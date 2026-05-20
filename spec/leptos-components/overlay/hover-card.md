@@ -18,14 +18,15 @@ HoverCard is like Popover but triggered by hover with a longer delay (700ms defa
 
 ```rust,no_check
 use leptos::prelude::*;
+use core::time::Duration;
 
 #[component]
 pub fn HoverCard(
     #[prop(into)] id: String,
     #[prop(optional)] open: Option<Signal<bool>>,
     #[prop(optional, default = false)] default_open: bool,
-    #[prop(optional, default = 700)] open_delay_ms: u32,
-    #[prop(optional, default = 300)] close_delay_ms: u32,
+    #[prop(optional, default = Duration::from_millis(700))] open_delay: Duration,
+    #[prop(optional, default = Duration::from_millis(300))] close_delay: Duration,
     #[prop(optional, default = false)] disabled: bool,
     #[prop(optional)] positioning: Option<PositioningOptions>,
     #[prop(optional)] on_open_change: Option<Callback<bool>>,
@@ -138,13 +139,13 @@ Composing overlays:
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop     | Mode       | Sync trigger             | Machine event / update path        | Visible effect                           | Notes                                               |
-| ---------------- | ---------- | ------------------------ | ---------------------------------- | ---------------------------------------- | --------------------------------------------------- |
-| `open`           | controlled | `Signal` change          | `PropSync` open/close event        | opens or closes the hover card           | deferred `Effect` watches `Signal<bool>` changes    |
-| `disabled`       | static     | render time only         | guards all transitions in machine  | disables all hover/focus/keyboard open   | machine returns `None` for all events when disabled |
-| `open_delay_ms`  | static     | init and context rebuild | stored in `Context.open_delay_ms`  | adjusts timer duration for open pending  | not reactive after mount                            |
-| `close_delay_ms` | static     | init and context rebuild | stored in `Context.close_delay_ms` | adjusts timer duration for close pending | not reactive after mount                            |
-| `positioning`    | static     | init and positioning run | passed to positioning engine       | affects positioner CSS custom properties | re-runs positioning when content opens              |
+| Adapter prop  | Mode       | Sync trigger             | Machine event / update path       | Visible effect                           | Notes                                               |
+| ------------- | ---------- | ------------------------ | --------------------------------- | ---------------------------------------- | --------------------------------------------------- |
+| `open`        | controlled | `Signal` change          | `PropSync` open/close event       | opens or closes the hover card           | deferred `Effect` watches `Signal<bool>` changes    |
+| `disabled`    | static     | render time only         | guards all transitions in machine | disables all hover/focus/keyboard open   | machine returns `None` for all events when disabled |
+| `open_delay`  | static     | init and context rebuild | stored in `Context.open_delay`    | adjusts timer duration for open pending  | not reactive after mount                            |
+| `close_delay` | static     | init and context rebuild | stored in `Context.close_delay`   | adjusts timer duration for close pending | not reactive after mount                            |
+| `positioning` | static     | init and positioning run | passed to positioning engine      | affects positioner CSS custom properties | re-runs positioning when content opens              |
 
 | UI event                    | Preconditions         | Machine event                 | Ordering notes                                       | Notes                                                    |
 | --------------------------- | --------------------- | ----------------------------- | ---------------------------------------------------- | -------------------------------------------------------- |
@@ -280,7 +281,7 @@ Composing overlays:
 
 ## 19. Consumer Expectations and Guarantees
 
-- Consumers may assume the hover card opens after 700ms of hovering (or the configured `open_delay_ms`) and closes 300ms after the pointer leaves (or the configured `close_delay_ms`).
+- Consumers may assume the hover card opens after 700ms of hovering (or the configured `open_delay`) and closes 300ms after the pointer leaves (or the configured `close_delay`).
 - Consumers may assume the card stays open while the pointer moves through the safe-area triangle from trigger to content.
 - Consumers may assume content is interactive — Tab enters the card, links and buttons work.
 - Consumers may assume `on_open_change` fires only for final open/close transitions, not intermediate pending states.
@@ -336,14 +337,15 @@ Leptos uses `on_cleanup` for timer and listener teardown. Safe-area `pointermove
 
 ```rust
 use leptos::prelude::*;
+use core::time::Duration;
 
 #[component]
 pub fn HoverCard(
     #[prop(into)] id: String,
     #[prop(optional)] open: Option<Signal<bool>>,
     #[prop(optional, default = false)] default_open: bool,
-    #[prop(optional, default = 700)] open_delay_ms: u32,
-    #[prop(optional, default = 300)] close_delay_ms: u32,
+    #[prop(optional, default = Duration::from_millis(700))] open_delay: Duration,
+    #[prop(optional, default = Duration::from_millis(300))] close_delay: Duration,
     #[prop(optional, default = false)] disabled: bool,
     #[prop(optional)] positioning: Option<PositioningOptions>,
     #[prop(optional)] on_open_change: Option<Callback<bool>>,
@@ -357,8 +359,8 @@ pub fn HoverCard(
         id,
         open: open.map(|s| s.get_untracked()),
         default_open,
-        open_delay_ms,
-        close_delay_ms,
+        open_delay,
+        close_delay,
         disabled,
         positioning: positioning.unwrap_or_default(),
         on_open_change,

@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/overlay/hover_card.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "hover-card",
+            ),
+        ),
+        (
+            Aria(
+                Expanded,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                HasPopup,
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            Aria(
+                Controls,
+            ),
+            String(
+                "hover-card-content",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "hover-card-trigger",
+            ),
+        ),
+    ],
+    styles: [],
+}

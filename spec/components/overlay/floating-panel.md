@@ -81,25 +81,55 @@ impl ResizeHandle {
 ### 1.2 Events
 
 ```rust
+/// Adapter-supplied viewport rectangle in CSS pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ViewportRect {
+    /// Left coordinate.
+    pub x: f64,
+    /// Top coordinate.
+    pub y: f64,
+    /// Width in CSS pixels.
+    pub width: f64,
+    /// Height in CSS pixels.
+    pub height: f64,
+}
+
+/// Adapter-supplied metrics for a maximize request.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MaximizeMetrics {
+    /// Available viewport area to fill.
+    pub viewport: ViewportRect,
+}
+
 /// The events of the floating panel.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event {
     /// Drag started on the title bar / drag handle.
     DragStart,
-    /// Mouse/touch moved during drag (delta x, delta y in pixels).
-    DragMove(f64, f64),
+    /// Mouse/touch moved during drag with adapter-normalized deltas.
+    DragMove {
+        /// Horizontal delta in CSS pixels.
+        dx: f64,
+        /// Vertical delta in CSS pixels.
+        dy: f64,
+    },
     /// Drag ended.
     DragEnd,
     /// Resize started from a specific handle.
     ResizeStart(ResizeHandle),
-    /// Mouse/touch moved during resize (delta x, delta y).
-    ResizeMove(f64, f64),
+    /// Mouse/touch moved during resize with adapter-normalized deltas.
+    ResizeMove {
+        /// Horizontal delta in CSS pixels.
+        dx: f64,
+        /// Vertical delta in CSS pixels.
+        dy: f64,
+    },
     /// Resize ended.
     ResizeEnd,
     /// Minimize the panel.
     Minimize,
-    /// Maximize the panel (fill available area).
-    Maximize,
+    /// Maximize the panel using adapter-supplied viewport metrics.
+    Maximize(MaximizeMetrics),
     /// Restore from minimized or maximized state.
     Restore,
     /// Close the panel.
@@ -117,10 +147,39 @@ pub enum Event {
     CloseOnEscape,
     /// Internal: set z-index after allocation (sent by BringToFront effect).
     SetZIndex(u32),
+    /// Controlled open state changed.
+    SetControlledOpen(bool),
+    /// Props changed without a controlled open change.
+    SyncProps,
 }
 ```
 
-### 1.3 Context
+### 1.3 Effects
+
+```rust
+/// Typed identifier for every named effect intent emitted by FloatingPanel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes `Props::on_open_change`.
+    OpenChange,
+    /// Adapter invokes `Props::on_position_change`.
+    PositionChange,
+    /// Adapter invokes `Props::on_position_change_end`.
+    PositionChangeEnd,
+    /// Adapter invokes `Props::on_size_change`.
+    SizeChange,
+    /// Adapter invokes `Props::on_size_change_end`.
+    SizeChangeEnd,
+    /// Adapter invokes `Props::on_stage_change`.
+    StageChange,
+    /// Adapter allocates a z-index and dispatches `Event::SetZIndex`.
+    AllocateZIndex,
+    /// Adapter releases the currently allocated z-index, if any.
+    ReleaseZIndex,
+}
+```
+
+### 1.4 Context
 
 ```rust
 /// The context of the floating panel.
@@ -161,7 +220,7 @@ pub struct Context {
 }
 ```
 
-### 1.4 Props
+### 1.5 Props
 
 ```rust
 /// The props of the floating panel.
@@ -177,6 +236,8 @@ pub struct Props {
     pub initial_position: (f64, f64),
     /// Initial size (width, height) in pixels.
     pub initial_size: (f64, f64),
+    /// Adapter-supplied viewport bounds used for drag and resize constraints.
+    pub viewport: ViewportRect,
     /// Minimum allowed size (width, height).
     pub min_size: (f64, f64),
     /// Maximum allowed size (width, height). `(f64::INFINITY, f64::INFINITY)` for no max.
@@ -211,17 +272,17 @@ pub struct Props {
     /// When true, panel content is removed from the DOM after closing. Default: false.
     pub unmount_on_exit: bool,
     /// Callback invoked when the panel open state changes.
-    pub on_open_change: Option<Callback<bool>>,
+    pub on_open_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
     /// Callback invoked when the panel position changes during drag.
-    pub on_position_change: Option<Callback<(f64, f64)>>,
+    pub on_position_change: Option<Callback<dyn Fn((f64, f64)) + Send + Sync>>,
     /// Callback invoked when drag ends (final position).
-    pub on_position_change_end: Option<Callback<(f64, f64)>>,
+    pub on_position_change_end: Option<Callback<dyn Fn((f64, f64)) + Send + Sync>>,
     /// Callback invoked when the panel size changes during resize.
-    pub on_size_change: Option<Callback<(f64, f64)>>,
+    pub on_size_change: Option<Callback<dyn Fn((f64, f64)) + Send + Sync>>,
     /// Callback invoked when resize ends (final size).
-    pub on_size_change_end: Option<Callback<(f64, f64)>>,
+    pub on_size_change_end: Option<Callback<dyn Fn((f64, f64)) + Send + Sync>>,
     /// Callback invoked when the panel stage changes (minimized/maximized/idle).
-    pub on_stage_change: Option<Callback<Stage>>,
+    pub on_stage_change: Option<Callback<dyn Fn(Stage) + Send + Sync>>,
 }
 
 /// The stage of the floating panel (for callbacks and data attributes).
@@ -243,6 +304,12 @@ impl Default for Props {
             default_open: true,
             initial_position: (100.0, 100.0),
             initial_size: (400.0, 300.0),
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: f64::INFINITY,
+                height: f64::INFINITY,
+            },
             min_size: (200.0, 150.0),
             max_size: (f64::INFINITY, f64::INFINITY),
             resizable: true,
@@ -270,7 +337,7 @@ impl Default for Props {
 }
 ```
 
-### 1.5 Full Machine Implementation
+### 1.6 Full Machine Implementation
 
 ```rust
 use ars_core::{TransitionPlan, PendingEffect, ComponentIds, AttrMap};
@@ -284,12 +351,14 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props   = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
         let locale = env.locale.clone();
         let messages = messages.clone();
+        let open = props.open.unwrap_or(props.default_open);
         (State::Idle, Context {
             position: props.initial_position,
             size: props.initial_size,
@@ -300,7 +369,7 @@ impl ars_core::Machine for Machine {
             focus_visible: false,
             minimized: false,
             maximized: false,
-            open: true,
+            open,
             locale,
             pre_maximize_position: None,
             pre_maximize_size: None,
@@ -318,10 +387,10 @@ impl ars_core::Machine for Machine {
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
             // ── Drag ────────────────────────────────────────────────────
-            (State::Idle, Event::DragStart) if props.draggable && !ctx.maximized => {
+            (State::Idle, Event::DragStart) if ctx.open && props.draggable && !ctx.maximized => {
                 Some(TransitionPlan::to(State::Moving))
             }
-            (State::Moving, Event::DragMove(dx, dy)) => {
+            (State::Moving, Event::DragMove { dx, dy }) => {
                 let dx = *dx;
                 let dy = *dy;
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -329,7 +398,7 @@ impl ars_core::Machine for Machine {
                     let new_pos = Self::clamp_position(
                         (x + dx, y + dy),
                         ctx.size,
-                        props.constrain_to_viewport,
+                        props,
                     );
                     ctx.position = Self::snap_to_grid(new_pos, props.grid_size);
                 }))
@@ -339,13 +408,13 @@ impl ars_core::Machine for Machine {
             }
 
             // ── Resize ──────────────────────────────────────────────────
-            (State::Idle, Event::ResizeStart(handle)) if props.resizable && !ctx.maximized => {
+            (State::Idle, Event::ResizeStart(handle)) if ctx.open && props.resizable && !ctx.maximized => {
                 let handle = *handle;
                 Some(TransitionPlan::to(State::Resizing { handle }).apply(move |ctx| {
                     ctx.active_resize_handle = Some(handle);
                 }))
             }
-            (State::Resizing { handle }, Event::ResizeMove(dx, dy)) => {
+            (State::Resizing { handle }, Event::ResizeMove { dx, dy }) => {
                 let dx = *dx;
                 let dy = *dy;
                 let handle = *handle;
@@ -388,22 +457,25 @@ impl ars_core::Machine for Machine {
             }
 
             // ── Minimize ────────────────────────────────────────────────
-            (State::Idle, Event::Minimize) if props.minimizable => {
+            (State::Idle, Event::Minimize) if ctx.open && props.minimizable => {
                 Some(TransitionPlan::to(State::Minimized).apply(|ctx| {
                     ctx.minimized = true;
                 }))
             }
-            (State::Minimized, Event::Restore) => {
+            (State::Minimized, Event::Restore) if ctx.open => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
                     ctx.minimized = false;
                 }))
             }
 
             // ── Maximize ────────────────────────────────────────────────
-            (State::Idle, Event::Maximize) if props.maximizable => {
-                Some(TransitionPlan::to(State::Maximized).apply(|ctx| {
+            (State::Idle, Event::Maximize(metrics)) if ctx.open && props.maximizable => {
+                let metrics = *metrics;
+                Some(TransitionPlan::to(State::Maximized).apply(move |ctx| {
                     ctx.pre_maximize_position = Some(ctx.position);
                     ctx.pre_maximize_size = Some(ctx.size);
+                    ctx.position = (metrics.viewport.x, metrics.viewport.y);
+                    ctx.size = (metrics.viewport.width, metrics.viewport.height);
                     ctx.maximized = true;
                 }))
             }
@@ -419,7 +491,7 @@ impl ars_core::Machine for Machine {
                 }))
             }
             // Double-click title bar toggles maximize.
-            (State::Maximized, Event::Maximize) => {
+            (State::Maximized, Event::Maximize(_)) if ctx.open => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
                     if let (Some(pos), Some(sz)) = (ctx.pre_maximize_position, ctx.pre_maximize_size) {
                         ctx.position = pos;
@@ -435,17 +507,20 @@ impl ars_core::Machine for Machine {
             (_, Event::Close) if props.closable => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
                     ctx.open = false;
+                    ctx.focused = false;
+                    ctx.focus_visible = false;
+                    ctx.minimized = false;
+                    ctx.maximized = false;
+                    ctx.active_resize_handle = None;
+                    ctx.pre_maximize_position = None;
+                    ctx.pre_maximize_size = None;
                 }))
             }
 
             // ── Bring to front ──────────────────────────────────────────
             (_, Event::BringToFront) => {
-                Some(TransitionPlan::context_only(|_ctx| {})
-                    .with_named_effect("z-index", |_ctx, _props, send| {
-                        let new_z = resolve_z_allocator().allocate();
-                        send.upgrade_and_send(Event::SetZIndex(new_z));
-                        no_cleanup()
-                    }))
+                Some(TransitionPlan::new()
+                    .with_effect(PendingEffect::named(Effect::AllocateZIndex)))
             }
 
             (_, Event::SetZIndex(z)) => {
@@ -497,13 +572,18 @@ impl Machine {
     fn clamp_position(
         pos: (f64, f64),
         size: (f64, f64),
-        constrain: bool,
+        props: &Props,
     ) -> (f64, f64) {
-        if !constrain {
+        if !props.constrain_to_viewport || props.allow_overflow {
             return pos;
         }
-        // Ensure at least the title bar (top 32px) remains visible.
-        (pos.0.max(-size.0 + 40.0), pos.1.max(0.0))
+
+        let max_x = (props.viewport.x + props.viewport.width - size.0).max(props.viewport.x);
+        let max_y = (props.viewport.y + props.viewport.height - size.1).max(props.viewport.y);
+        (
+            pos.0.clamp(props.viewport.x, max_x),
+            pos.1.clamp(props.viewport.y, max_y),
+        )
     }
 
     fn snap_to_grid(pos: (f64, f64), grid_size: f64) -> (f64, f64) {
@@ -516,7 +596,7 @@ impl Machine {
 }
 ```
 
-### 1.6 Connect / API
+### 1.7 Connect / API
 
 ```rust
 #[derive(ComponentPart)]
@@ -911,6 +991,17 @@ ctx.z_index = new_z;
 Each panel gets a unique z-index, ensuring the most recently focused panel is on top.
 The allocator's overflow detection prevents z-index exhaustion.
 
+The agnostic core emits allocation intent and stores adapter-supplied z-index
+values only. It does not inspect live panel elements or query stacking contexts.
+
+## 5.1 Adapter-Supplied Maximize Metrics
+
+Maximize fills the available area provided by the adapter through
+`Event::Maximize(MaximizeMetrics)`. The adapter owns viewport and panel
+measurement, visual viewport quirks, safe-area insets, and any platform-specific
+style application. The agnostic core only stores the pre-maximize rectangle and
+copies the supplied viewport rectangle into logical position and size state.
+
 ## 6. Move Integration
 
 `FloatingPanel` composes with `use_move` from `05-interactions.md` for drag functionality:
@@ -919,7 +1010,10 @@ The allocator's overflow detection prevents z-index exhaustion.
 // Adapter wiring (conceptual):
 use_move(MoveOptions {
     on_move_start: |_| send(Event::DragStart),
-    on_move: |delta| send(Event::DragMove(delta.x, delta.y)),
+    on_move: |delta| send(Event::DragMove {
+        dx: delta.x,
+        dy: delta.y,
+    }),
     on_move_end: |_| send(Event::DragEnd),
 });
 ```

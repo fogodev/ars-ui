@@ -110,7 +110,7 @@ The adapter surfaces the full core prop set on `FloatingPanel`. Sub-components c
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with the core `Props`, including all drag/resize/stage configuration, mount control (`lazy_mount`, `unmount_on_exit`), boundary constraints, and i18n messages.
-- Event parity: `DragStart`, `DragMove`, `DragEnd`, `ResizeStart`, `ResizeMove`, `ResizeEnd`, `Minimize`, `Maximize`, `Restore`, `Close`, `BringToFront`, `Focus`, `Blur`, `CloseOnEscape`, and `SetZIndex` are all adapter-driven.
+- Event parity: `DragStart`, `DragMove { dx, dy }`, `DragEnd`, `ResizeStart`, `ResizeMove { dx, dy }`, `ResizeEnd`, `Minimize`, `Maximize(MaximizeMetrics)`, `Restore`, `Close`, `BringToFront`, `Focus`, `Blur`, `CloseOnEscape`, and `SetZIndex` are all adapter-driven.
 - Part parity: all 11 core part types (Root, Header, DragHandle, Title, Content, Footer, ResizeHandle, CloseTrigger, MinimizeTrigger, MaximizeTrigger, StageTrigger) are mapped to compound sub-components.
 - Core machine ownership: `use_machine::<floating_panel::Machine>(...)` in `FloatingPanel` remains the single source of truth for state, position, size, stage, and z-index.
 
@@ -143,7 +143,7 @@ The adapter surfaces the full core prop set on `FloatingPanel`. Sub-components c
 | `ResizeHandle`    | `api.resize_handle_attrs(handle)` (aria-label, data-ars-handle, cursor)          | `pointerdown`/`pointermove`/`pointerup` handlers for resize                          | no consumer attrs                   | core aria-label and cursor win                                       | adapter-owned; not exposed for consumer decoration                   |
 | `CloseTrigger`    | `api.close_trigger_attrs()` (type, aria-label)                                   | `click` handler sending `Event::Close`                                               | consumer button content as children | core button semantics win                                            | adapter-owned                                                        |
 | `MinimizeTrigger` | `api.minimize_trigger_attrs()` (type, aria-label)                                | `click` handler sending `Event::Minimize` or `Event::Restore`                        | consumer button content as children | core button semantics and aria-label win                             | adapter-owned                                                        |
-| `MaximizeTrigger` | `api.maximize_trigger_attrs()` (type, aria-label)                                | `click` handler sending `Event::Maximize` or `Event::Restore`                        | consumer button content as children | core button semantics and aria-label win                             | adapter-owned                                                        |
+| `MaximizeTrigger` | `api.maximize_trigger_attrs()` (type, aria-label)                                | `click` handler sending `Event::Maximize(MaximizeMetrics)` or `Event::Restore`       | consumer button content as children | core button semantics and aria-label win                             | adapter-owned                                                        |
 | `StageTrigger`    | `api.stage_trigger_attrs()` (type, aria-label, data-ars-state)                   | `click` handler calling `api.on_stage_trigger_click()`                               | consumer button content as children | core button semantics and stage label win                            | adapter-owned                                                        |
 
 - Consumer must not override `position`, `left`, `top`, `width`, `height`, or `z-index` styles on Root; these are machine-owned.
@@ -184,24 +184,24 @@ The `open` prop supports controlled mode. When `open` is `Some`, the consumer dr
 | `maximizable` | non-reactive adapter prop | render time only          | included in Props passed to machine       | shows/hides MaximizeTrigger                            | conditional rendering, not runtime toggle              |
 | `modal`       | non-reactive adapter prop | render time only          | adapter-level composition with FocusScope | traps focus, sets inert on background                  | client-only behavior                                   |
 
-| UI event                      | Preconditions                            | Machine event / callback path                                   | Ordering notes                                                | Notes                                                    |
-| ----------------------------- | ---------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------- |
-| `pointerdown` on DragHandle   | `draggable=true` and not maximized       | `DragStart`; begin pointermove/pointerup tracking on document   | sets pointer capture before first DragMove                    | document-level listeners for move/end                    |
-| `pointermove` during drag     | DragStart has fired, pointer captured    | `DragMove(dx, dy)` with delta from last position                | fires on each animation frame or pointer event                | `on_position_change` callback fires after context update |
-| `pointerup` ending drag       | DragStart has fired                      | `DragEnd`; release pointer capture, remove document listeners   | `on_position_change_end` fires after final position committed | cleanup must run even if pointer leaves viewport         |
-| `pointerdown` on ResizeHandle | `resizable=true` and not maximized       | `ResizeStart(handle)`; begin pointermove/pointerup tracking     | sets pointer capture before first ResizeMove                  | document-level listeners for move/end                    |
-| `pointermove` during resize   | ResizeStart has fired, pointer captured  | `ResizeMove(dx, dy)` with delta from last position              | fires on each animation frame or pointer event                | `on_size_change` callback fires after context update     |
-| `pointerup` ending resize     | ResizeStart has fired                    | `ResizeEnd`; release pointer capture, remove document listeners | `on_size_change_end` fires after final size committed         | cleanup must run even if pointer leaves viewport         |
-| `click` on CloseTrigger       | `closable=true`                          | `Close`; `on_open_change(false)` callback                       | callback fires after state transition                         | standard button activation                               |
-| `click` on MinimizeTrigger    | `minimizable=true`                       | `Minimize` or `Restore`; `on_stage_change` callback             | callback fires after state transition                         | toggles based on current minimized state                 |
-| `click` on MaximizeTrigger    | `maximizable=true`                       | `Maximize` or `Restore`; `on_stage_change` callback             | callback fires after state transition                         | toggles based on current maximized state                 |
-| `click` on StageTrigger       | rendered                                 | `api.on_stage_trigger_click()` cycling stages                   | callback fires after state transition                         | cycles Normal -> Minimized -> Normal                     |
-| `keydown` Escape on Root      | `close_on_escape=true` and panel focused | `CloseOnEscape`; `on_open_change(false)` callback               | fires before blur                                             | client-only                                              |
-| `keydown` Arrow on Root       | panel root focused                       | `DragStart` (keyboard-based movement nudge)                     | fires after focus verification                                | keyboard movement for accessibility                      |
-| `pointerdown` on Root         | panel rendered                           | `BringToFront`; triggers z-index allocation effect              | z-index update fires asynchronously via `SetZIndex`           | every interaction brings panel to front                  |
-| `focus` on Root               | panel rendered                           | `Focus { is_keyboard }`                                         | after pointer modality normalization                          | tracks focus-visible for styling                         |
-| `blur` on Root                | panel had focus                          | `Blur`                                                          | before any late cleanup                                       | clears focus and focus-visible state                     |
-| `dblclick` on Header          | `maximizable=true`                       | `Maximize` or `Restore` (toggle)                                | same as MaximizeTrigger click                                 | double-click title bar toggles maximize                  |
+| UI event                      | Preconditions                            | Machine event / callback path                                        | Ordering notes                                                | Notes                                                    |
+| ----------------------------- | ---------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------- |
+| `pointerdown` on DragHandle   | `draggable=true` and not maximized       | `DragStart`; begin pointermove/pointerup tracking on document        | sets pointer capture before first DragMove                    | document-level listeners for move/end                    |
+| `pointermove` during drag     | DragStart has fired, pointer captured    | `DragMove { dx, dy }` with delta from last position                  | fires on each animation frame or pointer event                | `on_position_change` callback fires after context update |
+| `pointerup` ending drag       | DragStart has fired                      | `DragEnd`; release pointer capture, remove document listeners        | `on_position_change_end` fires after final position committed | cleanup must run even if pointer leaves viewport         |
+| `pointerdown` on ResizeHandle | `resizable=true` and not maximized       | `ResizeStart(handle)`; begin pointermove/pointerup tracking          | sets pointer capture before first ResizeMove                  | document-level listeners for move/end                    |
+| `pointermove` during resize   | ResizeStart has fired, pointer captured  | `ResizeMove { dx, dy }` with delta from last position                | fires on each animation frame or pointer event                | `on_size_change` callback fires after context update     |
+| `pointerup` ending resize     | ResizeStart has fired                    | `ResizeEnd`; release pointer capture, remove document listeners      | `on_size_change_end` fires after final size committed         | cleanup must run even if pointer leaves viewport         |
+| `click` on CloseTrigger       | `closable=true`                          | `Close`; `on_open_change(false)` callback                            | callback fires after state transition                         | standard button activation                               |
+| `click` on MinimizeTrigger    | `minimizable=true`                       | `Minimize` or `Restore`; `on_stage_change` callback                  | callback fires after state transition                         | toggles based on current minimized state                 |
+| `click` on MaximizeTrigger    | `maximizable=true`                       | `Maximize(MaximizeMetrics)` or `Restore`; `on_stage_change` callback | callback fires after state transition                         | toggles based on current maximized state                 |
+| `click` on StageTrigger       | rendered                                 | `api.on_stage_trigger_click()` cycling stages                        | callback fires after state transition                         | cycles Normal -> Minimized -> Normal                     |
+| `keydown` Escape on Root      | `close_on_escape=true` and panel focused | `CloseOnEscape`; `on_open_change(false)` callback                    | fires before blur                                             | client-only                                              |
+| `keydown` Arrow on Root       | panel root focused                       | `DragStart` (keyboard-based movement nudge)                          | fires after focus verification                                | keyboard movement for accessibility                      |
+| `pointerdown` on Root         | panel rendered                           | `BringToFront`; triggers z-index allocation effect                   | z-index update fires asynchronously via `SetZIndex`           | every interaction brings panel to front                  |
+| `focus` on Root               | panel rendered                           | `Focus { is_keyboard }`                                              | after pointer modality normalization                          | tracks focus-visible for styling                         |
+| `blur` on Root                | panel had focus                          | `Blur`                                                               | before any late cleanup                                       | clears focus and focus-visible state                     |
+| `dblclick` on Header          | `maximizable=true`                       | `Maximize(MaximizeMetrics)` or `Restore` (toggle)                    | same as MaximizeTrigger click                                 | double-click title bar toggles maximize                  |
 
 ## 8. Registration and Cleanup Contract
 
@@ -454,7 +454,7 @@ pub fn DragHandle(children: Children) -> impl IntoView {
     Effect::new(move |_| {
         if let Some(node) = handle_ref.get() {
             // Wire pointerdown -> set capture -> document pointermove/pointerup
-            // Send DragStart, DragMove(dx, dy), DragEnd to ctx.machine.send
+            // Send DragStart, DragMove { dx, dy }, DragEnd to ctx.machine.send
             let _ = node; // placeholder for pointer capture wiring
         }
     });
@@ -474,7 +474,7 @@ pub fn ResizeHandle(handle: ResizeHandle) -> impl IntoView {
     let attrs = ctx.machine.derive(move |api| api.resize_handle_attrs(handle));
 
     // Client-only: attach pointer-capture resize lifecycle
-    // Send ResizeStart(handle), ResizeMove(dx, dy), ResizeEnd to ctx.machine.send
+    // Send ResizeStart(handle), ResizeMove { dx, dy }, ResizeEnd to ctx.machine.send
 
     view! {
         <div node_ref=handle_ref {..attrs.get()} />
@@ -567,7 +567,9 @@ pub fn MaximizeTrigger(children: Children) -> impl IntoView {
             if is_maximized.get() {
                 ctx.machine.send.run(floating_panel::Event::Restore);
             } else {
-                ctx.machine.send.run(floating_panel::Event::Maximize);
+                ctx.machine
+                    .send
+                    .run(floating_panel::Event::Maximize(current_maximize_metrics()));
             }
         }>
             {children()}

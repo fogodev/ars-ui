@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/overlay/floating_panel.rs
+expression: snapshot_attrs(&api.maximize_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "maximize-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "floating-panel",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Maximize panel",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/overlay/floating_panel.rs
+expression: snapshot_attrs(&api.stage_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "stage-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "floating-panel",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "default",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Minimize",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

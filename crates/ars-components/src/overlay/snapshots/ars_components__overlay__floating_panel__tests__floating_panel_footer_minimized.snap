@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/overlay/floating_panel.rs
+expression: snapshot_attrs(&minimized.footer_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "footer",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "floating-panel",
+            ),
+        ),
+        (
+            Hidden,
+            Bool(
+                true,
+            ),
+        ),
+    ],
+    styles: [],
+}

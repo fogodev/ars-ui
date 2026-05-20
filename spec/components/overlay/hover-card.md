@@ -61,10 +61,43 @@ pub enum Event {
     CloseOnEscape,
     /// The title element mounts.
     TitleMount,
+    /// The title element unmounts.
+    TitleUnmount,
+    /// Adapter reported measured placement state.
+    PositioningUpdate(PositioningSnapshot),
+    /// Adapter supplied an allocated overlay z-index.
+    SetZIndex(u32),
+    /// Programmatic open requested immediate visibility.
+    Open,
+    /// Programmatic close requested immediate dismissal.
+    Close,
+    /// Controlled props synchronized the visible open state.
+    SetControlledOpen(bool),
+    /// Props changed without changing controlled visible state.
+    SyncProps,
 }
 ```
 
-### 1.3 Context
+### 1.3 Effects
+
+```rust
+/// Typed identifier for every named effect intent emitted by HoverCard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter starts the hover open-delay timer.
+    OpenDelay,
+    /// Adapter starts the close-delay timer.
+    CloseDelay,
+    /// Adapter invokes `Props::on_open_change` with the requested open state.
+    OpenChange,
+    /// Adapter allocates a z-index and dispatches `Event::SetZIndex`.
+    AllocateZIndex,
+    /// Adapter releases the previously allocated z-index claim.
+    ReleaseZIndex,
+}
+```
+
+### 1.4 Context
 
 ```rust
 /// The context of the hover card.
@@ -72,14 +105,16 @@ pub enum Event {
 pub struct Context {
     /// Whether the hover card is open.
     pub open: bool,
-    /// The delay in milliseconds before the hover card opens.
+    /// The delay before the hover card opens.
     /// Default: 700ms (intentional longer delay)
-    pub open_delay_ms: u32,
-    /// The delay in milliseconds before the hover card closes.
+    pub open_delay: Duration,
+    /// The delay before the hover card closes.
     /// Default: 300ms (so pointer can move into card)
-    pub close_delay_ms: u32,
+    pub close_delay: Duration,
     /// The positioning options for the hover card.
     pub positioning: PositioningOptions,
+    /// Current placement, initialized from props and updated by adapters.
+    pub current_placement: Placement,
     /// The component IDs for the hover card.
     pub ids: ComponentIds,
     /// The ID of the trigger element.
@@ -101,10 +136,12 @@ pub struct Context {
     pub locale: Locale,
     /// Resolved messages for accessibility labels.
     pub messages: Messages,
+    /// Adapter-allocated z-index for the positioner.
+    pub z_index: Option<u32>,
 }
 ```
 
-### 1.4 Props
+### 1.5 Props
 
 ```rust
 /// The props of the hover card.
@@ -116,16 +153,16 @@ pub struct Props {
     pub open: Option<bool>,
     /// Whether the hover card is open by default (uncontrolled). Default: false.
     pub default_open: bool,
-    /// The delay in milliseconds before the hover card opens. Default: 700ms.
-    pub open_delay_ms: u32,
-    /// The delay in milliseconds before the hover card closes. Default: 300ms.
-    pub close_delay_ms: u32,
+    /// The delay before the hover card opens. Default: 700ms.
+    pub open_delay: Duration,
+    /// The delay before the hover card closes. Default: 300ms.
+    pub close_delay: Duration,
     /// Whether the hover card is disabled. Default: false.
     pub disabled: bool,
     /// The positioning options for the hover card.
     pub positioning: PositioningOptions,
     /// Callback invoked when the hover card open state changes.
-    pub on_open_change: Option<Callback<bool>>,
+    pub on_open_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
     /// When true, hover card content is not mounted until first opened. Default: false.
     pub lazy_mount: bool,
     /// When true, hover card content is removed from the DOM after closing. Default: false.
@@ -138,8 +175,8 @@ impl Default for Props {
             id: String::new(),
             open: None,
             default_open: false,
-            open_delay_ms: 700,
-            close_delay_ms: 300,
+            open_delay: Duration::from_millis(700),
+            close_delay: Duration::from_millis(300),
             disabled: false,
             positioning: PositioningOptions::default(),
             on_open_change: None,
@@ -150,7 +187,7 @@ impl Default for Props {
 }
 ```
 
-### 1.5 Safe Area (Hover Bridge)
+### 1.6 Safe Area (Hover Bridge)
 
 When the pointer moves from the trigger to the floating content, it must cross a gap (the offset
 distance). Without a safe area, leaving the trigger's bounding box starts the close delay, and
@@ -187,7 +224,7 @@ remains open.
 > **Tooltip**: The same safe-area algorithm applies to interactive `Tooltip`s (`interactive: true`).
 > Non-interactive `Tooltip`s do not need a safe area since their content is not a pointer target.
 
-### 1.6 Full Machine Implementation
+### 1.7 Full Machine Implementation
 
 ```rust
 /// The machine of the hover card.
@@ -199,6 +236,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -212,9 +250,10 @@ impl ars_core::Machine for Machine {
         let messages = messages.clone();
         (initial_state, Context {
             open: initial_open,
-            open_delay_ms: props.open_delay_ms,
-            close_delay_ms: props.close_delay_ms,
+            open_delay: props.open_delay,
+            close_delay: props.close_delay,
             positioning: props.positioning.clone(),
+            current_placement: props.positioning.placement,
             ids,
             trigger_id,
             content_id,
@@ -224,6 +263,7 @@ impl ars_core::Machine for Machine {
             focus_active: false,
             locale,
             messages,
+            z_index: None,
         })
     }
 
@@ -239,25 +279,13 @@ impl ars_core::Machine for Machine {
             (State::Closed, Event::TriggerPointerEnter) => {
                 Some(TransitionPlan::to(State::OpenPending)
                     .apply(|ctx| { ctx.hover_active = true; })
-                    .with_effect(PendingEffect::new("open-delay", |ctx, _props, send| {
-                        let platform = use_platform_effects();
-                        let delay = ctx.open_delay_ms;
-                        let handle = platform.set_timeout(delay, Box::new(move || send(Event::OpenTimerFired)));
-                        let pc = platform.clone();
-                        Box::new(move || pc.clear_timeout(handle))
-                    })))
+                    .with_effect(PendingEffect::named(Effect::OpenDelay)))
             }
             // Keyboard-based opening: Focus starts delay, Enter/Space opens immediately
             (State::Closed, Event::TriggerFocus) => {
                 Some(TransitionPlan::to(State::OpenPending)
                     .apply(|ctx| { ctx.focus_active = true; })
-                    .with_effect(PendingEffect::new("open-delay", |ctx, _props, send| {
-                        let platform = use_platform_effects();
-                        let delay = ctx.open_delay_ms;
-                        let handle = platform.set_timeout(delay, Box::new(move || send(Event::OpenTimerFired)));
-                        let pc = platform.clone();
-                        Box::new(move || pc.clear_timeout(handle))
-                    })))
+                    .with_effect(PendingEffect::named(Effect::OpenDelay)))
             }
             (State::Closed | State::OpenPending, Event::TriggerKeyDown(key))
                 if *key == KeyboardKey::Enter || *key == KeyboardKey::Space => {
@@ -283,24 +311,12 @@ impl ars_core::Machine for Machine {
             // Start close delay on leave
             (State::Open, Event::TriggerPointerLeave | Event::TriggerBlur) => {
                 Some(TransitionPlan::to(State::ClosePending)
-                    .with_effect(PendingEffect::new("close-delay", |ctx, _props, send| {
-                        let platform = use_platform_effects();
-                        let delay = ctx.close_delay_ms;
-                        let handle = platform.set_timeout(delay, Box::new(move || send(Event::CloseTimerFired)));
-                        let pc = platform.clone();
-                        Box::new(move || pc.clear_timeout(handle))
-                    })))
+                    .with_effect(PendingEffect::named(Effect::CloseDelay)))
             }
             // Content pointer leave — start close delay
             (State::Open, Event::ContentPointerLeave) => {
                 Some(TransitionPlan::to(State::ClosePending)
-                    .with_effect(PendingEffect::new("close-delay", |ctx, _props, send| {
-                        let platform = use_platform_effects();
-                        let delay = ctx.close_delay_ms;
-                        let handle = platform.set_timeout(delay, Box::new(move || (send)(Event::CloseTimerFired)));
-                        let pc = platform.clone();
-                        Box::new(move || pc.clear_timeout(handle))
-                    })))
+                    .with_effect(PendingEffect::named(Effect::CloseDelay)))
             }
             // Cancel close when pointer enters content
             (State::ClosePending, Event::ContentPointerEnter | Event::TriggerPointerEnter | Event::TriggerFocus) => {
@@ -327,6 +343,10 @@ impl ars_core::Machine for Machine {
             (_, Event::TitleMount) => {
                 Some(TransitionPlan::context_only(|ctx| { ctx.has_title = true; }))
             }
+            // Title element unmounted — fall back to aria-label (any state)
+            (_, Event::TitleUnmount) => {
+                Some(TransitionPlan::context_only(|ctx| { ctx.has_title = false; }))
+            }
             _ => None,
         }
     }
@@ -342,7 +362,7 @@ impl ars_core::Machine for Machine {
 }
 ```
 
-### 1.7 Connect / API
+### 1.8 Connect / API
 
 ```rust
 #[derive(ComponentPart)]
@@ -392,6 +412,7 @@ impl<'a> Api<'a> {
         if self.ctx.open {
             attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.part("content"));
         }
+        attrs.set(HtmlAttr::Aria(AriaAttr::HasPopup), "dialog");
         attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if self.ctx.open { "true" } else { "false" });
         attrs
     }
@@ -415,6 +436,10 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Positioner.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Data("ars-placement"), self.ctx.current_placement.as_str());
+        if let Some(z_index) = self.ctx.z_index {
+            attrs.set_style(CssProperty::Custom("ars-z-index"), z_index.to_string());
+        }
         attrs
     }
 
@@ -459,6 +484,9 @@ impl<'a> Api<'a> {
 
     /// Call from the adapter when the HoverCard title element mounts.
     pub fn on_title_mount(&self) { (self.send)(Event::TitleMount); }
+
+    /// Call from the adapter when the HoverCard title element unmounts.
+    pub fn on_title_unmount(&self) { (self.send)(Event::TitleUnmount); }
 
     /// The attributes for the dismiss button.
     pub fn dismiss_button_attrs(&self) -> AttrMap {
@@ -522,7 +550,7 @@ HoverCard
 | Trigger | `aria-expanded`   | `"true"` / `"false"`                   |
 | Trigger | `aria-controls`   | Content ID (when open)                 |
 
-> **Screen reader behavior:** HoverCard content is supplementary visual enrichment. The content area does NOT receive an ARIA role (`role="dialog"` or `role="group"`) and is NOT announced to screen readers. Only the trigger element itself is accessible — it should have meaningful accessible text. Users who cannot hover (keyboard, screen reader, touch) access the linked content directly via the trigger's `href` or action.
+> **Screen reader behavior:** HoverCard content is interactive rich popup content and receives `role="dialog"` with `aria-labelledby` when a title is rendered, or `aria-label` from `Messages` as a fallback. The dialog is non-modal and does not make the page inert. Keyboard and assistive-technology users can open the card from the trigger and tab into the content, then dismiss it with Escape or the DismissButton.
 
 ### 3.2 Keyboard Interaction
 
@@ -626,8 +654,8 @@ ContextualHelp
 | -------------------- | ----------------- | --------------- | ----------------------- | ------------------------------------------- |
 | Controlled open      | `open`            | `open`          | `open`                  | Both libraries                              |
 | Default open         | `default_open`    | `defaultOpen`   | `defaultOpen`           | Both libraries                              |
-| Open delay           | `open_delay_ms`   | `openDelay`     | `openDelay`             | Both; 700ms default matches Radix           |
-| Close delay          | `close_delay_ms`  | `closeDelay`    | `closeDelay`            | Both; 300ms default matches both            |
+| Open delay           | `open_delay`      | `openDelay`     | `openDelay`             | Both; 700ms default matches Radix           |
+| Close delay          | `close_delay`     | `closeDelay`    | `closeDelay`            | Both; 300ms default matches both            |
 | Disabled             | `disabled`        | `disabled`      | --                      | Ark UI only                                 |
 | Positioning          | `positioning`     | `positioning`   | (side/sideOffset/align) | ars-ui unified; Radix uses individual props |
 | Lazy mount           | `lazy_mount`      | `lazyMount`     | --                      | Ark UI parity                               |

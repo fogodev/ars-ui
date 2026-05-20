@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/overlay/floating_panel.rs
+expression: snapshot_attrs(&api.close_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "close-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "floating-panel",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Close panel",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
