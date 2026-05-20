@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/navigation/pagination.rs
+expression: snapshot_attrs(&api.root_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "pagination",
+            ),
+        ),
+        (
+            Data(
+                "ars-size",
+            ),
+            String(
+                "medium",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Pagination",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "navigation",
+            ),
+        ),
+    ],
+    styles: [],
+}

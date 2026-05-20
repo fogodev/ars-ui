@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/navigation/breadcrumbs.rs
+expression: snapshot_attrs(&api.current_page_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "current-page",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "breadcrumbs",
+            ),
+        ),
+        (
+            Aria(
+                Current,
+            ),
+            String(
+                "page",
+            ),
+        ),
+    ],
+    styles: [],
+}

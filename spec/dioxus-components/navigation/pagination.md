@@ -68,14 +68,14 @@ The adapter owns visible range derivation, repeated page-trigger rendering, and 
 
 | Adapter prop                                                  | Mode       | Sync trigger            | Machine event / update path | Visible effect                                      | Notes                                            |
 | ------------------------------------------------------------- | ---------- | ----------------------- | --------------------------- | --------------------------------------------------- | ------------------------------------------------ |
-| `page`                                                        | controlled | prop change after mount | `SetPage`                   | updates current page and visible range              | no controlled/uncontrolled switching after mount |
-| `page_size`, `total_items`, `sibling_count`, `boundary_count` | controlled | rerender with new props | core prop rebuild           | recomputes visible range and disabled edge triggers | no shadow state                                  |
+| `page`                                                        | controlled | prop change after mount | `SyncProps` or `GoToPage`   | updates current page and visible range              | no controlled/uncontrolled switching after mount |
+| `page_size`, `total_items`, `sibling_count`, `boundary_count` | controlled | rerender with new props | `SyncProps`                 | recomputes visible range and disabled edge triggers | no shadow state                                  |
 | `get_page_url`                                                | controlled | rerender with new props | adapter host selection      | switches trigger host between `<button>` and `<a>`  | page semantics stay identical                    |
 
 | UI event                      | Preconditions                           | Machine event / callback path              | Ordering notes                                      | Notes                                     |
 | ----------------------------- | --------------------------------------- | ------------------------------------------ | --------------------------------------------------- | ----------------------------------------- |
-| prev or next activation       | not at edge                             | `GoToPrevPage` / `GoToNextPage`            | announcement fires only after committed page change | host may be button or anchor              |
-| page activation               | page is visible and not already current | `SetPage(page)`                            | announcement uses committed page number             | buttons and anchors share callback timing |
+| prev or next activation       | not at edge                             | `PrevPage` / `NextPage`                    | announcement fires only after committed page change | host may be button or anchor              |
+| page activation               | page is visible and not already current | `GoToPage(page)`                           | announcement uses committed page number             | buttons and anchors share callback timing |
 | route-style anchor navigation | `get_page_url` present                  | optional browser navigation after callback | adapter does not block navigation by default        | current page still uses `aria-current`    |
 
 ## 8. Registration and Cleanup Contract

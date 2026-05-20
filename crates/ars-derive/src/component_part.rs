@@ -2,7 +2,7 @@ use heck::ToKebabCase as _;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    Data, DeriveInput, Expr, Fields, Generics, Lit, LitStr, Meta, Type, Variant, parse_quote,
+    Data, DeriveInput, Expr, Field, Fields, Generics, Lit, LitStr, Meta, Type, Variant, parse_quote,
 };
 
 pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
@@ -23,7 +23,9 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     let field_types = collect_field_types(data);
 
-    let component_part_generics = with_field_bounds(
+    let defaultless_field_types = collect_defaultless_field_types(data)?;
+
+    let component_part_supertrait_generics = with_field_bounds(
         &input.generics,
         &field_types,
         &[
@@ -32,8 +34,12 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
             quote!(::core::cmp::PartialEq),
             quote!(::core::cmp::Eq),
             quote!(::core::hash::Hash),
-            quote!(::core::default::Default),
         ],
+    );
+    let component_part_generics = with_field_bounds(
+        &component_part_supertrait_generics,
+        &defaultless_field_types,
+        &[quote!(::core::default::Default)],
     );
 
     let clone_generics = with_field_bounds(
@@ -73,7 +79,13 @@ pub(crate) fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let (hash_impl_generics, hash_ty_generics, hash_where_clause) = hash_generics.split_for_impl();
 
     let name_arms = data.variants.iter().map(name_arm);
-    let all_values = data.variants.iter().map(all_value);
+
+    let all_values = data
+        .variants
+        .iter()
+        .map(all_value)
+        .collect::<syn::Result<Vec<_>>>()?;
+
     let clone_arms = data.variants.iter().map(clone_arm);
     let debug_arms = data.variants.iter().map(debug_arm);
 
@@ -207,6 +219,34 @@ fn collect_field_types(data: &syn::DataEnum) -> Vec<Type> {
         .collect()
 }
 
+fn collect_defaultless_field_types(data: &syn::DataEnum) -> syn::Result<Vec<Type>> {
+    let mut types = Vec::new();
+
+    for variant in &data.variants {
+        match &variant.fields {
+            Fields::Unit => {}
+
+            Fields::Unnamed(fields) => {
+                for field in &fields.unnamed {
+                    if field_default_expr(field)?.is_none() {
+                        types.push(field.ty.clone());
+                    }
+                }
+            }
+
+            Fields::Named(fields) => {
+                for field in &fields.named {
+                    if field_default_expr(field)?.is_none() {
+                        types.push(field.ty.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(types)
+}
+
 fn with_field_bounds(
     generics: &Generics,
     field_types: &[Type],
@@ -238,31 +278,72 @@ fn name_arm(variant: &Variant) -> TokenStream {
     }
 }
 
-fn all_value(variant: &Variant) -> TokenStream {
+fn all_value(variant: &Variant) -> syn::Result<TokenStream> {
     let ident = &variant.ident;
 
-    match &variant.fields {
+    Ok(match &variant.fields {
         Fields::Unit => quote!(Self::#ident),
 
         Fields::Unnamed(fields) => {
             let defaults = fields
                 .unnamed
                 .iter()
-                .map(|_| quote!(::core::default::Default::default()));
+                .map(field_all_expr)
+                .collect::<syn::Result<Vec<_>>>()?;
 
             quote!(Self::#ident(#(#defaults),*))
         }
 
         Fields::Named(fields) => {
-            let defaults = fields.named.iter().map(|field| {
-                let ident = field.ident.as_ref().expect("named field");
+            let defaults = fields
+                .named
+                .iter()
+                .map(|field| -> syn::Result<TokenStream> {
+                    let ident = field.ident.as_ref().expect("named field");
+                    let expr = field_all_expr(field)?;
 
-                quote!(#ident: ::core::default::Default::default())
-            });
+                    Ok(quote!(#ident: #expr))
+                })
+                .collect::<syn::Result<Vec<_>>>()?;
 
             quote!(Self::#ident { #(#defaults),* })
         }
+    })
+}
+
+fn field_all_expr(field: &Field) -> syn::Result<TokenStream> {
+    Ok(if let Some(expr) = field_default_expr(field)? {
+        quote!(#expr)
+    } else {
+        quote!(::core::default::Default::default())
+    })
+}
+
+fn field_default_expr(field: &Field) -> syn::Result<Option<Expr>> {
+    let mut default = None;
+
+    for attr in &field.attrs {
+        if !attr.path().is_ident("part") {
+            continue;
+        }
+
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("default") {
+                let value = meta.value()?;
+                let expr = value.parse::<Expr>()?;
+
+                if default.replace(expr).is_some() {
+                    return Err(meta.error("ComponentPart accepts only one field default"));
+                }
+
+                Ok(())
+            } else {
+                Err(meta.error("unknown ComponentPart field option; use default = expr"))
+            }
+        })?;
     }
+
+    Ok(default)
 }
 
 fn clone_arm(variant: &Variant) -> TokenStream {
@@ -550,6 +631,59 @@ mod tests {
         assert!(tokens.contains("Self :: Panel"));
         assert!(tokens.contains("debug_tuple"));
         assert!(tokens.contains("debug_struct"));
+    }
+
+    #[test]
+    fn expand_uses_field_defaults_for_all_values() {
+        let input: DeriveInput = parse_quote! {
+            #[scope = "pagination"]
+            enum Part {
+                Root,
+                PageTrigger {
+                    #[part(default = 1)]
+                    page_number: u32,
+                },
+                Link(
+                    #[part(default = SafeUrl::from_static("/"))]
+                    SafeUrl,
+                ),
+            }
+        };
+
+        let tokens = expand(&input)
+            .expect("component part should expand")
+            .to_string();
+
+        assert!(tokens.contains("page_number : 1"));
+        assert!(tokens.contains("SafeUrl :: from_static (\"/\")"));
+    }
+
+    #[test]
+    fn field_defaults_reject_malformed_options() {
+        let unknown_option: DeriveInput = parse_quote! {
+            #[scope = "bad"]
+            enum Part {
+                Root,
+                Item {
+                    #[part(value = 1)]
+                    index: usize,
+                },
+            }
+        };
+
+        let duplicate_default: DeriveInput = parse_quote! {
+            #[scope = "bad"]
+            enum Part {
+                Root,
+                Item {
+                    #[part(default = 1, default = 2)]
+                    index: usize,
+                },
+            }
+        };
+
+        assert!(expand(&unknown_option).is_err());
+        assert!(expand(&duplicate_default).is_err());
     }
 
     #[test]

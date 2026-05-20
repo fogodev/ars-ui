@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/navigation/pagination.rs
+expression: snapshot_attrs(&api.next_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "next-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "pagination",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Go to next page",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

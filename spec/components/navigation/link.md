@@ -38,11 +38,21 @@ external link detection.
 ### 1.3 Context
 
 ```rust
+/// Distinguishes browser URL navigation from adapter-owned client routing.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Target {
+    /// Browser-native URL navigation.
+    Href(SafeUrl),
+    /// Client-side route. Adapters may intercept activation, but the core
+    /// still emits this string as an `href` for progressive enhancement.
+    Route(String),
+}
+
 /// Context for the `Link` component.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
-    /// The destination URL (validated on construction via `SafeUrl`).
-    pub href: SafeUrl,
+    /// The current navigation target.
+    pub href: Target,
     /// Optional browsing context target (e.g. `_blank`).
     pub target: Option<String>,
     /// Optional link relationship (e.g. `noopener noreferrer`).
@@ -91,9 +101,8 @@ pub enum AriaCurrent {
 pub struct Props {
     /// Unique component identifier.
     pub id: String,
-    /// The destination URL (validated via `SafeUrl` — rejects `javascript:`, `data:`, `vbscript:` schemes).
-    /// See `01-architecture.md` §3.1.1.1 for allowed schemes.
-    pub href: SafeUrl,
+    /// The destination target. `Target::Href` values are validated via `SafeUrl`.
+    pub href: Target,
     /// Optional browsing context target (e.g. `_blank`).
     pub target: Option<String>,
     /// Optional link relationship (e.g. `noopener noreferrer`).
@@ -102,18 +111,23 @@ pub struct Props {
     pub is_current: Option<AriaCurrent>,
     /// Disables the link (removes href, sets `aria-disabled`).
     pub disabled: bool,
-    // Change callbacks provided by the adapter layer
+    /// Callback fired when a non-disabled link is activated.
+    pub on_navigate: Option<Callback<dyn Fn(Target) + Send + Sync>>,
+    /// Callback fired after `on_navigate` for press-style integrations.
+    pub on_press: Option<Callback<dyn Fn() + Send + Sync>>,
 }
 
 impl Default for Props {
     fn default() -> Self {
         Self {
             id: String::new(),
-            href: SafeUrl::from_static(""),
+            href: Target::Href(SafeUrl::from_static("")),
             target: None,
             rel: None,
             is_current: None,
             disabled: false,
+            on_navigate: None,
+            on_press: None,
         }
     }
 }
@@ -155,6 +169,8 @@ pub enum Event {
     PressEnd,
     /// The link was activated (click or keyboard confirm).
     Navigate,
+    /// Synchronize render props into context.
+    SyncProps,
 }
 
 // ── Machine ───────────────────────────────────────────────────────────────────
@@ -218,7 +234,7 @@ impl ars_core::Machine for Machine {
             }
 
             // ── Press ─────────────────────────────────────────────────────────
-            (State::Focused, Event::Press) if !ctx.disabled => {
+            (_, Event::Press) if !ctx.disabled => {
                 Some(TransitionPlan::to(State::Pressed)
                     .apply(|ctx| {
                         ctx.pressed = true;
@@ -226,7 +242,7 @@ impl ars_core::Machine for Machine {
             }
 
             // ── PressEnd ──────────────────────────────────────────────────────
-            (State::Pressed, Event::PressEnd) => {
+            (_, Event::PressEnd) => {
                 Some(TransitionPlan::to(State::Focused)
                     .apply(|ctx| {
                         ctx.pressed = false;
@@ -240,7 +256,7 @@ impl ars_core::Machine for Machine {
                 })
                 .with_effect(PendingEffect::new("navigate", |ctx, props, _send| {
                     if let Some(ref on_navigate) = props.on_navigate {
-                        on_navigate(&ctx.href);
+                        on_navigate(ctx.href.clone());
                     }
                     if let Some(ref on_press) = props.on_press {
                         on_press();
@@ -305,10 +321,9 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         } else {
             // Resolve target and rel for external links.
-            let is_external = self.ctx.href.as_str().starts_with("http://")
-                || self.ctx.href.as_str().starts_with("https://");
+            let is_external = self.ctx.href.is_external();
 
-            attrs.set(HtmlAttr::Href, self.ctx.href.as_str());
+            attrs.set(HtmlAttr::Href, sanitize_url(self.ctx.href.href()));
 
             let target = match &self.ctx.target {
                 Some(t) => Some(t.as_str()),
@@ -321,9 +336,7 @@ impl<'a> Api<'a> {
 
             let rel = match &self.ctx.rel {
                 Some(r) => Some(r.as_str()),
-                None if is_external && self.ctx.target.is_none() => {
-                    Some("noopener noreferrer")
-                }
+                None if target == Some("_blank") => Some("noopener noreferrer"),
                 None => None,
             };
             if let Some(r) = rel {
@@ -355,6 +368,10 @@ impl<'a> Api<'a> {
 
         if self.ctx.focus_visible {
             attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
+        }
+
+        if self.ctx.pressed {
+            attrs.set_bool(HtmlAttr::Data("ars-pressed"), true);
         }
 
         // When the element is not a native <a>, add role and tabindex.
@@ -419,9 +436,9 @@ Link
 └── Root   <a> href="..."
 ```
 
-| Part   | Element | Key Attributes                                                                                                                                        |
-| ------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Root` | `<a>`   | `data-ars-scope="link"`, `data-ars-part="root"`, `data-ars-state`, `href`, `target`, `rel`, `aria-current`, `aria-disabled`, `data-ars-focus-visible` |
+| Part   | Element | Key Attributes                                                                                                                                                            |
+| ------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Root` | `<a>`   | `data-ars-scope="link"`, `data-ars-part="root"`, `data-ars-state`, `href`, `target`, `rel`, `aria-current`, `aria-disabled`, `data-ars-focus-visible`, `data-ars-pressed` |
 
 When the consumer renders a non-`<a>` element for the root, `root_props()` should be
 extended with `role="link"` and `tabindex="0"` to maintain keyboard accessibility.
@@ -457,14 +474,26 @@ when the link role is applied to a non-native element, matching the WAI-ARIA lin
 `Link` supports both traditional `<a href>` navigation and client-side router navigation via the `Target` enum:
 
 ```rust
-/// Distinguishes between standard href navigation and client-side routing.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Target {
-    /// Standard URL — renders as `<a href="...">`. Navigates via browser.
-    Href(SafeUrl),
-    /// Client-side route — the adapter intercepts click and delegates to
-    /// the framework router (e.g., Leptos `use_navigate()`, Dioxus `navigator()`).
-    Route(String),
+impl From<SafeUrl> for Target {
+    fn from(value: SafeUrl) -> Self {
+        Self::Href(value)
+    }
+}
+
+impl Target {
+    /// Returns the renderable href string for this target.
+    pub fn href(&self) -> &str {
+        match self {
+            Self::Href(url) => url.as_str(),
+            Self::Route(route) => route.as_str(),
+        }
+    }
+
+    /// Returns true when this target is an absolute HTTP(S) URL.
+    pub fn is_external(&self) -> bool {
+        let href = self.href();
+        href.starts_with("http://") || href.starts_with("https://")
+    }
 }
 ```
 
@@ -477,7 +506,7 @@ When `Target::Route` is used:
 ```rust,no_check
 // Adapter-level auto-detection (e.g., in ars-leptos):
 let current_path = use_location().pathname.get();
-let auto_current = match &props.target {
+let auto_current = match &props.href {
     Target::Route(path) if props.is_current.is_none() => {
         if current_path == *path {
             Some(AriaCurrent::Page)
@@ -494,14 +523,14 @@ The `Props` struct accepts `Target` via the `href` field. For backward compatibi
 ## 5. External Link Detection
 
 When `href` starts with `http://` or `https://` and `target` is not explicitly set,
-`root_props()` automatically applies `target="_blank"` and `rel="noopener noreferrer"`.
+`root_attrs()` automatically applies `target="_blank"` and `rel="noopener noreferrer"`.
 This prevents the opened page from accessing `window.opener` and mitigates reverse
-tabnapping attacks. When `target` is explicitly provided, the automatic behavior is
-skipped — the consumer has full control.
+tabnapping attacks. When `target` is explicitly provided, automatic target selection is
+skipped; explicit `target="_blank"` still receives the `rel` repair described below.
 
 ### 5.1 Automatic `rel` for Explicit `target="_blank"`
 
-When the consumer explicitly sets `target: Some("_blank".into())`, the adapter MUST automatically append `rel="noopener noreferrer"` if `rel` is `None`. This ensures security protections are always applied for new-tab links, regardless of whether the URL is detected as external. Consumers can override by explicitly setting the `rel` prop.
+When the consumer explicitly sets `target: Some("_blank".into())`, the core API MUST automatically append `rel="noopener noreferrer"` if `rel` is `None`. This ensures security protections are always applied for new-tab links, regardless of whether the URL is detected as external. Consumers can override by explicitly setting the `rel` prop.
 
 ### 5.2 External Link Announcements and Iconography
 
@@ -545,19 +574,19 @@ impl ComponentMessages for Messages {}
 
 ### 7.1 Props
 
-| Feature         | ars-ui                            | React Aria       | Notes                          |
-| --------------- | --------------------------------- | ---------------- | ------------------------------ |
-| Href            | `href: SafeUrl`                   | `href: string`   | ars-ui validates via SafeUrl   |
-| Target          | `target`                          | `target`         | Full match                     |
-| Rel             | `rel`                             | `rel`            | Full match                     |
-| Disabled        | `disabled`                        | `isDisabled`     | Full match                     |
-| Is current      | `is_current: Option<AriaCurrent>` | --               | ars-ui addition (aria-current) |
-| Auto focus      | --                                | `autoFocus`      | Adapter concern                |
-| Download        | --                                | `download`       | See below                      |
-| Href lang       | --                                | `hrefLang`       | See below                      |
-| Ping            | --                                | `ping`           | See below                      |
-| Referrer policy | --                                | `referrerPolicy` | See below                      |
-| Router options  | `Target::Route` (section 4)       | `routerOptions`  | ars-ui has client-side routing |
+| Feature         | ars-ui                            | React Aria       | Notes                                |
+| --------------- | --------------------------------- | ---------------- | ------------------------------------ |
+| Href            | `href: Target`                    | `href: string`   | `Target::Href` validates via SafeUrl |
+| Target          | `target`                          | `target`         | Full match                           |
+| Rel             | `rel`                             | `rel`            | Full match                           |
+| Disabled        | `disabled`                        | `isDisabled`     | Full match                           |
+| Is current      | `is_current: Option<AriaCurrent>` | --               | ars-ui addition (aria-current)       |
+| Auto focus      | --                                | `autoFocus`      | Adapter concern                      |
+| Download        | --                                | `download`       | See below                            |
+| Href lang       | --                                | `hrefLang`       | See below                            |
+| Ping            | --                                | `ping`           | See below                            |
+| Referrer policy | --                                | `referrerPolicy` | See below                            |
+| Router options  | `Target::Route` (section 4)       | `routerOptions`  | ars-ui has client-side routing       |
 
 **Gaps:**
 

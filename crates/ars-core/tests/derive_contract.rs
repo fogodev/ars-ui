@@ -63,6 +63,9 @@ where
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 struct CustomDefaultKey(&'static str);
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct CustomAnnotatedKey(&'static str);
+
 #[derive(ComponentPart)]
 #[scope = "named"]
 enum NamedPart {
@@ -95,6 +98,46 @@ enum OrderedPart {
 enum GroupPart {
     Group,
     GroupItem { index: usize },
+}
+
+#[derive(ComponentPart)]
+#[scope = "annotated"]
+enum AnnotatedDefaultPart {
+    Root,
+    Link {
+        #[part(default = CustomAnnotatedKey("root-link"))]
+        key: CustomAnnotatedKey,
+    },
+    PageTrigger {
+        #[part(default = 1)]
+        page_number: u32,
+    },
+}
+
+trait AnnotatedPartValue {
+    fn annotated_part_value() -> Self;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct GenericAnnotatedKey(&'static str);
+
+impl AnnotatedPartValue for GenericAnnotatedKey {
+    fn annotated_part_value() -> Self {
+        Self("generic-link")
+    }
+}
+
+#[derive(ComponentPart)]
+#[scope = "annotated-generic"]
+enum AnnotatedGenericPart<T>
+where
+    T: AnnotatedPartValue + 'static,
+{
+    Root,
+    Link {
+        #[part(default = T::annotated_part_value())]
+        key: T,
+    },
 }
 
 #[test]
@@ -301,6 +344,45 @@ fn component_part_derive_uses_first_unit_variant_as_root() {
     assert_eq!(
         GroupPart::all(),
         vec![GroupPart::Group, GroupPart::GroupItem { index: 0 }]
+    );
+}
+
+#[test]
+fn component_part_derive_supports_annotated_all_defaults() {
+    assert_eq!(
+        AnnotatedDefaultPart::all(),
+        vec![
+            AnnotatedDefaultPart::Root,
+            AnnotatedDefaultPart::Link {
+                key: CustomAnnotatedKey("root-link"),
+            },
+            AnnotatedDefaultPart::PageTrigger { page_number: 1 },
+        ]
+    );
+}
+
+#[test]
+fn component_part_derive_keeps_supertrait_bounds_for_annotated_generic_fields() {
+    let part = AnnotatedGenericPart::<GenericAnnotatedKey>::Link {
+        key: GenericAnnotatedKey("current"),
+    };
+    let clone = part.clone();
+
+    assert_eq!(part, clone);
+    assert!(format!("{clone:?}").contains("Link"));
+
+    let mut hasher = DefaultHasher::new();
+
+    clone.hash(&mut hasher);
+
+    assert_eq!(
+        AnnotatedGenericPart::<GenericAnnotatedKey>::all(),
+        vec![
+            AnnotatedGenericPart::Root,
+            AnnotatedGenericPart::Link {
+                key: GenericAnnotatedKey("generic-link"),
+            },
+        ]
     );
 }
 

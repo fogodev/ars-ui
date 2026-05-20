@@ -1,0 +1,63 @@
+---
+source: crates/ars-components/src/navigation/pagination.rs
+expression: snapshot_attrs(&api.page_trigger_attrs(1))
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-current",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-index",
+            ),
+            String(
+                "1",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "page-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "pagination",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Page 1",
+            ),
+        ),
+        (
+            Aria(
+                Current,
+            ),
+            String(
+                "page",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

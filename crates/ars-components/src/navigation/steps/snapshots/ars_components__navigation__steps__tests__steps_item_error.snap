@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/navigation/steps.rs
+expression: snapshot_attrs(&api.item_attrs(3))
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-index",
+            ),
+            String(
+                "3",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "steps",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "error",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Step 4 of 4",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "listitem",
+            ),
+        ),
+    ],
+    styles: [],
+}

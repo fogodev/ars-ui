@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/navigation/pagination.rs
+expression: snapshot_attrs(&api.ellipsis_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "ellipsis",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "pagination",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "separator",
+            ),
+        ),
+    ],
+    styles: [],
+}

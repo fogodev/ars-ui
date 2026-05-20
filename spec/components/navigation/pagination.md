@@ -35,6 +35,7 @@ in context. A single `Idle` state is used.
 | `GoToFirstPage`             | —                     | Jump to page 1.                                       |
 | `GoToLastPage`              | —                     | Jump to `page_count`.                                 |
 | `SetPageSize(NonZero<u32>)` | new page size         | Change items-per-page; resets or clamps current page. |
+| `SyncProps`                 | —                     | Synchronize controlled props into context.            |
 
 ### 1.3 Context
 
@@ -52,6 +53,8 @@ pub struct Context {
     pub total_items: u32,
     /// Number of page buttons shown on each side of the current page.
     pub sibling_count: u32,
+    /// Number of always-visible page buttons at each boundary.
+    pub boundary_count: u32,
     /// Derived: `ceil(total_items / page_size)`, always >= 1.
     pub page_count: u32,
     /// Resolved locale for i18n.
@@ -65,51 +68,15 @@ pub struct Context {
 impl Context {
     /// Compute the derived page_count from total_items / page_size.
     pub fn compute_page_count(total_items: u32, page_size: NonZero<u32>) -> u32 {
-        ((total_items as f64) / (page_size.get() as f64)).ceil() as u32
+        total_items.div_ceil(page_size.get()).max(1)
     }
 
     /// Generate the list of pages to display, inserting `None` for ellipsis.
     ///
-    /// Example (page=5, page_count=10, sibling_count=1):
+    /// Example (page=5, page_count=10, sibling_count=1, boundary_count=1):
     ///   [Some(1), None, Some(4), Some(5), Some(6), None, Some(10)]
     pub fn page_range(&self) -> Vec<Option<u32>> {
-        let page       = *self.page.get();
-        let total      = self.page_count;
-        let siblings   = self.sibling_count;
-        // Always show first and last page.
-        // Show [page - siblings .. page + siblings] in the middle.
-        let left_start  = page.saturating_sub(siblings);
-        let right_end   = (page + siblings).min(total);
-        let show_left_ellipsis  = left_start > 2;
-        let show_right_ellipsis = right_end < total.saturating_sub(1);
-
-        let mut pages = vec![Some(1)];
-
-        if show_left_ellipsis {
-            pages.push(None); // ellipsis
-        } else {
-            for p in 2..left_start {
-                pages.push(Some(p));
-            }
-        }
-
-        for p in left_start.max(2)..=right_end.min(total.saturating_sub(1)) {
-            pages.push(Some(p));
-        }
-
-        if show_right_ellipsis {
-            pages.push(None); // ellipsis
-        } else {
-            for p in (right_end + 1)..total {
-                pages.push(Some(p));
-            }
-        }
-
-        if total > 1 {
-            pages.push(Some(total));
-        }
-
-        pages
+        page_range(*self.page.get(), self.page_count, self.sibling_count, self.boundary_count)
     }
 }
 ```
@@ -144,6 +111,8 @@ pub struct Props {
     /// progressive enhancement and SEO-friendly pagination. The callback
     /// receives a 1-based page number and returns the URL string.
     pub get_page_url: Option<Callback<dyn Fn(u32) -> String + Send + Sync>>,
+    /// Callback fired after the current page changes.
+    pub on_page_change: Option<Callback<dyn Fn(u32) + Send + Sync>>,
 }
 
 /// Visual size variants for Pagination.
@@ -170,6 +139,7 @@ impl Default for Props {
             boundary_count: 1,
             size: Size::default(),
             get_page_url: None,
+            on_page_change: None,
         }
     }
 }
@@ -202,6 +172,15 @@ pub enum Event {
     GoToLastPage,
     /// Change items-per-page; resets or clamps current page.
     SetPageSize(NonZero<u32>),
+    /// Synchronize controlled props into context.
+    SyncProps,
+}
+
+/// Effects for the `Pagination` component.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Effect {
+    /// The current page changed.
+    PageChange,
 }
 
 /// Machine for the `Pagination` component.
@@ -229,6 +208,7 @@ impl ars_core::Machine for Machine {
             page_size: props.page_size,
             total_items: props.total_items,
             sibling_count: props.sibling_count,
+            boundary_count: props.boundary_count,
             page_count,
             locale,
             ids,
@@ -240,7 +220,7 @@ impl ars_core::Machine for Machine {
         _state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
             Event::GoToPage(p) => {
@@ -248,7 +228,12 @@ impl ars_core::Machine for Machine {
                 if *ctx.page.get() == target { return None; }
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.page.set(target);
-                }))
+                }).with_effect(PendingEffect::new(Effect::PageChange, |ctx, props, _send| {
+                    if let Some(ref cb) = props.on_page_change {
+                        cb(*ctx.page.get());
+                    }
+                    no_cleanup()
+                })))
             }
             Event::NextPage => {
                 let next = (*ctx.page.get() + 1).min(ctx.page_count);
@@ -283,6 +268,24 @@ impl ars_core::Machine for Machine {
                     ctx.page_size  = new_size;
                     ctx.page_count = new_count;
                     ctx.page.set(clamped);
+                }))
+            }
+            Event::SyncProps => {
+                let page_size = props.page_size;
+                let total_items = props.total_items;
+                let sibling_count = props.sibling_count;
+                let boundary_count = props.boundary_count;
+                let page_count = Context::compute_page_count(total_items, page_size);
+                let controlled = props.page.map(|page| page.max(1).min(page_count));
+                let target = controlled.unwrap_or_else(|| (*ctx.page.get()).max(1).min(page_count));
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.page_size = page_size;
+                    ctx.total_items = total_items;
+                    ctx.sibling_count = sibling_count;
+                    ctx.boundary_count = boundary_count;
+                    ctx.page_count = page_count;
+                    ctx.page.sync_controlled(controlled);
+                    ctx.page.set(target);
                 }))
             }
         }
@@ -345,6 +348,7 @@ impl<'a> Api<'a> {
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "navigation");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.root_label)(&self.ctx.locale));
+        attrs.set(HtmlAttr::Data("ars-size"), self.props.size.as_str());
         attrs
     }
 
@@ -398,14 +402,14 @@ impl<'a> Api<'a> {
     pub fn page_trigger_attrs(&self, page_number: u32) -> AttrMap {
         let mut attrs = AttrMap::new();
         let is_current = self.current_page() == page_number;
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::PageTrigger { page_number: Default::default() }.data_attrs();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::PageTrigger { page_number }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
 
         // When get_page_url is set, render as <a> for progressive enhancement.
         // Otherwise render as <button>.
         if let Some(ref get_url) = self.props.get_page_url {
-            attrs.set(HtmlAttr::Href, get_url(page_number));
+            attrs.set(HtmlAttr::Href, sanitize_url(&get_url(page_number)));
         } else {
             attrs.set(HtmlAttr::Type, "button");
         }

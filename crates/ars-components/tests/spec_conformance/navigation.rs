@@ -5,7 +5,8 @@
 //! matches the declared `(scope, part-name)` ordering.
 
 use ars_collections::Key;
-use ars_components::navigation::tabs;
+use ars_components::navigation::{breadcrumbs, link, pagination, steps, tabs};
+use ars_core::SafeUrl;
 
 use super::helper::assert_anatomy;
 
@@ -46,6 +47,67 @@ fn tabs_anatomy_matches_spec() {
                 },
                 "tab-close-trigger",
             ),
+        ],
+    );
+}
+
+#[test]
+fn breadcrumbs_anatomy_matches_spec() {
+    assert_anatomy(
+        "breadcrumbs",
+        &[
+            (breadcrumbs::Part::Root, "root"),
+            (breadcrumbs::Part::List, "list"),
+            (breadcrumbs::Part::Item, "item"),
+            (
+                breadcrumbs::Part::Link {
+                    href: SafeUrl::from_static("/"),
+                },
+                "link",
+            ),
+            (breadcrumbs::Part::CurrentPage, "current-page"),
+            (breadcrumbs::Part::Separator, "separator"),
+        ],
+    );
+}
+
+#[test]
+fn link_anatomy_matches_spec() {
+    assert_anatomy("link", &[(link::Part::Root, "root")]);
+}
+
+#[test]
+fn pagination_anatomy_matches_spec() {
+    assert_anatomy(
+        "pagination",
+        &[
+            (pagination::Part::Root, "root"),
+            (pagination::Part::PrevTrigger, "prev-trigger"),
+            (pagination::Part::NextTrigger, "next-trigger"),
+            (
+                pagination::Part::PageTrigger { page_number: 1 },
+                "page-trigger",
+            ),
+            (pagination::Part::Ellipsis, "ellipsis"),
+        ],
+    );
+}
+
+#[test]
+fn steps_anatomy_matches_spec() {
+    assert_anatomy(
+        "steps",
+        &[
+            (steps::Part::Root, "root"),
+            (steps::Part::List, "list"),
+            (steps::Part::Item { index: 0 }, "item"),
+            (steps::Part::Indicator { index: 0 }, "indicator"),
+            (steps::Part::Title { index: 0 }, "title"),
+            (steps::Part::Description { index: 0 }, "description"),
+            (steps::Part::Separator { after_index: 0 }, "separator"),
+            (steps::Part::Content { index: 0 }, "content"),
+            (steps::Part::PrevTrigger, "prev-trigger"),
+            (steps::Part::NextTrigger, "next-trigger"),
         ],
     );
 }

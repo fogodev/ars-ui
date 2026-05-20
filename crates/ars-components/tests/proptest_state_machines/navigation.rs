@@ -8,8 +8,9 @@
 use std::collections::BTreeSet;
 
 use ars_collections::Key;
-use ars_components::navigation::tabs::{
-    ActivationMode, Effect, Event, Machine, Messages, Props, State, TabRegistration,
+use ars_components::navigation::{
+    pagination, steps,
+    tabs::{ActivationMode, Effect, Event, Machine, Messages, Props, State, TabRegistration},
 };
 use ars_core::{AriaAttr, Direction, Env, HtmlAttr, Machine as MachineTrait, Orientation, Service};
 use proptest::{prelude::*, test_runner::TestCaseResult};
@@ -477,5 +478,189 @@ proptest! {
 
         prop_assert_eq!(api.next_reorder_index(&target, true), expected_next);
         prop_assert_eq!(api.next_reorder_index(&target, false), expected_prev);
+    }
+}
+
+fn arb_pagination_event() -> impl Strategy<Value = pagination::Event> {
+    prop_oneof![
+        (0u32..64).prop_map(pagination::Event::GoToPage),
+        Just(pagination::Event::NextPage),
+        Just(pagination::Event::PrevPage),
+        Just(pagination::Event::GoToFirstPage),
+        Just(pagination::Event::GoToLastPage),
+        (1u32..32).prop_map(|size| pagination::Event::SetPageSize(
+            core::num::NonZeroU32::new(size).expect("range starts at one")
+        )),
+    ]
+}
+
+fn arb_pagination_props() -> impl Strategy<Value = pagination::Props> {
+    (
+        prop::option::of(0u32..64),
+        0u32..64,
+        1u32..32,
+        0u32..256,
+        0u32..4,
+        1u32..3,
+    )
+        .prop_map(
+            |(page, default_page, page_size, total_items, sibling_count, boundary_count)| {
+                let mut props = pagination::Props::new()
+                    .id("pagination")
+                    .default_page(default_page)
+                    .page_size(core::num::NonZeroU32::new(page_size).expect("range starts at one"))
+                    .total_items(total_items)
+                    .sibling_count(sibling_count)
+                    .boundary_count(boundary_count);
+
+                if let Some(page) = page {
+                    props = props.page(page);
+                }
+
+                props
+            },
+        )
+}
+
+fn arb_step_status() -> impl Strategy<Value = steps::Status> {
+    prop_oneof![
+        Just(steps::Status::Incomplete),
+        Just(steps::Status::Current),
+        Just(steps::Status::Complete),
+        Just(steps::Status::Error),
+    ]
+}
+
+fn arb_steps_event() -> impl Strategy<Value = steps::Event> {
+    prop_oneof![
+        (0u32..12).prop_map(steps::Event::GoToStep),
+        Just(steps::Event::NextStep),
+        Just(steps::Event::PrevStep),
+        (0u32..12).prop_map(steps::Event::CompleteStep),
+        (0u32..12, arb_step_status())
+            .prop_map(|(step, status)| steps::Event::SetStatus { step, status }),
+    ]
+}
+
+fn arb_steps_props() -> impl Strategy<Value = steps::Props> {
+    (
+        prop::option::of(0u32..12),
+        0u32..12,
+        1u32..12,
+        any::<bool>(),
+        arb_orientation(),
+        prop::collection::vec(arb_step_status(), 0..12),
+    )
+        .prop_map(
+            |(step, default_step, count, linear, orientation, statuses)| {
+                let mut props = steps::Props::new()
+                    .id("steps")
+                    .default_step(default_step)
+                    .count(core::num::NonZeroU32::new(count).expect("range starts at one"))
+                    .linear(linear)
+                    .orientation(orientation)
+                    .statuses(statuses)
+                    .is_step_skippable(|_| true)
+                    .is_step_valid(|_| true);
+
+                if let Some(step) = step {
+                    props = props.step(step);
+                }
+
+                props
+            },
+        )
+}
+
+fn assert_pagination_invariants(service: &Service<pagination::Machine>) -> TestCaseResult {
+    let ctx = service.context();
+    let page = *ctx.page.get();
+
+    prop_assert!(page >= 1);
+    prop_assert!(page <= ctx.page_count);
+
+    let mut previous = None;
+
+    for entry in ctx.page_range().into_iter().flatten() {
+        if let Some(previous) = previous {
+            prop_assert!(entry > previous, "page range must be strictly increasing");
+        }
+
+        previous = Some(entry);
+    }
+
+    Ok(())
+}
+
+fn assert_steps_invariants(service: &Service<steps::Machine>) -> TestCaseResult {
+    let ctx = service.context();
+    let step = *ctx.step.get();
+
+    prop_assert!(step < ctx.count.get());
+    prop_assert_eq!(ctx.statuses.len(), ctx.count.get() as usize);
+    let current_positions = ctx
+        .statuses
+        .iter()
+        .enumerate()
+        .filter_map(|(index, status)| (*status == steps::Status::Current).then_some(index as u32))
+        .collect::<Vec<_>>();
+
+    prop_assert!(
+        current_positions.len() <= 1,
+        "steps must not keep multiple current statuses"
+    );
+
+    if let Some(current_position) = current_positions.first() {
+        prop_assert_eq!(*current_position, step);
+    }
+
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(super::common::proptest_config())]
+
+    /// Pagination keeps page state within the derived one-based bounds.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_pagination_page_bounds_and_ranges_hold(
+        props in arb_pagination_props(),
+        events in prop::collection::vec(arb_pagination_event(), 0..64),
+    ) {
+        let mut service = Service::<pagination::Machine>::new(
+            props,
+            &Env::default(),
+            &pagination::Messages::default(),
+        );
+
+        assert_pagination_invariants(&service)?;
+
+        for event in events {
+            drop(service.send(event));
+
+            assert_pagination_invariants(&service)?;
+        }
+    }
+
+    /// Steps keeps the current index in range and exactly one current status.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_steps_current_status_invariants_hold(
+        props in arb_steps_props(),
+        events in prop::collection::vec(arb_steps_event(), 0..64),
+    ) {
+        let mut service = Service::<steps::Machine>::new(
+            props,
+            &Env::default(),
+            &steps::Messages::default(),
+        );
+
+        assert_steps_invariants(&service)?;
+
+        for event in events {
+            drop(service.send(event));
+
+            assert_steps_invariants(&service)?;
+        }
     }
 }

@@ -3585,7 +3585,7 @@ impl fmt::Display for UnsafeUrlError {
 
 Components that set URL-valued attributes must call `sanitize_url()`:
 
-- **Link**: `attrs.set(HtmlAttr::Href, sanitize_url(self.ctx.href.as_str()))`
+- **Link**: `attrs.set(HtmlAttr::Href, sanitize_url(self.ctx.href.href()))`
 - **Form**: `attrs.set(HtmlAttr::Action, sanitize_url(action))`
 
 #### 3.1.2 HtmlEvent
