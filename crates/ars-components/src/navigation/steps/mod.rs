@@ -465,7 +465,7 @@ impl ars_core::Machine for Machine {
             Event::CompleteStep(step) => {
                 let step = *step;
 
-                if step >= ctx.count.get() || step == *ctx.step.get() {
+                if step >= ctx.count.get() {
                     return None;
                 }
 
@@ -769,15 +769,7 @@ impl Api<'_> {
     /// Attributes for the next-step trigger.
     #[must_use]
     pub fn next_trigger_attrs(&self) -> AttrMap {
-        let mut attrs = self.button_attrs(&Part::NextTrigger);
-
-        if self.is_last_step() {
-            attrs
-                .set_bool(HtmlAttr::Disabled, true)
-                .set_bool(HtmlAttr::Data("ars-disabled"), true);
-        }
-
-        attrs
+        self.button_attrs(&Part::NextTrigger)
     }
 
     /// Dispatches previous-step navigation when not already at the first step.
@@ -787,11 +779,9 @@ impl Api<'_> {
         }
     }
 
-    /// Dispatches next-step navigation when not already at the last step.
+    /// Dispatches next-step navigation, including completion from the last step.
     pub fn on_next_trigger_click(&self) {
-        if !self.is_last_step() {
-            (self.send)(Event::NextStep);
-        }
+        (self.send)(Event::NextStep);
     }
 
     /// Dispatches direct step navigation.
@@ -1024,7 +1014,7 @@ mod tests {
     }
 
     #[test]
-    fn first_and_last_steps_disable_respective_triggers() {
+    fn first_step_disables_prev_but_last_step_keeps_next_enabled_for_completion() {
         let first = service(props().default_step(0));
 
         assert!(
@@ -1041,8 +1031,19 @@ mod tests {
             last.connect(&|_| {})
                 .next_trigger_attrs()
                 .get_value(&HtmlAttr::Disabled)
-                .is_some()
+                .is_none()
         );
+    }
+
+    #[test]
+    fn next_trigger_dispatches_completion_from_last_step() {
+        let sent = core::cell::RefCell::new(Vec::new());
+        let send = |event| sent.borrow_mut().push(event);
+        let service = service(props().default_step(3));
+
+        service.connect(&send).on_next_trigger_click();
+
+        assert_eq!(sent.borrow().as_slice(), &[Event::NextStep]);
     }
 
     #[test]
@@ -1190,7 +1191,7 @@ mod tests {
     }
 
     #[test]
-    fn completing_current_step_preserves_current_status() {
+    fn next_step_completion_preserves_current_status() {
         let mut service = service(props().default_step(3));
 
         drop(service.send(Event::NextStep));
@@ -1206,11 +1207,16 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn complete_step_can_mark_active_step_complete() {
+        let mut service = service(props().default_step(3));
 
         drop(service.send(Event::CompleteStep(3)));
 
         assert_eq!(*service.context().step.get(), 3);
-        assert_eq!(service.context().statuses[3], Status::Current);
+        assert_eq!(service.context().statuses[3], Status::Complete);
     }
 
     #[test]

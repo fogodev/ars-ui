@@ -428,16 +428,10 @@ impl ars_core::Machine for Machine {
                 let new_count = Context::compute_page_count(ctx.total_items, new_size);
                 let target = clamp_page(current, new_count);
                 let emit = target != current;
-                let controlled = ctx.page.is_controlled();
 
                 let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.page_size = new_size;
                     ctx.page_count = new_count;
-
-                    if controlled {
-                        ctx.page.sync_controlled(Some(target));
-                    }
-
                     ctx.page.set(target);
                 });
 
@@ -1069,7 +1063,7 @@ mod tests {
     }
 
     #[test]
-    fn controlled_set_page_size_clamps_visible_page() {
+    fn controlled_set_page_size_preserves_controlled_page_until_sync() {
         let mut service = service(props().page(10));
 
         let result = service.send(Event::SetPageSize(
@@ -1077,8 +1071,7 @@ mod tests {
         ));
 
         assert_eq!(service.context().page_count, 5);
-        assert_eq!(*service.context().page.get(), 5);
-        assert!(service.connect(&|_| {}).is_last_page());
+        assert_eq!(*service.context().page.get(), 10);
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, Effect::PageChange);
     }
