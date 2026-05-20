@@ -1277,14 +1277,26 @@ impl ars_core::Machine for Machine {
             }
 
             // ── Direction ────────────────────────────────────────────
+            // Resolve `Direction::Auto` against the active locale before
+            // writing into `Context::dir`. Keyboard handlers only check
+            // `ctx.dir == Direction::Rtl`, so storing `Auto` would
+            // silently disable RTL navigation until a corrective event
+            // arrived. The init path applies the same resolution for
+            // the boot value; this arm covers all runtime updates
+            // (`on_props_changed` for `Concrete → Auto` re-resolution,
+            // and adapter-driven re-resolution after a platform-locale
+            // change).
             Event::SetDirection(dir) => {
-                if ctx.dir == *dir {
+                let resolved = if *dir == Direction::Auto {
+                    Direction::from(ctx.locale.direction())
+                } else {
+                    *dir
+                };
+                if ctx.dir == resolved {
                     return None;
                 }
-
-                let dir = *dir;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.dir = dir;
+                    ctx.dir = resolved;
                 }))
             }
 

@@ -3284,3 +3284,65 @@ fn codex_round5_part_attrs_column_header_sortable_field() {
         "sortable=false must omit aria-sort",
     );
 }
+
+// ────────────────────────────────────────────────────────────────────
+// 23. Codex review pass 6 (PR #651) — Direction::Auto resolution in
+//      SetDirection transition.
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn codex_round6_set_direction_resolves_auto_from_locale() {
+    // Codex P2 (thread PRRT_kwDORp4enM6DT49S).
+    // `SetDirection(Direction::Auto)` must resolve `Auto` to a concrete
+    // direction via the active locale rather than storing `Auto` in
+    // `Context::dir`. Keyboard handlers compare `ctx.dir == Direction::Rtl`
+    // and treat everything else (including `Auto`) as LTR, so leaving
+    // `Auto` in context silently breaks RTL navigation after prop
+    // updates.
+    let mut service = service_with_rows(
+        Props {
+            dir: Direction::Rtl,
+            ..test_props()
+        },
+        &[],
+    );
+    assert_eq!(service.context().dir, Direction::Rtl);
+
+    // Adapter / parent flips the prop back to `Auto` (asks the
+    // platform to re-resolve). The default locale is LTR, so the
+    // resolved value should be `Ltr` — NOT `Auto`.
+    drop(service.send(Event::SetDirection(Direction::Auto)));
+
+    assert_eq!(
+        service.context().dir,
+        Direction::Ltr,
+        "SetDirection(Auto) must resolve to a concrete direction via ctx.locale",
+    );
+}
+
+#[test]
+fn codex_round6_set_direction_auto_via_props_change() {
+    // Companion test — `on_props_changed` forwards `new.dir` through
+    // `Event::SetDirection`. A `Rtl → Auto` prop transition must end
+    // with a concrete value in `ctx.dir`, not `Auto`.
+    let mut service = service_with_rows(
+        Props {
+            dir: Direction::Rtl,
+            ..test_props()
+        },
+        &[],
+    );
+    assert_eq!(service.context().dir, Direction::Rtl);
+
+    let new_props = Props {
+        dir: Direction::Auto,
+        ..test_props()
+    };
+    drop(service.set_props(new_props));
+
+    assert_ne!(
+        service.context().dir,
+        Direction::Auto,
+        "Context::dir must always be a concrete Direction (Ltr or Rtl), never Auto",
+    );
+}
