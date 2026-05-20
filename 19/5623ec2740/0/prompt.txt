@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bfb96vycz</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson--t3-worktrees-ars-ui-t3code-e1654fe1/aed4ae6a-a096-41cd-a852-67a4943533c3/tasks/bfb96vycz.output</output-file>
+<status>completed</status>
+<summary>Background command "Resume Codex poll for pass 3" completed (exit code 0)</summary>
+</task-notification>

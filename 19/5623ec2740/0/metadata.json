@@ -1,0 +1,88 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "195623ec2740",
+  "session_id": "b939c529-fda9-4daf-8309-cf7be7c57583",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-20T17:51:55.862411Z",
+  "branch": "t3code/e1654fe1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/input/pin_input/mod.rs",
+    "crates/ars-components/src/input/number_input/mod.rs",
+    "crates/ars-components/src/input/search_input/mod.rs",
+    "spec/components/input/search-input.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "1e6486175aa8",
+  "checkpoint_transcript_start": 1304,
+  "transcript_lines_at_start": 1304,
+  "token_usage": {
+    "input_tokens": 56,
+    "cache_creation_tokens": 649967,
+    "cache_read_tokens": 19786192,
+    "output_tokens": 24862,
+    "api_call_count": 31
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "summary": {
+    "intent": "Fix FSM consistency issues in ars-components input components (PinInput, NumberInput, SearchInput) identified by a multi-pass Codex review.",
+    "outcome": "All 6 P2 FSM consistency findings from pass 3 were fixed, 8 new unit tests added, all 1974 tests pass, clippy clean, and changes committed and pushed.",
+    "learnings": {
+      "repo": [
+        "The project uses a multi-pass Codex review workflow where findings are batched by pass and priority (P2 = medium priority FSM issues).",
+        "Input components (PinInput, NumberInput, SearchInput) are FSM-driven with explicit state transitions in mod.rs files under crates/ars-components/src/input/.",
+        "SearchInput uses a debounce mechanism with Cancel/Restart events; spec requires prop changes to restart (not just cancel) the debounce timer.",
+        "The project uses xci-fast as a CI-equivalent fast check before committing.",
+        "Specs for components live in spec/components/input/*.md and are updated alongside code fixes."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/input/pin_input/mod.rs",
+          "finding": "DeleteChar arm required FSM fix; SetValue must trigger state transitions when pin completeness changes; SetProps must transition to a valid state when focus_index is invalidated."
+        },
+        {
+          "path": "crates/ars-components/src/input/number_input/mod.rs",
+          "finding": "IncrementToMax/DecrementToMin must round values; Blur must clear scrubbing state. f64 representation issue: 1.005 is stored as 1.00499... so round_to_precision tests must use values with exact binary representations."
+        },
+        {
+          "path": "crates/ars-components/src/input/search_input/mod.rs",
+          "finding": "on_props_changed must emit RestartDebounce (not CancelDebounce) per spec; required adding a new RestartDebounce Event variant."
+        }
+      ],
+      "workflow": [
+        "Multi-pass Codex review catches regressions introduced by earlier fixes (round-2 fix #4 was flagged in pass 3).",
+        "Batching all findings from a single pass into one edit session before running tests is efficient.",
+        "When a test fails due to floating-point representation limits (f64), use inputs with exact binary representations rather than decimal round numbers."
+      ]
+    },
+    "friction": [
+      "Codex pass 3 pushed back on a round-2 fix (debounce cancel vs restart), requiring a revisit and additional Event variant.",
+      "f64 precision caused a newly written test to fail — 1.005 is not exactly representable, so the test had to be rewritten with binary-friendly values."
+    ],
+    "open_items": []
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-20T17:51:39.445513Z",
+    "agent_lines": 248,
+    "agent_removed": 21,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 248,
+    "total_lines_changed": 269,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
