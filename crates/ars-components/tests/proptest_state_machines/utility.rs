@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
 use ars_components::utility::{
-    button, download_trigger, error_boundary, field, fieldset, form, form_submit, separator,
-    visually_hidden,
+    button, download_trigger, error_boundary, field, fieldset, form, form_submit, separator, swap,
+    toggle, visually_hidden,
 };
 use ars_core::{ConnectApi, Env, HtmlAttr, Service, WeakSend, callback};
 use ars_forms::{
@@ -70,6 +70,62 @@ fn arb_button_event() -> impl Strategy<Value = button::Event> {
         Just(button::Event::Click),
         any::<bool>().prop_map(button::Event::SetLoading),
         any::<bool>().prop_map(button::Event::SetDisabled),
+    ]
+}
+
+fn arb_toggle_props() -> impl Strategy<Value = toggle::Props> {
+    (
+        prop::option::of(any::<bool>()),
+        any::<bool>(),
+        any::<bool>(),
+    )
+        .prop_map(|(pressed, default_pressed, disabled)| toggle::Props {
+            id: "toggle".to_string(),
+            pressed,
+            default_pressed,
+            disabled,
+            on_change: None,
+        })
+}
+
+fn arb_toggle_event() -> impl Strategy<Value = toggle::Event> {
+    prop_oneof![
+        Just(toggle::Event::Toggle),
+        Just(toggle::Event::TurnOn),
+        Just(toggle::Event::TurnOff),
+        any::<bool>().prop_map(|is_keyboard| toggle::Event::Focus { is_keyboard }),
+        Just(toggle::Event::Blur),
+        any::<bool>().prop_map(toggle::Event::SetDisabled),
+        prop::option::of(any::<bool>()).prop_map(toggle::Event::SetValue),
+    ]
+}
+
+fn arb_swap_props() -> impl Strategy<Value = swap::Props> {
+    (
+        prop::option::of(any::<bool>()),
+        any::<bool>(),
+        any::<bool>(),
+    )
+        .prop_map(|(checked, default_checked, disabled)| swap::Props {
+            id: "swap".to_string(),
+            checked,
+            default_checked,
+            disabled,
+            label: None,
+            animation: swap::Animation::None,
+            on_change: None,
+        })
+}
+
+fn arb_swap_event() -> impl Strategy<Value = swap::Event> {
+    prop_oneof![
+        Just(swap::Event::Toggle),
+        Just(swap::Event::SetOn),
+        Just(swap::Event::SetOff),
+        any::<bool>().prop_map(swap::Event::SetDisabled),
+        prop::option::of(any::<bool>()).prop_map(swap::Event::SetValue),
+        any::<bool>().prop_map(|is_keyboard| swap::Event::Focus { is_keyboard }),
+        Just(swap::Event::Blur),
     ]
 }
 
@@ -268,6 +324,88 @@ proptest! {
                     prop_assert!(ctx.loading, "loading state requires loading context");
                     prop_assert!(!ctx.pressed, "loading button cannot be pressed");
                 }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_toggle_event_sequences_preserve_invariants(
+        props in arb_toggle_props(),
+        events in prop::collection::vec(arb_toggle_event(), 0..128),
+    ) {
+        let mut service = Service::<toggle::Machine>::new(
+            props,
+            &Env::default(),
+            &toggle::Messages,
+        );
+
+        for event in events {
+            let before_pressed = *service.context().pressed.get();
+
+            let before_disabled = service.context().disabled;
+
+            let value_event = matches!(
+                event,
+                toggle::Event::Toggle | toggle::Event::TurnOn | toggle::Event::TurnOff
+            );
+
+            drop(service.send(event));
+
+            let state = service.state();
+            let ctx = service.context();
+
+            prop_assert_eq!(matches!(state, toggle::State::On), *ctx.pressed.get());
+            prop_assert!(
+                !ctx.focus_visible || ctx.focused,
+                "focus-visible cannot outlive focus"
+            );
+
+            if before_disabled && value_event {
+                prop_assert_eq!(
+                    *ctx.pressed.get(),
+                    before_pressed,
+                    "disabled toggle must not change pressed value"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_swap_event_sequences_preserve_invariants(
+        props in arb_swap_props(),
+        events in prop::collection::vec(arb_swap_event(), 0..128),
+    ) {
+        let mut service = Service::<swap::Machine>::new(
+            props,
+            &Env::default(),
+            &swap::Messages::default(),
+        );
+
+        for event in events {
+            let before_checked = *service.context().checked.get();
+
+            let before_disabled = service.context().disabled;
+
+            let value_event = matches!(
+                event,
+                swap::Event::Toggle | swap::Event::SetOn | swap::Event::SetOff
+            );
+
+            drop(service.send(event));
+
+            let state = service.state();
+            let ctx = service.context();
+
+            prop_assert_eq!(matches!(state, swap::State::On), *ctx.checked.get());
+
+            if before_disabled && value_event {
+                prop_assert_eq!(
+                    *ctx.checked.get(),
+                    before_checked,
+                    "disabled swap must not change checked value"
+                );
             }
         }
     }

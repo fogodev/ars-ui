@@ -1,0 +1,73 @@
+---
+source: crates/ars-components/src/utility/swap.rs
+expression: "snapshot_attrs(&off.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "swap",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "off",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Toggle",
+            ),
+        ),
+        (
+            Aria(
+                Pressed,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "theme",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "button",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
