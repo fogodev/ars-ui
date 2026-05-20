@@ -1,0 +1,11 @@
+<task-notification>
+<task-id>b1eczcqzv</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson--t3-worktrees-ars-ui-t3code-e1654fe1/aed4ae6a-a096-41cd-a852-67a4943533c3/tasks/b1eczcqzv.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll for Codex pass 4" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+Your background threads seems to be bugged, you keep losing your polling of new reviews
