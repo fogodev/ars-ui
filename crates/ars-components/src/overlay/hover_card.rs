@@ -335,6 +335,15 @@ fn close_plan(cancel: Option<Effect>) -> TransitionPlan<Machine> {
     plan
 }
 
+fn cancel_pending_open_plan() -> TransitionPlan<Machine> {
+    TransitionPlan::to(State::Closed)
+        .apply(|ctx: &mut Context| {
+            ctx.hover_active = false;
+            ctx.focus_active = false;
+        })
+        .cancel_effect(Effect::OpenDelay)
+}
+
 fn start_close_plan() -> TransitionPlan<Machine> {
     TransitionPlan::to(State::ClosePending).with_effect(PendingEffect::named(Effect::CloseDelay))
 }
@@ -408,15 +417,19 @@ impl ars_core::Machine for Machine {
         match (state, event) {
             (_, Event::SetControlledOpen(open)) => {
                 if *open {
-                    if matches!(state, State::Open) && ctx.open {
-                        None
-                    } else {
-                        Some(open_plan(None))
+                    match state {
+                        State::Open => None,
+                        State::OpenPending => Some(open_plan(Some(Effect::OpenDelay))),
+                        State::ClosePending => Some(open_plan(Some(Effect::CloseDelay))),
+                        State::Closed => Some(open_plan(None)),
                     }
-                } else if matches!(state, State::Closed) && !ctx.open {
-                    None
                 } else {
-                    Some(close_plan(None))
+                    match state {
+                        State::Closed => None,
+                        State::OpenPending => Some(cancel_pending_open_plan()),
+                        State::Open => Some(close_plan(None)),
+                        State::ClosePending => Some(close_plan(Some(Effect::CloseDelay))),
+                    }
                 }
             }
 
@@ -429,7 +442,9 @@ impl ars_core::Machine for Machine {
                     ctx.disabled = disabled;
                     ctx.open_delay = open_delay;
                     ctx.close_delay = close_delay;
-                    ctx.current_placement = positioning.placement;
+                    if ctx.positioning != positioning {
+                        ctx.current_placement = positioning.placement;
+                    }
                     ctx.positioning = positioning;
                 }
             })),
@@ -630,11 +645,12 @@ impl ars_core::Machine for Machine {
                 Some(close_plan(cancel))
             }
 
-            (State::OpenPending | State::Open | State::ClosePending, Event::CloseOnEscape) => {
+            (State::OpenPending, Event::CloseOnEscape) => Some(cancel_pending_open_plan()),
+
+            (State::Open | State::ClosePending, Event::CloseOnEscape) => {
                 let cancel = match state {
-                    State::OpenPending => Some(Effect::OpenDelay),
                     State::ClosePending => Some(Effect::CloseDelay),
-                    State::Open | State::Closed => None,
+                    State::Closed | State::OpenPending | State::Open => None,
                 };
 
                 Some(close_plan(cancel))
@@ -1285,6 +1301,87 @@ mod tests {
             effect_names(&close),
             vec![Effect::OpenChange, Effect::ReleaseZIndex]
         );
+    }
+
+    #[test]
+    fn controlled_open_close_cancel_pending_timers_without_spurious_open_change() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(service.send(Event::TriggerPointerEnter));
+
+        let controlled_close = service.send(Event::SetControlledOpen(false));
+
+        assert_eq!(service.state(), &State::Closed);
+        assert_eq!(controlled_close.cancel_effects, vec![Effect::OpenDelay]);
+        assert!(controlled_close.pending_effects.is_empty());
+
+        drop(service.send(Event::Open));
+        drop(service.send(Event::TriggerPointerLeave));
+
+        let controlled_open = service.send(Event::SetControlledOpen(true));
+
+        assert_eq!(service.state(), &State::Open);
+        assert_eq!(controlled_open.cancel_effects, vec![Effect::CloseDelay]);
+        assert_eq!(
+            effect_names(&controlled_open),
+            vec![Effect::OpenChange, Effect::AllocateZIndex]
+        );
+    }
+
+    #[test]
+    fn escape_before_open_cancels_delay_without_open_change() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(service.send(Event::TriggerPointerEnter));
+
+        let escape = service.send(Event::CloseOnEscape);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert_eq!(escape.cancel_effects, vec![Effect::OpenDelay]);
+        assert!(escape.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn props_sync_preserves_measured_placement_for_non_positioning_changes() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                positioning: PositioningOptions {
+                    placement: Placement::RightStart,
+                    ..PositioningOptions::default()
+                },
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::PositioningUpdate(PositioningSnapshot {
+            placement: Placement::TopEnd,
+            arrow: None,
+        })));
+
+        service.set_props(Props {
+            disabled: true,
+            positioning: PositioningOptions {
+                placement: Placement::RightStart,
+                ..PositioningOptions::default()
+            },
+            ..test_props()
+        });
+
+        assert_eq!(service.context().current_placement, Placement::TopEnd);
+
+        service.set_props(Props {
+            positioning: PositioningOptions {
+                placement: Placement::LeftStart,
+                ..PositioningOptions::default()
+            },
+            ..test_props()
+        });
+
+        assert_eq!(service.context().current_placement, Placement::LeftStart);
     }
 
     #[test]
