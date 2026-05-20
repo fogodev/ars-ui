@@ -97,6 +97,9 @@ pub enum Event {
     /// The title element mounted.
     TitleMount,
 
+    /// The title element unmounted.
+    TitleUnmount,
+
     /// Adapter reported measured placement state.
     PositioningUpdate(PositioningSnapshot),
 
@@ -451,7 +454,22 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            _ if props.disabled => None,
+            (_, Event::TitleUnmount) if ctx.has_title => {
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.has_title = false;
+                }))
+            }
+
+            (
+                _,
+                Event::TriggerPointerEnter
+                | Event::TriggerFocus
+                | Event::TriggerKeyDown(_)
+                | Event::ContentPointerEnter
+                | Event::ContentFocus
+                | Event::OpenTimerFired
+                | Event::Open,
+            ) if props.disabled => None,
 
             (State::Closed, Event::TriggerPointerEnter) => Some(
                 TransitionPlan::to(State::OpenPending)
@@ -791,12 +809,20 @@ impl Api<'_> {
     #[must_use]
     pub fn on_trigger_keydown(&self, data: &KeyboardEventData) -> bool {
         match data.key {
-            KeyboardKey::Enter | KeyboardKey::Space => {
+            KeyboardKey::Enter | KeyboardKey::Space
+                if !self.ctx.disabled
+                    && matches!(self.state, State::Closed | State::OpenPending) =>
+            {
                 (self.send)(Event::TriggerKeyDown(data.key));
                 true
             }
 
-            KeyboardKey::Escape => {
+            KeyboardKey::Escape
+                if matches!(
+                    self.state,
+                    State::OpenPending | State::Open | State::ClosePending
+                ) =>
+            {
                 (self.send)(Event::CloseOnEscape);
                 true
             }
@@ -910,6 +936,11 @@ impl Api<'_> {
     /// Dispatches the title-mounted registration event.
     pub fn on_title_mount(&self) {
         (self.send)(Event::TitleMount);
+    }
+
+    /// Dispatches the title-unmounted registration event.
+    pub fn on_title_unmount(&self) {
+        (self.send)(Event::TitleUnmount);
     }
 
     /// Returns attributes for the optional dismiss button.
@@ -1074,11 +1105,45 @@ mod tests {
 
         let api = service.connect(&send);
 
-        assert!(api.on_trigger_keydown(&keyboard_data(KeyboardKey::Space)));
+        assert!(!api.on_trigger_keydown(&keyboard_data(KeyboardKey::Space)));
+        assert!(observed.borrow().is_empty());
+    }
+
+    #[test]
+    fn trigger_keydown_consumes_only_handled_keys() {
+        let closed = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let send = {
+            let observed = Rc::clone(&observed);
+            move |event| observed.borrow_mut().push(event)
+        };
+        let closed_api = closed.connect(&send);
+
+        assert!(closed_api.on_trigger_keydown(&keyboard_data(KeyboardKey::Enter)));
+        assert!(!closed_api.on_trigger_keydown(&keyboard_data(KeyboardKey::Escape)));
         assert_eq!(
             &*observed.borrow(),
-            &[Event::TriggerKeyDown(KeyboardKey::Space)]
+            &[Event::TriggerKeyDown(KeyboardKey::Enter)]
         );
+
+        let open = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let send = {
+            let observed = Rc::clone(&observed);
+            move |event| observed.borrow_mut().push(event)
+        };
+        let open_api = open.connect(&send);
+
+        assert!(!open_api.on_trigger_keydown(&keyboard_data(KeyboardKey::Space)));
+        assert!(open_api.on_trigger_keydown(&keyboard_data(KeyboardKey::Escape)));
+        assert_eq!(&*observed.borrow(), &[Event::CloseOnEscape]);
     }
 
     #[test]
@@ -1192,6 +1257,37 @@ mod tests {
     }
 
     #[test]
+    fn disabled_open_hover_card_still_allows_close_cleanup() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        service.set_props(Props {
+            disabled: true,
+            ..test_props()
+        });
+
+        let leave = service.send(Event::TriggerPointerLeave);
+
+        assert_eq!(service.state(), &State::ClosePending);
+        assert_eq!(effect_names(&leave), vec![Effect::CloseDelay]);
+
+        let close = service.send(Event::CloseTimerFired);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert_eq!(
+            effect_names(&close),
+            vec![Effect::OpenChange, Effect::ReleaseZIndex]
+        );
+    }
+
+    #[test]
     fn positioning_title_and_attrs_reflect_state() {
         let mut service = Service::<Machine>::new(
             Props {
@@ -1254,6 +1350,16 @@ mod tests {
             Some("hover-card-title")
         );
         assert!(!labelled.contains(&HtmlAttr::Aria(AriaAttr::Label)));
+
+        drop(service.send(Event::TitleUnmount));
+
+        let fallback = service.connect(&|_| {}).content_attrs();
+
+        assert_eq!(
+            fallback.get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("Hover card")
+        );
+        assert!(!fallback.contains(&HtmlAttr::Aria(AriaAttr::LabelledBy)));
     }
 
     #[test]

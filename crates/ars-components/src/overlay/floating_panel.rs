@@ -862,7 +862,7 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Idle, Event::KeyboardMove { dx, dy })
-                if ctx.open && props.draggable && !ctx.maximized =>
+                if ctx.open && ctx.focused && props.draggable && !ctx.maximized =>
             {
                 let dx = *dx;
                 let dy = *dy;
@@ -1390,7 +1390,14 @@ impl Api<'_> {
     #[must_use]
     pub fn on_keydown(&self, data: &KeyboardEventData) -> bool {
         match data.key {
-            KeyboardKey::Escape => {
+            KeyboardKey::Escape
+                if self.ctx.open
+                    && self.props.close_on_escape
+                    && matches!(
+                        self.state,
+                        State::Idle | State::Minimized | State::Maximized
+                    ) =>
+            {
                 (self.send)(Event::CloseOnEscape);
 
                 true
@@ -1399,7 +1406,13 @@ impl Api<'_> {
             KeyboardKey::ArrowRight
             | KeyboardKey::ArrowLeft
             | KeyboardKey::ArrowDown
-            | KeyboardKey::ArrowUp => {
+            | KeyboardKey::ArrowUp
+                if self.ctx.open
+                    && self.ctx.focused
+                    && self.props.draggable
+                    && !self.ctx.maximized
+                    && matches!(self.state, State::Idle) =>
+            {
                 let step = if data.shift_key { 10.0 } else { 1.0 };
                 let (dx, dy) = match data.key {
                     KeyboardKey::ArrowRight => (step, 0.0),
@@ -1806,6 +1819,15 @@ mod tests {
         let mut service =
             Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
 
+        let unfocused_sent = RefCell::new(Vec::new());
+        let send = |event| unfocused_sent.borrow_mut().push(event);
+        let unfocused = service.connect(&send);
+
+        assert!(!unfocused.on_keydown(&keyboard_data(KeyboardKey::ArrowRight)));
+        assert!(unfocused_sent.into_inner().is_empty());
+
+        drop(service.send(Event::Focus { is_keyboard: true }));
+
         let sent = RefCell::new(Vec::new());
         let send = |event| sent.borrow_mut().push(event);
         let api = service.connect(&send);
@@ -1829,6 +1851,71 @@ mod tests {
             effect_names(&move_result),
             vec![Effect::PositionChange, Effect::PositionChangeEnd]
         );
+
+        drop(service.send(Event::Blur));
+
+        let ignored = service.send(Event::KeyboardMove { dx: 5.0, dy: 0.0 });
+
+        assert!(!ignored.state_changed);
+        assert!(!ignored.context_changed);
+        assert_eq!(service.context().position, (110.0, 99.0));
+    }
+
+    #[test]
+    fn keydown_reports_handled_only_when_transition_can_apply() {
+        let closed = Service::<Machine>::new(
+            Props {
+                open: Some(false),
+                close_on_escape: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+        let closed_events = RefCell::new(Vec::new());
+        let send = |event| closed_events.borrow_mut().push(event);
+        let closed_api = closed.connect(&send);
+
+        assert!(!closed_api.on_keydown(&keyboard_data(KeyboardKey::Escape)));
+        assert!(closed_events.into_inner().is_empty());
+
+        let mut open = Service::<Machine>::new(
+            Props {
+                close_on_escape: false,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(open.send(Event::Focus { is_keyboard: true }));
+
+        let events = RefCell::new(Vec::new());
+        let send = |event| events.borrow_mut().push(event);
+        let api = open.connect(&send);
+
+        assert!(!api.on_keydown(&keyboard_data(KeyboardKey::Escape)));
+        assert!(api.on_keydown(&keyboard_data(KeyboardKey::ArrowDown)));
+        assert_eq!(
+            events.into_inner(),
+            vec![Event::KeyboardMove { dx: 0.0, dy: 1.0 }]
+        );
+
+        drop(open.send(Event::Maximize(MaximizeMetrics {
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: 800.0,
+                height: 600.0,
+            },
+        })));
+
+        let maximized_events = RefCell::new(Vec::new());
+        let send = |event| maximized_events.borrow_mut().push(event);
+        let maximized_api = open.connect(&send);
+
+        assert!(!maximized_api.on_keydown(&keyboard_data(KeyboardKey::ArrowRight)));
+        assert!(maximized_events.into_inner().is_empty());
     }
 
     #[test]
