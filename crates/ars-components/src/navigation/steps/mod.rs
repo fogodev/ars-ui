@@ -415,7 +415,13 @@ impl ars_core::Machine for Machine {
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
-            Event::GoToStep(target) => step_change_plan(ctx, props, clamp_step(*target, ctx.count)),
+            Event::GoToStep(target) => {
+                if *target >= ctx.count.get() {
+                    return None;
+                }
+
+                step_change_plan(ctx, props, *target)
+            }
 
             Event::NextStep => {
                 let current = *ctx.step.get();
@@ -475,7 +481,6 @@ impl ars_core::Machine for Machine {
 
                 if step >= ctx.count.get()
                     || (status == Status::Current && ctx.step.is_controlled())
-                    || (status != Status::Current && step == *ctx.step.get())
                 {
                     return None;
                 }
@@ -1099,6 +1104,11 @@ mod tests {
 
         assert!(step_change_plan(service.context(), service.props(), 4).is_none());
         assert_eq!(service.context(), &context_before);
+
+        let result = service.send(Event::GoToStep(99));
+
+        assert!(!result.context_changed);
+        assert_eq!(service.context(), &context_before);
     }
 
     #[test]
@@ -1148,6 +1158,35 @@ mod tests {
         assert_eq!(*service.context().step.get(), 1);
         assert_eq!(service.context().statuses[1], Status::Current);
         assert_eq!(service.context().statuses[3], Status::Incomplete);
+    }
+
+    #[test]
+    fn set_status_can_mark_active_step_error() {
+        let mut service = service(props().default_step(1));
+
+        drop(service.send(Event::SetStatus {
+            step: 1,
+            status: Status::Error,
+        }));
+
+        assert_eq!(*service.context().step.get(), 1);
+        assert_eq!(service.context().statuses[1], Status::Error);
+        assert_eq!(
+            service
+                .context()
+                .statuses
+                .iter()
+                .filter(|status| **status == Status::Current)
+                .count(),
+            0
+        );
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .item_attrs(1)
+                .get(&HtmlAttr::Aria(AriaAttr::Current)),
+            Some("step")
+        );
     }
 
     #[test]

@@ -598,15 +598,21 @@ fn assert_steps_invariants(service: &Service<steps::Machine>) -> TestCaseResult 
 
     prop_assert!(step < ctx.count.get());
     prop_assert_eq!(ctx.statuses.len(), ctx.count.get() as usize);
-    prop_assert_eq!(
-        ctx.statuses
-            .iter()
-            .filter(|status| **status == steps::Status::Current)
-            .count(),
-        1,
-        "steps must keep exactly one current status"
+    let current_positions = ctx
+        .statuses
+        .iter()
+        .enumerate()
+        .filter_map(|(index, status)| (*status == steps::Status::Current).then_some(index as u32))
+        .collect::<Vec<_>>();
+
+    prop_assert!(
+        current_positions.len() <= 1,
+        "steps must not keep multiple current statuses"
     );
-    prop_assert_eq!(ctx.statuses[step as usize], steps::Status::Current);
+
+    if let Some(current_position) = current_positions.first() {
+        prop_assert_eq!(*current_position, step);
+    }
 
     Ok(())
 }
