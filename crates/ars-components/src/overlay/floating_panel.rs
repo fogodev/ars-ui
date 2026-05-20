@@ -277,6 +277,9 @@ pub enum Effect {
 
     /// Adapter allocates a z-index and dispatches [`Event::SetZIndex`].
     AllocateZIndex,
+
+    /// Adapter releases the currently allocated z-index, if any.
+    ReleaseZIndex,
 }
 
 /// Localizable strings for `FloatingPanel`.
@@ -355,8 +358,8 @@ pub struct Context {
     /// Maximum allowed size.
     pub max_size: (f64, f64),
 
-    /// Adapter-allocated z-index.
-    pub z_index: u32,
+    /// Adapter-allocated z-index, if assigned.
+    pub z_index: Option<u32>,
 
     /// Whether the panel currently contains focus.
     pub focused: bool,
@@ -703,8 +706,10 @@ fn close_plan(stage_changed: bool) -> TransitionPlan<Machine> {
             ctx.active_resize_handle = None;
             ctx.pre_maximize_position = None;
             ctx.pre_maximize_size = None;
+            ctx.z_index = None;
         })
-        .with_effect(PendingEffect::named(Effect::OpenChange));
+        .with_effect(PendingEffect::named(Effect::OpenChange))
+        .with_effect(PendingEffect::named(Effect::ReleaseZIndex));
 
     if stage_changed {
         plan = plan.with_effect(PendingEffect::named(Effect::StageChange));
@@ -786,7 +791,7 @@ impl ars_core::Machine for Machine {
                 size: props.initial_size,
                 min_size: props.min_size,
                 max_size: props.max_size,
-                z_index: 1,
+                z_index: None,
                 focused: false,
                 focus_visible: false,
                 minimized: false,
@@ -829,7 +834,7 @@ impl ars_core::Machine for Machine {
             (_, Event::SetZIndex(z_index)) => {
                 let z_index = *z_index;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.z_index = z_index;
+                    ctx.z_index = Some(z_index);
                 }))
             }
 
@@ -996,7 +1001,9 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::Close) if props.closable => {
-                if props.open == Some(true) {
+                if !ctx.open {
+                    None
+                } else if props.open == Some(true) {
                     Some(controlled_close_request_plan())
                 } else {
                     Some(close_plan(ctx.stage() != Stage::Default))
@@ -1006,7 +1013,9 @@ impl ars_core::Machine for Machine {
             (State::Idle | State::Minimized | State::Maximized, Event::CloseOnEscape)
                 if props.close_on_escape =>
             {
-                if props.open == Some(true) {
+                if !ctx.open {
+                    None
+                } else if props.open == Some(true) {
                     Some(controlled_close_request_plan())
                 } else {
                     Some(close_plan(ctx.stage() != Stage::Default))
@@ -1165,8 +1174,11 @@ impl Api<'_> {
             .set_style(CssProperty::Left, format!("{}px", self.ctx.position.0))
             .set_style(CssProperty::Top, format!("{}px", self.ctx.position.1))
             .set_style(CssProperty::Width, format!("{}px", self.ctx.size.0))
-            .set_style(CssProperty::Height, format!("{}px", self.ctx.size.1))
-            .set_style(CssProperty::ZIndex, self.ctx.z_index.to_string());
+            .set_style(CssProperty::Height, format!("{}px", self.ctx.size.1));
+
+        if let Some(z_index) = self.ctx.z_index {
+            attrs.set_style(CssProperty::ZIndex, z_index.to_string());
+        }
 
         if self.props.modal {
             attrs.set(HtmlAttr::Aria(AriaAttr::Modal), "true");
@@ -1571,6 +1583,15 @@ mod tests {
         assert_eq!(service.context().position, (100.0, 100.0));
         assert_eq!(service.context().size, (400.0, 300.0));
         assert_eq!(service.context().min_size, (200.0, 150.0));
+        assert_eq!(service.context().z_index, None);
+        assert!(
+            !service
+                .connect(&|_| {})
+                .root_attrs()
+                .styles()
+                .iter()
+                .any(|(property, _)| *property == CssProperty::ZIndex)
+        );
     }
 
     #[test]
@@ -1753,7 +1774,10 @@ mod tests {
         assert!(close.state_changed);
         assert!(!service.context().open);
         assert_eq!(service.state(), &State::Idle);
-        assert_eq!(effect_names(&close), vec![Effect::OpenChange]);
+        assert_eq!(
+            effect_names(&close),
+            vec![Effect::OpenChange, Effect::ReleaseZIndex]
+        );
     }
 
     #[test]
@@ -1768,7 +1792,11 @@ mod tests {
         assert_eq!(minimized.context().stage(), Stage::Default);
         assert_eq!(
             effect_names(&close_minimized),
-            vec![Effect::OpenChange, Effect::StageChange]
+            vec![
+                Effect::OpenChange,
+                Effect::ReleaseZIndex,
+                Effect::StageChange
+            ]
         );
 
         let mut maximized =
@@ -1788,8 +1816,78 @@ mod tests {
         assert_eq!(maximized.context().stage(), Stage::Default);
         assert_eq!(
             effect_names(&close_maximized),
-            vec![Effect::OpenChange, Effect::StageChange]
+            vec![
+                Effect::OpenChange,
+                Effect::ReleaseZIndex,
+                Effect::StageChange
+            ]
         );
+    }
+
+    #[test]
+    fn close_releases_allocated_z_index_and_clears_context() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(service.send(Event::SetZIndex(42)));
+
+        assert_eq!(service.context().z_index, Some(42));
+
+        let close = service.send(Event::Close);
+
+        assert!(!service.context().open);
+        assert_eq!(service.context().z_index, None);
+        assert_eq!(
+            effect_names(&close),
+            vec![Effect::OpenChange, Effect::ReleaseZIndex]
+        );
+    }
+
+    #[test]
+    fn close_when_already_closed_is_noop() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_open: false,
+                close_on_escape: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+        let before = service.context().clone();
+
+        let close = service.send(Event::Close);
+
+        assert_eq!(service.state(), &State::Idle);
+        assert_eq!(service.context(), &before);
+        assert!(!close.state_changed);
+        assert!(effect_names(&close).is_empty());
+
+        let escape = service.send(Event::CloseOnEscape);
+
+        assert_eq!(service.context(), &before);
+        assert!(!escape.state_changed);
+        assert!(effect_names(&escape).is_empty());
+    }
+
+    #[test]
+    fn close_ignored_when_panel_is_not_closable() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                closable: false,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+        let before = service.context().clone();
+
+        let close = service.send(Event::Close);
+
+        assert!(service.context().open);
+        assert_eq!(service.context(), &before);
+        assert!(!close.state_changed);
+        assert!(effect_names(&close).is_empty());
     }
 
     #[test]
@@ -1863,14 +1961,17 @@ mod tests {
 
         drop(service.send(Event::SetZIndex(88)));
 
-        assert_eq!(service.context().z_index, 88);
+        assert_eq!(service.context().z_index, Some(88));
 
         let close = service.send(Event::CloseOnEscape);
 
         assert!(!service.context().open);
         assert_eq!(service.state(), &State::Idle);
         assert!(!service.context().focused);
-        assert_eq!(effect_names(&close), vec![Effect::OpenChange]);
+        assert_eq!(
+            effect_names(&close),
+            vec![Effect::OpenChange, Effect::ReleaseZIndex]
+        );
 
         service.set_props(Props {
             open: Some(true),
@@ -1896,7 +1997,10 @@ mod tests {
 
         let close = service.send(Event::SetControlledOpen(false));
 
-        assert_eq!(effect_names(&close), vec![Effect::OpenChange]);
+        assert_eq!(
+            effect_names(&close),
+            vec![Effect::OpenChange, Effect::ReleaseZIndex]
+        );
         assert!(!service.context().open);
 
         let reopen = service.send(Event::SetControlledOpen(true));

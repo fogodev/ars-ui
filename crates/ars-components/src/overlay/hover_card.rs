@@ -527,6 +527,12 @@ impl ars_core::Machine for Machine {
 
             (State::OpenPending, Event::OpenTimerFired) => Some(open_plan(Some(Effect::OpenDelay))),
 
+            (State::OpenPending, Event::TriggerFocus) => {
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.focus_active = true;
+                }))
+            }
+
             (State::OpenPending, Event::TriggerPointerLeave) => {
                 if ctx.focus_active {
                     Some(TransitionPlan::context_only(|ctx: &mut Context| {
@@ -1212,6 +1218,32 @@ mod tests {
         assert_eq!(service.state(), &State::Open);
         assert!(service.context().hover_active);
         assert_eq!(enter.cancel_effects, vec![Effect::CloseDelay]);
+    }
+
+    #[test]
+    fn focus_during_pending_hover_open_survives_pointer_leave() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(service.send(Event::TriggerPointerEnter));
+
+        let focus = service.send(Event::TriggerFocus);
+
+        assert_eq!(service.state(), &State::OpenPending);
+        assert!(service.context().focus_active);
+        assert!(effect_names(&focus).is_empty());
+
+        let leave = service.send(Event::TriggerPointerLeave);
+
+        assert_eq!(service.state(), &State::OpenPending);
+        assert!(!service.context().hover_active);
+        assert!(service.context().focus_active);
+        assert!(effect_names(&leave).is_empty());
+
+        drop(service.send(Event::OpenTimerFired));
+
+        assert_eq!(service.state(), &State::Open);
+        assert!(service.context().open);
     }
 
     #[test]
