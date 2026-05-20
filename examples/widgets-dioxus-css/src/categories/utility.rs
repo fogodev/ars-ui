@@ -1,11 +1,13 @@
 use ars_dioxus::{
-    prelude::{Orientation, t, Translate},
+    prelude::{Orientation, Translate, t},
     utility::{
         button::{self, Button, ButtonAsChild},
+        client_only::ClientOnly,
         dismissable,
         error_boundary::{Boundary, CapturedError},
         separator::{Separator, SeparatorAsChild},
         visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
+        z_index_allocator::{Context as ZIndexContext, ZIndexAllocatorProvider},
     },
 };
 use dioxus::prelude::*;
@@ -100,7 +102,10 @@ pub(crate) enum UtilityText {
     )]
     VisuallyHiddenLabel,
 
-    #[translate(en_US = "Skip to button variants", pt_BR = "Pular para variantes de botão")]
+    #[translate(
+        en_US = "Skip to button variants",
+        pt_BR = "Pular para variantes de botão"
+    )]
     FocusableSkipLink,
 
     #[translate(
@@ -118,7 +123,10 @@ pub(crate) enum UtilityText {
     )]
     SeparatorDescription,
 
-    #[translate(en_US = "Horizontal section break", pt_BR = "Quebra horizontal de seção")]
+    #[translate(
+        en_US = "Horizontal section break",
+        pt_BR = "Quebra horizontal de seção"
+    )]
     HorizontalSeparator,
 
     #[translate(en_US = "Vertical divider", pt_BR = "Divisor vertical")]
@@ -132,6 +140,36 @@ pub(crate) enum UtilityText {
         pt_BR = "O divisor da raiz do consumidor preserva a semântica de separador"
     )]
     AsChildSeparator,
+
+    #[translate(en_US = "Client-only content", pt_BR = "Conteúdo somente no cliente")]
+    ClientOnly,
+
+    #[translate(
+        en_US = "Fallback content is replaced after client mount.",
+        pt_BR = "O conteúdo fallback é substituído após a montagem no cliente."
+    )]
+    ClientOnlyDescription,
+
+    #[translate(
+        en_US = "Client content mounted",
+        pt_BR = "Conteúdo do cliente montado"
+    )]
+    ClientOnlyMounted,
+
+    #[translate(
+        en_US = "Loading client content",
+        pt_BR = "Carregando conteúdo do cliente"
+    )]
+    ClientOnlyFallback,
+
+    #[translate(en_US = "Z-index allocator", pt_BR = "Alocador de z-index")]
+    ZIndexAllocator,
+
+    #[translate(
+        en_US = "Provider-scoped claims allocate deterministic stacking layers.",
+        pt_BR = "Claims no escopo do provider alocam camadas determinísticas."
+    )]
+    ZIndexAllocatorDescription,
 
     #[translate(en_US = "Dismissable primitive", pt_BR = "Primitivo dismissable")]
     DismissablePrimitive,
@@ -212,12 +250,22 @@ fn ExampleErrorChild() -> Element {
 }
 
 #[component]
+fn ZIndexProbe(id: &'static str) -> Element {
+    let context = try_use_context::<ZIndexContext>().expect("z-index context should be provided");
+
+    let claim = context.allocate_claim();
+
+    rsx! {
+        span { id, class: "z-index-chip", "data-z": "{claim.value()}", "{claim.value()}" }
+    }
+}
+
+#[component]
 pub(crate) fn UtilityPanel() -> Element {
     let dismiss_status = use_signal_sync(|| UtilityText::DismissInitial);
-    let dismiss_status_for_dismiss = dismiss_status;
-    let dismiss_props = dismissable::Props::new().on_dismiss(move |reason| {
-        let mut dismiss_status = dismiss_status_for_dismiss;
 
+    let dismiss_props = dismissable::Props::new().on_dismiss(move |reason| {
+        let mut dismiss_status = dismiss_status;
         dismiss_status.set(UtilityText::DismissReason {
             reason: format!("{reason:?}"),
         });
@@ -391,6 +439,28 @@ pub(crate) fn UtilityPanel() -> Element {
                     },
                 }
                 p { class: "panel-note", {t(UtilityText::AsChildSeparator)} }
+            }
+            section {
+                class: "showcase-panel",
+                "aria-labelledby": "client-only-z-index",
+                div { class: "panel-heading",
+                    h2 { id: "client-only-z-index", {t(UtilityText::ClientOnly)} }
+                    p { class: "panel-note", {t(UtilityText::ClientOnlyDescription)} }
+                }
+                ClientOnly {
+                    fallback: rsx! {
+                        span { {t(UtilityText::ClientOnlyFallback)} }
+                    },
+                    span { {t(UtilityText::ClientOnlyMounted)} }
+                }
+                div { class: "panel-heading",
+                    h3 { {t(UtilityText::ZIndexAllocator)} }
+                    p { class: "panel-note", {t(UtilityText::ZIndexAllocatorDescription)} }
+                }
+                ZIndexAllocatorProvider {
+                    ZIndexProbe { id: "dioxus-css-z-index-first" }
+                    ZIndexProbe { id: "dioxus-css-z-index-second" }
+                }
             }
             section {
                 class: "showcase-panel wide",

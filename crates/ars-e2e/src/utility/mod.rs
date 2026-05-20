@@ -15,6 +15,9 @@ use crate::{
 /// Browser E2E harness for Button.
 pub mod button;
 
+/// Browser E2E harness for ClientOnly.
+pub mod client_only;
+
 /// Browser E2E harness for Dismissable.
 pub mod dismissable;
 
@@ -26,6 +29,9 @@ pub mod separator;
 
 /// Browser E2E harness for VisuallyHidden.
 pub mod visually_hidden;
+
+/// Browser E2E harness for ZIndexAllocator.
+pub mod z_index_allocator;
 
 /// Runtime options for utility E2E harnesses.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,6 +75,9 @@ pub async fn run(options: Options) -> Result<(), Error> {
         button::run_button_flow(&session.driver, &session.url, adapter).await?;
         visually_hidden::run_visually_hidden_flow(&session.driver, &session.url, adapter).await?;
         separator::run_separator_flow(&session.driver, &session.url, adapter).await?;
+        client_only::run_client_only_flow(&session.driver, &session.url, adapter).await?;
+        z_index_allocator::run_z_index_allocator_flow(&session.driver, &session.url, adapter)
+            .await?;
         dismissable::run_dismissable_flow(&session.driver, &session.url).await?;
         error_boundary::run_error_boundary_flow(&session.driver, &session.url).await
     }

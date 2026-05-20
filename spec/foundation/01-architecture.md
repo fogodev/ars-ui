@@ -271,7 +271,7 @@ This pattern surfaces platform incompatibilities at compile time on any target, 
 
 **`SharedState<T>` — interior-mutable shared state:**
 
-`SharedState<T>` extends the same `cfg`-gated pattern to interior-mutable state containers (interaction result state, live reactive values). On WASM it wraps `Rc<RefCell<T>>`, on native it wraps `Arc<Mutex<T>>`. Key API:
+`SharedState<T>` extends the same shared-ownership pattern to interior-mutable state containers (interaction result state, live reactive values). With `std` it wraps `Arc<Mutex<T>>` on every target, including WASM, so framework context APIs that require `Send + Sync` can publish shared core state. In `no_std` it wraps `Rc<RefCell<T>>`. Key API:
 
 ```rust,no_check
 use ars_core::SharedState;

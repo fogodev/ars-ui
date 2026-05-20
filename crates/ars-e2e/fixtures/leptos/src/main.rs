@@ -9,10 +9,12 @@ use ars_leptos::{
     prelude::{Locale, Orientation, TabKey, Translate, t},
     utility::{
         button::{self, Button, ButtonAsChild},
+        client_only::ClientOnly,
         dismissable,
         error_boundary::Boundary,
         separator::{Separator, SeparatorAsChild},
         visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
+        z_index_allocator::{Context as ZIndexContext, ZIndexAllocatorProvider},
     },
 };
 use leptos::{mount::mount_to_body, prelude::*};
@@ -136,10 +138,16 @@ enum FixtureText {
     #[translate(en_US = "Reset", pt_BR = "Redefinir")]
     Reset,
 
-    #[translate(en_US = "Screen reader only label", pt_BR = "Rótulo apenas para leitor de tela")]
+    #[translate(
+        en_US = "Screen reader only label",
+        pt_BR = "Rótulo apenas para leitor de tela"
+    )]
     VisuallyHiddenLabel,
 
-    #[translate(en_US = "Skip to button variants", pt_BR = "Pular para variantes de botão")]
+    #[translate(
+        en_US = "Skip to button variants",
+        pt_BR = "Pular para variantes de botão"
+    )]
     FocusableSkipLink,
 
     #[translate(
@@ -209,6 +217,19 @@ impl std::error::Error for FixtureError {}
 
 fn fixture_error() -> Result<&'static str, FixtureError> {
     Err(FixtureError)
+}
+
+#[component]
+fn ZIndexProbe(id: &'static str) -> impl IntoView {
+    let context = use_context::<ZIndexContext>().expect("z-index context should be provided");
+
+    let claim = context.allocate_claim();
+
+    view! {
+        <span id=id data-z=claim.value().to_string()>
+            "Allocated"
+        </span>
+    }
 }
 
 #[component]
@@ -376,10 +397,30 @@ fn UtilityPanel() -> impl IntoView {
                     />
                     <span>"After"</span>
                 </div>
-                <SeparatorAsChild id="leptos-fixture-separator-as-child" orientation=Orientation::Vertical>
+                <SeparatorAsChild
+                    id="leptos-fixture-separator-as-child"
+                    orientation=Orientation::Vertical
+                >
                     <div class="separator-as-child"></div>
                 </SeparatorAsChild>
                 <Separator id="leptos-fixture-separator-decorative" decorative=true />
+                <div id="leptos-fixture-client-only-host">
+                    <ClientOnly fallback=|| {
+                        view! {
+                            <span id="leptos-fixture-client-only-fallback">
+                                "Loading client content"
+                            </span>
+                        }
+                    }>
+                        <span id="leptos-fixture-client-only-child">"Client content"</span>
+                    </ClientOnly>
+                </div>
+                <section id="leptos-fixture-z-index-host">
+                    <ZIndexAllocatorProvider>
+                        <ZIndexProbe id="leptos-fixture-z-index-first" />
+                        <ZIndexProbe id="leptos-fixture-z-index-second" />
+                    </ZIndexAllocatorProvider>
+                </section>
             </section>
             <section class="showcase-panel wide" aria-labelledby="dismissable">
                 <h2 id="dismissable">"Dismissable primitive"</h2>
