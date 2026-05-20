@@ -510,8 +510,13 @@ impl ars_core::Machine for Machine {
                 | Event::SetValue(_)
                 | Event::StartScrub
                 | Event::Scrub(_)
-                | Event::EndScrub
                 | Event::Wheel { .. } => return None,
+                // `EndScrub` is intentionally exempt: if the parent
+                // flips disabled/readonly during an active drag, the
+                // adapter still fires `EndScrub` on pointer-up and the
+                // machine must process it, otherwise state stays stuck
+                // at `Scrubbing` with `ctx.scrubbing = true` until some
+                // unrelated event clears it.
                 _ => {}
             }
         }
@@ -692,18 +697,23 @@ impl ars_core::Machine for Machine {
                     ctx.name = props.name.clone();
                     ctx.spin_on_press = props.spin_on_press;
 
-                    // Reclamp + reround the current value when the bounds
-                    // or precision change. Without this, `aria-valuenow`
-                    // can fall outside `[aria-valuemin, aria-valuemax]`
-                    // and boundary checks for Increment/Decrement keep
-                    // computing from a stale value until a user event.
-                    if bounds_or_precision_changed && let Some(value) = *ctx.value.get() {
-                        let was_controlled = ctx.value.is_controlled();
+                    // Reclamp + reround the internal value when the
+                    // bounds or precision change — UNCONTROLLED mode
+                    // only. In controlled mode the parent owns the
+                    // value; self-authoring a clamped controlled value
+                    // here would silently override the parent's intent
+                    // (next render with the same prop wouldn't emit
+                    // `SyncValue` so the desync would persist). Adapters
+                    // that want clamped controlled values must pass a
+                    // pre-clamped `props.value`. The display-time
+                    // `aria-valuenow` clamp in `input_attrs` still
+                    // keeps the spinbutton contract intact for AT.
+                    if bounds_or_precision_changed
+                        && !ctx.value.is_controlled()
+                        && let Some(value) = *ctx.value.get()
+                    {
                         let bounded = round_and_clamp(value, ctx.min, ctx.max, ctx.precision);
                         ctx.value.set(Some(bounded));
-                        if was_controlled {
-                            ctx.value.sync_controlled(Some(Some(bounded)));
-                        }
                     }
                 }))
             }
@@ -1597,6 +1607,64 @@ mod tests {
         assert!((svc.context().step - 5.0).abs() < f64::EPSILON);
         assert_eq!(svc.context().precision, Some(2));
         assert!(svc.context().disabled);
+    }
+
+    #[test]
+    fn number_input_set_props_preserves_controlled_value_when_bounds_shrink() {
+        // In controlled mode the parent owns the value. SetProps must
+        // NOT mutate the controlled slot even when bounds change such
+        // that the current value falls outside the new range —
+        // otherwise the agnostic core silently diverges from
+        // `props.value` and subsequent identical-value renders won't
+        // re-sync via `SyncValue` (`old.value == new.value`).
+        let mut svc = service(bounded_props().value(75.0));
+
+        assert!(svc.context().value.is_controlled());
+
+        drop(svc.set_props(bounded_props().min(0.0).max(50.0).value(75.0)));
+
+        // The controlled slot must still report 75.0 — the parent is
+        // the source of truth. `aria-valuenow` is clamped at
+        // display-time via `input_attrs`, so AT still sees a bounded
+        // value (covered by the round-7
+        // `*_aria_valuenow_is_clamped_*` test).
+        assert!(svc.context().value.is_controlled());
+        assert_eq!(svc.context().value.get(), &Some(75.0));
+    }
+
+    #[test]
+    fn number_input_end_scrub_processable_even_when_disabled_or_readonly() {
+        // If the parent disables the input during an active scrub
+        // gesture, the adapter still fires EndScrub on pointer-up.
+        // The machine must process it so state can leave Scrubbing
+        // and `ctx.scrubbing` clears.
+        let mut svc = service(bounded_props().default_value(10.0));
+
+        drop(svc.send(Event::StartScrub));
+        assert_eq!(svc.state(), &State::Scrubbing);
+
+        // Parent disables mid-drag.
+        drop(svc.set_props(bounded_props().default_value(10.0).disabled(true)));
+        assert!(svc.context().disabled);
+
+        // Pointer-up: adapter fires EndScrub. Must transition out of
+        // Scrubbing despite the disabled guard.
+        let result = svc.send(Event::EndScrub);
+        assert!(result.state_changed);
+        assert!(!svc.context().scrubbing);
+        assert_ne!(svc.state(), &State::Scrubbing);
+    }
+
+    #[test]
+    fn number_input_end_scrub_processable_when_readonly() {
+        let mut svc = service(bounded_props().default_value(10.0));
+        drop(svc.send(Event::StartScrub));
+
+        drop(svc.set_props(bounded_props().default_value(10.0).readonly(true)));
+
+        let result = svc.send(Event::EndScrub);
+        assert!(result.state_changed);
+        assert!(!svc.context().scrubbing);
     }
 
     #[test]
