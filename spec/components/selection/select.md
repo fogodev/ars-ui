@@ -767,6 +767,7 @@ pub enum Part {
     HiddenInput,
     Description,
     ErrorMessage,
+    EmptyState,
 }
 
 impl<'a> Api<'a> {
@@ -944,6 +945,18 @@ impl<'a> Api<'a> {
         (self.ctx.messages.empty)(&self.ctx.locale)
     }
 
+    /// Attributes for the empty-state status element.
+    pub fn empty_state_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::EmptyState.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Role, "status");
+        attrs.set(HtmlAttr::Aria(AriaAttr::Live), "polite");
+        attrs.set(HtmlAttr::Aria(AriaAttr::Atomic), "true");
+        attrs
+    }
+
     /// The handler for the content keydown event.
     pub fn on_content_keydown(&self, data: &KeyboardEventData, ctrl: bool, meta: bool) {
         match data.key {
@@ -1118,26 +1131,26 @@ impl ConnectApi for Api<'_> {
 
 ## 2. Anatomy
 
-| Part             | Selector                                                      | Element                                                   | Notes                 |
-| ---------------- | ------------------------------------------------------------- | --------------------------------------------------------- | --------------------- |
-| `Root`           | `[data-ars-scope="select"][data-ars-part="root"]`             | `<div>`                                                   | Container             |
-| `Label`          | `[data-ars-scope="select"][data-ars-part="label"]`            | `<label>`                                                 | Text label            |
-| `Control`        | `[data-ars-scope="select"][data-ars-part="control"]`          | `<div>`                                                   | Wraps trigger + clear |
-| `Trigger`        | `[data-ars-scope="select"][data-ars-part="trigger"]`          | `<button>`                                                | Opens dropdown        |
-| `ValueText`      | `[data-ars-scope="select"][data-ars-part="value-text"]`       | `<span>`                                                  | Displays selection    |
-| `Indicator`      | `[data-ars-scope="select"][data-ars-part="indicator"]`        | `<div>`                                                   | Arrow icon            |
-| `ClearTrigger`   | `[data-ars-scope="select"][data-ars-part="clear-trigger"]`    | `<button>`                                                | Clears selection      |
-| `Positioner`     | `[data-ars-scope="select"][data-ars-part="positioner"]`       | `<div>`                                                   | Positions content     |
-| `Content`        | `[data-ars-scope="select"][data-ars-part="content"]`          | `<div>`                                                   | Dropdown listbox      |
-| `ItemGroup`      | `[data-ars-scope="select"][data-ars-part="item-group"]`       | `<div>`                                                   | Group container       |
-| `ItemGroupLabel` | `[data-ars-scope="select"][data-ars-part="item-group-label"]` | `<div>`                                                   | Group heading         |
-| `Item`           | `[data-ars-scope="select"][data-ars-part="item"]`             | `<div>`                                                   | Option item           |
-| `ItemText`       | `[data-ars-scope="select"][data-ars-part="item-text"]`        | `<span>`                                                  | Item label            |
-| `ItemIndicator`  | `[data-ars-scope="select"][data-ars-part="item-indicator"]`   | `<div>`                                                   | Check mark            |
-| `HiddenInput`    | `[data-ars-scope="select"][data-ars-part="hidden-input"]`     | `<input>`                                                 | Form value            |
-| `Description`    | `[data-ars-scope="select"][data-ars-part="description"]`      | `<div>`                                                   | Help text             |
-| `ErrorMessage`   | `[data-ars-scope="select"][data-ars-part="error-message"]`    | `<div>`                                                   | Error text            |
-| **EmptyState**   | `<div>`                                                       | Message displayed when the listbox has no matching items. |                       |
+| Part             | Selector                                                      | Element    | Notes                                                     |
+| ---------------- | ------------------------------------------------------------- | ---------- | --------------------------------------------------------- |
+| `Root`           | `[data-ars-scope="select"][data-ars-part="root"]`             | `<div>`    | Container                                                 |
+| `Label`          | `[data-ars-scope="select"][data-ars-part="label"]`            | `<label>`  | Text label                                                |
+| `Control`        | `[data-ars-scope="select"][data-ars-part="control"]`          | `<div>`    | Wraps trigger + clear                                     |
+| `Trigger`        | `[data-ars-scope="select"][data-ars-part="trigger"]`          | `<button>` | Opens dropdown                                            |
+| `ValueText`      | `[data-ars-scope="select"][data-ars-part="value-text"]`       | `<span>`   | Displays selection                                        |
+| `Indicator`      | `[data-ars-scope="select"][data-ars-part="indicator"]`        | `<div>`    | Arrow icon                                                |
+| `ClearTrigger`   | `[data-ars-scope="select"][data-ars-part="clear-trigger"]`    | `<button>` | Clears selection                                          |
+| `Positioner`     | `[data-ars-scope="select"][data-ars-part="positioner"]`       | `<div>`    | Positions content                                         |
+| `Content`        | `[data-ars-scope="select"][data-ars-part="content"]`          | `<div>`    | Dropdown listbox                                          |
+| `ItemGroup`      | `[data-ars-scope="select"][data-ars-part="item-group"]`       | `<div>`    | Group container                                           |
+| `ItemGroupLabel` | `[data-ars-scope="select"][data-ars-part="item-group-label"]` | `<div>`    | Group heading                                             |
+| `Item`           | `[data-ars-scope="select"][data-ars-part="item"]`             | `<div>`    | Option item                                               |
+| `ItemText`       | `[data-ars-scope="select"][data-ars-part="item-text"]`        | `<span>`   | Item label                                                |
+| `ItemIndicator`  | `[data-ars-scope="select"][data-ars-part="item-indicator"]`   | `<div>`    | Check mark                                                |
+| `HiddenInput`    | `[data-ars-scope="select"][data-ars-part="hidden-input"]`     | `<input>`  | Form value                                                |
+| `Description`    | `[data-ars-scope="select"][data-ars-part="description"]`      | `<div>`    | Help text                                                 |
+| `ErrorMessage`   | `[data-ars-scope="select"][data-ars-part="error-message"]`    | `<div>`    | Error text                                                |
+| `EmptyState`     | `[data-ars-scope="select"][data-ars-part="empty-state"]`      | `<div>`    | Message displayed when the listbox has no matching items. |
 
 ## 3. Accessibility
 

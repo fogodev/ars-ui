@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/selection/select/mod.rs
+expression: "snapshot_attrs(&api.item_indicator_attrs(&key(\"bravo\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item-indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "select",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "selected",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

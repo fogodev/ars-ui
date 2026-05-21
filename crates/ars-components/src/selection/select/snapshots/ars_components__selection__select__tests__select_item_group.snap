@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/selection/select/mod.rs
+expression: "snapshot_attrs(&api.item_group_attrs(&key(\"group\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "select",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "sel-group-group-label",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/selection/listbox/mod.rs
+expression: "snapshot_attrs(&api.item_indicator_attrs(&key(\"bravo\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item-indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "listbox",
+            ),
+        ),
+        (
+            Data(
+                "ars-selected",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+    ],
+    styles: [],
+}

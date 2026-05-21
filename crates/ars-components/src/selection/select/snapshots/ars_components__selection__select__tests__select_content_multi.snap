@@ -1,0 +1,53 @@
+---
+source: crates/ars-components/src/selection/select/mod.rs
+expression: snapshot_attrs(&api.content_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "content",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "select",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "sel-label",
+            ),
+        ),
+        (
+            Aria(
+                MultiSelectable,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "sel-content",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "listbox",
+            ),
+        ),
+    ],
+    styles: [],
+}

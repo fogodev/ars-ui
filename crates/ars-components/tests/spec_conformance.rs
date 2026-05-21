@@ -32,5 +32,8 @@ mod navigation;
 #[path = "spec_conformance/overlay.rs"]
 mod overlay;
 
+#[path = "spec_conformance/selection.rs"]
+mod selection;
+
 #[path = "spec_conformance/utility.rs"]
 mod utility;
