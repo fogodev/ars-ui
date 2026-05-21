@@ -553,10 +553,6 @@ impl Api<'_> {
             )
             .set(HtmlAttr::Dir, self.ctx.dir.as_html_attr());
 
-        if self.ctx.multiple {
-            attrs.set(HtmlAttr::Aria(AriaAttr::MultiSelectable), "true");
-        }
-
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
         }
@@ -632,6 +628,8 @@ impl Api<'_> {
                 .set_bool(HtmlAttr::Disabled, true)
                 .set(HtmlAttr::Aria(AriaAttr::Disabled), "true")
                 .set_bool(HtmlAttr::Data("ars-disabled"), true);
+        } else if is_open && !self.ctx.multiple && !self.ctx.collapsible {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
 
         if is_focused && focus_visible {
@@ -1075,7 +1073,8 @@ mod tests {
 
     use ars_collections::Key;
     use ars_core::{
-        ConnectApi, Direction, Env, KeyboardKey, Machine as MachineTrait, Orientation, Service,
+        AriaAttr, ConnectApi, Direction, Env, HtmlAttr, KeyboardKey, Machine as MachineTrait,
+        Orientation, Service,
     };
     use ars_interactions::KeyboardEventData;
     use insta::assert_snapshot;
@@ -1794,6 +1793,23 @@ mod tests {
         for (part, expected) in parts {
             assert_eq!(api.part_attrs(part), expected);
         }
+    }
+
+    #[test]
+    fn root_attrs_do_not_emit_selection_container_aria() {
+        let service = service(props().multiple(true));
+        let attrs = service.connect(&|_| {}).root_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::MultiSelectable)), None);
+    }
+
+    #[test]
+    fn non_collapsible_open_trigger_is_aria_disabled_but_focusable() {
+        let service = service(props().default_value(keys(&["a"])));
+        let attrs = service.connect(&|_| {}).item_trigger_attrs(&key("a"), false);
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Disabled), None);
     }
 
     #[test]

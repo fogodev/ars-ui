@@ -66,7 +66,6 @@ pub struct Context {
     /// Which item trigger currently holds focus (used for keyboard navigation).
     pub focused_item: Option<Key>,
     /// Allow multiple items to be open simultaneously.
-    /// When `true`, the Accordion root element sets `aria-multiselectable="true"`.
     pub multiple: bool,
     /// In single mode, allow the open item to be closed (value becomes empty).
     pub collapsible: bool,
@@ -491,9 +490,6 @@ impl<'a> Api<'a> {
             Orientation::Vertical   => "vertical",
         });
         attrs.set(HtmlAttr::Dir, self.ctx.dir.as_html_attr());
-        if self.ctx.multiple {
-            attrs.set(HtmlAttr::Aria(AriaAttr::MultiSelectable), "true");
-        }
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
         }
@@ -751,7 +747,7 @@ Accordion
 | Part          | Role              | Properties                                                                                   |
 | ------------- | ----------------- | -------------------------------------------------------------------------------------------- |
 | `Root`        | (none / `<div>`)  | `aria-orientation` when horizontal layout matters                                            |
-| `ItemTrigger` | `button` (native) | `aria-expanded="true\|false"`, `aria-controls="{content-id}"`, `aria-disabled` when disabled |
+| `ItemTrigger` | `button` (native) | `aria-expanded="true\|false"`, `aria-controls="{content-id}"`, `aria-disabled` when disabled or when the open trigger cannot collapse in single non-collapsible mode |
 | `ItemContent` | `region`          | `aria-labelledby="{trigger-id}"`, `hidden` when closed                                       |
 
 ### 3.2 Keyboard Interaction
@@ -818,7 +814,7 @@ let disclosure_props = accordion::Props {
 
 - **Single item only**: The consumer registers exactly one item. The `Accordion` machine handles this naturally — no special casing is needed.
 - **`aria-expanded`**: The single trigger button carries `aria-expanded="true|false"`, which the `Accordion` trigger already emits.
-- **No `aria-multiselectable`**: Since `multiple` is false, the root does not set `aria-multiselectable`.
+- **No `aria-multiselectable`**: Accordion root never sets `aria-multiselectable`; each trigger exposes its own expanded state through `aria-expanded`.
 - **Programmatic control**: Use `Event::ExpandItem(id)` / `Event::CollapseItem(id)` to programmatically open/close.
 
 A **DisclosureGroup** is simply an `Accordion` with `multiple: false` and `collapsible: true` — only one item can be open at a time, and the open item can be closed. This maps directly to React Aria's `useDisclosureGroup`.
