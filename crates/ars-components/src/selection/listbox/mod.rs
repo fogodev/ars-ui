@@ -643,7 +643,7 @@ impl ars_core::Machine for Machine {
             (_, Event::SelectItem(key)) => select_plan(ctx, props, key.clone(), false),
 
             (_, Event::DeselectItem(key)) => {
-                if !ctx.items.contains_key(key) {
+                if !is_selectable_key(ctx, key) {
                     return None;
                 }
 
@@ -659,7 +659,7 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::ToggleItem(key)) => {
-                if !ctx.items.contains_key(key) {
+                if !is_selectable_key(ctx, key) {
                     return None;
                 }
 
@@ -1162,19 +1162,18 @@ impl Api<'_> {
             }
 
             KeyboardKey::Escape => (self.send)(Event::DeselectAll),
-            _ if data.character == Some('a') && (ctrl || meta) => {
+            _ if data
+                .character
+                .is_some_and(|ch| ch.eq_ignore_ascii_case(&'a'))
+                && (ctrl || meta) =>
+            {
                 (self.send)(Event::SelectAll);
             }
 
-            _ if data.character.is_some()
-                && now_ms.is_some()
-                && !ctrl
-                && !meta
-                && !data.is_composing =>
-            {
+            _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
                 (self.send)(Event::TypeaheadSearch(
                     data.character.expect("checked"),
-                    now_ms.expect("checked"),
+                    typeahead_time(now_ms, &self.ctx.typeahead),
                 ));
             }
 
@@ -1329,7 +1328,7 @@ fn select_plan(
     key: Key,
     toggle: bool,
 ) -> Option<TransitionPlan<Machine>> {
-    if !ctx.items.contains_key(&key) || ctx.selection_state.is_disabled(&key) {
+    if !is_selectable_key(ctx, &key) {
         return None;
     }
     if toggle
@@ -1405,8 +1404,9 @@ fn range_selection_state(ctx: &Context, target: Key) -> selection::State {
         return ctx.selection_state.select(target);
     }
 
-    let anchor = match &ctx.selection_state.anchor_key {
-        Some(anchor) if ctx.items.contains_key(anchor) => anchor.clone(),
+    let anchor = match (&ctx.selection_state.anchor_key, &ctx.highlighted_key) {
+        (Some(anchor), _) if is_selectable_key(ctx, anchor) => anchor.clone(),
+        (_, Some(highlighted)) if is_selectable_key(ctx, highlighted) => highlighted.clone(),
         _ => return ctx.selection_state.select(target),
     };
 
@@ -1584,6 +1584,14 @@ fn is_focusable_key(ctx: &Context, key: &Key) -> bool {
             || ctx.selection_state.disabled_behavior == DisabledBehavior::FocusOnly)
 }
 
+fn is_selectable_key(ctx: &Context, key: &Key) -> bool {
+    ctx.items.get(key).is_some_and(Node::is_focusable) && !ctx.selection_state.is_disabled(key)
+}
+
+fn typeahead_time(now_ms: Option<u64>, state: &typeahead::State) -> u64 {
+    now_ms.unwrap_or_else(|| state.last_key_time_ms.saturating_add(1))
+}
+
 const fn resolved_arrow_key(
     key: KeyboardKey,
     orientation: Orientation,
@@ -1662,6 +1670,19 @@ mod tests {
 
     fn single_item_collection() -> ars_collections::StaticCollection<super::Item> {
         CollectionBuilder::new()
+            .item(
+                key("alpha"),
+                "Alpha",
+                super::Item {
+                    label: "Alpha".into(),
+                },
+            )
+            .build()
+    }
+
+    fn grouped_collection() -> ars_collections::StaticCollection<super::Item> {
+        CollectionBuilder::new()
+            .section(key("group"), "Group")
             .item(
                 key("alpha"),
                 "Alpha",
@@ -1934,6 +1955,24 @@ mod tests {
 
         drop(empty.send(Event::SelectItem(key("missing"))));
         assert_eq!(*empty.context().selection.get(), selection::Set::Empty);
+
+        drop(empty.send(Event::UpdateItems(grouped_collection())));
+        drop(empty.send(Event::SelectItem(key("group"))));
+        drop(empty.send(Event::ToggleItem(key("group"))));
+
+        assert_eq!(*empty.context().selection.get(), selection::Set::Empty);
+
+        let mut all = service(
+            Props::new()
+                .id("all")
+                .selection_mode(selection::Mode::Multiple)
+                .default_value(selection::Set::All),
+        );
+
+        drop(all.send(Event::UpdateItems(grouped_collection())));
+        drop(all.send(Event::DeselectItem(key("group"))));
+
+        assert_eq!(*all.context().selection.get(), selection::Set::All);
     }
 
     #[test]
@@ -1959,7 +1998,7 @@ mod tests {
     }
 
     #[test]
-    fn keydown_helpers_require_adapter_timestamps_for_typeahead() {
+    fn keydown_helpers_emit_typeahead_with_or_without_adapter_timestamps() {
         let mut listbox = service(Props::new().id("lb"));
 
         drop(listbox.send(Event::Focus { is_keyboard: true }));
@@ -1985,7 +2024,10 @@ mod tests {
         }
         assert_eq!(
             sent.borrow().as_slice(),
-            &[Event::TypeaheadSearch('b', 100)]
+            &[
+                Event::TypeaheadSearch('b', 1),
+                Event::TypeaheadSearch('b', 100)
+            ]
         );
         for event in sent.take() {
             drop(listbox.send(event));
@@ -2207,6 +2249,12 @@ mod tests {
             false,
         );
         api.on_keydown(
+            &keyboard(KeyboardKey::Unidentified, Some('A')),
+            false,
+            true,
+            false,
+        );
+        api.on_keydown(
             &keyboard(KeyboardKey::Unidentified, Some('b')),
             false,
             false,
@@ -2237,7 +2285,10 @@ mod tests {
                 Event::HighlightPageDown,
                 Event::ToggleItem(key("alpha")),
                 Event::DeselectAll,
+                Event::TypeaheadSearch('a', 1),
                 Event::SelectAll,
+                Event::SelectAll,
+                Event::TypeaheadSearch('b', 1),
             ]
         );
     }
@@ -2578,6 +2629,20 @@ mod tests {
         assert_eq!(
             *listbox.context().selection.get(),
             selection::Set::Multiple(BTreeSet::from([key("alpha"), key("bravo")]))
+        );
+
+        let mut no_anchor = service(
+            Props::new()
+                .id("no-anchor")
+                .selection_mode(selection::Mode::Multiple),
+        );
+
+        drop(no_anchor.send(Event::HighlightItem(Some(key("alpha")))));
+        drop(no_anchor.send(Event::ExtendSelection(key("charlie"))));
+
+        assert_eq!(
+            *no_anchor.context().selection.get(),
+            selection::Set::Multiple(BTreeSet::from([key("alpha"), key("bravo"), key("charlie")]))
         );
     }
 

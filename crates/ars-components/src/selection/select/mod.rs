@@ -684,7 +684,7 @@ impl ars_core::Machine for Machine {
                 if !ctx.multiple {
                     return None;
                 }
-                if !ctx.items.contains_key(key) {
+                if !is_selectable_key(ctx, key) {
                     return None;
                 }
 
@@ -1084,15 +1084,10 @@ impl Api<'_> {
 
             KeyboardKey::Escape if self.ctx.open => (self.send)(Event::Close),
 
-            _ if data.character.is_some()
-                && now_ms.is_some()
-                && !ctrl
-                && !meta
-                && !data.is_composing =>
-            {
+            _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
                 (self.send)(Event::TypeaheadSearch(
                     data.character.expect("checked"),
-                    now_ms.expect("checked"),
+                    typeahead_time(now_ms, &self.ctx.typeahead),
                 ));
             }
 
@@ -1255,15 +1250,10 @@ impl Api<'_> {
 
             KeyboardKey::Escape => (self.send)(Event::Close),
 
-            _ if data.character.is_some()
-                && now_ms.is_some()
-                && !ctrl
-                && !meta
-                && !data.is_composing =>
-            {
+            _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
                 (self.send)(Event::TypeaheadSearch(
                     data.character.expect("checked"),
-                    now_ms.expect("checked"),
+                    typeahead_time(now_ms, &self.ctx.typeahead),
                 ));
             }
 
@@ -1510,7 +1500,7 @@ fn close_plan(props: &Props) -> TransitionPlan<Machine> {
 }
 
 fn select_item_plan(ctx: &Context, props: &Props, key: Key) -> Option<TransitionPlan<Machine>> {
-    if !ctx.items.contains_key(&key) || ctx.selection_state.is_disabled(&key) {
+    if !is_selectable_key(ctx, &key) {
         return None;
     }
 
@@ -1735,6 +1725,10 @@ fn is_focusable_key(ctx: &Context, key: &Key) -> bool {
             || ctx.selection_state.disabled_behavior == DisabledBehavior::FocusOnly)
 }
 
+fn is_selectable_key(ctx: &Context, key: &Key) -> bool {
+    ctx.items.get(key).is_some_and(Node::is_focusable) && !ctx.selection_state.is_disabled(key)
+}
+
 fn normalize_selection_state(mut state: selection::State) -> selection::State {
     state.selected_keys = normalize_selection_for_mode(state.selected_keys, state.mode);
 
@@ -1798,6 +1792,10 @@ fn serialize_selection(selection: &selection::Set) -> String {
     }
 }
 
+fn typeahead_time(now_ms: Option<u64>, state: &typeahead::State) -> u64 {
+    now_ms.unwrap_or_else(|| state.last_key_time_ms.saturating_add(1))
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::{collections::BTreeSet, sync::Arc};
@@ -1857,6 +1855,19 @@ mod tests {
 
     fn single_item_collection() -> ars_collections::StaticCollection<super::Item> {
         CollectionBuilder::new()
+            .item(
+                key("alpha"),
+                "Alpha",
+                super::Item {
+                    label: "Alpha".into(),
+                },
+            )
+            .build()
+    }
+
+    fn grouped_collection() -> ars_collections::StaticCollection<super::Item> {
+        CollectionBuilder::new()
+            .section(key("group"), "Group")
             .item(
                 key("alpha"),
                 "Alpha",
@@ -2071,10 +2082,12 @@ mod tests {
                 Event::Clear,
                 Event::Toggle,
                 Event::Open,
+                Event::TypeaheadSearch('a', 1),
                 Event::HighlightNext,
                 Event::HighlightPrev,
                 Event::HighlightFirst,
                 Event::HighlightLast,
+                Event::TypeaheadSearch('d', 1),
                 Event::Close,
             ]
         );
@@ -2267,6 +2280,17 @@ mod tests {
                 .get(&HtmlAttr::Value),
             Some("")
         );
+
+        drop(empty.send(Event::UpdateItems(grouped_collection())));
+        drop(empty.send(Event::Open));
+        drop(empty.send(Event::SelectItem(key("group"))));
+
+        assert_eq!(*empty.context().selection.get(), selection::Set::Empty);
+
+        drop(select.send(Event::UpdateItems(grouped_collection())));
+        drop(select.send(Event::DeselectItem(key("group"))));
+
+        assert_eq!(*select.context().selection.get(), selection::Set::All);
     }
 
     #[test]
@@ -2374,7 +2398,7 @@ mod tests {
     }
 
     #[test]
-    fn keydown_helpers_require_adapter_timestamps_for_typeahead() {
+    fn keydown_helpers_emit_typeahead_with_or_without_adapter_timestamps() {
         let mut select = make_service(Props::new().id("sel"));
 
         let sent = RefCell::new(Vec::new());
@@ -2397,7 +2421,10 @@ mod tests {
         }
         assert_eq!(
             sent.borrow().as_slice(),
-            &[Event::TypeaheadSearch('b', 100)]
+            &[
+                Event::TypeaheadSearch('b', 1),
+                Event::TypeaheadSearch('b', 100)
+            ]
         );
         for event in sent.take() {
             drop(select.send(event));
