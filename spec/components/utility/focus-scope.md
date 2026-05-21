@@ -73,8 +73,11 @@ pub enum Event {
     /// Disable focus trapping on an active scope.
     ReleaseTrap,
     /// Restore focus to the element that was focused before activation.
-    /// Only processed during deactivation (via `then_send` from Deactivate).
-    /// Ignored if the scope is still Active.
+    /// Adapters MAY send this event explicitly when an `Inactive` scope still
+    /// holds a non-empty `Context::saved_focus` (e.g., nested-scope cleanup).
+    /// When `Inactive`, the machine emits [`Effect::RestoreFocus`]; when
+    /// `Active`, the event is ignored — restoration is only meaningful
+    /// after the scope has deactivated.
     RestoreFocus,
     /// Move focus to the first tabbable element in the container.
     FocusFirst,
@@ -92,12 +95,19 @@ pub enum Event {
 /// from `State` in the connect API:
 /// - `is_active()` → `matches!(state, State::Active { .. })`
 /// - `is_trapped()` → `matches!(state, State::Active { trapped: true })`
-#[derive(Clone, Debug, PartialEq)]
+///
+/// `Eq` enables value-based comparison in proptest invariants; `Default`
+/// gives the machine a free `Context::default()` for `init`.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Context {
     /// The element that had focus before the scope was activated.
-    /// Restored on `Deactivate` if `restore_focus=true`.
+    /// Set on `Activate` and read by the adapter when dispatching
+    /// `Effect::RestoreFocus`. The agnostic core does not clear the value
+    /// after restoration — the next `Activate` overwrites it.
     pub saved_focus: Option<String>,
     /// The DOM ID of the container element that scopes focus.
+    /// Adapters populate this via `Service::context_mut()` once they have
+    /// resolved the container's stable ID.
     pub container_id: Option<String>,
 }
 ```
@@ -132,64 +142,162 @@ impl Default for Props {
         }
     }
 }
+
+impl Props {
+    /// Returns a fresh `Props` with every field at its `Default` value.
+    #[must_use]
+    pub fn new() -> Self { Self::default() }
+
+    /// Sets [`id`](Self::id).
+    #[must_use]
+    pub fn id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    /// Sets [`trapped`](Self::trapped).
+    #[must_use]
+    pub const fn trapped(mut self, trapped: bool) -> Self {
+        self.trapped = trapped;
+        self
+    }
+
+    /// Sets [`contain`](Self::contain).
+    #[must_use]
+    pub const fn contain(mut self, contain: bool) -> Self {
+        self.contain = contain;
+        self
+    }
+
+    /// Sets [`auto_focus`](Self::auto_focus).
+    #[must_use]
+    pub const fn auto_focus(mut self, auto_focus: bool) -> Self {
+        self.auto_focus = auto_focus;
+        self
+    }
+
+    /// Sets [`restore_focus`](Self::restore_focus).
+    #[must_use]
+    pub const fn restore_focus(mut self, restore_focus: bool) -> Self {
+        self.restore_focus = restore_focus;
+        self
+    }
+}
 ```
 
 ### 1.5 Transitions
 
 ```text
-Inactive + Activate { trapped }
-  → Active { trapped: trapped || contain }
-  action: save currently focused element → ctx.saved_focus
-  effect: "focus-trap-listener" (attaches keydown handler to intercept Tab)
-  then_send: FocusFirst (if auto_focus=true)
+Inactive + Activate { trapped, saved_focus_id }
+  → Active { trapped: trapped || props.trapped || props.contain }
+  action: ctx.saved_focus = saved_focus_id (adapter-captured ID)
+  effect: PendingEffect::named(Effect::FocusTrapListener)  ← only when the
+                                                            resolved `trapped`
+                                                            is `true`
+  then_send: FocusFirst (if props.auto_focus=true)
+
+  (Either `Props::trapped` or its `Props::contain` alias opts the
+   scope into trapping; the event's `trapped` is a per-activation
+   override that can also force trapping when the props didn't. The
+   trap listener is gated on the resolved trap value — entering
+   `Active { trapped: false }` does NOT install Tab interception.)
 
 Active + Deactivate { restore_focus }
   → Inactive
-  action: clear ctx.saved_focus reference
-  cleanup effect: remove keydown handler
-  then_send: RestoreFocus (if restore_focus=true)
+  cancel_effect: Effect::FocusTrapListener  (runs the adapter cleanup, tearing
+                                              down the Tab keydown handler)
+  if restore_focus:
+    effect: PendingEffect::named(Effect::RestoreFocus)
+    (ctx.saved_focus stays — adapter reads it; next Activate overwrites)
+  else:
+    action: ctx.saved_focus = None
 
 Active { trapped: false } + TrapFocus
   → Active { trapped: true }
+  effect: PendingEffect::named(Effect::FocusTrapListener)
+  (re-emitted so the adapter reinstalls the trap listener that
+   `state_changed=true` just drained — see §1.8)
 
 Active { trapped: true } + ReleaseTrap
   → Active { trapped: false }
+  (NO trap-listener effect — the `state_changed=true` drain
+   uninstalls the listener, which is the desired outcome since
+   `trapped: false` should not intercept Tab)
 
 Inactive + RestoreFocus
   → Inactive (stay)
-  action: restore focus from ctx.saved_focus via restore_focus_safely()
+  effect: PendingEffect::named(Effect::RestoreFocus)
 
 Active + RestoreFocus
-  → None (ignored — RestoreFocus is only meaningful after Deactivate)
+  → None (ignored — restoration is only meaningful after Deactivate)
 
 Active + FocusFirst
   → Active (stay)
-  effect: focus first tabbable element in container
+  effect: PendingEffect::named(Effect::FocusFirst)
 
 Active + FocusLast
   → Active (stay)
-  effect: focus last tabbable element in container
+  effect: PendingEffect::named(Effect::FocusLast)
 
-When `contain` is true and no tabbable elements exist within the scope, FocusScope MUST:
+When `contain` is true and no tabbable elements exist within the scope, the
+adapter's `Effect::FocusTrapListener` handler MUST:
   (1) keep focus on the container element (which has `tabindex="-1"`),
   (2) suppress Tab/Shift+Tab key events entirely (`preventDefault()`),
-  (3) re-scan for tabbable elements on each Tab press to detect dynamically added
-      content (e.g., lazy-loaded dialog body).
-  (handled entirely in effect, no state change needed)
+  (3) re-scan for tabbable elements on each Tab press to detect dynamically
+      added content (e.g., lazy-loaded dialog body).
+  (handled entirely in the adapter effect — no state change needed)
 ```
 
 ### 1.6 Full Machine Implementation
 
+The agnostic core emits typed effect intents via `Effect` markers. Adapters
+dispatch on the `Effect` variant and route to their `PlatformEffects`
+implementation — the core never calls platform helpers directly. This matches
+the named-effect pattern used by `Dialog` (`spec/components/overlay/dialog.md`)
+and `Popover`.
+
 ```rust
-use ars_core::{TransitionPlan, PendingEffect, ConnectApi, AttrMap};
+// The local `Messages` struct below shadows the `Messages` trait name, so the
+// trait must be brought into scope by its real name (`ComponentMessages`)
+// rather than an `as _` alias.
+use ars_core::{
+    AttrMap, ComponentMessages, ComponentPart, ConnectApi, Env, HtmlAttr, PendingEffect,
+    TransitionPlan,
+};
 
 /// The machine for the `FocusScope` component.
+#[derive(Debug)]
 pub struct Machine;
 
 /// This component has no translatable strings.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Messages;
 impl ComponentMessages for Messages {}
+
+/// Typed effect intents emitted by the focus-scope machine.
+///
+/// Each variant is an adapter contract — the adapter's effect handler
+/// translates the variant into the corresponding `PlatformEffects` call
+/// (see [`spec/foundation/11-dom-utilities.md`] §3 for the platform-level
+/// helpers and §1.8 of this file for each variant's contract).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Install the Tab-key interception (keydown handler + sentinel
+    /// elements) that keeps focus inside the scope while it is active.
+    ///
+    /// Cleanup tears the handler back down — invoked when the machine
+    /// emits `.cancel_effect(Effect::FocusTrapListener)` on `Deactivate`.
+    FocusTrapListener,
+    /// Move focus to the first tabbable descendant of the container.
+    /// Fall back to focusing the container itself when none exist.
+    FocusFirst,
+    /// Move focus to the last tabbable descendant of the container.
+    /// Fall back to focusing the container itself when none exist.
+    FocusLast,
+    /// Restore focus to `service.context().saved_focus`, applying the §7
+    /// fallback chain when the saved target is no longer focusable.
+    RestoreFocus,
+}
 
 impl ars_core::Machine for Machine {
     type State = State;
@@ -197,9 +305,10 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
-    fn init(props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
+    fn init(_props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
         (
             State::Inactive,
             Context {
@@ -212,26 +321,30 @@ impl ars_core::Machine for Machine {
     fn transition(
         state: &Self::State,
         event: &Self::Event,
-        ctx: &Self::Context,
+        _ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
             // ── Activation ──────────────────────────────────────────────
             (State::Inactive, Event::Activate { trapped, saved_focus_id }) => {
-                let trap = *trapped || props.contain;
+                // `Props::trapped` is the documented trap prop;
+                // `Props::contain` is its alias. Either opts the scope
+                // into trapping; the event's `trapped` is a
+                // per-activation override that can also force trapping
+                // when the props didn't request it.
+                let trap = *trapped || props.trapped || props.contain;
                 let auto_focus = props.auto_focus;
                 let saved = saved_focus_id.clone();
                 let mut plan = TransitionPlan::to(State::Active { trapped: trap })
-                    .apply(move |ctx| {
+                    .apply(move |ctx: &mut Context| {
                         ctx.saved_focus = saved;
-                    })
-                    .with_named_effect("focus-trap-listener", |ctx, _props, send| {
-                        let platform = use_platform_effects();
-                        let container_id = ctx.ids.part("container");
-                        platform.attach_focus_trap(&container_id, Box::new(move || {
-                            send.call_if_alive(Event::Deactivate { restore_focus: true });
-                        }))
                     });
+                // Only install Tab interception when the resolved state
+                // is actually trapped — `PlatformEffects::attach_focus_trap`
+                // unconditionally wraps Tab/Shift+Tab.
+                if trap {
+                    plan = plan.with_effect(PendingEffect::named(Effect::FocusTrapListener));
+                }
                 if auto_focus {
                     plan = plan.then(Event::FocusFirst);
                 }
@@ -241,58 +354,53 @@ impl ars_core::Machine for Machine {
             // ── Deactivation ────────────────────────────────────────────
             (State::Active { .. }, Event::Deactivate { restore_focus }) => {
                 let restore = *restore_focus;
-                let mut plan = TransitionPlan::to(State::Inactive);
+                let mut plan = TransitionPlan::to(State::Inactive)
+                    .cancel_effect(Effect::FocusTrapListener);
                 if restore {
-                    // RestoreFocus will read saved_focus then clear it.
-                    plan = plan.then(Event::RestoreFocus);
+                    // Adapter reads `service.context().saved_focus` when
+                    // dispatching `Effect::RestoreFocus`. The value stays
+                    // in context until the next `Activate` overwrites it.
+                    plan = plan.with_effect(PendingEffect::named(Effect::RestoreFocus));
                 } else {
-                    plan = plan.apply(|ctx| {
-                        ctx.saved_focus = None; // Clear to prevent stale DOM references
+                    plan = plan.apply(|ctx: &mut Context| {
+                        ctx.saved_focus = None;
                     });
                 }
                 Some(plan)
             }
 
             // ── Trap / Release ──────────────────────────────────────────
-            (State::Active { trapped: false }, Event::TrapFocus) => {
-                Some(TransitionPlan::to(State::Active { trapped: true }))
-            }
+            // Adapters drain ALL active effect cleanups when
+            // `state_changed` is true. `TrapFocus` enters a state that
+            // DOES need the listener, so it re-emits the effect for the
+            // adapter to reinstall the trap. `ReleaseTrap` exits the
+            // trapped state, so it MUST NOT re-emit — the drain
+            // teardown is the intended outcome.
+            (State::Active { trapped: false }, Event::TrapFocus) => Some(
+                TransitionPlan::to(State::Active { trapped: true })
+                    .with_effect(PendingEffect::named(Effect::FocusTrapListener)),
+            ),
             (State::Active { trapped: true }, Event::ReleaseTrap) => {
                 Some(TransitionPlan::to(State::Active { trapped: false }))
             }
 
             // ── RestoreFocus ────────────────────────────────────────────
-            // Only processed when Inactive (after Deactivate via then_send).
-            (State::Inactive, Event::RestoreFocus) => {
-                Some(TransitionPlan::context_only(|ctx| {
-                    if let Some(ref target) = ctx.saved_focus {
-                        restore_focus_safely(target.clone(), &[]);
-                    }
-                    ctx.saved_focus = None;
-                }))
-            }
-            // If RestoreFocus arrives while Active, ignore it.
+            // Adapters may send `RestoreFocus` explicitly (e.g. nested
+            // scope cleanup). When `Inactive` we emit the effect intent;
+            // when `Active` the event is ignored — restoration is only
+            // meaningful after the scope has deactivated.
+            (State::Inactive, Event::RestoreFocus) => Some(
+                TransitionPlan::new().with_effect(PendingEffect::named(Effect::RestoreFocus)),
+            ),
             (State::Active { .. }, Event::RestoreFocus) => None,
 
             // ── Focus Navigation ────────────────────────────────────────
-            (State::Active { .. }, Event::FocusFirst) => {
-                Some(TransitionPlan::new()
-                    .with_named_effect("focus_first", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        if let Some(ref id) = ctx.container_id {
-                            platform.focus_first_tabbable(id);
-                        }
-                    }))
-            }
-            (State::Active { .. }, Event::FocusLast) => {
-                Some(TransitionPlan::new()
-                    .with_named_effect("focus_last", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        if let Some(ref id) = ctx.container_id {
-                            platform.focus_last_tabbable(id);
-                        }
-                    }))
-            }
+            (State::Active { .. }, Event::FocusFirst) => Some(
+                TransitionPlan::new().with_effect(PendingEffect::named(Effect::FocusFirst)),
+            ),
+            (State::Active { .. }, Event::FocusLast) => Some(
+                TransitionPlan::new().with_effect(PendingEffect::named(Effect::FocusLast)),
+            ),
 
             _ => None,
         }
@@ -314,85 +422,45 @@ impl ars_core::Machine for Machine {
 }
 ```
 
-#### 1.6.1 Focus Restoration Safety
+#### 1.6.1 Focus Restoration Safety (adapter contract)
 
-````rust
-// Guard against restoring focus to a removed or unfocusable element.
-//
-// Checks performed before restoring focus:
-// 1. Element is in the DOM (document.contains)
-// 2. Element is visible (not visibility:hidden, not display:none)
-// 3. Element is not inside a closed <details> element
-// 4. Element is not already the active element (document.activeElement)
-// 5. Element can receive focus (is tabbable or has tabindex)
-// 6. Element has layout (offsetParent != null)
-//
-// If the target fails any check, try each fallback in order, then the
-// nearest focusable ancestor, then the document body.
-//
-// The `fallbacks` parameter supports nested dialog scenarios where the
-// original trigger may have been removed. Callers pass a prioritized list
-// (e.g., [parent_dialog_last_focused, parent_dialog_container,
-// parent_dialog_first_focusable]) so the function can gracefully degrade.
-fn restore_focus_safely(target_id: &str, fallback_ids: &[&str]) {
-    let platform = use_platform_effects();
-    if platform.can_restore_focus(target_id) {
-        platform.focus_element_by_id(target_id);
-        return;
-    }
-    // Try fallback elements in order
-    for id in fallback_ids {
-        if platform.can_restore_focus(id) {
-            platform.focus_element_by_id(id);
-            return;
-        }
-    }
-    // Walk up to nearest focusable ancestor of the original target.
-    if let Some(ancestor_id) = platform.nearest_focusable_ancestor_id(target_id) {
-        platform.focus_element_by_id(&ancestor_id);
-    } else {
-        // Last resort — focus document body
-        platform.focus_body();
-    }
-}
+The agnostic core stores the saved focus target as an opaque `Option<String>`
+on `Context::saved_focus`. When `Effect::RestoreFocus` fires, the adapter MUST
+guard against restoring focus to a removed, hidden, or otherwise unfocusable
+element by walking the following safety checks before calling
+`PlatformEffects::focus_element_by_id`:
 
-// ── Orientation Change Focus Audit ──────────────────────────────────────
-//
-// When the viewport orientation changes (e.g., portrait → landscape on mobile),
-// CSS media queries may hide or show elements. If FocusScope has trapped focus
-// on an element that is now hidden by `display: none`, the element stays in
-// the DOM but is invisible and has `offsetParent == null`.
-//
-// The FocusScope Tab handler MUST check `offsetParent !== null` before allowing
-// focus on any element. Additionally, the adapter MUST register a
-// `matchMedia('(orientation: portrait)')` change listener that triggers a
-// focus audit when orientation changes:
-//
-//   1. Check if the currently focused element has `offsetParent == null`.
-//   2. If hidden, move focus to the first visible tabbable element in the scope.
-//   3. Update the saved_focus reference if the restore target is now hidden.
-//
-// ```rust
-// fn audit_focus_on_orientation_change(scope: &FocusScopeContext) {
-//     let platform = use_platform_effects();
-//     if let Some(active_id) = platform.active_element_id() {
-//         if !platform.has_layout(&active_id) {
-//             // Focused element is hidden — move to first visible tabbable
-//             if let Some(ref container_id) = scope.container_id {
-//                 platform.focus_first_tabbable(container_id);
-//             }
-//         }
-//     }
-//     // Also validate the saved_focus restore target
-//     if let Some(ref saved) = scope.saved_focus {
-//         if !platform.has_layout(saved) {
-//             // Restore target is now hidden; clear it so fallback chain is used
-//             scope.saved_focus = None;
-//         }
-//     }
-// }
-// ```
-````
+1. The element is connected to the DOM (`document.contains` returns true).
+2. The element is visible (`visibility` is not `hidden`; `display` is not
+   `none`).
+3. The element is not inside a closed `<details>` element.
+4. The element is not already the active element (avoid a no-op refocus).
+5. The element can receive focus (tabbable or has explicit `tabindex`).
+6. The element has layout (`offsetParent !== null`).
+
+Each predicate above corresponds to a single `PlatformEffects::can_restore_focus`
+call — adapters typically implement the entire check list inside that one
+method. If the saved target fails any check, the adapter applies the fallback
+chain documented in §7.
+
+#### 1.6.2 Orientation-Change Focus Audit (adapter contract)
+
+When viewport orientation changes (portrait ↔ landscape on mobile), CSS media
+queries can hide or show elements without removing them from the DOM. If the
+currently focused element is hidden by `display: none` after the change, it
+still has focus but `offsetParent` becomes `null`. The agnostic core does not
+observe orientation events — adapters that need this behavior MUST register a
+`matchMedia('(orientation: portrait)')` change listener that:
+
+1. Reads the currently focused element via
+   `PlatformEffects::active_element_id`.
+2. If the focused element lacks layout (per the §1.6.1 check list), emits a
+   fresh `Event::FocusFirst` to move focus to the first visible tabbable in
+   the scope.
+3. If `service.context().saved_focus` references an element that lacks layout
+   after the change, the adapter may inform the consumer that the restore
+   target is no longer valid — the core's fallback chain (§7) handles the
+   actual recovery on the next `Effect::RestoreFocus` dispatch.
 
 ### 1.7 Connect / API
 
@@ -415,42 +483,72 @@ pub struct Api<'a> {
     send: &'a dyn Fn(Event),
 }
 
-impl<'a> Api<'a> {
+/// `Api` carries a closure-typed `send` field, so a manual `Debug` impl is
+/// required to satisfy the workspace's `missing_debug_implementations` lint
+/// without leaking the closure's address.
+impl Debug for Api<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("focus_scope::Api")
+            .field("state", self.state)
+            .field("ctx", self.ctx)
+            .field("props", self.props)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Api<'_> {
+    /// Returns the current [`State`] of the focus scope.
+    #[must_use]
+    pub const fn state(&self) -> &State { self.state }
+
+    /// Returns the current [`Context`] of the focus scope.
+    #[must_use]
+    pub const fn context(&self) -> &Context { self.ctx }
+
+    /// Returns the [`Props`] used by the focus scope.
+    #[must_use]
+    pub const fn props(&self) -> &Props { self.props }
+
     /// Whether the focus scope is active.
-    pub fn is_active(&self) -> bool {
+    #[must_use]
+    pub const fn is_active(&self) -> bool {
         matches!(self.state, State::Active { .. })
     }
 
     /// Whether the focus scope is trapped.
-    pub fn is_trapped(&self) -> bool {
+    #[must_use]
+    pub const fn is_trapped(&self) -> bool {
         matches!(self.state, State::Active { trapped: true })
     }
 
-    /// Props for the container element that scopes focus.
+    /// Attributes for the container element that scopes focus.
+    ///
+    /// Always emits `data-ars-scope="focus-scope"` and
+    /// `data-ars-part="container"`. When active, adds `data-ars-active`
+    /// and `tabindex="-1"` so the container can be a programmatic focus
+    /// target when no tabbable children exist yet. When trapped, adds
+    /// `data-ars-trapped`.
+    #[must_use]
     pub fn container_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Container.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
+        attrs.set(scope_attr, scope_val).set(part_attr, part_val);
         if self.is_active() {
-            attrs.set_bool(HtmlAttr::Data("ars-active"), true);
-
-            // tabindex="-1" allows the container itself to be focused programmatically,
-            // which is needed as a focus target when no tabbable children exist yet.
-            // Only set when active — an inactive scope's container should not appear
-            // as a programmatic focus target to screen readers.
-            attrs.set(HtmlAttr::TabIndex, "-1");
+            attrs
+                .set_bool(HtmlAttr::Data("ars-active"), true)
+                .set(HtmlAttr::TabIndex, "-1");
         }
         if self.is_trapped() {
             attrs.set_bool(HtmlAttr::Data("ars-trapped"), true);
         }
-        // Event handlers (keydown for Tab trapping) are typed methods on the Api struct.
         attrs
     }
 
     /// Imperatively activate the focus scope.
-    /// `saved_focus_id` is the ID of the currently focused element, captured by
-    /// the adapter via `platform.active_element_id()` before calling this.
+    ///
+    /// `saved_focus_id` is the ID of the currently focused element,
+    /// captured by the adapter via `PlatformEffects::active_element_id`
+    /// before calling this.
     pub fn activate(&self, trapped: bool, saved_focus_id: Option<String>) {
         (self.send)(Event::Activate { trapped, saved_focus_id });
     }
@@ -460,46 +558,19 @@ impl<'a> Api<'a> {
         (self.send)(Event::Deactivate { restore_focus });
     }
 
-    /// Move focus to the first tabbable element within the container.
-    /// Used by framework adapters when auto_focus=true.
+    /// Request that focus move to the first tabbable descendant of the
+    /// container. Sends [`Event::FocusFirst`]; the agnostic core then emits
+    /// [`Effect::FocusFirst`] which the adapter routes through
+    /// `PlatformEffects::focus_first_tabbable`. Used by framework adapters
+    /// when `auto_focus=true`.
     pub fn focus_first(&self) {
-        let platform = use_platform_effects();
-        if let Some(ref id) = self.ctx.container_id {
-            platform.focus_first_tabbable(id);
-        }
+        (self.send)(Event::FocusFirst);
     }
 
-    /// Move focus to the last tabbable element within the container.
+    /// Request that focus move to the last tabbable descendant of the
+    /// container. Sends [`Event::FocusLast`].
     pub fn focus_last(&self) {
-        let platform = use_platform_effects();
-        if let Some(ref id) = self.ctx.container_id {
-            platform.focus_last_tabbable(id);
-        }
-    }
-
-    /// Return IDs of all currently tabbable elements in the container.
-    pub fn get_tabbable_elements(&self) -> Vec<String> {
-        let platform = use_platform_effects();
-        self.ctx.container_id
-            .as_ref()
-            .map(|id| platform.tabbable_element_ids(id))
-            .unwrap_or_default()
-    }
-
-    /// Move focus to the next focusable element within the scope.
-    /// Returns `true` if focus was moved, `false` if no valid target exists.
-    /// Used by Toolbar, ActionGroup, and TreeView for programmatic sequential
-    /// focus movement beyond roving tabindex.
-    pub fn focus_next(&self, _opts: FocusNavigationOptions) -> bool {
-        // IMPL: traverse tabbable elements forward within scope
-        false
-    }
-
-    /// Move focus to the previous focusable element within the scope.
-    /// Returns `true` if focus was moved, `false` if no valid target exists.
-    pub fn focus_previous(&self, _opts: FocusNavigationOptions) -> bool {
-        // IMPL: traverse tabbable elements backward within scope
-        false
+        (self.send)(Event::FocusLast);
     }
 }
 
@@ -513,24 +584,55 @@ impl ConnectApi for Api<'_> {
     }
 }
 
-/// Options for focus navigation.
-#[derive(Clone)]
-pub struct FocusNavigationOptions {
-    /// Wrap around at boundaries.
-    pub wrap: bool,
-    /// Element ID to start from (default: currently focused element).
-    pub from: Option<String>,
-    /// Only consider tabbable elements (tabindex >= 0).
-    pub tabbable: bool,
-    /// Custom filter predicate that receives an element ID.
-    /// Uses `Rc` so the options struct can be cloned.
-    pub accept: Option<Rc<dyn Fn(&str) -> bool>>,
-}
 ```
+
+**Programmatic sequential navigation lives in the adapter layer, not the
+core.** `focus_next` / `focus_previous` and any `FocusNavigationOptions`-style
+config struct would require synchronous DOM lookups (tabbable filtering,
+`activeElement`, `accept` predicate evaluation against live element handles)
+that the agnostic core cannot perform — the issue's "Element/ref handling
+note" explicitly forbids ID-only or DOM-bound APIs at this layer. Adapters
+that need this behavior (consumed by `Toolbar`, `ActionGroup`, `TreeView`,
+nested `FocusScope`s) expose it on their own API surface and publish a
+`FocusManager` context as described in §1.7 _Focus Manager Context_ below;
+the agnostic core only emits `Event::FocusFirst` / `Event::FocusLast` for the
+two end-of-list targets it can describe as effect intents.
+
+### 1.8 Effect Contract
+
+Adapters MUST provide a handler for every [`Effect`] variant. Each handler
+receives `&Context`, `&Props`, and a `WeakSend<Event>` send handle, and is
+expected to call into the workspace's `PlatformEffects` implementation
+(see `spec/foundation/01-architecture.md` §2.2.7 and
+`spec/foundation/11-dom-utilities.md` §3) rather than the DOM directly.
+
+| Effect              | When emitted                                                                                                   | Adapter contract                                                                                                                                                                                                                                                                                  |
+| ------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FocusTrapListener` | `Inactive → Active{trapped:true}` (Activate when the resolved trap is `true`) and `Active{trapped:false} → Active{trapped:true}` (TrapFocus). NOT emitted on `Inactive → Active{trapped:false}` (active-but-untrapped activation) or on `ReleaseTrap` — the listener is only valid while `trapped: true`. | Call `PlatformEffects::attach_focus_trap(container_id, on_escape)`. Wire the returned `CleanupFn` as the effect's cleanup so `cancel_effect(Effect::FocusTrapListener)` tears the handler down on `Deactivate`. The `on_escape` callback SHOULD send `Event::Deactivate { restore_focus: true }`. The state-change-driven cleanup drain also uninstalls the listener whenever the resolved state moves off `trapped: true` (TrapFocus reinstalls it, ReleaseTrap and Deactivate intentionally leave it uninstalled). |
+| `FocusFirst`        | `Active + FocusFirst` (also on `Activate` when `props.auto_focus`)                                             | Call `PlatformEffects::focus_first_tabbable(container_id)`. Fall back to focusing the container element (which has `tabindex="-1"` while active) when no tabbable descendants exist.                                                                                                              |
+| `FocusLast`         | `Active + FocusLast`                                                                                           | Call `PlatformEffects::focus_last_tabbable(container_id)`. Fall back to the container when no tabbable descendants exist.                                                                                                                                                                         |
+| `RestoreFocus`      | `Active → Inactive` (Deactivate with `restore_focus: true`) or explicit `Event::RestoreFocus` while `Inactive` | Read `service.context().saved_focus`. If `Some(id)`, apply the §1.6.1 / §7 fallback chain via `PlatformEffects::can_restore_focus` → `focus_element_by_id` → `nearest_focusable_ancestor_id` → `focus_body`. The core does not clear `saved_focus` here; the next `Activate` overwrites it.       |
 
 #### Focus Manager Context
 
-The adapter SHOULD provide the FocusScope's navigation methods (`focus_next`, `focus_previous`, `focus_first`, `focus_last`) via framework context, allowing child components to programmatically manage focus without prop drilling. In Leptos: `provide_context(FocusManager { ... })`. In Dioxus: `use_context_provider(|| FocusManager { ... })`. This mirrors React Aria's `useFocusManager()` hook pattern.
+The adapter SHOULD publish a `FocusManager` context so child components can
+programmatically manage focus without prop drilling, mirroring React Aria's
+`useFocusManager()` hook pattern. The expected handles are:
+
+- `focus_first` / `focus_last` — thin wrappers that call
+  [`Api::focus_first`] / [`Api::focus_last`], so the underlying transition
+  still flows through the agnostic core's `Effect::FocusFirst` /
+  `Effect::FocusLast` markers.
+- `focus_next` / `focus_previous` — **adapter-owned**; these resolve live
+  tabbable element handles via `PlatformEffects::tabbable_element_ids`,
+  `active_element_id`, and `focus_element_by_id`, plus any adapter-defined
+  `FocusNavigationOptions` (wrap, accept predicate, starting element, etc.).
+  They are intentionally absent from the agnostic-core [`Api`] surface so
+  that the workspace's "no synchronous DOM lookups in the core" rule stays
+  enforced.
+
+Publication: `provide_context(FocusManager { ... })` in Leptos,
+`use_context_provider(|| FocusManager { ... })` in Dioxus.
 
 ## 2. Anatomy
 
@@ -753,14 +855,18 @@ fallback chain.
 
 ## 9. Platform Notes
 
-> **Dioxus focus operations:** Focus operations (`focus_first`, `focus_last`,
-> `restore_focus_safely`) use `PlatformEffects` trait methods (see `01-architecture.md`
-> section 2.2.7). For Dioxus Desktop/Mobile, the adapter provides a platform implementation
-> that routes these through native focus APIs for cross-platform compatibility.
+> **Dioxus focus operations:** Adapter-level focus operations (the
+> `Effect::FocusFirst`, `Effect::FocusLast`, `Effect::RestoreFocus` handlers,
+> the §1.6.1 safety chain, and the adapter-owned `focus_next` /
+> `focus_previous` from the `FocusManager` context) route through
+> `PlatformEffects` trait methods (see `spec/foundation/01-architecture.md`
+> §2.2.7 and `spec/foundation/11-dom-utilities.md` §3). For Dioxus
+> Desktop/Mobile, the adapter provides a platform implementation that
+> calls native focus APIs for cross-platform compatibility.
 >
-> **Cleanup timing:** Leptos uses `on_cleanup` and Dioxus uses `use_drop` for teardown.
-> In HMR/hot-reload scenarios, timing may differ — ensure the `FocusRestorationStack`
-> is cleared on both cleanup and re-mount.
+> **Cleanup timing:** Leptos uses `on_cleanup` and Dioxus uses `use_drop`
+> for teardown. In HMR/hot-reload scenarios, timing may differ — ensure
+> the `FocusRestorationStack` is cleared on both cleanup and re-mount.
 
 ## 10. Library Parity
 
@@ -786,19 +892,26 @@ fallback chain.
 
 ### 10.3 Features
 
-| Feature                  | ars-ui                              | React Aria              |
-| ------------------------ | ----------------------------------- | ----------------------- |
-| Focus trapping           | Yes                                 | Yes                     |
-| Focus restoration        | Yes                                 | Yes                     |
-| Auto-focus first element | Yes                                 | Yes                     |
-| FocusManager context     | Yes (`focus_next`/`focus_previous`) | Yes (`useFocusManager`) |
-| Nested scope stack       | Yes (`FocusRestorationStack`)       | Yes (internal)          |
-| Focus navigation options | Yes (`FocusNavigationOptions`)      | Yes (`wrap`, etc.)      |
+| Feature                  | ars-ui                                                                                      | React Aria              |
+| ------------------------ | ------------------------------------------------------------------------------------------- | ----------------------- |
+| Focus trapping           | Yes                                                                                         | Yes                     |
+| Focus restoration        | Yes                                                                                         | Yes                     |
+| Auto-focus first element | Yes                                                                                         | Yes                     |
+| FocusManager context     | Adapter-only (`focus_next` / `focus_previous` published via Leptos / Dioxus context — §1.7) | Yes (`useFocusManager`) |
+| Nested scope stack       | Yes (`FocusRestorationStack`)                                                               | Yes (internal)          |
+| Focus navigation options | Adapter-only (adapter defines its own option struct alongside `focus_next`)                 | Yes (`wrap`, etc.)      |
 
-**Gaps:** None.
+**Gaps:** None at the parity level. The two adapter-only rows above reflect a
+deliberate layering choice — see §1.7 for why programmatic sequential
+navigation lives in the adapter layer.
 
 ### 10.4 Summary
 
 - **Overall:** Full parity.
-- **Divergences:** ars-ui exposes both `trapped` and `contain` prop aliases. ars-ui explicitly defines `FocusRestorationStack` for nested scopes; React Aria handles this internally.
+- **Divergences:** ars-ui exposes both `trapped` and `contain` prop aliases.
+  ars-ui explicitly defines `FocusRestorationStack` for nested scopes; React
+  Aria handles this internally. Programmatic sequential focus navigation
+  (`focus_next` / `focus_previous` + a `FocusNavigationOptions`-style config
+  struct) lives in the adapter layer rather than on the agnostic-core `Api`,
+  so it can use live element handles instead of opaque ID strings.
 - **Recommended additions:** None.

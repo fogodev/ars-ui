@@ -1,0 +1,48 @@
+---
+source: crates/ars-components/src/utility/focus_scope/mod.rs
+assertion_line: 1262
+expression: "snapshot_attrs(&service.connect(&|_| {}).container_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-active",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "container",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "focus-scope",
+            ),
+        ),
+        (
+            Data(
+                "ars-trapped",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}
