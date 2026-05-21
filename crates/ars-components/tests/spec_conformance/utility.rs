@@ -5,7 +5,7 @@
 
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
-use ars_components::utility::{download_trigger, group, swap, toggle};
+use ars_components::utility::{download_trigger, group, live_region, swap, toggle};
 
 use super::helper::assert_anatomy;
 
@@ -48,6 +48,11 @@ fn swap_anatomy_matches_spec() {
             (swap::Part::OffContent, "off-content"),
         ],
     );
+}
+
+#[test]
+fn live_region_anatomy_matches_spec() {
+    assert_anatomy("live-region", &[(live_region::Part::Root, "root")]);
 }
 
 #[cfg(feature = "i18n")]

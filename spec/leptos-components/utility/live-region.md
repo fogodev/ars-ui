@@ -59,9 +59,9 @@ Announcements are reactive. Switching between controlled sources is allowed only
 - Cleanup must cancel pending timers before the root unmounts.
 - The root node itself persists for the component lifetime.
 
-| Registered entity              | Registration trigger                               | Identity key         | Cleanup trigger                | Cleanup action                              | Notes                             |
-| ------------------------------ | -------------------------------------------------- | -------------------- | ------------------------------ | ------------------------------------------- | --------------------------------- |
-| queued announcement timer/work | repeated announcement or delayed clear/insert path | live-region instance | message replacement or cleanup | cancel timer/work and discard stale message | prevents late stale announcements |
+| Registered entity              | Registration trigger                               | Identity key         | Cleanup trigger                        | Cleanup action                                                           | Notes                             |
+| ------------------------------ | -------------------------------------------------- | -------------------- | -------------------------------------- | ------------------------------------------------------------------------ | --------------------------------- |
+| queued announcement timer/work | repeated announcement or delayed clear/insert path | live-region instance | clear event, queue advance, or cleanup | cancel stale timer/work before the next machine-owned announcement cycle | prevents late stale announcements |
 
 ## 9. Ref and Node Contract
 
@@ -84,10 +84,10 @@ Announcements are reactive. Switching between controlled sources is allowed only
 
 ## 12. Failure and Degradation Rules
 
-| Condition                                                     | Policy             | Notes                                                                          |
-| ------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------ |
-| announce requested before hydration or before the root exists | no-op              | Preserve structure and wait for a live root node.                              |
-| timer API unavailable                                         | degrade gracefully | Prefer immediate message replacement without deferred sequencing if necessary. |
+| Condition                                                     | Policy             | Notes                                                                                      |
+| ------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------ |
+| announce requested before hydration or before the root exists | no-op              | Preserve structure and wait for a live root node.                                          |
+| timer API unavailable                                         | degrade gracefully | Prefer immediate machine-owned message rendering without deferred sequencing if necessary. |
 
 ## 13. Identity and Key Policy
 
@@ -104,8 +104,8 @@ Announcements are reactive. Switching between controlled sources is allowed only
 
 ## 15. Performance Constraints
 
-- Repeated identical announcements should reuse the documented clear-then-insert path instead of stacking redundant timers.
-- Timer cleanup must eagerly discard stale queued work when messages change.
+- Repeated identical announcements should reuse the documented clear-then-insert path and machine queue instead of stacking redundant independent timers.
+- Timer cleanup must eagerly discard stale adapter work when a queued machine-owned announcement cycle advances or unmounts.
 - Root-node replacement should be avoided; patch the existing live-region node instead.
 
 ## 16. Implementation Dependencies
@@ -126,7 +126,7 @@ Announcements are reactive. Switching between controlled sources is allowed only
 
 - Do not announce before hydration or before the live-region root exists.
 - Do not replace the root node instead of patching it in place.
-- Do not keep stale announcement timers alive after message replacement or unmount.
+- Do not keep stale announcement timers alive after a queued machine-owned announcement cycle advances or unmount.
 
 ## 19. Consumer Expectations and Guarantees
 
@@ -187,7 +187,7 @@ on_cleanup(|| timer_helper.cancel_all());
 - The live-region root must remain present in SSR output whenever the spec relies on hydration-stable announcements.
 - Announcements must not run before hydration or before the live region node exists in the document.
 - Repeated announcements must preserve the documented clear-then-insert sequence.
-- Timers and queued announcement work must be cancelled before unmount.
+- Timers and queued adapter work must be cancelled before unmount.
 - Politeness-level differences must remain explicit and must not be collapsed into one generic announce path.
 
 ## 27. Accessibility and SSR Notes
