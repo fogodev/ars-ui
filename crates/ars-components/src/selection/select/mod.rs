@@ -108,6 +108,9 @@ pub enum Event {
     /// Clear the type-ahead buffer.
     ClearTypeahead,
 
+    /// Synchronize context-backed fields from updated props.
+    SyncProps,
+
     /// Replace the item collection dynamically.
     UpdateItems(StaticCollection<Item>),
 }
@@ -577,13 +580,7 @@ impl ars_core::Machine for Machine {
             .clone()
             .unwrap_or_else(|| props.default_value.clone());
 
-        let effective_multiple =
-            props.multiple || props.selection_mode == selection::Mode::Multiple;
-        let effective_mode = if effective_multiple {
-            selection::Mode::Multiple
-        } else {
-            props.selection_mode
-        };
+        let (effective_multiple, effective_mode) = effective_selection_config(props);
 
         let mut selection_state = selection::State::new(effective_mode, props.selection_behavior);
 
@@ -649,16 +646,9 @@ impl ars_core::Machine for Machine {
         if ctx.readonly
             && matches!(
                 event,
-                Event::Open
-                    | Event::Toggle
-                    | Event::SelectItem(_)
+                Event::SelectItem(_)
                     | Event::DeselectItem(_)
                     | Event::Clear
-                    | Event::HighlightFirst
-                    | Event::HighlightLast
-                    | Event::HighlightNext
-                    | Event::HighlightPrev
-                    | Event::HighlightItem(_)
                     | Event::TypeaheadSearch(_, _)
             )
         {
@@ -811,6 +801,8 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (_, Event::SyncProps) => Some(sync_props_plan(props)),
+
             (_, Event::UpdateItems(items)) => {
                 let items = items.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -820,6 +812,14 @@ impl ars_core::Machine for Machine {
             }
 
             _ => None,
+        }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        if old == new {
+            Vec::new()
+        } else {
+            vec![Event::SyncProps]
         }
     }
 
@@ -1042,7 +1042,7 @@ impl Api<'_> {
 
     /// Dispatches trigger keydown events.
     pub fn on_trigger_keydown(&self, data: &KeyboardEventData, ctrl: bool, meta: bool) {
-        self.on_trigger_keydown_at(data, ctrl, meta, next_typeahead_time_ms(self.ctx));
+        self.on_trigger_keydown_impl(data, ctrl, meta, None);
     }
 
     /// Dispatches trigger keydown events with an adapter-provided monotonic timestamp.
@@ -1053,6 +1053,16 @@ impl Api<'_> {
         meta: bool,
         now_ms: u64,
     ) {
+        self.on_trigger_keydown_impl(data, ctrl, meta, Some(now_ms));
+    }
+
+    fn on_trigger_keydown_impl(
+        &self,
+        data: &KeyboardEventData,
+        ctrl: bool,
+        meta: bool,
+        now_ms: Option<u64>,
+    ) {
         match data.key {
             KeyboardKey::ArrowDown | KeyboardKey::ArrowUp => (self.send)(Event::Open),
 
@@ -1060,10 +1070,15 @@ impl Api<'_> {
 
             KeyboardKey::Escape if self.ctx.open => (self.send)(Event::Close),
 
-            _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
+            _ if data.character.is_some()
+                && now_ms.is_some()
+                && !ctrl
+                && !meta
+                && !data.is_composing =>
+            {
                 (self.send)(Event::TypeaheadSearch(
                     data.character.expect("checked"),
-                    now_ms,
+                    now_ms.expect("checked"),
                 ));
             }
 
@@ -1181,7 +1196,7 @@ impl Api<'_> {
 
     /// Dispatches content keydown events.
     pub fn on_content_keydown(&self, data: &KeyboardEventData, ctrl: bool, meta: bool) {
-        self.on_content_keydown_at(data, ctrl, meta, next_typeahead_time_ms(self.ctx));
+        self.on_content_keydown_impl(data, ctrl, meta, None);
     }
 
     /// Dispatches content keydown events with an adapter-provided monotonic timestamp.
@@ -1191,6 +1206,16 @@ impl Api<'_> {
         ctrl: bool,
         meta: bool,
         now_ms: u64,
+    ) {
+        self.on_content_keydown_impl(data, ctrl, meta, Some(now_ms));
+    }
+
+    fn on_content_keydown_impl(
+        &self,
+        data: &KeyboardEventData,
+        ctrl: bool,
+        meta: bool,
+        now_ms: Option<u64>,
     ) {
         match data.key {
             KeyboardKey::ArrowDown => (self.send)(Event::HighlightNext),
@@ -1209,10 +1234,15 @@ impl Api<'_> {
 
             KeyboardKey::Escape => (self.send)(Event::Close),
 
-            _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
+            _ if data.character.is_some()
+                && now_ms.is_some()
+                && !ctrl
+                && !meta
+                && !data.is_composing =>
+            {
                 (self.send)(Event::TypeaheadSearch(
                     data.character.expect("checked"),
-                    now_ms,
+                    now_ms.expect("checked"),
                 ));
             }
 
@@ -1510,6 +1540,46 @@ fn apply_selection_plan(next: selection::State) -> TransitionPlan<Machine> {
     })
 }
 
+fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
+    let props = props.clone();
+
+    TransitionPlan::context_only(move |ctx: &mut Context| {
+        let (effective_multiple, effective_mode) = effective_selection_config(&props);
+
+        ctx.disabled = props.disabled;
+        ctx.readonly = props.readonly;
+        ctx.required = props.required;
+        ctx.invalid = props.invalid;
+        ctx.multiple = effective_multiple;
+        ctx.name = props.name.clone();
+        ctx.loop_focus = props.loop_focus;
+
+        ctx.selection_state.mode = effective_mode;
+        ctx.selection_state.behavior = props.selection_behavior;
+        ctx.selection_state.disabled_behavior = props.disabled_behavior;
+        ctx.selection_state.disabled_keys = props.disabled_keys.clone();
+
+        if props.value.is_some() || ctx.selection.is_controlled() {
+            ctx.selection.sync_controlled(props.value.clone());
+        }
+
+        ctx.selection_state.selected_keys = ctx.selection.get().clone();
+        ctx.selection_state = normalize_selection_state(ctx.selection_state.clone());
+        invalidate_collection_references(ctx);
+    })
+}
+
+fn effective_selection_config(props: &Props) -> (bool, selection::Mode) {
+    let multiple = props.multiple || props.selection_mode == selection::Mode::Multiple;
+    let mode = if multiple {
+        selection::Mode::Multiple
+    } else {
+        props.selection_mode
+    };
+
+    (multiple, mode)
+}
+
 fn first_key(ctx: &Context) -> Option<Key> {
     first_enabled_key(
         &ctx.items,
@@ -1566,10 +1636,6 @@ fn process_typeahead(ctx: &Context, ch: char, now_ms: u64) -> (typeahead::State,
         &ctx.selection_state.disabled_keys,
         ctx.selection_state.disabled_behavior,
     )
-}
-
-const fn next_typeahead_time_ms(ctx: &Context) -> u64 {
-    ctx.typeahead.last_key_time_ms.saturating_add(1)
 }
 
 fn invalidate_collection_references(ctx: &mut Context) {
@@ -1930,12 +1996,10 @@ mod tests {
                 Event::Clear,
                 Event::Toggle,
                 Event::Open,
-                Event::TypeaheadSearch('a', 1),
                 Event::HighlightNext,
                 Event::HighlightPrev,
                 Event::HighlightFirst,
                 Event::HighlightLast,
-                Event::TypeaheadSearch('d', 1),
                 Event::Close,
             ]
         );
@@ -2050,7 +2114,7 @@ mod tests {
         drop(readonly.send(Event::Open));
         drop(readonly.send(Event::SelectItem(key("alpha"))));
 
-        assert_eq!(*readonly.state(), State::Closed);
+        assert_eq!(*readonly.state(), State::Open);
         assert!(readonly.context().selection.get().is_empty());
     }
 
@@ -2189,7 +2253,7 @@ mod tests {
     }
 
     #[test]
-    fn keydown_helpers_use_monotonic_typeahead_timestamps() {
+    fn keydown_helpers_require_adapter_timestamps_for_typeahead() {
         let mut select = make_service(Props::new().id("sel"));
 
         let sent = RefCell::new(Vec::new());
@@ -2203,7 +2267,17 @@ mod tests {
                 false,
                 false,
             );
+            api.on_trigger_keydown_at(
+                &keyboard(KeyboardKey::Unidentified, Some('b')),
+                false,
+                false,
+                100,
+            );
         }
+        assert_eq!(
+            sent.borrow().as_slice(),
+            &[Event::TypeaheadSearch('b', 100)]
+        );
         for event in sent.take() {
             drop(select.send(event));
         }
@@ -2214,18 +2288,68 @@ mod tests {
                 sent.borrow_mut().push(event);
             };
             let api = select.connect(&send);
-            api.on_content_keydown(
+            api.on_content_keydown_at(
                 &keyboard(KeyboardKey::Unidentified, Some('r')),
                 false,
                 false,
+                1_000,
             );
         }
         for event in sent.take() {
             drop(select.send(event));
         }
 
-        assert!(first_time > 0);
-        assert!(select.context().typeahead.last_key_time_ms > first_time);
+        assert_eq!(first_time, 100);
+        assert_eq!(select.context().typeahead.last_key_time_ms, 1_000);
+    }
+
+    #[test]
+    fn set_props_syncs_context_backed_select_fields() {
+        let mut select = make_service(Props::new().id("sel"));
+
+        drop(
+            select.set_props(
+                Props::new()
+                    .id("sel")
+                    .disabled(true)
+                    .readonly(true)
+                    .required(true)
+                    .invalid(true)
+                    .multiple(true)
+                    .name("country")
+                    .loop_focus(false)
+                    .disabled_behavior(DisabledBehavior::FocusOnly)
+                    .disabled_keys(BTreeSet::from([key("bravo")]))
+                    .value(selection::Set::Single(key("alpha"))),
+            ),
+        );
+
+        assert!(select.context().disabled);
+        assert!(select.context().readonly);
+        assert!(select.context().required);
+        assert!(select.context().invalid);
+        assert!(select.context().multiple);
+        assert_eq!(select.context().name.as_deref(), Some("country"));
+        assert!(!select.context().loop_focus);
+        assert_eq!(
+            select.context().selection_state.mode,
+            selection::Mode::Multiple
+        );
+        assert_eq!(
+            select.context().selection_state.disabled_behavior,
+            DisabledBehavior::FocusOnly
+        );
+        assert_eq!(
+            *select.context().selection.get(),
+            selection::Set::Single(key("alpha"))
+        );
+
+        let attrs = select.connect(&|_| {}).trigger_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ReadOnly)), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Required)), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("true"));
     }
 
     #[test]

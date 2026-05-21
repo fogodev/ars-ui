@@ -100,6 +100,9 @@ pub enum Event {
     /// Mark IME composition as inactive and clear stale type-ahead state.
     CompositionEnd,
 
+    /// Synchronize context-backed fields from updated props.
+    SyncProps,
+
     /// Replace the item collection dynamically.
     UpdateItems(StaticCollection<Item>),
 
@@ -711,6 +714,8 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (_, Event::SyncProps) => Some(sync_props_plan(props)),
+
             (_, Event::UpdateItems(items)) => {
                 let items = items.clone();
 
@@ -731,6 +736,14 @@ impl ars_core::Machine for Machine {
             }
 
             _ => None,
+        }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        if old == new {
+            Vec::new()
+        } else {
+            vec![Event::SyncProps]
         }
     }
 
@@ -1058,7 +1071,7 @@ impl Api<'_> {
 
     /// Dispatches a keydown event.
     pub fn on_keydown(&self, data: &KeyboardEventData, shift: bool, ctrl: bool, meta: bool) {
-        self.on_keydown_at(data, shift, ctrl, meta, next_typeahead_time_ms(self.ctx));
+        self.on_keydown_impl(data, shift, ctrl, meta, None);
     }
 
     /// Dispatches a keydown event with an adapter-provided monotonic timestamp.
@@ -1069,6 +1082,17 @@ impl Api<'_> {
         ctrl: bool,
         meta: bool,
         now_ms: u64,
+    ) {
+        self.on_keydown_impl(data, shift, ctrl, meta, Some(now_ms));
+    }
+
+    fn on_keydown_impl(
+        &self,
+        data: &KeyboardEventData,
+        shift: bool,
+        ctrl: bool,
+        meta: bool,
+        now_ms: Option<u64>,
     ) {
         let key = resolved_arrow_key(data.key, self.ctx.orientation, self.ctx.dir);
 
@@ -1108,10 +1132,15 @@ impl Api<'_> {
                 (self.send)(Event::SelectAll);
             }
 
-            _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
+            _ if data.character.is_some()
+                && now_ms.is_some()
+                && !ctrl
+                && !meta
+                && !data.is_composing =>
+            {
                 (self.send)(Event::TypeaheadSearch(
                     data.character.expect("checked"),
-                    now_ms,
+                    now_ms.expect("checked"),
                 ));
             }
 
@@ -1301,6 +1330,33 @@ fn apply_selection_plan(next: selection::State) -> TransitionPlan<Machine> {
     })
 }
 
+fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
+    let props = props.clone();
+
+    TransitionPlan::context_only(move |ctx: &mut Context| {
+        ctx.disabled = props.disabled;
+        ctx.required = props.required;
+        ctx.invalid = props.invalid;
+        ctx.orientation = props.orientation;
+        ctx.dir = props.dir;
+        ctx.loop_focus = props.loop_focus;
+        ctx.loading = props.loading;
+
+        ctx.selection_state.mode = props.selection_mode;
+        ctx.selection_state.behavior = props.selection_behavior;
+        ctx.selection_state.disabled_behavior = props.disabled_behavior;
+        ctx.selection_state.disabled_keys = props.disabled_keys.clone();
+
+        if props.value.is_some() || ctx.selection.is_controlled() {
+            ctx.selection.sync_controlled(props.value.clone());
+        }
+
+        ctx.selection_state.selected_keys = ctx.selection.get().clone();
+        ctx.selection_state = normalize_selection_state(ctx.selection_state.clone());
+        invalidate_collection_references(ctx);
+    })
+}
+
 fn set_from_keys(keys: BTreeSet<Key>) -> selection::Set {
     if keys.is_empty() {
         selection::Set::Empty
@@ -1323,10 +1379,6 @@ fn selection_is_empty(set: &selection::Set) -> bool {
         selection::Set::Multiple(keys) => keys.is_empty(),
         _ => false,
     }
-}
-
-const fn next_typeahead_time_ms(ctx: &Context) -> u64 {
-    ctx.typeahead.last_key_time_ms.saturating_add(1)
 }
 
 fn process_typeahead(ctx: &Context, ch: char, now_ms: u64) -> (typeahead::State, Option<Key>) {
@@ -1767,7 +1819,7 @@ mod tests {
     }
 
     #[test]
-    fn keydown_helpers_use_monotonic_typeahead_timestamps() {
+    fn keydown_helpers_require_adapter_timestamps_for_typeahead() {
         let mut listbox = service(Props::new().id("lb"));
 
         drop(listbox.send(Event::Focus { is_keyboard: true }));
@@ -1783,7 +1835,18 @@ mod tests {
                 false,
                 false,
             );
+            api.on_keydown_at(
+                &keyboard(KeyboardKey::Unidentified, Some('b')),
+                false,
+                false,
+                false,
+                100,
+            );
         }
+        assert_eq!(
+            sent.borrow().as_slice(),
+            &[Event::TypeaheadSearch('b', 100)]
+        );
         for event in sent.take() {
             drop(listbox.send(event));
         }
@@ -1794,19 +1857,20 @@ mod tests {
                 sent.borrow_mut().push(event);
             };
             let api = listbox.connect(&send);
-            api.on_keydown(
+            api.on_keydown_at(
                 &keyboard(KeyboardKey::Unidentified, Some('r')),
                 false,
                 false,
                 false,
+                1_000,
             );
         }
         for event in sent.take() {
             drop(listbox.send(event));
         }
 
-        assert!(first_time > 0);
-        assert!(listbox.context().typeahead.last_key_time_ms > first_time);
+        assert_eq!(first_time, 100);
+        assert_eq!(listbox.context().typeahead.last_key_time_ms, 1_000);
     }
 
     #[test]
@@ -2033,11 +2097,63 @@ mod tests {
                 Event::HighlightPageDown,
                 Event::ToggleItem(key("alpha")),
                 Event::DeselectAll,
-                Event::TypeaheadSearch('a', 1),
                 Event::SelectAll,
-                Event::TypeaheadSearch('b', 1),
             ]
         );
+    }
+
+    #[test]
+    fn set_props_syncs_context_backed_listbox_fields() {
+        let mut listbox = service(Props::new().id("lb"));
+
+        drop(
+            listbox.set_props(
+                Props::new()
+                    .id("lb")
+                    .disabled(true)
+                    .required(true)
+                    .invalid(true)
+                    .orientation(ars_core::Orientation::Horizontal)
+                .dir(Direction::Rtl)
+                .loop_focus(false)
+                .loading(true)
+                .on_load_more(Callback::new_void(|| {}))
+                .selection_mode(selection::Mode::Multiple)
+                    .disabled_behavior(DisabledBehavior::FocusOnly)
+                    .disabled_keys(BTreeSet::from([key("bravo")]))
+                    .value(selection::Set::Single(key("alpha"))),
+            ),
+        );
+
+        assert!(listbox.context().disabled);
+        assert!(listbox.context().required);
+        assert!(listbox.context().invalid);
+        assert_eq!(
+            listbox.context().orientation,
+            ars_core::Orientation::Horizontal
+        );
+        assert_eq!(listbox.context().dir, Direction::Rtl);
+        assert!(!listbox.context().loop_focus);
+        assert!(listbox.context().loading);
+        assert_eq!(
+            listbox.context().selection_state.mode,
+            selection::Mode::Multiple
+        );
+        assert_eq!(
+            listbox.context().selection_state.disabled_behavior,
+            DisabledBehavior::FocusOnly
+        );
+        assert_eq!(
+            *listbox.context().selection.get(),
+            selection::Set::Single(key("alpha"))
+        );
+
+        let attrs = listbox.connect(&|_| {}).content_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Required)), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("true"));
+        assert!(listbox.connect(&|_| {}).loading_sentinel_attrs().is_some());
     }
 
     #[test]
