@@ -191,12 +191,16 @@ impl Props {
 Inactive + Activate { trapped, saved_focus_id }
   → Active { trapped: trapped || props.trapped || props.contain }
   action: ctx.saved_focus = saved_focus_id (adapter-captured ID)
-  effect: PendingEffect::named(Effect::FocusTrapListener)
+  effect: PendingEffect::named(Effect::FocusTrapListener)  ← only when the
+                                                            resolved `trapped`
+                                                            is `true`
   then_send: FocusFirst (if props.auto_focus=true)
 
   (Either `Props::trapped` or its `Props::contain` alias opts the
    scope into trapping; the event's `trapped` is a per-activation
-   override that can also force trapping when the props didn't.)
+   override that can also force trapping when the props didn't. The
+   trap listener is gated on the resolved trap value — entering
+   `Active { trapped: false }` does NOT install Tab interception.)
 
 Active + Deactivate { restore_focus }
   → Inactive
@@ -216,8 +220,9 @@ Active { trapped: false } + TrapFocus
 
 Active { trapped: true } + ReleaseTrap
   → Active { trapped: false }
-  effect: PendingEffect::named(Effect::FocusTrapListener)
-  (re-emitted for the same adapter-cleanup-drain reason as above)
+  (NO trap-listener effect — the `state_changed=true` drain
+   uninstalls the listener, which is the desired outcome since
+   `trapped: false` should not intercept Tab)
 
 Inactive + RestoreFocus
   → Inactive (stay)
@@ -333,8 +338,13 @@ impl ars_core::Machine for Machine {
                 let mut plan = TransitionPlan::to(State::Active { trapped: trap })
                     .apply(move |ctx: &mut Context| {
                         ctx.saved_focus = saved;
-                    })
-                    .with_effect(PendingEffect::named(Effect::FocusTrapListener));
+                    });
+                // Only install Tab interception when the resolved state
+                // is actually trapped — `PlatformEffects::attach_focus_trap`
+                // unconditionally wraps Tab/Shift+Tab.
+                if trap {
+                    plan = plan.with_effect(PendingEffect::named(Effect::FocusTrapListener));
+                }
                 if auto_focus {
                     plan = plan.then(Event::FocusFirst);
                 }
@@ -361,18 +371,18 @@ impl ars_core::Machine for Machine {
 
             // ── Trap / Release ──────────────────────────────────────────
             // Adapters drain ALL active effect cleanups when
-            // `state_changed` is true, so the `Active{trapped:_}` ↔
-            // `Active{trapped:_}` boundary must re-emit
-            // `Effect::FocusTrapListener` for the adapter to reinstall
-            // the keydown trap that the drain just removed.
+            // `state_changed` is true. `TrapFocus` enters a state that
+            // DOES need the listener, so it re-emits the effect for the
+            // adapter to reinstall the trap. `ReleaseTrap` exits the
+            // trapped state, so it MUST NOT re-emit — the drain
+            // teardown is the intended outcome.
             (State::Active { trapped: false }, Event::TrapFocus) => Some(
                 TransitionPlan::to(State::Active { trapped: true })
                     .with_effect(PendingEffect::named(Effect::FocusTrapListener)),
             ),
-            (State::Active { trapped: true }, Event::ReleaseTrap) => Some(
-                TransitionPlan::to(State::Active { trapped: false })
-                    .with_effect(PendingEffect::named(Effect::FocusTrapListener)),
-            ),
+            (State::Active { trapped: true }, Event::ReleaseTrap) => {
+                Some(TransitionPlan::to(State::Active { trapped: false }))
+            }
 
             // ── RestoreFocus ────────────────────────────────────────────
             // Adapters may send `RestoreFocus` explicitly (e.g. nested
@@ -598,7 +608,7 @@ expected to call into the workspace's `PlatformEffects` implementation
 
 | Effect              | When emitted                                                                                                   | Adapter contract                                                                                                                                                                                                                                                                                  |
 | ------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FocusTrapListener` | `Inactive → Active` (Activate) and every `Active{trapped:_} ↔ Active{trapped:_}` transition (TrapFocus / ReleaseTrap) | Call `PlatformEffects::attach_focus_trap(container_id, on_escape)`. Wire the returned `CleanupFn` as the effect's cleanup so `cancel_effect(Effect::FocusTrapListener)` tears the handler down on `Deactivate`. The `on_escape` callback SHOULD send `Event::Deactivate { restore_focus: true }`. **Re-emitted on TrapFocus / ReleaseTrap because adapters drain all active cleanups when `state_changed` is true, so the listener must be reinstalled to preserve Tab trapping across the Active variants.** |
+| `FocusTrapListener` | `Inactive → Active{trapped:true}` (Activate when the resolved trap is `true`) and `Active{trapped:false} → Active{trapped:true}` (TrapFocus). NOT emitted on `Inactive → Active{trapped:false}` (active-but-untrapped activation) or on `ReleaseTrap` — the listener is only valid while `trapped: true`. | Call `PlatformEffects::attach_focus_trap(container_id, on_escape)`. Wire the returned `CleanupFn` as the effect's cleanup so `cancel_effect(Effect::FocusTrapListener)` tears the handler down on `Deactivate`. The `on_escape` callback SHOULD send `Event::Deactivate { restore_focus: true }`. The state-change-driven cleanup drain also uninstalls the listener whenever the resolved state moves off `trapped: true` (TrapFocus reinstalls it, ReleaseTrap and Deactivate intentionally leave it uninstalled). |
 | `FocusFirst`        | `Active + FocusFirst` (also on `Activate` when `props.auto_focus`)                                             | Call `PlatformEffects::focus_first_tabbable(container_id)`. Fall back to focusing the container element (which has `tabindex="-1"` while active) when no tabbable descendants exist.                                                                                                              |
 | `FocusLast`         | `Active + FocusLast`                                                                                           | Call `PlatformEffects::focus_last_tabbable(container_id)`. Fall back to the container when no tabbable descendants exist.                                                                                                                                                                         |
 | `RestoreFocus`      | `Active → Inactive` (Deactivate with `restore_focus: true`) or explicit `Event::RestoreFocus` while `Inactive` | Read `service.context().saved_focus`. If `Some(id)`, apply the §1.6.1 / §7 fallback chain via `PlatformEffects::can_restore_focus` → `focus_element_by_id` → `nearest_focusable_ancestor_id` → `focus_body`. The core does not clear `saved_focus` here; the next `Activate` overwrites it.       |
