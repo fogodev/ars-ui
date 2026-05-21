@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/overlay/floating_panel/mod.rs
+expression: snapshot_attrs(&api.header_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "header",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "floating-panel",
+            ),
+        ),
+    ],
+    styles: [],
+}

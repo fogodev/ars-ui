@@ -6,14 +6,14 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [z-index-stacking]
 related: [dialog]
 references:
-  ark-ui: Dialog
-  radix-ui: AlertDialog
-  react-aria: Dialog
+    ark-ui: Dialog
+    radix-ui: AlertDialog
+    react-aria: Dialog
 ---
 
 # AlertDialog
 
-`AlertDialog` is `Dialog` with stricter interaction rules for destructive/critical confirmations. It reuses Dialog's state machine entirely (see [Dialog §1](./dialog.md#1-state-machine)) with the following overrides: no backdrop dismiss, no Escape dismiss, and initial focus on the cancel action.
+`AlertDialog` is `Dialog` with stricter interaction rules for destructive/critical confirmations. It reuses Dialog's binary state/event/effect semantics (see [Dialog §1](./dialog.md#1-state-machine)) with the following overrides: no backdrop dismiss, no Escape dismiss, and adapter-resolved initial focus on the cancel action.
 
 ## 1. State Machine
 
@@ -27,7 +27,42 @@ See [Dialog §1.2 Events](./dialog.md#12-events). AlertDialog uses the same `Eve
 
 ### 1.3 Context
 
-See [Dialog §1.3 Context](./dialog.md#13-context). AlertDialog uses the same `Context` struct with `role` set to `Role::AlertDialog`.
+AlertDialog mirrors [Dialog §1.3 Context](./dialog.md#13-context) and keeps the same open-state, dismissal, focus, role, id, title, description, and locale fields. It owns a dedicated `Context` type so localized `CancelTrigger` and `ActionTrigger` labels resolve from AlertDialog-specific `Messages` while the transition semantics remain aligned with Dialog.
+
+```rust
+/// Runtime context for the alert dialog.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Context {
+    /// Whether the alert dialog is logically open.
+    pub open: bool,
+    /// Whether the alert dialog is modal.
+    pub modal: bool,
+    /// Whether backdrop clicks may close the alert dialog.
+    pub close_on_backdrop: bool,
+    /// Whether Escape may close the alert dialog.
+    pub close_on_escape: bool,
+    /// Whether body scroll should be locked while open.
+    pub prevent_scroll: bool,
+    /// Whether focus should be restored to the trigger when closed.
+    pub restore_focus: bool,
+    /// Initial focus target resolved by the adapter.
+    pub initial_focus: Option<FocusTarget>,
+    /// Final focus target resolved by the adapter.
+    pub final_focus: Option<FocusTarget>,
+    /// Semantic role applied to content.
+    pub role: dialog::Role,
+    /// Hydration-stable semantic IDs for ARIA wiring.
+    pub ids: ComponentIds,
+    /// Whether a title has been registered.
+    pub has_title: bool,
+    /// Whether a description has been registered.
+    pub has_description: bool,
+    /// Active locale used to resolve messages.
+    pub locale: Locale,
+    /// Localized alert dialog action message bundle.
+    pub messages: Messages,
+}
+```
 
 ### 1.4 Props
 
@@ -57,13 +92,13 @@ pub struct Props {
     /// When true, the action button gets `data-ars-destructive` attribute for styling.
     pub is_destructive: bool,
     /// Callback invoked when the alert dialog open state changes.
-    pub on_open_change: Option<Callback<bool>>,
+    pub on_open_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
     /// Callback invoked when Escape is pressed (only relevant if `close_on_escape` is overridden to `true`).
-    /// See Dialog §1.4 for `PreventableEvent` semantics.
-    pub on_escape_key_down: Option<Callback<dialog::PreventableEvent>>,
+    /// See Dialog §1.4 for dismiss-attempt semantics.
+    pub on_escape_key_down: Option<Callback<dyn Fn(DismissAttempt<()>) + Send + Sync>>,
     /// Callback invoked when interaction occurs outside the alert dialog content.
-    /// See Dialog §1.4 for `PreventableEvent` semantics.
-    pub on_interact_outside: Option<Callback<dialog::PreventableEvent>>,
+    /// See Dialog §1.4 for dismiss-attempt semantics.
+    pub on_interact_outside: Option<Callback<dyn Fn(DismissAttempt<()>) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -94,7 +129,7 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
-AlertDialog delegates entirely to Dialog's Machine. See [Dialog §1.9 Full Machine Implementation](./dialog.md#19-full-machine-implementation). The only difference is the Props defaults shown in §1.4 above.
+AlertDialog reuses Dialog's `State`, `Event`, and `Effect` enums and mirrors Dialog's transition semantics. It has a dedicated `Machine` because `Props`, `Messages`, and `Context` differ, but every open/close guard and adapter intent must stay equivalent to Dialog except for the AlertDialog defaults shown in §1.4 above.
 
 ### 1.6 Connect / API
 
@@ -115,21 +150,20 @@ pub enum Part {
 }
 
 /// The API for the `AlertDialog` component.
-/// Wraps Dialog's Api with additional parts for cancel/action buttons.
 pub struct Api<'a> {
-    /// The inner Dialog API.
-    inner: dialog::Api<'a>,
+    /// Current state.
+    state: &'a State,
+    /// Current context.
+    ctx: &'a Context,
     /// The props of the alert dialog.
     props: &'a Props,
-    /// The current locale for message resolution.
-    locale: &'a Locale,
-    /// Resolved messages for accessibility labels.
-    messages: Messages,
+    /// Event sender supplied by the adapter service.
+    send: &'a dyn Fn(Event),
 }
 
 impl<'a> Api<'a> {
     /// Whether the alert dialog is open.
-    pub fn is_open(&self) -> bool { self.inner.is_open() }
+    pub fn is_open(&self) -> bool { matches!(self.state, State::Open) }
 
     /// The attributes for the root element.
     pub fn root_attrs(&self) -> AttrMap {
@@ -143,13 +177,15 @@ impl<'a> Api<'a> {
 
     /// The attributes for the trigger element.
     pub fn trigger_attrs(&self) -> AttrMap {
-        // Delegates to Dialog trigger_attrs but with alert-dialog scope
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Trigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("trigger"));
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::HasPopup), "dialog");
         attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if self.is_open() { "true" } else { "false" });
+        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.part("content"));
         attrs
     }
 
@@ -176,11 +212,23 @@ impl<'a> Api<'a> {
 
     /// The attributes for the content element.
     pub fn content_attrs(&self) -> AttrMap {
-        let mut attrs = self.inner.content_attrs();
-        // Override scope to alert-dialog
+        let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Content.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("content"));
+        attrs.set(HtmlAttr::Role, self.ctx.role.as_aria_role());
+        attrs.set(HtmlAttr::Data("ars-state"), if self.is_open() { "open" } else { "closed" });
+        attrs.set(HtmlAttr::TabIndex, "-1");
+        if self.ctx.modal {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Modal), "true");
+        }
+        if self.ctx.has_title {
+            attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("title"));
+        }
+        if self.ctx.has_description {
+            attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), self.ctx.ids.part("description"));
+        }
         attrs
     }
 
@@ -190,6 +238,8 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Title.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("title"));
+        attrs.set(HtmlAttr::Data("ars-heading-level"), self.props.title_level.clamp(1, 6).to_string());
         attrs
     }
 
@@ -199,6 +249,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Description.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("description"));
         attrs
     }
 
@@ -209,7 +260,8 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::CancelTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.messages.cancel_label)(self.locale));
+        attrs.set(HtmlAttr::Type, "button");
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.cancel_label)(&self.ctx.locale));
         attrs
     }
 
@@ -219,7 +271,8 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ActionTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.messages.confirm_label)(self.locale));
+        attrs.set(HtmlAttr::Type, "button");
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.confirm_label)(&self.ctx.locale));
         if self.props.is_destructive {
             attrs.set_bool(HtmlAttr::Data("ars-destructive"), true);
         }
@@ -232,6 +285,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::CloseTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs
     }
 }
@@ -272,18 +326,18 @@ AlertDialog
 └── CloseTrigger     (optional — explicit close button)
 ```
 
-| Part          | Element    | Key Attributes                                          |
-| ------------- | ---------- | ------------------------------------------------------- |
-| Root          | `<div>`    | `data-ars-scope="alert-dialog"`, `data-ars-state`       |
-| Trigger       | `<button>` | `aria-haspopup="dialog"`, `aria-expanded`               |
-| Backdrop      | `<div>`    | `aria-hidden="true"`, `inert`                           |
-| Positioner    | `<div>`    | `data-ars-scope="alert-dialog"`                         |
-| Content       | `<div>`    | `role="alertdialog"`, `aria-modal="true"`               |
-| Title         | `<h2>`     | `aria-labelledby` target                                |
-| Description   | `<p>`      | `aria-describedby` target                               |
-| CancelTrigger | `<button>` | `aria-label` from Messages — **receives initial focus** |
-| ActionTrigger | `<button>` | `aria-label` from Messages, `data-ars-destructive`      |
-| CloseTrigger  | `<button>` | `data-ars-scope="alert-dialog"`                         |
+| Part          | Element    | Key Attributes                                                                    |
+| ------------- | ---------- | --------------------------------------------------------------------------------- |
+| Root          | `<div>`    | `data-ars-scope="alert-dialog"`, `data-ars-state`                                 |
+| Trigger       | `<button>` | `id`, `type="button"`, `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls` |
+| Backdrop      | `<div>`    | `aria-hidden="true"`, `inert`                                                     |
+| Positioner    | `<div>`    | `data-ars-scope="alert-dialog"`                                                   |
+| Content       | `<div>`    | `role="alertdialog"`, `aria-modal="true"`                                         |
+| Title         | `<h2>`     | `id`, `data-ars-heading-level`                                                    |
+| Description   | `<p>`      | `id`                                                                              |
+| CancelTrigger | `<button>` | `type="button"`, `aria-label` from Messages — **receives initial focus**          |
+| ActionTrigger | `<button>` | `type="button"`, `aria-label` from Messages, `data-ars-destructive`               |
+| CloseTrigger  | `<button>` | `type="button"`, `data-ars-scope="alert-dialog"`                                  |
 
 ## 3. Accessibility
 
@@ -303,16 +357,18 @@ AlertDialog
 
 ### 3.2 Focus Management
 
-- **Initial focus goes to CancelTrigger** (the safe action), not the first focusable element or the destructive action. This prevents accidental confirmation of destructive actions.
-- Focus trap works identically to Dialog (Tab/Shift+Tab cycle within content).
-- On close, focus returns to the trigger element that opened the AlertDialog.
+- The agnostic core emits Dialog-compatible focus intent effects only; it does not traverse the DOM or resolve element handles.
+- When `initial_focus` is `None`, adapters resolve initial focus to `CancelTrigger` (the safe action), not the first focusable element or the destructive action. This prevents accidental confirmation of destructive actions.
+- Explicit `initial_focus` and `final_focus` values remain adapter-resolvable [`FocusTarget`] values.
+- Focus trap works identically to Dialog (Tab/Shift+Tab cycle within content) and is owned by adapters.
+- On close, adapters restore focus to the trigger element unless `final_focus` provides a different target.
 
 ## 4. Internationalization
 
 ### 4.1 Messages
 
 ```rust
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Confirm action label (default: "Confirm")
     pub confirm_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,

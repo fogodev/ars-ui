@@ -102,10 +102,10 @@ cargo install cargo-mutants --locked --version 27.0.0
 
 ```bash
 # Run on a single component machine (~6 min for popover)
-cargo mutants -p ars-components -f crates/ars-components/src/overlay/popover.rs
+cargo mutants -p ars-components -f crates/ars-components/src/overlay/popover/mod.rs
 
 # Just list what would be mutated, without running tests (fast)
-cargo mutants -p ars-components -f crates/ars-components/src/overlay/popover.rs --list
+cargo mutants -p ars-components -f crates/ars-components/src/overlay/popover/mod.rs --list
 
 # Whole crate (slow — only if you really mean it)
 cargo mutants -p ars-components
@@ -135,7 +135,7 @@ All matrix jobs run with `fail-fast: false` so failures on one module don't mask
 
 **Excluded crates** (mutation testing's signal degrades wherever determinism does): adapter glue (`ars-leptos`, `ars-dioxus`), DOM/FFI (`ars-dom`), ICU/FFI (`ars-i18n`), test infrastructure (`ars-test-harness*`), and the proc-macro crate (`ars-derive`, runs in the compiler). Adding a brand-new crate that is a good mutation target requires one new matrix entry; run a local scout first (`cargo mutants -p <crate> --list` to size, then a real run) so we know the right shard count before the nightly fires.
 
-**Bumping the pinned version.** Both the local install command above and `.github/workflows/nightly.yml` pin cargo-mutants to an exact version (currently `27.0.0`) — same convention as `wasm-pack` in the `a11y-audit` job. Pinning is deliberate: cargo-mutants ships new mutators in releases, and an unpinned install would silently change the mutation set without any code change, surfacing as phantom CI failures on a green-source repo. To bump, open a PR that (1) updates the version string in CLAUDE.md and `nightly.yml`, (2) runs the popover scout locally with the new version (`cargo mutants -p ars-components -f crates/ars-components/src/overlay/popover.rs`) to confirm the mutation count is in the same ballpark, and (3) triages any new "missed" entries the new mutators surface — they are usually genuine test-quality gaps newly visible to the tool.
+**Bumping the pinned version.** Both the local install command above and `.github/workflows/nightly.yml` pin cargo-mutants to an exact version (currently `27.0.0`) — same convention as `wasm-pack` in the `a11y-audit` job. Pinning is deliberate: cargo-mutants ships new mutators in releases, and an unpinned install would silently change the mutation set without any code change, surfacing as phantom CI failures on a green-source repo. To bump, open a PR that (1) updates the version string in CLAUDE.md and `nightly.yml`, (2) runs the popover scout locally with the new version (`cargo mutants -p ars-components -f crates/ars-components/src/overlay/popover/mod.rs`) to confirm the mutation count is in the same ballpark, and (3) triages any new "missed" entries the new mutators surface — they are usually genuine test-quality gaps newly visible to the tool.
 
 ### Property Testing (proptest)
 

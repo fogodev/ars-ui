@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/overlay/hover_card/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).arrow_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "arrow",
+            ),
+        ),
+        (
+            Data(
+                "ars-placement",
+            ),
+            String(
+                "top",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "hover-card",
+            ),
+        ),
+    ],
+    styles: [],
+}
