@@ -1806,7 +1806,9 @@ mod tests {
     #[test]
     fn non_collapsible_open_trigger_is_aria_disabled_but_focusable() {
         let service = service(props().default_value(keys(&["a"])));
-        let attrs = service.connect(&|_| {}).item_trigger_attrs(&key("a"), false);
+        let attrs = service
+            .connect(&|_| {})
+            .item_trigger_attrs(&key("a"), false);
 
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
         assert_eq!(attrs.get(&HtmlAttr::Disabled), None);
