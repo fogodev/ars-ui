@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/overlay/alert_dialog/mod.rs
+expression: "snapshot_attrs(&fresh_service(Props\n{ title_level: 0, ..test_props() }).connect(&|_| {}).title_attrs(),)"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-heading-level",
+            ),
+            String(
+                "1",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "title",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "alert-dialog",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "alert-title",
+            ),
+        ),
+    ],
+    styles: [],
+}

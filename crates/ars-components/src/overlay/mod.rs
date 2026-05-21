@@ -1,5 +1,8 @@
 //! Overlay component machines.
 
+/// Alert dialog machine.
+pub mod alert_dialog;
+
 /// Shared DOM-free overlay positioning configuration.
 pub mod positioning;
 

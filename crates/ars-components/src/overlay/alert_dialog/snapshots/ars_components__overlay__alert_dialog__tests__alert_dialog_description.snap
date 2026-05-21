@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/overlay/alert_dialog/mod.rs
+expression: "snapshot_attrs(&fresh_service(test_props()).connect(&|_|\n{}).description_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "description",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "alert-dialog",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "alert-description",
+            ),
+        ),
+    ],
+    styles: [],
+}

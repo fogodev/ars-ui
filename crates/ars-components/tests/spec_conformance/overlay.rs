@@ -4,12 +4,31 @@
 //! spec's §3 anatomy table and asserts the impl's `Part` enum matches.
 
 use ars_components::overlay::{
-    floating_panel, hover_card,
+    alert_dialog, floating_panel, hover_card,
     toast::{manager as toast_manager, single as toast_single},
 };
 use ars_core::{ComponentPart, Env, HtmlAttr, Service};
 
 use super::helper::assert_anatomy;
+
+#[test]
+fn alert_dialog_anatomy_matches_spec() {
+    assert_anatomy(
+        "alert-dialog",
+        &[
+            (alert_dialog::Part::Root, "root"),
+            (alert_dialog::Part::Trigger, "trigger"),
+            (alert_dialog::Part::Backdrop, "backdrop"),
+            (alert_dialog::Part::Positioner, "positioner"),
+            (alert_dialog::Part::Content, "content"),
+            (alert_dialog::Part::Title, "title"),
+            (alert_dialog::Part::Description, "description"),
+            (alert_dialog::Part::CancelTrigger, "cancel-trigger"),
+            (alert_dialog::Part::ActionTrigger, "action-trigger"),
+            (alert_dialog::Part::CloseTrigger, "close-trigger"),
+        ],
+    );
+}
 
 #[test]
 fn toast_single_anatomy_matches_spec() {

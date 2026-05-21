@@ -1049,7 +1049,7 @@ must implement `PartialEq` too. The derive composes naturally because
 ## 7. Tests
 
 The agnostic-core test surface has three layers, all covered in
-`crates/ars-components/src/overlay/popover.rs` under `#[cfg(test)]`:
+`crates/ars-components/src/overlay/popover/mod.rs` under `#[cfg(test)]`:
 
 ### 7.1 State-machine invariants
 

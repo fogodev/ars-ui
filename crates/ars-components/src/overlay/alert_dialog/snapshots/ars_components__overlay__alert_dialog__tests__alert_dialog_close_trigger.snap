@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/overlay/alert_dialog/mod.rs
+expression: "snapshot_attrs(&fresh_service(test_props()).connect(&|_|\n{}).close_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "close-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "alert-dialog",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

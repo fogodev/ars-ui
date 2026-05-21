@@ -1,0 +1,46 @@
+---
+source: crates/ars-components/src/overlay/floating_panel/mod.rs
+expression: "snapshot_attrs(&api.resize_handle_attrs(ResizeHandle::SW))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-handle",
+            ),
+            String(
+                "sw",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "resize-handle",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "floating-panel",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Resize bottom-left",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Cursor,
+            "nesw-resize",
+        ),
+    ],
+}

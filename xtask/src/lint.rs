@@ -1472,7 +1472,7 @@ mod tests {
     #[test]
     fn infer_source_component_handles_ars_components_nested_modules() {
         let file = Path::new("crates/ars-components/src/utility/field/mod.rs");
-        let file_direct = Path::new("crates/ars-components/src/overlay/presence.rs");
+        let file_direct = Path::new("crates/ars-components/src/overlay/presence/mod.rs");
 
         assert_eq!(infer_source_component(file).as_deref(), Some("field"));
         assert_eq!(
@@ -1486,7 +1486,7 @@ mod tests {
         let root = temp_dir("snapshot-ars-components");
 
         write(
-            &root.join("crates/ars-components/src/overlay/presence.rs"),
+            &root.join("crates/ars-components/src/overlay/presence/mod.rs"),
             "pub enum State {\n    Unmounted,\n    Mounting,\n    Mounted,\n    UnmountPending,\n}\n",
         );
 
