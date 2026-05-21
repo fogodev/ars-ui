@@ -1,0 +1,42 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "ae87aa5115c0",
+  "strategy": "manual-commit",
+  "branch": "t3code/272d6151",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "crates/ars-dioxus/src/lib.rs",
+    "crates/ars-dioxus/src/prelude.rs",
+    "crates/ars-dioxus/src/provider.rs",
+    "crates/ars-dioxus/tests/ars_provider.rs",
+    "crates/ars-dioxus/tests/ars_provider_wasm.rs",
+    "crates/ars-leptos/src/lib.rs",
+    "crates/ars-leptos/src/prelude.rs",
+    "crates/ars-leptos/src/provider.rs",
+    "crates/ars-leptos/tests/ars_provider.rs",
+    "crates/ars-leptos/tests/ars_provider_wasm.rs",
+    "examples/widgets-dioxus-css/src/main.rs",
+    "examples/widgets-dioxus-tailwind/src/main.rs",
+    "examples/widgets-dioxus/src/main.rs",
+    "examples/widgets-leptos-css/src/main.rs",
+    "examples/widgets-leptos-tailwind/src/main.rs",
+    "examples/widgets-leptos/src/main.rs",
+    "spec/dioxus-components/utility/ars-provider.md",
+    "spec/leptos-components/utility/ars-provider.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ae/87aa5115c0/0/metadata.json",
+      "transcript": "/ae/87aa5115c0/0/full.jsonl",
+      "content_hash": "/ae/87aa5115c0/0/content_hash.txt",
+      "prompt": "/ae/87aa5115c0/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 4308,
+    "cache_creation_tokens": 1693214,
+    "cache_read_tokens": 52874413,
+    "output_tokens": 150414,
+    "api_call_count": 203
+  }
+}

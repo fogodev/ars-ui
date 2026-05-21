@@ -1,0 +1,139 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "ae87aa5115c0",
+  "session_id": "45919921-cf11-4f5b-9fbb-8b212b7b1d9b",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-21T05:33:17.547848Z",
+  "branch": "t3code/272d6151",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "crates/ars-dioxus/src/lib.rs",
+    "crates/ars-dioxus/src/prelude.rs",
+    "crates/ars-dioxus/src/provider.rs",
+    "crates/ars-dioxus/tests/ars_provider.rs",
+    "crates/ars-dioxus/tests/ars_provider_wasm.rs",
+    "crates/ars-leptos/src/lib.rs",
+    "crates/ars-leptos/src/prelude.rs",
+    "crates/ars-leptos/src/provider.rs",
+    "crates/ars-leptos/tests/ars_provider.rs",
+    "crates/ars-leptos/tests/ars_provider_wasm.rs",
+    "examples/widgets-dioxus-css/src/main.rs",
+    "examples/widgets-dioxus-tailwind/src/main.rs",
+    "examples/widgets-dioxus/src/main.rs",
+    "examples/widgets-leptos-css/src/main.rs",
+    "examples/widgets-leptos-tailwind/src/main.rs",
+    "examples/widgets-leptos/src/main.rs",
+    "spec/dioxus-components/utility/ars-provider.md",
+    "spec/leptos-components/utility/ars-provider.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "99874b1f1f26",
+  "token_usage": {
+    "input_tokens": 4308,
+    "cache_creation_tokens": 1693214,
+    "cache_read_tokens": 52874413,
+    "output_tokens": 150414,
+    "api_call_count": 203
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Finish the ArsProvider adapter deliverables for both Leptos (#347) and Dioxus (#477) by adding integration test files, exposing ArsProvider in both preludes, and filling spec §28/§29 gaps — the component implementations already existed but the integration-tier surface was never completed.",
+    "outcome": "All deliverables implemented and committed: 4 new integration test files (22 tests passing), use_direction() hook added to both adapters (spec §22 gap), preludes updated symmetrically, both adapter specs updated, widget examples simplified to use prelude imports, cargo xci-fast all-green, and a PR opened closing both #347 and #477.",
+    "learnings": {
+      "repo": [
+        "Both ArsProvider components were fully implemented (ars-leptos/src/provider.rs:169-254, ars-dioxus/src/provider.rs:28-239) but had no adapter-tier integration tests and were not exposed in the preludes — issue #477 was closed prematurely as 'superseded by #193' without the discrete adapter deliverable being finished.",
+        "The use_direction() hook was required by Leptos spec §22 but was missing from both adapter implementations; use_style_strategy() existed in ars-dioxus but was undocumented in the Dioxus spec §22.",
+        "Dioxus --all-features activates the 'desktop' feature which switches the default platform from NullPlatform to DesktopPlatform, making SSR tests for dioxus_platform default feature-sensitive; tests must use default_dioxus_platform() dynamically rather than hardcoding a type.",
+        "All 6 widget examples were importing ArsProvider from the crate root (ars_*::{ArsProvider, prelude::t}) instead of the prelude because it wasn't re-exported there — a direct validator that the prelude additions were needed.",
+        "Integration test files in tests/ cannot access pub(crate) probe helpers defined in src/ — each test file must define its own local Probe/probe component.",
+        "cargo xci-fast is the workspace gate (~5 min) covering fmt, check, clippy, unit/integration, spec-compile-snippets, error-variant-coverage, and snapshot-count.",
+        "The project uses a post-implementation-audit skill with three phases: (1) spec/impl drift, (2) ≥2 rounds of 'anything missing?', (3) llvm-cov coverage audit — the audit found 5 distinct gaps before going clean.",
+        "Leptos SSR oracle pattern: view!{}.to_html(). Dioxus SSR oracle pattern: VirtualDom::new(app) → vdom.rebuild_in_place() → dioxus_ssr::render(&vdom)."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-leptos/src/provider.rs",
+          "line": 169,
+          "end_line": 254,
+          "finding": "ArsProvider Leptos component implementation — fully spec-compliant before this PR; the gap was only integration tests and prelude exposure."
+        },
+        {
+          "path": "crates/ars-dioxus/src/provider.rs",
+          "line": 28,
+          "end_line": 239,
+          "finding": "ArsProvider Dioxus component implementation — same situation; also contains default_dioxus_platform() which resolves the platform based on enabled feature flags."
+        },
+        {
+          "path": "crates/ars-dioxus/tests/ars_provider.rs",
+          "line": 1,
+          "end_line": 1,
+          "finding": "Dioxus SSR test for dioxus_platform default must call default_dioxus_platform() dynamically rather than asserting a concrete type, because the desktop feature changes which platform is returned."
+        }
+      ],
+      "workflow": [
+        "leptosfmt can cause widespread reformatting of unrelated files when run broadly; changes must be scoped carefully and unintended reformats reverted before committing.",
+        "wasm-pack test --chrome --headless is the canonical wasm test runner; the xtask wasm recipes wrap it per-crate.",
+        "GitHub Projects board status updates require manual gh CLI calls to find the project item IDs and Status field option IDs — not automatic when reopening issues.",
+        "The audit skill's no-deferral rule means all findings during the post-implementation-audit must land in the same PR rather than being filed as follow-ups.",
+        "When dogfooding new hooks in integration tests (using the hook rather than reading context directly), this simultaneously validates the hook and provides integration-tier coverage."
+      ]
+    },
+    "friction": [
+      "Issue #477 was closed without a PR or linked implementation commit, requiring it to be reopened and adding confusion about what 'superseded' actually meant.",
+      "cargo xci-fast --all-features broke the Dioxus SSR dioxus_platform test because the desktop feature silently changes the default platform return value — required a non-obvious fix to call default_dioxus_platform() dynamically.",
+      "leptosfmt reformatted dozens of unrelated files in categories/ subdirectories, requiring manual git revert to keep the diff scoped to the actual changes.",
+      "use_direction() was listed as 'required' in Leptos spec §22 but was absent from both adapter implementations — a gap that only surfaced during the post-implementation audit, not during initial planning.",
+      "pub(crate) test helpers (ProviderProbe, ConfiguredProviderProbe) in inline tests are not accessible from tests/ integration files, requiring duplicate local probe component definitions in each test file."
+    ],
+    "open_items": [
+      "Codex review loop (waiting-for-codex-review skill) after PR push — the transcript ends at commit/push without confirming the review loop was invoked.",
+      "Dioxus wasm tests (ars_provider_wasm.rs) were written and compiled but the transcript does not confirm they were run via wasm-pack in headless Chrome before the commit.",
+      "ArsContext is explicitly kept out of both preludes (by design) — advanced users must reach it via ars_leptos::ArsContext / ars_dioxus::ArsContext; this decision should be documented in the PR description to prevent reviewer questions."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-21T05:32:26.640077Z",
+    "agent_lines": 1099,
+    "agent_removed": 23,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1099,
+    "total_lines_changed": 1122,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 910,
+      "agent_lines_removed": 1
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1099,
+      "agent_lines_removed": 23
+    }
+  ]
+}

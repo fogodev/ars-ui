@@ -1,0 +1,103 @@
+Implement tasks #347 and the equivalent one for Dioxus
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Plan: Finish ArsProvider Leptos (#347) + Dioxus (#477) adapters
+
+## Context
+
+The two adapter tasks ship the **ArsProvider** component shell — the single root context provider for every ars-ui app (locale, direction, color mode, disabled/read-only, ID prefix, portal/root nodes, platform effects, intl backend, i18n registries, style strategy, plus `dioxus_platform` on Dioxus). The agnostic core (`ArsContext`, `ColorMode`, `PlatformEffects` in `ars-core`) landed via #213; the reactive shell, hooks, and context publishing landed via #190 (Leptos) and #193 (Dioxus). #477 was then closed as superseded by #193, but the discrete *adapter component* deliverable for both frameworks was never finished:
+
+- No dedicated `tests/ars_provider*.rs` integration tests in either adapter crate.
+- `ArsProvider` is not exposed in either adapter's `prelude` — every other delivered component module is.
+- Spec §28 mandates oracles for SSR rendering, nonce auto-render when `StyleStrategy::Nonce`, default `StyleStrategy::Inline`, and (Dioxus) feature-flag-based `dioxus_platform` defaults — none of these are exercised end-to-end through the public component.
+
+The component implementations themselves (`crates/ars-leptos/src/provider.rs` lines 169-254, `crates/ars-dioxus/src/provider.rs` lines 28-239) and ~40 inline unit/wasm tests already exist; this PR adds the missing integration-tier surface so #347 and #477 can close against a green CI + Codex 👍.
+
+## Scope
+
+One bundled PR closing **#347** and **#477** (reopen #477 first). Add adapter-tier integration test files, expose `ArsProvider` in both preludes, fill the spec §28 gaps. No new dependencies. No spec changes (specs already authoritative). No changes to the component implementations or inline tests.
+
+## Reference: agnostic + adapter surface
+
+- Core: `crates/ars-core/src/provider.rs` (`ArsContext`, `ColorMode::{Light, Dark, System}`), `crates/ars-core/src/platform.rs` (`NullPlatformEffects`).
+- Leptos component + hooks: `crates/ars-leptos/src/provider.rs` (`ArsProvider`, `ArsContext`, `use_locale`, `use_direction`, `use_style_strategy` at `attrs.rs:1226`, `use_intl_backend`, `use_modality_context`, `use_platform_effects`, `use_number_formatter`, `t`).
+- Dioxus component + hooks: `crates/ars-dioxus/src/provider.rs` (same surface + `ArsProviderProps`, `arc_option_ptr_eq`, `default_dioxus_platform`).
+- Nonce: `crates/ars-leptos/src/nonce.rs` and `crates/ars-dioxus/src/nonce.rs` (`ArsNonceCssCtx`, `ArsNonceStyle`, `use_nonce_css_context_provider`, `NonceCssRule`, `append_nonce_css`).
+- SSR oracle pattern: `crates/ars-leptos/tests/client_only.rs` (Leptos `view!{}.to_html()`), `crates/ars-dioxus/tests/client_only.rs` (Dioxus `VirtualDom::new(app); vdom.rebuild_in_place(); dioxus_ssr::render(&vdom)`).
+- WASM probe pattern: existing inline `ProviderProbe` / `ConfiguredProviderProbe` in each adapter's `provider.rs` test module — reuse the **shape** (don't import; tests/ files can't see `pub(crate)` helpers, so define a local probe).
+
+## Files to modify
+
+### Leptos (#347)
+
+1. **Create** `crates/ars-leptos/tests/ars_provider.rs` — native SSR oracle, gated `#![cfg(all(not(target_arch = "wasm32"), feature = "ssr"))]`, mirroring the `client_only.rs` shape. Scenarios:
+   - Renders `<div dir="ltr">` wrapper with children for default props (no locale supplied).
+   - Renders `<div dir="rtl">` when an RTL locale (e.g. `Locale::parse("ar-EG")`) is provided.
+   - Renders `<div dir="rtl">` when explicit `direction=Signal::stored(Direction::Rtl)` overrides an LTR locale.
+   - When `style_strategy=StyleStrategy::Nonce("test-nonce")`, the SSR HTML contains a `<style nonce="test-nonce">` tag (sourced from `ArsNonceStyle`).
+   - When `style_strategy=StyleStrategy::Inline` (default), no `<style nonce="…">` is emitted.
+
+2. **Create** `crates/ars-leptos/tests/ars_provider_wasm.rs` — `#![cfg(target_arch = "wasm32")]` + `wasm_bindgen_test_configure!(run_in_browser)`. Use a locally-defined `#[component] fn Probe()` that reads `use_context::<ArsContext>()` (reuse the pattern from the existing inline `ConfiguredProviderProbe`). Scenarios that complement (don't duplicate) the inline tests:
+   - All-props configuration round-trip: `locale`, `direction` override, `color_mode`, `disabled`, `read_only`, `id_prefix`, `portal_container_id`, `root_node_id`, `style_strategy=Cssom` — every field observable via the probe matches the input.
+   - Nonce auto-render: when `style_strategy=StyleStrategy::Nonce(...)` is passed, a probe verifies (a) `ArsNonceCssCtx` is published and (b) the rendered DOM contains a `<style>` element with the expected nonce attribute (mount via `leptos::mount::mount_to(...)` then query).
+   - `use_style_strategy()` fallback: outside any provider, returns `StyleStrategy::Inline`.
+
+3. **Edit** `crates/ars-leptos/src/prelude.rs` — add `pub use crate::ArsProvider;` and `pub use ars_core::ColorMode;` (color mode is a configuration type users pass via the `color_mode` prop; add a short doc comment on the `ColorMode` line to explain why it's in the prelude).
+
+### Dioxus (#477)
+
+4. **Create** `crates/ars-dioxus/tests/ars_provider.rs` — native SSR oracle, gated `#![cfg(not(target_arch = "wasm32"))]`, using the `render_app` helper from `client_only.rs`. Scenarios:
+   - Default props render `<div dir="ltr">` with children.
+   - RTL locale renders `<div dir="rtl">`.
+   - Explicit `direction` prop overrides locale-derived direction.
+   - `style_strategy=StyleStrategy::Nonce("test-nonce")` emits `<style nonce="test-nonce">`.
+   - Default (`None`) `style_strategy` emits no nonce style.
+   - **Dioxus-specific:** when `dioxus_platform` is `None`, the published context's `dioxus_platform` resolves to `default_dioxus_platform()` (verified via a probe component reading `use_context::<ArsContext>()`, since this is a context-registration oracle per spec §29).
+
+5. **Create** `crates/ars-dioxus/tests/ars_provider_wasm.rs` — `#![cfg(all(target_arch = "wasm32", feature = "web"))]` + `wasm_bindgen_test_configure!(run_in_browser)`. Scenarios analogous to Leptos wasm tests, plus:
+   - `dioxus_platform` resolution when no prop supplied (context-registration oracle).
+   - Nonce DOM presence verified via mount + querySelector.
+
+6. **Edit** `crates/ars-dioxus/src/prelude.rs` — add `pub use crate::{ArsProvider, ArsProviderProps};` and `pub use ars_core::ColorMode;` symmetric to Leptos. (Dioxus needs the `Props` struct re-exported because explicit Props derives are part of the user-callable surface.)
+
+### Both adapters
+
+7. Run `post-implementation-audit` skill on the diff: spec drift pass (compare new tests against §28/§29 oracles + §30 checklist), iterative "anything missing?" pass (≥2 rounds), test-coverage audit (`cargo llvm-cov test -p ars-leptos --text -- ars_provider` and same for Dioxus; uncovered branches must be intentional). Land every audit finding in this PR — no follow-ups.
+
+8. Reopen #477 (`gh issue reopen 477`) so the PR's `Closes #477` auto-close keyword works.
+
+9. Open one PR targeting `main` with body containing `Closes #347` and `Closes #477`. Wait for codex review via the `waiting-for-codex-review` skill; address every thread.
+
+## Spec parity notes (not changing the spec)
+
+- Issue #347's "Tests to add first" template lists "ARIA attributes from core ConnectApi" and "Axe-core audit using `data-ars-scope` selector". Neither applies to `ArsProvider`: spec §1.2 documents it as a context-only provider with no ConnectApi/`Part`/`data-ars-scope` (the `<div dir>` wrapper has zero ARIA semantics by design — spec §26). The PR description should call this out explicitly so the reviewer doesn't expect those tests. Spec §28 is the authoritative test-scenarios list and is what we're delivering against.
+- Leptos task description references "ZIndexAllocator and ClientOnly Leptos adapter" (#319) as a dependency — already closed and shipped. No action needed.
+
+## Verification
+
+Run from the worktree root (`/Users/ericson/.t3/worktrees/ars-ui/t3code-272d6151`):
+
+1. **Targeted unit/integration:**
+   - `cargo test -p ars-leptos --features ssr --test ars_provider`
+   - `cargo test -p ars-dioxus --test ars_provider`
+   - Wasm: `wasm-pack test --chrome --headless crates/ars-leptos --test ars_provider_wasm` (or use the workspace recipe used by existing `*_wasm` files; check `Cargo.toml` for the canonical command).
+2. **Coverage probe (per crate, per CLAUDE.md):**
+   - `cargo llvm-cov test -p ars-leptos --text -- ars_provider` — inspect uncovered branches in `provider.rs` lines around the `ArsProvider` component body; verify nonce + style strategy branches are now hit.
+   - Same for `ars-dioxus`.
+3. **Workspace gate before push:** `cargo xci-fast` (≈5 min, includes fmt, check, clippy, unit/integration/adapter, spec-compile-snippets, error-variant-coverage, snapshot-count).
+4. **Codex review:** invoke `waiting-for-codex-review` skill after first push; loop until 👍.
+5. **Manual eyeball on PR:** confirm `Closes #347` and `Closes #477` keywords are present; #477 reopened before PR opens; both preludes symmetric.
+
+## Out of scope (explicitly)
+
+- No changes to `ArsProvider` component implementation in either `provider.rs` — already spec-compliant.
+- No refactoring of existing inline tests — they cover unit-level concerns and stay where they are.
+- No new dependencies — no `Cargo.toml` edits.
+- No spec edits — spec is authoritative and unchanged.
+- `ArsContext` does not enter the prelude (it's a published context value, not a configuration type users pass in). Advanced users still reach it via `ars_leptos::ArsContext` / `ars_dioxus::ArsContext`.
+
+---
+
+Did you finish?
