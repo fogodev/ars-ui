@@ -1,0 +1,171 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "a409f77a9ec7",
+  "session_id": "019e4a69-8d84-7753-89a0-ec5d2e651f96",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-21T17:25:13.955577Z",
+  "branch": "t3code/61dbf109",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".cargo/mutants.toml",
+    "crates/ars-components/src/overlay/drawer/mod.rs",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_backdrop_closed.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_backdrop_open.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_body.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_close_trigger_custom_label.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_close_trigger_default_label.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_content_dragging.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_content_modal.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_content_non_modal.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_content_with_title_and_description.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_description.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_drag_handle_with_snap_points.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_drag_handle_without_snap_points.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_footer.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_header.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_positioner_bottom.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_positioner_left.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_positioner_right.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_positioner_top.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_positioner_with_z_index.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_root_closed.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_root_dragging.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_root_open.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_title_heading_clamp_high.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_title_heading_clamp_low.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_trigger_closed.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_trigger_open.snap",
+    "crates/ars-components/src/overlay/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay.rs",
+    "crates/ars-components/tests/spec_conformance/overlay.rs",
+    "spec/components/overlay/drawer.md",
+    "spec/dioxus-components/overlay/drawer.md",
+    "spec/leptos-components/overlay/drawer.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "93881f26c213",
+  "token_usage": {
+    "input_tokens": 826859,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 40348032,
+    "output_tokens": 71374,
+    "api_call_count": 259
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement the `ars_components::overlay::drawer` agnostic core component (task #263) following the existing Dialog pattern, with spec corrections to fix core/adapter responsibility boundaries around placement resolution and snap/velocity math.",
+    "outcome": "Fully implemented and tested Drawer agnostic core: 54 unit tests, 26 insta snapshots, spec-conformance, proptest, doctest, llvm-cov, and mutation (176 mutants, 0 missed) all passing. Committed and pushed PR with `Closes #263`.",
+    "learnings": {
+      "repo": [
+        "Dialog (`crates/ars-components/src/overlay/dialog/mod.rs`) is the canonical reference implementation pattern for all new overlay agnostic cores.",
+        "Z-index uses an adapter feedback loop: core emits `AllocateZIndex` effect, adapter responds with `SetZIndex(u32)` event, attrs render `--ars-z-index`; core never stores DOM-resolved values.",
+        "Focus trapping and restoration are pure named effects (`FocusInitial`, `FocusFirstTabbable`, `RestoreFocus`); the agnostic core never queries, stores, or resolves live DOM elements.",
+        "Snap points are fractions in `0.0..=1.0`; invalid/empty values are filtered at initialization; `default_snap_index` clamps to the last valid point.",
+        "`data-ars-placement` is emitted on both Positioner and Content parts because both layout wrappers and content CSS may need the resolved physical side.",
+        "Adapter specs (Leptos and Dioxus) must be updated alongside the core spec when core/adapter responsibility boundaries change — they had stale placement and velocity logic attributed to adapters.",
+        "`cargo xci --profile fast` is the mandatory pre-commit CI gate; commits require `Co-authored-by: OpenAI Codex <codex@openai.com>` trailer.",
+        "New agnostic components require mutation testing with `cargo mutants` and llvm-cov; all missed mutants must be triaged in the same PR.",
+        "GitHub project board field IDs require GraphQL introspection (`gh api graphql`) to find the correct `optionId` for status transitions.",
+        "The proptest for state machine invariants must allow `DragEnd` to transition `Dragging → Open` without emitting `OpenChange`, since logical open state doesn't change."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/overlay/dialog/mod.rs",
+          "line": 1,
+          "end_line": 1040,
+          "finding": "Full Dialog implementation is the structural template: State/Event/Props/Context/Part/Effect enums, ConnectApi impl, inline #[cfg(test)] module with unit+snapshot tests."
+        },
+        {
+          "path": "crates/ars-components/src/overlay/drawer/mod.rs",
+          "line": 1,
+          "end_line": 1940,
+          "finding": "New file. Velocity-based snap resolution must move from the *current* snap index in the movement direction, not from the nearest snap at the release offset — initial implementation had this wrong and was caught by a failing test."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/overlay.rs",
+          "line": 1004,
+          "end_line": 1020,
+          "finding": "Over-strict invariant: asserting OpenChange on every state-flipping transition is wrong for DragEnd (Dragging→Open is not an open/close change). The check must be scoped to actual open/closed transitions only."
+        },
+        {
+          "path": "spec/components/overlay/drawer.md",
+          "line": 230,
+          "end_line": 670,
+          "finding": "Spec had adapter-owned responsibilities for placement resolution and velocity/snap targeting; these belong to the agnostic core. DragEnd offset semantics also needed clarification: 0.0=fully open, 1.0=fully dismissed, positive velocity toward dismissal."
+        },
+        {
+          "path": ".cargo/mutants.toml",
+          "line": 1,
+          "end_line": 10,
+          "finding": "Added one justified equivalent-mutant skip for the negative velocity sign check inside `resolve_snap_index` — inside the `velocity.abs() > threshold` branch, `< 0.0` and `<= 0.0` cannot differ in behavior."
+        }
+      ],
+      "workflow": [
+        "TDD sequence: write failing tests referencing the nonexistent module first, confirm compile failure, then implement until all pass — prevents accidentally green tests.",
+        "`cargo insta accept` must be run multiple times during snapshot test development as new snapshot test cases are added incrementally.",
+        "`cargo mutants` on a ~1900-line file takes ~29 minutes; run it once at the end rather than iterating on it, collecting the full missed list before patching.",
+        "`cargo insta test --unreferenced=reject` fails workspace-wide if any other unreferenced snapshots exist — use `--unreferenced=warn` with a `--glob-filter` for targeted per-component snapshot validation.",
+        "Plan Mode cannot be exited by the assistant itself; the user must paste the plan back as an explicit implementation instruction to enter Default mode.",
+        "Builder methods and public accessor helpers on Props/Context need direct mutation tests — proptest and behavioral unit tests alone will not catch all survivors because cargo-mutants will mutate the individual field assignments."
+      ]
+    },
+    "friction": [
+      "`cargo insta test --unreferenced=reject` is unusable for per-component validation because pre-existing unrelated unreferenced snapshots elsewhere in the workspace cause the command to abort.",
+      "Velocity snap semantics were wrong in the initial implementation (snapping from nearest offset rather than from current snap in movement direction) — caught only by a failing unit test, not by spec reading.",
+      "Proptest invariant for `OpenChange` was over-strict; required a fix mid-run after proptest found a counterexample via `DragEnd`.",
+      "Plan Mode required user to explicitly paste the plan text as a new message to trigger implementation — the assistant could not exit Plan Mode on its own.",
+      "`cargo insta accept` needed multiple separate invocations as snapshot tests were added in stages, rather than one final accept pass.",
+      "GitHub project board status transition required multi-step GraphQL introspection (list project, list fields, find option ID) before a single `item-edit` mutation could be issued.",
+      "Mutation testing run took ~29 minutes, making the triage-and-rerun loop expensive (two full runs required)."
+    ],
+    "open_items": [
+      "Leptos and Dioxus adapter Drawer components are not implemented — explicitly out of scope for #263 but will be separate follow-up issues.",
+      "Pre-existing unreferenced insta snapshots across the workspace need cleanup before `cargo insta test --unreferenced=reject` can be used safely as a CI gate.",
+      "Adapter specs (Leptos/Dioxus) were updated for responsibility boundaries but no adapter implementation exists yet to validate the spec corrections against real code."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-21T17:24:13.892219Z",
+    "agent_lines": 3793,
+    "agent_removed": 28,
+    "human_added": 214,
+    "human_modified": 154,
+    "human_removed": 0,
+    "total_committed": 4084,
+    "total_lines_changed": 4189,
+    "agent_percentage": 91.2150871329673,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 184,
+      "user_lines_removed": 77,
+      "agent_lines_added": 4054,
+      "agent_lines_removed": 105,
+      "user_added_per_file": {
+        "crates/ars-components/src/overlay/drawer/mod.rs": 105,
+        "crates/ars-components/tests/proptest_state_machines/overlay.rs": 6,
+        "spec/components/overlay/drawer.md": 13,
+        "spec/dioxus-components/overlay/drawer.md": 30,
+        "spec/leptos-components/overlay/drawer.md": 30
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/overlay/drawer/mod.rs": 4,
+        "spec/components/overlay/drawer.md": 13,
+        "spec/dioxus-components/overlay/drawer.md": 30,
+        "spec/leptos-components/overlay/drawer.md": 30
+      }
+    }
+  ]
+}

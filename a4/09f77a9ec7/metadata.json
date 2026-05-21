@@ -1,0 +1,58 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "a409f77a9ec7",
+  "strategy": "manual-commit",
+  "branch": "t3code/61dbf109",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".cargo/mutants.toml",
+    "crates/ars-components/src/overlay/drawer/mod.rs",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_backdrop_closed.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_backdrop_open.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_body.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_close_trigger_custom_label.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_close_trigger_default_label.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_content_dragging.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_content_modal.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_content_non_modal.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_content_with_title_and_description.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_description.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_drag_handle_with_snap_points.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_drag_handle_without_snap_points.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_footer.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_header.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_positioner_bottom.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_positioner_left.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_positioner_right.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_positioner_top.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_positioner_with_z_index.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_root_closed.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_root_dragging.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_root_open.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_title_heading_clamp_high.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_title_heading_clamp_low.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_trigger_closed.snap",
+    "crates/ars-components/src/overlay/drawer/snapshots/ars_components__overlay__drawer__tests__drawer_trigger_open.snap",
+    "crates/ars-components/src/overlay/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay.rs",
+    "crates/ars-components/tests/spec_conformance/overlay.rs",
+    "spec/components/overlay/drawer.md",
+    "spec/dioxus-components/overlay/drawer.md",
+    "spec/leptos-components/overlay/drawer.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/a4/09f77a9ec7/0/metadata.json",
+      "transcript": "/a4/09f77a9ec7/0/full.jsonl",
+      "content_hash": "/a4/09f77a9ec7/0/content_hash.txt",
+      "prompt": "/a4/09f77a9ec7/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 826859,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 40348032,
+    "output_tokens": 71374,
+    "api_call_count": 259
+  }
+}

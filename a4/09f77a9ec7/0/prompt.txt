@@ -1,0 +1,250 @@
+Implement task #263
+
+---
+
+Implement Plan
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #263: Drawer Agnostic Core Implementation Plan
+
+## Summary
+
+Implement `ars_components::overlay::drawer` as a DOM-free agnostic core component, following the existing `dialog` implementation pattern and correcting the Drawer spec where it still assigns agnostic-core responsibilities to adapters.
+
+Scope is limited to the framework-agnostic component layer. No Leptos/Dioxus adapter component work, examples, or new dependencies.
+
+## Source Of Truth
+
+- GitHub issue: `fogodev/ars-ui#263`
+- Dependency: `#253` Dialog is closed/completed
+- Specs:
+  - `spec/components/overlay/drawer.md`
+  - `spec/components/overlay/dialog.md`
+  - `spec/shared/z-index-stacking.md`
+- Existing implementation pattern:
+  - `crates/ars-components/src/overlay/dialog/mod.rs`
+  - `crates/ars-components/src/overlay/popover/mod.rs`
+  - `crates/ars-components/tests/spec_conformance/overlay.rs`
+  - `crates/ars-components/tests/proptest_state_machines/overlay.rs`
+
+## Public API / Interface Changes
+
+Create `crates/ars-components/src/overlay/drawer/mod.rs` and export it from `crates/ars-components/src/overlay/mod.rs`.
+
+Public types:
+
+- `State`
+  - `Closed`
+  - `Open`
+  - `Dragging(f64)` where the value is the adapter-normalized drag offset on the drawer axis.
+- `Event`
+  - `Open`
+  - `Close`
+  - `Toggle`
+  - `DragStart(f64)`
+  - `DragMove(f64)`
+  - `DragEnd { offset: f64, velocity: f64 }`
+  - `SnapTo(usize)`
+  - `SetZIndex(u32)`
+  - `CloseOnBackdropClick`
+  - `CloseOnEscape`
+  - `RegisterTitle`
+  - `RegisterDescription`
+  - `SyncProps`
+- `Placement`
+  - `Top`, `Bottom`, `Left`, `Right`, `Start`, `End`
+  - `to_physical(dir: ResolvedDirection) -> ResolvedPlacement`
+  - `as_css_translate() -> &'static str`
+  - `as_data_attr() -> &'static str`
+- `ResolvedPlacement`
+  - `Top`, `Bottom`, `Left`, `Right`
+  - `as_data_attr() -> &'static str`
+  - `as_css_translate() -> &'static str`
+- `Context`
+  - Dialog-like state: open/modal/close guards/scroll/focus/ids/title/description/locale/messages
+  - Drawer state: `placement`, `resolved_placement`, `current_snap`, `snap_height`, `z_index`
+- `Props`
+  - Dialog-like props: id/open/default_open/modal/close guards/prevent_scroll/restore_focus/initial_focus/final_focus/title_level/lazy_mount/unmount_on_exit/on_open_change/on_escape_key_down/on_interact_outside
+  - Drawer props: `placement`, `dir`, `snap_points`, `default_snap_index`
+- `Messages`
+  - `role_description`
+  - `close_label`
+  - `snap_value_text`
+- `Part`
+  - `Root`, `Trigger`, `Backdrop`, `Positioner`, `Content`, `Title`, `Description`, `Header`, `Body`, `Footer`, `CloseTrigger`, `DragHandle`
+- `Effect`
+  - `OpenChange`
+  - `SetBackgroundInert`
+  - `RemoveBackgroundInert`
+  - `ScrollLockAcquire`
+  - `ScrollLockRelease`
+  - `FocusInitial`
+  - `FocusFirstTabbable`
+  - `RestoreFocus`
+  - `AllocateZIndex`
+  - `ReleaseZIndex`
+  - `SnapChange`
+
+All public items must have `///` documentation.
+
+## Spec Updates
+
+Modify `spec/components/overlay/drawer.md` in the same change:
+
+- Replace prose saying adapters resolve logical placement. The agnostic core resolves `Start`/`End` using `Props::dir`; adapters only provide an already-resolved `Direction` when they construct props.
+- Replace prose saying adapters compute velocity/snap targeting. Adapters provide normalized `offset` and `velocity`; the agnostic core computes close/snap outcome.
+- Add `SetZIndex`, `RegisterTitle`, `RegisterDescription`, and `SyncProps` to the event list.
+- Add `z_index`, `has_title`, `has_description`, `restore_focus`, `initial_focus`, `final_focus`, `current_snap`, and `snap_height` to context.
+- Clarify `data-ars-placement` is emitted from `positioner_attrs()` and `content_attrs()` using the resolved physical placement.
+- Clarify `DragEnd { offset, velocity }`: `offset` is normalized on the drawer axis, `0.0` means fully open, `1.0` means fully dismissed, and positive velocity moves toward dismissal.
+- Clarify bottom-sheet snap points are core-owned pure math over fractions, without panel or viewport measurement in the core.
+
+## Implementation Steps
+
+1. Move issue `#263` to In Progress on the GitHub project board before implementation starts.
+
+2. Add tests first in the new inline test module inside `crates/ars-components/src/overlay/drawer/mod.rs`.
+   Initial failing tests:
+   - `init_default_open_false_starts_closed`
+   - `init_default_open_true_starts_open`
+   - `placement_start_resolves_left_in_ltr_and_right_in_rtl`
+   - `placement_prop_controls_data_ars_placement_and_translate`
+   - `content_attrs_emit_role_dialog`
+   - `content_attrs_emit_modal_role_description_labelledby_and_describedby_when_registered`
+   - `focus_trap_is_adapter_intent_not_dom_lookup`
+   - `backdrop_attrs_are_decorative_and_inert`
+   - `snap_to_updates_current_snap_and_snap_height`
+   - `drag_end_snaps_to_nearest_point_with_low_velocity`
+   - `drag_end_uses_velocity_to_select_next_snap`
+   - `drag_end_closes_when_normalized_offset_reaches_dismiss_threshold`
+   - `content_attrs_emit_data_ars_dragging_while_dragging`
+   - `drag_handle_attrs_emit_slider_semantics_when_snap_points_exist`
+   - `set_z_index_updates_positioner_style`
+   - `close_releases_z_index_and_focus_intents`
+   - `on_props_changed_syncs_context_fields`
+   - `initial_effects_for_default_open_emit_open_lifecycle_intents`
+
+3. Run targeted tests and confirm they fail because `drawer` does not exist yet:
+   - `cargo test -p ars-components overlay::drawer`
+   - `cargo test -p ars-components --test spec_conformance overlay::drawer_anatomy_matches_spec`
+
+4. Implement `crates/ars-components/src/overlay/drawer/mod.rs`.
+   Use `dialog/mod.rs` structure, adapting only where Drawer needs placement, snap state, drag state, role description, drag handle, and z-index.
+
+5. Add `pub mod drawer;` to `crates/ars-components/src/overlay/mod.rs`.
+
+6. Add spec-conformance coverage in `crates/ars-components/tests/spec_conformance/overlay.rs`.
+   Import `drawer` and add:
+   - `drawer_anatomy_matches_spec`
+   Expected parts:
+   - `root`, `trigger`, `backdrop`, `positioner`, `content`, `title`, `description`, `header`, `body`, `footer`, `close-trigger`, `drag-handle`
+
+7. Add proptest coverage in `crates/ars-components/tests/proptest_state_machines/overlay.rs`.
+   Add Drawer strategies and an ignored nightly proptest asserting:
+   - `ctx.open` matches `State::Open | State::Dragging(_)`
+   - resolved placement matches `placement + dir`
+   - snap index is always in range when snap points exist
+   - guarded backdrop/escape events are no-ops when disabled
+   - `SetZIndex` changes only z-index context
+   - state-flipping transitions emit `OpenChange`
+   - no DOM-dependent data appears in context
+
+8. Add snapshot tests in the Drawer inline test module using `insta::assert_snapshot`.
+   Snapshot every anatomy part and each output-affecting branch:
+   - root closed/open/dragging
+   - trigger closed/open
+   - backdrop closed/open
+   - positioner with each physical placement
+   - positioner with z-index
+   - content modal/non-modal
+   - content with title/description
+   - content dragging
+   - title heading clamp low/high
+   - description
+   - header/body/footer
+   - close trigger default/custom/localized label
+   - drag handle with no snap points
+   - drag handle with snap points/current snap
+
+9. Update `spec/components/overlay/drawer.md` to match the final public API and core/adapter responsibility split.
+
+10. Run focused verification:
+   - `cargo test -p ars-components overlay::drawer`
+   - `cargo test -p ars-components --test spec_conformance overlay::drawer_anatomy_matches_spec`
+   - `PROPTEST_CASES=64 cargo test -p ars-components --test proptest_state_machines proptest_drawer_state_context_invariants_hold -- --ignored`
+   - `cargo insta test -p ars-components drawer --unreferenced=reject`
+   - `cargo test -p ars-components --doc drawer`
+
+11. Run the mandatory post-implementation audit skill before presenting the result.
+   Audit must cover:
+   - Drawer spec/code drift
+   - at least two “anything else missing?” rounds
+   - coverage breadth: unit, snapshot, proptest, spec-conformance, doctest, mutation, llvm-cov
+
+12. Run coverage and mutation checks required for a new agnostic component:
+   - `cargo llvm-cov test -p ars-components --lib --no-fail-fast --text -- overlay::drawer`
+   - `cargo mutants -p ars-components -f crates/ars-components/src/overlay/drawer/mod.rs`
+   - Triage every `MISSED` mutant in the same PR by adding tests or a justified `.cargo/mutants.toml` skip.
+
+13. Final local validation before user review:
+   - `cargo test -p ars-components overlay::drawer`
+   - `cargo test -p ars-components --test spec_conformance`
+   - `cargo test -p ars-components --test proptest_state_machines proptest_drawer_state_context_invariants_hold -- --ignored`
+   - `cargo insta test -p ars-components --unreferenced=reject`
+   - `cargo xtask spec validate`
+
+14. Present the local result for user review.
+   Do not commit or push until explicit user approval.
+
+15. After approval:
+   - run `cargo xci --profile fast`
+   - commit with `Co-authored-by: OpenAI Codex <codex@openai.com>`
+   - push a PR targeting `main`
+   - PR body must include `Closes #263`
+   - if `.snap` files changed, add the `snapshot-reviewed` label
+   - invoke `.agents/skills/waiting-for-codex-review/SKILL.md` after the first push and after every later push
+
+## Test Scenarios
+
+Required behavior coverage:
+
+- Placement:
+  - `Right` default resolves to right.
+  - `Start` resolves left in LTR and right in RTL.
+  - `End` resolves right in LTR and left in RTL.
+  - `data-ars-placement` uses physical placement.
+- ARIA:
+  - content has `role="dialog"`.
+  - modal content has `aria-modal="true"`.
+  - content has localized `aria-roledescription`.
+  - title/description registration gates `aria-labelledby` and `aria-describedby`.
+- Adapter intent boundary:
+  - opening emits focus/scroll/inert/z-index intents, never DOM lookup data.
+  - closing emits restore-focus/scroll-release/inert-release/z-index-release intents.
+- Backdrop:
+  - backdrop is decorative: `aria-hidden="true"` and `inert`.
+  - backdrop close respects `close_on_backdrop`.
+- Snap points:
+  - default snap index clamps into range.
+  - `SnapTo` clamps into range.
+  - low-velocity drag snaps to nearest point.
+  - high positive velocity moves toward dismissal/smaller snap.
+  - high negative velocity moves toward expansion/larger snap.
+- Swipe dismiss:
+  - drag start/move enters `Dragging`.
+  - drag end below dismiss threshold returns open/snap.
+  - drag end past dismiss threshold closes.
+- Attribute snapshots:
+  - every `Part` and every output-affecting state/prop/context branch.
+
+## Assumptions And Defaults
+
+- No new dependency crate will be added.
+- Drawer snap points are represented as fractions in `0.0..=1.0`; invalid or empty values are filtered out during initialization.
+- `default_snap_index` clamps to the last valid snap point.
+- `snap_points` are only semantically active for bottom-sheet behavior, but the core helpers remain pure and DOM-free.
+- `data-ars-placement` is emitted on both `Positioner` and `Content` because both layout wrappers and content CSS may need the resolved physical side.
+- Z-index is represented as an adapter feedback loop: core emits `AllocateZIndex`, adapter sends `SetZIndex(u32)`, and attrs render `--ars-z-index`.
+- Focus trapping and focus restoration are represented only as named effects; the core never queries, stores, or resolves live elements.
