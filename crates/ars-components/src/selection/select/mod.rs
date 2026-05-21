@@ -1793,7 +1793,24 @@ fn serialize_selection(selection: &selection::Set) -> String {
 }
 
 fn typeahead_time(now_ms: Option<u64>, state: &typeahead::State) -> u64 {
-    now_ms.unwrap_or_else(|| state.last_key_time_ms.saturating_add(1))
+    now_ms.unwrap_or_else(|| {
+        current_time_ms().unwrap_or_else(|| state.last_key_time_ms.saturating_add(1))
+    })
+}
+
+#[cfg(feature = "std")]
+fn current_time_ms() -> Option<u64> {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+
+    Some(u64::try_from(millis).unwrap_or(u64::MAX))
+}
+
+#[cfg(not(feature = "std"))]
+const fn current_time_ms() -> Option<u64> {
+    None
 }
 
 #[cfg(test)]
@@ -2070,9 +2087,12 @@ mod tests {
             api.on_content_keydown(&keyboard(KeyboardKey::Escape, None), false, false);
         }
 
+        let captured = captured.into_inner();
+
+        assert_eq!(captured.len(), 16);
         assert_eq!(
-            captured.into_inner(),
-            vec![
+            &captured[..9],
+            &[
                 Event::Toggle,
                 Event::Focus { is_keyboard: true },
                 Event::Blur,
@@ -2082,15 +2102,26 @@ mod tests {
                 Event::Clear,
                 Event::Toggle,
                 Event::Open,
-                Event::TypeaheadSearch('a', 1),
+            ]
+        );
+        assert!(matches!(
+            captured[9],
+            Event::TypeaheadSearch('a', timestamp) if timestamp > 0
+        ));
+        assert_eq!(
+            &captured[10..14],
+            &[
                 Event::HighlightNext,
                 Event::HighlightPrev,
                 Event::HighlightFirst,
                 Event::HighlightLast,
-                Event::TypeaheadSearch('d', 1),
-                Event::Close,
             ]
         );
+        assert!(matches!(
+            captured[14],
+            Event::TypeaheadSearch('d', timestamp) if timestamp > 0
+        ));
+        assert_eq!(captured[15], Event::Close);
 
         let open_capture = RefCell::new(Vec::new());
 
@@ -2419,13 +2450,15 @@ mod tests {
                 100,
             );
         }
-        assert_eq!(
-            sent.borrow().as_slice(),
-            &[
-                Event::TypeaheadSearch('b', 1),
-                Event::TypeaheadSearch('b', 100)
-            ]
-        );
+        let events = sent.borrow();
+
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            events[0],
+            Event::TypeaheadSearch('b', timestamp) if timestamp > 0
+        ));
+        assert_eq!(events[1], Event::TypeaheadSearch('b', 100));
+        drop(events);
         for event in sent.take() {
             drop(select.send(event));
         }

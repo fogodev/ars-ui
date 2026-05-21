@@ -674,6 +674,10 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::ExtendSelection(key)) => {
+                if !is_selectable_key(ctx, key) {
+                    return None;
+                }
+
                 let next = range_selection_state(ctx, key.clone());
 
                 if props.disallow_empty_selection && selection_is_empty(&next.selected_keys) {
@@ -753,10 +757,7 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::ItemActivated(key)) => {
-                if ctx.disabled
-                    || !ctx.items.contains_key(key)
-                    || ctx.selection_state.is_disabled(key)
-                {
+                if ctx.disabled || !is_selectable_key(ctx, key) {
                     return None;
                 }
 
@@ -1157,7 +1158,14 @@ impl Api<'_> {
 
             KeyboardKey::Space | KeyboardKey::Enter => {
                 if let Some(key) = &self.ctx.highlighted_key {
-                    (self.send)(Event::ToggleItem(key.clone()));
+                    let event = if self.ctx.selection_state.behavior == selection::Behavior::Replace
+                    {
+                        Event::SelectItem(key.clone())
+                    } else {
+                        Event::ToggleItem(key.clone())
+                    };
+
+                    (self.send)(event);
                 }
             }
 
@@ -1329,13 +1337,6 @@ fn select_plan(
     toggle: bool,
 ) -> Option<TransitionPlan<Machine>> {
     if !is_selectable_key(ctx, &key) {
-        return None;
-    }
-    if toggle
-        && ctx.selection_state.is_selected(&key)
-        && props.disallow_empty_selection
-        && ctx.selection.get().len() <= 1
-    {
         return None;
     }
 
@@ -1589,7 +1590,24 @@ fn is_selectable_key(ctx: &Context, key: &Key) -> bool {
 }
 
 fn typeahead_time(now_ms: Option<u64>, state: &typeahead::State) -> u64 {
-    now_ms.unwrap_or_else(|| state.last_key_time_ms.saturating_add(1))
+    now_ms.unwrap_or_else(|| {
+        current_time_ms().unwrap_or_else(|| state.last_key_time_ms.saturating_add(1))
+    })
+}
+
+#[cfg(feature = "std")]
+fn current_time_ms() -> Option<u64> {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+
+    Some(u64::try_from(millis).unwrap_or(u64::MAX))
+}
+
+#[cfg(not(feature = "std"))]
+const fn current_time_ms() -> Option<u64> {
+    None
 }
 
 const fn resolved_arrow_key(
@@ -2022,13 +2040,15 @@ mod tests {
                 100,
             );
         }
-        assert_eq!(
-            sent.borrow().as_slice(),
-            &[
-                Event::TypeaheadSearch('b', 1),
-                Event::TypeaheadSearch('b', 100)
-            ]
-        );
+        let events = sent.borrow();
+
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            events[0],
+            Event::TypeaheadSearch('b', timestamp) if timestamp > 0
+        ));
+        assert_eq!(events[1], Event::TypeaheadSearch('b', 100));
+        drop(events);
         for event in sent.take() {
             drop(listbox.send(event));
         }
@@ -2267,9 +2287,12 @@ mod tests {
 
         api.on_keydown(&composing, false, false, false);
 
+        let captured = captured.into_inner();
+
+        assert_eq!(captured.len(), 19);
         assert_eq!(
-            captured.into_inner(),
-            vec![
+            &captured[..15],
+            &[
                 Event::Focus { is_keyboard: true },
                 Event::Blur,
                 Event::ToggleItem(key("alpha")),
@@ -2285,12 +2308,39 @@ mod tests {
                 Event::HighlightPageDown,
                 Event::ToggleItem(key("alpha")),
                 Event::DeselectAll,
-                Event::TypeaheadSearch('a', 1),
-                Event::SelectAll,
-                Event::SelectAll,
-                Event::TypeaheadSearch('b', 1),
             ]
         );
+        assert!(matches!(
+            captured[15],
+            Event::TypeaheadSearch('a', timestamp) if timestamp > 0
+        ));
+        assert_eq!(captured[16], Event::SelectAll);
+        assert_eq!(captured[17], Event::SelectAll);
+        assert!(matches!(
+            captured[18],
+            Event::TypeaheadSearch('b', timestamp) if timestamp > 0
+        ));
+    }
+
+    #[test]
+    fn keydown_activation_honors_replace_selection_behavior() {
+        let captured = RefCell::new(Vec::new());
+        let mut service = service(
+            Props::new()
+                .id("lb")
+                .selection_mode(selection::Mode::Multiple)
+                .selection_behavior(selection::Behavior::Replace),
+        );
+
+        service.context_mut().highlighted_key = Some(key("bravo"));
+
+        let send = |event| captured.borrow_mut().push(event);
+
+        service
+            .connect(&send)
+            .on_keydown(&keyboard(KeyboardKey::Enter, None), false, false, false);
+
+        assert_eq!(captured.into_inner(), vec![Event::SelectItem(key("bravo"))]);
     }
 
     #[test]
@@ -2597,6 +2647,8 @@ mod tests {
 
         drop(service.send(Event::ItemActivated(key("bravo"))));
         drop(service.send(Event::ItemActivated(key("stale"))));
+        drop(service.send(Event::UpdateItems(grouped_collection())));
+        drop(service.send(Event::ItemActivated(key("group"))));
         drop(service.set_props(Props::new().id("lb").disabled(true)));
         drop(service.send(Event::ItemActivated(key("alpha"))));
 
@@ -2639,6 +2691,13 @@ mod tests {
 
         drop(no_anchor.send(Event::HighlightItem(Some(key("alpha")))));
         drop(no_anchor.send(Event::ExtendSelection(key("charlie"))));
+
+        assert_eq!(
+            *no_anchor.context().selection.get(),
+            selection::Set::Multiple(BTreeSet::from([key("alpha"), key("bravo"), key("charlie")]))
+        );
+
+        drop(no_anchor.send(Event::ExtendSelection(key("missing"))));
 
         assert_eq!(
             *no_anchor.context().selection.get(),
