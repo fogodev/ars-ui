@@ -103,6 +103,9 @@ pub enum Event {
     /// Mark IME composition as inactive and clear stale type-ahead state.
     CompositionEnd,
 
+    /// Mark whether a description element is rendered for the listbox.
+    SetDescriptionPresent(bool),
+
     /// Synchronize context-backed fields from updated props.
     SyncProps,
 
@@ -698,7 +701,13 @@ impl ars_core::Machine for Machine {
 
                 let mut next = ctx.selection_state.clone();
 
-                next.selected_keys = set_from_keys(enabled_item_keys(ctx).collect());
+                next.selected_keys = if ctx.selection_state.disabled_keys.is_empty()
+                    && enabled_item_keys(ctx).next().is_some()
+                {
+                    selection::Set::All
+                } else {
+                    set_from_keys(enabled_item_keys(ctx).collect())
+                };
 
                 Some(apply_selection_plan(next))
             }
@@ -742,6 +751,14 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(|ctx: &mut Context| {
                     ctx.is_composing = false;
                     ctx.typeahead = typeahead::State::default();
+                }))
+            }
+
+            (_, Event::SetDescriptionPresent(present)) => {
+                let present = *present;
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.has_description = present;
                 }))
             }
 
@@ -1091,7 +1108,18 @@ impl Api<'_> {
 
     /// Dispatches an item click event.
     pub fn on_item_click(&self, key: Key) {
-        (self.send)(Event::ToggleItem(key));
+        let event = if self.ctx.selection_state.behavior == selection::Behavior::Replace {
+            Event::SelectItem(key)
+        } else {
+            Event::ToggleItem(key)
+        };
+
+        (self.send)(event);
+    }
+
+    /// Dispatches description presence changes.
+    pub fn on_description_present(&self, present: bool) {
+        (self.send)(Event::SetDescriptionPresent(present));
     }
 
     /// Dispatches an item hover event.
@@ -1824,6 +1852,7 @@ mod tests {
 
         drop(toggle.send(Event::SelectAll));
 
+        assert_eq!(*toggle.context().selection.get(), selection::Set::All);
         assert!(toggle.context().selection.get().contains(&key("alpha")));
         assert!(toggle.context().selection.get().contains(&key("bravo")));
         assert!(toggle.context().selection.get().contains(&key("charlie")));
@@ -2339,8 +2368,43 @@ mod tests {
         service
             .connect(&send)
             .on_keydown(&keyboard(KeyboardKey::Enter, None), false, false, false);
+        service.connect(&send).on_item_click(key("alpha"));
 
-        assert_eq!(captured.into_inner(), vec![Event::SelectItem(key("bravo"))]);
+        assert_eq!(
+            captured.into_inner(),
+            vec![
+                Event::SelectItem(key("bravo")),
+                Event::SelectItem(key("alpha"))
+            ]
+        );
+    }
+
+    #[test]
+    fn description_presence_can_be_registered_through_api() {
+        let mut listbox = service(Props::new().id("lb"));
+        let sent = RefCell::new(Vec::new());
+        {
+            let send = |event| sent.borrow_mut().push(event);
+
+            listbox.connect(&send).on_description_present(true);
+        }
+
+        assert_eq!(
+            sent.borrow().as_slice(),
+            &[Event::SetDescriptionPresent(true)]
+        );
+
+        for event in sent.take() {
+            drop(listbox.send(event));
+        }
+
+        assert_eq!(
+            listbox
+                .connect(&|_| {})
+                .content_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("lb-description")
+        );
     }
 
     #[test]

@@ -108,6 +108,9 @@ pub enum Event {
     /// Clear the type-ahead buffer.
     ClearTypeahead,
 
+    /// Mark whether a description element is rendered for the select.
+    SetDescriptionPresent(bool),
+
     /// Synchronize context-backed fields from updated props.
     SyncProps,
 
@@ -805,6 +808,14 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (_, Event::SetDescriptionPresent(present)) => {
+                let present = *present;
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.has_description = present;
+                }))
+            }
+
             (_, Event::SyncProps) => Some(sync_props_plan(props)),
 
             (_, Event::UpdateItems(items)) => {
@@ -889,6 +900,11 @@ impl Api<'_> {
     /// Dispatches an item click.
     pub fn on_item_click(&self, key: Key) {
         (self.send)(Event::SelectItem(key));
+    }
+
+    /// Dispatches description presence changes.
+    pub fn on_description_present(&self, present: bool) {
+        (self.send)(Event::SetDescriptionPresent(present));
     }
 
     /// Dispatches an item hover.
@@ -1504,7 +1520,7 @@ fn select_item_plan(ctx: &Context, props: &Props, key: Key) -> Option<Transition
         return None;
     }
 
-    let next = if ctx.multiple {
+    let next = if ctx.multiple && ctx.selection_state.behavior == selection::Behavior::Toggle {
         ctx.selection_state.toggle(key, &ctx.items)
     } else {
         ctx.selection_state.select(key)
@@ -2208,6 +2224,23 @@ mod tests {
 
         assert!(multi.context().selection.get().is_empty());
 
+        let mut replace = make_service(
+            Props::new()
+                .id("replace")
+                .multiple(true)
+                .selection_mode(selection::Mode::Multiple)
+                .selection_behavior(selection::Behavior::Replace),
+        );
+
+        drop(replace.send(Event::Open));
+        drop(replace.send(Event::SelectItem(key("alpha"))));
+        drop(replace.send(Event::SelectItem(key("alpha"))));
+
+        assert_eq!(
+            *replace.context().selection.get(),
+            selection::Set::Multiple(BTreeSet::from([key("alpha")]))
+        );
+
         let mut allow_empty = make_service(
             Props::new()
                 .id("allow-empty")
@@ -2426,6 +2459,34 @@ mod tests {
             Some("sel-description sel-error-message")
         );
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::AutoComplete)), None);
+    }
+
+    #[test]
+    fn description_presence_can_be_registered_through_api() {
+        let mut select = make_service(Props::new().id("sel"));
+        let sent = RefCell::new(Vec::new());
+        {
+            let send = |event| sent.borrow_mut().push(event);
+
+            select.connect(&send).on_description_present(true);
+        }
+
+        assert_eq!(
+            sent.borrow().as_slice(),
+            &[Event::SetDescriptionPresent(true)]
+        );
+
+        for event in sent.take() {
+            drop(select.send(event));
+        }
+
+        assert_eq!(
+            select
+                .connect(&|_| {})
+                .trigger_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("sel-description")
+        );
     }
 
     #[test]
