@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "217f60619de3",
+  "strategy": "manual-commit",
+  "branch": "t3code/81d31d0b",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/navigation/accordion/mod.rs",
+    "spec/components/navigation/accordion.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/21/7f60619de3/0/metadata.json",
+      "transcript": "/21/7f60619de3/0/full.jsonl",
+      "content_hash": "/21/7f60619de3/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 137111,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 13759232,
+    "output_tokens": 12060,
+    "api_call_count": 114
+  }
+}
