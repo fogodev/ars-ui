@@ -37,7 +37,7 @@ use alloc::{
     string::{String, ToString as _},
     vec::Vec,
 };
-use core::fmt::{self, Debug, Write as _};
+use core::fmt::{self, Debug};
 
 use ars_collections::{Key, TabKey};
 use ars_core::{
@@ -46,6 +46,8 @@ use ars_core::{
     TransitionPlan,
 };
 use ars_interactions::KeyboardEventData;
+
+use super::key_token::dom_safe_key_token;
 
 // ────────────────────────────────────────────────────────────────────
 // State
@@ -1947,23 +1949,6 @@ fn tab_dom_id(ids: &ComponentIds, key: &Key) -> String {
 
 fn panel_dom_id(ids: &ComponentIds, key: &Key) -> String {
     ids.item("panel", &dom_safe_key_token(key))
-}
-
-fn dom_safe_key_token(key: &Key) -> String {
-    match key {
-        Key::Int(value) => format!("i-{value}"),
-        #[cfg(feature = "uuid")]
-        Key::Uuid(value) => format!("u-{value}"),
-        Key::String(value) => {
-            let mut token = String::from("s-");
-
-            for byte in value.as_bytes() {
-                write!(token, "{byte:02x}").expect("writing to a String cannot fail");
-            }
-
-            token
-        }
-    }
 }
 
 // ────────────────────────────────────────────────────────────────────

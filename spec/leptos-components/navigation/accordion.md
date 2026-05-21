@@ -40,14 +40,14 @@ The adapter owns repeated item registration, trigger refs, heading wrappers, and
 
 ## 4. Part Mapping
 
-| Core part / structure | Required?         | Adapter rendering target | Ownership     | Attr source                                           | Notes                                 |
-| --------------------- | ----------------- | ------------------------ | ------------- | ----------------------------------------------------- | ------------------------------------- |
-| `Root`                | required          | `<div>`                  | adapter-owned | `api.root_attrs()`                                    | owns ordered trigger registry         |
-| `Item`                | repeated          | `<div>`                  | adapter-owned | `api.item_attrs(key)`                                 | keyed by item key                     |
-| `ItemHeader`          | repeated          | heading wrapper          | adapter-owned | `api.item_header_attrs(key)`                          | semantic heading shell around trigger |
-| `ItemTrigger`         | repeated          | `<button>`               | adapter-owned | `api.item_trigger_attrs(key, content_id)`             | focusable roving target               |
-| `ItemIndicator`       | optional repeated | `<span>`                 | adapter-owned | `api.item_indicator_attrs(key)`                       | decorative only                       |
-| `ItemContent`         | repeated          | `<div>`                  | adapter-owned | `api.item_content_attrs(key, content_id, trigger_id)` | `role="region"` when rendered         |
+| Core part / structure | Required?         | Adapter rendering target | Ownership     | Attr source                                  | Notes                                 |
+| --------------------- | ----------------- | ------------------------ | ------------- | -------------------------------------------- | ------------------------------------- |
+| `Root`                | required          | `<div>`                  | adapter-owned | `api.root_attrs()`                           | owns ordered trigger registry         |
+| `Item`                | repeated          | `<div>`                  | adapter-owned | `api.item_attrs(key)`                        | keyed by item key                     |
+| `ItemHeader`          | repeated          | heading wrapper          | adapter-owned | `api.item_header_attrs(key)`                 | semantic heading shell around trigger |
+| `ItemTrigger`         | repeated          | `<button>`               | adapter-owned | `api.item_trigger_attrs(key, focus_visible)` | focusable roving target               |
+| `ItemIndicator`       | optional repeated | `<span>`                 | adapter-owned | `api.item_indicator_attrs(key)`              | decorative only                       |
+| `ItemContent`         | repeated          | `<div>`                  | adapter-owned | `api.item_content_attrs(key)`                | `role="region"` when rendered         |
 
 ## 5. Attr Merge and Ownership Rules
 
@@ -193,7 +193,7 @@ view! {
 
 - Initialize the machine from the committed props.
 - Register each trigger in DOM order on mount and unregister on cleanup.
-- Render heading wrappers and trigger-content linkage from the machine ids.
+- Render heading wrappers and trigger-content linkage from the core-derived ids.
 - Route click and keyboard focus through the same guard-protected core transitions.
 
 ## 26. Adapter Invariants

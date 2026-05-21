@@ -3,6 +3,8 @@
 //! Components in this module help the user move between sections, pages, or
 //! views: tabbed interfaces, accordions, breadcrumbs, paginators, and so on.
 
+mod key_token;
+
 /// Breadcrumb navigation component.
 pub mod breadcrumbs;
 
@@ -14,6 +16,9 @@ pub mod pagination;
 
 /// Steps navigation component.
 pub mod steps;
+
+/// Accordion navigation component.
+pub mod accordion;
 
 /// Tabs component — a tab list paired with associated content panels.
 pub mod tabs;

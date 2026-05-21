@@ -1,0 +1,11 @@
+---
+source: crates/ars-components/src/navigation/accordion/mod.rs
+expression: "snapshot_attrs(&closed.item_trigger_attrs(&key(\"c\"), false))"
+---
+aria-controls=accordion-content-s-63
+aria-expanded=false
+data-ars-part=item-trigger
+data-ars-scope=accordion
+data-ars-state=closed
+id=accordion-trigger-s-63
+type=button

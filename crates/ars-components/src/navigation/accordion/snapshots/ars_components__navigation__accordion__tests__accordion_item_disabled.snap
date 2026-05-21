@@ -1,0 +1,8 @@
+---
+source: crates/ars-components/src/navigation/accordion/mod.rs
+expression: "snapshot_attrs(&disabled.connect(&|_| {}).item_attrs(&key(\"b\")))"
+---
+data-ars-disabled=true
+data-ars-part=item
+data-ars-scope=accordion
+data-ars-state=closed
