@@ -30,14 +30,6 @@ AttrMap {
         ),
         (
             Aria(
-                AutoComplete,
-            ),
-            String(
-                "none",
-            ),
-        ),
-        (
-            Aria(
                 Expanded,
             ),
             String(
@@ -82,6 +74,14 @@ AttrMap {
             ),
             String(
                 "sel-content",
+            ),
+        ),
+        (
+            Aria(
+                DescribedBy,
+            ),
+            String(
+                "sel-description sel-error-message",
             ),
         ),
         (

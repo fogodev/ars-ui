@@ -633,6 +633,7 @@ impl ars_core::Machine for Machine {
                     | Event::HighlightNext
                     | Event::HighlightPrev
                     | Event::HighlightItem(_)
+                    | Event::TypeaheadSearch(_, _)
             )
         {
             return None;
@@ -651,6 +652,7 @@ impl ars_core::Machine for Machine {
                     | Event::HighlightNext
                     | Event::HighlightPrev
                     | Event::HighlightItem(_)
+                    | Event::TypeaheadSearch(_, _)
             )
         {
             return None;
@@ -685,11 +687,13 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                if props.disallow_empty_selection && ctx.selection.get().len() <= 1 {
+                let next = ctx.selection_state.deselect_from_all(key, &ctx.items);
+
+                if props.disallow_empty_selection && next.selected_keys.is_empty() {
                     return None;
                 }
 
-                Some(apply_selection_plan(ctx.selection_state.deselect(key)))
+                Some(apply_selection_plan(next))
             }
 
             (_, Event::Clear) => {
@@ -955,7 +959,6 @@ impl Api<'_> {
                 if self.ctx.open { "true" } else { "false" },
             )
             .set(HtmlAttr::Aria(AriaAttr::HasPopup), "listbox")
-            .set(HtmlAttr::Aria(AriaAttr::AutoComplete), "none")
             .set(
                 HtmlAttr::Aria(AriaAttr::Controls),
                 self.ctx.ids.part("content"),
@@ -991,6 +994,23 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
         }
 
+        let mut described_by = Vec::new();
+
+        if self.ctx.has_description {
+            described_by.push(self.ctx.ids.part("description"));
+        }
+
+        if self.ctx.invalid {
+            described_by.push(self.ctx.ids.part("error-message"));
+        }
+
+        if !described_by.is_empty() {
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::DescribedBy),
+                described_by.join(" "),
+            );
+        }
+
         if self.ctx.disabled {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
@@ -1013,6 +1033,17 @@ impl Api<'_> {
 
     /// Dispatches trigger keydown events.
     pub fn on_trigger_keydown(&self, data: &KeyboardEventData, ctrl: bool, meta: bool) {
+        self.on_trigger_keydown_at(data, ctrl, meta, next_typeahead_time_ms(self.ctx));
+    }
+
+    /// Dispatches trigger keydown events with an adapter-provided monotonic timestamp.
+    pub fn on_trigger_keydown_at(
+        &self,
+        data: &KeyboardEventData,
+        ctrl: bool,
+        meta: bool,
+        now_ms: u64,
+    ) {
         match data.key {
             KeyboardKey::ArrowDown | KeyboardKey::ArrowUp => (self.send)(Event::Open),
 
@@ -1021,7 +1052,10 @@ impl Api<'_> {
             KeyboardKey::Escape if self.ctx.open => (self.send)(Event::Close),
 
             _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
-                (self.send)(Event::TypeaheadSearch(data.character.expect("checked"), 0));
+                (self.send)(Event::TypeaheadSearch(
+                    data.character.expect("checked"),
+                    now_ms,
+                ));
             }
 
             _ => {}
@@ -1138,6 +1172,17 @@ impl Api<'_> {
 
     /// Dispatches content keydown events.
     pub fn on_content_keydown(&self, data: &KeyboardEventData, ctrl: bool, meta: bool) {
+        self.on_content_keydown_at(data, ctrl, meta, next_typeahead_time_ms(self.ctx));
+    }
+
+    /// Dispatches content keydown events with an adapter-provided monotonic timestamp.
+    pub fn on_content_keydown_at(
+        &self,
+        data: &KeyboardEventData,
+        ctrl: bool,
+        meta: bool,
+        now_ms: u64,
+    ) {
         match data.key {
             KeyboardKey::ArrowDown => (self.send)(Event::HighlightNext),
 
@@ -1156,7 +1201,10 @@ impl Api<'_> {
             KeyboardKey::Escape => (self.send)(Event::Close),
 
             _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
-                (self.send)(Event::TypeaheadSearch(data.character.expect("checked"), 0));
+                (self.send)(Event::TypeaheadSearch(
+                    data.character.expect("checked"),
+                    now_ms,
+                ));
             }
 
             _ => {}
@@ -1505,6 +1553,10 @@ fn process_typeahead(ctx: &Context, ch: char, now_ms: u64) -> (typeahead::State,
     )
 }
 
+const fn next_typeahead_time_ms(ctx: &Context) -> u64 {
+    ctx.typeahead.last_key_time_ms.saturating_add(1)
+}
+
 fn invalidate_collection_references(ctx: &mut Context) {
     if ctx
         .highlighted_key
@@ -1833,12 +1885,12 @@ mod tests {
                 Event::Clear,
                 Event::Toggle,
                 Event::Open,
-                Event::TypeaheadSearch('a', 0),
+                Event::TypeaheadSearch('a', 1),
                 Event::HighlightNext,
                 Event::HighlightPrev,
                 Event::HighlightFirst,
                 Event::HighlightLast,
-                Event::TypeaheadSearch('d', 0),
+                Event::TypeaheadSearch('d', 1),
                 Event::Close,
             ]
         );
@@ -1955,6 +2007,91 @@ mod tests {
 
         assert_eq!(*readonly.state(), State::Closed);
         assert!(readonly.context().selection.get().is_empty());
+    }
+
+    #[test]
+    fn readonly_select_ignores_typeahead_open_and_highlight() {
+        let mut select = make_service(Props::new().id("sel").readonly(true));
+
+        drop(select.send(Event::TypeaheadSearch('b', 100)));
+
+        assert_eq!(select.state(), &State::Closed);
+        assert!(!select.context().open);
+        assert_eq!(select.context().highlighted_key, None);
+        assert_eq!(select.context().typeahead.search, "");
+    }
+
+    #[test]
+    fn disallow_empty_selection_allows_deselect_from_all_when_items_remain() {
+        let mut select = make_service(
+            Props::new()
+                .id("sel")
+                .multiple(true)
+                .default_value(selection::Set::All)
+                .disallow_empty_selection(true),
+        );
+
+        drop(select.send(Event::DeselectItem(key("alpha"))));
+
+        assert_eq!(
+            *select.context().selection.get(),
+            selection::Set::Multiple(BTreeSet::from([key("bravo"), key("charlie")]))
+        );
+    }
+
+    #[test]
+    fn trigger_links_description_and_error_without_autocomplete() {
+        let mut select = make_service(Props::new().id("sel").invalid(true));
+
+        select.context_mut().has_description = true;
+
+        let attrs = select.connect(&|_| {}).trigger_attrs();
+
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("sel-description sel-error-message")
+        );
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::AutoComplete)), None);
+    }
+
+    #[test]
+    fn keydown_helpers_use_monotonic_typeahead_timestamps() {
+        let mut select = make_service(Props::new().id("sel"));
+
+        let sent = RefCell::new(Vec::new());
+        {
+            let send = |event| {
+                sent.borrow_mut().push(event);
+            };
+            let api = select.connect(&send);
+            api.on_trigger_keydown(
+                &keyboard(KeyboardKey::Unidentified, Some('b')),
+                false,
+                false,
+            );
+        }
+        for event in sent.take() {
+            drop(select.send(event));
+        }
+        let first_time = select.context().typeahead.last_key_time_ms;
+        let sent = RefCell::new(Vec::new());
+        {
+            let send = |event| {
+                sent.borrow_mut().push(event);
+            };
+            let api = select.connect(&send);
+            api.on_content_keydown(
+                &keyboard(KeyboardKey::Unidentified, Some('r')),
+                false,
+                false,
+            );
+        }
+        for event in sent.take() {
+            drop(select.send(event));
+        }
+
+        assert!(first_time > 0);
+        assert!(select.context().typeahead.last_key_time_ms > first_time);
     }
 
     #[test]

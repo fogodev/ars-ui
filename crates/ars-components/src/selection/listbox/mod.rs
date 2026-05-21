@@ -530,11 +530,20 @@ impl ars_core::Machine for Machine {
         if ctx.disabled
             && matches!(
                 event,
-                Event::SelectItem(_)
+                Event::Focus { .. }
+                    | Event::SelectItem(_)
                     | Event::DeselectItem(_)
                     | Event::ToggleItem(_)
                     | Event::SelectAll
                     | Event::DeselectAll
+                    | Event::HighlightItem(_)
+                    | Event::HighlightNext
+                    | Event::HighlightPrev
+                    | Event::HighlightFirst
+                    | Event::HighlightLast
+                    | Event::HighlightPageUp
+                    | Event::HighlightPageDown
+                    | Event::TypeaheadSearch(_, _)
             )
         {
             return None;
@@ -626,23 +635,23 @@ impl ars_core::Machine for Machine {
             (_, Event::SelectItem(key)) => select_plan(ctx, props, key.clone(), false),
 
             (_, Event::DeselectItem(key)) => {
-                if props.disallow_empty_selection && ctx.selection.get().len() <= 1 {
+                let next = ctx.selection_state.deselect_from_all(key, &ctx.items);
+
+                if props.disallow_empty_selection && next.selected_keys.is_empty() {
                     return None;
                 }
 
-                let next = ctx.selection_state.deselect(key);
                 Some(apply_selection_plan(next))
             }
 
             (_, Event::ToggleItem(key)) => {
-                if ctx.selection_state.is_selected(key)
-                    && props.disallow_empty_selection
-                    && ctx.selection.get().len() <= 1
-                {
+                let next = ctx.selection_state.toggle(key.clone(), &ctx.items);
+
+                if props.disallow_empty_selection && next.selected_keys.is_empty() {
                     return None;
                 }
 
-                select_plan(ctx, props, key.clone(), true)
+                Some(apply_selection_plan(next))
             }
 
             (_, Event::SelectAll) => {
@@ -652,7 +661,7 @@ impl ars_core::Machine for Machine {
 
                 let mut next = ctx.selection_state.clone();
 
-                next.selected_keys = selection::Set::Multiple(enabled_item_keys(ctx).collect());
+                next.selected_keys = set_from_keys(enabled_item_keys(ctx).collect());
 
                 Some(apply_selection_plan(next))
             }
@@ -1046,6 +1055,18 @@ impl Api<'_> {
 
     /// Dispatches a keydown event.
     pub fn on_keydown(&self, data: &KeyboardEventData, shift: bool, ctrl: bool, meta: bool) {
+        self.on_keydown_at(data, shift, ctrl, meta, next_typeahead_time_ms(self.ctx));
+    }
+
+    /// Dispatches a keydown event with an adapter-provided monotonic timestamp.
+    pub fn on_keydown_at(
+        &self,
+        data: &KeyboardEventData,
+        shift: bool,
+        ctrl: bool,
+        meta: bool,
+        now_ms: u64,
+    ) {
         let key = resolved_arrow_key(data.key, self.ctx.orientation, self.ctx.dir);
 
         match key {
@@ -1085,7 +1106,10 @@ impl Api<'_> {
             }
 
             _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
-                (self.send)(Event::TypeaheadSearch(data.character.expect("checked"), 0));
+                (self.send)(Event::TypeaheadSearch(
+                    data.character.expect("checked"),
+                    now_ms,
+                ));
             }
 
             _ => {}
@@ -1266,6 +1290,18 @@ fn apply_selection_plan(next: selection::State) -> TransitionPlan<Machine> {
         ctx.selection_state = next;
         ctx.selection_state.selected_keys = ctx.selection.get().clone();
     })
+}
+
+fn set_from_keys(keys: BTreeSet<Key>) -> selection::Set {
+    if keys.is_empty() {
+        selection::Set::Empty
+    } else {
+        selection::Set::Multiple(keys)
+    }
+}
+
+const fn next_typeahead_time_ms(ctx: &Context) -> u64 {
+    ctx.typeahead.last_key_time_ms.saturating_add(1)
 }
 
 fn process_typeahead(ctx: &Context, ch: char, now_ms: u64) -> (typeahead::State, Option<Key>) {
@@ -1589,6 +1625,94 @@ mod tests {
     }
 
     #[test]
+    fn disabled_listbox_ignores_highlight_and_typeahead_events() {
+        let mut listbox = service(Props::new().id("lb").disabled(true));
+
+        drop(listbox.send(Event::HighlightItem(Some(key("alpha")))));
+        drop(listbox.send(Event::Focus { is_keyboard: true }));
+        drop(listbox.send(Event::TypeaheadSearch('b', 100)));
+
+        assert_eq!(listbox.context().highlighted_key, None);
+        assert_eq!(listbox.context().typeahead.search, "");
+    }
+
+    #[test]
+    fn select_all_with_no_enabled_items_canonicalizes_to_empty() {
+        let disabled = BTreeSet::from([key("alpha"), key("bravo"), key("charlie")]);
+        let mut listbox = service(
+            Props::new()
+                .id("lb")
+                .selection_mode(selection::Mode::Multiple)
+                .disabled_keys(disabled),
+        );
+
+        drop(listbox.send(Event::SelectAll));
+
+        assert_eq!(*listbox.context().selection.get(), selection::Set::Empty);
+    }
+
+    #[test]
+    fn disallow_empty_selection_allows_deselect_from_all_when_items_remain() {
+        let mut listbox = service(
+            Props::new()
+                .id("lb")
+                .selection_mode(selection::Mode::Multiple)
+                .default_value(selection::Set::All)
+                .disallow_empty_selection(true),
+        );
+
+        drop(listbox.send(Event::DeselectItem(key("alpha"))));
+
+        assert_eq!(
+            *listbox.context().selection.get(),
+            selection::Set::Multiple(BTreeSet::from([key("bravo"), key("charlie")]))
+        );
+    }
+
+    #[test]
+    fn keydown_helpers_use_monotonic_typeahead_timestamps() {
+        let mut listbox = service(Props::new().id("lb"));
+
+        drop(listbox.send(Event::Focus { is_keyboard: true }));
+        let sent = RefCell::new(Vec::new());
+        {
+            let send = |event| {
+                sent.borrow_mut().push(event);
+            };
+            let api = listbox.connect(&send);
+            api.on_keydown(
+                &keyboard(KeyboardKey::Unidentified, Some('b')),
+                false,
+                false,
+                false,
+            );
+        }
+        for event in sent.take() {
+            drop(listbox.send(event));
+        }
+        let first_time = listbox.context().typeahead.last_key_time_ms;
+        let sent = RefCell::new(Vec::new());
+        {
+            let send = |event| {
+                sent.borrow_mut().push(event);
+            };
+            let api = listbox.connect(&send);
+            api.on_keydown(
+                &keyboard(KeyboardKey::Unidentified, Some('r')),
+                false,
+                false,
+                false,
+            );
+        }
+        for event in sent.take() {
+            drop(listbox.send(event));
+        }
+
+        assert!(first_time > 0);
+        assert!(listbox.context().typeahead.last_key_time_ms > first_time);
+    }
+
+    #[test]
     fn home_end_page_and_ime_behavior_match_contract() {
         let mut service = service(Props::new().id("lb"));
 
@@ -1812,9 +1936,9 @@ mod tests {
                 Event::HighlightPageDown,
                 Event::ToggleItem(key("alpha")),
                 Event::DeselectAll,
-                Event::TypeaheadSearch('a', 0),
+                Event::TypeaheadSearch('a', 1),
                 Event::SelectAll,
-                Event::TypeaheadSearch('b', 0),
+                Event::TypeaheadSearch('b', 1),
             ]
         );
     }
