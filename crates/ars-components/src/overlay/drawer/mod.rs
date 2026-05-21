@@ -1791,7 +1791,11 @@ mod tests {
             &props,
         )
         .expect("SnapTo should produce a transition plan");
-        assert!(plan.effects.iter().any(|effect| effect.name == Effect::SnapChange));
+        assert!(
+            plan.effects
+                .iter()
+                .any(|effect| effect.name == Effect::SnapChange)
+        );
 
         let mut changed_index_same_height = service.context().clone();
         changed_index_same_height.current_snap = 0;
@@ -1803,7 +1807,11 @@ mod tests {
             &props,
         )
         .expect("SnapTo should produce a transition plan");
-        assert!(plan.effects.iter().any(|effect| effect.name == Effect::SnapChange));
+        assert!(
+            plan.effects
+                .iter()
+                .any(|effect| effect.name == Effect::SnapChange)
+        );
     }
 
     #[test]
@@ -2013,7 +2021,11 @@ mod tests {
             &props,
         )
         .expect("DragEnd should produce a transition plan");
-        assert!(plan.effects.iter().any(|effect| effect.name == Effect::SnapChange));
+        assert!(
+            plan.effects
+                .iter()
+                .any(|effect| effect.name == Effect::SnapChange)
+        );
 
         let mut changed_index_same_height = service.context().clone();
         changed_index_same_height.current_snap = 0;
@@ -2028,7 +2040,11 @@ mod tests {
             &props,
         )
         .expect("DragEnd should produce a transition plan");
-        assert!(plan.effects.iter().any(|effect| effect.name == Effect::SnapChange));
+        assert!(
+            plan.effects
+                .iter()
+                .any(|effect| effect.name == Effect::SnapChange)
+        );
     }
 
     #[test]
