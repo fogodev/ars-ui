@@ -1,0 +1,343 @@
+Implement task #260
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #260: AlertDialog Agnostic Core
+
+## Summary
+
+Implement `AlertDialog` as a dedicated agnostic overlay core in `ars-components`, scoped to issue #260. The implementation will reuse Dialog’s binary state machine semantics and named adapter intents, but expose AlertDialog-specific defaults, anatomy, ARIA/data attributes, localized action labels, and destructive-action styling.
+
+No adapter components are in scope. The first implementation action must be moving issue #260 to `In Progress` on the GitHub Project board.
+
+## Approach
+
+Use a new `crates/ars-components/src/overlay/alert_dialog.rs` module.
+
+Chosen design:
+- `AlertDialog` gets its own `Props`, `Messages`, `Part`, `Machine`, and `Api`.
+- `Machine` reuses Dialog’s public state/event/context/effect types:
+  - `pub type State = dialog::State`
+  - `pub type Event = dialog::Event`
+  - `pub type Context = dialog::Context`
+  - `pub type Effect = dialog::Effect`
+- `Machine::init`, `transition`, `on_props_changed`, and `initial_effects` convert `alert_dialog::Props` into `dialog::Props` and delegate to `dialog::Machine`.
+- `Api` renders AlertDialog-scoped attributes directly rather than exposing `dialog` scope and patching it afterward.
+- `Props::default()` locks in safety defaults:
+  - `role = dialog::Role::AlertDialog`
+  - `close_on_backdrop = false`
+  - `close_on_escape = false`
+  - `modal = true`
+  - `prevent_scroll = true`
+  - `restore_focus = true`
+  - `initial_focus = None`, interpreted by adapters as CancelTrigger default per spec
+  - `is_destructive = false`
+
+## Public API Additions
+
+Add `pub mod alert_dialog;` to `crates/ars-components/src/overlay/mod.rs`.
+
+New module path:
+- `ars_components::overlay::alert_dialog`
+
+Public items:
+- `pub type State = dialog::State`
+- `pub type Event = dialog::Event`
+- `pub type Context = dialog::Context`
+- `pub type Effect = dialog::Effect`
+- `pub struct Props`
+- `pub struct Messages`
+- `pub enum Part`
+- `pub struct Machine`
+- `pub struct Api<'a>`
+
+`Props` fields must match the current spec, adjusted to existing codebase callback types:
+- `id: String`
+- `open: Option<bool>`
+- `default_open: bool`
+- `modal: bool`
+- `close_on_backdrop: bool`
+- `close_on_escape: bool`
+- `prevent_scroll: bool`
+- `restore_focus: bool`
+- `initial_focus: Option<FocusTarget>`
+- `final_focus: Option<FocusTarget>`
+- `role: dialog::Role`
+- `title_level: u8`
+- `lazy_mount: bool`
+- `unmount_on_exit: bool`
+- `is_destructive: bool`
+- `on_open_change: Option<Callback<dyn Fn(bool) + Send + Sync>>`
+- `on_escape_key_down: Option<Callback<dyn Fn(DismissAttempt<()>) + Send + Sync>>`
+- `on_interact_outside: Option<Callback<dyn Fn(DismissAttempt<()>) + Send + Sync>>`
+
+`Props` builder methods:
+- `new`
+- `id`
+- `open`
+- `default_open`
+- `modal`
+- `close_on_backdrop`
+- `close_on_escape`
+- `prevent_scroll`
+- `restore_focus`
+- `initial_focus`
+- `final_focus`
+- `role`
+- `title_level`
+- `lazy_mount`
+- `unmount_on_exit`
+- `is_destructive`
+- `on_open_change`
+- `on_escape_key_down`
+- `on_interact_outside`
+
+`Messages`:
+- `confirm_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>`
+- `cancel_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>`
+- defaults: `"Confirm"` and `"Cancel"`
+- implements `ComponentMessages`
+
+`Part` with `#[derive(ComponentPart)]` and `#[scope = "alert-dialog"]`:
+- `Root`
+- `Trigger`
+- `Backdrop`
+- `Positioner`
+- `Content`
+- `Title`
+- `Description`
+- `CancelTrigger`
+- `ActionTrigger`
+- `CloseTrigger`
+
+`Api<'a>` methods:
+- `is_open`
+- `is_modal`
+- `role`
+- `lazy_mount`
+- `unmount_on_exit`
+- `root_attrs`
+- `trigger_attrs`
+- `backdrop_attrs`
+- `positioner_attrs`
+- `content_attrs`
+- `title_attrs`
+- `description_attrs`
+- `cancel_trigger_attrs`
+- `action_trigger_attrs`
+- `close_trigger_attrs`
+- `on_trigger_click`
+- `on_backdrop_click`
+- `on_content_keydown`
+- `on_cancel_trigger_click`
+- `on_action_trigger_click`
+- `on_close_trigger_click`
+
+Event handler mapping:
+- trigger click -> `Event::Toggle`
+- backdrop click -> `Event::CloseOnBackdropClick`
+- Escape keydown -> `Event::CloseOnEscape`
+- cancel trigger click -> `Event::Close`
+- action trigger click -> `Event::Close`
+- close trigger click -> `Event::Close`
+
+## Attribute Contract
+
+All AlertDialog parts must emit `data-ars-scope="alert-dialog"` and the matching `data-ars-part`.
+
+Root:
+- `data-ars-state="open|closed"`
+
+Trigger:
+- `id="{id}-trigger"`
+- `type="button"`
+- `aria-haspopup="dialog"`
+- `aria-expanded="true|false"`
+- `aria-controls="{id}-content"`
+
+Backdrop:
+- `data-ars-state="open|closed"`
+- `aria-hidden="true"`
+- `inert=""`
+
+Positioner:
+- scope/part only
+
+Content:
+- `id="{id}-content"`
+- `role="alertdialog"` by default
+- `aria-modal="true"` when modal
+- `data-ars-state="open|closed"`
+- `tabindex="-1"`
+- `aria-labelledby="{id}-title"` after `RegisterTitle`
+- `aria-describedby="{id}-description"` after `RegisterDescription`
+
+Title:
+- `id="{id}-title"`
+- `data-ars-heading-level` clamped to `1..=6`
+
+Description:
+- `id="{id}-description"`
+
+CancelTrigger:
+- `type="button"`
+- `aria-label` from `Messages::cancel_label`
+
+ActionTrigger:
+- `type="button"`
+- `aria-label` from `Messages::confirm_label`
+- `data-ars-destructive=""` only when `Props::is_destructive == true`
+
+CloseTrigger:
+- `type="button"`
+
+## File Changes
+
+Create:
+- `crates/ars-components/src/overlay/alert_dialog.rs`
+
+Modify:
+- `crates/ars-components/src/overlay/mod.rs`
+- `crates/ars-components/tests/proptest_state_machines/overlay.rs`
+- `spec/components/overlay/alert-dialog.md` only if implementation exposes a necessary adapter-facing focus contract not currently documented clearly enough
+
+Generated/updated:
+- `crates/ars-components/src/overlay/snapshots/ars_components__overlay__alert_dialog__tests__*.snap`
+
+Do not add dependencies. Do not touch adapter crates.
+
+## Implementation Sequence
+
+1. Move GitHub issue #260 to `In Progress`.
+
+2. Add failing unit tests first in `alert_dialog.rs` under `#[cfg(test)]`:
+   - defaults set `role=AlertDialog`, `modal=true`, `close_on_backdrop=false`, `close_on_escape=false`, `is_destructive=false`
+   - init starts closed/open using `default_open` and controlled `open`
+   - Escape does not close by default
+   - backdrop click does not close by default
+   - explicit `Close`, cancel trigger, action trigger, and close trigger close the dialog
+   - overriding `close_on_escape=true` allows Escape close
+   - overriding `close_on_backdrop=true` allows backdrop close
+   - open emits Dialog focus/scroll/inert/open-change adapter intents, with no DOM/id payload metadata
+   - content attrs produce `role="alertdialog"` and `aria-modal="true"`
+   - title/description registration wires `aria-labelledby` and `aria-describedby`
+   - `cancel_trigger_attrs` resolves localized cancel label
+   - `action_trigger_attrs` resolves localized confirm label
+   - destructive action emits `data-ars-destructive`
+   - `ConnectApi::part_attrs` matches direct methods for every `Part`
+   - builder chain covers every setter
+   - callback fields debug safely through existing `Callback(..)` behavior
+
+3. Implement `alert_dialog.rs`:
+   - module docs must state that the agnostic core owns semantic state/attrs and adapter intents only
+   - all public items, fields, variants, and methods must have `///` docs
+   - delegate machine logic through converted `dialog::Props`
+   - keep AlertDialog IDs semantic only through `ComponentIds::from_id(&props.id)`
+   - avoid any DOM traversal, element lookup, or adapter-specific handle storage
+
+4. Add snapshot tests:
+   - root closed/open
+   - trigger closed/open
+   - backdrop closed/open
+   - positioner
+   - content open default
+   - content closed
+   - content with title
+   - content with description
+   - content with title and description
+   - title default h2
+   - title clamped above six
+   - title clamped below one
+   - description
+   - cancel trigger default label
+   - cancel trigger localized label
+   - action trigger default label
+   - action trigger localized label
+   - action trigger destructive
+   - close trigger
+   Keep total AlertDialog snapshots under the 40-file hard cap.
+
+5. Add AlertDialog proptest coverage in `crates/ars-components/tests/proptest_state_machines/overlay.rs`:
+   - generate `alert_dialog::Props`
+   - generate Dialog events through `alert_dialog::Event`
+   - assert state/context invariants:
+     - `context.open == matches!(state, State::Open)`
+     - IDs stay `{id}-trigger`, `{id}-content`, `{id}-title`, `{id}-description`
+     - default close guards prevent Escape/backdrop close unless props override them
+     - emitted effects are in the Dialog effect allow-list and carry no metadata
+     - `RegisterTitle` and `RegisterDescription` are monotonic
+     - after `set_props`, context-backed fields mirror props
+
+6. Run focused red/green checks:
+   - `cargo test -p ars-components overlay::alert_dialog`
+   - `PROPTEST_CASES=64 cargo test -p ars-components --test proptest_state_machines proptest_alert_dialog_state_context_invariants_hold -- --ignored`
+   - `cargo insta test -p ars-components --unreferenced=reject`
+   - `cargo xtask lint snapshot-count`
+
+7. Run mutation testing for the new agnostic component:
+   - `cargo mutants -p ars-components -f crates/ars-components/src/overlay/alert_dialog.rs --list`
+   - `cargo mutants -p ars-components -f crates/ars-components/src/overlay/alert_dialog.rs`
+   Triage every `MISSED` mutant in the same task by adding tests or, only for true equivalent mutations, adding a narrowly justified `.cargo/mutants.toml` skip.
+
+8. Invoke `.agents/skills/post-implementation-audit/SKILL.md` after the initial implementation:
+   - run spec/implementation drift audit
+   - run at least two “anything else missing?” passes
+   - run coverage audit across relevant test types
+   - apply every finding in this same PR scope
+
+9. Run final local verification before presenting for review:
+   - `cargo test -p ars-components overlay::alert_dialog`
+   - `cargo test -p ars-components --test proptest_state_machines`
+   - `cargo insta test -p ars-components --unreferenced=reject`
+   - `cargo xtask lint snapshot-count`
+   - `cargo llvm-cov test -p ars-components --text -- alert_dialog`
+   - any focused checks required by audit findings
+
+10. Present local changes and verification results for user review. Stop before commit/push because AGENTS.md requires explicit approval.
+
+11. After user approval only:
+   - run `cargo xci-fast`
+   - commit with a message like `feat(components): add alert dialog core`
+   - include `Co-authored-by: OpenAI Codex <codex@openai.com>` if requested at that time
+   - push branch and open a non-draft PR targeting `main`
+   - PR body must include `Closes #260`
+   - if `.snap` files changed, apply `snapshot-reviewed` label
+   - invoke `.agents/skills/waiting-for-codex-review/SKILL.md`
+   - loop on Codex review until 👍 and CI green
+
+## Tests And Acceptance Criteria
+
+Required issue tests:
+- `ConnectApi` produces `role="alertdialog"`
+- focus behavior is represented by adapter-resolvable Dialog effect intents, not DOM traversal
+- Escape does not close by default
+- backdrop click does not close by default
+- cancel and action trigger APIs exist and close explicitly
+- action trigger supports destructive styling
+- `aria-labelledby` and `aria-describedby` are emitted after registration
+- localized cancel and confirm labels resolve through `Messages`
+
+Regression checks:
+- no new warnings
+- no new dependencies
+- no adapter crate changes
+- snapshot fixtures committed and reviewed
+- mutation survivors triaged
+- post-implementation audit findings fixed before review
+
+## Assumptions
+
+- Issue #253 is complete; Dialog is a valid dependency to reuse.
+- `AlertDialog` should be a dedicated public module even though Dialog already supports `Role::AlertDialog`.
+- `initial_focus: None` remains the spec default, with adapters interpreting AlertDialog’s default initial focus as `CancelTrigger`.
+- The first implementation pass will not add adapter code; adapter work belongs to later issue-backed tasks.
+- If implementation reveals that the spec’s focus wording is too adapter-specific, update only `spec/components/overlay/alert-dialog.md` in this task to document the agnostic intent clearly.
+
+---
+
+We're putting all snapshots together for the overlay category, let's split and have a single snapshot directory for each component instead
+
+---
+
+No dude, look how we have split the snapshot directories for other categories like the input one
