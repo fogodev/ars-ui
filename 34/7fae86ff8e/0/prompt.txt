@@ -1,0 +1,304 @@
+Implement task #212
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Plan: Implement FocusScope agnostic core (task #212)
+
+## Context
+
+Task #212 (epic #10) implements the **framework-agnostic FocusScope core** — a stateful utility that constrains keyboard Tab focus within a container, enabling focus trapping for `Dialog`, `Drawer`, `Popover`, and other overlay components. The spec at `spec/components/utility/focus-scope.md` defines its contract; the issue lists 10 tests and the acceptance criteria.
+
+Why this matters: FocusScope is critical infrastructure. Several already-implemented components (Dialog, Popover) currently model focus-trap behavior inline via per-component `Effect::FocusInitial` / `Effect::FocusFirstTabbable` markers. Landing FocusScope's agnostic core gives those overlays a reusable trap primitive and unblocks downstream work (Drawer, ComboBox listbox, etc.).
+
+The spec at §1.6 contains drift: its transition closures call `use_platform_effects()` synchronously, but that function lives in adapter crates (`ars-leptos`, `ars-dioxus`) — the agnostic core cannot reach it. Dialog and Popover have already established the correct pattern: a typed `Effect` enum with `PendingEffect::named(Effect::Foo)` markers that adapters dispatch on (`crates/ars-components/src/overlay/dialog/mod.rs:549`, `crates/ars-components/src/overlay/popover/mod.rs:96`). This task adopts that pattern for FocusScope and updates the spec to match.
+
+## Scope
+
+In scope (this PR):
+- New module `crates/ars-components/src/utility/focus_scope/mod.rs` with state machine, props, context, events, effect-intent enum, connect API, snapshot tests, unit tests, and proptest invariants.
+- Spec sync to `spec/components/utility/focus-scope.md` resolving the named-effect drift in §1.6, §1.6.1, §1.7.
+- New entry in `crates/ars-components/src/utility/mod.rs` exposing the module.
+
+Out of scope (deferred to separate tasks):
+- Leptos and Dioxus adapter components — the per-framework integrations are tracked under epic #10's adapter tasks.
+- DOM-level focus query, sentinel rendering, keydown handlers — adapter responsibilities.
+- `FocusRestorationStack` for nested scopes (spec §8) — adapter-scoped client-only state.
+- `audit_focus_on_orientation_change` (spec §1.6.1) — adapter-scoped.
+- Extending `EffectMetadata` to carry focus targets — `ctx.saved_focus` is sufficient.
+- Adding `has_layout` to the `PlatformEffects` trait — `can_restore_focus` already encapsulates the layout check.
+
+## Module Structure
+
+Single-file module at `crates/ars-components/src/utility/focus_scope/mod.rs`, matching the convention of `live_region/mod.rs` and `dismissable/mod.rs` (no child files). Tests live inline under `#[cfg(test)] mod tests { ... }`; snapshot fixtures land in `crates/ars-components/src/utility/focus_scope/snapshots/`.
+
+Register the module in `crates/ars-components/src/utility/mod.rs` and re-export from the crate root if utility submodules are surfaced there.
+
+## Public API surface
+
+All types are `pub` and documented (workspace `missing_docs` is hard-enforced).
+
+```rust
+// State / Event / Context / Props
+pub enum State { Inactive, Active { trapped: bool } }
+pub enum Event {
+    Activate { trapped: bool, saved_focus_id: Option<String> },
+    Deactivate { restore_focus: bool },
+    TrapFocus,
+    ReleaseTrap,
+    RestoreFocus,
+    FocusFirst,
+    FocusLast,
+}
+pub struct Context { pub saved_focus: Option<String>, pub container_id: Option<String> }
+pub struct Props {
+    pub id: String,
+    pub trapped: bool,
+    pub contain: bool,
+    pub auto_focus: bool,
+    pub restore_focus: bool,
+}
+// Default: id="", trapped=false, contain=false, auto_focus=true, restore_focus=true
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Messages;
+impl ComponentMessages for Messages {}
+
+// Typed effect intents (named-marker pattern; adapter dispatches)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    FocusTrapListener, // setup: attach Tab keydown handler + sentinels; cleanup: tear down handler
+    FocusFirst,        // setup: focus first tabbable in container (or fall back to container)
+    FocusLast,         // setup: focus last tabbable in container (or fall back to container)
+    RestoreFocus,      // setup: read ctx.saved_focus, restore with fallback chain (see §7)
+}
+
+#[derive(ComponentPart)]
+#[scope = "focus-scope"]
+pub enum Part { Container }
+
+pub struct Machine;
+pub struct Api<'a> { state: &'a State, ctx: &'a Context, props: &'a Props, send: &'a dyn Fn(Event) }
+pub struct FocusNavigationOptions { pub wrap: bool, pub from: Option<String>, pub tabbable: bool, pub accept: Option<Rc<dyn Fn(&str) -> bool>> }
+```
+
+## State machine transitions
+
+```text
+(Inactive, Activate { trapped, saved_focus_id })
+  → Active { trapped: trapped || props.contain }
+  apply: ctx.saved_focus = saved_focus_id
+  effect: PendingEffect::named(Effect::FocusTrapListener)
+  then(Event::FocusFirst) if props.auto_focus
+
+(Active { .. }, Deactivate { restore_focus })
+  → Inactive
+  cancel_effect: Effect::FocusTrapListener  (adapter cleanup tears down keydown handler)
+  if restore_focus:
+    effect: PendingEffect::named(Effect::RestoreFocus)  (adapter reads ctx.saved_focus)
+  else:
+    apply: ctx.saved_focus = None
+
+(Active { trapped: false }, TrapFocus) → Active { trapped: true }
+(Active { trapped: true },  ReleaseTrap) → Active { trapped: false }
+
+(Inactive, RestoreFocus)
+  → Inactive (no state change)
+  effect: PendingEffect::named(Effect::RestoreFocus)
+
+(Active { .. }, RestoreFocus) → None  (ignored — only meaningful after Deactivate)
+
+(Active { .. }, FocusFirst) → Active (no state change), effect: PendingEffect::named(Effect::FocusFirst)
+(Active { .. }, FocusLast)  → Active (no state change), effect: PendingEffect::named(Effect::FocusLast)
+(Inactive, FocusFirst | FocusLast) → None
+
+_ → None
+```
+
+`Machine::initial_effects` keeps the trait default (returns empty `Vec`) — the spec has no `default_active` prop so `init` always returns `State::Inactive`. No initial open-lifecycle needs to fire.
+
+## Connect API (`container_attrs`)
+
+```rust
+let mut attrs = AttrMap::new();
+let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Container.data_attrs();
+attrs.set(scope_attr, scope_val).set(part_attr, part_val);
+if self.is_active() {
+    attrs.set_bool(HtmlAttr::Data("ars-active"), true);
+    attrs.set(HtmlAttr::TabIndex, "-1");
+}
+if self.is_trapped() {
+    attrs.set_bool(HtmlAttr::Data("ars-trapped"), true);
+}
+attrs
+```
+
+`Api::is_active()` → `matches!(state, State::Active { .. })`. `Api::is_trapped()` → `matches!(state, State::Active { trapped: true })`. Imperative methods `activate(trapped, saved_focus_id)`, `deactivate(restore_focus)`, `focus_first()`, `focus_last()` all send their corresponding `Event`. `focus_next(_)` and `focus_previous(_)` return `false` (matches spec stub — the adapter exposes platform-aware variants on its own API surface).
+
+`get_tabbable_elements()` is **removed** from the core Api — synchronous DOM queries cannot run in the agnostic core (the issue's "Element/ref handling note" is explicit). Adapters call `PlatformEffects::tabbable_element_ids` directly when consumers need this.
+
+**Issue/spec attribute typo:** Issue #212 test 9 says `data-ars-focus-trapped`, but spec §2 says `data-ars-trapped`. The spec is authoritative — implement `data-ars-trapped`. Cross-reference both names in the PR description.
+
+## Effect contract (adapter handles)
+
+| Effect              | When emitted                                              | Adapter contract                                                                                                              |
+| ------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `FocusTrapListener` | `Inactive → Active` (Activate)                            | `platform.attach_focus_trap(container_id, on_escape) -> CleanupFn`. Wire the returned cleanup as the effect's cleanup.        |
+| `FocusFirst`        | `Active + FocusFirst` (also on Activate when auto_focus)  | `platform.focus_first_tabbable(container_id)`. Fall back to focusing the container element when no tabbables exist.           |
+| `FocusLast`         | `Active + FocusLast`                                      | `platform.focus_last_tabbable(container_id)`. Fall back to the container.                                                     |
+| `RestoreFocus`      | `Active → Inactive` (Deactivate) or explicit RestoreFocus | Read `service.context().saved_focus`. If `Some(id)`, run the §7 fallback chain via `PlatformEffects` methods. Adapters MAY clear via a follow-up event but the core does not require it (next `Activate` overwrites). |
+
+`cancel_effect(Effect::FocusTrapListener)` invokes the cleanup captured at install time. No separate `Effect::FocusTrapRelease` variant is needed.
+
+## Spec sync (lands in this PR)
+
+Update `spec/components/utility/focus-scope.md`:
+
+1. **§1.2 Events table** — keep all seven events. No change.
+2. **§1.6 Full Machine Implementation**:
+   - Add a `#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum Effect { FocusTrapListener, FocusFirst, FocusLast, RestoreFocus }` block before the `impl Machine`.
+   - Add `type Effect = Effect;` to the `Machine` impl.
+   - Replace every `.with_named_effect("string", |ctx, _props, send| { use_platform_effects(); ... })` with `.with_effect(PendingEffect::named(Effect::Foo))`.
+   - On `Deactivate`, add `.cancel_effect(Effect::FocusTrapListener)`.
+   - Rewrite the `(Inactive, RestoreFocus)` branch to use `TransitionPlan::new().with_effect(PendingEffect::named(Effect::RestoreFocus))` — drop the inline `restore_focus_safely` call and the `ctx.saved_focus = None` clear (next `Activate` overwrites; clarify in narrative).
+3. **§1.6.1 Focus Restoration Safety** — convert the `restore_focus_safely` Rust function to a narrative bullet list ("Adapter contract for `Effect::RestoreFocus`") that names the six DOM checks and fallback order. Remove `audit_focus_on_orientation_change` from the file (out of agnostic-core scope; if normative anywhere, it lives in `spec/foundation/11-dom-utilities.md` §3.2).
+4. **§1.7 Api** — change `focus_first()` / `focus_last()` to send `Event::FocusFirst` / `Event::FocusLast`. Delete `get_tabbable_elements()` (move responsibility into adapter API). Keep `focus_next` / `focus_previous` as `-> bool` stubs that return `false`, with a note that adapters override via their own API for components needing programmatic sequential focus.
+5. **§1.7 add a new "Effect Contract" subsection** documenting the four variants and their adapter responsibilities (mirroring the table above).
+
+`spec/foundation/11-dom-utilities.md` §3 needs no changes — its focus utilities already document the platform-level helpers adapters use.
+
+## Tests (TDD order — write before implementation)
+
+All tests are inline in `mod.rs` under `#[cfg(test)] mod tests`. Use the `helper::send_event(&service, event)` style from `live_region`. Snapshot tests use `insta::assert_snapshot!` with explicit names.
+
+### Unit tests (state-machine contract)
+
+1. `init_returns_inactive_state_and_empty_context`
+2. `activate_inactive_to_active_with_trapped_from_event`
+3. `activate_propagates_contain_prop_into_trapped_when_event_trapped_false`
+4. `activate_stores_saved_focus_id_in_context`
+5. `activate_emits_focus_trap_listener_effect`
+6. `activate_then_sends_focus_first_when_props_auto_focus_true`
+7. `activate_does_not_then_send_focus_first_when_props_auto_focus_false`
+8. `activate_ignored_when_already_active`
+9. `deactivate_active_to_inactive`
+10. `deactivate_with_restore_focus_emits_restore_focus_effect`
+11. `deactivate_without_restore_focus_clears_saved_focus`
+12. `deactivate_cancels_focus_trap_listener_effect`
+13. `deactivate_ignored_when_already_inactive`
+14. `trap_focus_toggles_trapped_flag_within_active`
+15. `release_trap_toggles_trapped_flag_within_active`
+16. `trap_focus_ignored_when_already_trapped`
+17. `release_trap_ignored_when_not_trapped`
+18. `restore_focus_when_inactive_emits_restore_focus_effect`
+19. `restore_focus_when_active_returns_none_transition`
+20. `focus_first_when_active_emits_focus_first_effect`
+21. `focus_last_when_active_emits_focus_last_effect`
+22. `focus_first_when_inactive_returns_none_transition`
+23. `focus_last_when_inactive_returns_none_transition`
+24. `props_default_matches_spec_section_1_4`
+25. `messages_default_matches_spec_empty_struct`
+
+### Connect API tests
+
+26. `container_attrs_inactive_sets_scope_and_part_only`
+27. `container_attrs_active_adds_data_active_and_tabindex_minus_one`
+28. `container_attrs_active_trapped_adds_data_trapped`
+29. `connect_part_attrs_for_container_matches_container_attrs`
+30. `is_active_and_is_trapped_derived_from_state`
+31. `api_activate_sends_activate_event_with_args`
+32. `api_deactivate_sends_deactivate_event_with_restore_focus`
+33. `api_focus_first_sends_focus_first_event`
+34. `api_focus_last_sends_focus_last_event`
+35. `api_focus_next_and_focus_previous_stub_return_false`
+
+### Snapshot tests
+
+36. `container_attrs_inactive_default_props` → 1 snap.
+37. `container_attrs_active_untrapped` → 1 snap.
+38. `container_attrs_active_trapped` → 1 snap.
+
+Per-(part, variant) budget = 1 part × 3 variants × 3 snapshots = up to 9 snapshots. If `cargo xtask ci snapshot-count` (`xtask/src/ci/mod.rs:619`) fails on a low count, add `contain_prop_promotes_trapped` and `default_props_round_trip` variants to satisfy the minimum without padding tests.
+
+### Proptest invariants
+
+Add `crates/ars-components/tests/proptest_state_machines/utility.rs` entries (proptest config from `tests/proptest_state_machines/common.rs`):
+
+- `prop_activate_then_deactivate_returns_to_inactive_regardless_of_events_in_between`
+- `prop_trap_release_pair_preserves_state_within_active`
+- `prop_focus_navigation_events_never_leave_active_state`
+
+### Spec-conformance
+
+Add a `crates/ars-components/tests/spec_conformance_focus_scope.rs` (or extend the existing utility conformance file if one exists):
+
+- `part_enum_has_only_container_variant`
+- `event_enum_has_seven_variants_matching_spec_section_1_2`
+- `state_enum_inactive_active_with_trapped_field`
+- `props_field_names_and_defaults_match_spec`
+- `effect_enum_has_four_variants_documented_in_spec`
+- `connect_api_emits_data_ars_trapped_not_data_ars_focus_trapped` (guards the issue/spec typo regression)
+
+### Mutation testing (post-implementation)
+
+Run `cargo mutants -p ars-components -f crates/ars-components/src/utility/focus_scope/mod.rs`. Triage every `MISSED` mutant by adding tests or, for true equivalents, justified `[[skip]]` entries in `.cargo/mutants.toml`. Treat MISSED as a real test gap unless proven equivalent.
+
+## Critical Files
+
+- `crates/ars-components/src/utility/focus_scope/mod.rs` — new module (create).
+- `crates/ars-components/src/utility/mod.rs` — add `pub mod focus_scope;` entry.
+- `crates/ars-components/src/utility/focus_scope/snapshots/` — committed `.snap` files.
+- `crates/ars-components/tests/proptest_state_machines/utility.rs` — add FocusScope invariants.
+- `crates/ars-components/tests/spec_conformance_focus_scope.rs` (or shared utility-conformance file) — new contract tests.
+- `spec/components/utility/focus-scope.md` — §1.6, §1.6.1, §1.7 updates per "Spec sync" above.
+
+### Existing files referenced (read-only)
+
+- Pattern templates: `crates/ars-components/src/utility/live_region/mod.rs`, `crates/ars-components/src/utility/dismissable/mod.rs`, `crates/ars-components/src/overlay/dialog/mod.rs:549`, `crates/ars-components/src/overlay/popover/mod.rs:96`.
+- Core APIs: `crates/ars-core/src/lib.rs` (`TransitionPlan`, `PendingEffect`, `EffectMetadata`, `cancel_effect`), `crates/ars-core/src/platform.rs` (`PlatformEffects`).
+- CI gate: `xtask/src/ci/mod.rs:619` (`snapshot-count`).
+
+## Verification
+
+After implementation, run:
+
+```bash
+# 1. TDD loop — fast iteration on the new module:
+cargo nextest run -p ars-components focus_scope
+
+# 2. Whole-crate sanity:
+cargo test -p ars-components
+
+# 3. Snapshot review (commit only after eyeballing the .snap output):
+cargo insta test -p ars-components --review
+cargo insta test -p ars-components --unreferenced=reject
+
+# 4. Spec drift / frontmatter validation:
+cargo xtask spec validate
+cargo xtask ci snapshot-count   # confirms per-component budget
+cargo xtask ci spec-compile-snippets   # makes sure the updated §1.6 Rust block still compiles
+
+# 5. Coverage on the new file:
+cargo llvm-cov test -p ars-components --text -- focus_scope
+
+# 6. Mutation gate (per CLAUDE.md "Agnostic component implementation gate"):
+cargo mutants -p ars-components -f crates/ars-components/src/utility/focus_scope/mod.rs
+
+# 7. Pre-push gate (after user review):
+cargo xci --profile fast
+```
+
+Acceptance is reached when:
+
+- All 35+ unit/connect-API tests pass.
+- 3 (or more, up to the snapshot-count budget) `.snap` fixtures land, all marked reviewed (`snapshot-reviewed` label on the PR).
+- All 3 proptest invariants pass at 1,000 cases (default) and 10,000 cases (nightly `extended-proptest`).
+- `cargo xtask ci snapshot-count` and `cargo xtask spec validate` are green.
+- `cargo mutants` shows zero `MISSED` after triage.
+- Spec edits compile under `cargo xtask ci spec-compile-snippets`.
+- `cargo xci --profile fast` passes locally before push.
+- After push, the `post-implementation-audit` skill is invoked, all findings land in this PR, and `waiting-for-codex-review` is invoked until Codex returns 👍.
+
+---
+
+If we can't properly implement `focus_next` and `focus_previous` in the agnostic layer, let's remove them and update the spec mentioning that this part must live in the adapter layer only

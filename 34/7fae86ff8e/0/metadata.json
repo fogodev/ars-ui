@@ -1,0 +1,147 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "347fae86ff8e",
+  "session_id": "29eb8d2d-71d3-4dc3-b391-1fd15f77a3d1",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-21T15:26:53.086601Z",
+  "branch": "t3code/7b271fe9",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/utility/focus_scope/mod.rs",
+    "crates/ars-components/src/utility/focus_scope/snapshots/ars_components__utility__focus_scope__tests__container_attrs_active_trapped.snap",
+    "crates/ars-components/src/utility/focus_scope/snapshots/ars_components__utility__focus_scope__tests__container_attrs_active_untrapped.snap",
+    "crates/ars-components/src/utility/focus_scope/snapshots/ars_components__utility__focus_scope__tests__container_attrs_contain_prop_promotes_trapped.snap",
+    "crates/ars-components/src/utility/focus_scope/snapshots/ars_components__utility__focus_scope__tests__container_attrs_inactive.snap",
+    "crates/ars-components/src/utility/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility.rs",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "spec/components/utility/focus-scope.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "cc6c05fc9828",
+  "token_usage": {
+    "input_tokens": 5546,
+    "cache_creation_tokens": 1194147,
+    "cache_read_tokens": 58654736,
+    "output_tokens": 175217,
+    "api_call_count": 196
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement task #212: the framework-agnostic FocusScope core — a stateful utility that constrains keyboard Tab focus within a container, enabling focus trapping for Dialog, Drawer, Popover, and other overlay components.",
+    "outcome": "Full TDD implementation landed: new module at crates/ars-components/src/utility/focus_scope/mod.rs with 50 passing tests, 4 snapshot fixtures, 3 proptest invariants, 6 spec-conformance tests, 0 missed mutants. Spec synced to resolve named-effect drift. focus_next/focus_previous stubs removed per user feedback. Commit ready to push as PR after rebase onto main.",
+    "learnings": {
+      "repo": [
+        "The named-effect pattern (PendingEffect::named(Effect::Foo) markers + adapter dispatch) is the established agnostic-core convention for effects — calling use_platform_effects() synchronously from within agnostic-core transitions is architecturally impossible; Dialog and Popover already established the correct pattern.",
+        "Utility components follow a single-file module structure (no child files): live_region/mod.rs and dismissable/mod.rs are the canonical templates. Inline tests under #[cfg(test)] mod tests, snapshot fixtures in snapshots/ subdirectory.",
+        "spec/foundation/02-component-catalog.md:254 incorrectly lists FocusScope/FocusRing/LiveRegion/VisuallyHidden under ars-a11y; actual placement is ars-components::utility::*. This is a pre-existing workspace cataloging issue affecting four components.",
+        "GitHub issue #212 test 9 uses the attribute name data-ars-focus-trapped, but spec §2 specifies data-ars-trapped. The spec is authoritative; a dedicated regression test was added to pin the correct name.",
+        "ComponentPart derive uses the first variant as ROOT regardless of its name.",
+        "Synchronous DOM queries (e.g., get_tabbable_elements) cannot live in the agnostic core — the issue's 'Element/ref handling note' is explicit. Adapters call PlatformEffects::tabbable_element_ids directly.",
+        "cancel_effect(Effect::FocusTrapListener) triggers the cleanup captured at install time — no separate FocusTrapRelease effect variant is needed.",
+        "FocusNavigationOptions and focus_next/focus_previous must live entirely in the adapter layer: synchronous DOM lookups and live element handles make them impossible to implement in the agnostic core."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/overlay/dialog/mod.rs",
+          "line": 549,
+          "end_line": 549,
+          "finding": "Canonical example of named-effect pattern: Effect::RestoreFocus emitted via PendingEffect::named(Effect::RestoreFocus), adapter dispatches."
+        },
+        {
+          "path": "crates/ars-components/src/overlay/popover/mod.rs",
+          "line": 96,
+          "end_line": 96,
+          "finding": "Canonical example of named-effect pattern for focus effects in overlay components."
+        },
+        {
+          "path": "xtask/src/ci/mod.rs",
+          "line": 619,
+          "end_line": 619,
+          "finding": "snapshot-count gate: cargo xtask ci snapshot-count validates that per-component snapshot budgets are met."
+        },
+        {
+          "path": "crates/ars-components/src/utility/focus_scope/mod.rs",
+          "line": 1,
+          "finding": "New module ~1300 LOC. Contains State/Event/Context/Props/Messages/Effect/Part/Machine/Api. Tests inline. Rc import dropped when FocusNavigationOptions/AcceptFn were removed per user feedback."
+        }
+      ],
+      "workflow": [
+        "TDD discipline: write failing tests first (compile with placeholder impls), verify red, then fill in implementation until all pass — never write impl before the test baseline.",
+        "Post-implementation-audit skill is mandatory per CLAUDE.md before presenting for user review: Phase 1 = spec/impl drift, Phase 2 = external surfaces/adapter specs/catalog, Phase 3 = coverage + mutation triage.",
+        "Spec sync resolving known drift must land in the same PR as the implementation (CLAUDE.md policy).",
+        "User review checkpoint is required before running cargo xci --profile fast and committing/pushing.",
+        "cargo mutants -p ars-components -f <path> for targeted mutation testing; 0 MISSED is the acceptance gate.",
+        "cargo insta test --unreferenced=reject used to confirm no orphaned snapshot fixtures after any test removal.",
+        "When a proptest invariant fails, the fix is to make the invariant match the actual correct semantic (e.g., saved_focus is retained on Deactivate{restore_focus:true} by design) rather than weakening the test.",
+        "Coverage report parsing required multiple approaches; the most reliable was regenerating with cargo llvm-cov and grepping the annotated text output for the specific module."
+      ]
+    },
+    "friction": [
+      "Spec §1.6 had significant architectural drift: transition closures calling use_platform_effects() synchronously from the agnostic core, which is impossible. Required understanding the existing Dialog/Popover patterns before the correct approach was clear.",
+      "SendResult does not expose a then_send accessor; understanding that queued events are processed synchronously and their effects merged into the same SendResult required checking the API shape before writing tests.",
+      "Coverage report parsing was difficult: required multiple grep/awk attempts to isolate uncovered lines in focus_scope from the full workspace report.",
+      "Issue attribute typo (data-ars-focus-trapped vs data-ars-trapped) required cross-referencing issue text against the spec and adding a dedicated regression test to prevent future confusion.",
+      "The worktree fell one commit behind main (Accordion #662 landed) during implementation, requiring a rebase before push.",
+      "First proptest invariant (activate-deactivate-inactive) failed because saved_focus is intentionally retained when restore_focus:true — required restructuring the invariant to assert the actual correct semantic."
+    ],
+    "open_items": [
+      "Leptos and Dioxus adapter FocusScope components — tracked under epic #10's adapter tasks; DOM-level focus query, sentinel rendering, keydown handler, and FocusNavigationOptions live here.",
+      "FocusRestorationStack for nested scope tracking (spec §8) — adapter-scoped client-only state, deferred.",
+      "audit_focus_on_orientation_change (spec §1.6.1) — adapter-scoped, removed from agnostic-core spec; if normative, belongs in spec/foundation/11-dom-utilities.md §3.2.",
+      "spec/foundation/02-component-catalog.md:254 incorrectly lists FocusScope/FocusRing/LiveRegion/VisuallyHidden under ars-a11y instead of ars-components::utility — workspace-wide cataloging cleanup task affecting four components.",
+      "ars-leptos::hydration::setup_focus_scope_hydration_safe — pre-existing Leptos-specific hydration helper that operates independently of the new agnostic-core surface; tracked under task #196.",
+      "focus_next/focus_previous and FocusNavigationOptions are intentionally adapter-layer only; adapter tasks under epic #10 will implement them with real DOM access."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-21T15:25:53.329863Z",
+    "agent_lines": 1893,
+    "agent_removed": 215,
+    "human_added": 100,
+    "human_modified": 26,
+    "human_removed": 0,
+    "total_committed": 2006,
+    "total_lines_changed": 2234,
+    "agent_percentage": 94.35989256938228,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 10,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2056,
+      "agent_lines_removed": 189,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/focus_scope/mod.rs": 10
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 58,
+      "user_lines_removed": 13,
+      "agent_lines_added": 1974,
+      "agent_lines_removed": 228,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/focus_scope/mod.rs": 37,
+        "crates/ars-components/tests/proptest_state_machines/utility.rs": 4,
+        "crates/ars-components/tests/spec_conformance/utility.rs": 4,
+        "spec/components/utility/focus-scope.md": 13
+      },
+      "user_removed_per_file": {
+        "spec/components/utility/focus-scope.md": 13
+      }
+    }
+  ]
+}

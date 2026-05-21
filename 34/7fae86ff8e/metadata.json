@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "347fae86ff8e",
+  "strategy": "manual-commit",
+  "branch": "t3code/7b271fe9",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/utility/focus_scope/mod.rs",
+    "crates/ars-components/src/utility/focus_scope/snapshots/ars_components__utility__focus_scope__tests__container_attrs_active_trapped.snap",
+    "crates/ars-components/src/utility/focus_scope/snapshots/ars_components__utility__focus_scope__tests__container_attrs_active_untrapped.snap",
+    "crates/ars-components/src/utility/focus_scope/snapshots/ars_components__utility__focus_scope__tests__container_attrs_contain_prop_promotes_trapped.snap",
+    "crates/ars-components/src/utility/focus_scope/snapshots/ars_components__utility__focus_scope__tests__container_attrs_inactive.snap",
+    "crates/ars-components/src/utility/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility.rs",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "spec/components/utility/focus-scope.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/34/7fae86ff8e/0/metadata.json",
+      "transcript": "/34/7fae86ff8e/0/full.jsonl",
+      "content_hash": "/34/7fae86ff8e/0/content_hash.txt",
+      "prompt": "/34/7fae86ff8e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 5546,
+    "cache_creation_tokens": 1194147,
+    "cache_read_tokens": 58654736,
+    "output_tokens": 175217,
+    "api_call_count": 196
+  }
+}
