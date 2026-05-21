@@ -490,6 +490,7 @@ impl ars_core::Machine for Machine {
             .value
             .clone()
             .unwrap_or_else(|| props.default_value.clone());
+        let selected = normalize_selection_for_mode(selected, props.selection_mode);
 
         let mut selection_state =
             selection::State::new(props.selection_mode, props.selection_behavior);
@@ -504,8 +505,8 @@ impl ars_core::Machine for Machine {
                 locale: env.locale.clone(),
                 items: StaticCollection::default(),
                 selection: match &props.value {
-                    Some(value) => Bindable::controlled(value.clone()),
-                    None => Bindable::uncontrolled(props.default_value.clone()),
+                    Some(_) => Bindable::controlled(selected.clone()),
+                    None => Bindable::uncontrolled(selected.clone()),
                 },
                 selection_state,
                 highlighted_key: None,
@@ -1371,10 +1372,18 @@ fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
         ctx.selection_state.disabled_keys = props.disabled_keys.clone();
 
         if props.value.is_some() || ctx.selection.is_controlled() {
-            ctx.selection.sync_controlled(props.value.clone());
+            ctx.selection.sync_controlled(
+                props
+                    .value
+                    .clone()
+                    .map(|value| normalize_selection_for_mode(value, props.selection_mode)),
+            );
         }
 
-        ctx.selection_state.selected_keys = ctx.selection.get().clone();
+        set_current_selection(
+            ctx,
+            normalize_selection_for_mode(ctx.selection.get().clone(), props.selection_mode),
+        );
         ctx.selection_state = normalize_selection_state(ctx.selection_state.clone());
         invalidate_collection_references(ctx);
     })
@@ -1431,11 +1440,42 @@ fn set_from_keys(keys: BTreeSet<Key>) -> selection::Set {
 }
 
 fn normalize_selection_state(mut state: selection::State) -> selection::State {
-    if selection_is_empty(&state.selected_keys) {
-        state.selected_keys = selection::Set::Empty;
-    }
+    state.selected_keys = normalize_selection_for_mode(state.selected_keys, state.mode);
 
     state
+}
+
+fn normalize_selection_for_mode(selected: selection::Set, mode: selection::Mode) -> selection::Set {
+    match mode {
+        selection::Mode::None => selection::Set::Empty,
+        selection::Mode::Single => match selected {
+            selection::Set::Single(key) => selection::Set::Single(key),
+            selection::Set::Multiple(keys) => keys
+                .into_iter()
+                .next()
+                .map_or(selection::Set::Empty, selection::Set::Single),
+            _ => selection::Set::Empty,
+        },
+        selection::Mode::Multiple => {
+            if selection_is_empty(&selected) {
+                selection::Set::Empty
+            } else {
+                selected
+            }
+        }
+    }
+}
+
+fn set_current_selection(ctx: &mut Context, selected: selection::Set) {
+    let selected = normalize_selection_for_mode(selected, ctx.selection_state.mode);
+
+    if ctx.selection.is_controlled() {
+        ctx.selection.sync_controlled(Some(selected.clone()));
+    } else {
+        ctx.selection.set(selected.clone());
+    }
+
+    ctx.selection_state.selected_keys = selected;
 }
 
 fn selection_is_empty(set: &selection::Set) -> bool {
@@ -1469,8 +1509,7 @@ fn invalidate_collection_references(ctx: &mut Context) {
 
     let selection = retain_present_selection(ctx.selection.get(), &ctx.items);
 
-    ctx.selection.set(selection.clone());
-    ctx.selection_state.selected_keys = selection;
+    set_current_selection(ctx, selection);
 
     if ctx
         .selection_state
@@ -2222,6 +2261,103 @@ mod tests {
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Required)), Some("true"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("true"));
         assert!(listbox.connect(&|_| {}).loading_sentinel_attrs().is_some());
+    }
+
+    #[test]
+    fn initial_selection_is_normalized_for_selection_mode() {
+        let single = service(
+            Props::new()
+                .id("single")
+                .selection_mode(selection::Mode::Single)
+                .default_value(selection::Set::Multiple(BTreeSet::from([
+                    key("alpha"),
+                    key("bravo"),
+                ]))),
+        );
+
+        assert_eq!(
+            *single.context().selection.get(),
+            selection::Set::Single(key("alpha"))
+        );
+        assert_eq!(
+            single.context().selection_state.selected_keys,
+            selection::Set::Single(key("alpha"))
+        );
+
+        let none = service(
+            Props::new()
+                .id("none")
+                .selection_mode(selection::Mode::None)
+                .value(selection::Set::Single(key("alpha"))),
+        );
+
+        assert_eq!(*none.context().selection.get(), selection::Set::Empty);
+        assert_eq!(
+            none.context().selection_state.selected_keys,
+            selection::Set::Empty
+        );
+    }
+
+    #[test]
+    fn prop_sync_normalizes_selection_for_next_mode() {
+        let mut listbox = service(
+            Props::new()
+                .id("lb")
+                .selection_mode(selection::Mode::Multiple)
+                .default_value(selection::Set::Multiple(BTreeSet::from([
+                    key("alpha"),
+                    key("bravo"),
+                ]))),
+        );
+
+        drop(
+            listbox.set_props(
+                Props::new()
+                    .id("lb")
+                    .selection_mode(selection::Mode::Single),
+            ),
+        );
+
+        assert_eq!(
+            *listbox.context().selection.get(),
+            selection::Set::Single(key("alpha"))
+        );
+        assert_eq!(
+            listbox.context().selection_state.selected_keys,
+            selection::Set::Single(key("alpha"))
+        );
+
+        drop(listbox.set_props(Props::new().id("lb").selection_mode(selection::Mode::None)));
+
+        assert_eq!(*listbox.context().selection.get(), selection::Set::Empty);
+        assert_eq!(
+            listbox.context().selection_state.selected_keys,
+            selection::Set::Empty
+        );
+    }
+
+    #[test]
+    fn controlled_selection_pruning_keeps_binding_and_state_in_sync() {
+        let mut listbox = service(
+            Props::new()
+                .id("lb")
+                .selection_mode(selection::Mode::Multiple)
+                .value(selection::Set::Multiple(BTreeSet::from([
+                    key("alpha"),
+                    key("bravo"),
+                ]))),
+        );
+
+        drop(listbox.send(Event::UpdateItems(single_item_collection())));
+
+        assert_eq!(
+            *listbox.context().selection.get(),
+            selection::Set::Multiple(BTreeSet::from([key("alpha")]))
+        );
+        assert_eq!(
+            listbox.context().selection_state.selected_keys,
+            *listbox.context().selection.get()
+        );
     }
 
     #[test]
