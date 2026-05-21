@@ -4,8 +4,8 @@ use ars_a11y::AriaRelevant;
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
 use ars_components::utility::{
-    button, download_trigger, error_boundary, field, fieldset, form, form_submit, live_region,
-    separator, swap, toggle, visually_hidden,
+    button, download_trigger, error_boundary, field, fieldset, focus_scope, form, form_submit,
+    live_region, separator, swap, toggle, visually_hidden,
 };
 use ars_core::{ConnectApi, Env, HtmlAttr, Service, WeakSend, callback};
 use ars_forms::{
@@ -152,6 +152,39 @@ fn arb_live_region_event() -> impl Strategy<Value = live_region::Event> {
         Just(live_region::Event::Clear),
         Just(live_region::Event::Rendered),
         Just(live_region::Event::SetProps),
+    ]
+}
+
+fn arb_focus_scope_props() -> impl Strategy<Value = focus_scope::Props> {
+    (any::<bool>(), any::<bool>(), any::<bool>(), any::<bool>()).prop_map(
+        |(trapped, contain, auto_focus, restore_focus)| focus_scope::Props {
+            id: "focus-scope".to_string(),
+            trapped,
+            contain,
+            auto_focus,
+            restore_focus,
+        },
+    )
+}
+
+fn arb_optional_focus_target() -> impl Strategy<Value = Option<String>> {
+    prop::option::of("[a-zA-Z0-9-]{1,16}".prop_map(String::from))
+}
+
+fn arb_focus_scope_event() -> impl Strategy<Value = focus_scope::Event> {
+    prop_oneof![
+        (any::<bool>(), arb_optional_focus_target()).prop_map(|(trapped, saved_focus_id)| {
+            focus_scope::Event::Activate {
+                trapped,
+                saved_focus_id,
+            }
+        }),
+        any::<bool>().prop_map(|restore_focus| focus_scope::Event::Deactivate { restore_focus }),
+        Just(focus_scope::Event::TrapFocus),
+        Just(focus_scope::Event::ReleaseTrap),
+        Just(focus_scope::Event::RestoreFocus),
+        Just(focus_scope::Event::FocusFirst),
+        Just(focus_scope::Event::FocusLast),
     ]
 }
 
@@ -1232,6 +1265,141 @@ proptest! {
             prop_assert_eq!(chunks.len(), 1, "empty query → exactly one chunk");
             prop_assert!(!chunks[0].highlighted, "empty-query chunk must not be highlighted");
             prop_assert_eq!(chunks[0].text, props.text.as_str());
+        }
+    }
+}
+
+proptest! {
+    #![proptest_config(super::common::proptest_config())]
+
+    /// `Activate → Deactivate { restore_focus: false }` always lands at
+    /// `State::Inactive` with `saved_focus = None`, regardless of any
+    /// intermediate events. Intermediate events may toggle the scope in
+    /// and out of `Active`, but the final forced `Deactivate(false)`
+    /// from `Active` clears the saved focus via its apply step.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_focus_scope_activate_deactivate_round_trip(
+        props in arb_focus_scope_props(),
+        intermediate in prop::collection::vec(arb_focus_scope_event(), 0..64),
+        saved_focus_id in arb_optional_focus_target(),
+    ) {
+        let mut service = Service::<focus_scope::Machine>::new(
+            props,
+            &Env::default(),
+            &focus_scope::Messages,
+        );
+
+        // Force-activate so the round-trip always exercises both halves.
+        drop(service.send(focus_scope::Event::Activate {
+            trapped: true,
+            saved_focus_id,
+        }));
+
+        for event in intermediate {
+            drop(service.send(event));
+        }
+
+        // Re-activate if the intermediate sequence landed us back at
+        // `Inactive`. Without this the final `Deactivate(false)` would be
+        // a no-op (the wildcard arm ignores it) and any leftover
+        // `saved_focus` from an earlier `Deactivate(true)` would survive.
+        if matches!(service.state(), focus_scope::State::Inactive) {
+            drop(service.send(focus_scope::Event::Activate {
+                trapped: false,
+                saved_focus_id: Some("force-active".to_string()),
+            }));
+        }
+
+        // Force back to Inactive without restoration. Any active scope
+        // MUST return to Inactive after a Deactivate(false); the apply
+        // step clears `saved_focus` to drop the stale token.
+        drop(service.send(focus_scope::Event::Deactivate { restore_focus: false }));
+
+        prop_assert_eq!(service.state(), &focus_scope::State::Inactive);
+        prop_assert!(service.context().saved_focus.is_none());
+    }
+
+    /// `TrapFocus` and `ReleaseTrap` only have a state-affecting effect
+    /// while the scope is `Active`; they are ignored from `Inactive`.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_focus_scope_trap_release_only_changes_state_in_active(
+        props in arb_focus_scope_props(),
+        events in prop::collection::vec(arb_focus_scope_event(), 0..32),
+    ) {
+        let mut service = Service::<focus_scope::Machine>::new(
+            props,
+            &Env::default(),
+            &focus_scope::Messages,
+        );
+
+        for event in events {
+            let was_active = matches!(service.state(), focus_scope::State::Active { .. });
+
+            let result = service.send(event.clone());
+
+            match event {
+                focus_scope::Event::TrapFocus | focus_scope::Event::ReleaseTrap
+                    if !was_active =>
+                {
+                    prop_assert!(
+                        !result.state_changed,
+                        "{:?} from Inactive must be ignored",
+                        event,
+                    );
+                }
+                _ => {}
+            }
+
+            // The trapped flag and the State::Active variant always agree.
+            match service.state() {
+                focus_scope::State::Inactive => {
+                    // No further invariant — saved_focus may be set or cleared.
+                }
+
+                focus_scope::State::Active { trapped } => {
+                    // Empty arm: we just assert the variant carries the
+                    // current `trapped` flag, which is structural.
+                    let _ = trapped;
+                }
+            }
+        }
+    }
+
+    /// Focus-navigation events (`FocusFirst`, `FocusLast`, `RestoreFocus`)
+    /// never change the high-level state — they either emit an effect
+    /// intent (when their state precondition holds) or are no-ops.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_focus_scope_navigation_events_never_leave_state(
+        props in arb_focus_scope_props(),
+        events in prop::collection::vec(arb_focus_scope_event(), 0..32),
+    ) {
+        let mut service = Service::<focus_scope::Machine>::new(
+            props,
+            &Env::default(),
+            &focus_scope::Messages,
+        );
+
+        for event in events {
+            let before = *service.state();
+
+            let result = service.send(event.clone());
+
+            if matches!(
+                event,
+                focus_scope::Event::FocusFirst
+                    | focus_scope::Event::FocusLast
+                    | focus_scope::Event::RestoreFocus,
+            ) {
+                prop_assert!(
+                    !result.state_changed,
+                    "{:?} must not change the high-level state (it only emits an effect intent)",
+                    event,
+                );
+                prop_assert_eq!(service.state(), &before);
+            }
         }
     }
 }

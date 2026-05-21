@@ -35,6 +35,10 @@ pub mod form;
 /// focus modality).
 pub mod focus_ring;
 
+/// `FocusScope` component machine (focus-trap state machine with named
+/// effect intents that adapters route to `PlatformEffects` focus helpers).
+pub mod focus_scope;
+
 /// Form submit machine.
 pub mod form_submit;
 
