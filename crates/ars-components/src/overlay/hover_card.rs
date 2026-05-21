@@ -1185,6 +1185,83 @@ mod tests {
     }
 
     #[test]
+    fn props_builder_sets_identity_and_initial_open_state() {
+        let props = Props::new()
+            .id("profile-card")
+            .open(true)
+            .default_open(false);
+
+        assert_eq!(props.id, "profile-card");
+        assert_eq!(props.open, Some(true));
+        assert!(!props.default_open);
+    }
+
+    #[test]
+    fn props_changed_tracks_only_runtime_sync_inputs() {
+        let base = test_props();
+
+        assert!(!props_changed(&base, &base));
+
+        assert!(props_changed(
+            &base,
+            &Props {
+                disabled: true,
+                ..base.clone()
+            }
+        ));
+        assert!(props_changed(
+            &base,
+            &Props {
+                open_delay: Duration::from_millis(100),
+                ..base.clone()
+            }
+        ));
+        assert!(props_changed(
+            &base,
+            &Props {
+                close_delay: Duration::from_millis(50),
+                ..base.clone()
+            }
+        ));
+        assert!(props_changed(
+            &base,
+            &Props {
+                positioning: PositioningOptions {
+                    placement: Placement::LeftEnd,
+                    ..PositioningOptions::default()
+                },
+                ..base.clone()
+            }
+        ));
+
+        assert!(!props_changed(
+            &base,
+            &Props {
+                open: Some(true),
+                default_open: true,
+                lazy_mount: true,
+                unmount_on_exit: true,
+                ..base.clone()
+            }
+        ));
+    }
+
+    #[test]
+    fn close_plan_carries_state_context_effects_and_cancellation() {
+        let plan = close_plan(Some(Effect::CloseDelay));
+
+        assert_eq!(plan.target, Some(State::Closed));
+        assert_eq!(
+            plan.effects
+                .iter()
+                .map(|effect| effect.name)
+                .collect::<Vec<_>>(),
+            vec![Effect::OpenChange, Effect::ReleaseZIndex]
+        );
+        assert_eq!(plan.cancel_effects, vec![Effect::CloseDelay]);
+    }
+
+    #[test]
     fn hover_trigger_opens_after_delay() {
         let mut service =
             Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
@@ -1324,6 +1401,110 @@ mod tests {
     }
 
     #[test]
+    fn focus_leave_during_pending_open_cancels_open_delay() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(service.send(Event::TriggerFocus));
+
+        let blur = service.send(Event::TriggerBlur);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().focus_active);
+        assert_eq!(blur.cancel_effects, vec![Effect::OpenDelay]);
+        assert!(blur.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn pending_open_only_closes_after_every_activation_source_leaves() {
+        let mut pointer_only =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(pointer_only.send(Event::TriggerPointerEnter));
+
+        let pointer_leave = pointer_only.send(Event::TriggerPointerLeave);
+
+        assert_eq!(pointer_only.state(), &State::Closed);
+        assert!(!pointer_only.context().hover_active);
+        assert_eq!(pointer_leave.cancel_effects, vec![Effect::OpenDelay]);
+
+        let mut pointer_and_focus =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(pointer_and_focus.send(Event::TriggerPointerEnter));
+        drop(pointer_and_focus.send(Event::TriggerFocus));
+
+        let blur = pointer_and_focus.send(Event::TriggerBlur);
+
+        assert_eq!(pointer_and_focus.state(), &State::OpenPending);
+        assert!(pointer_and_focus.context().hover_active);
+        assert!(!pointer_and_focus.context().focus_active);
+        assert!(blur.pending_effects.is_empty());
+        assert!(blur.cancel_effects.is_empty());
+    }
+
+    #[test]
+    fn open_card_stays_open_while_hover_or_focus_remains_active() {
+        let mut focused = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(focused.send(Event::TriggerFocus));
+
+        let pointer_leave = focused.send(Event::TriggerPointerLeave);
+
+        assert_eq!(focused.state(), &State::Open);
+        assert!(!focused.context().hover_active);
+        assert!(focused.context().focus_active);
+        assert!(effect_names(&pointer_leave).is_empty());
+
+        let blur = focused.send(Event::TriggerBlur);
+
+        assert_eq!(focused.state(), &State::ClosePending);
+        assert!(!focused.context().focus_active);
+        assert_eq!(effect_names(&blur), vec![Effect::CloseDelay]);
+
+        let reopen = focused.send(Event::Open);
+
+        assert_eq!(focused.state(), &State::Open);
+        assert!(focused.context().open);
+        assert_eq!(reopen.cancel_effects, vec![Effect::CloseDelay]);
+        assert_eq!(
+            effect_names(&reopen),
+            vec![Effect::OpenChange, Effect::AllocateZIndex]
+        );
+
+        let mut hovered = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(hovered.send(Event::TriggerPointerEnter));
+        drop(hovered.send(Event::ContentFocus));
+
+        let content_blur = hovered.send(Event::ContentBlur);
+
+        assert_eq!(hovered.state(), &State::Open);
+        assert!(hovered.context().hover_active);
+        assert!(!hovered.context().focus_active);
+        assert!(effect_names(&content_blur).is_empty());
+
+        let pointer_leave = hovered.send(Event::ContentPointerLeave);
+
+        assert_eq!(hovered.state(), &State::ClosePending);
+        assert_eq!(effect_names(&pointer_leave), vec![Effect::CloseDelay]);
+    }
+
+    #[test]
     fn content_focus_cancels_close_delay_after_trigger_blur() {
         let mut service = Service::<Machine>::new(
             Props {
@@ -1352,6 +1533,25 @@ mod tests {
         assert_eq!(service.state(), &State::ClosePending);
         assert!(!service.context().focus_active);
         assert_eq!(effect_names(&content_blur), vec![Effect::CloseDelay]);
+    }
+
+    #[test]
+    fn content_focus_marks_open_card_focused() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        let focus = service.send(Event::ContentFocus);
+
+        assert_eq!(service.state(), &State::Open);
+        assert!(service.context().focus_active);
+        assert!(focus.pending_effects.is_empty());
+        assert!(focus.cancel_effects.is_empty());
     }
 
     #[test]
@@ -1484,6 +1684,126 @@ mod tests {
         assert_eq!(service.state(), &State::Open);
         assert_eq!(controlled_open.cancel_effects, vec![Effect::CloseDelay]);
         assert_eq!(effect_names(&controlled_open), vec![Effect::AllocateZIndex]);
+    }
+
+    #[test]
+    fn controlled_sync_noops_and_close_pending_cleanup_are_explicit() {
+        let mut closed =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        let closed_sync = closed.send(Event::SetControlledOpen(false));
+
+        assert_eq!(closed.state(), &State::Closed);
+        assert!(!closed_sync.state_changed);
+        assert!(closed_sync.pending_effects.is_empty());
+
+        let mut open = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        let open_sync = open.send(Event::SetControlledOpen(true));
+
+        assert_eq!(open.state(), &State::Open);
+        assert!(!open_sync.state_changed);
+        assert!(open_sync.pending_effects.is_empty());
+
+        drop(open.send(Event::TriggerPointerLeave));
+
+        let close_pending_sync = open.send(Event::SetControlledOpen(false));
+
+        assert_eq!(open.state(), &State::Closed);
+        assert_eq!(close_pending_sync.cancel_effects, vec![Effect::CloseDelay]);
+        assert_eq!(
+            effect_names(&close_pending_sync),
+            vec![Effect::ReleaseZIndex]
+        );
+    }
+
+    #[test]
+    fn programmatic_open_close_and_escape_cover_controlled_pending_states() {
+        let mut already_open = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        let redundant_open = already_open.send(Event::Open);
+
+        assert_eq!(already_open.state(), &State::Open);
+        assert!(!redundant_open.state_changed);
+
+        drop(already_open.send(Event::TriggerPointerLeave));
+
+        let close_pending_open = already_open.send(Event::Open);
+
+        assert_eq!(already_open.state(), &State::Open);
+        assert_eq!(close_pending_open.cancel_effects, vec![Effect::CloseDelay]);
+        assert_eq!(
+            effect_names(&close_pending_open),
+            vec![Effect::OpenChange, Effect::AllocateZIndex]
+        );
+
+        let mut controlled_closed = Service::<Machine>::new(
+            Props {
+                open: Some(false),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(controlled_closed.send(Event::TriggerPointerEnter));
+
+        let open_request = controlled_closed.send(Event::Open);
+
+        assert_eq!(controlled_closed.state(), &State::Closed);
+        assert_eq!(open_request.cancel_effects, vec![Effect::OpenDelay]);
+        assert_eq!(effect_names(&open_request), vec![Effect::OpenChange]);
+
+        let mut controlled_open = Service::<Machine>::new(
+            Props {
+                open: Some(true),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(controlled_open.send(Event::TriggerPointerLeave));
+
+        let escape = controlled_open.send(Event::CloseOnEscape);
+
+        assert_eq!(controlled_open.state(), &State::Open);
+        assert_eq!(escape.cancel_effects, vec![Effect::CloseDelay]);
+        assert_eq!(effect_names(&escape), vec![Effect::OpenChange]);
+
+        let mut controlled_pending = Service::<Machine>::new(
+            Props {
+                open: Some(true),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(controlled_pending.set_props(Props {
+            open: Some(false),
+            ..test_props()
+        }));
+        drop(controlled_pending.send(Event::TriggerFocus));
+
+        let close_request = controlled_pending.send(Event::Close);
+
+        assert_eq!(controlled_pending.state(), &State::Closed);
+        assert_eq!(close_request.cancel_effects, vec![Effect::OpenDelay]);
     }
 
     #[test]
@@ -1678,6 +1998,46 @@ mod tests {
     }
 
     #[test]
+    fn props_sync_updates_timing_and_title_registration_is_idempotent() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(service.set_props(Props {
+            open_delay: Duration::from_millis(100),
+            close_delay: Duration::from_millis(50),
+            ..test_props()
+        }));
+
+        assert_eq!(service.context().open_delay, Duration::from_millis(100));
+        assert_eq!(service.context().close_delay, Duration::from_millis(50));
+
+        drop(service.send(Event::TitleMount));
+
+        let second_mount = service.send(Event::TitleMount);
+
+        assert!(!second_mount.state_changed);
+        assert!(service.context().has_title);
+
+        drop(service.send(Event::TitleUnmount));
+
+        let second_unmount = service.send(Event::TitleUnmount);
+
+        assert!(!second_unmount.state_changed);
+        assert!(!service.context().has_title);
+    }
+
+    #[test]
+    fn open_change_effect_is_noop_without_callback() {
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        let send: StrongSend<Event> = Arc::new(|_| {});
+
+        let cleanup = open_change_effect(true).run(service.context(), service.props(), send);
+
+        drop(cleanup);
+    }
+
+    #[test]
     fn positioning_title_and_attrs_reflect_state() {
         let mut service = Service::<Machine>::new(
             Props {
@@ -1750,6 +2110,135 @@ mod tests {
             Some("Hover card")
         );
         assert!(!fallback.contains(&HtmlAttr::Aria(AriaAttr::LabelledBy)));
+    }
+
+    #[test]
+    fn api_event_helpers_dispatch_expected_events() {
+        let observed = Rc::new(RefCell::new(Vec::new()));
+        let send = {
+            let observed = Rc::clone(&observed);
+            move |event| observed.borrow_mut().push(event)
+        };
+
+        let service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        let api = service.connect(&send);
+
+        api.on_trigger_pointer_enter();
+        api.on_trigger_pointer_leave();
+        api.on_trigger_focus();
+        api.on_trigger_blur();
+        api.on_content_pointer_enter();
+        api.on_content_pointer_leave();
+        api.on_content_focus();
+        api.on_content_blur();
+        api.on_title_mount();
+        api.on_title_unmount();
+        api.on_dismiss_button_click();
+
+        assert_eq!(
+            &*observed.borrow(),
+            &[
+                Event::TriggerPointerEnter,
+                Event::TriggerPointerLeave,
+                Event::TriggerFocus,
+                Event::TriggerBlur,
+                Event::ContentPointerEnter,
+                Event::ContentPointerLeave,
+                Event::ContentFocus,
+                Event::ContentBlur,
+                Event::TitleMount,
+                Event::TitleUnmount,
+                Event::Close,
+            ]
+        );
+    }
+
+    #[test]
+    fn api_mount_flags_reflect_props() {
+        let defaults = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        let default_api = defaults.connect(&|_| {});
+
+        assert!(!default_api.lazy_mount());
+        assert!(!default_api.unmount_on_exit());
+
+        let mounted = Service::<Machine>::new(
+            Props {
+                lazy_mount: true,
+                unmount_on_exit: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        let mounted_api = mounted.connect(&|_| {});
+
+        assert!(mounted_api.lazy_mount());
+        assert!(mounted_api.unmount_on_exit());
+    }
+
+    #[test]
+    fn part_attrs_dispatches_each_anatomy_part() {
+        let service = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.part_attrs(Part::Root), api.root_attrs());
+        assert_eq!(api.part_attrs(Part::Trigger), api.trigger_attrs());
+        assert_eq!(api.part_attrs(Part::Positioner), api.positioner_attrs());
+        assert_eq!(api.part_attrs(Part::Content), api.content_attrs());
+        assert_eq!(api.part_attrs(Part::Arrow), api.arrow_attrs());
+        assert_eq!(api.part_attrs(Part::Title), api.title_attrs());
+        assert_eq!(
+            api.part_attrs(Part::DismissButton),
+            api.dismiss_button_attrs()
+        );
+    }
+
+    #[test]
+    fn initial_effects_allocate_z_index_only_for_open_state() {
+        let service = Service::<Machine>::new(
+            Props {
+                default_open: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        let open_effects = <Machine as ars_core::Machine>::initial_effects(
+            service.state(),
+            service.context(),
+            service.props(),
+        );
+
+        assert_eq!(
+            open_effects
+                .iter()
+                .map(|effect| effect.name)
+                .collect::<Vec<_>>(),
+            vec![Effect::OpenChange, Effect::AllocateZIndex]
+        );
+
+        let closed = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        assert!(
+            <Machine as ars_core::Machine>::initial_effects(
+                closed.state(),
+                closed.context(),
+                closed.props()
+            )
+            .is_empty()
+        );
     }
 
     #[test]

@@ -1418,6 +1418,90 @@ mod tests {
         assert_eq!(api.chunks(&en_us()), highlight_chunks(&props, &en_us()));
     }
 
+    #[test]
+    fn normalised_identity_and_case_fold_mapping_are_observable() {
+        let identity = Normalised::build("Ab", false, &en_us());
+
+        assert_eq!(identity.text, "Ab");
+        assert_eq!(identity.map_range(0, 1), (0, 1));
+        assert_eq!(identity.map_range(1, 2), (1, 2));
+
+        let folded = Normalised::build("Straße", true, &german());
+
+        assert_eq!(folded.text, "strasse");
+        assert_eq!(folded.map_range(4, 6), (4, 6));
+        assert_eq!(folded.map_range(5, 7), (4, 7));
+    }
+
+    #[test]
+    fn private_match_pushers_cover_empty_and_positive_paths() {
+        let normalised = Normalised::build("banana", false, &en_us());
+
+        let mut ranges = Vec::new();
+
+        push_contains_matches(&normalised, "", &mut ranges);
+
+        assert!(ranges.is_empty());
+
+        push_contains_matches(&normalised, "ana", &mut ranges);
+
+        assert_eq!(ranges, vec![(1, 4), (3, 6)]);
+
+        let mut starts = Vec::new();
+
+        push_starts_with_match(&normalised, "", &mut starts);
+        push_starts_with_match(&normalised, "ban", &mut starts);
+        push_starts_with_match(&normalised, "nan", &mut starts);
+
+        assert_eq!(starts, vec![(0, 3)]);
+
+        let mut fuzzy = Vec::new();
+
+        push_fuzzy_matches("a_b_c", "abc", false, &en_us(), &mut fuzzy);
+
+        assert_eq!(fuzzy, vec![(0, 1), (2, 3), (4, 5)]);
+
+        let mut missing = Vec::new();
+
+        push_fuzzy_matches("a_b_c", "abcd", false, &en_us(), &mut missing);
+
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn merge_ranges_and_build_chunks_cover_boundaries() {
+        assert_eq!(
+            merge_ranges(vec![(5, 7), (1, 3), (3, 5), (10, 12)]),
+            vec![(1, 7), (10, 12)]
+        );
+
+        assert_eq!(
+            build_chunks("0123456789", &[(0, 2), (4, 6), (8, 10)]),
+            vec![
+                HighlightChunk {
+                    text: "01",
+                    highlighted: true,
+                },
+                HighlightChunk {
+                    text: "23",
+                    highlighted: false,
+                },
+                HighlightChunk {
+                    text: "45",
+                    highlighted: true,
+                },
+                HighlightChunk {
+                    text: "67",
+                    highlighted: false,
+                },
+                HighlightChunk {
+                    text: "89",
+                    highlighted: true,
+                },
+            ]
+        );
+    }
+
     // ── Snapshots ──────────────────────────────────────────────────
 
     #[test]

@@ -111,6 +111,12 @@ cargo mutants -p ars-components -f crates/ars-components/src/overlay/popover.rs 
 cargo mutants -p ars-components
 ```
 
+**Agnostic component implementation gate:** whenever an agent implements a new framework-agnostic component, or materially changes an existing one, the delivery must include:
+
+- a targeted mutation run for the component source file, usually `cargo mutants -p ars-components -f crates/ars-components/src/<category>/<component>/mod.rs` (adjust the path for single-file modules);
+- spec-conformance tests for the component's anatomy/public contract, including its `Part` enum and required API/attribute surface;
+- same-task triage of every `MISSED` mutant: add tests for real gaps, or add a justified line-agnostic `.cargo/mutants.toml` exclude only for true equivalent mutations.
+
 **Reading the output:** Results land in `mutants.out/mutants.out/` (gitignored). The two files that matter:
 
 - `caught.txt` — mutations that broke at least one test ✅

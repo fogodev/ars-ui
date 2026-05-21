@@ -100,9 +100,584 @@ fn snapshot_attrs(attrs: &AttrMap) -> String {
     format!("{attrs:#?}")
 }
 
+fn set(keys: &[&str]) -> BTreeSet<Key> {
+    keys.iter().map(|value| key(value)).collect()
+}
+
 // ────────────────────────────────────────────────────────────────────
 // 1. Root / table element role + caption labelling
 // ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn selection_helper_functions_cover_prune_restrict_normalize_and_materialize() {
+    let disabled = set(&["r2", "r3"]);
+
+    assert_eq!(
+        prune_selection_against(&selection::Set::Single(key("r1")), &disabled),
+        selection::Set::Single(key("r1"))
+    );
+    assert_eq!(
+        prune_selection_against(&selection::Set::Single(key("r2")), &disabled),
+        selection::Set::Empty
+    );
+    assert_eq!(
+        prune_selection_against(
+            &selection::Set::Multiple(set(&["r1", "r2", "r3"])),
+            &disabled
+        ),
+        selection::Set::Single(key("r1"))
+    );
+    assert_eq!(
+        prune_selection_against(&selection::Set::Multiple(BTreeSet::new()), &disabled),
+        selection::Set::Empty
+    );
+    assert_eq!(
+        prune_selection_against(&selection::Set::Empty, &disabled),
+        selection::Set::Empty
+    );
+    assert_eq!(
+        prune_selection_against(&selection::Set::All, &disabled),
+        selection::Set::All
+    );
+
+    let rows = vec![key("r1"), key("r3")];
+
+    assert_eq!(
+        restrict_selection_to_rows(&selection::Set::Single(key("r2")), &rows),
+        selection::Set::Empty
+    );
+    assert_eq!(
+        restrict_selection_to_rows(&selection::Set::Multiple(set(&["r1", "r2", "r3"])), &rows),
+        selection::Set::Multiple(set(&["r1", "r3"]))
+    );
+    assert_eq!(
+        restrict_selection_to_rows(&selection::Set::Multiple(BTreeSet::new()), &rows),
+        selection::Set::Empty
+    );
+    assert_eq!(
+        restrict_selection_to_rows(&selection::Set::Multiple(set(&["r1", "r2"])), &rows),
+        selection::Set::Single(key("r1"))
+    );
+    assert_eq!(
+        restrict_selection_to_rows(&selection::Set::Empty, &rows),
+        selection::Set::Empty
+    );
+    assert_eq!(
+        restrict_selection_to_rows(&selection::Set::All, &rows),
+        selection::Set::All
+    );
+
+    assert_eq!(
+        normalize_selection_for_mode(selection::Set::Single(key("r1")), selection::Mode::Single),
+        selection::Set::Single(key("r1"))
+    );
+    assert_eq!(
+        normalize_selection_for_mode(selection::Set::All, selection::Mode::Single),
+        selection::Set::Empty
+    );
+    assert_eq!(
+        normalize_selection_for_mode(
+            selection::Set::Multiple(set(&["r2", "r1"])),
+            selection::Mode::Single,
+        ),
+        selection::Set::Single(key("r1"))
+    );
+    assert_eq!(
+        normalize_selection_for_mode(selection::Set::Single(key("r1")), selection::Mode::None),
+        selection::Set::Empty
+    );
+
+    let mut state = selection::State::new(selection::Mode::Multiple, selection::Behavior::Toggle);
+
+    state.selected_keys = selection::Set::All;
+    state.disabled_keys = disabled;
+
+    assert_eq!(
+        materialize_all_against_rows(&state, &rows).selected_keys,
+        selection::Set::Single(key("r1"))
+    );
+
+    state.disabled_keys = set(&["r1", "r3"]);
+
+    assert_eq!(
+        materialize_all_against_rows(&state, &rows).selected_keys,
+        selection::Set::Empty
+    );
+
+    let mut selected =
+        selection::State::new(selection::Mode::Multiple, selection::Behavior::Toggle);
+
+    selected.selected_keys = selection::Set::Single(key("r1"));
+
+    assert_eq!(
+        materialize_all_against_rows(&selected, &rows).selected_keys,
+        selection::Set::Single(key("r1"))
+    );
+}
+
+#[test]
+fn prop_delta_helpers_cover_controlled_and_context_fields() {
+    assert!(!bindable_controlled_state_changed(
+        &Bindable::controlled(true),
+        &Bindable::controlled(true),
+    ));
+    assert!(bindable_controlled_state_changed(
+        &Bindable::controlled(true),
+        &Bindable::controlled(false),
+    ));
+    assert!(bindable_controlled_state_changed(
+        &Bindable::controlled(true),
+        &Bindable::uncontrolled(true),
+    ));
+    assert!(!bindable_controlled_state_changed(
+        &Bindable::uncontrolled(true),
+        &Bindable::uncontrolled(false),
+    ));
+
+    let old = test_props();
+    let mut new = old.clone();
+
+    assert!(!non_dir_context_props_changed(&old, &new));
+
+    new.id = "next".to_string();
+
+    assert!(non_dir_context_props_changed(&old, &new));
+
+    new = old.clone();
+    new.disabled_keys = set(&["r1"]);
+
+    assert!(non_dir_context_props_changed(&old, &new));
+
+    new = old.clone();
+    new.min_column_width = 75.5;
+
+    assert!(non_dir_context_props_changed(&old, &new));
+
+    new = old.clone();
+    new.column_resize_step = 2.5;
+
+    assert!(non_dir_context_props_changed(&old, &new));
+
+    new = old.clone();
+    new.escape_key_behavior = EscapeKeyBehavior::None;
+
+    assert!(non_dir_context_props_changed(&old, &new));
+
+    new = old.clone();
+    new.select_all_mode = SelectAllMode::AllData { total_count: 42 };
+
+    assert!(non_dir_context_props_changed(&old, &new));
+
+    new = old.clone();
+    new.virtual_scrolling = true;
+
+    assert!(non_dir_context_props_changed(&old, &new));
+
+    new = old.clone();
+    new.total_rows = 10;
+
+    assert!(non_dir_context_props_changed(&old, &new));
+
+    new = old.clone();
+    new.total_cols = 4;
+
+    assert!(non_dir_context_props_changed(&old, &new));
+
+    new = old.clone();
+    new.dir = Direction::Rtl;
+
+    assert!(!non_dir_context_props_changed(&old, &new));
+}
+
+#[test]
+fn would_empty_and_some_selected_report_exact_selection_state() {
+    assert!(would_empty_after_deselect(
+        &selection::Set::Single(key("r1")),
+        &key("r1")
+    ));
+    assert!(!would_empty_after_deselect(
+        &selection::Set::Single(key("r1")),
+        &key("r2")
+    ));
+    assert!(would_empty_after_deselect(
+        &selection::Set::Multiple(set(&["r1"])),
+        &key("r1")
+    ));
+    assert!(!would_empty_after_deselect(
+        &selection::Set::Multiple(set(&["r1", "r2"])),
+        &key("r1")
+    ));
+    assert!(!would_empty_after_deselect(
+        &selection::Set::All,
+        &key("r1")
+    ));
+
+    let rows = vec![key("r1"), key("r2"), key("r3")];
+    let row_refs = rows.iter().collect::<Vec<_>>();
+
+    let service = service_with_rows(
+        Props {
+            default_selected_rows: selection::Set::Single(key("r2")),
+            disabled_keys: set(&["r1"]),
+            ..test_props_multi()
+        },
+        &rows,
+    );
+
+    let api = service.connect(&|_| {});
+
+    assert!(api.some_selected(&row_refs));
+
+    let all_service = service_with_rows(
+        Props {
+            default_selected_rows: selection::Set::All,
+            disabled_keys: set(&["r1", "r2", "r3"]),
+            ..test_props_multi()
+        },
+        &rows,
+    );
+
+    let all_api = all_service.connect(&|_| {});
+
+    assert!(!all_api.some_selected(&row_refs));
+}
+
+#[test]
+fn cell_keydown_and_format_width_cover_boundary_noops() {
+    assert_eq!(format_width(120.0), "120");
+    assert_eq!(format_width(120.5), "120.5");
+
+    let rows = vec![key("r1")];
+    let row_refs = rows.iter().collect::<Vec<_>>();
+
+    let service = service_with_rows(
+        Props {
+            interactive: true,
+            ..test_props()
+        },
+        &rows,
+    );
+
+    let recorder = EventRecorder::default();
+
+    let send = |event| record(&recorder, event);
+
+    let api = service.connect(&send);
+
+    api.on_cell_keydown(
+        &key("missing"),
+        0,
+        &keydown(KeyboardKey::ArrowRight),
+        &row_refs,
+        2,
+    );
+    api.on_cell_keydown(
+        &key("r1"),
+        1,
+        &keydown(KeyboardKey::ArrowRight),
+        &row_refs,
+        2,
+    );
+    api.on_cell_keydown(
+        &key("r1"),
+        0,
+        &keydown(KeyboardKey::ArrowLeft),
+        &row_refs,
+        2,
+    );
+
+    assert!(recorder.borrow().is_empty());
+}
+
+#[test]
+fn cell_keydown_home_end_without_ctrl_stay_on_current_row() {
+    let rows = vec![key("r1"), key("r2"), key("r3")];
+    let row_refs = rows.iter().collect::<Vec<_>>();
+
+    let service = service_with_rows(
+        Props {
+            interactive: true,
+            ..test_props()
+        },
+        &rows,
+    );
+
+    let recorder = EventRecorder::default();
+
+    let send = |event| record(&recorder, event);
+
+    let api = service.connect(&send);
+
+    api.on_cell_keydown(&key("r2"), 2, &keydown(KeyboardKey::Home), &row_refs, 4);
+    api.on_cell_keydown(&key("r2"), 1, &keydown(KeyboardKey::End), &row_refs, 4);
+
+    assert_eq!(
+        *recorder.borrow(),
+        vec![
+            Event::FocusCell {
+                row: key("r2"),
+                col: 0,
+                row_index: 1,
+            },
+            Event::FocusCell {
+                row: key("r2"),
+                col: 3,
+                row_index: 1,
+            },
+        ]
+    );
+}
+
+#[test]
+fn selection_transition_guards_cover_noop_and_allowed_edges() {
+    let mut none_mode = service_with_rows(
+        Props {
+            default_selected_rows: selection::Set::Single(key("r1")),
+            ..test_props()
+        },
+        &[key("r1")],
+    );
+
+    let result = none_mode.send(Event::DeselectRow(key("r1")));
+
+    assert!(!result.context_changed);
+    assert_eq!(
+        none_mode.context().selected_rows.get(),
+        &selection::Set::Single(key("r1"))
+    );
+
+    let mut unselected = service_with_rows(test_props_multi(), &[key("r1"), key("r2")]);
+    let result = unselected.send(Event::DeselectRow(key("r2")));
+
+    assert!(!result.context_changed);
+    assert_eq!(
+        unselected.context().selected_rows.get(),
+        &selection::Set::Empty
+    );
+
+    let mut deselect_allowed = service_with_rows(
+        Props {
+            default_selected_rows: selection::Set::Single(key("r1")),
+            disallow_empty_selection: false,
+            ..test_props_multi()
+        },
+        &[key("r1")],
+    );
+
+    let result = deselect_allowed.send(Event::DeselectRow(key("r1")));
+
+    assert!(result.context_changed);
+    assert_eq!(
+        deselect_allowed.context().selected_rows.get(),
+        &selection::Set::Empty
+    );
+
+    let mut toggle_allowed = service_with_rows(
+        Props {
+            default_selected_rows: selection::Set::Single(key("r1")),
+            disallow_empty_selection: false,
+            ..test_props_multi()
+        },
+        &[key("r1")],
+    );
+
+    let result = toggle_allowed.send(Event::ToggleRow(key("r1")));
+
+    assert!(result.context_changed);
+    assert_eq!(
+        toggle_allowed.context().selected_rows.get(),
+        &selection::Set::Empty
+    );
+
+    let mut toggle_unselected_disallow = service_with_rows(
+        Props {
+            disallow_empty_selection: true,
+            ..test_props_multi()
+        },
+        &[key("r1")],
+    );
+
+    let result = toggle_unselected_disallow.send(Event::ToggleRow(key("r1")));
+
+    assert!(result.context_changed);
+    assert_eq!(
+        toggle_unselected_disallow.context().selected_rows.get(),
+        &selection::Set::Multiple(set(&["r1"]))
+    );
+
+    let mut all_data_single = service_with_rows(
+        Props {
+            default_selected_rows: selection::Set::Single(key("r1")),
+            select_all_mode: SelectAllMode::AllData { total_count: 10 },
+            ..test_props_multi()
+        },
+        &[key("r1")],
+    );
+
+    let result = all_data_single.send(Event::DeselectRow(key("r1")));
+
+    assert!(result.context_changed);
+    assert_eq!(
+        all_data_single.context().selected_rows.get(),
+        &selection::Set::Empty
+    );
+}
+
+#[test]
+fn select_all_and_deselect_all_edges_cover_empty_single_and_none_mode() {
+    let mut no_visible = service_with_rows(test_props_multi(), &[]);
+    let result = no_visible.send(Event::SelectAll);
+
+    assert!(result.context_changed);
+    assert_eq!(
+        no_visible.context().selected_rows.get(),
+        &selection::Set::Empty
+    );
+
+    let mut one_visible = service_with_rows(test_props_multi(), &[key("r1")]);
+
+    let result = one_visible.send(Event::SelectAll);
+
+    assert!(result.context_changed);
+    assert_eq!(
+        one_visible.context().selected_rows.get(),
+        &selection::Set::Single(key("r1"))
+    );
+
+    let mut none_mode = service_with_rows(
+        Props {
+            default_selected_rows: selection::Set::Single(key("r1")),
+            ..test_props()
+        },
+        &[key("r1")],
+    );
+
+    let result = none_mode.send(Event::DeselectAll);
+
+    assert!(!result.context_changed);
+    assert_eq!(
+        none_mode.context().selected_rows.get(),
+        &selection::Set::Single(key("r1"))
+    );
+}
+
+#[test]
+fn sync_props_edges_cover_selection_demotion_and_expansion_control() {
+    let mut empty_rows = service_with_rows(
+        Props {
+            default_selected_rows: selection::Set::All,
+            select_all_mode: SelectAllMode::AllData { total_count: 10 },
+            ..test_props_multi()
+        },
+        &[],
+    );
+
+    drop(empty_rows.set_props(Props {
+        select_all_mode: SelectAllMode::AllVisible,
+        ..test_props_multi()
+    }));
+
+    assert_eq!(
+        empty_rows.context().selected_rows.get(),
+        &selection::Set::Empty
+    );
+
+    let mut one_row = service_with_rows(
+        Props {
+            default_selected_rows: selection::Set::All,
+            select_all_mode: SelectAllMode::AllData { total_count: 10 },
+            ..test_props_multi()
+        },
+        &[key("r1")],
+    );
+
+    drop(one_row.set_props(Props {
+        select_all_mode: SelectAllMode::AllVisible,
+        ..test_props_multi()
+    }));
+
+    assert_eq!(
+        one_row.context().selected_rows.get(),
+        &selection::Set::Single(key("r1"))
+    );
+
+    let mut uncontrolled_expansion = service_with_rows(
+        Props {
+            default_expanded_rows: set(&["r1", "r2"]),
+            ..test_props()
+        },
+        &[key("r1"), key("r2")],
+    );
+
+    drop(uncontrolled_expansion.set_props(Props {
+        disabled_keys: set(&["r2"]),
+        ..test_props()
+    }));
+
+    assert_eq!(
+        uncontrolled_expansion.context().expanded_rows.get(),
+        &set(&["r1"])
+    );
+
+    let mut controlled_expansion = service_with_rows(
+        Props {
+            expanded_rows: Some(set(&["r1", "r2"])),
+            ..test_props()
+        },
+        &[key("r1"), key("r2")],
+    );
+
+    drop(controlled_expansion.set_props(Props {
+        expanded_rows: Some(set(&["r1", "r2"])),
+        disabled_keys: set(&["r2"]),
+        ..test_props()
+    }));
+
+    assert_eq!(
+        controlled_expansion.context().expanded_rows.get(),
+        &set(&["r1", "r2"])
+    );
+}
+
+#[test]
+fn props_changed_syncs_controlled_selection_and_expansion() {
+    let mut service = service_with_rows(test_props_multi(), &[key("r1"), key("r2")]);
+
+    drop(service.set_props(Props {
+        selected_rows: Some(selection::Set::Single(key("r1"))),
+        ..test_props_multi()
+    }));
+
+    assert_eq!(
+        service.context().selected_rows.get(),
+        &selection::Set::Single(key("r1"))
+    );
+
+    drop(service.set_props(Props {
+        selected_rows: Some(selection::Set::Single(key("r1"))),
+        expanded_rows: Some(set(&["r2"])),
+        ..test_props_multi()
+    }));
+
+    assert_eq!(service.context().expanded_rows.get(), &set(&["r2"]));
+}
+
+#[test]
+fn init_preserves_controlled_selected_rows() {
+    let service = service_with_rows(
+        Props {
+            selected_rows: Some(selection::Set::Single(key("r1"))),
+            ..test_props_multi()
+        },
+        &[key("r1")],
+    );
+
+    assert_eq!(
+        service.context().selected_rows.get(),
+        &selection::Set::Single(key("r1"))
+    );
+    assert!(service.context().selection_state.is_selected(&key("r1")));
+}
 
 #[test]
 fn table_root_produces_table_role() {
@@ -1591,6 +2166,45 @@ fn table_set_row_counts_idempotent_when_unchanged() {
 }
 
 #[test]
+fn table_set_row_counts_updates_when_only_one_axis_changes() {
+    let mut rows_service = service_with_rows(
+        Props {
+            total_rows: 5,
+            total_cols: 3,
+            ..test_props()
+        },
+        &[],
+    );
+
+    let result = rows_service.send(Event::SetRowCounts {
+        total_rows: 6,
+        total_cols: 3,
+    });
+
+    assert!(result.context_changed);
+    assert_eq!(rows_service.context().total_rows, 6);
+    assert_eq!(rows_service.context().total_cols, 3);
+
+    let mut cols_service = service_with_rows(
+        Props {
+            total_rows: 5,
+            total_cols: 3,
+            ..test_props()
+        },
+        &[],
+    );
+
+    let result = cols_service.send(Event::SetRowCounts {
+        total_rows: 5,
+        total_cols: 4,
+    });
+
+    assert!(result.context_changed);
+    assert_eq!(cols_service.context().total_rows, 5);
+    assert_eq!(cols_service.context().total_cols, 4);
+}
+
+#[test]
 fn table_init_seeds_selection_state_from_default_selected_rows() {
     // Regression guard for spec drift D1: `selection_state.selected_keys`
     // must reflect `default_selected_rows` at init so subsequent
@@ -1606,6 +2220,24 @@ fn table_init_seeds_selection_state_from_default_selected_rows() {
 
     assert!(service.context().selection_state.is_selected(&key("r1")));
     assert!(!service.context().selection_state.is_selected(&key("r2")));
+}
+
+#[test]
+fn table_init_seeds_selection_state_before_rows_register() {
+    let service = Service::<Machine>::new(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            default_selected_rows: selection::Set::Single(key("r1")),
+            ..test_props()
+        },
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    assert_eq!(
+        service.context().selection_state.selected_keys,
+        selection::Set::Single(key("r1"))
+    );
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -2218,6 +2850,7 @@ fn table_part_attrs_dispatcher_covers_every_variant() {
 
     for part in parts {
         let attrs = api.part_attrs(part);
+
         // Every part should yield at least the scope/part attrs unless
         // intentionally short-circuited (SelectAllCheckbox in mode
         // None — but we're in Multiple here, so all are populated).
@@ -2238,10 +2871,13 @@ fn codex_sync_props_copies_updated_disabled_keys_into_context() {
     // Codex P1 (thread PRRT_kwDORp4enM6DRmcb).
     // SyncProps must mirror Props → Context for the non-Bindable fields.
     let service = service_with_rows(test_props_multi(), &[key("r1"), key("r2")]);
+
     assert!(service.context().disabled_keys.is_empty());
 
     let mut new_disabled = BTreeSet::new();
+
     new_disabled.insert(key("r1"));
+
     let new_props = Props {
         selection_mode: selection::Mode::Multiple,
         disabled_keys: new_disabled,
@@ -2249,6 +2885,7 @@ fn codex_sync_props_copies_updated_disabled_keys_into_context() {
     };
 
     let mut service = service;
+
     drop(service.set_props(new_props));
 
     assert!(
@@ -2261,13 +2898,16 @@ fn codex_sync_props_copies_updated_disabled_keys_into_context() {
 fn codex_sync_props_copies_updated_interactive_flag() {
     // Codex P1 — SyncProps interactivity update.
     let service = service_with_rows(test_props(), &[key("r1")]);
+
     assert!(!service.context().interactive);
 
     let new_props = Props {
         interactive: true,
         ..test_props()
     };
+
     let mut service = service;
+
     drop(service.set_props(new_props));
 
     assert!(service.context().interactive);
@@ -2299,8 +2939,11 @@ fn codex_on_props_changed_dispatches_sync_events() {
     // which calls `on_props_changed` and then dispatches the returned
     // events.
     let old_props = test_props_multi();
+
     let mut disabled = BTreeSet::new();
+
     disabled.insert(key("r1"));
+
     let new_props = Props {
         disabled_keys: disabled.clone(),
         dir: Direction::Rtl,
@@ -2308,7 +2951,9 @@ fn codex_on_props_changed_dispatches_sync_events() {
     };
 
     let service = service_with_rows(old_props, &[key("r1"), key("r2")]);
+
     let mut service = service;
+
     drop(service.set_props(new_props));
 
     // `SetDirection` must have flowed.
@@ -2328,6 +2973,7 @@ fn codex_select_all_in_all_visible_mode_materializes_current_rows() {
     drop(service.send(Event::SelectAll));
 
     let sel = service.context().selected_rows.get().clone();
+
     assert!(
         !matches!(sel, selection::Set::All),
         "AllVisible select-all must not write Set::All — that means dataset-wide"
@@ -2365,6 +3011,7 @@ fn codex_sort_column_does_not_leave_is_sorting_stuck() {
     // stuck `true` in the synchronous-sort path. The flag becomes
     // adapter-controlled via `SetIsSorting(bool)`.
     let mut service = service_with_rows(test_props(), &[]);
+
     drop(service.send(Event::SortColumn {
         column: "name".to_string(),
     }));
@@ -2380,12 +3027,15 @@ fn codex_set_is_sorting_event_toggles_flag() {
     // Codex P2 follow-up — the new `SetIsSorting` event lets adapters
     // drive the async-sort indicator explicitly.
     let mut service = service_with_rows(test_props(), &[]);
+
     assert!(!service.context().is_sorting);
 
     drop(service.send(Event::SetIsSorting(true)));
+
     assert!(service.context().is_sorting);
 
     drop(service.send(Event::SetIsSorting(false)));
+
     assert!(!service.context().is_sorting);
 }
 
@@ -2397,6 +3047,7 @@ fn codex_select_all_attrs_gated_on_mode_multiple() {
     // because `Event::SelectAll` is rejected in those modes and the
     // checkbox would render but never work.
     let service = service_with_rows(test_props_single(), &[key("r1")]);
+
     let attrs = service.connect(&|_| {}).select_all_attrs(&[&key("r1")]);
 
     assert!(
@@ -2408,6 +3059,7 @@ fn codex_select_all_attrs_gated_on_mode_multiple() {
 #[test]
 fn codex_select_all_attrs_empty_when_mode_none() {
     let service = service_with_rows(test_props(), &[key("r1")]);
+
     let attrs = service.connect(&|_| {}).select_all_attrs(&[&key("r1")]);
 
     assert!(attrs.iter_attrs().next().is_none());
@@ -2426,11 +3078,13 @@ fn codex_set_rows_rebases_focused_cell_when_row_moves_index() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     drop(service.send(Event::FocusCell {
         row: key("r2"),
         col: 1,
         row_index: 1,
     }));
+
     assert_eq!(service.context().focused_cell, Some((1, 1)));
 
     // Reorder: r2 was at index 1, now at index 0.
@@ -2460,6 +3114,7 @@ fn codex_round2_uncontrolled_to_controlled_sort_dispatches_sync() {
         sort_descriptor: Bindable::uncontrolled(None),
         ..test_props()
     };
+
     let new_props = Props {
         sort_descriptor: Bindable::controlled(Some(SortDescriptor {
             column: "name".to_string(),
@@ -2469,7 +3124,9 @@ fn codex_round2_uncontrolled_to_controlled_sort_dispatches_sync() {
     };
 
     let service = service_with_rows(old_props, &[]);
+
     let mut service = service;
+
     drop(service.set_props(new_props));
 
     assert!(
@@ -2500,13 +3157,16 @@ fn codex_round2_controlled_to_uncontrolled_sort_dispatches_sync() {
         })),
         ..test_props()
     };
+
     let new_props = Props {
         sort_descriptor: Bindable::uncontrolled(None),
         ..test_props()
     };
 
     let service = service_with_rows(old_props, &[]);
+
     let mut service = service;
+
     drop(service.set_props(new_props));
 
     assert!(
@@ -2524,13 +3184,16 @@ fn codex_round2_controlled_loading_syncs_on_props_change() {
         loading: Bindable::controlled(false),
         ..test_props()
     };
+
     let new_props = Props {
         loading: Bindable::controlled(true),
         ..test_props()
     };
 
     let service = service_with_rows(old_props, &[]);
+
     let mut service = service;
+
     drop(service.set_props(new_props));
 
     assert!(
@@ -2547,9 +3210,11 @@ fn codex_round2_sync_props_does_not_corrupt_controlled_selection() {
     // SyncProps must not silently desync `selection_state.selected_keys`
     // from the actually-visible selection — re-sync from `get()`.
     let mut disabled = BTreeSet::new();
+
     disabled.insert(key("r1"));
 
     let mut controlled = BTreeSet::new();
+
     controlled.insert(key("r1"));
     controlled.insert(key("r2"));
 
@@ -2569,6 +3234,7 @@ fn codex_round2_sync_props_does_not_corrupt_controlled_selection() {
         disabled_keys: disabled.clone(),
         ..test_props()
     };
+
     drop(service.set_props(new_props));
 
     // For controlled bindables, the user-visible value is whatever the
@@ -2589,6 +3255,7 @@ fn codex_round2_sync_props_prunes_uncontrolled_selection() {
     // Codex P1 follow-up — pruning still applies in the uncontrolled
     // case where the agnostic core owns the value.
     let mut new_disabled = BTreeSet::new();
+
     new_disabled.insert(key("r1"));
 
     let mut service = service_with_rows(
@@ -2616,9 +3283,11 @@ fn codex_round2_sync_props_prunes_uncontrolled_selection() {
         }),
         ..test_props()
     };
+
     drop(service.set_props(new_props));
 
     let sel = service.context().selected_rows.get().clone();
+
     assert!(
         !sel.contains(&key("r1")),
         "uncontrolled selection must be pruned of disabled rows"
@@ -2634,6 +3303,7 @@ fn codex_round2_sync_props_resyncs_id_and_caption_id() {
     // `aria-labelledby` and `aria-controls` ids stay stale after a
     // parent rename).
     let mut service = service_with_rows(test_props(), &[]);
+
     assert_eq!(service.context().id, "table");
     assert_eq!(service.context().caption_id, "table-caption");
 
@@ -2641,6 +3311,7 @@ fn codex_round2_sync_props_resyncs_id_and_caption_id() {
         id: "orders".to_string(),
         ..test_props()
     };
+
     drop(service.set_props(new_props));
 
     assert_eq!(
@@ -2663,6 +3334,7 @@ fn codex_round2_part_attrs_select_all_uses_ctx_rows() {
     // and therefore "aria-checked=false" even when every registered row
     // was selected. The dispatcher must route through `ctx.rows`.
     let mut service = service_with_rows(test_props_multi(), &[key("r1"), key("r2")]);
+
     drop(service.send(Event::SelectAll));
 
     let attrs = service.connect(&|_| {}).part_attrs(Part::SelectAllCheckbox);
@@ -2691,8 +3363,10 @@ fn codex_round3_set_rows_keeps_selection_state_aligned_when_controlled() {
     // pruned/restricted internal write — otherwise transition guards
     // and API reads disagree.
     let mut controlled = BTreeSet::new();
+
     controlled.insert(key("r1"));
     controlled.insert(key("r2"));
+
     let mut service = service_with_rows(
         Props {
             selection_mode: selection::Mode::Multiple,
@@ -2724,8 +3398,10 @@ fn codex_round3_sync_controlled_selected_rows_leave_controlled_resyncs_state() {
     // `selection_state.selected_keys` must reflect the internal value
     // that `get()` now returns.
     let mut controlled = BTreeSet::new();
+
     controlled.insert(key("r1"));
     controlled.insert(key("r2"));
+
     let mut service = service_with_rows(
         Props {
             selection_mode: selection::Mode::Multiple,
@@ -2738,6 +3414,7 @@ fn codex_round3_sync_controlled_selected_rows_leave_controlled_resyncs_state() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     assert_eq!(
         service.context().selection_state.selected_keys,
         selection::Set::Multiple(controlled),
@@ -2777,7 +3454,9 @@ fn codex_round4_deselect_row_keeps_set_all_in_all_data_mode() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     drop(service.send(Event::SelectAll));
+
     assert!(matches!(
         service.context().selected_rows.get(),
         selection::Set::All
@@ -2804,6 +3483,7 @@ fn codex_round4_toggle_row_keeps_set_all_in_all_data_mode() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     drop(service.send(Event::SelectAll));
 
     drop(service.send(Event::ToggleRow(key("r2"))));
@@ -2815,12 +3495,57 @@ fn codex_round4_toggle_row_keeps_set_all_in_all_data_mode() {
 }
 
 #[test]
+fn table_toggle_row_all_data_single_selection_can_toggle_off() {
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            select_all_mode: SelectAllMode::AllData { total_count: 10 },
+            default_selected_rows: selection::Set::Single(key("r1")),
+            ..test_props()
+        },
+        &[key("r1"), key("r2")],
+    );
+
+    let result = service.send(Event::ToggleRow(key("r1")));
+
+    assert!(result.context_changed);
+    assert_eq!(
+        service.context().selected_rows.get(),
+        &selection::Set::Empty
+    );
+}
+
+#[test]
+fn table_toggle_row_all_visible_set_all_materializes_and_deselects() {
+    let mut service = service_with_rows(
+        Props {
+            selection_mode: selection::Mode::Multiple,
+            default_selected_rows: selection::Set::All,
+            ..test_props()
+        },
+        &[key("r1"), key("r2")],
+    );
+
+    assert_eq!(service.context().selected_rows.get(), &selection::Set::All);
+
+    let result = service.send(Event::ToggleRow(key("r1")));
+
+    assert!(result.context_changed);
+    assert_eq!(
+        service.context().selected_rows.get(),
+        &selection::Set::Multiple(set(&["r2"]))
+    );
+}
+
+#[test]
 fn codex_round4_on_row_keydown_skips_disabled_when_arrow_down() {
     // Codex P2 (thread PRRT_kwDORp4enM6DTElY).
     // Arrow-key row navigation must skip disabled rows so adapter focus
     // wiring doesn't land on `aria-disabled` rows.
     let mut disabled = BTreeSet::new();
+
     disabled.insert(key("r2"));
+
     let service = service_with_rows(
         Props {
             interactive: true,
@@ -2829,12 +3554,17 @@ fn codex_round4_on_row_keydown_skips_disabled_when_arrow_down() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     let recorder = EventRecorder::default();
+
     let rows = [key("r1"), key("r2"), key("r3")];
     let row_refs: Vec<&Key> = rows.iter().collect();
+
     {
         let send = |e| record(&recorder, e);
+
         let api = service.connect(&send);
+
         api.on_row_keydown(&key("r1"), &keydown(KeyboardKey::ArrowDown), &row_refs);
     }
 
@@ -2847,7 +3577,9 @@ fn codex_round4_on_row_keydown_skips_disabled_when_arrow_down() {
 #[test]
 fn codex_round4_on_row_keydown_skips_disabled_when_arrow_up() {
     let mut disabled = BTreeSet::new();
+
     disabled.insert(key("r2"));
+
     let service = service_with_rows(
         Props {
             interactive: true,
@@ -2856,12 +3588,17 @@ fn codex_round4_on_row_keydown_skips_disabled_when_arrow_up() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     let recorder = EventRecorder::default();
+
     let rows = [key("r1"), key("r2"), key("r3")];
     let row_refs: Vec<&Key> = rows.iter().collect();
+
     {
         let send = |e| record(&recorder, e);
+
         let api = service.connect(&send);
+
         api.on_row_keydown(&key("r3"), &keydown(KeyboardKey::ArrowUp), &row_refs);
     }
 
@@ -2875,7 +3612,9 @@ fn codex_round4_on_row_keydown_skips_disabled_when_arrow_up() {
 fn codex_round4_on_cell_keydown_arrow_down_skips_disabled_row() {
     // Codex P2 (thread PRRT_kwDORp4enM6DTElb).
     let mut disabled = BTreeSet::new();
+
     disabled.insert(key("r2"));
+
     let service = service_with_rows(
         Props {
             interactive: true,
@@ -2884,12 +3623,17 @@ fn codex_round4_on_cell_keydown_arrow_down_skips_disabled_row() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     let recorder = EventRecorder::default();
+
     let rows = [key("r1"), key("r2"), key("r3")];
     let row_refs: Vec<&Key> = rows.iter().collect();
+
     {
         let send = |e| record(&recorder, e);
+
         let api = service.connect(&send);
+
         api.on_cell_keydown(
             &key("r1"),
             0,
@@ -2904,6 +3648,7 @@ fn codex_round4_on_cell_keydown_arrow_down_skips_disabled_row() {
             assert_eq!(row, &key("r3"), "must skip disabled r2");
             assert_eq!(*row_index, 2);
         }
+
         other => panic!("expected FocusCell(r3), got {other:?}"),
     }
 }
@@ -2919,6 +3664,7 @@ fn codex_round4_table_attrs_emits_aria_multiselectable_on_interactive_grid() {
         },
         &[key("r1")],
     );
+
     let attrs = service.connect(&|_| {}).table_attrs();
 
     assert_eq!(
@@ -2940,6 +3686,7 @@ fn codex_round4_table_attrs_omits_aria_multiselectable_in_single_mode() {
         },
         &[key("r1")],
     );
+
     let attrs = service.connect(&|_| {}).table_attrs();
 
     assert!(
@@ -2960,6 +3707,7 @@ fn codex_round4_table_attrs_omits_aria_multiselectable_when_non_interactive() {
         },
         &[key("r1")],
     );
+
     let attrs = service.connect(&|_| {}).table_attrs();
 
     assert!(
@@ -3010,7 +3758,9 @@ fn codex_round4_on_row_keydown_home_skips_disabled_first_row() {
     // Home must land on the first ENABLED row, skipping any leading
     // disabled rows.
     let mut disabled = BTreeSet::new();
+
     disabled.insert(key("r1"));
+
     let service = service_with_rows(
         Props {
             interactive: true,
@@ -3019,12 +3769,17 @@ fn codex_round4_on_row_keydown_home_skips_disabled_first_row() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     let recorder = EventRecorder::default();
+
     let rows = [key("r1"), key("r2"), key("r3")];
     let row_refs: Vec<&Key> = rows.iter().collect();
+
     {
         let send = |e| record(&recorder, e);
+
         let api = service.connect(&send);
+
         api.on_row_keydown(&key("r3"), &keydown(KeyboardKey::Home), &row_refs);
     }
 
@@ -3037,7 +3792,9 @@ fn codex_round4_on_row_keydown_home_skips_disabled_first_row() {
 #[test]
 fn codex_round4_on_row_keydown_end_skips_disabled_last_row() {
     let mut disabled = BTreeSet::new();
+
     disabled.insert(key("r3"));
+
     let service = service_with_rows(
         Props {
             interactive: true,
@@ -3046,12 +3803,17 @@ fn codex_round4_on_row_keydown_end_skips_disabled_last_row() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     let recorder = EventRecorder::default();
+
     let rows = [key("r1"), key("r2"), key("r3")];
     let row_refs: Vec<&Key> = rows.iter().collect();
+
     {
         let send = |e| record(&recorder, e);
+
         let api = service.connect(&send);
+
         api.on_row_keydown(&key("r1"), &keydown(KeyboardKey::End), &row_refs);
     }
 
@@ -3066,8 +3828,10 @@ fn codex_round4_on_row_keydown_arrow_no_op_when_all_remaining_disabled() {
     // When every row after the current one is disabled, ArrowDown
     // must emit no event (no FocusRow to land on).
     let mut disabled = BTreeSet::new();
+
     disabled.insert(key("r2"));
     disabled.insert(key("r3"));
+
     let service = service_with_rows(
         Props {
             interactive: true,
@@ -3076,12 +3840,17 @@ fn codex_round4_on_row_keydown_arrow_no_op_when_all_remaining_disabled() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     let recorder = EventRecorder::default();
+
     let rows = [key("r1"), key("r2"), key("r3")];
     let row_refs: Vec<&Key> = rows.iter().collect();
+
     {
         let send = |e| record(&recorder, e);
+
         let api = service.connect(&send);
+
         api.on_row_keydown(&key("r1"), &keydown(KeyboardKey::ArrowDown), &row_refs);
     }
 
@@ -3094,7 +3863,9 @@ fn codex_round4_on_row_keydown_arrow_no_op_when_all_remaining_disabled() {
 #[test]
 fn codex_round4_ctrl_home_skips_disabled_first_row_in_cell_nav() {
     let mut disabled = BTreeSet::new();
+
     disabled.insert(key("r1"));
+
     let service = service_with_rows(
         Props {
             interactive: true,
@@ -3103,12 +3874,17 @@ fn codex_round4_ctrl_home_skips_disabled_first_row_in_cell_nav() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     let recorder = EventRecorder::default();
+
     let rows = [key("r1"), key("r2"), key("r3")];
     let row_refs: Vec<&Key> = rows.iter().collect();
+
     {
         let send = |e| record(&recorder, e);
+
         let api = service.connect(&send);
+
         api.on_cell_keydown(
             &key("r3"),
             2,
@@ -3123,6 +3899,7 @@ fn codex_round4_ctrl_home_skips_disabled_first_row_in_cell_nav() {
             assert_eq!(row, &key("r2"), "Ctrl+Home must skip disabled r1");
             assert_eq!(*row_index, 1);
         }
+
         other => panic!("expected FocusCell(r2), got {other:?}"),
     }
 }
@@ -3147,16 +3924,19 @@ fn codex_round5_sync_props_reclamps_column_widths_below_new_min() {
         },
         &[],
     );
+
     drop(service.send(Event::ColumnResize {
         column: "name".to_string(),
         width: 60.0,
     }));
+
     assert_eq!(service.context().column_widths.get("name"), Some(&60.0));
 
     let new_props = Props {
         min_column_width: 100.0,
         ..test_props()
     };
+
     drop(service.set_props(new_props));
 
     assert_eq!(
@@ -3174,7 +3954,9 @@ fn codex_round5_is_row_selected_excludes_disabled_in_set_all() {
     // non-selectable", not "disabled rows happen to be selected when
     // everyone is".
     let mut disabled = BTreeSet::new();
+
     disabled.insert(key("r1"));
+
     let service = service_with_rows(
         Props {
             selection_mode: selection::Mode::Multiple,
@@ -3185,6 +3967,7 @@ fn codex_round5_is_row_selected_excludes_disabled_in_set_all() {
         },
         &[key("r1"), key("r2")],
     );
+
     let api = service.connect(&|_| {});
 
     assert!(
@@ -3203,7 +3986,9 @@ fn codex_round5_all_selected_excludes_disabled() {
     // filter the disabled set so the result reflects "every SELECTABLE
     // row is selected".
     let mut disabled = BTreeSet::new();
+
     disabled.insert(key("r3"));
+
     let mut service = service_with_rows(
         Props {
             selection_mode: selection::Mode::Multiple,
@@ -3216,13 +4001,16 @@ fn codex_round5_all_selected_excludes_disabled() {
 
     let ids = [key("r1"), key("r2"), key("r3")];
     let id_refs: Vec<&Key> = ids.iter().collect();
+
     let api = service.connect(&|_| {});
 
     assert!(
         api.all_selected(&id_refs),
         "all_selected must filter disabled rows when checking",
     );
+
     let attrs = api.select_all_attrs(&id_refs);
+
     assert_eq!(
         attrs
             .get(&HtmlAttr::Aria(AriaAttr::Checked))
@@ -3245,7 +4033,9 @@ fn codex_round5_set_rows_rebases_focused_cell_without_focused_row() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     drop(service.send(Event::Focus { cell: (1, 2) }));
+
     assert_eq!(service.context().focused_cell, Some((1, 2)));
     assert!(service.context().focused_row.is_none());
 
@@ -3264,12 +4054,14 @@ fn codex_round5_part_attrs_column_header_sortable_field() {
     // `Part::ColumnHeader` now carries a `sortable: bool` so the
     // dispatcher honors caller intent.
     let service = service_with_rows(test_props(), &[]);
+
     let api = service.connect(&|_| {});
 
     let sortable = api.part_attrs(Part::ColumnHeader {
         header: "name".to_string(),
         sortable: true,
     });
+
     assert!(
         sortable.get(&HtmlAttr::Aria(AriaAttr::Sort)).is_some(),
         "sortable=true must emit aria-sort",
@@ -3279,6 +4071,7 @@ fn codex_round5_part_attrs_column_header_sortable_field() {
         header: "avatar".to_string(),
         sortable: false,
     });
+
     assert!(
         non_sortable.get(&HtmlAttr::Aria(AriaAttr::Sort)).is_none(),
         "sortable=false must omit aria-sort",
@@ -3306,6 +4099,7 @@ fn codex_round6_set_direction_resolves_auto_from_locale() {
         },
         &[],
     );
+
     assert_eq!(service.context().dir, Direction::Rtl);
 
     // Adapter / parent flips the prop back to `Auto` (asks the
@@ -3332,12 +4126,14 @@ fn codex_round6_set_direction_auto_via_props_change() {
         },
         &[],
     );
+
     assert_eq!(service.context().dir, Direction::Rtl);
 
     let new_props = Props {
         dir: Direction::Auto,
         ..test_props()
     };
+
     drop(service.set_props(new_props));
 
     assert_ne!(
@@ -3360,9 +4156,11 @@ fn codex_round7_sync_props_normalizes_selection_when_mode_tightens_to_single() {
     // selection state that's invalid for the active mode until the
     // next user-driven selection event.
     let mut starting = BTreeSet::new();
+
     starting.insert(key("r1"));
     starting.insert(key("r2"));
     starting.insert(key("r3"));
+
     let mut service = service_with_rows(
         Props {
             selection_mode: selection::Mode::Multiple,
@@ -3371,15 +4169,18 @@ fn codex_round7_sync_props_normalizes_selection_when_mode_tightens_to_single() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     assert_eq!(service.context().selected_rows.get().len(), 3);
 
     let new_props = Props {
         selection_mode: selection::Mode::Single,
         ..test_props()
     };
+
     drop(service.set_props(new_props));
 
     let sel = service.context().selected_rows.get().clone();
+
     assert!(
         sel.len() <= 1,
         "Mode::Single must hold at most one selected row after SyncProps, got {sel:?}",
@@ -3396,8 +4197,10 @@ fn codex_round7_sync_props_clears_selection_when_mode_becomes_none() {
     // Same root cause, harder constraint: `Mode::None` must hold an
     // empty selection.
     let mut starting = BTreeSet::new();
+
     starting.insert(key("r1"));
     starting.insert(key("r2"));
+
     let mut service = service_with_rows(
         Props {
             selection_mode: selection::Mode::Multiple,
@@ -3406,12 +4209,14 @@ fn codex_round7_sync_props_clears_selection_when_mode_becomes_none() {
         },
         &[key("r1"), key("r2")],
     );
+
     assert!(!service.context().selected_rows.get().is_empty());
 
     let new_props = Props {
         selection_mode: selection::Mode::None,
         ..test_props()
     };
+
     drop(service.set_props(new_props));
 
     assert!(
@@ -3426,6 +4231,7 @@ fn codex_round7_part_attrs_resize_handle_uses_cached_width() {
     // `part_attrs(Part::ColumnResizeHandle)` must reflect the cached
     // width from `ctx.column_widths`, not a hard-coded 0.
     let mut service = service_with_rows(test_props(), &[]);
+
     drop(service.send(Event::ColumnResize {
         column: "name".to_string(),
         width: 180.0,
@@ -3497,7 +4303,9 @@ fn codex_round7_sync_props_demotes_set_all_when_mode_leaves_all_data() {
         },
         &[key("r1"), key("r2"), key("r3")],
     );
+
     drop(service.send(Event::SelectAll));
+
     assert!(matches!(
         service.context().selected_rows.get(),
         selection::Set::All
@@ -3508,9 +4316,11 @@ fn codex_round7_sync_props_demotes_set_all_when_mode_leaves_all_data() {
         select_all_mode: SelectAllMode::AllVisible,
         ..test_props()
     };
+
     drop(service.set_props(new_props));
 
     let sel = service.context().selected_rows.get().clone();
+
     assert!(
         !matches!(sel, selection::Set::All),
         "leaving AllData mode must demote Set::All to Multiple(ctx.rows), got {sel:?}",

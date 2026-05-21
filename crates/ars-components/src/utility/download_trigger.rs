@@ -812,14 +812,14 @@ fn parse_authority(scheme: &str, authority: &str) -> Option<ParsedOrigin> {
 
         let port = if after.is_empty() {
             default_http_port(scheme)
-        } else if let Some(port_raw) = after.strip_prefix(':') {
+        } else {
+            let port_raw = after.strip_prefix(':')?;
+
             if port_raw.is_empty() {
                 default_http_port(scheme)
             } else {
                 port_raw.parse::<u16>().ok()?
             }
-        } else {
-            return None;
         };
 
         return Some(ParsedOrigin {
@@ -1619,5 +1619,224 @@ mod tests {
                 .root_attrs(),
             )
         );
+    }
+
+    #[test]
+    fn clear_builders_and_api_accessors_report_current_props() {
+        let props = Props::new()
+            .id("dl-clear")
+            .href("/before.bin")
+            .filename("before.bin")
+            .mime_type("application/octet-stream")
+            .disabled(true)
+            .document_origin("https://example.com")
+            .clear_filename()
+            .clear_mime_type()
+            .clear_document_origin();
+
+        assert_eq!(props.filename, None);
+        assert_eq!(props.mime_type, None);
+        assert_eq!(props.document_origin, None);
+
+        let cleared = api(props);
+
+        assert_eq!(cleared.id(), "dl-clear");
+        assert!(cleared.is_disabled());
+        assert_eq!(cleared.filename(), None);
+
+        let enabled = api(Props::new()
+            .id("dl-file")
+            .href("/file.txt")
+            .filename("file.txt"));
+
+        assert!(!enabled.is_disabled());
+        assert_eq!(enabled.filename(), Some("file.txt"));
+    }
+
+    #[test]
+    fn scheme_prefix_validation_accepts_only_rfc3986_scheme_bytes() {
+        assert!(scheme_prefix_bytes_valid(b"a"));
+        assert!(scheme_prefix_bytes_valid(b"a+1-z."));
+        assert!(scheme_prefix_bytes_valid(b"web+test-1.2"));
+
+        assert!(!scheme_prefix_bytes_valid(b""));
+        assert!(!scheme_prefix_bytes_valid(b"1http"));
+        assert!(!scheme_prefix_bytes_valid(b"+http"));
+        assert!(!scheme_prefix_bytes_valid(b"http_"));
+        assert!(!scheme_prefix_bytes_valid(b"http:"));
+    }
+
+    #[test]
+    fn starts_with_ignore_case_checks_length_and_ascii_case() {
+        assert!(starts_with_ignore_case(b"HTTPS://example.com", b"https:"));
+        assert!(starts_with_ignore_case(b"data:", b"data:"));
+
+        assert!(!starts_with_ignore_case(b"data", b"data:"));
+        assert!(!starts_with_ignore_case(b"mailto:", b"tel:"));
+        assert!(!starts_with_ignore_case(b"DATB:", b"data:"));
+    }
+
+    #[test]
+    fn relative_reference_scheme_scan_stops_at_url_delimiters() {
+        assert!(contains_scheme_separator_before_delim(b"web+app.1:path"));
+        assert!(!contains_scheme_separator_before_delim(b"/x:y"));
+        assert!(!contains_scheme_separator_before_delim(b"?x:y"));
+        assert!(!contains_scheme_separator_before_delim(b"#x:y"));
+        assert!(!contains_scheme_separator_before_delim(b"a/b:c"));
+        assert!(!contains_scheme_separator_before_delim(b"a?b:c"));
+        assert!(!contains_scheme_separator_before_delim(b"a#b:c"));
+        assert!(!contains_scheme_separator_before_delim(b"1bad:path"));
+        assert!(!contains_scheme_separator_before_delim(
+            b"not a scheme:path"
+        ));
+
+        assert!(is_relative_reference("./a:b"));
+        assert!(is_relative_reference("../a:b"));
+        assert!(is_relative_reference("/a:b"));
+        assert!(is_relative_reference("?a:b"));
+        assert!(is_relative_reference("#a:b"));
+        assert!(!is_relative_reference("mailto:user@example.com"));
+        assert!(!is_relative_reference("//example.com/file"));
+    }
+
+    #[test]
+    fn low_level_origin_helpers_cover_ports_userinfo_and_host_normalization() {
+        assert_eq!(
+            http_https_authority_rest("//example.com"),
+            Some("example.com")
+        );
+        assert_eq!(http_https_authority_rest("//"), Some(""));
+        assert_eq!(
+            http_https_authority_rest(r"\\\example.com/path"),
+            Some("example.com/path")
+        );
+        assert_eq!(http_https_authority_rest("/example.com"), None);
+
+        assert_eq!(default_http_port("http"), 80);
+        assert_eq!(default_http_port("https"), 443);
+        assert_eq!(default_http_port("HTTPS"), 443);
+
+        assert_eq!(hex_value(b'0'), Some(0));
+        assert_eq!(hex_value(b'9'), Some(9));
+        assert_eq!(hex_value(b'a'), Some(10));
+        assert_eq!(hex_value(b'F'), Some(15));
+        assert_eq!(hex_value(b'g'), None);
+
+        assert_eq!(percent_decode_host("exa%6Dple.com").as_ref(), "example.com");
+        assert_eq!(percent_decode_host("%").as_ref(), "%");
+        assert_eq!(percent_decode_host("%6").as_ref(), "%6");
+        assert_eq!(percent_decode_host("a%20b").as_ref(), "a b");
+        assert_eq!(percent_decode_host("%ff").as_ref(), "%ff");
+
+        assert_eq!(
+            authority_without_userinfo("user:pass@example.com"),
+            "example.com"
+        );
+        assert_eq!(authority_without_userinfo("[::1]"), "[::1]");
+        assert_eq!(authority_without_userinfo("user@[::1]:443"), "[::1]:443");
+        assert_eq!(
+            authority_without_userinfo("[::1]@example.com"),
+            "example.com"
+        );
+        assert_eq!(
+            authority_without_userinfo("[fe80::1%25en@0]:443"),
+            "[fe80::1%25en@0]:443"
+        );
+        assert_eq!(
+            authority_without_userinfo("[a@b]@example.com"),
+            "example.com"
+        );
+
+        assert_eq!(
+            parse_authority("https", "EXAMPLE.com:").unwrap(),
+            ParsedOrigin {
+                scheme: "https".to_string(),
+                host: "example.com".to_string(),
+                port: 443,
+            }
+        );
+        assert_eq!(
+            parse_authority("http", "[::1]:8080").unwrap(),
+            ParsedOrigin {
+                scheme: "http".to_string(),
+                host: "::1".to_string(),
+                port: 8080,
+            }
+        );
+        assert_eq!(parse_authority("https", "[::1]evil"), None);
+    }
+
+    #[test]
+    fn relaxed_ipv4_parser_covers_shorthand_radix_and_bounds() {
+        assert_eq!(
+            parse_ipv4_address_relaxed("127.1"),
+            Some(Ipv4Addr::new(127, 0, 0, 1))
+        );
+        assert_eq!(
+            parse_ipv4_address_relaxed("127.0.0.1"),
+            Some(Ipv4Addr::new(127, 0, 0, 1))
+        );
+        assert_eq!(
+            parse_ipv4_address_relaxed("0177.0.0.1"),
+            Some(Ipv4Addr::new(127, 0, 0, 1))
+        );
+        assert_eq!(
+            parse_ipv4_address_relaxed("127.0x1.01"),
+            Some(Ipv4Addr::new(127, 1, 0, 1))
+        );
+        assert_eq!(
+            parse_ipv4_address_relaxed("1.2.65535"),
+            Some(Ipv4Addr::new(1, 2, 255, 255))
+        );
+        assert_eq!(
+            parse_ipv4_address_relaxed("1.16777215"),
+            Some(Ipv4Addr::new(1, 255, 255, 255))
+        );
+        assert_eq!(
+            parse_ipv4_address_relaxed("0x7f000001"),
+            Some(Ipv4Addr::new(127, 0, 0, 1))
+        );
+        assert_eq!(parse_ipv4_address_relaxed(""), None);
+        assert_eq!(parse_ipv4_address_relaxed("127.0.0.256"), None);
+        assert_eq!(parse_ipv4_address_relaxed("1.2.65536"), None);
+        assert_eq!(parse_ipv4_address_relaxed("1.16777216"), None);
+        assert_eq!(parse_ipv4_address_relaxed("127.0.0.0.1"), None);
+        assert_eq!(parse_ipv4_address_relaxed("127:"), None);
+
+        assert_eq!(parse_ipv4_component_value("010"), Some(8));
+        assert_eq!(parse_ipv4_component_value("0X10"), Some(16));
+        assert_eq!(parse_ipv4_component_value(""), None);
+        assert_eq!(parse_ipv4_component_value("0x"), None);
+    }
+
+    #[test]
+    fn scheme_policy_helpers_cover_protocol_pairs_and_document_scheme() {
+        assert_eq!(
+            classify_href("blob:https://example.com/id", None),
+            DownloadPolicy::Native
+        );
+        assert_eq!(
+            classify_href("data:text/plain,hello", None),
+            DownloadPolicy::Native
+        );
+        assert_eq!(
+            classify_href("mailto:user@example.com", None),
+            DownloadPolicy::NoDownloadHint
+        );
+        assert_eq!(
+            classify_href("tel:+15551212", None),
+            DownloadPolicy::NoDownloadHint
+        );
+
+        assert_eq!(
+            document_origin_scheme(Some("http://example.com")),
+            Some("http")
+        );
+        assert_eq!(
+            document_origin_scheme(Some("https://example.com")),
+            Some("https")
+        );
+        assert_eq!(document_origin_scheme(Some("ftp://example.com")), None);
+        assert_eq!(document_origin_scheme(None), None);
     }
 }
