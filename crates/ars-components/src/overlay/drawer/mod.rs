@@ -771,7 +771,7 @@ impl ars_core::Machine for Machine {
                 let snap_points = normalize_snap_points(props.snap_points.as_deref());
                 let default_snap_index = props.default_snap_index;
 
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
                     let current_snap = if ctx.snap_points == snap_points {
                         clamp_snap_index(ctx.current_snap, &snap_points)
                     } else {
@@ -792,7 +792,35 @@ impl ars_core::Machine for Machine {
                     ctx.snap_points = snap_points.clone();
                     ctx.current_snap = current_snap;
                     ctx.snap_height = snap_height;
-                }))
+                });
+
+                if ctx.open {
+                    match (ctx.modal, modal) {
+                        (true, false) => {
+                            plan = plan
+                                .with_effect(PendingEffect::named(Effect::RemoveBackgroundInert));
+                        }
+                        (false, true) => {
+                            plan =
+                                plan.with_effect(PendingEffect::named(Effect::SetBackgroundInert));
+                        }
+                        _ => {}
+                    }
+
+                    match (ctx.prevent_scroll, prevent_scroll) {
+                        (true, false) => {
+                            plan =
+                                plan.with_effect(PendingEffect::named(Effect::ScrollLockRelease));
+                        }
+                        (false, true) => {
+                            plan =
+                                plan.with_effect(PendingEffect::named(Effect::ScrollLockAcquire));
+                        }
+                        _ => {}
+                    }
+                }
+
+                Some(plan)
             }
             _ => None,
         }
@@ -2297,6 +2325,72 @@ mod tests {
         assert!(result.context_changed);
         assert_eq!(service.context().current_snap, 2);
         assert_eq!(service.context().snap_height, 1.0);
+    }
+
+    #[test]
+    fn sync_props_while_open_releases_modal_and_scroll_effects_when_disabled() {
+        let mut service = open_service(Props {
+            modal: true,
+            prevent_scroll: true,
+            ..test_props()
+        });
+
+        let result = service.set_props(Props {
+            modal: false,
+            prevent_scroll: false,
+            ..test_props()
+        });
+        let names = effect_names(&result);
+
+        assert!(!service.context().modal);
+        assert!(!service.context().prevent_scroll);
+        assert!(names.contains(&Effect::RemoveBackgroundInert));
+        assert!(names.contains(&Effect::ScrollLockRelease));
+        assert!(!names.contains(&Effect::SetBackgroundInert));
+        assert!(!names.contains(&Effect::ScrollLockAcquire));
+    }
+
+    #[test]
+    fn sync_props_while_open_acquires_modal_and_scroll_effects_when_enabled() {
+        let mut service = open_service(Props {
+            modal: false,
+            prevent_scroll: false,
+            ..test_props()
+        });
+
+        let result = service.set_props(Props {
+            modal: true,
+            prevent_scroll: true,
+            ..test_props()
+        });
+        let names = effect_names(&result);
+
+        assert!(service.context().modal);
+        assert!(service.context().prevent_scroll);
+        assert!(names.contains(&Effect::SetBackgroundInert));
+        assert!(names.contains(&Effect::ScrollLockAcquire));
+        assert!(!names.contains(&Effect::RemoveBackgroundInert));
+        assert!(!names.contains(&Effect::ScrollLockRelease));
+    }
+
+    #[test]
+    fn sync_props_while_closed_does_not_emit_modal_or_scroll_effects() {
+        let mut service = fresh_service(Props {
+            modal: true,
+            prevent_scroll: true,
+            ..test_props()
+        });
+
+        let result = service.set_props(Props {
+            modal: false,
+            prevent_scroll: false,
+            ..test_props()
+        });
+        let names = effect_names(&result);
+
+        assert!(!service.context().open);
+        assert!(!names.contains(&Effect::RemoveBackgroundInert));
+        assert!(!names.contains(&Effect::ScrollLockRelease));
     }
 
     #[test]
