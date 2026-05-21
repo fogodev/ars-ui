@@ -1,0 +1,85 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "6c894854138f",
+  "session_id": "019e488d-a3a5-7e42-871c-43cd60efbf27",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-21T05:53:15.337038Z",
+  "branch": "t3code/9f5b5f2f",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "914f943bdfd6",
+  "token_usage": {
+    "input_tokens": 806453,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 43913088,
+    "output_tokens": 74042,
+    "api_call_count": 292
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Implement AlertDialog as a dedicated agnostic overlay core in ars-components (issue #260), reusing Dialog's state machine, and then refactor overlay snapshot directories to match the per-component directory structure used by the input category.",
+    "outcome": "AlertDialog core was fully implemented with unit tests, snapshots (22 new), proptests, mutation testing (0 survivors after two passes), spec updates, and conformance test. Overlay modules were converted from flat `.rs` files to directory-backed modules (`overlay/<component>/mod.rs`) with per-component `snapshots/` dirs. PR #660 was opened, Codex review findings addressed, and a fix commit landed.",
+    "learnings": {
+      "repo": [
+        "The `input` category pattern is the canonical snapshot layout: each component is a directory-backed module at `<category>/<component>/mod.rs` with snapshots under `<category>/<component>/snapshots/`. Overlay previously used flat files and a shared `overlay/snapshots/` dir.",
+        "Snapshot-count lint has a 500-file workspace-wide warning threshold and a 40-file per-component hard cap. Total was 505 after this PR.",
+        "`cargo xci-fast` is the mandatory pre-push gate; it runs fmt, check, clippy -D warnings, unit tests via nextest, integration tests, and adapter tests.",
+        "PRs with `.snap` file changes must have the `snapshot-reviewed` label applied; a CI check enforces this and will fail if the label is absent when the job runs.",
+        "`@codex review` triggers the automated review bot; approval is signaled by a 👍 reaction on the PR.",
+        "AGENTS.md enforces a hard stop before commit/push — explicit user approval is required.",
+        "`cargo insta test -p ars-components --unreferenced=reject` fails on pre-existing unreferenced `utility/highlight` snapshots unrelated to this work; `--unreferenced=warn` must be used instead."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/overlay/alert_dialog/mod.rs",
+          "line": 1,
+          "end_line": 50,
+          "finding": "`dialog::Context` carries `dialog::Messages`, so AlertDialog cannot use `pub type Context = dialog::Context` — it needs its own `Context` struct to hold localized `cancel_label`/`confirm_label`. State, Event, and Effect work fine as type aliases."
+        },
+        {
+          "path": "crates/ars-components/src/overlay/dialog/mod.rs",
+          "line": 1118,
+          "end_line": 1145,
+          "finding": "Snapshot path for a flat overlay module can be overridden per-test using `insta::with_settings!({ snapshot_path => \"../snapshots/dialog\" })` — this is how the flat modules redirected snapshots before the directory-backed conversion."
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "line": 1450,
+          "end_line": 1510,
+          "finding": "The snapshot-count lint needed to be updated to detect `pub type State = ...` machine modules, which AlertDialog uses instead of defining its own State enum. Codex flagged this as a gap in review."
+        },
+        {
+          "path": "spec/components/overlay/alert-dialog.md",
+          "line": 230,
+          "end_line": 285,
+          "finding": "Spec example for AlertDialog was using stale callback types and implied a plain Dialog context. The spec was updated to document the AlertDialog-specific Context divergence and the correct attribute/callback contract."
+        }
+      ],
+      "workflow": [
+        "Write failing tests before implementation (TDD) to confirm the exact compilation error before filling in types/logic.",
+        "Run `cargo mutants -p <crate> -f <file>` twice: once after initial implementation to find coverage gaps, and again after adding coverage tests to confirm 0 survivors. First pass had 29 missed mutants concentrated in prop-sync and registration idempotence.",
+        "Accept new insta snapshots with `cargo insta accept` (not `--accept` flag) after the first green compile; snapshots are generated as `.snap.new` files that need explicit acceptance.",
+        "The CI `Snapshot Change Check` can fail due to a timing race where the workflow checks for the `snapshot-reviewed` label before it has been applied. Re-running the failed job is the fix, not a code change.",
+        "When converting flat module files to directory-backed modules, all hard-coded path references in AGENTS.md, spec markdown, xtask, and snapshot `.snap` files must be updated (snap files contain `source` metadata with file paths)."
+      ]
+    },
+    "friction": [
+      "`cargo xci-fast` took extremely long — multiple 60-second poll intervals across fmt, check, clippy, nextest unit, integration, and adapter compilation phases.",
+      "Mutation testing required two full runs (first: 29 missed, second: 0 missed), each taking many minutes with no intermediate progress output.",
+      "CI Snapshot Change Check failed on first push due to a label-timing race — the job checked for `snapshot-reviewed` before the label API call completed.",
+      "`cargo insta test --unreferenced=reject` is unusable in this workspace due to pre-existing unreferenced `utility/highlight` snapshots, forcing use of `--unreferenced=warn` throughout.",
+      "The plan specified `pub type Context = dialog::Context` but Dialog's Context embeds Dialog's Messages type, making that alias impossible without losing AlertDialog's i18n contract. Required a design deviation and spec update.",
+      "Codex review loop required a separate follow-up commit to address two findings (xtask lint gap and spec example fix), extending the session after the PR was already open."
+    ],
+    "open_items": [
+      "Pre-existing unreferenced `utility/highlight` snapshots need cleanup to unblock `cargo insta test --unreferenced=reject` usage.",
+      "Total workspace snapshot count is at 505, above the 500-file warning threshold — approaching limits that may require snapshot pruning or the hard cap being hit.",
+      "No adapter components for AlertDialog were implemented; adapter work is deferred to later issue-backed tasks.",
+      "AlertDialog `initial_focus: None` default leaves adapters to interpret the CancelTrigger focus behavior — this adapter contract is documented in spec but not enforced at the agnostic core level."
+    ]
+  }
+}
