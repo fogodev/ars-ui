@@ -681,7 +681,7 @@ impl ars_core::Machine for Machine {
                 }
             }
 
-            (State::Open, Event::SelectItem(key)) => select_item_plan(ctx, props, key.clone()),
+            (_, Event::SelectItem(key)) => select_item_plan(ctx, props, key.clone()),
 
             (_, Event::DeselectItem(key)) => {
                 if !ctx.multiple {
@@ -982,6 +982,7 @@ impl Api<'_> {
 
         attrs
             .set(HtmlAttr::Id, self.ctx.ids.part("trigger"))
+            .set(HtmlAttr::Type, "button")
             .set(HtmlAttr::Role, "combobox")
             .set(
                 HtmlAttr::Aria(AriaAttr::Expanded),
@@ -1096,8 +1097,6 @@ impl Api<'_> {
                 }
             }
 
-            KeyboardKey::Enter | KeyboardKey::Space => (self.send)(Event::Toggle),
-
             KeyboardKey::Escape if self.ctx.open => (self.send)(Event::Close),
 
             _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
@@ -1157,6 +1156,7 @@ impl Api<'_> {
         let mut attrs = part_attrs(&Part::ClearTrigger);
 
         attrs
+            .set(HtmlAttr::Type, "button")
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.clear_label)(&self.ctx.locale),
@@ -1979,13 +1979,16 @@ mod tests {
 
         let trigger = api.trigger_attrs();
         let content = api.content_attrs();
+        let clear = api.clear_trigger_attrs();
         let hidden = api.hidden_input_attrs();
 
         assert_eq!(trigger.get(&HtmlAttr::Role), Some("combobox"));
+        assert_eq!(trigger.get(&HtmlAttr::Type), Some("button"));
         assert_eq!(
             trigger.get(&HtmlAttr::Aria(AriaAttr::HasPopup)),
             Some("listbox")
         );
+        assert_eq!(clear.get(&HtmlAttr::Type), Some("button"));
         assert_eq!(content.get(&HtmlAttr::Role), Some("listbox"));
         assert_eq!(api.selected_text(), Some("Bravo"));
         assert_eq!(hidden.get(&HtmlAttr::Name), Some("country"));
@@ -2105,9 +2108,9 @@ mod tests {
 
         let captured = captured.into_inner();
 
-        assert_eq!(captured.len(), 16);
+        assert_eq!(captured.len(), 15);
         assert_eq!(
-            &captured[..9],
+            &captured[..8],
             &[
                 Event::Toggle,
                 Event::Focus { is_keyboard: true },
@@ -2116,16 +2119,15 @@ mod tests {
                 Event::HighlightItem(Some(key("bravo"))),
                 Event::HighlightItem(None),
                 Event::Clear,
-                Event::Toggle,
                 Event::Open,
             ]
         );
         assert!(matches!(
-            captured[9],
+            captured[8],
             Event::TypeaheadSearch('a', timestamp) if timestamp > 0
         ));
         assert_eq!(
-            &captured[10..14],
+            &captured[9..13],
             &[
                 Event::HighlightNext,
                 Event::HighlightPrev,
@@ -2134,10 +2136,10 @@ mod tests {
             ]
         );
         assert!(matches!(
-            captured[14],
+            captured[13],
             Event::TypeaheadSearch('d', timestamp) if timestamp > 0
         ));
-        assert_eq!(captured[15], Event::Close);
+        assert_eq!(captured[14], Event::Close);
 
         let open_capture = RefCell::new(Vec::new());
 
@@ -2167,6 +2169,18 @@ mod tests {
                 Event::Close,
                 Event::SelectItem(key("alpha")),
             ]
+        );
+
+        let mut blurred_click = make_service(Props::new().id("blurred-click"));
+
+        drop(blurred_click.send(Event::Open));
+        drop(blurred_click.send(Event::Blur));
+        drop(blurred_click.send(Event::SelectItem(key("alpha"))));
+
+        assert_eq!(*blurred_click.state(), State::Closed);
+        assert_eq!(
+            *blurred_click.context().selection.get(),
+            selection::Set::Single(key("alpha"))
         );
     }
 
