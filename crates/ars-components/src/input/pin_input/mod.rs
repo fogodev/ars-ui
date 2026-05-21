@@ -1526,6 +1526,15 @@ mod tests {
     }
 
     #[test]
+    fn pin_input_zero_length_never_reports_complete() {
+        let svc = service(props().length(0));
+
+        assert_eq!(svc.state(), &State::Idle);
+        assert!(!svc.context().complete);
+        assert!(svc.context().value.get().is_empty());
+    }
+
+    #[test]
     fn pin_input_private_helpers_cover_next_empty_and_output_props() {
         let values = string_vec(&["1", "", "3", ""]);
 
@@ -1800,6 +1809,23 @@ mod tests {
         assert_eq!(svc.context().focused_index, Some(1));
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, Effect::FocusCell);
+    }
+
+    #[test]
+    fn pin_input_delete_char_on_first_empty_cell_is_noop() {
+        let mut svc = service(props());
+
+        drop(svc.send(Event::Focus {
+            index: 0,
+            is_keyboard: false,
+        }));
+
+        let before = svc.context().clone();
+        let result = svc.send(Event::DeleteChar { index: 0 });
+
+        assert!(result.pending_effects.is_empty());
+        assert_eq!(svc.context(), &before);
+        assert_eq!(svc.state(), &State::Focused { index: 0 });
     }
 
     #[test]
@@ -2087,6 +2113,19 @@ mod tests {
         drop(svc.set_props(props().uncontrolled()));
 
         assert!(!svc.context().value.is_controlled());
+    }
+
+    #[test]
+    fn pin_input_set_value_keeps_zero_length_incomplete() {
+        let mut svc = service(props().length(0).value(Vec::new()));
+
+        assert_eq!(svc.state(), &State::Idle);
+        assert!(!svc.context().complete);
+
+        drop(svc.set_props(props().length(0).value(Vec::new())));
+
+        assert_eq!(svc.state(), &State::Idle);
+        assert!(!svc.context().complete);
     }
 
     #[test]

@@ -101,69 +101,90 @@ jobs:
           - name: components-shard-1
             package: ars-components
             shard: "0/12"
+            features: "ars-components/i18n"
           - name: components-shard-2
             package: ars-components
             shard: "1/12"
+            features: "ars-components/i18n"
           - name: components-shard-3
             package: ars-components
             shard: "2/12"
+            features: "ars-components/i18n"
           - name: components-shard-4
             package: ars-components
             shard: "3/12"
+            features: "ars-components/i18n"
           - name: components-shard-5
             package: ars-components
             shard: "4/12"
+            features: "ars-components/i18n"
           - name: components-shard-6
             package: ars-components
             shard: "5/12"
+            features: "ars-components/i18n"
           - name: components-shard-7
             package: ars-components
             shard: "6/12"
+            features: "ars-components/i18n"
           - name: components-shard-8
             package: ars-components
             shard: "7/12"
+            features: "ars-components/i18n"
           - name: components-shard-9
             package: ars-components
             shard: "8/12"
+            features: "ars-components/i18n"
           - name: components-shard-10
             package: ars-components
             shard: "9/12"
+            features: "ars-components/i18n"
           - name: components-shard-11
             package: ars-components
             shard: "10/12"
+            features: "ars-components/i18n"
           - name: components-shard-12
             package: ars-components
             shard: "11/12"
+            features: "ars-components/i18n"
           # ─── ars-collections (≈ 1,080 mutants, sharded 4-way) ──
           - name: collections-shard-1
             package: ars-collections
             shard: "0/4"
+            features: ""
           - name: collections-shard-2
             package: ars-collections
             shard: "1/4"
+            features: ""
           - name: collections-shard-3
             package: ars-collections
             shard: "2/4"
+            features: ""
           - name: collections-shard-4
             package: ars-collections
             shard: "3/4"
+            features: ""
           # ─── ars-core (≈ 700 mutants, sharded 2-way) ───────────
           - name: core-shard-1
             package: ars-core
             shard: "0/2"
+            features: ""
           - name: core-shard-2
             package: ars-core
             shard: "1/2"
+            features: ""
           # ─── Single-job runs (small enough for one runner) ─────
           - name: a11y
             package: ars-a11y
             shard: ""
+            features: ""
           - name: forms
             package: ars-forms
             shard: ""
+            features: ""
           - name: interactions
             package: ars-interactions
             shard: ""
+            features: ""
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -193,15 +214,20 @@ jobs:
         env:
           PACKAGE: ${{ matrix.package }}
           SHARD: ${{ matrix.shard }}
+          FEATURES: ${{ matrix.features }}
         # `SHARD` is empty for single-job entries and `k/n` for sharded
         # entries; the conditional keeps both shapes in one job template.
         # Both env vars are quoted to defend against accidental whitespace
         # from matrix overrides.
         run: |
+          args=(-p "$PACKAGE" --output mutants.out)
+          if [ -n "$FEATURES" ]; then
+            args+=(--features "$FEATURES")
+          fi
           if [ -n "$SHARD" ]; then
-            cargo mutants -p "$PACKAGE" --shard "$SHARD" --output mutants.out
+            cargo mutants "${args[@]}" --shard "$SHARD"
           else
-            cargo mutants -p "$PACKAGE" --output mutants.out
+            cargo mutants "${args[@]}"
           fi
       # Always upload, even on success — surviving "missed" entries on a
       # passing run are valuable feedback for follow-up tightening.

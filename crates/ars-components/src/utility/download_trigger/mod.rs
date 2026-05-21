@@ -1679,6 +1679,10 @@ mod tests {
     #[test]
     fn relative_reference_scheme_scan_stops_at_url_delimiters() {
         assert!(contains_scheme_separator_before_delim(b"web+app.1:path"));
+        assert!(contains_scheme_separator_before_delim(b"a:path"));
+        assert!(contains_scheme_separator_before_delim(b"a+b:path"));
+        assert!(contains_scheme_separator_before_delim(b"a-b:path"));
+        assert!(contains_scheme_separator_before_delim(b"a.b:path"));
         assert!(!contains_scheme_separator_before_delim(b"/x:y"));
         assert!(!contains_scheme_separator_before_delim(b"?x:y"));
         assert!(!contains_scheme_separator_before_delim(b"#x:y"));
@@ -1690,6 +1694,7 @@ mod tests {
             b"not a scheme:path"
         ));
 
+        assert!(!is_relative_reference(""));
         assert!(is_relative_reference("./a:b"));
         assert!(is_relative_reference("../a:b"));
         assert!(is_relative_reference("/a:b"));
@@ -1723,6 +1728,8 @@ mod tests {
         assert_eq!(hex_value(b'g'), None);
 
         assert_eq!(percent_decode_host("exa%6Dple.com").as_ref(), "example.com");
+        assert_eq!(percent_decode_host("a%2Fb").as_ref(), "a/b");
+        assert_eq!(percent_decode_host("a%00b").as_ref(), "a\0b");
         assert_eq!(percent_decode_host("%").as_ref(), "%");
         assert_eq!(percent_decode_host("%6").as_ref(), "%6");
         assert_eq!(percent_decode_host("a%20b").as_ref(), "a b");
@@ -1797,14 +1804,30 @@ mod tests {
             Some(Ipv4Addr::new(127, 0, 0, 1))
         );
         assert_eq!(parse_ipv4_address_relaxed(""), None);
+        assert_eq!(parse_ipv4_address_relaxed("127:1"), None);
+        assert_eq!(
+            parse_ipv4_address_relaxed("1.2.3.255"),
+            Some(Ipv4Addr::new(1, 2, 3, 255))
+        );
+        assert_eq!(parse_ipv4_address_relaxed("1.2.3.256"), None);
         assert_eq!(parse_ipv4_address_relaxed("127.0.0.256"), None);
         assert_eq!(parse_ipv4_address_relaxed("1.2.65536"), None);
+        assert_eq!(
+            parse_ipv4_address_relaxed("1.2.65535"),
+            Some(Ipv4Addr::new(1, 2, 255, 255))
+        );
         assert_eq!(parse_ipv4_address_relaxed("1.16777216"), None);
+        assert_eq!(
+            parse_ipv4_address_relaxed("1.16777215"),
+            Some(Ipv4Addr::new(1, 255, 255, 255))
+        );
         assert_eq!(parse_ipv4_address_relaxed("127.0.0.0.1"), None);
         assert_eq!(parse_ipv4_address_relaxed("127:"), None);
 
         assert_eq!(parse_ipv4_component_value("010"), Some(8));
         assert_eq!(parse_ipv4_component_value("0X10"), Some(16));
+        assert_eq!(parse_ipv4_component_value("0x0"), Some(0));
+        assert_eq!(parse_ipv4_component_value("0"), Some(0));
         assert_eq!(parse_ipv4_component_value(""), None);
         assert_eq!(parse_ipv4_component_value("0x"), None);
     }
@@ -1825,6 +1848,22 @@ mod tests {
         );
         assert_eq!(
             classify_href("tel:+15551212", None),
+            DownloadPolicy::NoDownloadHint
+        );
+        assert_eq!(
+            classify_href("BLOB:https://example.com/id", None),
+            DownloadPolicy::Native
+        );
+        assert_eq!(
+            classify_href("DATA:text/plain,hello", None),
+            DownloadPolicy::Native
+        );
+        assert_eq!(
+            classify_href("MAILTO:user@example.com", None),
+            DownloadPolicy::NoDownloadHint
+        );
+        assert_eq!(
+            classify_href("TEL:+15551212", None),
             DownloadPolicy::NoDownloadHint
         );
 

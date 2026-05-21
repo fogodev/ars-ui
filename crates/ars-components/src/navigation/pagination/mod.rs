@@ -432,6 +432,11 @@ impl ars_core::Machine for Machine {
                 let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.page_size = new_size;
                     ctx.page_count = new_count;
+
+                    if ctx.page.is_controlled() {
+                        ctx.page.sync_controlled(Some(target));
+                    }
+
                     ctx.page.set(target);
                 });
 
@@ -1063,7 +1068,20 @@ mod tests {
     }
 
     #[test]
-    fn controlled_set_page_size_preserves_controlled_page_until_sync() {
+    fn controlled_initial_page_is_clamped_to_page_count() {
+        let service = service(props().page(20));
+
+        assert_eq!(service.context().page_count, 10);
+        assert_eq!(*service.context().page.get(), 10);
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.current_page(), 10);
+        assert!(api.is_last_page());
+    }
+
+    #[test]
+    fn controlled_set_page_size_clamps_visible_page_when_page_count_shrinks() {
         let mut service = service(props().page(10));
 
         let result = service.send(Event::SetPageSize(
@@ -1071,9 +1089,55 @@ mod tests {
         ));
 
         assert_eq!(service.context().page_count, 5);
-        assert_eq!(*service.context().page.get(), 10);
+        assert_eq!(*service.context().page.get(), 5);
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, Effect::PageChange);
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.current_page(), 5);
+        assert!(api.is_last_page());
+    }
+
+    #[test]
+    fn sync_props_clamps_controlled_page_to_new_page_count() {
+        let mut service = service(props().page(4));
+
+        service.set_props(props().page(8).total_items(25));
+
+        drop(service.send(Event::SyncProps));
+
+        assert_eq!(service.context().page_count, 3);
+        assert_eq!(*service.context().page.get(), 3);
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.current_page(), 3);
+        assert!(api.is_last_page());
+    }
+
+    #[test]
+    fn controlled_page_change_callback_keeps_requested_target_after_clamped_size_change() {
+        let pages = Arc::new(Mutex::new(Vec::new()));
+        let pages_clone = Arc::clone(&pages);
+
+        let mut service = service(
+            props()
+                .page(10)
+                .on_page_change(move |page| lock(&pages_clone).push(page)),
+        );
+
+        let result = service.send(Event::SetPageSize(
+            NonZeroU32::new(20).expect("non-zero page size"),
+        ));
+
+        let send: StrongSend<Event> = Arc::new(|_| {});
+
+        for effect in result.pending_effects {
+            drop(effect.run(service.context(), service.props(), Arc::clone(&send)));
+        }
+
+        assert_eq!(lock(&pages).as_slice(), &[5]);
     }
 
     #[test]

@@ -750,6 +750,28 @@ mod tests {
     }
 
     #[test]
+    fn swap_set_props_syncs_disabled_without_checked_change() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        let result = service.set_props(Props {
+            disabled: true,
+            ..test_props()
+        });
+
+        assert!(result.context_changed);
+        assert!(service.context().disabled);
+
+        let result = service.set_props(Props {
+            disabled: true,
+            ..test_props()
+        });
+
+        assert!(!result.context_changed);
+        assert!(service.context().disabled);
+    }
+
+    #[test]
     fn swap_disabled_blocks_value_events() {
         let mut service = Service::<Machine>::new(
             Props {
@@ -790,6 +812,23 @@ mod tests {
         }
 
         assert_eq!(*changes.lock().unwrap(), vec![true]);
+    }
+
+    #[test]
+    fn swap_api_reports_disabled_state() {
+        let enabled = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        let disabled = Service::<Machine>::new(
+            Props {
+                disabled: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        assert!(!enabled.connect(&|_| {}).is_disabled());
+        assert!(disabled.connect(&|_| {}).is_disabled());
     }
 
     #[test]

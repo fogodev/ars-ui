@@ -1500,6 +1500,24 @@ mod tests {
                 },
             ]
         );
+
+        assert_eq!(
+            build_chunks("0123", &[(1, 1), (1, 3), (3, 3)]),
+            vec![
+                HighlightChunk {
+                    text: "0",
+                    highlighted: false,
+                },
+                HighlightChunk {
+                    text: "12",
+                    highlighted: true,
+                },
+                HighlightChunk {
+                    text: "3",
+                    highlighted: false,
+                },
+            ]
+        );
     }
 
     // ── Snapshots ──────────────────────────────────────────────────
