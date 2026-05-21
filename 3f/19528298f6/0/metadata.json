@@ -1,0 +1,81 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3f19528298f6",
+  "session_id": "019e4884-1bf7-7fc3-9a5b-174a8aee0de8",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-21T05:39:36.987388Z",
+  "branch": "codex/live-region-core",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "bf7f790498ce",
+  "token_usage": {
+    "input_tokens": 1317332,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 43557120,
+    "output_tokens": 63483,
+    "api_call_count": 304
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Implement the framework-agnostic LiveRegion core component (issue #211) in ars-components with a priority queue, typed PendingEffect, and connect API attributes, following the repo's mandatory TDD and post-implementation audit workflow.",
+    "outcome": "LiveRegion core was fully implemented and verified (unit, spec-conformance, proptest, llvm-cov, cargo-mutants 0 missed); utility snapshot directories were split per-component; delay field was changed to Duration; Codex review findings were addressed and fix commit pushed to PR #659.",
+    "learnings": {
+      "repo": [
+        "All time-related fields must use core::time::Duration, not u32 milliseconds — this is a hard consistency requirement enforced by code review.",
+        "Utility agnostic modules use foo/mod.rs + foo/snapshots/ layout, not a flat foo.rs with a shared utility/snapshots/ directory.",
+        "cargo xci-fast must pass before committing — it runs fmt, check, clippy, unit, integration, and adapter gates in sequence.",
+        "Post-implementation audit is mandatory before committing: spec drift check, llvm-cov with no uncovered source lines, and cargo-mutants with 0 missed.",
+        "cargo insta test --unreferenced=reject -p ars-components --features i18n --lib is the correct strict snapshot gate; without --features i18n, feature-gated highlight tests leave their snapshots unreferenced and the check fails.",
+        "GitHub issue must be moved to In Progress on project board fogodev/2 before touching tracked files.",
+        "PRs with .snap changes require the snapshot-reviewed label; @codex review comment triggers the Codex review bot.",
+        "Context types are initialized through Machine::init, not Default — tests must use the machine-initialized context as a base.",
+        "aria-relevant attribute must be omitted entirely when empty, not set to an empty string.",
+        "During a re-queue Rendered transition, already-rendered messages must be preserved while the next pending message is announced, not cleared eagerly."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/live_region/mod.rs",
+          "line": 450,
+          "end_line": 490,
+          "finding": "has_announcements helper and Idle+Clear guard had a test gap: Clear from Idle must also wipe already-rendered messages, not be a complete no-op. Both proptest invariant checking and cargo-mutants independently caught this."
+        },
+        {
+          "path": "crates/ars-components/src/utility/live_region/mod.rs",
+          "line": 340,
+          "end_line": 470,
+          "finding": "Two Codex review bugs: aria-relevant was emitted even when empty (should be omitted), and messages were cleared before the next queued announcement was set as pending (should be preserved until next Rendered event)."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/utility.rs",
+          "line": 120,
+          "end_line": 150,
+          "finding": "Proptest strategy for delay must produce Duration::from_millis() values, not raw u32, after the public Props type was changed."
+        }
+      ],
+      "workflow": [
+        "TDD red-green cycle: confirm tests fail for the right reason before implementing — avoids false green and catches API shape mismatches early.",
+        "cargo-mutants run after coverage; surviving mutants directly drove new test additions that exposed real logic gaps (has_announcements guard, sequence number assertions).",
+        "Codex review polling via a shell while-loop checking reactions and unresolved GraphQL threads works but takes 10-15 minutes per pass.",
+        "Spec and both adapter specs must be updated in the same PR as the core implementation; the mandatory post-audit spec-drift pass is what surfaces this.",
+        "cargo insta accept must run before the --unreferenced=reject gate to avoid rejecting intentionally new snapshots."
+      ]
+    },
+    "friction": [
+      "zsh word-splitting caused the first bulk component rename loop to create one directory named as the entire space-joined string instead of per-component directories; required rewriting with an explicit zsh array and setopt null_glob.",
+      "A git index.lock appeared mid-session during bulk git mv operations and had to be manually removed after confirming no active git processes.",
+      "cargo insta positional test filter is unsupported in the installed insta version; required switching to --glob-filter or running the full lib suite to get the snapshot gate to work.",
+      "cargo insta --unreferenced=reject silently fails on the default feature set because highlight snapshots are behind the i18n feature; the i18n flag is non-obvious and not documented near the insta invocation.",
+      "TransitionPlan field name was assumed incorrectly on the first test compile, causing a red-for-wrong-reason failure that required an extra debug round-trip."
+    ],
+    "open_items": [
+      "Leptos adapter wrapper component for LiveRegion not yet implemented — only the agnostic core was in scope for #211.",
+      "Dioxus adapter wrapper component for LiveRegion not yet implemented — same scope boundary.",
+      "Second Codex review pass after the fix commit was still pending when the transcript ended — approval status unknown.",
+      "18 unviable mutants in the cargo-mutants run were not investigated; they may indicate dead code or unreachable branches worth reviewing."
+    ]
+  }
+}
