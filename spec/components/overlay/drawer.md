@@ -63,8 +63,12 @@ pub enum Event {
     CloseOnEscape,
     /// Register the title element for `aria-labelledby`.
     RegisterTitle,
+    /// Unregister the title element from `aria-labelledby`.
+    UnregisterTitle,
     /// Register the description element for `aria-describedby`.
     RegisterDescription,
+    /// Unregister the description element from `aria-describedby`.
+    UnregisterDescription,
     /// Re-apply context-backed props after a prop change.
     SyncProps,
 }
@@ -297,8 +301,9 @@ The key additions are:
 - `DragStart`, `DragMove`, `DragEnd { offset, velocity }` events handle adapter-normalized drag interactions. The adapter supplies normalized values only; the core owns snap and dismiss math.
 - `SnapTo(usize)` event handles keyboard-initiated snap transitions (see §5 Bottom Sheet).
 - `SetZIndex(u32)` stores the adapter-allocated z-index and renders it as `--ars-z-index`.
-- `RegisterTitle` and `RegisterDescription` gate `aria-labelledby` / `aria-describedby`.
+- `RegisterTitle` / `UnregisterTitle` and `RegisterDescription` / `UnregisterDescription` gate `aria-labelledby` / `aria-describedby` so optional title and description parts can mount and unmount without stale ARIA IDREFs.
 - `SyncProps` replays context-backed props after prop changes.
+- Controlled opening queues `SyncProps` before `Open` so opening effects use current props. Controlled closing queues `Close` before `SyncProps` so the core does not emit acquire effects for props that only apply after the drawer is closed.
 - Scroll lock, inert, z-index, and focus effects are represented as adapter-resolvable intents. The core never measures layout, traps focus, captures pointers, restores focus by ID lookup, or traverses the DOM.
 
 ### 1.7 Connect / API
@@ -520,7 +525,7 @@ Drawer
 | Body         | `<div>`    | `data-ars-scope="drawer"`, `data-ars-part="body"`                                                                  |
 | Footer       | `<div>`    | `data-ars-scope="drawer"`, `data-ars-part="footer"`                                                                |
 | CloseTrigger | `<button>` | `aria-label` from Messages                                                                                         |
-| DragHandle   | `<div>`    | `role="slider"` (when snap points configured)                                                                      |
+| DragHandle   | `<div>`    | `role="slider"` with an accessible name (when bottom-sheet snap points are active)                                  |
 
 ## 3. Accessibility
 
@@ -545,10 +550,10 @@ props; they do not duplicate placement resolution. Start → Left in LTR and Rig
 | Arrow Down | Move to the next smaller snap point (collapse)           |
 | Page Up    | Move to the next larger snap point (same as Arrow Up)    |
 | Page Down  | Move to the next smaller snap point (same as Arrow Down) |
-| Home       | Move to the largest (fully expanded) snap point          |
-| End        | Move to the smallest (most collapsed) snap point         |
+| Home       | Move to the minimum snap index                           |
+| End        | Move to the maximum snap index                           |
 
-Arrow/Page/Home/End keys are active when focus is on the `Drawer`'s drag handle or `Content` element.
+Arrow/Page/Home/End keys are active when focus is on the `Drawer`'s drag handle or `Content` element and `placement == Bottom` with valid snap points.
 The adapter sends `Event::SnapTo(index)` for each keyboard-initiated snap transition.
 
 ### 3.3 Snap Point Accessibility
@@ -556,15 +561,16 @@ The adapter sends `Event::SnapTo(index)` for each keyboard-initiated snap transi
 The `Drawer`'s drag handle element receives slider semantics for snap navigation:
 
 - `role="slider"`
+- `aria-label` set to `Messages::drag_handle_label`
 - `aria-orientation="vertical"`
 - `aria-valuemin="0"`
 - `aria-valuemax="{snap_points.len() - 1}"`
 - `aria-valuenow="{current_snap_index}"`
 - `aria-valuetext` set to a localized description from `Messages` (e.g., "Half screen", "Full screen")
 
-Arrow Up/Down and Home/End on the handle navigate between snap points.
+Arrow Up/Down and Home/End on the handle navigate between snap points. Home maps to `aria-valuemin` (`0`) and End maps to `aria-valuemax` (`snap_points.len() - 1`).
 
-> **Touch-action requirement:** The `Drawer`'s drag handle and `Content` element MUST apply the `ars-touch-none` class from the companion stylesheet when `snap_points` is configured. This prevents the browser from intercepting vertical touch gestures as page scroll or overscroll. Additionally, set `overscroll-behavior: contain` on `Content` to prevent overscroll chaining to the body.
+> **Touch-action requirement:** The `Drawer`'s drag handle and `Content` element MUST apply the `ars-touch-none` class from the companion stylesheet when `placement == Bottom` and `snap_points` is configured. This prevents the browser from intercepting vertical touch gestures as page scroll or overscroll. Additionally, set `overscroll-behavior: contain` on `Content` to prevent overscroll chaining to the body.
 
 When `state == Dragging(_)`, the `Content` element emits `data-ars-dragging` (presence attribute). CSS consumers can use `[data-ars-dragging] { transition: none; }` to disable animation during drag.
 
@@ -579,6 +585,8 @@ pub struct Messages {
     pub role_description: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Close trigger label (default: "Close drawer")
     pub close_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Drag handle slider label (default: "Drawer snap position")
+    pub drag_handle_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Snap-point slider value text (default: percentage, e.g. "50%")
     pub snap_value_text: MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync>,
 }
@@ -588,6 +596,7 @@ impl Default for Messages {
         Self {
             role_description: MessageFn::static_str("drawer"),
             close_label: MessageFn::static_str("Close drawer"),
+            drag_handle_label: MessageFn::static_str("Drawer snap position"),
             snap_value_text: MessageFn::new(|value: f64, _locale: &Locale| {
                 format!("{:.0}%", value * 100.0)
             }),
@@ -603,7 +612,9 @@ impl ComponentMessages for Messages {}
 ## 5. Variant: Bottom Sheet
 
 When `placement == Bottom`, Drawer acts as a **bottom sheet** with discrete snap points
-that the user can swipe between.
+that the user can swipe between. Snap points are inactive for `Top`, `Left`,
+`Right`, `Start`, and `End` placements even if `Props::snap_points` contains
+valid values; those placements remain edge drawers.
 
 ### 5.1 Additional Props
 

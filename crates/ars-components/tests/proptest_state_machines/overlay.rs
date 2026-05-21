@@ -915,7 +915,9 @@ fn arb_drawer_event() -> impl Strategy<Value = drawer::Event> {
         Just(drawer::Event::CloseOnBackdropClick),
         Just(drawer::Event::CloseOnEscape),
         Just(drawer::Event::RegisterTitle),
+        Just(drawer::Event::UnregisterTitle),
         Just(drawer::Event::RegisterDescription),
+        Just(drawer::Event::UnregisterDescription),
         Just(drawer::Event::SyncProps),
     ]
 }
@@ -979,7 +981,6 @@ fn assert_drawer_send_result_invariants(
 
     if matches!(event, drawer::Event::SyncProps) {
         prop_assert!(!result.state_changed);
-        prop_assert!(result.pending_effects.is_empty());
     }
 
     if matches!(event, drawer::Event::CloseOnBackdropClick) && !before_context.close_on_backdrop {

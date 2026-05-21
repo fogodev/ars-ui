@@ -92,8 +92,14 @@ pub enum Event {
     /// A title part mounted and should label content.
     RegisterTitle,
 
+    /// A title part unmounted and should no longer label content.
+    UnregisterTitle,
+
     /// A description part mounted and should describe content.
     RegisterDescription,
+
+    /// A description part unmounted and should no longer describe content.
+    UnregisterDescription,
 
     /// Re-apply context-backed props after prop changes.
     SyncProps,
@@ -279,6 +285,9 @@ pub struct Messages {
     /// Accessible label for the close trigger. Defaults to `"Close drawer"`.
     pub close_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 
+    /// Accessible label for the drag handle slider.
+    pub drag_handle_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+
     /// Accessible value text for snap-point slider handles.
     pub snap_value_text: MessageFn<SnapValueTextFn>,
 }
@@ -288,6 +297,7 @@ impl Default for Messages {
         Self {
             role_description: MessageFn::static_str("drawer"),
             close_label: MessageFn::static_str("Close drawer"),
+            drag_handle_label: MessageFn::static_str("Drawer snap position"),
             snap_value_text: MessageFn::new(|value: f64, _locale: &Locale| {
                 alloc::format!("{:.0}%", value * 100.0)
             }),
@@ -722,7 +732,7 @@ impl ars_core::Machine for Machine {
                 Some(resolve_drag_end_plan(ctx, *offset, *velocity))
             }
 
-            (State::Open | State::Dragging(_), Event::SnapTo(index)) => {
+            (State::Open | State::Dragging(_), Event::SnapTo(index)) if snap_points_active(ctx) => {
                 let index = clamp_snap_index(*index, &ctx.snap_points);
                 let height = ctx.snap_points.get(index).copied().unwrap_or(1.0);
                 let snap_changed = index != ctx.current_snap || height != ctx.snap_height;
@@ -751,10 +761,20 @@ impl ars_core::Machine for Machine {
                     ctx.has_title = true;
                 }))
             }
+            (_, Event::UnregisterTitle) if ctx.has_title => {
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.has_title = false;
+                }))
+            }
 
             (_, Event::RegisterDescription) if !ctx.has_description => {
                 Some(TransitionPlan::context_only(|ctx: &mut Context| {
                     ctx.has_description = true;
+                }))
+            }
+            (_, Event::UnregisterDescription) if ctx.has_description => {
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.has_description = false;
                 }))
             }
             (_, Event::SyncProps) => {
@@ -842,15 +862,24 @@ impl ars_core::Machine for Machine {
 
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
         let mut events = Vec::new();
+        let context_changed = context_relevant_props_changed(old, new);
 
-        if context_relevant_props_changed(old, new) {
-            events.push(Event::SyncProps);
-        }
-
-        if let (was, Some(now)) = (old.open, new.open)
-            && was != Some(now)
+        if let (old_open, Some(new_open)) = (old.open, new.open)
+            && old_open != Some(new_open)
         {
-            events.push(if now { Event::Open } else { Event::Close });
+            if new_open {
+                if context_changed {
+                    events.push(Event::SyncProps);
+                }
+                events.push(Event::Open);
+            } else {
+                events.push(Event::Close);
+                if context_changed {
+                    events.push(Event::SyncProps);
+                }
+            }
+        } else if context_changed {
+            events.push(Event::SyncProps);
         }
 
         events
@@ -936,7 +965,7 @@ fn resolve_drag_end_plan(ctx: &Context, offset: f64, velocity: f64) -> Transitio
         return close_plan(ctx);
     }
 
-    if ctx.snap_points.is_empty() {
+    if !snap_points_active(ctx) {
         return TransitionPlan::to(State::Open).apply(|ctx: &mut Context| {
             ctx.open = true;
         });
@@ -1020,6 +1049,10 @@ fn nearest_snap_index(snap_points: &[f64], current_height: f64) -> usize {
                 .total_cmp(&(*b - current_height).abs())
         })
         .map_or(0, |(index, _)| index)
+}
+
+fn snap_points_active(ctx: &Context) -> bool {
+    ctx.placement == Placement::Bottom && !ctx.snap_points.is_empty()
 }
 
 fn dismiss_offset_to_snap_height(offset: f64) -> f64 {
@@ -1236,7 +1269,7 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Data("ars-dragging"), "");
         }
 
-        if !self.ctx.snap_points.is_empty() {
+        if snap_points_active(self.ctx) {
             attrs
                 .set(HtmlAttr::Class, "ars-touch-none")
                 .set_style(CssProperty::OverscrollBehavior, "contain");
@@ -1250,19 +1283,21 @@ impl Api<'_> {
         match data.key {
             KeyboardKey::Escape => (self.send)(Event::CloseOnEscape),
 
-            KeyboardKey::ArrowUp | KeyboardKey::PageUp => {
+            KeyboardKey::ArrowUp | KeyboardKey::PageUp if snap_points_active(self.ctx) => {
                 (self.send)(Event::SnapTo(self.ctx.current_snap.saturating_add(1)));
             }
 
-            KeyboardKey::ArrowDown | KeyboardKey::PageDown => {
+            KeyboardKey::ArrowDown | KeyboardKey::PageDown if snap_points_active(self.ctx) => {
                 (self.send)(Event::SnapTo(self.ctx.current_snap.saturating_sub(1)));
             }
 
-            KeyboardKey::Home if !self.ctx.snap_points.is_empty() => {
-                (self.send)(Event::SnapTo(self.ctx.snap_points.len() - 1));
+            KeyboardKey::Home if snap_points_active(self.ctx) => {
+                (self.send)(Event::SnapTo(0));
             }
 
-            KeyboardKey::End => (self.send)(Event::SnapTo(0)),
+            KeyboardKey::End if snap_points_active(self.ctx) => {
+                (self.send)(Event::SnapTo(self.ctx.snap_points.len() - 1));
+            }
 
             _ => {}
         }
@@ -1349,12 +1384,16 @@ impl Api<'_> {
 
         attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
-        if !self.ctx.snap_points.is_empty() {
+        if snap_points_active(self.ctx) {
             let value = self.ctx.snap_height;
 
             attrs
                 .set(HtmlAttr::Role, "slider")
                 .set(HtmlAttr::Class, "ars-touch-none")
+                .set(
+                    HtmlAttr::Aria(AriaAttr::Label),
+                    (self.ctx.messages.drag_handle_label)(&self.ctx.locale),
+                )
                 .set(HtmlAttr::Aria(AriaAttr::Orientation), "vertical")
                 .set(HtmlAttr::Aria(AriaAttr::ValueMin), "0")
                 .set(
@@ -1753,6 +1792,29 @@ mod tests {
     }
 
     #[test]
+    fn title_and_description_unregistration_clear_aria_idrefs() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::RegisterTitle));
+        drop(service.send(Event::RegisterDescription));
+
+        let title = service.send(Event::UnregisterTitle);
+        let second_title = service.send(Event::UnregisterTitle);
+        let description = service.send(Event::UnregisterDescription);
+        let second_description = service.send(Event::UnregisterDescription);
+        let attrs = service.connect(&|_| {}).content_attrs();
+
+        assert!(title.context_changed);
+        assert!(!second_title.context_changed);
+        assert!(description.context_changed);
+        assert!(!second_description.context_changed);
+        assert!(!service.context().has_title);
+        assert!(!service.context().has_description);
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)), None);
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)), None);
+    }
+
+    #[test]
     fn snap_to_updates_current_snap_and_snap_height() {
         let mut service = open_service(Props {
             placement: Placement::Bottom,
@@ -1766,6 +1828,24 @@ mod tests {
         assert_eq!(service.context().current_snap, 2);
         assert_eq!(service.context().snap_height, 1.0);
         assert!(effect_names(&result).contains(&Effect::SnapChange));
+    }
+
+    #[test]
+    fn snap_to_is_inactive_for_non_bottom_drawers() {
+        let mut service = open_service(Props {
+            placement: Placement::Right,
+            snap_points: Some(vec![0.25, 0.5, 1.0]),
+            default_snap_index: 1,
+            ..test_props()
+        });
+
+        let result = service.send(Event::SnapTo(2));
+
+        assert!(!result.state_changed);
+        assert!(!result.context_changed);
+        assert_eq!(service.context().current_snap, 1);
+        assert_eq!(service.context().snap_height, 0.5);
+        assert!(!effect_names(&result).contains(&Effect::SnapChange));
     }
 
     #[test]
@@ -2119,6 +2199,10 @@ mod tests {
 
         assert_eq!(attrs.get(&HtmlAttr::Role), Some("slider"));
         assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("Drawer snap position")
+        );
+        assert_eq!(
             attrs.get(&HtmlAttr::Aria(AriaAttr::Orientation)),
             Some("vertical")
         );
@@ -2126,6 +2210,22 @@ mod tests {
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("2"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("1"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueText)), Some("50%"));
+    }
+
+    #[test]
+    fn drag_handle_attrs_do_not_emit_slider_semantics_for_non_bottom_drawers() {
+        let service = open_service(Props {
+            placement: Placement::Right,
+            snap_points: Some(vec![0.25, 0.5, 1.0]),
+            default_snap_index: 1,
+            ..test_props()
+        });
+
+        let attrs = service.connect(&|_| {}).drag_handle_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Role), None);
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Label)), None);
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), None);
     }
 
     #[test]
@@ -2196,6 +2296,26 @@ mod tests {
         let events = <Machine as MachineTrait>::on_props_changed(&old, &new);
 
         assert_eq!(events, vec![Event::SyncProps, Event::Open]);
+    }
+
+    #[test]
+    fn on_props_changed_closes_before_syncing_context_for_controlled_close() {
+        let old = Props {
+            modal: false,
+            prevent_scroll: false,
+            open: Some(true),
+            ..test_props()
+        };
+        let new = Props {
+            modal: true,
+            prevent_scroll: true,
+            open: Some(false),
+            ..old.clone()
+        };
+
+        let events = <Machine as MachineTrait>::on_props_changed(&old, &new);
+
+        assert_eq!(events, vec![Event::Close, Event::SyncProps]);
     }
 
     #[test]
@@ -2394,6 +2514,32 @@ mod tests {
     }
 
     #[test]
+    fn controlled_close_with_context_sync_does_not_emit_acquire_effects() {
+        let mut service = open_service(Props {
+            modal: false,
+            prevent_scroll: false,
+            open: Some(true),
+            ..test_props()
+        });
+
+        let result = service.set_props(Props {
+            modal: true,
+            prevent_scroll: true,
+            open: Some(false),
+            ..test_props()
+        });
+        let names = effect_names(&result);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(service.context().modal);
+        assert!(service.context().prevent_scroll);
+        assert!(!names.contains(&Effect::SetBackgroundInert));
+        assert!(!names.contains(&Effect::ScrollLockAcquire));
+        assert!(names.contains(&Effect::OpenChange));
+        assert!(names.contains(&Effect::ReleaseZIndex));
+    }
+
+    #[test]
     fn api_accessors_return_current_context_and_props() {
         let service = open_service(Props {
             modal: false,
@@ -2464,6 +2610,7 @@ mod tests {
         let (sent, handler) = recorder();
 
         let service = open_service(Props {
+            placement: Placement::Bottom,
             snap_points: Some(vec![0.25, 0.5, 1.0]),
             default_snap_index: 1,
             ..test_props()
@@ -2487,8 +2634,8 @@ mod tests {
                 Event::Close,
                 Event::SnapTo(2),
                 Event::SnapTo(0),
-                Event::SnapTo(2),
                 Event::SnapTo(0),
+                Event::SnapTo(2),
             ]
         );
     }
@@ -2502,6 +2649,30 @@ mod tests {
         service
             .connect(&handler)
             .on_content_keydown(&keyboard_data(KeyboardKey::Home));
+
+        assert!(sent.borrow().is_empty());
+    }
+
+    #[test]
+    fn snap_keys_with_snap_points_are_inactive_for_non_bottom_drawers() {
+        let (sent, handler) = recorder();
+
+        let service = open_service(Props {
+            placement: Placement::Right,
+            snap_points: Some(vec![0.25, 0.5, 1.0]),
+            default_snap_index: 1,
+            ..test_props()
+        });
+
+        service
+            .connect(&handler)
+            .on_content_keydown(&keyboard_data(KeyboardKey::Home));
+        service
+            .connect(&handler)
+            .on_content_keydown(&keyboard_data(KeyboardKey::End));
+        service
+            .connect(&handler)
+            .on_content_keydown(&keyboard_data(KeyboardKey::ArrowUp));
 
         assert!(sent.borrow().is_empty());
     }

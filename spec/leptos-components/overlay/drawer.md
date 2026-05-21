@@ -34,7 +34,7 @@ This spec maps the core [`Drawer`](../../components/overlay/drawer.md) machine t
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with the core `drawer::Props`.
-- Event parity: Open, Close, Toggle, DragStart, DragMove, `DragEnd { offset, velocity }`, SnapTo, SetZIndex, CloseOnBackdropClick, CloseOnEscape, RegisterTitle, RegisterDescription, and SyncProps all map to adapter-driven UI events or adapter feedback.
+- Event parity: Open, Close, Toggle, DragStart, DragMove, `DragEnd { offset, velocity }`, SnapTo, SetZIndex, CloseOnBackdropClick, CloseOnEscape, RegisterTitle, UnregisterTitle, RegisterDescription, UnregisterDescription, and SyncProps all map to adapter-driven UI events or adapter feedback.
 - Structure parity: all twelve parts (Root, Trigger, Backdrop, Positioner, Content, Title, Description, Header, Body, Footer, CloseTrigger, DragHandle) are rendered as compound child components.
 - Placement resolution: the core resolves logical Start/End placements to physical Left/Right from `Props::dir`; the adapter supplies the document `Direction` when constructing or syncing props.
 
@@ -53,7 +53,7 @@ This spec maps the core [`Drawer`](../../components/overlay/drawer.md) machine t
 | Body                  | optional  | `<div>` element          | consumer-composed | `api.body_attrs()`          | Structural layout part.                                                       |
 | Footer                | optional  | `<div>` element          | consumer-composed | `api.footer_attrs()`        | Structural layout part.                                                       |
 | CloseTrigger          | optional  | native `<button>`        | consumer-composed | `api.close_trigger_attrs()` | `aria-label` from `Messages.close_label`.                                     |
-| DragHandle            | optional  | `<div>` element          | consumer-composed | `api.drag_handle_attrs()`   | `role="slider"` when snap points configured; keyboard snap navigation target. |
+| DragHandle            | optional  | `<div>` element          | consumer-composed | `api.drag_handle_attrs()`   | `role="slider"` with accessible name when bottom-sheet snap points are active; keyboard snap navigation target. |
 
 ## 5. Attr Merge and Ownership Rules
 
@@ -64,7 +64,7 @@ This spec maps the core [`Drawer`](../../components/overlay/drawer.md) machine t
 | Backdrop    | `api.backdrop_attrs()` (scope, part, aria-hidden, inert)                                                                                                             | click handler                                    | consumer decoration only | core dismissal semantics win                                                 | adapter-owned; click handler sends CloseOnBackdropClick |
 | Positioner  | `api.positioner_attrs()` (scope, part, state, placement, closed transform, optional z-index custom property)                                                         | live drag CSS transform style                    | consumer decoration only | core placement/z-index attrs win; live drag transform wins while dragging    | adapter-owned sliding container                         |
 | Content     | `api.content_attrs()` (role, aria-modal, aria-roledescription, aria-labelledby, aria-describedby, state, placement, dragging, tabindex, snap touch/overscroll attrs) | keydown handler, pointer/touch handlers for drag | consumer content attrs   | core ARIA/data attrs win; handlers compose; `class`/`style` merge additively | adapter-owned dialog surface                            |
-| DragHandle  | `api.drag_handle_attrs()` (scope, part, optional slider ARIA attrs when snap points configured)                                                                      | pointer/touch handlers                           | consumer decoration only | core slider attrs win when snap points active                                | adapter-owned drag interaction surface                  |
+| DragHandle  | `api.drag_handle_attrs()` (scope, part, optional slider ARIA attrs when bottom-sheet snap points are active)                                                         | pointer/touch handlers                           | consumer decoration only | core slider attrs win when bottom-sheet snap points are active               | adapter-owned drag interaction surface                  |
 
 - Consumers must not override `role`, `aria-modal`, `aria-roledescription`, or `aria-labelledby`/`aria-describedby` on Content.
 - Consumers must not override slider ARIA attrs on DragHandle when snap points are configured.
@@ -107,10 +107,10 @@ Controlled `open` uses an immediate-effect watcher that sends `Open`/`Close` eve
 | Pointer/touch down on Content or DragHandle | drawer open and drag enabled                | `DragStart(position)`          | sets Dragging state before subsequent moves               | initiates swipe gesture tracking                                     |
 | Pointer/touch move during drag              | `state == Dragging(_)`                      | `DragMove(position)`           | updates drag position before visual feedback              | CSS transform updated to follow drag                                 |
 | Pointer/touch up during drag                | `state == Dragging(_)`                      | `DragEnd { offset, velocity }` | core snap/dismiss resolution runs before state transition | offset is normalized, velocity points toward dismissal when positive |
-| Arrow Up on DragHandle                      | drawer open with snap points                | `SnapTo(index)`                | fires after focus validation                              | moves to next larger snap point                                      |
-| Arrow Down on DragHandle                    | drawer open with snap points                | `SnapTo(index)`                | fires after focus validation                              | moves to next smaller snap point                                     |
-| Home on DragHandle                          | drawer open with snap points                | `SnapTo(last_index)`           | fires after focus validation                              | moves to largest snap point                                          |
-| End on DragHandle                           | drawer open with snap points                | `SnapTo(0)`                    | fires after focus validation                              | moves to smallest snap point                                         |
+| Arrow Up on DragHandle                      | drawer open with bottom snap points         | `SnapTo(index)`                | fires after focus validation                              | moves to next larger snap point                                      |
+| Arrow Down on DragHandle                    | drawer open with bottom snap points         | `SnapTo(index)`                | fires after focus validation                              | moves to next smaller snap point                                     |
+| Home on DragHandle                          | drawer open with bottom snap points         | `SnapTo(0)`                    | fires after focus validation                              | moves to `aria-valuemin` / minimum snap index                        |
+| End on DragHandle                           | drawer open with bottom snap points         | `SnapTo(last_index)`           | fires after focus validation                              | moves to `aria-valuemax` / maximum snap index                        |
 
 ## 8. Registration and Cleanup Contract
 
@@ -538,7 +538,7 @@ on_cleanup(move || {
 
 - Content must have `role="dialog"`, `aria-modal="true"`, `aria-roledescription` from `Messages.role_description`, `aria-labelledby` pointing to the Title ID, and `aria-describedby` pointing to the Description ID.
 - CloseTrigger must have `aria-label` from `Messages.close_label`.
-- DragHandle must have `role="slider"`, `aria-orientation="vertical"`, `aria-valuemin="0"`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext` when snap points are configured.
+- DragHandle must have `role="slider"`, an accessible name, `aria-orientation="vertical"`, `aria-valuemin="0"`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext` when bottom-sheet snap points are active.
 - Logical placements (Start/End) must be passed with `dir`; the core resolves them before attrs are rendered.
 - Title and Description IDs are generated deterministically from `ComponentIds` for hydration stability.
 - SSR renders the inline Root and Trigger; portal content is SSR-safe empty unless `default_open` is true.
@@ -577,8 +577,8 @@ Traceability note: this adapter spec explicitly restates the following adapter-o
 - Velocity-based snap targeting selects correct snap point
 - Rubber-band overdrag beyond extreme snap points
 - DragHandle Arrow Up/Down navigates between snap points
-- DragHandle Home/End navigates to extreme snap points
-- DragHandle applies core-returned slider ARIA attrs when snap points configured
+- DragHandle Home navigates to the minimum snap index and End navigates to the maximum snap index
+- DragHandle applies core-returned slider ARIA attrs when bottom-sheet snap points are active
 - `data-ars-dragging` present on Content during drag
 - CSS transition suppressed during drag via `data-ars-dragging`
 - Portal content rendered inside ArsProvider portal root
@@ -601,7 +601,7 @@ Traceability note: this adapter spec explicitly restates the following adapter-o
 | Escape dismiss                | callback order        | Assert `CloseOnEscape` fires before `on_open_change(false)`.                             |
 | Drag gesture state            | machine state         | Assert `Dragging(position)` during active drag.                                          |
 | Snap resolution               | machine state         | Assert correct snap index after drag end with velocity.                                  |
-| DragHandle slider ARIA        | DOM attrs             | Assert `role="slider"`, `aria-valuenow`, `aria-valuemin`, `aria-valuemax` on DragHandle. |
+| DragHandle slider ARIA        | DOM attrs             | Assert `role="slider"`, accessible name, `aria-valuenow`, `aria-valuemin`, `aria-valuemax` on DragHandle. |
 | `data-ars-dragging`           | DOM attrs             | Assert presence on Content during drag, absence when not dragging.                       |
 | Portal rendering              | rendered structure    | Assert Backdrop and Content are siblings inside the portal root.                         |
 | Cleanup                       | cleanup side effects  | Verify listeners, scroll lock, dialog stack, and z-index are released on unmount.        |
@@ -622,7 +622,7 @@ Cheap verification recipe:
 - [ ] Backdrop and Positioner/Content are siblings inside the portal root (backdrop sibling pattern).
 - [ ] Content has `role="dialog"`, `aria-modal="true"`, `aria-roledescription`, `aria-labelledby`, `aria-describedby`.
 - [ ] CloseTrigger has `aria-label` from `Messages.close_label`.
-- [ ] DragHandle applies core-returned `role="slider"` and slider ARIA attrs when snap points configured.
+- [ ] DragHandle applies core-returned `role="slider"`, accessible name, and slider ARIA attrs when bottom-sheet snap points are active.
 - [ ] Presence composes mount/unmount animation lifecycle for portal content.
 - [ ] FocusScope activates after `animationstart`, not before.
 - [ ] Content has `tabindex="-1"` during animation delay period.
@@ -636,9 +636,9 @@ Cheap verification recipe:
 - [ ] CSS transform during drag writes directly to DOM, not through reactive system.
 - [ ] Velocity sampling uses last 3--5 positions; normalized `DragEnd { offset, velocity }` is passed to the core for snap resolution.
 - [ ] Rubber-band overdrag uses 0.3 factor.
-- [ ] `ars-touch-none` class applied to DragHandle and Content when snap points configured.
-- [ ] `overscroll-behavior: contain` set on Content when snap points configured.
-- [ ] DragHandle keyboard navigation (Arrow Up/Down, Home/End) sends `SnapTo` events.
+- [ ] `ars-touch-none` class applied to DragHandle and Content when bottom-sheet snap points are active.
+- [ ] `overscroll-behavior: contain` set on Content when bottom-sheet snap points are active.
+- [ ] DragHandle keyboard navigation (Arrow Up/Down, Home/End) sends `SnapTo` events only for bottom-sheet snap points.
 - [ ] `data-ars-dragging` present on Content during drag.
 - [ ] Logical Start/End placement and `dir` are passed to the core, and rendered attrs use the core-resolved physical placement.
 - [ ] `lazy_mount` defers content rendering; `unmount_on_exit` removes content after close.

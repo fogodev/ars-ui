@@ -1,5 +1,6 @@
 ---
 source: crates/ars-components/src/overlay/drawer/mod.rs
+assertion_line: 2950
 expression: "snapshot_attrs(&service.connect(&|_| {}).drag_handle_attrs())"
 ---
 AttrMap {
@@ -18,6 +19,14 @@ AttrMap {
             ),
             String(
                 "drawer",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Drawer snap position",
             ),
         ),
         (
