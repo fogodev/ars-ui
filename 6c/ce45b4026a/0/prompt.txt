@@ -1,0 +1,134 @@
+Our main branch is failing the code coverage ratchet for ars-components. Let's give it a check and improve the coverage
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Fix `ars-components` Coverage Ratchet
+
+## Summary
+
+Local `origin/main` reproduction shows `ars-components` passes tests but fails the coverage gate on branch coverage:
+
+- `cargo +nightly llvm-cov nextest --branch -p ars-components ...`: `1891 passed`, `50 skipped`
+- `cargo xtask coverage check --file target/coverage/ars-components-local.lcov --package ars-components --min 90 --branch-min 90`
+- Result: lines `98.2%` PASS, branches `89.8% (2249/2504)` FAIL
+
+The fastest durable fix is to add focused behavior tests for uncovered `HoverCard` state-machine/API branches, because `hover_card.rs` is both recently added and the weakest file: `86.61%` lines, `70.83%` branches.
+
+## Scope
+
+Modify only:
+
+- `crates/ars-components/src/overlay/hover_card.rs`
+- `crates/ars-components/src/utility/download_trigger.rs` only for the observed clippy-style warning at line 815, with no behavior change
+
+No public API, spec, dependency, or snapshot contract changes are planned.
+
+## Implementation Steps
+
+1. Add focused `HoverCard` tests, test-first, in `crates/ars-components/src/overlay/hover_card.rs`.
+
+2. Add a test covering `OpenPending` cancellation when focus leaves without hover:
+   - Start default closed.
+   - Send `TriggerFocus`.
+   - Send `TriggerBlur`.
+   - Assert state returns to `Closed`, `focus_active == false`, `OpenDelay` is canceled, and no open-change effect is emitted.
+   - Covers the uncovered `TriggerBlur` close/cancel branch.
+
+3. Add a test covering open-state hover/focus coordination:
+   - Start `default_open: true`.
+   - Send `TriggerFocus`, then `TriggerPointerLeave`.
+   - Assert state stays `Open`, `hover_active == false`, `focus_active == true`, no close delay.
+   - Send `TriggerBlur`.
+   - Assert state becomes `ClosePending` and emits `CloseDelay`.
+   - In a separate service, send `TriggerPointerEnter`, `ContentFocus`, then `ContentBlur`.
+   - Assert hover keeps the card open until pointer leaves.
+   - Covers branches where one affordance keeps the card open while the other leaves.
+
+4. Add a test covering API event dispatch helpers:
+   - Connect with a recording `send`.
+   - Call:
+     - `on_trigger_pointer_enter`
+     - `on_trigger_pointer_leave`
+     - `on_trigger_focus`
+     - `on_trigger_blur`
+     - `on_content_pointer_enter`
+     - `on_content_pointer_leave`
+     - `on_content_focus`
+     - `on_content_blur`
+     - `on_title_mount`
+     - `on_title_unmount`
+     - `on_dismiss_button_click`
+   - Assert the exact event sequence.
+   - Covers currently uncovered adapter-facing helper methods.
+
+5. Add a test covering `part_attrs` dispatch:
+   - For each `Part` variant, compare `api.part_attrs(part)` to the corresponding direct method output.
+   - Covers the uncovered `ConnectApi::part_attrs` match arms.
+
+6. Add a test covering initial effects directly:
+   - Call `<Machine as ars_core::Machine>::initial_effects(&State::Open, ...)`.
+   - Assert it emits `OpenChange` and `AllocateZIndex`.
+   - Call with `State::Closed`.
+   - Assert it emits no effects.
+   - Covers the uncovered `initial_effects` branch.
+
+7. Refactor `download_trigger.rs` line 815 per clippy’s suggestion:
+   - Replace the nested `else if let Some(port_raw) = after.strip_prefix(':') { ... } else { return None; }` with `let port_raw = after.strip_prefix(':')?;`.
+   - Keep all existing parser behavior identical.
+   - This is included because the coverage run surfaced a warning and the repo has a zero-warnings policy.
+
+## Verification
+
+Run, in order:
+
+1. Focused test pass:
+   - `cargo test -p ars-components overlay::hover_card::tests::`
+
+2. Focused branch coverage:
+   - `mkdir -p target/coverage`
+   - `cargo +nightly llvm-cov nextest --branch -p ars-components --lcov --output-path target/coverage/ars-components-local.lcov --no-fail-fast`
+   - `cargo xtask coverage check --file target/coverage/ars-components-local.lcov --package ars-components --min 90 --branch-min 90`
+
+3. Ensure the new branch coverage is above threshold with buffer:
+   - Target: at least `90.2%` branch coverage for `ars-components`, not merely `90.0%`.
+
+4. Clippy/warning guard:
+   - `cargo clippy -p ars-components --all-targets --all-features -- -D warnings`
+
+5. Full crate regression:
+   - `cargo test -p ars-components --all-targets`
+
+6. Final pre-review status:
+   - `git status --short`
+   - Present local changes and verification output for user review before any commit or push.
+
+## Acceptance Criteria
+
+- `ars-components` branch coverage passes the enforced `90%` threshold locally.
+- Line coverage remains comfortably above threshold.
+- No public API changes.
+- No snapshots are created or modified.
+- No new dependencies.
+- No warnings from the touched crate under clippy.
+- No commit or push until explicit user approval.
+
+---
+
+As you're dealing with mutants already, after you finish improving the test coverage of ars-components, give a check in the Nightly CI #31, it has many mutants issues too
+
+---
+
+Let's handle those mutants then
+
+---
+
+Can't we run mutants for other components in parallel? It takes too long to run one by one
+
+---
+
+A new PR was merged on main with new agnostic components, after you finish this current batch, rebase with the latest main to look for mutants in those new components too
+
+---
+
+While we wait, let's improve our development docs to include that whenever an agent is implementing an agnostic component, it need to do a cargo-mutants run on it, and write spec conformance tests

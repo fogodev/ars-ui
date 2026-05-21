@@ -1,0 +1,161 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "6cce45b4026a",
+  "session_id": "019e4669-f077-7c51-98ac-4866b3621995",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-21T02:31:00.848617Z",
+  "branch": "t3code/457f9bf1",
+  "checkpoints_count": 2,
+  "files_touched": [
+    ".agents/skills/post-implementation-audit/SKILL.md",
+    ".cargo/mutants.toml",
+    "AGENTS.md",
+    "crates/ars-components/src/data_display/table/tests.rs",
+    "crates/ars-components/src/input/number_input/mod.rs",
+    "crates/ars-components/src/input/password_input/mod.rs",
+    "crates/ars-components/src/input/pin_input/mod.rs",
+    "crates/ars-components/src/input/search_input/mod.rs",
+    "crates/ars-components/src/overlay/hover_card.rs",
+    "crates/ars-components/src/utility/download_trigger.rs",
+    "crates/ars-components/src/utility/highlight.rs",
+    "docs/implementation/README.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "99f9487a5272",
+  "token_usage": {
+    "input_tokens": 2133320,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 109605760,
+    "output_tokens": 124155,
+    "api_call_count": 825
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Fix the failing ars-components branch coverage ratchet on main (89.8% vs 90% threshold), then tackle Nightly CI #31 mutation failures across multiple shards, and extend mutation coverage to newly merged agnostic input components after rebasing.",
+    "outcome": "Branch coverage lifted from 89.8% to 91.8% with 0 missed mutants across all targeted files (HoverCard, Table, DownloadTrigger, Highlight, PasswordInput, SearchInput, NumberInput, PinInput, ars-core SharedState, ars-collections Key); development docs updated to require mutation testing and spec-conformance tests for every new agnostic component; all verification gates (fmt, clippy, xci-fast) passed and changes committed.",
+    "learnings": {
+      "repo": [
+        "Coverage gate is dual-threshold: both lines AND branches must be ≥90%, enforced via `cargo xtask coverage check --file ... --package ars-components --min 90 --branch-min 90`.",
+        "`cargo xci-fast` is the required pre-push gate and runs 10 sequential stages: fmt, check, clippy, unit, integration, adapter, spec snippets, error variant coverage, mutual exclusion, snapshot count.",
+        "Spec-conformance tests live in `crates/ars-components/tests/spec_conformance/` and proptest state machines in `crates/ars-components/tests/proptest_state_machines/`.",
+        "Equivalent mutant exclusions are documented in `.cargo/mutants.toml` with function-name-based regex patterns; skip regex must include trailing `=` to match cargo-mutants' actual mutation descriptions (e.g., `replace += with -=`).",
+        "PR #657 merged agnostic cores for PasswordInput, SearchInput, NumberInput, PinInput — these needed mutation runs as part of the rebase catch-up.",
+        "The `ars-components` HoverCard title mount/unmount guards are idempotent (writing same boolean value), making those specific mutants structurally equivalent with no observable test surface."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/download_trigger.rs",
+          "line": 815,
+          "end_line": 815,
+          "finding": "Nested `else if let Some(port_raw) = after.strip_prefix(':') { ... } else { return None; }` should be replaced with `let port_raw = after.strip_prefix(':')?;` — equivalent behavior, satisfies zero-warnings clippy policy."
+        },
+        {
+          "path": "crates/ars-components/src/overlay/hover_card.rs",
+          "line": 1114,
+          "end_line": 1910,
+          "finding": "HoverCard was the weakest file at 86.61% lines / 70.83% branches; the test module lacked coverage of TriggerBlur cancellation, focus/hover coordination, API event dispatch helpers, part_attrs dispatch, initial_effects branches, and close_plan shape."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/table/tests.rs",
+          "line": 440,
+          "end_line": 460,
+          "finding": "Multiple-selection mode toggle on a single row produces `Set::Multiple({r1})`, NOT `Set::Single(r1)` — the representation is not normalized to Single even for cardinality-1 sets."
+        },
+        {
+          "path": ".cargo/mutants.toml",
+          "line": 180,
+          "end_line": 260,
+          "finding": "Equivalent-mutant skip regex patterns for DownloadTrigger scanner index-advance mutations were missing the trailing `=`, so the patterns didn't match the actual mutation descriptions reported by cargo-mutants."
+        }
+      ],
+      "workflow": [
+        "Running two concurrent `cargo mutants -p ars-components` processes against the same crate produces false timeouts from cargo/test runner contention — always serialize heavy same-crate mutation runs.",
+        "Use `cargo mutants --list | wc -l` first to size the mutant set before committing to a full run; helps decide on `-j` level and whether to parallelize.",
+        "Isolated output dirs (`-o target/mutants/<name>`) are required when running multiple mutation passes so results don't overwrite each other.",
+        "For large files, `--timeout 60 -j 1` serial runs are more reliable than parallel runs when distinguishing real hangs from resource-contention timeouts.",
+        "Use `cargo test -p ars-components --lib input::module::tests::` (with `--lib`) when unit-testing new input modules to avoid hanging on the proptest integration test binary that also matches the filter.",
+        "When a mutation pass finds misses, batch all targeted tests in one patch pass rather than iterating per-mutant — addresses the full cluster at once and avoids multiple slow baseline recompilations.",
+        "Mutation timeout-only survivors (no missed, just timeout) are often equivalent boundary mutations or parser scanner loops; verify by serial rerun before documenting as equivalent."
+      ]
+    },
+    "friction": [
+      "`target/coverage/` directory did not exist on first LCOV run, causing report-write failure — needed an explicit `mkdir -p target/coverage` before the coverage command.",
+      "Running two concurrent `cargo mutants -p ars-components` jobs (DownloadTrigger + Table) produced false timeouts, invalidating both runs and requiring serial reruns.",
+      "cargo-mutants `-o` flag requires the output parent directory to exist before invocation — no automatic creation.",
+      "The `.cargo/mutants.toml` skip patterns for DownloadTrigger's index-advance mutations were missing trailing `=`, so those timeout-only mutants kept appearing across reruns until the regex was corrected.",
+      "`cargo test -p ars-components input::` hung indefinitely because the filter matched both the lib unit tests and the proptest/spec-conformance integration test binaries — required `--lib` flag to isolate.",
+      "Mutation runs for large crate files (Table, DownloadTrigger, NumberInput) each take 30–60+ minutes serially, making iteration expensive.",
+      "The parallel mutation runs for NumberInput and PinInput produced timeout artifacts that required a third serial rerun to confirm they were concurrency artifacts rather than real failures."
+    ],
+    "open_items": [
+      "Nightly CI run #26141232323 had 7 failing mutation shards with a total of ~185 missed mutants across components-shard-1/2/9/10/11, core-shard-2, and collections-shard-1 — the local patches should close most of these but the PR CI run is the definitive check.",
+      "The Table mutation final run ended with 0 missed mutants locally, but the earlier Nightly table shard had 61+ misses — the gap between local file-targeted runs and CI shard coverage warrants a post-merge Nightly validation.",
+      "ars-core SharedState and ars-collections Key/UUID had small survivor sets addressed by equivalent-mutant exclusions, but no additional tests were added — these could use a future test-strengthening pass if the profile-inactive code paths ever become testable.",
+      "The development docs update requires agents to run `cargo mutants` for new agnostic components, but there is no automated enforcement — a future CI gate or xtask check could formalize this requirement."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-21T02:29:57.134455Z",
+    "agent_lines": 28,
+    "agent_removed": 4,
+    "human_added": 9606,
+    "human_modified": 4,
+    "human_removed": 0,
+    "total_committed": 9638,
+    "total_lines_changed": 9642,
+    "agent_percentage": 0.33188135241651107,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 475,
+      "user_lines_removed": 3,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "crates/ars-components/src/overlay/hover_card.rs": 472,
+        "crates/ars-components/src/utility/download_trigger.rs": 3
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/utility/download_trigger.rs": 3
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 9216,
+      "user_lines_removed": 1,
+      "agent_lines_added": 499,
+      "agent_lines_removed": 4,
+      "user_added_per_file": {
+        ".cargo/mutants.toml": 57,
+        "crates/ars-components/src/data_display/table/tests.rs": 496,
+        "crates/ars-components/src/input/number_input/mod.rs": 2475,
+        "crates/ars-components/src/input/password_input/mod.rs": 1426,
+        "crates/ars-components/src/input/pin_input/mod.rs": 2859,
+        "crates/ars-components/src/input/search_input/mod.rs": 1627,
+        "crates/ars-components/src/overlay/hover_card.rs": 2,
+        "crates/ars-components/src/utility/download_trigger.rs": 190,
+        "crates/ars-components/src/utility/highlight.rs": 84
+      },
+      "user_removed_per_file": {
+        ".cargo/mutants.toml": 1
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 197,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2114,
+      "agent_lines_removed": 14,
+      "user_added_per_file": {
+        "crates/ars-components/src/data_display/table/tests.rs": 172,
+        "crates/ars-components/src/input/number_input/mod.rs": 15,
+        "crates/ars-components/src/input/pin_input/mod.rs": 10
+      }
+    }
+  ]
+}
