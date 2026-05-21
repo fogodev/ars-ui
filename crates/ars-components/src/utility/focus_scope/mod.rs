@@ -275,7 +275,13 @@ impl ars_core::Machine for Machine {
                     saved_focus_id,
                 },
             ) => {
-                let trap = *trapped || props.contain;
+                // `Props::trapped` is documented in spec §1.4 as
+                // controlling whether focus is trapped; `Props::contain`
+                // is its alias. Either prop opts the scope into
+                // trapping; the event's `trapped` is a per-activation
+                // override that can also force trapping when the props
+                // didn't request it.
+                let trap = *trapped || props.trapped || props.contain;
                 let auto_focus = props.auto_focus;
                 let saved = saved_focus_id.clone();
 
@@ -611,6 +617,32 @@ mod tests {
             service.state(),
             &State::Active { trapped: true },
             "contain=true must promote `trapped` even when event passes false"
+        );
+    }
+
+    #[test]
+    fn activate_propagates_trapped_prop_into_trapped_when_event_trapped_false() {
+        // Regression guard for Codex review #663 (P2): `Props::trapped`
+        // is documented in spec §1.4 as the prop that prevents Tab from
+        // escaping. The original `Activate` transition ORed only the
+        // event's `trapped` and `props.contain`, silently dropping
+        // `props.trapped` and forcing every caller to mirror it into
+        // `Event::Activate { trapped: ... }`. Adapters that activate
+        // with a constant `false` (or that derive `trapped` solely from
+        // a transient interaction state) would have left a
+        // `Props { trapped: true, .. }` scope untrapped.
+        let mut service = service(test_props().trapped(true));
+
+        let result = service.send(Event::Activate {
+            trapped: false,
+            saved_focus_id: None,
+        });
+
+        assert!(result.state_changed);
+        assert_eq!(
+            service.state(),
+            &State::Active { trapped: true },
+            "Props::trapped=true must promote `trapped` even when the event passes false",
         );
     }
 

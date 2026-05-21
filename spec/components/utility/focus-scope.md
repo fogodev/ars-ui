@@ -189,10 +189,14 @@ impl Props {
 
 ```text
 Inactive + Activate { trapped, saved_focus_id }
-  → Active { trapped: trapped || props.contain }
+  → Active { trapped: trapped || props.trapped || props.contain }
   action: ctx.saved_focus = saved_focus_id (adapter-captured ID)
   effect: PendingEffect::named(Effect::FocusTrapListener)
   then_send: FocusFirst (if props.auto_focus=true)
+
+  (Either `Props::trapped` or its `Props::contain` alias opts the
+   scope into trapping; the event's `trapped` is a per-activation
+   override that can also force trapping when the props didn't.)
 
 Active + Deactivate { restore_focus }
   → Inactive
@@ -318,7 +322,12 @@ impl ars_core::Machine for Machine {
         match (state, event) {
             // ── Activation ──────────────────────────────────────────────
             (State::Inactive, Event::Activate { trapped, saved_focus_id }) => {
-                let trap = *trapped || props.contain;
+                // `Props::trapped` is the documented trap prop;
+                // `Props::contain` is its alias. Either opts the scope
+                // into trapping; the event's `trapped` is a
+                // per-activation override that can also force trapping
+                // when the props didn't request it.
+                let trap = *trapped || props.trapped || props.contain;
                 let auto_focus = props.auto_focus;
                 let saved = saved_focus_id.clone();
                 let mut plan = TransitionPlan::to(State::Active { trapped: trap })
