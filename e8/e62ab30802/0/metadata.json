@@ -1,0 +1,42 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "e8e62ab30802",
+  "session_id": "019e4a69-8d84-7753-89a0-ec5d2e651f96",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-21T20:00:31.847664Z",
+  "branch": "t3code/61dbf109",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/overlay/drawer/mod.rs",
+    "spec/components/overlay/drawer.md",
+    "spec/leptos-components/overlay/drawer.md",
+    "spec/dioxus-components/overlay/drawer.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "1b385ce1ef9c",
+  "checkpoint_transcript_start": 2561,
+  "transcript_lines_at_start": 2561,
+  "token_usage": {
+    "input_tokens": 105606,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 6434944,
+    "output_tokens": 14966,
+    "api_call_count": 83
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-21T20:00:30.247521Z",
+    "agent_lines": 83,
+    "agent_removed": 16,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 83,
+    "total_lines_changed": 111,
+    "agent_percentage": 89.1891891891892,
+    "metric_version": 2
+  }
+}
