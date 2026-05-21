@@ -725,15 +725,18 @@ impl ars_core::Machine for Machine {
             (State::Open | State::Dragging(_), Event::SnapTo(index)) => {
                 let index = clamp_snap_index(*index, &ctx.snap_points);
                 let height = ctx.snap_points.get(index).copied().unwrap_or(1.0);
-                Some(
-                    TransitionPlan::to(State::Open)
-                        .apply(move |ctx: &mut Context| {
-                            ctx.open = true;
-                            ctx.current_snap = index;
-                            ctx.snap_height = height;
-                        })
-                        .with_effect(PendingEffect::named(Effect::SnapChange)),
-                )
+                let snap_changed = index != ctx.current_snap || height != ctx.snap_height;
+                let mut plan = TransitionPlan::to(State::Open).apply(move |ctx: &mut Context| {
+                    ctx.open = true;
+                    ctx.current_snap = index;
+                    ctx.snap_height = height;
+                });
+
+                if snap_changed {
+                    plan = plan.with_effect(PendingEffect::named(Effect::SnapChange));
+                }
+
+                Some(plan)
             }
 
             (_, Event::SetZIndex(z_index)) => {
@@ -766,10 +769,16 @@ impl ars_core::Machine for Machine {
                 let initial_focus = props.initial_focus;
                 let final_focus = props.final_focus;
                 let snap_points = normalize_snap_points(props.snap_points.as_deref());
-                let current_snap = clamp_snap_index(props.default_snap_index, &snap_points);
-                let snap_height = snap_points.get(current_snap).copied().unwrap_or(1.0);
+                let default_snap_index = props.default_snap_index;
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let current_snap = if ctx.snap_points == snap_points {
+                        clamp_snap_index(ctx.current_snap, &snap_points)
+                    } else {
+                        clamp_snap_index(default_snap_index, &snap_points)
+                    };
+                    let snap_height = snap_points.get(current_snap).copied().unwrap_or(1.0);
+
                     ctx.modal = modal;
                     ctx.placement = placement;
                     ctx.resolved_placement = resolved_placement;
@@ -806,14 +815,14 @@ impl ars_core::Machine for Machine {
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
         let mut events = Vec::new();
 
+        if context_relevant_props_changed(old, new) {
+            events.push(Event::SyncProps);
+        }
+
         if let (was, Some(now)) = (old.open, new.open)
             && was != Some(now)
         {
             events.push(if now { Event::Open } else { Event::Close });
-        }
-
-        if context_relevant_props_changed(old, new) {
-            events.push(Event::SyncProps);
         }
 
         events
@@ -905,16 +914,22 @@ fn resolve_drag_end_plan(ctx: &Context, offset: f64, velocity: f64) -> Transitio
         });
     }
 
-    let target = resolve_snap_index(ctx, offset, velocity);
+    let current_height = dismiss_offset_to_snap_height(offset);
+    let target = resolve_snap_index(ctx, current_height, velocity);
     let height = ctx.snap_points[target];
+    let snap_changed = target != ctx.current_snap || height != ctx.snap_height;
 
-    TransitionPlan::to(State::Open)
-        .apply(move |ctx: &mut Context| {
-            ctx.open = true;
-            ctx.current_snap = target;
-            ctx.snap_height = height;
-        })
-        .with_effect(PendingEffect::named(Effect::SnapChange))
+    let mut plan = TransitionPlan::to(State::Open).apply(move |ctx: &mut Context| {
+        ctx.open = true;
+        ctx.current_snap = target;
+        ctx.snap_height = height;
+    });
+
+    if snap_changed {
+        plan = plan.with_effect(PendingEffect::named(Effect::SnapChange));
+    }
+
+    plan
 }
 
 fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
@@ -977,6 +992,10 @@ fn nearest_snap_index(snap_points: &[f64], current_height: f64) -> usize {
                 .total_cmp(&(*b - current_height).abs())
         })
         .map_or(0, |(index, _)| index)
+}
+
+fn dismiss_offset_to_snap_height(offset: f64) -> f64 {
+    1.0 - clamp_fraction(offset)
 }
 
 const fn clamp_fraction(value: f64) -> f64 {
@@ -1722,6 +1741,72 @@ mod tests {
     }
 
     #[test]
+    fn snap_to_same_index_does_not_emit_snap_change() {
+        let mut service = open_service(Props {
+            placement: Placement::Bottom,
+            snap_points: Some(vec![0.25, 0.5, 1.0]),
+            default_snap_index: 1,
+            ..test_props()
+        });
+
+        let result = service.send(Event::SnapTo(1));
+
+        assert_eq!(service.context().current_snap, 1);
+        assert_eq!(service.context().snap_height, 0.5);
+        assert!(!effect_names(&result).contains(&Effect::SnapChange));
+    }
+
+    #[test]
+    fn snap_to_without_snap_points_does_not_emit_snap_change() {
+        let mut service = open_service(Props {
+            placement: Placement::Bottom,
+            snap_points: None,
+            ..test_props()
+        });
+
+        let result = service.send(Event::SnapTo(99));
+
+        assert_eq!(service.context().current_snap, 0);
+        assert_eq!(service.context().snap_height, 1.0);
+        assert!(!effect_names(&result).contains(&Effect::SnapChange));
+    }
+
+    #[test]
+    fn snap_to_emits_snap_change_when_index_or_height_changes_independently() {
+        let service = open_service(Props {
+            placement: Placement::Bottom,
+            snap_points: Some(vec![0.25, 0.5, 1.0]),
+            default_snap_index: 1,
+            ..test_props()
+        });
+        let props = service.props().clone();
+
+        let mut same_index_changed_height = service.context().clone();
+        same_index_changed_height.current_snap = 1;
+        same_index_changed_height.snap_height = 0.25;
+        let plan = <Machine as MachineTrait>::transition(
+            &State::Open,
+            &Event::SnapTo(1),
+            &same_index_changed_height,
+            &props,
+        )
+        .expect("SnapTo should produce a transition plan");
+        assert!(plan.effects.iter().any(|effect| effect.name == Effect::SnapChange));
+
+        let mut changed_index_same_height = service.context().clone();
+        changed_index_same_height.current_snap = 0;
+        changed_index_same_height.snap_height = 0.5;
+        let plan = <Machine as MachineTrait>::transition(
+            &State::Open,
+            &Event::SnapTo(1),
+            &changed_index_same_height,
+            &props,
+        )
+        .expect("SnapTo should produce a transition plan");
+        assert!(plan.effects.iter().any(|effect| effect.name == Effect::SnapChange));
+    }
+
+    #[test]
     fn snap_points_are_filtered_sorted_deduped_and_default_snap_clamps() {
         let service = fresh_service(Props {
             snap_points: Some(vec![f64::NAN, f64::INFINITY, -0.1, 0.5, 0.25, 0.5, 1.1]),
@@ -1767,7 +1852,7 @@ mod tests {
         drop(service.send(Event::DragStart(0.0)));
 
         let result = service.send(Event::DragEnd {
-            offset: 0.6,
+            offset: 0.05,
             velocity: 0.0,
         });
 
@@ -1815,7 +1900,7 @@ mod tests {
 
         drop(at_threshold.send(Event::DragStart(0.0)));
         drop(at_threshold.send(Event::DragEnd {
-            offset: 0.6,
+            offset: 0.4,
             velocity: VELOCITY_THRESHOLD,
         }));
 
@@ -1845,11 +1930,11 @@ mod tests {
 
         drop(at_negative_threshold.send(Event::DragStart(0.0)));
         drop(at_negative_threshold.send(Event::DragEnd {
-            offset: 0.1,
+            offset: 0.4,
             velocity: -VELOCITY_THRESHOLD,
         }));
 
-        assert_eq!(at_negative_threshold.context().current_snap, 0);
+        assert_eq!(at_negative_threshold.context().current_snap, 2);
 
         let mut below_negative = open_service(Props {
             placement: Placement::Bottom,
@@ -1884,6 +1969,66 @@ mod tests {
 
         assert_eq!(service.context().current_snap, 2);
         assert_eq!(service.context().snap_height, 0.6);
+    }
+
+    #[test]
+    fn drag_end_low_velocity_maps_dismiss_offset_to_visible_snap_height() {
+        let mut service = open_service(Props {
+            placement: Placement::Bottom,
+            snap_points: Some(vec![0.25, 0.5, 1.0]),
+            default_snap_index: 1,
+            ..test_props()
+        });
+
+        drop(service.send(Event::DragStart(0.0)));
+        drop(service.send(Event::DragEnd {
+            offset: 0.1,
+            velocity: 0.0,
+        }));
+
+        assert_eq!(service.context().current_snap, 2);
+        assert_eq!(service.context().snap_height, 1.0);
+    }
+
+    #[test]
+    fn drag_end_emits_snap_change_when_index_or_height_changes_independently() {
+        let service = open_service(Props {
+            placement: Placement::Bottom,
+            snap_points: Some(vec![0.25, 0.5, 1.0]),
+            default_snap_index: 1,
+            ..test_props()
+        });
+        let props = service.props().clone();
+
+        let mut same_index_changed_height = service.context().clone();
+        same_index_changed_height.current_snap = 2;
+        same_index_changed_height.snap_height = 0.5;
+        let plan = <Machine as MachineTrait>::transition(
+            &State::Dragging(0.1),
+            &Event::DragEnd {
+                offset: 0.1,
+                velocity: 0.0,
+            },
+            &same_index_changed_height,
+            &props,
+        )
+        .expect("DragEnd should produce a transition plan");
+        assert!(plan.effects.iter().any(|effect| effect.name == Effect::SnapChange));
+
+        let mut changed_index_same_height = service.context().clone();
+        changed_index_same_height.current_snap = 0;
+        changed_index_same_height.snap_height = 1.0;
+        let plan = <Machine as MachineTrait>::transition(
+            &State::Dragging(0.1),
+            &Event::DragEnd {
+                offset: 0.1,
+                velocity: 0.0,
+            },
+            &changed_index_same_height,
+            &props,
+        )
+        .expect("DragEnd should produce a transition plan");
+        assert!(plan.effects.iter().any(|effect| effect.name == Effect::SnapChange));
     }
 
     #[test]
@@ -1990,6 +2135,52 @@ mod tests {
     }
 
     #[test]
+    fn on_props_changed_syncs_context_before_controlled_open_change() {
+        let old = Props {
+            modal: true,
+            prevent_scroll: true,
+            open: Some(false),
+            ..test_props()
+        };
+        let new = Props {
+            modal: false,
+            prevent_scroll: false,
+            open: Some(true),
+            ..old.clone()
+        };
+
+        let events = <Machine as MachineTrait>::on_props_changed(&old, &new);
+
+        assert_eq!(events, vec![Event::SyncProps, Event::Open]);
+    }
+
+    #[test]
+    fn controlled_open_uses_synced_context_for_open_effects() {
+        let mut service = fresh_service(Props {
+            modal: true,
+            prevent_scroll: true,
+            open: Some(false),
+            ..test_props()
+        });
+
+        let result = service.set_props(Props {
+            modal: false,
+            prevent_scroll: false,
+            open: Some(true),
+            ..test_props()
+        });
+
+        let names = effect_names(&result);
+
+        assert_eq!(service.state(), &State::Open);
+        assert!(!service.context().modal);
+        assert!(!service.context().prevent_scroll);
+        assert!(!names.contains(&Effect::SetBackgroundInert));
+        assert!(!names.contains(&Effect::ScrollLockAcquire));
+        assert!(names.contains(&Effect::OpenChange));
+    }
+
+    #[test]
     fn on_props_changed_detects_each_context_relevant_field_independently() {
         assert_syncs_when_only(|props| props.placement = Placement::Left);
         assert_syncs_when_only(|props| props.dir = Direction::Rtl);
@@ -2065,6 +2256,31 @@ mod tests {
         assert_eq!(service.context().snap_points, vec![0.25, 0.75]);
         assert_eq!(service.context().current_snap, 1);
         assert_eq!(service.context().snap_height, 0.75);
+    }
+
+    #[test]
+    fn sync_props_preserves_active_snap_for_non_snap_prop_updates() {
+        let mut service = open_service(Props {
+            placement: Placement::Bottom,
+            snap_points: Some(vec![0.25, 0.5, 1.0]),
+            default_snap_index: 1,
+            ..test_props()
+        });
+
+        drop(service.send(Event::SnapTo(2)));
+
+        let result = service.set_props(Props {
+            placement: Placement::Bottom,
+            snap_points: Some(vec![0.25, 0.5, 1.0]),
+            default_snap_index: 0,
+            modal: false,
+            close_on_escape: false,
+            ..test_props()
+        });
+
+        assert!(result.context_changed);
+        assert_eq!(service.context().current_snap, 2);
+        assert_eq!(service.context().snap_height, 1.0);
     }
 
     #[test]
