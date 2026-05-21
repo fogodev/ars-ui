@@ -61,6 +61,9 @@ pub mod keyboard;
 /// `Landmark` component (stateless ARIA landmark mapper).
 pub mod landmark;
 
+/// `LiveRegion` component machine.
+pub mod live_region;
+
 /// Separator component (stateless attribute mapper).
 pub mod separator;
 

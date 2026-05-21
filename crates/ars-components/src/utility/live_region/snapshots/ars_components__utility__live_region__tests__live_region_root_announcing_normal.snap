@@ -1,0 +1,69 @@
+---
+source: crates/ars-components/src/utility/live_region.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "live-region",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "announcing",
+            ),
+        ),
+        (
+            Aria(
+                Atomic,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Aria(
+                Relevant,
+            ),
+            String(
+                "additions text",
+            ),
+        ),
+        (
+            Class,
+            String(
+                "ars-visually-hidden",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "announcer",
+            ),
+        ),
+    ],
+    styles: [],
+}

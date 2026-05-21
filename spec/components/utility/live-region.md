@@ -23,29 +23,31 @@ guarantee detection by all major screen readers.
 
 ### 1.1 States
 
-| State        | Description                                                     |
-| ------------ | --------------------------------------------------------------- |
-| `Idle`       | No announcement pending.                                        |
-| `Announcing` | A message is being announced. The live region DOM is populated. |
+| State        | Description                                                                                                |
+| ------------ | ---------------------------------------------------------------------------------------------------------- |
+| `Idle`       | No announcement pending.                                                                                   |
+| `Announcing` | An announcement cycle is active; the DOM may be in the cleared delay phase or contain the current message. |
 
 ### 1.2 Events
 
 | Event      | Payload                                       | Description                                                         |
 | ---------- | --------------------------------------------- | ------------------------------------------------------------------- |
 | `Announce` | `message: String, priority: AnnouncePriority` | Queue a new announcement.                                           |
-| `Clear`    | —                                             | Clear all pending messages.                                         |
-| `Rendered` | —                                             | Signal that the DOM has been updated (triggers insert after clear). |
+| `Clear`    | —                                             | Clear rendered, pending, and queued announcements.                  |
+| `Rendered` | —                                             | Signal that the adapter has inserted the pending announcement text. |
 | `SetProps` | —                                             | Sync props into context (triggered by adapter on prop change).      |
 
 ### 1.3 Context
 
 ```rust
+use core::time::Duration;
+
 /// The state of the `LiveRegion` component.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
     /// No announcement pending.
     Idle,
-    /// A message is being announced. The live region DOM is populated.
+    /// An announcement cycle is active.
     Announcing,
 }
 
@@ -59,9 +61,9 @@ pub enum Event {
         /// The priority of the announcement.
         priority: AnnouncePriority,
     },
-    /// Clear all pending messages.
+    /// Clear rendered, pending, and queued announcements.
     Clear,
-    /// Signal that the DOM has been updated (triggers insert after clear).
+    /// Signal that the adapter has inserted the pending announcement text.
     Rendered,
     /// Sync props into context (triggered by adapter on prop change).
     SetProps,
@@ -87,21 +89,35 @@ pub enum AnnouncePriority {
     Urgent,
 }
 
-// `AriaRelevant` — defined in `03-accessibility.md`
+// `AriaRelevant` — defined in `03-accessibility.md` as the shared
+// additions/removals/text struct.
+
+/// Queued announcement data waiting for an active announcement cycle to finish.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueuedAnnouncement {
+    /// The message to announce.
+    pub message: String,
+    /// The announcement priority.
+    pub priority: AnnouncePriority,
+    /// Monotonic insertion order used to preserve FIFO ordering per priority.
+    pub sequence: u64,
+}
 
 /// The context of the `LiveRegion` component.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
-    /// The messages to announce.
+    /// The messages currently rendered inside the live region.
     pub messages: Vec<String>,
+    /// Messages waiting behind the active announcement.
+    pub queue: Vec<QueuedAnnouncement>,
     /// The politeness of the announcements.
     pub politeness: AriaPoliteness,
     /// true = the entire live region is announced, not just changed nodes.
     pub atomic: bool,
     /// The relevant changes for `aria-relevant`.
     pub relevant: AriaRelevant,
-    /// Delay in milliseconds before announcing. Allows batching rapid updates.
-    pub delay: u32,
+    /// Delay before announcing. Allows batching rapid updates.
+    pub delay: Duration,
     /// Tracks whether we are in the "cleared" phase of the two-step update.
     pub pending_message: Option<String>,
     /// The priority of the current announcement. Used to set `aria-live` dynamically.
@@ -112,6 +128,8 @@ pub struct Context {
 ### 1.4 Props
 
 ```rust
+use core::time::Duration;
+
 /// Props for the `LiveRegion` component.
 #[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
@@ -123,8 +141,8 @@ pub struct Props {
     pub atomic: bool,
     /// The relevant changes for `aria-relevant`.
     pub relevant: AriaRelevant,
-    /// Delay before announcing in milliseconds. Helps avoid announcing transient states.
-    pub delay: u32,
+    /// Delay before announcing. Helps avoid announcing transient states.
+    pub delay: Duration,
 }
 
 impl Default for Props {
@@ -133,8 +151,8 @@ impl Default for Props {
             id: String::new(),
             politeness: AriaPoliteness::Polite,
             atomic: true,
-            relevant: AriaRelevant::Additions,
-            delay: 0,
+            relevant: AriaRelevant::default(), // additions text
+            delay: Duration::from_millis(100),
         }
     }
 }
@@ -146,23 +164,29 @@ impl Default for Props {
 Idle + Announce(msg, priority)
   → Announcing
   action: clear messages[], set pending_message = msg
-  effect: "announce_delay" — clear DOM content, wait ctx.delay (default 100ms),
+  effect: Effect::AnnounceDelay — clear DOM content, wait ctx.delay (default 100ms),
           then insert ctx.pending_message text and send Rendered event
 
 Announcing + Rendered
-  → Announcing (stays)
-  action: push pending_message into messages[], clear pending_message
+  → Idle if queue is empty; otherwise Announcing
+  action: move pending_message into messages[], clear pending_message;
+          if queue has messages, dequeue the next highest-priority item,
+          keep the rendered message available until the adapter performs
+          the next clear-then-insert cycle, set pending_message, set current_priority,
+          and emit Effect::AnnounceDelay
 
 Announcing + Announce(msg, priority)
   → Announcing
-  action: replace pending_message = msg
-  effect: restart "announce_delay" timer
+  action: enqueue msg with priority and insertion sequence
 
 Announcing + Clear
   → Idle
-  action: clear messages[], clear pending_message
+  action: clear messages[], queue[], pending_message
+  effect: cancel Effect::AnnounceDelay
 
-Idle + Clear → Idle (no-op, return None)
+Idle + Clear
+  → Idle
+  action: clear rendered messages when present; otherwise no-op
 
 Idle + Rendered → Idle (ignored, return None)
 ```
@@ -170,7 +194,16 @@ Idle + Rendered → Idle (ignored, return None)
 ### 1.6 Full Machine Implementation
 
 ```rust
-use ars_core::{TransitionPlan, PendingEffect, ConnectApi, AttrMap};
+use core::time::Duration;
+
+use ars_core::{AttrMap, ConnectApi, PendingEffect, TransitionPlan};
+
+/// Typed effect intents emitted by the live-region machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter performs the delayed clear-then-insert render cycle.
+    AnnounceDelay,
+}
 
 /// The machine for the `LiveRegion` component.
 pub struct Machine;
@@ -186,6 +219,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -193,9 +227,10 @@ impl ars_core::Machine for Machine {
             State::Idle,
             Context {
                 messages: Vec::new(),
+                queue: Vec::new(),
                 politeness: props.politeness,
                 atomic: props.atomic,
-                relevant: props.relevant,
+                relevant: props.relevant.clone(),
                 delay: props.delay,
                 pending_message: None,
                 current_priority: AnnouncePriority::Normal,
@@ -220,71 +255,68 @@ impl ars_core::Machine for Machine {
                         ctx.pending_message = Some(msg);
                         ctx.current_priority = prio;
                     })
-                    .with_named_effect("announce_delay", |ctx, _props, send| {
-                        // Effect: clear DOM content, wait ctx.delay (default 100ms),
-                        // then insert ctx.pending_message text and send Rendered.
-                        let platform = use_platform_effects();
-                        let delay = Duration::from_millis(ctx.delay as u64);
-                        let handle = platform.set_timeout(delay, Box::new(move || {
-                            send.call_if_alive(Event::Rendered);
-                        }));
-                        let pc = platform.clone();
-                        Box::new(move || pc.clear_timeout(handle))
-                    }))
+                    .with_effect(PendingEffect::named(Effect::AnnounceDelay)))
             }
             (State::Announcing, Event::Announce { message, priority }) => {
                 let msg = message.clone();
                 let prio = *priority;
-                Some(TransitionPlan::to(State::Announcing)
-                    .apply(move |ctx| {
-                        ctx.pending_message = Some(msg);
-                        ctx.current_priority = prio;
-                    })
-                    .with_named_effect("announce_delay", |ctx, _props, send| {
-                        // Restart the delay timer with the new message.
-                        let platform = use_platform_effects();
-                        let delay = Duration::from_millis(ctx.delay as u64);
-                        let handle = platform.set_timeout(delay, Box::new(move || {
-                            send.call_if_alive(Event::Rendered);
-                        }));
-                        let pc = platform.clone();
-                        Box::new(move || pc.clear_timeout(handle))
-                    }))
+                Some(TransitionPlan::context_only(move |ctx| {
+                    let sequence = next_sequence(&ctx.queue);
+                    ctx.queue.push(QueuedAnnouncement {
+                        message: msg,
+                        priority: prio,
+                        sequence,
+                    });
+                }))
             }
 
             // ── Rendered ────────────────────────────────────────────────
             (State::Announcing, Event::Rendered) => {
-                Some(TransitionPlan::context_only(|ctx| {
+                let has_next = !ctx.queue.is_empty();
+                let mut plan = TransitionPlan::to(if has_next {
+                    State::Announcing
+                } else {
+                    State::Idle
+                })
+                .apply(|ctx| {
                     if let Some(msg) = ctx.pending_message.take() {
+                        ctx.messages.clear();
                         ctx.messages.push(msg);
                     }
-                }))
+                    if let Some(next) = dequeue_next(&mut ctx.queue) {
+                        ctx.pending_message = Some(next.message);
+                        ctx.current_priority = next.priority;
+                    } else {
+                        ctx.current_priority = AnnouncePriority::Normal;
+                    }
+                });
+                if has_next {
+                    plan = plan.with_effect(PendingEffect::named(Effect::AnnounceDelay));
+                }
+                Some(plan)
             }
             // Rendered while Idle is a no-op (e.g., late timer firing after Clear).
             (State::Idle, Event::Rendered) => None,
 
             // ── Clear ───────────────────────────────────────────────────
-            // ── Clear ───────────────────────────────────────────────────
             // **Effect cleanup:** When transitioning from Announcing to Idle via Clear,
-            // the adapter MUST cancel the pending `announce_delay` named effect timer.
-            // Per the architecture spec, named effects are automatically cancelled when
-            // the state changes, but adapters should verify their effect cleanup
-            // implementation handles this case — a stale `Rendered` event after Clear
-            // would be silently dropped by the `_ => None` fallback.
-            (State::Announcing, Event::Clear) => {
+            // the adapter MUST cancel the pending `Effect::AnnounceDelay` timer/work.
+            (_, Event::Clear) if has_announcements(ctx) => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
                     ctx.messages.clear();
+                    ctx.queue.clear();
                     ctx.pending_message = None;
-                }))
+                    ctx.current_priority = AnnouncePriority::Normal;
+                }).cancel_effect(Effect::AnnounceDelay))
             }
-            // Clear while Idle is a no-op.
+            // Clear while Idle with no content is a no-op.
             (State::Idle, Event::Clear) => None,
 
             // ── SetProps ────────────────────────────────────────────────
             (_, Event::SetProps) => {
                 let politeness = props.politeness;
                 let atomic = props.atomic;
-                let relevant = props.relevant;
+                let relevant = props.relevant.clone();
                 let delay = props.delay;
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.politeness = politeness;
@@ -318,10 +350,11 @@ impl ars_core::Machine for Machine {
 }
 ```
 
-> **Effect `announce_delay`:** On entry to `Announcing`, clear DOM content, wait `ctx.delay`
-> (default 100ms), then insert `ctx.pending_message` text and send `Rendered` event. When a
-> new `Announce` arrives while already `Announcing`, the effect is restarted (the adapter
-> cancels the previous timer and starts a new one).
+> **Effect `Effect::AnnounceDelay`:** The agnostic machine emits a typed, adapter-resolvable
+> intent for the clear-then-insert cycle. The adapter clears the root's rendered text, waits
+> `ctx.delay` (default 100ms), inserts `ctx.pending_message`, and sends `Rendered`. A new
+> `Announce` received while already `Announcing` is queued; it does not replace the active
+> pending message or restart the active timer.
 
 ### 1.7 Connect / API
 
@@ -374,16 +407,22 @@ impl<'a> Api<'a> {
                 AriaPoliteness::Assertive => "assertive",
             }
         };
+        if !self.props.id.is_empty() {
+            attrs.set(HtmlAttr::Id, self.props.id.clone());
+        }
         attrs.set(HtmlAttr::Aria(AriaAttr::Live), live_value);
         attrs.set(HtmlAttr::Aria(AriaAttr::Atomic), if self.props.atomic { "true" } else { "false" });
-        let relevant_str = match self.props.relevant {
-            AriaRelevant::Additions => "additions",
-            AriaRelevant::Removals => "removals",
-            AriaRelevant::Text => "text",
-            AriaRelevant::All => "all",
-            AriaRelevant::AdditionsText => "additions text",
-        };
-        attrs.set(HtmlAttr::Aria(AriaAttr::Relevant), relevant_str);
+        attrs.set(
+            HtmlAttr::Aria(AriaAttr::Relevant),
+            self.props.relevant.to_string(),
+        );
+        attrs.set(
+            HtmlAttr::Data("ars-state"),
+            match self.state {
+                State::Idle => "idle",
+                State::Announcing => "announcing",
+            },
+        );
         // Static styles via companion stylesheet class (CSP-safe in all strategies).
         attrs.set(HtmlAttr::Class, "ars-visually-hidden");
         attrs
@@ -434,23 +473,26 @@ To guarantee screen readers detect the change, the component:
 > alone is insufficient — a `setTimeout(100)` (or equivalent) is the minimum reliable
 > delay across screen readers.
 
-For `AnnouncePriority::Urgent`, a second live region with `aria-live="assertive"` is maintained
-internally, and urgent messages are routed to it.
+For `AnnouncePriority::Urgent`, the root attributes report `aria-live="assertive"` while the
+urgent message is active. The agnostic core does not create or mutate a second DOM node; adapter
+tasks may add framework-specific multi-region rendering later if their specs require it.
 
 ## 2. Anatomy
 
 ```text
 LiveRegion
 └── Root    <div>    data-ars-scope="live-region" data-ars-part="root"
+                     id="..."
                      aria-live="polite|assertive|off"
                      aria-atomic="true|false"
                      aria-relevant="..."
+                     data-ars-state="idle|announcing"
                      (visually hidden)
 ```
 
-| Part | Element | Key Attributes                                                                                                              |
-| ---- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Root | `<div>` | `data-ars-scope="live-region"`, `data-ars-part="root"`, `aria-live`, `aria-atomic`, `aria-relevant`, `.ars-visually-hidden` |
+| Part | Element | Key Attributes                                                                                                                                      |
+| ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root | `<div>` | `id`, `data-ars-scope="live-region"`, `data-ars-part="root"`, `data-ars-state`, `aria-live`, `aria-atomic`, `aria-relevant`, `.ars-visually-hidden` |
 
 ## 3. Accessibility
 
@@ -525,13 +567,13 @@ must preserve the existing element rather than replacing it.
 
 ## 9. Platform Notes
 
-**Dioxus timer cancellation safety:** When the `announce_delay` timer fires, its callback calls `send(Event::Rendered)`. If the component unmounts before the timer fires, `use_drop` runs cleanup but the timer callback may still be pending. The timer callback MUST check a cancellation flag (`SharedFlag`) before calling `send()`:
+**Dioxus timer cancellation safety:** When the `Effect::AnnounceDelay` timer fires, its callback calls `send(Event::Rendered)`. If the component unmounts before the timer fires, `use_drop` runs cleanup but the timer callback may still be pending. The timer callback MUST check a cancellation flag (`SharedFlag`) before calling `send()`:
 
 ```rust,no_check
 let platform = use_platform_effects();
 let cancelled = SharedFlag::new(false);
 let cancelled_clone = cancelled.clone();
-let handle = platform.set_timeout(delay_ms, Box::new(move || {
+let handle = platform.set_timeout(ctx.delay, Box::new(move || {
     if !cancelled_clone.get() {
         send(Event::Rendered);
     }
@@ -545,7 +587,7 @@ This pattern prevents runtime panics when `send()` writes to a dropped Dioxus si
 
 > **Dioxus timing:** The two-step clear-then-insert pattern requires a timed delay
 > (minimum 100ms). In Leptos, use `platform.set_timeout()` via `PlatformEffects`. In Dioxus, use
-> `spawn(async move { tokio::time::sleep(Duration::from_millis(delay)).await; if !cancelled.get() { send(Event::Rendered); } })`
+> `spawn(async move { tokio::time::sleep(delay).await; if !cancelled.get() { send(Event::Rendered); } })`
 > which works on both Web and Desktop targets via the Dioxus async runtime.
 >
 > **Dioxus SSR:** The `<div aria-live>` container must appear in server-rendered HTML
@@ -559,12 +601,12 @@ This pattern prevents runtime panics when `send()` writes to a dropped Dioxus si
 
 ### 10.1 Props
 
-| Feature       | ars-ui                       | React Aria                 | Notes                                   |
-| ------------- | ---------------------------- | -------------------------- | --------------------------------------- |
-| Politeness    | `politeness: AriaPoliteness` | via `announce()` parameter | Both libraries support polite/assertive |
-| Atomic        | `atomic`                     | --                         | ars-ui addition                         |
-| Relevant      | `relevant`                   | --                         | ars-ui addition for `aria-relevant`     |
-| Clear timeout | `clear_timeout_ms`           | --                         | ars-ui addition for auto-clearing       |
+| Feature    | ars-ui                       | React Aria                 | Notes                                        |
+| ---------- | ---------------------------- | -------------------------- | -------------------------------------------- |
+| Politeness | `politeness: AriaPoliteness` | via `announce()` parameter | Both libraries support polite/assertive      |
+| Atomic     | `atomic`                     | --                         | ars-ui addition                              |
+| Relevant   | `relevant`                   | --                         | ars-ui addition for `aria-relevant`          |
+| Delay      | `delay`                      | --                         | ars-ui addition for clear-then-insert timing |
 
 **Gaps:** None.
 
@@ -583,7 +625,7 @@ This pattern prevents runtime panics when `send()` writes to a dropped Dioxus si
 | Polite/Assertive modes | Yes    | Yes                          |
 | Two-step clear/insert  | Yes    | Yes                          |
 | Queue management       | Yes    | --                           |
-| Auto-clear timeout     | Yes    | --                           |
+| Configurable delay     | Yes    | --                           |
 | Declarative component  | Yes    | -- (imperative `announce()`) |
 
 **Gaps:** None.
@@ -591,5 +633,5 @@ This pattern prevents runtime panics when `send()` writes to a dropped Dioxus si
 ### 10.4 Summary
 
 - **Overall:** Full parity.
-- **Divergences:** React Aria exposes `announce()` as an imperative function; ars-ui provides a declarative component with state machine. ars-ui adds `atomic`, `relevant`, queue management, and auto-clear timeout.
+- **Divergences:** React Aria exposes `announce()` as an imperative function; ars-ui provides a declarative component with state machine. ars-ui adds `atomic`, `relevant`, queue management, and configurable clear-then-insert delay.
 - **Recommended additions:** None.

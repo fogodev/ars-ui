@@ -1,10 +1,11 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
+use ars_a11y::AriaRelevant;
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
 use ars_components::utility::{
-    button, download_trigger, error_boundary, field, fieldset, form, form_submit, separator, swap,
-    toggle, visually_hidden,
+    button, download_trigger, error_boundary, field, fieldset, form, form_submit, live_region,
+    separator, swap, toggle, visually_hidden,
 };
 use ars_core::{ConnectApi, Env, HtmlAttr, Service, WeakSend, callback};
 use ars_forms::{
@@ -97,6 +98,60 @@ fn arb_toggle_event() -> impl Strategy<Value = toggle::Event> {
         Just(toggle::Event::Blur),
         any::<bool>().prop_map(toggle::Event::SetDisabled),
         prop::option::of(any::<bool>()).prop_map(toggle::Event::SetValue),
+    ]
+}
+
+fn arb_live_region_relevant() -> impl Strategy<Value = AriaRelevant> {
+    (any::<bool>(), any::<bool>(), any::<bool>()).prop_map(|(additions, removals, text)| {
+        AriaRelevant {
+            additions,
+            removals,
+            text,
+        }
+    })
+}
+
+fn arb_live_region_politeness() -> impl Strategy<Value = live_region::AriaPoliteness> {
+    prop_oneof![
+        Just(live_region::AriaPoliteness::Off),
+        Just(live_region::AriaPoliteness::Polite),
+        Just(live_region::AriaPoliteness::Assertive),
+    ]
+}
+
+fn arb_live_region_priority() -> impl Strategy<Value = live_region::AnnouncePriority> {
+    prop_oneof![
+        Just(live_region::AnnouncePriority::Normal),
+        Just(live_region::AnnouncePriority::Urgent),
+    ]
+}
+
+fn arb_live_region_props() -> impl Strategy<Value = live_region::Props> {
+    (
+        arb_live_region_politeness(),
+        any::<bool>(),
+        arb_live_region_relevant(),
+        (0_u64..=1_000).prop_map(Duration::from_millis),
+    )
+        .prop_map(|(politeness, atomic, relevant, delay)| live_region::Props {
+            id: "live-region".to_string(),
+            politeness,
+            atomic,
+            relevant,
+            delay,
+        })
+}
+
+fn arb_live_region_event() -> impl Strategy<Value = live_region::Event> {
+    prop_oneof![
+        (
+            "[a-zA-Z0-9 _-]{1,24}".prop_map(String::from),
+            arb_live_region_priority(),
+        )
+            .prop_map(|(message, priority)| live_region::Event::Announce { message, priority }),
+        Just(live_region::Event::Clear),
+        Just(live_region::Event::Rendered),
+        Just(live_region::Event::SetProps),
     ]
 }
 
@@ -366,6 +421,74 @@ proptest! {
                     *ctx.pressed.get(),
                     before_pressed,
                     "disabled toggle must not change pressed value"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_live_region_event_sequences_preserve_invariants(
+        props in arb_live_region_props(),
+        events in prop::collection::vec(arb_live_region_event(), 0..128),
+    ) {
+        let mut service = Service::<live_region::Machine>::new(
+            props,
+            &Env::default(),
+            &live_region::Messages,
+        );
+
+        for event in events {
+            let was_clear = matches!(event, live_region::Event::Clear);
+
+            let was_rendered = matches!(event, live_region::Event::Rendered);
+
+            let was_announcing = matches!(service.state(), live_region::State::Announcing);
+
+            let queued_has_urgent = service
+                .context()
+                .queue
+                .iter()
+                .any(|queued| queued.priority == live_region::AnnouncePriority::Urgent);
+
+            let queued_has_normal = service
+                .context()
+                .queue
+                .iter()
+                .any(|queued| queued.priority == live_region::AnnouncePriority::Normal);
+
+            drop(service.send(event));
+
+            let state = service.state();
+            let ctx = service.context();
+
+            prop_assert!(
+                ctx.pending_message.is_none() || matches!(state, live_region::State::Announcing),
+                "pending message requires Announcing state"
+            );
+            prop_assert!(
+                ctx.messages.len() <= 1,
+                "only one rendered announcement may be present"
+            );
+            prop_assert!(
+                ctx.queue
+                    .windows(2)
+                    .all(|window| window[0].sequence < window[1].sequence),
+                "queue sequence must preserve insertion order"
+            );
+
+            if was_clear {
+                prop_assert_eq!(state, &live_region::State::Idle);
+                prop_assert!(ctx.messages.is_empty(), "Clear empties rendered messages");
+                prop_assert!(ctx.queue.is_empty(), "Clear empties queued messages");
+                prop_assert_eq!(&ctx.pending_message, &None, "Clear drops pending message");
+            }
+
+            if was_rendered && was_announcing && queued_has_urgent && queued_has_normal {
+                prop_assert_eq!(
+                    ctx.current_priority,
+                    live_region::AnnouncePriority::Urgent,
+                    "urgent queued messages are selected before normal messages"
                 );
             }
         }
