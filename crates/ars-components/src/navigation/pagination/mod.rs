@@ -375,13 +375,10 @@ impl ars_core::Machine for Machine {
     ) -> (Self::State, Self::Context) {
         let page_count = Context::compute_page_count(props.total_items, props.page_size);
 
-        let raw_initial_page = props.page.unwrap_or(props.default_page);
-        let initial_page = clamp_page(raw_initial_page, page_count);
+        let initial_page = clamp_page(props.page.unwrap_or(props.default_page), page_count);
 
         let page = if props.page.is_some() {
-            let mut page = Bindable::controlled(raw_initial_page);
-            page.set(initial_page);
-            page
+            Bindable::controlled(initial_page)
         } else {
             Bindable::uncontrolled(initial_page)
         };
@@ -443,6 +440,10 @@ impl ars_core::Machine for Machine {
                     ctx.page_size = new_size;
                     ctx.page_count = new_count;
 
+                    if ctx.page.is_controlled() {
+                        ctx.page.sync_controlled(Some(target));
+                    }
+
                     ctx.page.set(target);
                 });
 
@@ -459,11 +460,9 @@ impl ars_core::Machine for Machine {
                 let boundary_count = props.boundary_count;
 
                 let new_count = Context::compute_page_count(total_items, page_size);
-                let controlled = props.page;
-                let target = controlled.map_or_else(
-                    || clamp_page(current, new_count),
-                    |page| clamp_page(page, new_count),
-                );
+                let controlled = props.page.map(|page| clamp_page(page, new_count));
+                let target = controlled
+                    .map_or_else(|| clamp_page(current, new_count), core::convert::identity);
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.page_size = page_size;
@@ -1081,7 +1080,7 @@ mod tests {
         let service = service(props().page(20));
 
         assert_eq!(service.context().page_count, 10);
-        assert_eq!(*service.context().page.get(), 20);
+        assert_eq!(*service.context().page.get(), 10);
         assert_eq!(service.context().current_page(), 10);
 
         let api = service.connect(&|_| {});
@@ -1099,7 +1098,7 @@ mod tests {
         ));
 
         assert_eq!(service.context().page_count, 5);
-        assert_eq!(*service.context().page.get(), 10);
+        assert_eq!(*service.context().page.get(), 5);
         assert_eq!(service.context().current_page(), 5);
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, Effect::PageChange);
@@ -1119,7 +1118,7 @@ mod tests {
         drop(service.send(Event::SyncProps));
 
         assert_eq!(service.context().page_count, 3);
-        assert_eq!(*service.context().page.get(), 8);
+        assert_eq!(*service.context().page.get(), 3);
         assert_eq!(service.context().current_page(), 3);
 
         let api = service.connect(&|_| {});
@@ -1174,7 +1173,7 @@ mod tests {
         }
 
         assert_eq!(service.context().page_count, 5);
-        assert_eq!(*service.context().page.get(), 10);
+        assert_eq!(*service.context().page.get(), 5);
         assert_eq!(service.context().current_page(), 5);
 
         let expand = service.send(Event::SetPageSize(

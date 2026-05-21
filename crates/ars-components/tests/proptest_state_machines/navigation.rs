@@ -717,7 +717,7 @@ fn arb_steps_props() -> impl Strategy<Value = steps::Props> {
 
 fn assert_pagination_invariants(service: &Service<pagination::Machine>) -> TestCaseResult {
     let ctx = service.context();
-    let page = ctx.current_page();
+    let page = *ctx.page.get();
 
     prop_assert!(page >= 1);
     prop_assert!(page <= ctx.page_count);
