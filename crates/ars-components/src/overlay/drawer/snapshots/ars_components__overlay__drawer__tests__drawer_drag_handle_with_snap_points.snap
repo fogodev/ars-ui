@@ -1,0 +1,77 @@
+---
+source: crates/ars-components/src/overlay/drawer/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).drag_handle_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "drag-handle",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "drawer",
+            ),
+        ),
+        (
+            Aria(
+                Orientation,
+            ),
+            String(
+                "vertical",
+            ),
+        ),
+        (
+            Aria(
+                ValueMax,
+            ),
+            String(
+                "2",
+            ),
+        ),
+        (
+            Aria(
+                ValueMin,
+            ),
+            String(
+                "0",
+            ),
+        ),
+        (
+            Aria(
+                ValueNow,
+            ),
+            String(
+                "1",
+            ),
+        ),
+        (
+            Aria(
+                ValueText,
+            ),
+            String(
+                "50%",
+            ),
+        ),
+        (
+            Class,
+            String(
+                "ars-touch-none",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "slider",
+            ),
+        ),
+    ],
+    styles: [],
+}

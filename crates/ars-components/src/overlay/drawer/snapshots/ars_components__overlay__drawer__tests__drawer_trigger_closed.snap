@@ -1,0 +1,61 @@
+---
+source: crates/ars-components/src/overlay/drawer/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "drawer",
+            ),
+        ),
+        (
+            Aria(
+                Expanded,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                HasPopup,
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            Aria(
+                Controls,
+            ),
+            String(
+                "drawer-content",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "drawer-trigger",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

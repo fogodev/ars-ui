@@ -4,7 +4,7 @@
 //! spec's §3 anatomy table and asserts the impl's `Part` enum matches.
 
 use ars_components::overlay::{
-    alert_dialog, floating_panel, hover_card,
+    alert_dialog, drawer, floating_panel, hover_card,
     toast::{manager as toast_manager, single as toast_single},
 };
 use ars_core::{ComponentPart, Env, HtmlAttr, Service};
@@ -73,6 +73,27 @@ fn hover_card_anatomy_matches_spec() {
             (hover_card::Part::Arrow, "arrow"),
             (hover_card::Part::Title, "title"),
             (hover_card::Part::DismissButton, "dismiss-button"),
+        ],
+    );
+}
+
+#[test]
+fn drawer_anatomy_matches_spec() {
+    assert_anatomy(
+        "drawer",
+        &[
+            (drawer::Part::Root, "root"),
+            (drawer::Part::Trigger, "trigger"),
+            (drawer::Part::Backdrop, "backdrop"),
+            (drawer::Part::Positioner, "positioner"),
+            (drawer::Part::Content, "content"),
+            (drawer::Part::Title, "title"),
+            (drawer::Part::Description, "description"),
+            (drawer::Part::Header, "header"),
+            (drawer::Part::Body, "body"),
+            (drawer::Part::Footer, "footer"),
+            (drawer::Part::CloseTrigger, "close-trigger"),
+            (drawer::Part::DragHandle, "drag-handle"),
         ],
     );
 }

@@ -47,13 +47,26 @@ pub enum Event {
     /// Move the drawer.
     DragMove(f64),
     /// End dragging the drawer.
-    DragEnd(f64),
+    DragEnd {
+        /// Final normalized drag offset. `0.0` is fully open; `1.0` is fully dismissed.
+        offset: f64,
+        /// Final normalized velocity. Positive moves toward dismissal; negative moves toward expansion.
+        velocity: f64,
+    },
     /// Snap to a snap point.
     SnapTo(usize),
+    /// Adapter reported the z-index allocated for this drawer.
+    SetZIndex(u32),
     /// Close the drawer on backdrop click.
     CloseOnBackdropClick,
     /// Close the drawer on escape key.
     CloseOnEscape,
+    /// Register the title element for `aria-labelledby`.
+    RegisterTitle,
+    /// Register the description element for `aria-describedby`.
+    RegisterDescription,
+    /// Re-apply context-backed props after a prop change.
+    SyncProps,
 }
 ```
 
@@ -69,21 +82,35 @@ pub struct Context {
     /// Whether the drawer is modal.
     pub modal: bool,
     /// The placement of the drawer.
-    pub side: Placement,
+    pub placement: Placement,
     /// The resolved physical placement (after Start/End → Left/Right resolution).
-    pub resolved_side: ResolvedPlacement,
+    pub resolved_placement: ResolvedPlacement,
     /// Whether the drawer is closeable on backdrop click.
     pub close_on_backdrop: bool,
     /// Whether the drawer is closeable on escape key.
     pub close_on_escape: bool,
     /// Whether the drawer should prevent scroll.
     pub prevent_scroll: bool,
+    /// Whether the drawer should restore focus when it closes.
+    pub restore_focus: bool,
+    /// Initial focus target resolved by the adapter when the drawer opens.
+    pub initial_focus: Option<FocusTarget>,
+    /// Final focus target resolved by the adapter when the drawer closes.
+    pub final_focus: Option<FocusTarget>,
     /// Component instance IDs.
     pub ids: ComponentIds,
-    /// The ID for the title element.
-    pub title_id: String,
-    /// The ID for the description element.
-    pub description_id: String,
+    /// Whether a title part was registered.
+    pub has_title: bool,
+    /// Whether a description part was registered.
+    pub has_description: bool,
+    /// Sanitized snap-point fractions in ascending order.
+    pub snap_points: Vec<f64>,
+    /// Index of the currently active snap point.
+    pub current_snap: usize,
+    /// The resolved height fraction at the current snap.
+    pub snap_height: f64,
+    /// Adapter-allocated z-index rendered as `--ars-z-index`.
+    pub z_index: Option<u32>,
     /// The current locale for message resolution.
     pub locale: Locale,
     /// Resolved messages for accessibility labels.
@@ -128,11 +155,15 @@ pub struct Props {
     /// Index into `snap_points` for the initial position. Defaults to 0.
     pub default_snap_index: usize,
     /// Callback invoked when the drawer open state changes.
-    pub on_open_change: Option<Callback<bool>>,
+    pub on_open_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
     /// When true, drawer content is not mounted until first opened. Default: false.
     pub lazy_mount: bool,
     /// When true, drawer content is removed from the DOM after closing. Default: false.
     pub unmount_on_exit: bool,
+    /// Callback invoked before Escape dismissal.
+    pub on_escape_key_down: Option<Callback<dyn Fn(DismissAttempt<()>) + Send + Sync>>,
+    /// Callback invoked before outside/backdrop dismissal.
+    pub on_interact_outside: Option<Callback<dyn Fn(DismissAttempt<()>) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -156,6 +187,8 @@ impl Default for Props {
             on_open_change: None,
             lazy_mount: false,
             unmount_on_exit: false,
+            on_escape_key_down: None,
+            on_interact_outside: None,
         }
     }
 }
@@ -184,12 +217,17 @@ pub enum Placement {
 }
 
 impl Placement {
-    /// Converts the logical placement to the physical placement based on the direction.
-    pub fn to_physical(&self, dir: ResolvedDirection) -> Self {
-        match self {
-            Self::Start => if dir.is_rtl() { Self::Right } else { Self::Left },
-            Self::End => if dir.is_rtl() { Self::Left } else { Self::Right },
-            other => *other,
+    /// Converts the logical placement to a physical placement based on direction.
+    pub fn to_physical(self, dir: ResolvedDirection) -> ResolvedPlacement {
+        match (self, dir) {
+            (Self::Start, ResolvedDirection::Ltr) => ResolvedPlacement::Left,
+            (Self::Start, ResolvedDirection::Rtl) => ResolvedPlacement::Right,
+            (Self::End, ResolvedDirection::Ltr) => ResolvedPlacement::Right,
+            (Self::End, ResolvedDirection::Rtl) => ResolvedPlacement::Left,
+            (Self::Top, _) => ResolvedPlacement::Top,
+            (Self::Bottom, _) => ResolvedPlacement::Bottom,
+            (Self::Left, _) => ResolvedPlacement::Left,
+            (Self::Right, _) => ResolvedPlacement::Right,
         }
     }
 
@@ -218,17 +256,25 @@ pub enum ResolvedPlacement {
     Right,
 }
 
-/// Resolves the logical placement to the physical placement based on the direction.
-fn resolve_placement(placement: Placement, dir: ResolvedDirection) -> ResolvedPlacement {
-    match (placement, dir) {
-        (Placement::Start, ResolvedDirection::Ltr) => ResolvedPlacement::Left,
-        (Placement::Start, ResolvedDirection::Rtl) => ResolvedPlacement::Right,
-        (Placement::End, ResolvedDirection::Ltr) => ResolvedPlacement::Right,
-        (Placement::End, ResolvedDirection::Rtl) => ResolvedPlacement::Left,
-        (Placement::Top, _) => ResolvedPlacement::Top,
-        (Placement::Bottom, _) => ResolvedPlacement::Bottom,
-        (Placement::Left, _) => ResolvedPlacement::Left,
-        (Placement::Right, _) => ResolvedPlacement::Right,
+impl ResolvedPlacement {
+    /// The data attribute token for this physical placement.
+    pub fn as_data_attr(&self) -> &'static str {
+        match self {
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+
+    /// The CSS translation for the drawer based on the resolved placement.
+    pub fn as_css_translate(&self) -> &'static str {
+        match self {
+            Self::Bottom => "translateY(100%)",
+            Self::Top => "translateY(-100%)",
+            Self::Left => "translateX(-100%)",
+            Self::Right => "translateX(100%)",
+        }
     }
 }
 ```
@@ -237,19 +283,23 @@ fn resolve_placement(placement: Placement, dir: ResolvedDirection) -> ResolvedPl
 
 Drawer follows the Dialog Machine pattern (see [Dialog §1.9](./dialog.md#19-full-machine-implementation)) for open/close transitions, scroll lock, inert attribute management, and focus management.
 
-In `init()`, the `title_id` and `description_id` fields MUST be initialized from `ComponentIds`:
+In `init()`, semantic IDs MUST be derived from `ComponentIds` and used only for ARIA wiring and hydration-stable `id` attributes:
 
 ```rust,no_check
-ctx.title_id = ids.part("title");
-ctx.description_id = ids.part("description");
+ctx.ids = ComponentIds::from_id(&props.id);
+ctx.has_title = false;
+ctx.has_description = false;
 ```
 
 The key additions are:
 
 - The `Dragging(f64)` state tracks drag position during swipe-to-dismiss gestures.
-- `DragStart`, `DragMove`, `DragEnd` events handle touch/pointer drag interactions.
+- `DragStart`, `DragMove`, `DragEnd { offset, velocity }` events handle adapter-normalized drag interactions. The adapter supplies normalized values only; the core owns snap and dismiss math.
 - `SnapTo(usize)` event handles keyboard-initiated snap transitions (see §5 Bottom Sheet).
-- Scroll lock, inert, and focus effects are identical to Dialog.
+- `SetZIndex(u32)` stores the adapter-allocated z-index and renders it as `--ars-z-index`.
+- `RegisterTitle` and `RegisterDescription` gate `aria-labelledby` / `aria-describedby`.
+- `SyncProps` replays context-backed props after prop changes.
+- Scroll lock, inert, z-index, and focus effects are represented as adapter-resolvable intents. The core never measures layout, traps focus, captures pointers, restores focus by ID lookup, or traverses the DOM.
 
 ### 1.7 Connect / API
 
@@ -336,8 +386,13 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Role, "dialog");
         attrs.set(HtmlAttr::Aria(AriaAttr::Modal), "true");
         attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), (self.ctx.messages.role_description)(&self.ctx.locale));
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), &self.ctx.title_id);
-        attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), &self.ctx.description_id);
+        if self.ctx.has_title {
+            attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("title"));
+        }
+        if self.ctx.has_description {
+            attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), self.ctx.ids.part("description"));
+        }
+        attrs.set(HtmlAttr::Data("ars-placement"), self.ctx.resolved_placement.as_data_attr());
         if matches!(self.state, State::Dragging(_)) {
             attrs.set_bool(HtmlAttr::Data("ars-dragging"), true);
         }
@@ -349,7 +404,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Title.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.title_id);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("title"));
         attrs
     }
 
@@ -358,7 +413,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Description.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.description_id);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("description"));
         attrs
     }
 
@@ -452,20 +507,20 @@ Drawer
 └── DragHandle       (optional — for snap point drag interaction)
 ```
 
-| Part         | Element    | Key Attributes                                                                               |
-| ------------ | ---------- | -------------------------------------------------------------------------------------------- |
-| Root         | `<div>`    | `data-ars-scope="drawer"`, `data-ars-state`                                                  |
-| Trigger      | `<button>` | `aria-haspopup="dialog"`, `aria-expanded`                                                    |
-| Backdrop     | `<div>`    | `aria-hidden="true"`, `inert`                                                                |
-| Positioner   | `<div>`    | `data-ars-scope="drawer"`                                                                    |
-| Content      | `<div>`    | `role="dialog"`, `aria-modal`, `aria-roledescription`, `aria-labelledby`, `aria-describedby` |
-| Title        | `<h{n}>`   | `id` for `aria-labelledby` on Content                                                        |
-| Description  | `<div>`    | `id` for `aria-describedby` on Content                                                       |
-| Header       | `<div>`    | `data-ars-scope="drawer"`, `data-ars-part="header"`                                          |
-| Body         | `<div>`    | `data-ars-scope="drawer"`, `data-ars-part="body"`                                            |
-| Footer       | `<div>`    | `data-ars-scope="drawer"`, `data-ars-part="footer"`                                          |
-| CloseTrigger | `<button>` | `aria-label` from Messages                                                                   |
-| DragHandle   | `<div>`    | `role="slider"` (when snap points configured)                                                |
+| Part         | Element    | Key Attributes                                                                                                     |
+| ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------ |
+| Root         | `<div>`    | `data-ars-scope="drawer"`, `data-ars-state`                                                                        |
+| Trigger      | `<button>` | `aria-haspopup="dialog"`, `aria-expanded`                                                                          |
+| Backdrop     | `<div>`    | `aria-hidden="true"`, `inert`                                                                                      |
+| Positioner   | `<div>`    | `data-ars-scope="drawer"`, `data-ars-placement`, `--ars-z-index` when allocated                                    |
+| Content      | `<div>`    | `role="dialog"`, `aria-modal`, `aria-roledescription`, `aria-labelledby`, `aria-describedby`, `data-ars-placement` |
+| Title        | `<h{n}>`   | `id` for `aria-labelledby` on Content                                                                              |
+| Description  | `<div>`    | `id` for `aria-describedby` on Content                                                                             |
+| Header       | `<div>`    | `data-ars-scope="drawer"`, `data-ars-part="header"`                                                                |
+| Body         | `<div>`    | `data-ars-scope="drawer"`, `data-ars-part="body"`                                                                  |
+| Footer       | `<div>`    | `data-ars-scope="drawer"`, `data-ars-part="footer"`                                                                |
+| CloseTrigger | `<button>` | `aria-label` from Messages                                                                                         |
+| DragHandle   | `<div>`    | `role="slider"` (when snap points configured)                                                                      |
 
 ## 3. Accessibility
 
@@ -476,8 +531,9 @@ Same as Dialog (see [Dialog §3.1](./dialog.md#31-aria-roles-states-and-properti
 - The `Drawer` content element MUST set `aria-roledescription` to `(self.ctx.messages.role_description)(&self.ctx.locale)` per `03-accessibility.md` §2.9 to distinguish it from a generic dialog.
 - The close trigger MUST use `(self.ctx.messages.close_label)(&self.ctx.locale)` for its `aria-label`.
 
-Adapters MUST resolve logical placements (Start/End) to physical directions
-based on document direction. Start → Left in LTR, Right in RTL.
+The agnostic core resolves logical placements (Start/End) to physical directions
+from `Props::dir`. Adapters provide the document `Direction` when constructing
+props; they do not duplicate placement resolution. Start → Left in LTR and Right in RTL.
 
 ### 3.2 Keyboard Interaction
 
@@ -523,6 +579,8 @@ pub struct Messages {
     pub role_description: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Close trigger label (default: "Close drawer")
     pub close_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Snap-point slider value text (default: percentage, e.g. "50%")
+    pub snap_value_text: MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
@@ -530,6 +588,9 @@ impl Default for Messages {
         Self {
             role_description: MessageFn::static_str("drawer"),
             close_label: MessageFn::static_str("Close drawer"),
+            snap_value_text: MessageFn::new(|value: f64, _locale: &Locale| {
+                format!("{:.0}%", value * 100.0)
+            }),
         }
     }
 }
@@ -568,33 +629,36 @@ pub snap_height: f64,
 ### 5.3 Additional Events
 
 ```rust,no_check
-/// Fired when the drawer settles at a snap point (after drag or keyboard).
-Snap(usize),  // index into snap_points
+/// Keyboard-initiated snap transition.
+SnapTo(usize),  // index into snap_points
 ```
 
-The consumer can listen to `Snap` to react to snap changes (e.g., loading more
-content when fully expanded).
+The core emits `Effect::SnapChange` when the drawer settles at a new snap point
+after drag or keyboard input. Adapters can resolve that intent by notifying any
+consumer callback.
 
 ### 5.4 Behavior
 
 #### 5.4.1 Velocity-Based Snap Targeting
 
-On `DragEnd`, the adapter computes swipe velocity from the last few `DragMove` events.
-Snap targeting uses both position and velocity:
+On `DragEnd`, the adapter supplies normalized offset and velocity from its pointer
+tracking. The agnostic core computes snap targeting from that data. Offset uses
+`0.0` for fully open and `1.0` for fully dismissed. Positive velocity moves toward
+dismissal or a smaller snap point; negative velocity moves toward expansion or a
+larger snap point.
 
 ```rust
 fn resolve_snap(
     snap_points: &[f64],
+    current_snap: usize,
     current_height: f64,
-    velocity: f64,  // positive = expanding, negative = collapsing
+    velocity: f64,  // positive = dismissing/collapsing, negative = expanding
 ) -> usize {
     // If velocity exceeds threshold, snap to the next point in the direction of motion.
     const VELOCITY_THRESHOLD: f64 = 0.5; // viewport-heights per second
     if velocity.abs() > VELOCITY_THRESHOLD {
-        let dir = if velocity > 0.0 { 1i32 } else { -1 };
-        // Find nearest snap, then step in `dir`
-        let nearest = nearest_snap_index(snap_points, current_height);
-        return (nearest as i32 + dir).clamp(0, snap_points.len() as i32 - 1) as usize;
+        let dir = if velocity < 0.0 { 1i32 } else { -1 };
+        return (current_snap as i32 + dir).clamp(0, snap_points.len() as i32 - 1) as usize;
     }
     // Otherwise, snap to the nearest point by position.
     nearest_snap_index(snap_points, current_height)

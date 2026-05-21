@@ -47,6 +47,11 @@ exclude_re = [
   'replace < with <= in KeyboardDragRegistry::unregister',
   'replace - with [+/] in KeyboardDragRegistry::unregister',
 
+  # Drawer snap targeting only evaluates the sign branch after
+  # `velocity.abs() > VELOCITY_THRESHOLD`, so `velocity < 0.0` and
+  # `velocity <= 0.0` are equivalent for every reachable value in that branch.
+  'replace < with <= in resolve_snap_index',
+
   # FocusZone's ArrowUp/ArrowDown grid arms repeat the guard inside the branch
   # with `if let Grid`, so weakening the outer guard to `true` is equivalent.
   'zone.rs:(185|195):20: replace match guard matches!\(self.options.direction, FocusZoneDirection::Grid \{ \.\. \}\) with true',
