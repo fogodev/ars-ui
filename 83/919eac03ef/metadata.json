@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "83919eac03ef",
+  "strategy": "manual-commit",
+  "branch": "t3code/61dbf109",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/overlay/drawer/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay.rs",
+    "spec/components/overlay/drawer.md",
+    "spec/dioxus-components/overlay/drawer.md",
+    "spec/leptos-components/overlay/drawer.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/83/919eac03ef/0/metadata.json",
+      "transcript": "/83/919eac03ef/0/full.jsonl",
+      "content_hash": "/83/919eac03ef/0/content_hash.txt",
+      "prompt": "/83/919eac03ef/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 234356,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 9944192,
+    "output_tokens": 14525,
+    "api_call_count": 52
+  }
+}
