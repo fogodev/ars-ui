@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bmir44uyr</task-id>
+<tool-use-id>toolu_01H4AZwJE9E1XPgyvSPhSYyt</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson--t3-worktrees-ars-ui-t3code-7b271fe9/dbc9cbbb-2dfd-4511-b5dc-954e56ea588a/tasks/bmir44uyr.output</output-file>
+<status>completed</status>
+<summary>Background command "Watch PR #663 for Codex verdict" completed (exit code 0)</summary>
+</task-notification>
