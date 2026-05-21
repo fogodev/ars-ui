@@ -32,23 +32,32 @@ in context, not in the state discriminant, because the set of items is dynamic.
 
 ### 1.2 Events
 
-| Event                         | Payload       | Description                                                                                                          |
-| ----------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `ExpandItem(Key)`             | item key      | Open a specific item.                                                                                                |
-| `CollapseItem(Key)`           | item key      | Close a specific item.                                                                                               |
-| `ToggleItem(Key)`             | item key      | Open if closed; close if open.                                                                                       |
-| `ExpandAll`                   | —             | Open every registered item (only useful when `multiple=true`).                                                       |
-| `CollapseAll`                 | —             | Close every open item.                                                                                               |
-| `Focus { item, is_keyboard }` | `Key`, `bool` | Move keyboard focus to a trigger button.                                                                             |
-| `Blur { item }`               | `Key`         | Remove focus from a trigger button.                                                                                  |
-| `RequestFocus { target_id }`  | `String`      | Request the adapter to move DOM focus to the target element. Emits a `PendingEffect`; core never calls DOM directly. |
+| Event                                | Payload        | Description                                                            |
+| ------------------------------------ | -------------- | ---------------------------------------------------------------------- |
+| `ExpandItem(Key)`                    | item key       | Open a specific item.                                                  |
+| `CollapseItem(Key)`                  | item key       | Close a specific item.                                                 |
+| `ToggleItem(Key)`                    | item key       | Open if closed; close if open.                                         |
+| `ExpandAll`                          | —              | Open every registered enabled item (only useful when `multiple=true`). |
+| `CollapseAll`                        | —              | Close every open enabled item; open disabled items remain open.        |
+| `Focus(Key)`                         | item key       | Record a trigger as focused.                                           |
+| `Blur`                               | —              | Clear trigger focus.                                                   |
+| `SetDirection(Direction)`            | direction      | Set the adapter-resolved text direction used by horizontal keyboard navigation. |
+| `FocusNext` / `FocusPrev`            | —              | Move focus intent to the next/previous enabled trigger.                |
+| `FocusFirst` / `FocusLast`           | —              | Move focus intent to the first/last enabled trigger.                   |
+| `SetItems(Vec<ItemRegistration>)`    | registrations  | Replace registered item keys and disabled flags in DOM order.          |
+| `SyncProps`                          | —              | Synchronize prop-backed context fields after render prop changes, including controlled-mode exit and single-mode value normalization. |
+| `SyncControlledValue(BTreeSet<Key>)` | open item keys | Push a new controlled open-item set into context, entering controlled mode if needed. |
+
+Focus-navigation events emit the typed `Effect::FocusFocusedItem` intent. Adapters execute
+that effect by focusing their framework-native item handle for `Context::focused_item`
+(Leptos `NodeRef`, Dioxus `MountedData` or platform equivalent). Core never calls DOM
+focus APIs and does not carry target element ids as event payloads.
 
 ### 1.3 Context
 
 ```rust
-use ars_core::Bindable;
+use ars_core::{Bindable, ComponentIds, Direction, Orientation};
 use ars_collections::Key;
-use ars_i18n::{Orientation, Direction};
 
 /// Context for the `Accordion` component.
 #[derive(Clone, Debug, PartialEq)]
@@ -57,10 +66,7 @@ pub struct Context {
     pub value: Bindable<BTreeSet<Key>>,
     /// Which item trigger currently holds focus (used for keyboard navigation).
     pub focused_item: Option<Key>,
-    /// True when the focused item received focus via keyboard.
-    pub focus_visible: bool,
     /// Allow multiple items to be open simultaneously.
-    /// When `true`, the Accordion root element sets `aria-multiselectable="true"`.
     pub multiple: bool,
     /// In single mode, allow the open item to be closed (value becomes empty).
     pub collapsible: bool,
@@ -71,6 +77,8 @@ pub struct Context {
     pub orientation: Orientation,
     /// Text direction — used for RTL-aware arrow key handling in horizontal orientation.
     pub dir: Direction,
+    /// Heading level for the wrapper element around each item's trigger button.
+    pub heading_level: u8,
     /// Registered item keys in DOM order (populated at mount by each Item part).
     pub items: Vec<Key>,
     /// Per-item disabled flags (keyed by item key).
@@ -83,9 +91,8 @@ pub struct Context {
 ### 1.4 Props
 
 ```rust
-use ars_core::Bindable;
+use ars_core::{Bindable, Direction, Orientation};
 use ars_collections::Key;
-use ars_i18n::{Orientation, Direction};
 
 /// Props for the `Accordion` component.
 #[derive(Clone, Debug, PartialEq, HasId)]
@@ -153,9 +160,8 @@ mount, and `unmount_on_exit` removes it again after closing.
 ### 1.5 Full Machine Implementation
 
 ```rust
-use ars_core::{TransitionPlan, PendingEffect, Bindable, AttrMap};
+use ars_core::{TransitionPlan, PendingEffect, Bindable, AttrMap, Direction, Orientation};
 use ars_collections::Key;
-use ars_i18n::{Orientation, Direction};
 use alloc::collections::BTreeSet;
 
 // ── States ───────────────────────────────────────────────────────────────────
@@ -186,23 +192,42 @@ pub enum Event {
     /// Collapse all items.
     CollapseAll,
     /// Focus an item.
-    Focus {
-        /// The item to focus.
-        item: Key,
-        /// Whether the focus was initiated by a keyboard.
-        is_keyboard: bool,
-    },
-    /// Blur an item.
-    Blur {
-        /// The item to blur.
-        item: Key,
-    },
-    /// Request the adapter to move DOM focus to the element with `target_id`.
-    /// The core machine MUST NOT call DOM methods directly; focus is an adapter effect.
-    RequestFocus {
-        /// The ID of the target element to focus.
-        target_id: String,
-    },
+    Focus(Key),
+    /// Blur the current item.
+    Blur,
+    /// Set the adapter-resolved text direction used for keyboard navigation.
+    SetDirection(Direction),
+    /// Focus the next enabled item.
+    FocusNext,
+    /// Focus the previous enabled item.
+    FocusPrev,
+    /// Focus the first enabled item.
+    FocusFirst,
+    /// Focus the last enabled item.
+    FocusLast,
+    /// Replace registered items in DOM order.
+    SetItems(Vec<ItemRegistration>),
+    /// Synchronize prop-backed context fields, controlled-mode exit, and
+    /// single-mode value normalization.
+    SyncProps,
+    /// Synchronize a controlled value, entering controlled mode if needed.
+    SyncControlledValue(BTreeSet<Key>),
+}
+
+/// Adapter-supplied registration data for one rendered accordion item.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ItemRegistration {
+    /// Stable item key in DOM order.
+    pub key: Key,
+    /// Whether this item is disabled.
+    pub disabled: bool,
+}
+
+/// Typed effect intents emitted by the `Accordion` machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter must move DOM focus to `Context::focused_item`.
+    FocusFocusedItem,
 }
 
 // ── Machine ──────────────────────────────────────────────────────────────────
@@ -221,6 +246,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props   = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
@@ -231,12 +257,12 @@ impl ars_core::Machine for Machine {
         (State::Idle, Context {
             value,
             focused_item: None,
-            focus_visible: false,
             multiple: props.multiple,
             collapsible: props.collapsible,
             disabled: props.disabled,
             orientation: props.orientation,
             dir: props.dir,
+            heading_level: props.heading_level,
             items: Vec::new(),
             disabled_items: alloc::collections::BTreeMap::new(),
             ids: ComponentIds::from_id(&props.id),
@@ -381,34 +407,27 @@ impl ars_core::Machine for Machine {
             }
 
             // ── Focus ─────────────────────────────────────────────────────────
-            (State::Idle, Event::Focus { item, is_keyboard }) => {
-                let item       = item.clone();
-                let is_keyboard = *is_keyboard;
+            (State::Idle, Event::Focus(item)) => {
+                let item = item.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.focused_item  = Some(item);
-                    ctx.focus_visible = is_keyboard;
+                    ctx.focused_item = Some(item);
                 }))
             }
 
             // ── Blur ──────────────────────────────────────────────────────────
-            (State::Idle, Event::Blur { .. }) => {
+            (State::Idle, Event::Blur) => {
                 Some(TransitionPlan::context_only(|ctx| {
-                    ctx.focused_item  = None;
-                    ctx.focus_visible = false;
+                    ctx.focused_item = None;
                 }))
             }
 
-            // ── RequestFocus ─────────────────────────────────────────────────
-            // Core machine does NOT call DOM methods. Instead, it emits
-            // a PendingEffect that the adapter executes to move focus.
-            (_, Event::RequestFocus { target_id }) => {
-                let target_id = target_id.clone();
-                Some(TransitionPlan::context_only(|_| {})
-                    .with_effect(PendingEffect::new("focus-element", move |_ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        platform.focus_element_by_id(&target_id);
-                        no_cleanup()
-                    })))
+            // ── Focus movement ───────────────────────────────────────────────
+            // Core stores the focused item key and emits a typed effect intent.
+            // Adapters resolve the key to their native handle and perform DOM focus.
+            (_, Event::FocusNext | Event::FocusPrev | Event::FocusFirst | Event::FocusLast) => {
+                Some(TransitionPlan::context_only(|ctx| {
+                    ctx.focused_item = next_enabled_item(ctx);
+                }).with_effect(PendingEffect::named(Effect::FocusFocusedItem)))
             }
 
             _ => None,
@@ -435,9 +454,9 @@ pub enum Part {
     Root,
     Item { item_key: Key },
     ItemHeader { item_key: Key },
-    ItemTrigger { item_key: Key, content_id: String },
+    ItemTrigger { item_key: Key },
     ItemIndicator { item_key: Key },
-    ItemContent { item_key: Key, content_id: String, trigger_id: String },
+    ItemContent { item_key: Key },
 }
 
 /// API for the `Accordion` component.
@@ -474,6 +493,7 @@ impl<'a> Api<'a> {
             Orientation::Horizontal => "horizontal",
             Orientation::Vertical   => "vertical",
         });
+        attrs.set(HtmlAttr::Dir, self.ctx.dir.as_html_attr());
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
         }
@@ -504,6 +524,16 @@ impl<'a> Api<'a> {
         self.props.heading_level.clamp(2, 6)
     }
 
+    /// Returns the generated trigger id for an item.
+    pub fn trigger_id(&self, item_key: &Key) -> String {
+        self.ctx.ids.item("trigger", &dom_safe_key_token(item_key))
+    }
+
+    /// Returns the generated content id for an item.
+    pub fn content_id(&self, item_key: &Key) -> String {
+        self.ctx.ids.item("content", &dom_safe_key_token(item_key))
+    }
+
     /// Attrs for the heading wrapper element around each item trigger.
     /// The adapter renders this as `<h{heading_level()}>` with these attributes.
     pub fn item_header_attrs(&self, item_key: &Key) -> AttrMap {
@@ -517,26 +547,27 @@ impl<'a> Api<'a> {
     /// Attrs for the trigger `<button>` inside an item.
     ///
     /// `item_key` — the item this trigger belongs to.
-    /// `content_id` — the ID of the associated content region (for `aria-controls`).
-    pub fn item_trigger_attrs(&self, item_key: &Key, content_id: &str) -> AttrMap {
+    /// `focus_visible` is the keyboard-modality bit provided by the adapter.
+    pub fn item_trigger_attrs(&self, item_key: &Key, focus_visible: bool) -> AttrMap {
         let mut attrs = AttrMap::new();
         let is_open     = self.is_item_open(item_key);
         let is_disabled = self.is_item_disabled(item_key);
         let is_focused  = self.ctx.focused_item.as_ref() == Some(item_key);
 
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemTrigger { item_key: Key::default(), content_id: String::new() }.data_attrs();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemTrigger { item_key: Key::default() }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.trigger_id(item_key));
         attrs.set(HtmlAttr::Data("ars-state"), if is_open { "open" } else { "closed" });
         attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if is_open { "true" } else { "false" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), content_id);
+        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.content_id(item_key));
         if is_disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
         }
-        if is_focused && self.ctx.focus_visible {
+        if is_focused && focus_visible {
             attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
         }
         attrs
@@ -550,13 +581,13 @@ impl<'a> Api<'a> {
     }
 
     /// Handle focus event on the item trigger.
-    pub fn on_item_trigger_focus(&self, item_key: &Key, is_keyboard: bool) {
-        (self.send)(Event::Focus { item: item_key.clone(), is_keyboard });
+    pub fn on_item_trigger_focus(&self, item_key: &Key) {
+        (self.send)(Event::Focus(item_key.clone()));
     }
 
     /// Handle blur event on the item trigger.
-    pub fn on_item_trigger_blur(&self, item_key: &Key) {
-        (self.send)(Event::Blur { item: item_key.clone() });
+    pub fn on_item_trigger_blur(&self) {
+        (self.send)(Event::Blur);
     }
 
     // RTL-aware arrow key resolution for horizontal orientation.
@@ -582,9 +613,9 @@ impl<'a> Api<'a> {
         // items where disabled == true. If all items are disabled, navigation
         // is a no-op.
         //
-        // NOTE: Focus is requested via Event::RequestFocus, NOT by calling DOM
-        // methods directly. The adapter handles the actual DOM focus in the
-        // resulting PendingEffect.
+        // NOTE: Focus is requested through typed focus events, NOT by carrying
+        // target element ids through core. The adapter handles the actual DOM
+        // focus in response to `Effect::FocusFocusedItem`.
         let enabled = self.enabled_items();
         if enabled.is_empty() { return; }
         let idx = enabled.iter().position(|x| **x == *item_key).unwrap_or(0);
@@ -596,15 +627,13 @@ impl<'a> Api<'a> {
                 let resolved = Self::resolve_horizontal_key(data.key, is_rtl);
                 if resolved == Some("Prev") {
                     let prev_idx = if idx == 0 { len - 1 } else { idx - 1 };
-                    if let Some(prev) = enabled.get(prev_idx) {
-                        (self.send)(Event::RequestFocus { target_id: prev.to_string() });
-                        (self.send)(Event::Focus { item: (*prev).clone(), is_keyboard: true });
+                    if enabled.get(prev_idx).is_some() {
+                        (self.send)(Event::FocusPrev);
                     }
                     return;
                 } else if resolved == Some("Next") {
-                    if let Some(next) = enabled.get((idx + 1) % len) {
-                        (self.send)(Event::RequestFocus { target_id: next.to_string() });
-                        (self.send)(Event::Focus { item: (*next).clone(), is_keyboard: true });
+                    if enabled.get((idx + 1) % len).is_some() {
+                        (self.send)(Event::FocusNext);
                     }
                     return;
                 }
@@ -612,25 +641,21 @@ impl<'a> Api<'a> {
             }
         };
         if data.key == next_key {
-            if let Some(next) = enabled.get((idx + 1) % len) {
-                (self.send)(Event::RequestFocus { target_id: next.to_string() });
-                (self.send)(Event::Focus { item: (*next).clone(), is_keyboard: true });
+            if enabled.get((idx + 1) % len).is_some() {
+                (self.send)(Event::FocusNext);
             }
         } else if data.key == prev_key {
             let prev_idx = if idx == 0 { len - 1 } else { idx - 1 };
-            if let Some(prev) = enabled.get(prev_idx) {
-                (self.send)(Event::RequestFocus { target_id: prev.to_string() });
-                (self.send)(Event::Focus { item: (*prev).clone(), is_keyboard: true });
+            if enabled.get(prev_idx).is_some() {
+                (self.send)(Event::FocusPrev);
             }
         } else if data.key == KeyboardKey::Home {
-            if let Some(first) = enabled.first() {
-                (self.send)(Event::RequestFocus { target_id: first.to_string() });
-                (self.send)(Event::Focus { item: (*first).clone(), is_keyboard: true });
+            if enabled.first().is_some() {
+                (self.send)(Event::FocusFirst);
             }
         } else if data.key == KeyboardKey::End {
-            if let Some(last) = enabled.last() {
-                (self.send)(Event::RequestFocus { target_id: last.to_string() });
-                (self.send)(Event::Focus { item: (*last).clone(), is_keyboard: true });
+            if enabled.last().is_some() {
+                (self.send)(Event::FocusLast);
             }
         }
     }
@@ -650,18 +675,17 @@ impl<'a> Api<'a> {
     /// Attrs for the collapsible content region.
     ///
     /// `item_key` — the item this content belongs to.
-    /// `content_id` — the element ID (must match `aria-controls` in trigger).
-    /// `trigger_id` — the element ID of the associated trigger (for `aria-labelledby`).
-    pub fn item_content_attrs(&self, item_key: &Key, content_id: &str, trigger_id: &str) -> AttrMap {
+    /// IDs are derived from the component base id plus a DOM-safe item-key token.
+    pub fn item_content_attrs(&self, item_key: &Key) -> AttrMap {
         let mut attrs = AttrMap::new();
         let is_open = self.is_item_open(item_key);
-        attrs.set(HtmlAttr::Id, content_id);
+        attrs.set(HtmlAttr::Id, self.content_id(item_key));
         attrs.set(HtmlAttr::Role, "region");
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemContent { item_key: Key::default(), content_id: String::new(), trigger_id: String::new() }.data_attrs();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemContent { item_key: Key::default() }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Data("ars-state"), if is_open { "open" } else { "closed" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), trigger_id);
+        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.trigger_id(item_key));
         if !is_open {
             // `hidden="until-found"` enables browser find-in-page to reveal
             // collapsed accordion content. However, it is only supported in
@@ -691,9 +715,9 @@ impl ConnectApi for Api<'_> {
             Part::Root => self.root_attrs(),
             Part::Item { item_key } => self.item_attrs(item_key),
             Part::ItemHeader { item_key } => self.item_header_attrs(item_key),
-            Part::ItemTrigger { item_key, content_id } => self.item_trigger_attrs(item_key, content_id),
+            Part::ItemTrigger { item_key } => self.item_trigger_attrs(item_key, false),
             Part::ItemIndicator { item_key } => self.item_indicator_attrs(item_key),
-            Part::ItemContent { item_key, content_id, trigger_id } => self.item_content_attrs(item_key, content_id, trigger_id),
+            Part::ItemContent { item_key } => self.item_content_attrs(item_key),
         }
     }
 }
@@ -705,7 +729,8 @@ impl ConnectApi for Api<'_> {
 Accordion
 ├── Root                   data-ars-scope="accordion" data-ars-part="root"
 └── Item (×N)              data-ars-scope="accordion" data-ars-part="item"
-    ├── ItemTrigger        data-ars-scope="accordion" data-ars-part="item-trigger"
+    ├── ItemHeader         data-ars-scope="accordion" data-ars-part="item-header"
+    │   └── ItemTrigger    data-ars-scope="accordion" data-ars-part="item-trigger"
     │   └── ItemIndicator  data-ars-scope="accordion" data-ars-part="item-indicator"
     └── ItemContent        data-ars-scope="accordion" data-ars-part="item-content"
 ```
@@ -714,6 +739,7 @@ Accordion
 | --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `Root`          | `<div>`    | `data-ars-scope="accordion"`, `data-ars-part="root"`, `data-ars-orientation`                                             |
 | `Item`          | `<div>`    | `data-ars-scope="accordion"`, `data-ars-part="item"`, `data-ars-state="open\|closed"`, `data-ars-disabled`               |
+| `ItemHeader`    | `<h2-h6>`  | `data-ars-scope="accordion"`, `data-ars-part="item-header"`                                                              |
 | `ItemTrigger`   | `<button>` | `data-ars-scope="accordion"`, `data-ars-part="item-trigger"`, `aria-expanded`, `aria-controls`, `data-ars-focus-visible` |
 | `ItemIndicator` | `<span>`   | `data-ars-scope="accordion"`, `data-ars-part="item-indicator"`, `aria-hidden="true"`                                     |
 | `ItemContent`   | `<div>`    | `data-ars-scope="accordion"`, `data-ars-part="item-content"`, `role="region"`, `aria-labelledby`                         |
@@ -725,7 +751,7 @@ Accordion
 | Part          | Role              | Properties                                                                                   |
 | ------------- | ----------------- | -------------------------------------------------------------------------------------------- |
 | `Root`        | (none / `<div>`)  | `aria-orientation` when horizontal layout matters                                            |
-| `ItemTrigger` | `button` (native) | `aria-expanded="true\|false"`, `aria-controls="{content-id}"`, `aria-disabled` when disabled |
+| `ItemTrigger` | `button` (native) | `aria-expanded="true\|false"`, `aria-controls="{content-id}"`, `aria-disabled` when disabled or when the open trigger cannot collapse in single non-collapsible mode |
 | `ItemContent` | `region`          | `aria-labelledby="{trigger-id}"`, `hidden` when closed                                       |
 
 ### 3.2 Keyboard Interaction
@@ -792,7 +818,7 @@ let disclosure_props = accordion::Props {
 
 - **Single item only**: The consumer registers exactly one item. The `Accordion` machine handles this naturally — no special casing is needed.
 - **`aria-expanded`**: The single trigger button carries `aria-expanded="true|false"`, which the `Accordion` trigger already emits.
-- **No `aria-multiselectable`**: Since `multiple` is false, the root does not set `aria-multiselectable`.
+- **No `aria-multiselectable`**: Accordion root never sets `aria-multiselectable`; each trigger exposes its own expanded state through `aria-expanded`.
 - **Programmatic control**: Use `Event::ExpandItem(id)` / `Event::CollapseItem(id)` to programmatically open/close.
 
 A **DisclosureGroup** is simply an `Accordion` with `multiple: false` and `collapsible: true` — only one item can be open at a time, and the open item can be closed. This maps directly to React Aria's `useDisclosureGroup`.

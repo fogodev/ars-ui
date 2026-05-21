@@ -1,0 +1,6 @@
+---
+source: crates/ars-components/src/navigation/accordion/mod.rs
+expression: "snapshot_attrs(&service(props()).connect(&|_|\n{}).item_header_attrs(&key(\"a\")))"
+---
+data-ars-part=item-header
+data-ars-scope=accordion
