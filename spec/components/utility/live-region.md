@@ -171,7 +171,8 @@ Announcing + Rendered
   → Idle if queue is empty; otherwise Announcing
   action: move pending_message into messages[], clear pending_message;
           if queue has messages, dequeue the next highest-priority item,
-          clear messages[], set pending_message, set current_priority,
+          keep the rendered message available until the adapter performs
+          the next clear-then-insert cycle, set pending_message, set current_priority,
           and emit Effect::AnnounceDelay
 
 Announcing + Announce(msg, priority)
@@ -283,7 +284,6 @@ impl ars_core::Machine for Machine {
                         ctx.messages.push(msg);
                     }
                     if let Some(next) = dequeue_next(&mut ctx.queue) {
-                        ctx.messages.clear();
                         ctx.pending_message = Some(next.message);
                         ctx.current_priority = next.priority;
                     } else {

@@ -367,12 +367,13 @@ impl Api<'_> {
                 HtmlAttr::Aria(AriaAttr::Atomic),
                 if self.props.atomic { "true" } else { "false" },
             )
-            .set(
-                HtmlAttr::Aria(AriaAttr::Relevant),
-                self.props.relevant.to_string(),
-            )
             .set(HtmlAttr::Data("ars-state"), self.data_state())
             .set(HtmlAttr::Class, "ars-visually-hidden");
+
+        let relevant = self.props.relevant.to_string();
+        if !relevant.is_empty() {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Relevant), relevant);
+        }
 
         if !self.props.id.is_empty() {
             attrs.set(HtmlAttr::Id, self.props.id.clone());
@@ -443,8 +444,6 @@ fn rendered_plan(has_next: bool) -> TransitionPlan<Machine> {
     })
     .apply(|ctx: &mut Context| {
         if let Some(next) = dequeue_next(&mut ctx.queue) {
-            ctx.messages.clear();
-
             ctx.pending_message = Some(next.message);
             ctx.current_priority = next.priority;
         } else {
@@ -633,7 +632,7 @@ mod tests {
 
         assert!(result.state_changed);
         assert_eq!(service.state(), &State::Announcing);
-        assert!(service.context().messages.is_empty());
+        assert_eq!(service.context().messages, vec![String::from("First")]);
         assert_eq!(service.context().pending_message.as_deref(), Some("Second"));
         assert!(service.context().queue.is_empty());
         assert_eq!(result.pending_effects.len(), 1);
@@ -1000,6 +999,19 @@ mod tests {
         );
         assert_eq!(attrs.get(&HtmlAttr::Data("ars-state")), Some("idle"));
         assert_eq!(attrs.get(&HtmlAttr::Class), Some("ars-visually-hidden"));
+    }
+
+    #[test]
+    fn root_attrs_omit_empty_aria_relevant() {
+        let service = service(Props::new().id("announcer").relevant(AriaRelevant {
+            additions: false,
+            removals: false,
+            text: false,
+        }));
+
+        let attrs = service.connect(&|_| {}).root_attrs();
+
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Relevant)));
     }
 
     #[test]
