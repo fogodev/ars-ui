@@ -1064,7 +1064,17 @@ impl Api<'_> {
         now_ms: Option<u64>,
     ) {
         match data.key {
+            KeyboardKey::ArrowDown if self.ctx.open => (self.send)(Event::HighlightNext),
+
+            KeyboardKey::ArrowUp if self.ctx.open => (self.send)(Event::HighlightPrev),
+
             KeyboardKey::ArrowDown | KeyboardKey::ArrowUp => (self.send)(Event::Open),
+
+            KeyboardKey::Enter | KeyboardKey::Space if self.ctx.open => {
+                if let Some(key) = &self.ctx.highlighted_key {
+                    (self.send)(Event::SelectItem(key.clone()));
+                }
+            }
 
             KeyboardKey::Enter | KeyboardKey::Space => (self.send)(Event::Toggle),
 
@@ -1172,6 +1182,13 @@ impl Api<'_> {
             self.ctx.ids.part("label"),
         );
 
+        if let Some(key) = valid_highlight(self.ctx) {
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::ActiveDescendant),
+                self.ctx.ids.item("item", key),
+            );
+        }
+
         attrs
     }
 
@@ -1267,10 +1284,6 @@ impl Api<'_> {
 
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
-        }
-
-        if self.ctx.required {
-            attrs.set_bool(HtmlAttr::Required, true);
         }
 
         if let Some(value) = &self.props.autocomplete {
@@ -1553,6 +1566,7 @@ fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
         ctx.multiple = effective_multiple;
         ctx.name = props.name.clone();
         ctx.loop_focus = props.loop_focus;
+        ctx.ids = ComponentIds::from_id(&props.id);
 
         ctx.selection_state.mode = effective_mode;
         ctx.selection_state.behavior = props.selection_behavior;
@@ -1863,6 +1877,13 @@ mod tests {
 
         drop(service.send(Event::Open));
         drop(service.send(Event::HighlightItem(Some(key("bravo")))));
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .content_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ActiveDescendant)),
+            Some("sel-item-bravo")
+        );
         drop(service.send(Event::SelectItem(key("bravo"))));
 
         let api = service.connect(&|_| {});
@@ -2016,13 +2037,22 @@ mod tests {
 
             let api = open_service.connect(&send);
 
+            api.on_trigger_keydown(&keyboard(KeyboardKey::ArrowDown, None), false, false);
+            api.on_trigger_keydown(&keyboard(KeyboardKey::ArrowUp, None), false, false);
+            api.on_trigger_keydown(&keyboard(KeyboardKey::Enter, None), false, false);
             api.on_trigger_keydown(&keyboard(KeyboardKey::Escape, None), false, false);
             api.on_content_keydown(&keyboard(KeyboardKey::Enter, None), false, false);
         }
 
         assert_eq!(
             open_capture.into_inner(),
-            vec![Event::Close, Event::SelectItem(key("alpha"))]
+            vec![
+                Event::HighlightNext,
+                Event::HighlightPrev,
+                Event::SelectItem(key("alpha")),
+                Event::Close,
+                Event::SelectItem(key("alpha")),
+            ]
         );
     }
 
@@ -2310,7 +2340,7 @@ mod tests {
         drop(
             select.set_props(
                 Props::new()
-                    .id("sel")
+                    .id("sel-next")
                     .disabled(true)
                     .readonly(true)
                     .required(true)
@@ -2344,12 +2374,22 @@ mod tests {
             selection::Set::Single(key("alpha"))
         );
 
+        assert_eq!(select.context().ids.id(), "sel-next");
+
         let attrs = select.connect(&|_| {}).trigger_attrs();
 
+        assert_eq!(attrs.get(&HtmlAttr::Id), Some("sel-next-trigger"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ReadOnly)), Some("true"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Required)), Some("true"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("true"));
+        assert_eq!(
+            select
+                .connect(&|_| {})
+                .hidden_input_attrs()
+                .get(&HtmlAttr::Required),
+            None
+        );
     }
 
     #[test]

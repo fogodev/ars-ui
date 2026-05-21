@@ -64,6 +64,9 @@ pub enum Event {
     /// Replace the highlighted item.
     HighlightItem(Option<Key>),
 
+    /// Extend selection from the current anchor to the provided item key.
+    ExtendSelection(Key),
+
     /// Highlight the next enabled item.
     HighlightNext,
 
@@ -540,6 +543,7 @@ impl ars_core::Machine for Machine {
                     | Event::SelectAll
                     | Event::DeselectAll
                     | Event::HighlightItem(_)
+                    | Event::ExtendSelection(_)
                     | Event::HighlightNext
                     | Event::HighlightPrev
                     | Event::HighlightFirst
@@ -660,6 +664,20 @@ impl ars_core::Machine for Machine {
                 Some(apply_selection_plan(next))
             }
 
+            (_, Event::ExtendSelection(key)) => {
+                let next = range_selection_state(ctx, key.clone());
+
+                if props.disallow_empty_selection && selection_is_empty(&next.selected_keys) {
+                    return None;
+                }
+
+                let highlighted_key = key.clone();
+
+                Some(apply_selection_plan(next).apply(move |ctx: &mut Context| {
+                    ctx.highlighted_key = Some(highlighted_key);
+                }))
+            }
+
             (_, Event::SelectAll) => {
                 if ctx.selection_state.mode != selection::Mode::Multiple {
                     return None;
@@ -726,6 +744,10 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::ItemActivated(key)) => {
+                if !ctx.items.contains_key(key) || ctx.selection_state.is_disabled(key) {
+                    return None;
+                }
+
                 let key = key.clone();
                 let on_action = props.on_action.clone();
                 Some(TransitionPlan::context_only(move |_| {
@@ -1169,7 +1191,7 @@ impl Api<'_> {
             };
 
             if let Some(next) = next {
-                (self.send)(Event::SelectItem(next.clone()));
+                (self.send)(Event::ExtendSelection(next.clone()));
                 (self.send)(Event::HighlightItem(Some(next)));
             }
         }
@@ -1341,6 +1363,7 @@ fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
         ctx.dir = props.dir;
         ctx.loop_focus = props.loop_focus;
         ctx.loading = props.loading;
+        ctx.ids = ComponentIds::from_id(&props.id);
 
         ctx.selection_state.mode = props.selection_mode;
         ctx.selection_state.behavior = props.selection_behavior;
@@ -1355,6 +1378,48 @@ fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
         ctx.selection_state = normalize_selection_state(ctx.selection_state.clone());
         invalidate_collection_references(ctx);
     })
+}
+
+fn range_selection_state(ctx: &Context, target: Key) -> selection::State {
+    if ctx.selection_state.mode != selection::Mode::Multiple {
+        return ctx.selection_state.select(target);
+    }
+
+    let anchor = match &ctx.selection_state.anchor_key {
+        Some(anchor) if ctx.items.contains_key(anchor) => anchor.clone(),
+        _ => return ctx.selection_state.select(target),
+    };
+
+    let mut in_range = false;
+    let mut keys = BTreeSet::new();
+
+    for node in ctx.items.nodes() {
+        if !node.is_focusable() {
+            continue;
+        }
+
+        let boundary = node.key == anchor || node.key == target;
+
+        if boundary {
+            if !ctx.selection_state.is_disabled(&node.key) {
+                keys.insert(node.key.clone());
+            }
+
+            if anchor == target {
+                break;
+            }
+
+            in_range = !in_range;
+        } else if in_range && !ctx.selection_state.is_disabled(&node.key) {
+            keys.insert(node.key.clone());
+        }
+    }
+
+    selection::State {
+        selected_keys: set_from_keys(keys),
+        focused_key: Some(target),
+        ..ctx.selection_state.clone()
+    }
 }
 
 fn set_from_keys(keys: BTreeSet<Key>) -> selection::Set {
@@ -2089,7 +2154,7 @@ mod tests {
                 Event::HighlightItem(None),
                 Event::HighlightPrev,
                 Event::HighlightNext,
-                Event::SelectItem(key("bravo")),
+                Event::ExtendSelection(key("bravo")),
                 Event::HighlightItem(Some(key("bravo"))),
                 Event::HighlightFirst,
                 Event::HighlightLast,
@@ -2109,7 +2174,7 @@ mod tests {
         drop(
             listbox.set_props(
                 Props::new()
-                    .id("lb")
+                    .id("lb-next")
                     .disabled(true)
                     .required(true)
                     .invalid(true)
@@ -2148,8 +2213,11 @@ mod tests {
             selection::Set::Single(key("alpha"))
         );
 
+        assert_eq!(listbox.context().ids.id(), "lb-next");
+
         let attrs = listbox.connect(&|_| {}).content_attrs();
 
+        assert_eq!(attrs.get(&HtmlAttr::Id), Some("lb-next-content"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Required)), Some("true"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("true"));
@@ -2285,6 +2353,58 @@ mod tests {
             &[key("bravo")]
         );
         assert!(service.context().selection.get().is_empty());
+    }
+
+    #[test]
+    fn item_activated_ignores_disabled_or_stale_targets() {
+        let activated = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&activated);
+
+        let mut service = service(
+            Props::new()
+                .id("lb")
+                .disabled_keys(BTreeSet::from([key("bravo")]))
+                .on_action(Callback::new(move |key: Key| {
+                    captured
+                        .lock()
+                        .expect("activation capture poisoned")
+                        .push(key);
+                })),
+        );
+
+        drop(service.send(Event::ItemActivated(key("bravo"))));
+        drop(service.send(Event::ItemActivated(key("stale"))));
+
+        assert!(
+            activated
+                .lock()
+                .expect("activation capture poisoned")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn extend_selection_recomputes_range_from_anchor() {
+        let mut listbox = service(
+            Props::new()
+                .id("lb")
+                .selection_mode(selection::Mode::Multiple),
+        );
+
+        drop(listbox.send(Event::SelectItem(key("alpha"))));
+        drop(listbox.send(Event::ExtendSelection(key("charlie"))));
+
+        assert_eq!(
+            *listbox.context().selection.get(),
+            selection::Set::Multiple(BTreeSet::from([key("alpha"), key("bravo"), key("charlie")]))
+        );
+
+        drop(listbox.send(Event::ExtendSelection(key("bravo"))));
+
+        assert_eq!(
+            *listbox.context().selection.get(),
+            selection::Set::Multiple(BTreeSet::from([key("alpha"), key("bravo")]))
+        );
     }
 
     #[test]

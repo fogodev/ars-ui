@@ -53,12 +53,6 @@ AttrMap {
             ),
         ),
         (
-            Required,
-            Bool(
-                true,
-            ),
-        ),
-        (
             Type,
             String(
                 "hidden",
