@@ -1,0 +1,36 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "132c18a4c847",
+  "strategy": "manual-commit",
+  "branch": "t3code/65277991",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".cargo/mutants.toml",
+    ".github/workflows/nightly.yml",
+    "crates/ars-components/src/input/pin_input/mod.rs",
+    "crates/ars-components/src/navigation/pagination/mod.rs",
+    "crates/ars-components/src/navigation/steps/mod.rs",
+    "crates/ars-components/src/overlay/floating_panel/mod.rs",
+    "crates/ars-components/src/overlay/hover_card/mod.rs",
+    "crates/ars-components/src/utility/download_trigger/mod.rs",
+    "crates/ars-components/src/utility/highlight/mod.rs",
+    "crates/ars-components/src/utility/swap/mod.rs",
+    "crates/ars-components/src/utility/toggle/mod.rs",
+    "spec/components/navigation/pagination.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/13/2c18a4c847/0/metadata.json",
+      "transcript": "/13/2c18a4c847/0/full.jsonl",
+      "content_hash": "/13/2c18a4c847/0/content_hash.txt",
+      "prompt": "/13/2c18a4c847/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1004547,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 59917312,
+    "output_tokens": 77805,
+    "api_call_count": 399
+  }
+}
