@@ -46,9 +46,19 @@
 
 // -- User-facing traits --
 pub use ars_collections::{Key, TabKey};
-pub use ars_core::{I18nRegistries, MessageFn, MessagesRegistry, SafeUrl, UnsafeUrlError};
+// `ColorMode` is a configuration enum that end users pass to `ArsProvider`
+// via the `color_mode` prop; it belongs with the configuration types.
+pub use ars_core::{
+    ColorMode, I18nRegistries, MessageFn, MessagesRegistry, SafeUrl, UnsafeUrlError,
+};
 pub use ars_i18n::{Direction, IntlBackend, Locale, Orientation, ResolvedDirection, Translate};
 
+// -- Root provider --
+// `ArsProvider` is the single root provider every ars-ui application wraps its
+// tree with. It publishes locale, direction, color mode, disabled/read-only,
+// portal/root nodes, platform effects, and style strategy via context. See
+// `spec/leptos-components/utility/ars-provider.md`.
+pub use crate::ArsProvider;
 // -- Component modules --
 //
 // Consumers reach component types via the module qualifier

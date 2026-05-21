@@ -278,6 +278,24 @@ pub fn use_locale() -> Signal<Locale> {
     )
 }
 
+/// Returns the resolved reading direction signal from provider context.
+///
+/// Falls back to [`Direction::Ltr`] when no [`ArsProvider`] is in scope.
+/// Defined by `spec/leptos-components/utility/ars-provider.md` §22 — the
+/// adapter-required parallel to [`use_locale`] for direction-dependent
+/// components.
+#[must_use]
+pub fn use_direction() -> Signal<Direction> {
+    current_ars_context().map_or_else(
+        || {
+            warn_missing_provider("use_direction");
+
+            Signal::stored(Direction::Ltr)
+        },
+        |ctx| Signal::derive(move || ctx.direction.get()),
+    )
+}
+
 /// Resolves the current ICU provider from provider context.
 #[must_use]
 pub fn use_intl_backend() -> Arc<dyn IntlBackend> {
@@ -512,8 +530,8 @@ mod tests {
     use leptos::prelude::{Get, GetUntracked, Memo, Owner, RwSignal, Set, Signal};
 
     use super::{
-        ArsContext, current_ars_context, resolve_locale, t, translated_text, use_intl_backend,
-        use_locale, use_messages, use_modality_context, use_number_formatter,
+        ArsContext, current_ars_context, resolve_locale, t, translated_text, use_direction,
+        use_intl_backend, use_locale, use_messages, use_modality_context, use_number_formatter,
         use_resolved_number_formatter,
     };
 
@@ -694,6 +712,29 @@ mod tests {
         let owner = Owner::new();
         owner.with(|| {
             assert_eq!(use_locale().get_untracked().to_bcp47(), "en-US");
+        });
+    }
+
+    #[test]
+    fn use_direction_falls_back_to_ltr_without_provider() {
+        let owner = Owner::new();
+        owner.with(|| {
+            assert_eq!(use_direction().get_untracked(), Direction::Ltr);
+        });
+    }
+
+    #[test]
+    fn use_direction_tracks_provider_direction_when_explicitly_set() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let (context, _) = reactive_test_context(
+                Locale::parse("en-US").expect("locale should parse"),
+                Arc::new(StubIntlBackend),
+            );
+
+            crate::provide_ars_context(context);
+
+            assert_eq!(use_direction().get_untracked(), Direction::Ltr);
         });
     }
 

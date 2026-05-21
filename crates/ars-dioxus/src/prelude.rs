@@ -46,7 +46,11 @@
 
 // -- User-facing traits --
 pub use ars_collections::{Key, TabKey};
-pub use ars_core::{I18nRegistries, MessageFn, MessagesRegistry, SafeUrl, UnsafeUrlError};
+// `ColorMode` is a configuration enum that end users pass to `ArsProvider`
+// via the `color_mode` prop; it belongs with the configuration types.
+pub use ars_core::{
+    ColorMode, I18nRegistries, MessageFn, MessagesRegistry, SafeUrl, UnsafeUrlError,
+};
 pub use ars_i18n::{Direction, IntlBackend, Locale, Orientation, ResolvedDirection, Translate};
 
 // -- Component modules --
@@ -71,5 +75,13 @@ pub use crate::utility::{
     self, button, client_only, dismissable, error_boundary, separator, visually_hidden,
     z_index_allocator,
 };
+// -- Root provider --
+// `ArsProvider` is the single root provider every ars-ui application wraps its
+// tree with. It publishes locale, direction, color mode, disabled/read-only,
+// portal/root nodes, platform effects, and style strategy via context. The
+// explicit `ArsProviderProps` struct is re-exported so end users can build
+// props value at call sites without importing it separately. See
+// `spec/dioxus-components/utility/ars-provider.md`.
+pub use crate::{ArsProvider, ArsProviderProps};
 // -- User-facing helpers --
 pub use crate::{Translatable, t, use_number_formatter};

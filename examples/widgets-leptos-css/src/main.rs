@@ -1,4 +1,4 @@
-use ars_leptos::{ArsProvider, prelude::t};
+use ars_leptos::prelude::{ArsProvider, t};
 use leptos::{mount::mount_to_body, prelude::*};
 
 mod categories;
@@ -6,7 +6,11 @@ mod locale;
 mod messages;
 mod text;
 
-use crate::{categories::CategoryTabs, locale::{LocaleSwitcher, parse_locale}, text::WidgetsText};
+use crate::{
+    categories::CategoryTabs,
+    locale::{LocaleSwitcher, parse_locale},
+    text::WidgetsText,
+};
 
 fn main() {
     mount_to_body(App);

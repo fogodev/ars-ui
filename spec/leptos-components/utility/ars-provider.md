@@ -264,6 +264,7 @@ Intentional deviations: none.
 - nonce collector publication for `ArsNonceStyle`
 - default fallback values when props are absent
 - `use_locale()` fallback without provider
+- `use_direction()` fallback without provider
 - `dir` attribute reactivity on locale change
 - SSR rendering
 - `use_style_strategy()` returns `StyleStrategy::Inline` by default
@@ -275,6 +276,7 @@ Intentional deviations: none.
 | ---------------------- | --------------------- | --------------------------------------------------------------------- |
 | provider publication   | context registration  | Assert descendants observe the published ArsContext.                  |
 | locale fallback        | context registration  | Assert `use_locale()` returns en-US without a provider.               |
+| direction fallback     | context registration  | Assert `use_direction()` returns `Ltr` without a provider.            |
 | dir attribute          | DOM assertion         | Assert `dir` attribute matches current direction.                     |
 | style strategy default | context registration  | Assert `use_style_strategy()` returns `Inline` without explicit prop. |
 | nonce collector        | context registration  | Assert `append_nonce_css()` collects rules from provider context.     |
@@ -286,6 +288,7 @@ Intentional deviations: none.
 - [ ] `<div dir>` wrapper renders and reactively updates.
 - [ ] Default fallback values match documented defaults (en-US, Ltr, System, false, false, Inline).
 - [ ] `use_locale()` works with and without provider.
+- [ ] `use_direction()` works with and without provider.
 - [ ] `use_style_strategy()` returns `StyleStrategy::Inline` by default.
 - [ ] SSR renders the wrapper with correct `dir`.
 - [ ] Context-registration test oracles are covered.

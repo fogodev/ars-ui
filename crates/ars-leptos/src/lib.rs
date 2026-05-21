@@ -69,7 +69,7 @@ pub use nonce::{
     use_nonce_css_context_provider, use_nonce_css_from_attrs, use_nonce_css_rule,
 };
 pub use provider::{
-    ArsContext, ArsProvider, Translatable, provide_ars_context, resolve_locale, t,
+    ArsContext, ArsProvider, Translatable, provide_ars_context, resolve_locale, t, use_direction,
     use_intl_backend, use_locale, use_messages, use_modality_context, use_number_formatter,
     use_platform_effects, warn_missing_provider,
 };

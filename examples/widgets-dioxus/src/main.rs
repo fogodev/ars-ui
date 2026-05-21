@@ -3,10 +3,14 @@ mod locale;
 mod messages;
 mod text;
 
-use ars_dioxus::{ArsProvider, prelude::t};
+use ars_dioxus::prelude::{ArsProvider, t};
 use dioxus::prelude::*;
 
-use crate::{categories::CategoryTabs, locale::{LocaleSwitcher, parse_locale}, text::WidgetsText};
+use crate::{
+    categories::CategoryTabs,
+    locale::{LocaleSwitcher, parse_locale},
+    text::WidgetsText,
+};
 
 fn main() {
     dioxus::launch(App);
