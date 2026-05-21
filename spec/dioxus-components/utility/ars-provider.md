@@ -198,9 +198,11 @@ ArsProvider is context-driven rather than event-driven.
 
 ## 22. Shared Adapter Helper Notes
 
-| Helper concept      | Required? | Responsibility                                  | Reused by                       | Notes                                   |
-| ------------------- | --------- | ----------------------------------------------- | ------------------------------- | --------------------------------------- |
-| `use_locale()` hook | required  | Read locale from ArsContext with en-US fallback | all locale-dependent components | Defined in `09-adapter-dioxus.md` §16.1 |
+| Helper concept              | Required? | Responsibility                                   | Reused by                          | Notes                                   |
+| --------------------------- | --------- | ------------------------------------------------ | ---------------------------------- | --------------------------------------- |
+| `use_locale()` hook         | required  | Read locale from ArsContext with en-US fallback  | all locale-dependent components    | Defined in `09-adapter-dioxus.md` §16.1 |
+| `use_direction()` hook      | required  | Read direction from ArsContext with Ltr fallback | all direction-dependent components | Parallel to `use_locale()`              |
+| `use_style_strategy()` hook | required  | Read style strategy from ArsContext              | all components using `attrs.rs`    | Returns `StyleStrategy::Inline` default |
 
 ## 23. Framework-Specific Behavior
 
@@ -322,6 +324,7 @@ Intentional deviations:
 - nonce collector publication for `ArsNonceStyle`
 - default fallback values when props are absent
 - `use_locale()` fallback without provider
+- `use_direction()` fallback without provider
 - `dir` attribute reactivity on locale change
 - SSR rendering on all Dioxus targets (web, desktop, mobile)
 - `style_strategy` defaults to `StyleStrategy::Inline` when absent
@@ -333,6 +336,7 @@ Intentional deviations:
 | ----------------------- | --------------------- | ------------------------------------------------------------------------------------ |
 | provider publication    | context registration  | Assert descendants observe the published ArsContext.                                 |
 | locale fallback         | context registration  | Assert `use_locale()` returns en-US without a provider.                              |
+| direction fallback      | context registration  | Assert `use_direction()` returns `Ltr` without a provider.                           |
 | dir attribute           | DOM assertion         | Assert `dir` attribute matches current direction.                                    |
 | SSR platform fallback   | context registration  | Verify context is published without platform lookup during SSR.                      |
 | style strategy default  | context registration  | Assert `use_style_strategy()` returns `Inline` without explicit prop.                |
@@ -346,6 +350,7 @@ Intentional deviations:
 - [ ] `<div dir>` wrapper renders and reactively updates.
 - [ ] Default fallback values match documented defaults (en-US, Ltr, System, false, false, Inline).
 - [ ] `use_locale()` works with and without provider.
+- [ ] `use_direction()` works with and without provider.
 - [ ] SSR renders without platform lookup.
 - [ ] `style_strategy` defaults to `StyleStrategy::Inline`.
 - [ ] `dioxus_platform` defaults via feature flag resolution (Web > Desktop > NullPlatform).

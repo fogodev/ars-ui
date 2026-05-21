@@ -76,9 +76,9 @@ pub use platform::{
     default_dioxus_platform, use_platform,
 };
 pub use provider::{
-    ArsContext, ArsProvider, ArsProviderProps, Translatable, resolve_locale, t, use_intl_backend,
-    use_locale, use_messages, use_modality_context, use_number_formatter, use_platform_effects,
-    warn_missing_provider,
+    ArsContext, ArsProvider, ArsProviderProps, Translatable, resolve_locale, t, use_direction,
+    use_intl_backend, use_locale, use_messages, use_modality_context, use_number_formatter,
+    use_platform_effects, warn_missing_provider,
 };
 #[cfg(feature = "web")]
 pub use safe_listener::{

@@ -380,6 +380,26 @@ pub fn use_locale() -> Signal<Locale> {
     )
 }
 
+/// Returns the resolved reading-direction memo from provider context.
+///
+/// Falls back to a memo of [`Direction::Ltr`] when no
+/// [`ArsProvider`] is in scope. Defined by
+/// `spec/dioxus-components/utility/ars-provider.md` §6 — the parallel to
+/// [`use_locale`] for direction-dependent components.
+#[must_use]
+pub fn use_direction() -> Memo<Direction> {
+    let fallback = use_memo(|| Direction::Ltr);
+
+    try_use_context::<ArsContext>().map_or_else(
+        || {
+            warn_missing_provider("use_direction");
+
+            fallback
+        },
+        |ctx| ctx.direction,
+    )
+}
+
 /// Resolves the effective locale for an adapter component instance.
 ///
 /// Returns `adapter_props_locale.cloned()` when set, otherwise reads the
@@ -712,6 +732,21 @@ mod tests {
     fn use_locale_falls_back_without_provider() {
         fn app() -> Element {
             assert_eq!(use_locale()().to_bcp47(), "en-US");
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+
+        dom.rebuild_in_place();
+    }
+
+    #[test]
+    fn use_direction_falls_back_to_ltr_without_provider() {
+        fn app() -> Element {
+            assert_eq!(*use_direction().read(), Direction::Ltr);
 
             rsx! {
                 div {}
