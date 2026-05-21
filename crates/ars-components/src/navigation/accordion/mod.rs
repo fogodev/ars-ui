@@ -55,6 +55,9 @@ pub enum Event {
     /// Focus left the accordion trigger set.
     Blur,
 
+    /// Set the resolved text direction used for keyboard navigation.
+    SetDirection(Direction),
+
     /// Move focus to the next enabled trigger.
     FocusNext,
 
@@ -416,6 +419,18 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            Event::SetDirection(dir) => {
+                let dir = *dir;
+
+                if ctx.dir == dir {
+                    return None;
+                }
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.dir = dir;
+                }))
+            }
+
             Event::FocusNext => {
                 let current = focus_anchor(ctx)?;
                 let next = step_focus(ctx, &current, FocusStep::Next)?;
@@ -467,8 +482,11 @@ impl ars_core::Machine for Machine {
             || old.collapsible != new.collapsible
             || old.disabled != new.disabled
             || old.orientation != new.orientation
-            || old.dir != new.dir
             || old.heading_level != new.heading_level;
+
+        if old.dir != new.dir {
+            events.push(Event::SetDirection(new.dir));
+        }
 
         if props_changed {
             events.push(Event::SyncProps);
@@ -905,7 +923,6 @@ fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
     let collapsible = props.collapsible;
     let disabled = props.disabled;
     let orientation = props.orientation;
-    let dir = props.dir;
     let heading_level = props.heading_level;
     let controlled_value = props
         .value
@@ -918,7 +935,6 @@ fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
         ctx.collapsible = collapsible;
         ctx.disabled = disabled;
         ctx.orientation = orientation;
-        ctx.dir = dir;
         ctx.heading_level = heading_level;
 
         if let Some(value) = controlled_value.clone() {
@@ -1591,6 +1607,30 @@ mod tests {
     }
 
     #[test]
+    fn set_direction_resolves_auto_for_horizontal_navigation() {
+        let events = RefCell::new(Vec::new());
+        let mut service = service(
+            props()
+                .orientation(Orientation::Horizontal)
+                .dir(Direction::Auto),
+        );
+
+        drop(service.send(Event::SetDirection(Direction::Rtl)));
+
+        let send = |event| events.borrow_mut().push(event);
+        let api = service.connect(&send);
+
+        api.on_item_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft));
+        api.on_item_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowRight));
+
+        assert_eq!(service.context().dir, Direction::Rtl);
+        assert_eq!(
+            events.into_inner(),
+            vec![Event::FocusNext, Event::FocusPrev]
+        );
+    }
+
+    #[test]
     fn home_end_focus_first_last_enabled_item() {
         let mut service = service(props());
 
@@ -2018,7 +2058,11 @@ mod tests {
 
         assert_eq!(
             <Machine as MachineTrait>::on_props_changed(&old, &new),
-            vec![Event::SyncProps, Event::SyncControlledValue(keys(&["b"]))]
+            vec![
+                Event::SetDirection(Direction::Rtl),
+                Event::SyncProps,
+                Event::SyncControlledValue(keys(&["b"])),
+            ]
         );
     }
 
@@ -2031,7 +2075,6 @@ mod tests {
             props().collapsible(true),
             props().disabled(true),
             props().orientation(Orientation::Horizontal),
-            props().dir(Direction::Rtl),
             props().heading_level(4),
         ];
 
@@ -2043,6 +2086,21 @@ mod tests {
                 vec![Event::SyncProps]
             );
         }
+
+        assert_eq!(
+            <Machine as MachineTrait>::on_props_changed(&old, &props().dir(Direction::Rtl)),
+            vec![Event::SetDirection(Direction::Rtl)]
+        );
+
+        assert_eq!(
+            <Machine as MachineTrait>::on_props_changed(
+                &old,
+                &props()
+                    .dir(Direction::Rtl)
+                    .orientation(Orientation::Horizontal),
+            ),
+            vec![Event::SetDirection(Direction::Rtl), Event::SyncProps]
+        );
     }
 
     #[test]

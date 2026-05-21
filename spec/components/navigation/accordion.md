@@ -41,6 +41,7 @@ in context, not in the state discriminant, because the set of items is dynamic.
 | `CollapseAll`                        | —              | Close every open enabled item; open disabled items remain open.        |
 | `Focus(Key)`                         | item key       | Record a trigger as focused.                                           |
 | `Blur`                               | —              | Clear trigger focus.                                                   |
+| `SetDirection(Direction)`            | direction      | Set the adapter-resolved text direction used by horizontal keyboard navigation. |
 | `FocusNext` / `FocusPrev`            | —              | Move focus intent to the next/previous enabled trigger.                |
 | `FocusFirst` / `FocusLast`           | —              | Move focus intent to the first/last enabled trigger.                   |
 | `SetItems(Vec<ItemRegistration>)`    | registrations  | Replace registered item keys and disabled flags in DOM order.          |
@@ -194,6 +195,8 @@ pub enum Event {
     Focus(Key),
     /// Blur the current item.
     Blur,
+    /// Set the adapter-resolved text direction used for keyboard navigation.
+    SetDirection(Direction),
     /// Focus the next enabled item.
     FocusNext,
     /// Focus the previous enabled item.
