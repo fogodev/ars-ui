@@ -166,7 +166,7 @@ pub mod drawer {
 | Body                  | optional  | `<div>` element          | consumer-composed | `api.body_attrs()`          | Structural layout part.                                                       |
 | Footer                | optional  | `<div>` element          | consumer-composed | `api.footer_attrs()`        | Structural layout part.                                                       |
 | CloseTrigger          | optional  | native `<button>`        | consumer-composed | `api.close_trigger_attrs()` | `aria-label` from `Messages.close_label`.                                     |
-| DragHandle            | optional  | `<div>` element          | consumer-composed | `api.drag_handle_attrs()`   | `role="slider"` with accessible name when bottom-sheet snap points are active; keyboard snap navigation target. |
+| DragHandle            | optional  | `<div>` element          | consumer-composed | `api.drag_handle_attrs()`   | `role="slider"` with accessible name and `tabindex="0"` when bottom-sheet snap points are active; keyboard snap navigation target. |
 
 ## 5. Attr Merge and Ownership Rules
 
@@ -177,7 +177,7 @@ pub mod drawer {
 | Backdrop    | `api.backdrop_attrs()` (scope, part, aria-hidden, inert only when backdrop dismissal is disabled)                                                                    | click handler                                    | consumer decoration only | core dismissal semantics win                                                 | adapter-owned; click handler sends CloseOnBackdropClick |
 | Positioner  | `api.positioner_attrs()` (scope, part, state, placement, closed transform, optional z-index custom property)                                                         | live drag CSS transform style                    | consumer decoration only | core placement/z-index attrs win; live drag transform wins while dragging    | adapter-owned sliding container                         |
 | Content     | `api.content_attrs()` (role, aria-modal, aria-roledescription, aria-labelledby, aria-describedby, state, placement, dragging, tabindex, snap touch/overscroll attrs) | keydown handler, pointer/touch handlers for drag | consumer content attrs   | core ARIA/data attrs win; handlers compose; `class`/`style` merge additively | adapter-owned dialog surface                            |
-| DragHandle  | `api.drag_handle_attrs()` (scope, part, optional slider ARIA attrs when bottom-sheet snap points are active)                                                         | pointer/touch handlers                           | consumer decoration only | core slider attrs win when bottom-sheet snap points are active               | adapter-owned drag interaction surface                  |
+| DragHandle  | `api.drag_handle_attrs()` (scope, part, optional slider ARIA attrs and tabindex when bottom-sheet snap points are active)                                            | pointer/touch handlers                           | consumer decoration only | core slider attrs win when bottom-sheet snap points are active               | adapter-owned drag interaction surface                  |
 
 - Consumers must not override `role`, `aria-modal`, `aria-roledescription`, or `aria-labelledby`/`aria-describedby` on Content.
 - Consumers must not override slider ARIA attrs on DragHandle when snap points are configured.
@@ -762,7 +762,7 @@ use_drop(move || {
 
 - Content must have `role="dialog"`, `aria-modal="true"`, `aria-roledescription` from `Messages.role_description`, `aria-labelledby` pointing to the Title ID, and `aria-describedby` pointing to the Description ID.
 - CloseTrigger must have `aria-label` from `Messages.close_label`.
-- DragHandle must have `role="slider"`, an accessible name, `aria-orientation="vertical"`, `aria-valuemin="0"`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext` when bottom-sheet snap points are active.
+- DragHandle must have `role="slider"`, `tabindex="0"`, an accessible name, `aria-orientation="vertical"`, `aria-valuemin="0"`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext` when bottom-sheet snap points are active.
 - Logical placements (Start/End) must be passed with `dir`; the core resolves them before attrs are rendered.
 - Title and Description IDs are generated deterministically from `ComponentIds` for hydration stability.
 - SSR renders the inline Root and Trigger; portal content is SSR-safe empty unless `default_open` is true.
@@ -828,7 +828,7 @@ Traceability note: this adapter spec explicitly restates the following adapter-o
 | Escape dismiss                | callback order        | Assert `CloseOnEscape` fires before `on_open_change(false)`.                             |
 | Drag gesture state            | machine state         | Assert `Dragging(position)` during active drag.                                          |
 | Snap resolution               | machine state         | Assert correct snap index after drag end with velocity.                                  |
-| DragHandle slider ARIA        | DOM attrs             | Assert `role="slider"`, accessible name, `aria-valuenow`, `aria-valuemin`, `aria-valuemax` on DragHandle. |
+| DragHandle slider ARIA        | DOM attrs             | Assert `role="slider"`, `tabindex="0"`, accessible name, `aria-valuenow`, `aria-valuemin`, `aria-valuemax` on DragHandle. |
 | `data-ars-dragging`           | DOM attrs             | Assert presence on Content during drag, absence when not dragging.                       |
 | Portal rendering              | rendered structure    | Assert Backdrop and Content are siblings inside the portal root.                         |
 | Cleanup                       | cleanup side effects  | Verify listeners, scroll lock, dialog stack, and z-index are released on unmount.        |
@@ -851,7 +851,7 @@ Cheap verification recipe:
 - [ ] Backdrop and Positioner/Content are siblings inside the portal root (backdrop sibling pattern).
 - [ ] Content has `role="dialog"`, `aria-modal="true"`, `aria-roledescription`, `aria-labelledby`, `aria-describedby`.
 - [ ] CloseTrigger has `aria-label` from `Messages.close_label`.
-- [ ] DragHandle applies core-returned `role="slider"`, accessible name, and slider ARIA attrs when bottom-sheet snap points are active.
+- [ ] DragHandle applies core-returned `role="slider"`, `tabindex="0"`, accessible name, and slider ARIA attrs when bottom-sheet snap points are active.
 - [ ] Presence composes mount/unmount animation lifecycle for portal content.
 - [ ] FocusScope activates after `animationstart`, not before.
 - [ ] Content has `tabindex="-1"` during animation delay period.

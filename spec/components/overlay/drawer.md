@@ -527,7 +527,7 @@ Drawer
 | Body         | `<div>`    | `data-ars-scope="drawer"`, `data-ars-part="body"`                                                                  |
 | Footer       | `<div>`    | `data-ars-scope="drawer"`, `data-ars-part="footer"`                                                                |
 | CloseTrigger | `<button>` | `aria-label` from Messages                                                                                         |
-| DragHandle   | `<div>`    | `role="slider"` with an accessible name (when bottom-sheet snap points are active)                                  |
+| DragHandle   | `<div>`    | `role="slider"` with an accessible name and `tabindex="0"` (when bottom-sheet snap points are active)               |
 
 ## 3. Accessibility
 
@@ -565,6 +565,7 @@ The adapter sends `Event::SnapTo(index)` for each keyboard-initiated snap transi
 The `Drawer`'s drag handle element receives slider semantics for snap navigation:
 
 - `role="slider"`
+- `tabindex="0"`
 - `aria-label` set to `Messages::drag_handle_label`
 - `aria-orientation="vertical"`
 - `aria-valuemin="0"`

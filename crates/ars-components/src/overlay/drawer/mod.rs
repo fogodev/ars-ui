@@ -1393,6 +1393,7 @@ impl Api<'_> {
             attrs
                 .set(HtmlAttr::Role, "slider")
                 .set(HtmlAttr::Class, "ars-touch-none")
+                .set(HtmlAttr::TabIndex, "0")
                 .set(
                     HtmlAttr::Aria(AriaAttr::Label),
                     (self.ctx.messages.drag_handle_label)(&self.ctx.locale),
@@ -2258,6 +2259,7 @@ mod tests {
             attrs.get(&HtmlAttr::Aria(AriaAttr::Orientation)),
             Some("vertical")
         );
+        assert_eq!(attrs.get(&HtmlAttr::TabIndex), Some("0"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("2"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("1"));
@@ -2277,6 +2279,7 @@ mod tests {
 
         assert_eq!(attrs.get(&HtmlAttr::Role), None);
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Label)), None);
+        assert_eq!(attrs.get(&HtmlAttr::TabIndex), None);
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), None);
     }
 
