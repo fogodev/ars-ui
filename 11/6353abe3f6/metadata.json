@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "116353abe3f6",
+  "strategy": "manual-commit",
+  "branch": "t3code/7b271fe9",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/utility/focus_scope/mod.rs",
+    "spec/components/utility/focus-scope.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/11/6353abe3f6/0/metadata.json",
+      "transcript": "/11/6353abe3f6/0/full.jsonl",
+      "content_hash": "/11/6353abe3f6/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 29,
+    "cache_creation_tokens": 30534,
+    "cache_read_tokens": 12809670,
+    "output_tokens": 16326,
+    "api_call_count": 24
+  }
+}
