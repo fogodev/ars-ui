@@ -497,6 +497,9 @@ fn infer_snapshot_component(path: &Path) -> Option<String> {
 fn detect_state_variants(root: &Path) -> Result<BTreeMap<String, usize>, Error> {
     let enum_start = Regex::new(r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+State\s*\{")?;
 
+    let state_alias =
+        Regex::new(r"(?m)^\s*pub\s+type\s+State\s*=\s*(?P<target>[A-Za-z0-9_:]+)::State\s*;")?;
+
     let variant = Regex::new(r"^\s*([A-Z][A-Za-z0-9_]*)\s*(?:[{(,]|$)")?;
 
     let files = collect_files(root, |path| {
@@ -512,21 +515,35 @@ fn detect_state_variants(root: &Path) -> Result<BTreeMap<String, usize>, Error> 
     })?;
 
     let mut variants = BTreeMap::new();
+    let mut aliases = Vec::new();
 
     for file in files {
         let content = fs::read_to_string(&file)?;
-
-        if enum_start.find(&content).is_none() {
-            continue;
-        }
 
         let Some(component) = infer_source_component(&file) else {
             continue;
         };
 
-        let count = parse_state_variant_count(&content, &variant);
+        if enum_start.find(&content).is_some() {
+            let count = parse_state_variant_count(&content, &variant);
 
-        if count > 0 {
+            if count > 0 {
+                variants
+                    .entry(component.clone())
+                    .and_modify(|existing: &mut usize| *existing = (*existing).max(count))
+                    .or_insert(count);
+            }
+        }
+
+        if let Some(captures) = state_alias.captures(&content)
+            && let Some(target) = captures.name("target").and_then(alias_target_component)
+        {
+            aliases.push((component, target));
+        }
+    }
+
+    for (component, target) in aliases {
+        if let Some(count) = variants.get(&target).copied() {
             variants
                 .entry(component)
                 .and_modify(|existing: &mut usize| *existing = (*existing).max(count))
@@ -539,6 +556,14 @@ fn detect_state_variants(root: &Path) -> Result<BTreeMap<String, usize>, Error> 
 
 fn parse_state_variant_count(content: &str, variant: &Regex) -> usize {
     parse_enum_variant_count(content, "enum State", variant)
+}
+
+fn alias_target_component(target: regex::Match<'_>) -> Option<String> {
+    target
+        .as_str()
+        .rsplit("::")
+        .next()
+        .map(|component| component.replace('-', "_"))
 }
 
 /// Counts variants of any `pub enum Part` decorated with a
@@ -1509,6 +1534,44 @@ mod tests {
         let output = check_snapshot_count(&options).expect("ars-components snapshots should count");
 
         assert!(output.contains("presence | 4 | 4 | 0 | 4 | 20 | OK"));
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn snapshot_count_detects_state_alias_machine_modules() {
+        let root = temp_dir("snapshot-state-alias");
+
+        write(
+            &root.join("crates/ars-components/src/overlay/dialog/mod.rs"),
+            "pub enum State {\n    Closed,\n    Open,\n}\n",
+        );
+
+        write(
+            &root.join("crates/ars-components/src/overlay/alert_dialog/mod.rs"),
+            "pub type State = dialog::State;\n",
+        );
+
+        for idx in 0..2 {
+            write(
+                &root.join(format!(
+                    "crates/ars-components/src/overlay/alert_dialog/snapshots/ars_components__overlay__alert_dialog__tests__alert_dialog_root_{idx}.snap"
+                )),
+                "snapshot",
+            );
+        }
+
+        let options = SnapshotCountOptions {
+            snapshots_dir: root.join("crates"),
+            min_per_variant: 3,
+            max_per_component: 20,
+            per_part_per_variant: 3,
+        };
+
+        let output = check_snapshot_count(&options)
+            .expect("state alias components should participate in snapshot-count");
+
+        assert!(output.contains("alert_dialog | 2 | 2 | 0 | 0 | 20 | OK"));
 
         drop(fs::remove_dir_all(root));
     }

@@ -217,7 +217,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("content"));
-        attrs.set(HtmlAttr::Role, self.ctx.role.as_str());
+        attrs.set(HtmlAttr::Role, self.ctx.role.as_aria_role());
         attrs.set(HtmlAttr::Data("ars-state"), if self.is_open() { "open" } else { "closed" });
         attrs.set(HtmlAttr::TabIndex, "-1");
         if self.ctx.modal {
@@ -261,7 +261,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Type, "button");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), self.ctx.messages.cancel_label.resolve(&self.ctx.locale));
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.cancel_label)(&self.ctx.locale));
         attrs
     }
 
@@ -272,7 +272,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Type, "button");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), self.ctx.messages.confirm_label.resolve(&self.ctx.locale));
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.confirm_label)(&self.ctx.locale));
         if self.props.is_destructive {
             attrs.set_bool(HtmlAttr::Data("ars-destructive"), true);
         }
