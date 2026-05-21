@@ -1,0 +1,79 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3726f832a989",
+  "session_id": "29eb8d2d-71d3-4dc3-b391-1fd15f77a3d1",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-21T16:15:23.176487Z",
+  "branch": "t3code/7b271fe9",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/utility/focus_scope/mod.rs",
+    "spec/components/utility/focus-scope.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "218f1ce6a8c5",
+  "checkpoint_transcript_start": 979,
+  "transcript_lines_at_start": 979,
+  "token_usage": {
+    "input_tokens": 16,
+    "cache_creation_tokens": 492780,
+    "cache_read_tokens": 5139490,
+    "output_tokens": 6256,
+    "api_call_count": 11
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Fix a P2 bug in the FocusScope component where `Props::trapped` was silently ignored during activation, using TDD red-green workflow.",
+    "outcome": "The bug was fixed by making `Activate` read `props.trapped` alongside `event.trapped || props.contain`, all tests passed (including mutation testing with 0 missed mutants), and the change was committed and pushed.",
+    "learnings": {
+      "repo": [
+        "FocusScope's `Activate` handler reads `event.trapped || props.contain` but previously omitted `props.trapped`, creating a discrepancy between documented API and runtime behavior.",
+        "The project uses a Codex review system that produces prioritized findings (P1/P2) that feed back into the development loop.",
+        "Mutation testing is run as part of the pre-push gate alongside xci-fast; results are reported as caught/unviable/missed."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/focus_scope/mod.rs",
+          "finding": "`Activate` only checked `event.trapped || props.contain`, silently ignoring `props.trapped`. Fix adds `props.trapped` to the condition."
+        },
+        {
+          "path": "spec/components/utility/focus-scope.md",
+          "finding": "Spec was updated to align with the corrected behavior, indicating spec and implementation are kept in sync as part of the fix workflow."
+        }
+      ],
+      "workflow": [
+        "TDD red-green cycle is enforced: failing test is written and confirmed red before applying the fix.",
+        "Mutation testing (23 caught, 11 unviable, 0 missed) is used to validate test suite quality after bug fixes, not just correctness.",
+        "Watcher/notification system for Codex findings can silently fail; foreground polling is a necessary fallback."
+      ]
+    },
+    "friction": [
+      "The background watcher recorded a Codex verdict but failed to notify, requiring the user to prompt for foreground polling manually."
+    ],
+    "open_items": []
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-21T16:15:10.426899Z",
+    "agent_lines": 44,
+    "agent_removed": 3,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 44,
+    "total_lines_changed": 47,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
