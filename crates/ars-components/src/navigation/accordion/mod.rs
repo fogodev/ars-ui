@@ -463,20 +463,23 @@ impl ars_core::Machine for Machine {
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
         let mut events = Vec::new();
 
-        if old.multiple != new.multiple
+        let props_changed = old.multiple != new.multiple
             || old.collapsible != new.collapsible
             || old.disabled != new.disabled
             || old.orientation != new.orientation
             || old.dir != new.dir
-            || old.heading_level != new.heading_level
-        {
+            || old.heading_level != new.heading_level;
+
+        if props_changed {
             events.push(Event::SyncProps);
         }
 
-        if let (Some(old_value), Some(new_value)) = (&old.value, &new.value)
-            && old_value != new_value
-        {
-            events.push(Event::SyncControlledValue(new_value.clone()));
+        if old.value != new.value {
+            if let Some(new_value) = &new.value {
+                events.push(Event::SyncControlledValue(new_value.clone()));
+            } else if !props_changed {
+                events.push(Event::SyncProps);
+            }
         }
 
         events
@@ -904,6 +907,10 @@ fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
     let orientation = props.orientation;
     let dir = props.dir;
     let heading_level = props.heading_level;
+    let controlled_value = props
+        .value
+        .clone()
+        .map(|value| normalize_value_for_mode(value, multiple));
     let needs_value_normalize = ctx.multiple && !multiple;
 
     TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -914,7 +921,11 @@ fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
         ctx.dir = dir;
         ctx.heading_level = heading_level;
 
-        if needs_value_normalize {
+        if let Some(value) = controlled_value.clone() {
+            ctx.value.sync_controlled(Some(value));
+        } else if ctx.value.is_controlled() {
+            ctx.value.sync_controlled(None);
+        } else if needs_value_normalize {
             let normalized = normalize_value_for_mode(ctx.value.get().clone(), false);
 
             ctx.value.set(normalized);
@@ -1715,6 +1726,18 @@ mod tests {
     }
 
     #[test]
+    fn sync_props_normalizes_controlled_value_when_multiple_turns_off() {
+        let mut service = service(props().multiple(true).value(keys(&["a", "b"])));
+
+        let result = service.set_props(props().value(keys(&["a", "b"])));
+
+        assert!(result.context_changed);
+        assert!(service.context().value.is_controlled());
+        assert_eq!(service.context().value.get().len(), 1);
+        assert!(service.context().value.get().contains(&key("a")));
+    }
+
+    #[test]
     fn sync_controlled_value_updates_value_and_normalizes_single_mode() {
         let mut service = service(props().value(keys(&["a"])));
 
@@ -1724,6 +1747,26 @@ mod tests {
         assert!(service.context().value.is_controlled());
         assert_eq!(service.context().value.get().len(), 1);
         assert!(service.context().value.get().contains(&key("b")));
+    }
+
+    #[test]
+    fn controlled_value_can_enter_and_exit_controlled_mode() {
+        let mut service = service(props().default_value(keys(&["a"])));
+
+        let controlled = service.set_props(props().value(keys(&["b"])));
+
+        assert!(controlled.context_changed);
+        assert!(service.context().value.is_controlled());
+        assert_eq!(service.context().value.get(), &keys(&["b"]));
+
+        let uncontrolled = service.set_props(props());
+
+        assert!(uncontrolled.context_changed);
+        assert!(!service.context().value.is_controlled());
+
+        drop(service.send(Event::ExpandItem(key("c"))));
+
+        assert_eq!(service.context().value.get(), &keys(&["c"]));
     }
 
     #[test]
@@ -2013,5 +2056,15 @@ mod tests {
         );
 
         assert!(<Machine as MachineTrait>::on_props_changed(&old, &old).is_empty());
+
+        assert_eq!(
+            <Machine as MachineTrait>::on_props_changed(&props(), &new),
+            vec![Event::SyncControlledValue(keys(&["b"]))]
+        );
+
+        assert_eq!(
+            <Machine as MachineTrait>::on_props_changed(&old, &props()),
+            vec![Event::SyncProps]
+        );
     }
 }

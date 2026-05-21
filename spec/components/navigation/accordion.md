@@ -44,8 +44,8 @@ in context, not in the state discriminant, because the set of items is dynamic.
 | `FocusNext` / `FocusPrev`            | —              | Move focus intent to the next/previous enabled trigger.                |
 | `FocusFirst` / `FocusLast`           | —              | Move focus intent to the first/last enabled trigger.                   |
 | `SetItems(Vec<ItemRegistration>)`    | registrations  | Replace registered item keys and disabled flags in DOM order.          |
-| `SyncProps`                          | —              | Synchronize prop-backed context fields after render prop changes.      |
-| `SyncControlledValue(BTreeSet<Key>)` | open item keys | Push a new controlled open-item set into context.                      |
+| `SyncProps`                          | —              | Synchronize prop-backed context fields after render prop changes, including controlled-mode exit and single-mode value normalization. |
+| `SyncControlledValue(BTreeSet<Key>)` | open item keys | Push a new controlled open-item set into context, entering controlled mode if needed. |
 
 Focus-navigation events emit the typed `Effect::FocusFocusedItem` intent. Adapters execute
 that effect by focusing their framework-native item handle for `Context::focused_item`
@@ -204,9 +204,10 @@ pub enum Event {
     FocusLast,
     /// Replace registered items in DOM order.
     SetItems(Vec<ItemRegistration>),
-    /// Synchronize prop-backed context fields.
+    /// Synchronize prop-backed context fields, controlled-mode exit, and
+    /// single-mode value normalization.
     SyncProps,
-    /// Synchronize a controlled value.
+    /// Synchronize a controlled value, entering controlled mode if needed.
     SyncControlledValue(BTreeSet<Key>),
 }
 
