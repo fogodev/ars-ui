@@ -1244,6 +1244,13 @@ mod tests {
         props().min(0.0).max(100.0).step(1.0).large_step(10.0)
     }
 
+    fn fmt_opts() -> FormatOptions {
+        FormatOptions {
+            use_grouping: false,
+            ..FormatOptions::default()
+        }
+    }
+
     fn service(props: Props) -> Service<Machine> {
         Service::<Machine>::new(props, &Env::default(), &Messages::default())
     }
@@ -1369,6 +1376,7 @@ mod tests {
         drop(svc.send(Event::Change("999".to_string())));
 
         let api = svc.connect(&|_| {});
+
         let attrs = api.input_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::Value), Some("999"));
@@ -1378,6 +1386,7 @@ mod tests {
     #[test]
     fn number_input_keydown_returns_false_when_disabled() {
         let svc = service(bounded_props().disabled(true));
+
         let api = svc.connect(&|_| {});
 
         for key in [
@@ -1389,6 +1398,7 @@ mod tests {
             KeyboardKey::End,
         ] {
             let data = keyboard_event(key, false);
+
             assert!(
                 !api.on_input_keydown(&data),
                 "disabled machine must not claim {key:?} as handled"
@@ -1399,10 +1409,12 @@ mod tests {
     #[test]
     fn number_input_keydown_returns_false_when_readonly() {
         let svc = service(bounded_props().readonly(true));
+
         let api = svc.connect(&|_| {});
 
         for key in [KeyboardKey::ArrowUp, KeyboardKey::Home] {
             let data = keyboard_event(key, false);
+
             assert!(!api.on_input_keydown(&data));
         }
     }
@@ -1416,6 +1428,7 @@ mod tests {
 
         for non_finite in ["inf", "-inf", "NaN", "infinity", "-infinity"] {
             drop(svc.send(Event::Change(non_finite.to_string())));
+
             assert_eq!(
                 svc.context().value.get(),
                 &Some(7.0),
@@ -1435,6 +1448,7 @@ mod tests {
         drop(svc.send(Event::IncrementToMax));
 
         let value = svc.context().value.get().expect("value set");
+
         assert!(value <= 1.5, "stored value {value} must not exceed max");
         assert_eq!(svc.context().value.get(), &Some(1.5));
     }
@@ -1448,6 +1462,7 @@ mod tests {
         drop(svc.send(Event::DecrementToMin));
 
         let value = svc.context().value.get().expect("value set");
+
         assert!(value >= -1.5, "stored value {value} must not undercut min");
         assert_eq!(svc.context().value.get(), &Some(-1.5));
     }
@@ -1464,6 +1479,7 @@ mod tests {
         drop(svc.send(Event::Increment));
 
         let value = svc.context().value.get().expect("value set");
+
         assert!(value <= 1.5, "stepped value {value} must respect max");
     }
 
@@ -1475,6 +1491,7 @@ mod tests {
         let mut svc = service(bounded_props().default_value(10.0));
 
         drop(svc.send(Event::StartScrub));
+
         assert!(svc.context().scrubbing);
 
         drop(svc.send(Event::Blur));
@@ -1486,7 +1503,9 @@ mod tests {
     #[test]
     fn number_input_required_sets_native_required_alongside_aria_required() {
         let svc = service(bounded_props().required(true));
+
         let api = svc.connect(&|_| {});
+
         let attrs = api.input_attrs();
 
         assert!(attrs.contains(&HtmlAttr::Required));
@@ -1544,8 +1563,139 @@ mod tests {
     }
 
     #[test]
+    fn number_input_private_numeric_helpers_cover_boundaries() {
+        assert_eq!(clamp(0.0, 0.0, 10.0), 0.0);
+        assert_eq!(clamp(10.0, 0.0, 10.0), 10.0);
+        assert_eq!(clamp(-1.0, 0.0, 10.0), 0.0);
+        assert_eq!(clamp(11.0, 0.0, 10.0), 10.0);
+
+        let both_finite = service(props().min(5.0).max(10.0));
+
+        assert_eq!(baseline(both_finite.context()), 5.0);
+
+        let positive_min = service(props().min(5.0));
+
+        assert_eq!(baseline(positive_min.context()), 5.0);
+
+        let negative_max = service(props().max(-5.0));
+
+        assert_eq!(baseline(negative_max.context()), -5.0);
+
+        let negative_min_unbounded_max = service(props().min(-5.0));
+
+        assert_eq!(baseline(negative_min_unbounded_max.context()), 0.0);
+
+        let positive_max_unbounded_min = service(props().max(5.0));
+
+        assert_eq!(baseline(positive_max_unbounded_min.context()), 0.0);
+
+        let unbounded = service(props());
+
+        assert_eq!(baseline(unbounded.context()), 0.0);
+    }
+
+    #[test]
+    fn number_input_props_output_changed_covers_each_render_field() {
+        let old = bounded_props().min(1.0).max(2.0).step(1.0).large_step(1.0);
+
+        assert!(!props_output_changed(&old, &old));
+
+        let mut epsilon_only = old.clone();
+
+        epsilon_only.min += f64::EPSILON;
+
+        assert!(!props_output_changed(&old, &epsilon_only));
+
+        epsilon_only = old.clone();
+        epsilon_only.max -= f64::EPSILON;
+
+        assert!(!props_output_changed(&old, &epsilon_only));
+
+        epsilon_only = old.clone();
+        epsilon_only.step += f64::EPSILON;
+
+        assert!(!props_output_changed(&old, &epsilon_only));
+
+        epsilon_only = old.clone();
+        epsilon_only.large_step -= f64::EPSILON;
+
+        assert!(!props_output_changed(&old, &epsilon_only));
+
+        let mut new = old.clone();
+
+        new.min = 1.5;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.max = 99.0;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.step = 2.0;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.large_step = 20.0;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.precision = Some(2);
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.disabled = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.readonly = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.invalid = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.required = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.name = Some("amount".to_string());
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.form = Some("order".to_string());
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.spin_on_press = false;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.allow_mouse_wheel = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.clamp_value_on_blur = false;
+
+        assert!(props_output_changed(&old, &new));
+    }
+
+    #[test]
     fn number_input_scrub_lifecycle_uses_scrubbing_state() {
-        let mut svc = service(bounded_props().default_value(10.0));
+        let mut svc = service(bounded_props().step(2.0).default_value(10.0));
 
         drop(svc.send(Event::StartScrub));
 
@@ -1554,7 +1704,7 @@ mod tests {
 
         drop(svc.send(Event::Scrub(3.0)));
 
-        assert_eq!(svc.context().value.get(), &Some(13.0));
+        assert_eq!(svc.context().value.get(), &Some(16.0));
 
         drop(svc.send(Event::EndScrub));
 
@@ -1583,6 +1733,7 @@ mod tests {
         drop(svc.send(Event::Increment));
 
         let value = svc.context().value.get().expect("value set after step");
+
         assert!(value.is_finite(), "value must remain finite after stepping");
         assert!(
             (value - 1.0).abs() < f64::EPSILON,
@@ -1597,6 +1748,7 @@ mod tests {
         drop(svc.send(Event::Decrement));
 
         let value = svc.context().value.get().expect("value set after step");
+
         assert!(value.is_finite());
         assert!((value - -1.0).abs() < f64::EPSILON);
     }
@@ -1689,10 +1841,12 @@ mod tests {
         // would serialize as `"NaN"`/`"inf"` into the visible input
         // attribute — same defect class `Change` already guards against.
         let mut svc = service(bounded_props().value(10.0));
+
         assert_eq!(svc.context().value.get(), &Some(10.0));
 
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             drop(svc.send(Event::SyncValue(Some(bad))));
+
             assert_eq!(
                 svc.context().value.get(),
                 &Some(10.0),
@@ -1706,10 +1860,12 @@ mod tests {
         let mut svc = service(bounded_props().value(10.0));
 
         drop(svc.send(Event::SyncValue(Some(42.0))));
+
         assert_eq!(svc.context().value.get(), &Some(42.0));
         assert!(svc.context().value.is_controlled());
 
         drop(svc.send(Event::SyncValue(None)));
+
         assert!(!svc.context().value.is_controlled());
     }
 
@@ -1727,6 +1883,7 @@ mod tests {
         // (1.5 itself if precision is capped where it can preserve
         // the value, or a small rounding artefact).
         let value = svc.context().value.get().expect("value set");
+
         assert!(value.is_finite(), "value {value} must be finite");
         assert!((value - 1.5).abs() < 1.0, "value {value} must be near 1.5");
     }
@@ -1763,15 +1920,18 @@ mod tests {
         let mut svc = service(bounded_props().default_value(10.0));
 
         drop(svc.send(Event::StartScrub));
+
         assert_eq!(svc.state(), &State::Scrubbing);
 
         // Parent disables mid-drag.
         drop(svc.set_props(bounded_props().default_value(10.0).disabled(true)));
+
         assert!(svc.context().disabled);
 
         // Pointer-up: adapter fires EndScrub. Must transition out of
         // Scrubbing despite the disabled guard.
         let result = svc.send(Event::EndScrub);
+
         assert!(result.state_changed);
         assert!(!svc.context().scrubbing);
         assert_ne!(svc.state(), &State::Scrubbing);
@@ -1780,11 +1940,13 @@ mod tests {
     #[test]
     fn number_input_end_scrub_processable_when_readonly() {
         let mut svc = service(bounded_props().default_value(10.0));
+
         drop(svc.send(Event::StartScrub));
 
         drop(svc.set_props(bounded_props().default_value(10.0).readonly(true)));
 
         let result = svc.send(Event::EndScrub);
+
         assert!(result.state_changed);
         assert!(!svc.context().scrubbing);
     }
@@ -1826,6 +1988,7 @@ mod tests {
         // zero, but the actual stored bits push it just barely below the
         // half-way mark; verify a numerically robust upper bound instead).
         let value = svc.context().value.get().expect("value set");
+
         assert!(
             (value - 2.3).abs() < f64::EPSILON || (value - 2.4).abs() < f64::EPSILON,
             "value {value} must be reround'd to 2.3 or 2.4 (precision 1)"
@@ -1842,6 +2005,55 @@ mod tests {
         drop(svc.set_props(bounded_props().default_value(7.0).name("qty2")));
 
         assert_eq!(svc.context().value.get(), &Some(7.0));
+    }
+
+    #[test]
+    fn number_input_blur_and_set_props_ignore_epsilon_only_value_deltas() {
+        let edge = 1.0 + f64::EPSILON;
+
+        let mut blur_svc = service(props().min(0.0).max(1.0).default_value(edge));
+
+        drop(blur_svc.send(Event::Focus { is_keyboard: false }));
+        drop(blur_svc.send(Event::Blur));
+
+        assert_eq!(blur_svc.context().value.get(), &Some(edge));
+
+        let mut props_svc = service(props().min(0.0).max(1.0).default_value(edge));
+
+        drop(props_svc.set_props(props().min(0.0).max(1.0 - f64::EPSILON).default_value(edge)));
+
+        assert_eq!(props_svc.context().value.get(), &Some(edge));
+    }
+
+    #[test]
+    fn number_input_set_props_render_change_does_not_reclamp_epsilon_only_bounds() {
+        let edge = 2.0 + f64::EPSILON;
+
+        let mut svc = service(props().min(1.0).max(2.0).name("amount").default_value(edge));
+
+        drop(
+            svc.set_props(
+                props()
+                    .min(1.0 + f64::EPSILON)
+                    .max(2.0 - f64::EPSILON)
+                    .name("total")
+                    .default_value(edge),
+            ),
+        );
+
+        assert_eq!(svc.context().value.get(), &Some(edge));
+    }
+
+    #[test]
+    fn number_input_zero_wheel_delta_is_noop() {
+        let mut svc = service(bounded_props().allow_mouse_wheel(true).default_value(10.0));
+
+        drop(svc.send(Event::Focus { is_keyboard: false }));
+
+        let result = svc.send(Event::Wheel { delta: 0.0 });
+
+        assert!(!result.context_changed);
+        assert_eq!(svc.context().value.get(), &Some(10.0));
     }
 
     #[test]
@@ -1879,6 +2091,7 @@ mod tests {
             Event::Wheel { delta: 1.0 },
         ] {
             let result = svc.send(event);
+
             assert!(!result.context_changed);
         }
 
@@ -1904,7 +2117,6 @@ mod tests {
         assert!(!idle_result.context_changed);
 
         drop(svc.send(Event::Focus { is_keyboard: false }));
-
         drop(svc.send(Event::Wheel { delta: 1.0 }));
 
         assert_eq!(svc.context().value.get(), &Some(11.0));
@@ -1938,6 +2150,91 @@ mod tests {
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("42"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("100"));
+    }
+
+    #[test]
+    fn number_input_format_option_builders_round_trip() {
+        let p = props()
+            .format_options(fmt_opts())
+            .display_format(FormatOptions {
+                min_fraction_digits: 2,
+                max_fraction_digits: 2,
+                ..FormatOptions::default()
+            });
+
+        assert_eq!(p.format_options, Some(fmt_opts()));
+        assert_eq!(
+            p.display_format
+                .as_ref()
+                .map(|options| options.min_fraction_digits),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn number_input_static_attrs_and_boundary_helpers_are_observable() {
+        let min_svc = service(bounded_props().default_value(0.0));
+
+        let min_api = min_svc.connect(&|_| {});
+
+        assert_eq!(min_api.label_attrs().get(&HtmlAttr::Id), Some("num-label"));
+        assert_eq!(min_api.label_attrs().get(&HtmlAttr::For), Some("num-input"));
+        assert_eq!(
+            min_api.description_attrs().get(&HtmlAttr::Id),
+            Some("num-description")
+        );
+        assert_eq!(
+            min_api.error_message_attrs().get(&HtmlAttr::Id),
+            Some("num-error-message")
+        );
+        assert_eq!(
+            min_api
+                .error_message_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::Live)),
+            Some("polite")
+        );
+        assert!(
+            min_api
+                .decrement_trigger_attrs()
+                .contains(&HtmlAttr::Disabled)
+        );
+        assert!(
+            !min_api
+                .increment_trigger_attrs()
+                .contains(&HtmlAttr::Disabled)
+        );
+
+        let disabled_svc = service(bounded_props().default_value(50.0).disabled(true));
+        let disabled_api = disabled_svc.connect(&|_| {});
+
+        assert!(
+            disabled_api
+                .increment_trigger_attrs()
+                .contains(&HtmlAttr::Disabled)
+        );
+
+        let readonly_svc = service(bounded_props().default_value(50.0).readonly(true));
+        let readonly_api = readonly_svc.connect(&|_| {});
+
+        assert!(
+            readonly_api
+                .decrement_trigger_attrs()
+                .contains(&HtmlAttr::Disabled)
+        );
+
+        let max_svc = service(bounded_props().default_value(100.0));
+        let max_api = max_svc.connect(&|_| {});
+
+        assert!(
+            max_api
+                .increment_trigger_attrs()
+                .contains(&HtmlAttr::Disabled)
+        );
+        assert!(
+            !max_api
+                .decrement_trigger_attrs()
+                .contains(&HtmlAttr::Disabled)
+        );
     }
 
     #[test]

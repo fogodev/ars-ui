@@ -1007,6 +1007,26 @@ mod tests {
     }
 
     #[test]
+    fn search_input_props_builder_clearers_round_trip() {
+        let props = Props::new()
+            .id("search")
+            .placeholder("Search")
+            .no_placeholder()
+            .name("q")
+            .no_name()
+            .form("search-form")
+            .no_form()
+            .debounce(Duration::from_millis(50))
+            .no_debounce();
+
+        assert_eq!(props.id, "search");
+        assert_eq!(props.placeholder, None);
+        assert_eq!(props.name, None);
+        assert_eq!(props.form, None);
+        assert_eq!(props.debounce, None);
+    }
+
+    #[test]
     fn search_input_change_schedules_debounce_effect() {
         let mut service = service(props().debounce(Duration::from_millis(200)));
 
@@ -1064,6 +1084,18 @@ mod tests {
 
         assert_eq!(result.cancel_effects, alloc::vec![Effect::SearchDebounce]);
         assert_eq!(service.context().value.get(), "");
+    }
+
+    #[test]
+    fn search_input_clear_noops_when_disabled_or_readonly() {
+        for props in [props().disabled(true), props().readonly(true)] {
+            let mut service = service(props.default_value("query"));
+
+            let result = service.send(Event::Clear);
+
+            assert!(!result.context_changed);
+            assert_eq!(service.context().value.get(), "query");
+        }
     }
 
     #[test]
@@ -1203,6 +1235,7 @@ mod tests {
         let result = svc.set_props(props().debounce(Duration::from_millis(500)));
 
         assert!(result.pending_effects.is_empty());
+        assert!(!svc.context().debounce_pending);
     }
 
     #[test]
@@ -1390,6 +1423,66 @@ mod tests {
                 "part_attrs disagrees with explicit accessor"
             );
         }
+    }
+
+    #[test]
+    fn search_input_label_attrs_points_to_input() {
+        let service = service(props());
+
+        let api = service.connect(&|_| {});
+
+        let attrs = api.label_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Id), Some("search-label"));
+        assert_eq!(attrs.get(&HtmlAttr::For), Some("search-input"));
+    }
+
+    #[test]
+    fn search_input_props_output_changed_covers_each_render_field() {
+        let old = props();
+
+        assert!(!props_output_changed(&old, &old));
+
+        let mut new = old.clone();
+
+        new.disabled = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.readonly = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.invalid = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.required = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.placeholder = Some("Find".to_string());
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.name = Some("q".to_string());
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.form = Some("form".to_string());
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.debounce = Some(Duration::from_millis(100));
+
+        assert!(props_output_changed(&old, &new));
     }
 
     #[test]

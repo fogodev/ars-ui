@@ -1088,6 +1088,18 @@ mod tests {
     }
 
     #[test]
+    fn password_input_label_attrs_points_to_input() {
+        let service = service(props());
+
+        let api = service.connect(&|_| {});
+
+        let attrs = api.label_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Id), Some("pwd-label"));
+        assert_eq!(attrs.get(&HtmlAttr::For), Some("pwd-input"));
+    }
+
+    #[test]
     fn password_input_disabled_root_carries_data_attrs() {
         let service = service(
             props()
@@ -1289,16 +1301,18 @@ mod tests {
         let api = service.connect(&send);
 
         api.on_input_focus(true);
+        api.on_input_change("secret".to_string());
         api.on_input_blur();
         api.on_toggle_click();
 
-        assert_eq!(count.get(), 3);
+        assert_eq!(count.get(), 4);
 
         let events = received.borrow();
 
         assert_eq!(events[0], Event::Focus { is_keyboard: true });
-        assert_eq!(events[1], Event::Blur);
-        assert_eq!(events[2], Event::ToggleVisibility);
+        assert_eq!(events[1], Event::Change("secret".to_string()));
+        assert_eq!(events[2], Event::Blur);
+        assert_eq!(events[3], Event::ToggleVisibility);
     }
 
     #[test]

@@ -1496,6 +1496,10 @@ mod tests {
         }
     }
 
+    fn string_vec(values: &[&str]) -> Vec<String> {
+        values.iter().map(ToString::to_string).collect()
+    }
+
     #[test]
     fn pin_input_initial_state_is_idle_with_empty_cells() {
         let svc = service(props());
@@ -1519,6 +1523,90 @@ mod tests {
 
         assert_eq!(svc.state(), &State::Completed);
         assert!(svc.context().complete);
+    }
+
+    #[test]
+    fn pin_input_private_helpers_cover_next_empty_and_output_props() {
+        let values = string_vec(&["1", "", "3", ""]);
+
+        assert_eq!(next_empty_index(&values, 0), Some(1));
+        assert_eq!(next_empty_index(&values, 1), Some(3));
+        assert_eq!(next_empty_index(&values, 3), None);
+
+        let old = props();
+
+        assert!(!props_output_changed(&old, &old));
+
+        let mut new = old.clone();
+
+        new.length = 5;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.disabled = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.invalid = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.otp = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.mask = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.placeholder = Some("*".to_string());
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.mode = Mode::Alphanumeric;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.name = Some("pin".to_string());
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.form = Some("login".to_string());
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.required = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.readonly = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.select_on_focus = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.blur_on_complete = true;
+
+        assert!(props_output_changed(&old, &new));
+
+        new = old.clone();
+        new.dir = Direction::Rtl;
+
+        assert!(props_output_changed(&old, &new));
     }
 
     #[test]
@@ -1568,6 +1656,28 @@ mod tests {
         assert_eq!(svc.context().focused_index, Some(1));
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, Effect::FocusCell);
+    }
+
+    #[test]
+    fn pin_input_input_char_completes_when_last_empty_cell_fills() {
+        let mut svc =
+            service(props().default_value(vec!["1".into(), "2".into(), "3".into(), String::new()]));
+
+        drop(svc.send(Event::Focus {
+            index: 3,
+            is_keyboard: false,
+        }));
+        drop(svc.send(Event::InputChar {
+            index: 3,
+            char: '4',
+        }));
+
+        assert_eq!(svc.state(), &State::Completed);
+        assert!(svc.context().complete);
+        assert_eq!(
+            svc.context().value.get(),
+            &string_vec(&["1", "2", "3", "4"])
+        );
     }
 
     #[test]
@@ -1906,11 +2016,13 @@ mod tests {
         // one cell tabbable so keyboard users can enter the group — otherwise
         // every cell carries `tabindex="-1"` and the group is unreachable.
         let svc = service(props());
+
         assert_eq!(svc.context().focused_index, None);
 
         let api = svc.connect(&|_| {});
 
         assert_eq!(api.input_attrs(0).get(&HtmlAttr::TabIndex), Some("0"));
+
         for index in 1..4 {
             assert_eq!(
                 api.input_attrs(index).get(&HtmlAttr::TabIndex),
@@ -2012,6 +2124,7 @@ mod tests {
         assert_eq!(svc.context().value.get().len(), 2);
 
         let api = svc.connect(&|_| {});
+
         assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some("12"));
     }
 
@@ -2092,12 +2205,84 @@ mod tests {
             index: 3,
             is_keyboard: false,
         }));
+
         assert_eq!(svc.state(), &State::Focused { index: 3 });
 
         drop(svc.set_props(props().length(2)));
 
         assert_eq!(svc.state(), &State::Idle);
         assert_eq!(svc.context().focused_index, None);
+    }
+
+    #[test]
+    fn pin_input_set_props_invalidates_focus_at_exact_new_length() {
+        let mut svc = service(props().length(4));
+
+        drop(svc.send(Event::Focus {
+            index: 3,
+            is_keyboard: false,
+        }));
+
+        assert_eq!(svc.state(), &State::Focused { index: 3 });
+
+        drop(svc.set_props(props().length(3)));
+
+        assert_eq!(svc.state(), &State::Idle);
+        assert_eq!(svc.context().focused_index, None);
+    }
+
+    #[test]
+    fn pin_input_set_props_recomputes_completion_for_full_and_zero_length_values() {
+        let mut full_svc = service(props().length(4).default_value(vec![
+            "1".into(),
+            "2".into(),
+            "3".into(),
+            String::new(),
+        ]));
+
+        assert_eq!(full_svc.state(), &State::Idle);
+
+        drop(
+            full_svc.set_props(
+                props()
+                    .length(4)
+                    .default_value(vec!["1".into(), "2".into(), "3".into(), String::new()])
+                    .value(vec!["1".into(), "2".into(), "3".into(), "4".into()]),
+            ),
+        );
+
+        assert_eq!(full_svc.state(), &State::Completed);
+        assert!(full_svc.context().complete);
+
+        let mut empty_svc = service(props().length(1).default_value(vec!["1".into()]));
+
+        assert_eq!(empty_svc.state(), &State::Completed);
+
+        drop(empty_svc.set_props(props().length(0).default_value(vec!["1".into()])));
+
+        assert_eq!(empty_svc.state(), &State::Idle);
+        assert!(!empty_svc.context().complete);
+        assert!(empty_svc.context().value.get().is_empty());
+    }
+
+    #[test]
+    fn pin_input_set_props_preserves_completion_for_full_existing_value() {
+        let mut svc =
+            service(props().default_value(vec!["1".into(), "2".into(), "3".into(), "4".into()]));
+
+        assert_eq!(svc.state(), &State::Completed);
+        assert!(svc.context().complete);
+
+        drop(
+            svc.set_props(
+                props()
+                    .default_value(vec!["1".into(), "2".into(), "3".into(), "4".into()])
+                    .name("otp"),
+            ),
+        );
+
+        assert_eq!(svc.state(), &State::Completed);
+        assert!(svc.context().complete);
     }
 
     #[test]
@@ -2119,6 +2304,7 @@ mod tests {
         assert_eq!(svc.context().focused_index, None);
 
         let api = svc.connect(&|_| {});
+
         assert_eq!(api.input_attrs(0).get(&HtmlAttr::TabIndex), Some("0"));
         assert_eq!(api.input_attrs(1).get(&HtmlAttr::TabIndex), Some("-1"));
     }
@@ -2336,6 +2522,7 @@ mod tests {
         assert!(api.on_cell_keydown(1, &keyboard_event(KeyboardKey::ArrowRight, false)));
 
         let events = received.borrow();
+
         assert_eq!(events[0], Event::FocusNext);
         assert_eq!(events[1], Event::FocusPrev);
     }
@@ -2344,6 +2531,7 @@ mod tests {
     fn pin_input_clear_cell_on_filled_clears_without_navigation() {
         let mut svc =
             service(props().default_value(vec!["1".into(), "2".into(), "3".into(), "4".into()]));
+
         drop(svc.send(Event::Focus {
             index: 2,
             is_keyboard: false,
@@ -2366,6 +2554,7 @@ mod tests {
             String::new(),
             String::new(),
         ]));
+
         drop(svc.send(Event::Focus {
             index: 2,
             is_keyboard: false,
@@ -2388,6 +2577,7 @@ mod tests {
 
         for key in [KeyboardKey::Backspace, KeyboardKey::Delete] {
             let data = keyboard_event(key, false);
+
             assert!(
                 !api.on_cell_keydown(0, &data),
                 "readonly must not claim {key:?} as handled"
@@ -2402,6 +2592,7 @@ mod tests {
 
         for key in [KeyboardKey::Backspace, KeyboardKey::Delete] {
             let data = keyboard_event(key, false);
+
             assert!(!api.on_cell_keydown(0, &data));
         }
     }
@@ -2433,6 +2624,28 @@ mod tests {
         assert_eq!(svc.context().value.get().len(), 6);
         assert_eq!(svc.context().value.get()[4], "5");
         assert_eq!(svc.context().value.get()[5], "6");
+    }
+
+    #[test]
+    fn pin_input_static_attrs_expose_label_description_and_error_ids() {
+        let svc = service(props());
+
+        let api = svc.connect(&|_| {});
+
+        assert_eq!(api.label_attrs().get(&HtmlAttr::Id), Some("pin-label"));
+        assert_eq!(
+            api.description_attrs().get(&HtmlAttr::Id),
+            Some("pin-description")
+        );
+        assert_eq!(
+            api.error_message_attrs().get(&HtmlAttr::Id),
+            Some("pin-error-message")
+        );
+        assert_eq!(
+            api.error_message_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::Live)),
+            Some("polite")
+        );
     }
 
     #[test]
