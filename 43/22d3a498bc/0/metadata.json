@@ -1,0 +1,89 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "4322d3a498bc",
+  "session_id": "019e4a69-8d84-7753-89a0-ec5d2e651f96",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-21T18:49:37.324446Z",
+  "branch": "t3code/61dbf109",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/overlay/drawer/mod.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "93881f26c213",
+  "checkpoint_transcript_start": 1225,
+  "transcript_lines_at_start": 1225,
+  "token_usage": {
+    "input_tokens": 246763,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 13181440,
+    "output_tokens": 14041,
+    "api_call_count": 69
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Fix Codex review findings on PR #664 (Drawer component) by adding regression tests and patching the state machine transition logic.",
+    "outcome": "All four Codex review findings addressed with regression tests and a transition patch; mutation testing passed clean (188 mutants, 0 missed); follow-up commit pushed to the PR branch.",
+    "learnings": {
+      "repo": [
+        "Drawer state machine requires SyncProps to be enqueued before open/close events so that controlled prop sync runs first.",
+        "Drag-end nearest-snap resolution must convert dismissal progress into visible snap height before finding the nearest snap point.",
+        "Snap sync should preserve the active snap index unless the snap-point set itself changes; no-op snap transitions must not emit SnapChange.",
+        "The repo uses cargo-mutants for mutation testing and cargo-insta for snapshot testing; both are part of the required pre-push gate.",
+        "PR workflow requires applying a 'snapshot-reviewed' label when .snap files are added, posting a '@codex review' trigger comment, and polling for Codex review completion before merging.",
+        "Commit trailers use 'Co-authored-by: OpenAI Codex <codex@openai.com>' for AI-assisted commits."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/overlay/drawer/mod.rs",
+          "line": 720,
+          "end_line": 735,
+          "finding": "Snap-change predicate logic; mutation testing found surviving mutants here around 'did snap actually change' edge cases (same index/changed height, changed index/same height)."
+        },
+        {
+          "path": "crates/ars-components/src/overlay/drawer/mod.rs",
+          "line": 912,
+          "end_line": 924,
+          "finding": "Drag-end nearest-snap math corrected to convert dismiss progress to visible snap height before resolution."
+        },
+        {
+          "path": "crates/ars-components/src/overlay/drawer/mod.rs",
+          "line": 1888,
+          "end_line": 1910,
+          "finding": "Transition patch area for controlled prop sync ordering (SyncProps before open/close)."
+        }
+      ],
+      "workflow": [
+        "Mutation testing (cargo-mutants) can abort with an internal 'interrupted' build-phase error that is not a code failure; rerunning resolves it.",
+        "Waiting for Codex review requires polling both PR reactions (👀 = in progress) and review threads; reactions appear before threads.",
+        "cargo llvm-cov and proptest are run as part of the review-fix validation suite before committing follow-up changes.",
+        "CI matrix includes unit, integration, check, clippy, formatting, mutual exclusion, snapshots, and error-variant coverage checks."
+      ]
+    },
+    "friction": [
+      "Mutation testing run aborted mid-way with an internal 'interrupted' error, requiring a full rerun.",
+      "Codex review polling required multiple sleep/poll cycles (120s intervals) with no structured notification mechanism.",
+      "Locating the correct 'yeet' skill path required searching multiple plugin cache directories."
+    ],
+    "open_items": [
+      "Second Codex review pass (@codex review trigger) still pending after the follow-up commit was pushed.",
+      "33 unviable mutants in the mutation run were not triaged — worth reviewing to confirm they are genuinely unreachable.",
+      "CI checks on the follow-up commit were not yet confirmed green at session end."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-21T18:49:15.414509Z",
+    "agent_lines": 243,
+    "agent_removed": 27,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 243,
+    "total_lines_changed": 270,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
