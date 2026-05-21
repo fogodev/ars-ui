@@ -310,12 +310,20 @@ impl ars_core::Machine for Machine {
             }
 
             // ── Trap / Release ──────────────────────────────────────────
-            (State::Active { trapped: false }, Event::TrapFocus) => {
-                Some(TransitionPlan::to(State::Active { trapped: true }))
-            }
-            (State::Active { trapped: true }, Event::ReleaseTrap) => {
-                Some(TransitionPlan::to(State::Active { trapped: false }))
-            }
+            // Adapters drain ALL active effect cleanups when
+            // `state_changed` is true (see `ars-leptos::use_machine::
+            // handle_effects`), so the `Active{trapped:_}` ↔
+            // `Active{trapped:_}` boundary must re-emit
+            // `Effect::FocusTrapListener` for the adapter to reinstall
+            // the keydown trap that the cleanup drain just removed.
+            (State::Active { trapped: false }, Event::TrapFocus) => Some(
+                TransitionPlan::to(State::Active { trapped: true })
+                    .with_effect(PendingEffect::named(Effect::FocusTrapListener)),
+            ),
+            (State::Active { trapped: true }, Event::ReleaseTrap) => Some(
+                TransitionPlan::to(State::Active { trapped: false })
+                    .with_effect(PendingEffect::named(Effect::FocusTrapListener)),
+            ),
 
             // ── RestoreFocus ────────────────────────────────────────────
             // While `Active`, `RestoreFocus` is ignored by the wildcard
@@ -821,6 +829,56 @@ mod tests {
 
         assert!(result.state_changed);
         assert_eq!(service.state(), &State::Active { trapped: false });
+    }
+
+    #[test]
+    fn trap_focus_re_emits_focus_trap_listener_so_adapter_reinstalls_after_state_change() {
+        // Regression guard for Codex review #663: adapters drain ALL active
+        // effect cleanups whenever `state_changed` is true (see
+        // `ars-leptos::use_machine::handle_effects` line 607). If the
+        // `Active{trapped:false} → Active{trapped:true}` transition does
+        // NOT re-emit `Effect::FocusTrapListener`, the adapter tears down
+        // the keydown trap and never reinstalls it, silently breaking Tab
+        // trapping until a full deactivate/activate cycle.
+        let mut service = service(test_props());
+        drop(service.send(Event::Activate {
+            trapped: false,
+            saved_focus_id: None,
+        }));
+
+        let result = service.send(Event::TrapFocus);
+
+        assert!(result.state_changed);
+        assert!(
+            effect_names(&result.pending_effects).contains(&Effect::FocusTrapListener),
+            "TrapFocus must re-emit Effect::FocusTrapListener so the adapter reinstalls \
+             the trap listener after the state-change-driven cleanup drain",
+        );
+    }
+
+    #[test]
+    fn release_trap_re_emits_focus_trap_listener_so_adapter_reinstalls_after_state_change() {
+        // Same regression class as
+        // `trap_focus_re_emits_focus_trap_listener_so_adapter_reinstalls_after_state_change`,
+        // but for the `Active{trapped:true} → Active{trapped:false}`
+        // direction. The trap listener semantically stays valid across
+        // both Active variants — its `trapped` check reads context — but
+        // the adapter still needs to be told to reinstall after the
+        // state-change cleanup drain.
+        let mut service = service(test_props());
+        drop(service.send(Event::Activate {
+            trapped: true,
+            saved_focus_id: None,
+        }));
+
+        let result = service.send(Event::ReleaseTrap);
+
+        assert!(result.state_changed);
+        assert!(
+            effect_names(&result.pending_effects).contains(&Effect::FocusTrapListener),
+            "ReleaseTrap must re-emit Effect::FocusTrapListener so the adapter reinstalls \
+             the trap listener after the state-change-driven cleanup drain",
+        );
     }
 
     #[test]
