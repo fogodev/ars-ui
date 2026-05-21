@@ -643,6 +643,10 @@ impl ars_core::Machine for Machine {
             (_, Event::SelectItem(key)) => select_plan(ctx, props, key.clone(), false),
 
             (_, Event::DeselectItem(key)) => {
+                if !ctx.items.contains_key(key) {
+                    return None;
+                }
+
                 let next = normalize_selection_state(
                     ctx.selection_state.deselect_from_all(key, &ctx.items),
                 );
@@ -655,6 +659,10 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::ToggleItem(key)) => {
+                if !ctx.items.contains_key(key) {
+                    return None;
+                }
+
                 let next =
                     normalize_selection_state(ctx.selection_state.toggle(key.clone(), &ctx.items));
 
@@ -745,7 +753,10 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::ItemActivated(key)) => {
-                if !ctx.items.contains_key(key) || ctx.selection_state.is_disabled(key) {
+                if ctx.disabled
+                    || !ctx.items.contains_key(key)
+                    || ctx.selection_state.is_disabled(key)
+                {
                     return None;
                 }
 
@@ -1318,7 +1329,7 @@ fn select_plan(
     key: Key,
     toggle: bool,
 ) -> Option<TransitionPlan<Machine>> {
-    if ctx.selection_state.is_disabled(&key) {
+    if !ctx.items.contains_key(&key) || ctx.selection_state.is_disabled(&key) {
         return None;
     }
     if toggle
@@ -1898,6 +1909,31 @@ mod tests {
 
         drop(listbox.send(Event::ToggleItem(key("alpha"))));
         assert_eq!(*listbox.context().selection.get(), selection::Set::All);
+    }
+
+    #[test]
+    fn stale_item_selection_events_do_not_mutate_selection() {
+        let mut listbox = service(
+            Props::new()
+                .id("lb")
+                .selection_mode(selection::Mode::Multiple)
+                .default_value(selection::Set::All),
+        );
+
+        drop(listbox.send(Event::DeselectItem(key("missing"))));
+        assert_eq!(*listbox.context().selection.get(), selection::Set::All);
+
+        drop(listbox.send(Event::ToggleItem(key("missing"))));
+        assert_eq!(*listbox.context().selection.get(), selection::Set::All);
+
+        let mut empty = service(
+            Props::new()
+                .id("empty")
+                .selection_mode(selection::Mode::Multiple),
+        );
+
+        drop(empty.send(Event::SelectItem(key("missing"))));
+        assert_eq!(*empty.context().selection.get(), selection::Set::Empty);
     }
 
     #[test]
@@ -2510,6 +2546,8 @@ mod tests {
 
         drop(service.send(Event::ItemActivated(key("bravo"))));
         drop(service.send(Event::ItemActivated(key("stale"))));
+        drop(service.set_props(Props::new().id("lb").disabled(true)));
+        drop(service.send(Event::ItemActivated(key("alpha"))));
 
         assert!(
             activated

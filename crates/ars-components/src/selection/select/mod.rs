@@ -684,6 +684,9 @@ impl ars_core::Machine for Machine {
                 if !ctx.multiple {
                     return None;
                 }
+                if !ctx.items.contains_key(key) {
+                    return None;
+                }
 
                 let next = normalize_selection_state(
                     ctx.selection_state.deselect_from_all(key, &ctx.items),
@@ -1275,13 +1278,16 @@ impl Api<'_> {
 
         attrs
             .set(HtmlAttr::Type, "hidden")
-            .set(HtmlAttr::Name, self.ctx.name.as_deref().unwrap_or(""))
             .set(
                 HtmlAttr::Value,
                 serialize_selection(self.ctx.selection.get()),
             )
             .set(HtmlAttr::TabIndex, "-1")
             .set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+
+        if let Some(name) = &self.ctx.name {
+            attrs.set(HtmlAttr::Name, name);
+        }
 
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -1504,7 +1510,7 @@ fn close_plan(props: &Props) -> TransitionPlan<Machine> {
 }
 
 fn select_item_plan(ctx: &Context, props: &Props, key: Key) -> Option<TransitionPlan<Machine>> {
-    if ctx.selection_state.is_disabled(&key) {
+    if !ctx.items.contains_key(&key) || ctx.selection_state.is_disabled(&key) {
         return None;
     }
 
@@ -1964,6 +1970,15 @@ mod tests {
             Some("all")
         );
 
+        let unnamed = make_service(Props::new().id("unnamed"));
+
+        assert!(
+            !unnamed
+                .connect(&|_| {})
+                .hidden_input_attrs()
+                .contains(&HtmlAttr::Name)
+        );
+
         let disabled = make_service(Props::new().id("disabled").disabled(true));
 
         assert_eq!(
@@ -2214,6 +2229,43 @@ mod tests {
         assert_eq!(
             *select.context().selection.get(),
             selection::Set::Multiple(BTreeSet::from([key("bravo"), key("charlie")]))
+        );
+    }
+
+    #[test]
+    fn stale_item_selection_events_do_not_mutate_selection_or_hidden_value() {
+        let mut select = make_service(
+            Props::new()
+                .id("sel")
+                .name("choice")
+                .multiple(true)
+                .selection_mode(selection::Mode::Multiple)
+                .default_value(selection::Set::All),
+        );
+
+        drop(select.send(Event::DeselectItem(key("missing"))));
+
+        assert_eq!(*select.context().selection.get(), selection::Set::All);
+        assert_eq!(
+            select
+                .connect(&|_| {})
+                .hidden_input_attrs()
+                .get(&HtmlAttr::Value),
+            Some("all")
+        );
+
+        let mut empty = make_service(Props::new().id("empty").name("choice"));
+
+        drop(empty.send(Event::Open));
+        drop(empty.send(Event::SelectItem(key("missing"))));
+
+        assert_eq!(*empty.context().selection.get(), selection::Set::Empty);
+        assert_eq!(
+            empty
+                .connect(&|_| {})
+                .hidden_input_attrs()
+                .get(&HtmlAttr::Value),
+            Some("")
         );
     }
 
