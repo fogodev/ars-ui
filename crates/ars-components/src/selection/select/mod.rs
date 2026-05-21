@@ -577,8 +577,15 @@ impl ars_core::Machine for Machine {
             .clone()
             .unwrap_or_else(|| props.default_value.clone());
 
-        let mut selection_state =
-            selection::State::new(props.selection_mode, props.selection_behavior);
+        let effective_multiple =
+            props.multiple || props.selection_mode == selection::Mode::Multiple;
+        let effective_mode = if effective_multiple {
+            selection::Mode::Multiple
+        } else {
+            props.selection_mode
+        };
+
+        let mut selection_state = selection::State::new(effective_mode, props.selection_behavior);
 
         selection_state.disabled_behavior = props.disabled_behavior;
         selection_state.disabled_keys = props.disabled_keys.clone();
@@ -601,7 +608,7 @@ impl ars_core::Machine for Machine {
                 readonly: props.readonly,
                 required: props.required,
                 invalid: props.invalid,
-                multiple: props.multiple,
+                multiple: effective_multiple,
                 focused: false,
                 focus_visible: false,
                 name: props.name.clone(),
@@ -687,9 +694,11 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                let next = ctx.selection_state.deselect_from_all(key, &ctx.items);
+                let next = normalize_selection_state(
+                    ctx.selection_state.deselect_from_all(key, &ctx.items),
+                );
 
-                if props.disallow_empty_selection && next.selected_keys.is_empty() {
+                if props.disallow_empty_selection && selection_is_empty(&next.selected_keys) {
                     return None;
                 }
 
@@ -1460,6 +1469,11 @@ fn select_item_plan(ctx: &Context, props: &Props, key: Key) -> Option<Transition
     } else {
         ctx.selection_state.select(key)
     };
+    let next = normalize_selection_state(next);
+
+    if props.disallow_empty_selection && selection_is_empty(&next.selected_keys) {
+        return None;
+    }
 
     let selected = next.selected_keys.clone();
     let close = props.close_on_select.unwrap_or(!ctx.multiple);
@@ -1486,6 +1500,7 @@ fn select_item_plan(ctx: &Context, props: &Props, key: Key) -> Option<Transition
 }
 
 fn apply_selection_plan(next: selection::State) -> TransitionPlan<Machine> {
+    let next = normalize_selection_state(next);
     let selected = next.selected_keys.clone();
 
     TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -1621,7 +1636,25 @@ fn valid_highlight(ctx: &Context) -> Option<&Key> {
 }
 
 fn is_focusable_key(ctx: &Context, key: &Key) -> bool {
-    ctx.items.get(key).is_some_and(Node::is_focusable) && !ctx.selection_state.is_disabled(key)
+    ctx.items.get(key).is_some_and(Node::is_focusable)
+        && (!ctx.selection_state.is_disabled(key)
+            || ctx.selection_state.disabled_behavior == DisabledBehavior::FocusOnly)
+}
+
+fn normalize_selection_state(mut state: selection::State) -> selection::State {
+    if selection_is_empty(&state.selected_keys) {
+        state.selected_keys = selection::Set::Empty;
+    }
+
+    state
+}
+
+fn selection_is_empty(set: &selection::Set) -> bool {
+    match set {
+        selection::Set::Empty => true,
+        selection::Set::Multiple(keys) => keys.is_empty(),
+        _ => false,
+    }
 }
 
 fn serialize_selection(selection: &selection::Set) -> String {
@@ -1692,6 +1725,18 @@ mod tests {
                 "Charlie",
                 super::Item {
                     label: "Charlie".into(),
+                },
+            )
+            .build()
+    }
+
+    fn single_item_collection() -> ars_collections::StaticCollection<super::Item> {
+        CollectionBuilder::new()
+            .item(
+                key("alpha"),
+                "Alpha",
+                super::Item {
+                    label: "Alpha".into(),
                 },
             )
             .build()
@@ -2037,6 +2082,95 @@ mod tests {
             *select.context().selection.get(),
             selection::Set::Multiple(BTreeSet::from([key("bravo"), key("charlie")]))
         );
+    }
+
+    #[test]
+    fn disallow_empty_selection_blocks_empty_toggle_paths() {
+        let mut only_selected = make_service(
+            Props::new()
+                .id("sel")
+                .multiple(true)
+                .default_value(selection::Set::Single(key("alpha")))
+                .disallow_empty_selection(true),
+        );
+
+        drop(only_selected.send(Event::Open));
+        drop(only_selected.send(Event::SelectItem(key("alpha"))));
+        assert_eq!(
+            *only_selected.context().selection.get(),
+            selection::Set::Single(key("alpha"))
+        );
+
+        let mut all_singleton = make_service(
+            Props::new()
+                .id("sel")
+                .multiple(true)
+                .default_value(selection::Set::All)
+                .disallow_empty_selection(true),
+        );
+
+        drop(all_singleton.send(Event::UpdateItems(single_item_collection())));
+        drop(all_singleton.send(Event::DeselectItem(key("alpha"))));
+        assert_eq!(
+            *all_singleton.context().selection.get(),
+            selection::Set::All
+        );
+
+        drop(all_singleton.send(Event::Open));
+        drop(all_singleton.send(Event::SelectItem(key("alpha"))));
+        assert_eq!(
+            *all_singleton.context().selection.get(),
+            selection::Set::All
+        );
+    }
+
+    #[test]
+    fn focus_only_disabled_items_keep_active_descendant() {
+        let mut select = make_service(
+            Props::new()
+                .id("sel")
+                .disabled_keys(BTreeSet::from([key("bravo")]))
+                .disabled_behavior(DisabledBehavior::FocusOnly),
+        );
+
+        drop(select.send(Event::Open));
+        drop(select.send(Event::HighlightItem(Some(key("bravo")))));
+
+        assert_eq!(
+            select
+                .connect(&|_| {})
+                .trigger_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ActiveDescendant)),
+            Some("sel-item-bravo")
+        );
+    }
+
+    #[test]
+    fn multiple_prop_normalizes_selection_mode_and_close_behavior() {
+        let mut select = make_service(Props::new().id("sel").multiple(true));
+
+        drop(select.send(Event::Open));
+        drop(select.send(Event::SelectItem(key("alpha"))));
+        drop(select.send(Event::SelectItem(key("bravo"))));
+
+        assert_eq!(
+            *select.context().selection.get(),
+            selection::Set::Multiple(BTreeSet::from([key("alpha"), key("bravo")]))
+        );
+        assert_eq!(select.state(), &State::Open);
+        assert!(select.context().multiple);
+
+        let mut mode_select = make_service(
+            Props::new()
+                .id("sel")
+                .selection_mode(selection::Mode::Multiple),
+        );
+
+        drop(mode_select.send(Event::Open));
+        drop(mode_select.send(Event::SelectItem(key("alpha"))));
+
+        assert_eq!(mode_select.state(), &State::Open);
+        assert!(mode_select.context().multiple);
     }
 
     #[test]

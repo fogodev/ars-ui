@@ -635,9 +635,11 @@ impl ars_core::Machine for Machine {
             (_, Event::SelectItem(key)) => select_plan(ctx, props, key.clone(), false),
 
             (_, Event::DeselectItem(key)) => {
-                let next = ctx.selection_state.deselect_from_all(key, &ctx.items);
+                let next = normalize_selection_state(
+                    ctx.selection_state.deselect_from_all(key, &ctx.items),
+                );
 
-                if props.disallow_empty_selection && next.selected_keys.is_empty() {
+                if props.disallow_empty_selection && selection_is_empty(&next.selected_keys) {
                     return None;
                 }
 
@@ -645,9 +647,10 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::ToggleItem(key)) => {
-                let next = ctx.selection_state.toggle(key.clone(), &ctx.items);
+                let next =
+                    normalize_selection_state(ctx.selection_state.toggle(key.clone(), &ctx.items));
 
-                if props.disallow_empty_selection && next.selected_keys.is_empty() {
+                if props.disallow_empty_selection && selection_is_empty(&next.selected_keys) {
                     return None;
                 }
 
@@ -1279,11 +1282,17 @@ fn select_plan(
     } else {
         ctx.selection_state.select(key)
     };
+    let next = normalize_selection_state(next);
+
+    if toggle && props.disallow_empty_selection && selection_is_empty(&next.selected_keys) {
+        return None;
+    }
 
     Some(apply_selection_plan(next))
 }
 
 fn apply_selection_plan(next: selection::State) -> TransitionPlan<Machine> {
+    let next = normalize_selection_state(next);
     let selected = next.selected_keys.clone();
     TransitionPlan::context_only(move |ctx: &mut Context| {
         ctx.selection.set(selected.clone());
@@ -1297,6 +1306,22 @@ fn set_from_keys(keys: BTreeSet<Key>) -> selection::Set {
         selection::Set::Empty
     } else {
         selection::Set::Multiple(keys)
+    }
+}
+
+fn normalize_selection_state(mut state: selection::State) -> selection::State {
+    if selection_is_empty(&state.selected_keys) {
+        state.selected_keys = selection::Set::Empty;
+    }
+
+    state
+}
+
+fn selection_is_empty(set: &selection::Set) -> bool {
+    match set {
+        selection::Set::Empty => true,
+        selection::Set::Multiple(keys) => keys.is_empty(),
+        _ => false,
     }
 }
 
@@ -1387,7 +1412,9 @@ fn valid_highlight(ctx: &Context) -> Option<&Key> {
 }
 
 fn is_focusable_key(ctx: &Context, key: &Key) -> bool {
-    ctx.items.get(key).is_some_and(Node::is_focusable) && !ctx.selection_state.is_disabled(key)
+    ctx.items.get(key).is_some_and(Node::is_focusable)
+        && (!ctx.selection_state.is_disabled(key)
+            || ctx.selection_state.disabled_behavior == DisabledBehavior::FocusOnly)
 }
 
 const fn resolved_arrow_key(
@@ -1461,6 +1488,18 @@ mod tests {
                 "Charlie",
                 super::Item {
                     label: "Charlie".into(),
+                },
+            )
+            .build()
+    }
+
+    fn single_item_collection() -> ars_collections::StaticCollection<super::Item> {
+        CollectionBuilder::new()
+            .item(
+                key("alpha"),
+                "Alpha",
+                super::Item {
+                    label: "Alpha".into(),
                 },
             )
             .build()
@@ -1667,6 +1706,64 @@ mod tests {
             *listbox.context().selection.get(),
             selection::Set::Multiple(BTreeSet::from([key("bravo"), key("charlie")]))
         );
+    }
+
+    #[test]
+    fn disallow_empty_selection_allows_toggle_from_all_when_items_remain() {
+        let mut listbox = service(
+            Props::new()
+                .id("lb")
+                .selection_mode(selection::Mode::Multiple)
+                .default_value(selection::Set::All)
+                .disallow_empty_selection(true),
+        );
+
+        drop(listbox.send(Event::ToggleItem(key("alpha"))));
+
+        assert_eq!(
+            *listbox.context().selection.get(),
+            selection::Set::Multiple(BTreeSet::from([key("bravo"), key("charlie")]))
+        );
+    }
+
+    #[test]
+    fn disallow_empty_selection_blocks_singleton_deselect_from_all() {
+        let mut listbox = service(
+            Props::new()
+                .id("lb")
+                .selection_mode(selection::Mode::Multiple)
+                .default_value(selection::Set::All)
+                .disallow_empty_selection(true),
+        );
+
+        drop(listbox.send(Event::UpdateItems(single_item_collection())));
+        drop(listbox.send(Event::DeselectItem(key("alpha"))));
+        assert_eq!(*listbox.context().selection.get(), selection::Set::All);
+
+        drop(listbox.send(Event::ToggleItem(key("alpha"))));
+        assert_eq!(*listbox.context().selection.get(), selection::Set::All);
+    }
+
+    #[test]
+    fn focus_only_disabled_items_keep_active_descendant() {
+        let mut listbox = service(
+            Props::new()
+                .id("lb")
+                .disabled_keys(BTreeSet::from([key("bravo")]))
+                .disabled_behavior(DisabledBehavior::FocusOnly),
+        );
+
+        drop(listbox.send(Event::Focus { is_keyboard: true }));
+        drop(listbox.send(Event::HighlightItem(Some(key("bravo")))));
+
+        assert_eq!(
+            listbox
+                .connect(&|_| {})
+                .content_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ActiveDescendant)),
+            Some("lb-item-bravo")
+        );
+        assert_eq!(*listbox.context().selection.get(), selection::Set::Empty);
     }
 
     #[test]
