@@ -10,7 +10,7 @@ source_foundation: foundation/09-adapter-dioxus.md
 
 ## 1. Purpose and Adapter Scope
 
-This spec maps the core [`Drawer`](../../components/overlay/drawer.md) machine to Dioxus 0.7.x. The adapter owns compound component rendering (Drawer through DragHandle), portal rendering into the `ArsProvider` portal root, focus-scope activation via `FocusScope`, scroll-lock management, inert-attribute management via `dialog_stack_push`/`dialog_stack_pop`, dismissable outside-interaction detection via `Dismissable`, z-index allocation via `ZIndexAllocator`, backdrop sibling rendering, CSS transform-based slide animation coordination via `Presence`, drag/swipe gesture wiring on the content and drag-handle elements, snap-point keyboard navigation, and `aria-roledescription` semantic repair for screen readers. On Desktop and Mobile targets, drag gestures use platform-appropriate pointer events and scroll-lock behavior degrades gracefully.
+This spec maps the core [`Drawer`](../../components/overlay/drawer.md) machine to Dioxus 0.7.x. The adapter owns compound component rendering (Drawer through DragHandle), portal rendering into the `ArsProvider` portal root, focus-scope activation via `FocusScope`, scroll-lock management, inert-attribute management via `dialog_stack_push`/`dialog_stack_pop`, dismissable outside-interaction detection via `Dismissable`, z-index allocation via `ZIndexAllocator`, backdrop sibling rendering, CSS transform-based slide animation coordination via `Presence`, raw drag/swipe gesture wiring on the content and drag-handle elements, normalized offset/velocity sampling for `DragEnd`, and applying the core-returned ARIA and data attributes. On Desktop and Mobile targets, drag gestures use platform-appropriate pointer events and scroll-lock behavior degrades gracefully.
 
 ## 2. Public Adapter API
 
@@ -147,9 +147,9 @@ pub mod drawer {
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with the core `drawer::Props`.
-- Event parity: Open, Close, Toggle, DragStart, DragMove, DragEnd, SnapTo, CloseOnBackdropClick, CloseOnEscape all map to adapter-driven UI events.
+- Event parity: Open, Close, Toggle, DragStart, DragMove, `DragEnd { offset, velocity }`, SnapTo, `SetZIndex { request_id, z_index }`, CloseOnBackdropClick, CloseOnEscape, RegisterTitle, UnregisterTitle, RegisterDescription, UnregisterDescription, and SyncProps all map to adapter-driven UI events or adapter feedback.
 - Structure parity: all twelve parts (Root, Trigger, Backdrop, Positioner, Content, Title, Description, Header, Body, Footer, CloseTrigger, DragHandle) are rendered as compound child components.
-- Placement resolution: logical Start/End placements resolve to physical Left/Right based on `dir` prop, using `resolve_placement()`.
+- Placement resolution: the core resolves logical Start/End placements to physical Left/Right from `Props::dir`; the adapter supplies the document `Direction` when constructing or syncing props.
 
 ## 4. Part Mapping
 
@@ -166,18 +166,18 @@ pub mod drawer {
 | Body                  | optional  | `<div>` element          | consumer-composed | `api.body_attrs()`          | Structural layout part.                                                       |
 | Footer                | optional  | `<div>` element          | consumer-composed | `api.footer_attrs()`        | Structural layout part.                                                       |
 | CloseTrigger          | optional  | native `<button>`        | consumer-composed | `api.close_trigger_attrs()` | `aria-label` from `Messages.close_label`.                                     |
-| DragHandle            | optional  | `<div>` element          | consumer-composed | `api.drag_handle_attrs()`   | `role="slider"` when snap points configured; keyboard snap navigation target. |
+| DragHandle            | optional  | `<div>` element          | consumer-composed | `api.drag_handle_attrs()`   | `role="slider"` with accessible name and `tabindex="0"` when bottom-sheet snap points are active; keyboard snap navigation target. |
 
 ## 5. Attr Merge and Ownership Rules
 
-| Target node | Core attrs                                                                                                           | Adapter-owned attrs                                                   | Consumer attrs           | Merge order                                                             | Ownership notes                                         |
-| ----------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------- | ------------------------------------------------------- |
-| Root        | `api.root_attrs()` (scope, part, state)                                                                              | none                                                                  | consumer root attrs      | core scope and state attrs win; `class`/`style` merge additively        | adapter-owned container                                 |
-| Trigger     | `api.trigger_attrs()` (scope, part, aria-haspopup, aria-expanded)                                                    | none                                                                  | consumer trigger attrs   | core ARIA attrs win; handlers compose around Toggle                     | consumer-composed inside adapter context                |
-| Backdrop    | `api.backdrop_attrs()` (scope, part, aria-hidden, inert)                                                             | click handler                                                         | consumer decoration only | core dismissal semantics win                                            | adapter-owned; click handler sends CloseOnBackdropClick |
-| Positioner  | `api.positioner_attrs()` (scope, part)                                                                               | CSS transform style for slide direction                               | consumer decoration only | adapter CSS transform wins for positioning                              | adapter-owned sliding container                         |
-| Content     | `api.content_attrs()` (role, aria-modal, aria-roledescription, aria-labelledby, aria-describedby, data-ars-dragging) | keydown handler, pointer/touch handlers for drag                      | consumer content attrs   | core ARIA attrs win; handlers compose; `class`/`style` merge additively | adapter-owned dialog surface                            |
-| DragHandle  | `api.drag_handle_attrs()` (scope, part)                                                                              | slider ARIA attrs when snap points configured, pointer/touch handlers | consumer decoration only | adapter slider attrs win when snap points active                        | adapter-owned drag interaction surface                  |
+| Target node | Core attrs                                                                                                                                                           | Adapter-owned attrs                              | Consumer attrs           | Merge order                                                                  | Ownership notes                                         |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Root        | `api.root_attrs()` (scope, part, state)                                                                                                                              | none                                             | consumer root attrs      | core scope and state attrs win; `class`/`style` merge additively             | adapter-owned container                                 |
+| Trigger     | `api.trigger_attrs()` (scope, part, aria-haspopup, aria-expanded)                                                                                                    | none                                             | consumer trigger attrs   | core ARIA attrs win; handlers compose around Toggle                          | consumer-composed inside adapter context                |
+| Backdrop    | `api.backdrop_attrs()` (scope, part, aria-hidden, inert only when backdrop dismissal is disabled)                                                                    | click handler                                    | consumer decoration only | core dismissal semantics win                                                 | adapter-owned; click handler sends CloseOnBackdropClick |
+| Positioner  | `api.positioner_attrs()` (scope, part, state, placement, closed transform, optional z-index custom property)                                                         | live drag CSS transform style                    | consumer decoration only | core placement/z-index attrs win; live drag transform wins while dragging    | adapter-owned sliding container                         |
+| Content     | `api.content_attrs()` (role, aria-modal, aria-roledescription, aria-labelledby, aria-describedby, state, placement, dragging, tabindex, snap touch/overscroll attrs) | keydown handler, pointer/touch handlers for drag | consumer content attrs   | core ARIA/data attrs win; handlers compose; `class`/`style` merge additively | adapter-owned dialog surface                            |
+| DragHandle  | `api.drag_handle_attrs()` (scope, part, optional slider ARIA attrs and tabindex when bottom-sheet snap points are active)                                            | pointer/touch handlers                           | consumer decoration only | core slider attrs win when bottom-sheet snap points are active               | adapter-owned drag interaction surface                  |
 
 - Consumers must not override `role`, `aria-modal`, `aria-roledescription`, or `aria-labelledby`/`aria-describedby` on Content.
 - Consumers must not override slider ARIA attrs on DragHandle when snap points are configured.
@@ -198,44 +198,44 @@ The drawer composes:
 
 ## 7. Prop Sync and Event Mapping
 
-Controlled `open` uses a deferred `use_effect` watcher that sends `Open`/`Close` events on change. Switching between controlled and uncontrolled mode after mount is not supported. `default_open` is init-only.
+Controlled `open` uses a deferred `use_effect` watcher that sends `Open`/`Close` events on change. Other context-backed props sync through the core `SyncProps` path when the adapter receives changed props. Switching between controlled and uncontrolled mode after mount is not supported. `default_open` is init-only.
 
 | Adapter prop        | Mode                        | Sync trigger            | Machine event / update path | Visible effect                                    | Notes                                                          |
 | ------------------- | --------------------------- | ----------------------- | --------------------------- | ------------------------------------------------- | -------------------------------------------------------------- |
 | `open`              | controlled                  | prop change after mount | `Open` / `Close`            | opens or closes the drawer                        | deferred `use_effect` (same pattern as Dialog controlled open) |
 | `default_open`      | uncontrolled internal state | initial render only     | initial machine props       | seeds initial open state                          | read once at initialization                                    |
-| `placement`         | non-reactive adapter prop   | render time only        | initial machine props       | determines slide direction and resolved side      | changes require remount                                        |
-| `dir`               | non-reactive adapter prop   | render time only        | initial machine props       | resolves logical Start/End to physical Left/Right | changes require remount                                        |
-| `snap_points`       | non-reactive adapter prop   | render time only        | initial machine props       | enables bottom-sheet behavior                     | changes require remount                                        |
-| `modal`             | non-reactive adapter prop   | render time only        | initial machine props       | controls focus trap, scroll lock, inert           | changes require remount                                        |
-| `close_on_backdrop` | non-reactive adapter prop   | render time only        | initial machine props       | enables/disables backdrop dismiss                 | changes require remount                                        |
-| `close_on_escape`   | non-reactive adapter prop   | render time only        | initial machine props       | enables/disables Escape dismiss                   | changes require remount                                        |
+| `placement`         | reactive adapter prop       | prop change after mount | `SyncProps`                 | determines slide direction and resolved side      | core re-resolves logical placement from `dir`                  |
+| `dir`               | reactive adapter prop       | prop change after mount | `SyncProps`                 | resolves logical Start/End to physical Left/Right | adapter supplies document `Direction`, core stores result      |
+| `snap_points`       | reactive adapter prop       | prop change after mount | `SyncProps`                 | enables bottom-sheet behavior                     | core normalizes fractions and clamps current snap              |
+| `modal`             | reactive adapter prop       | prop change after mount | `SyncProps`                 | controls focus trap, scroll lock, inert           | adapters apply effect intents emitted by the core              |
+| `close_on_backdrop` | reactive adapter prop       | prop change after mount | `SyncProps`                 | enables/disables backdrop dismiss                 | core guards backdrop close event                               |
+| `close_on_escape`   | reactive adapter prop       | prop change after mount | `SyncProps`                 | enables/disables Escape dismiss                   | core guards escape close event                                 |
 
-| UI event                                    | Preconditions                               | Machine event / callback path | Ordering notes                                              | Notes                                  |
-| ------------------------------------------- | ------------------------------------------- | ----------------------------- | ----------------------------------------------------------- | -------------------------------------- |
-| Trigger click                               | trigger rendered and interactive            | `Toggle`                      | fires before open-change callback                           | standard button activation             |
-| Backdrop click                              | drawer open and `close_on_backdrop` enabled | `CloseOnBackdropClick`        | containment check runs before close transition              | Dismissable-mediated when composed     |
-| Escape keydown on Content                   | drawer open and `close_on_escape` enabled   | `CloseOnEscape`               | Escape handling runs before notification callbacks          | topmost-only via dialog stack          |
-| CloseTrigger click                          | drawer open                                 | `Close`                       | fires before open-change callback                           | direct close path                      |
-| Pointer/touch down on Content or DragHandle | drawer open and drag enabled                | `DragStart(position)`         | sets Dragging state before subsequent moves                 | initiates swipe gesture tracking       |
-| Pointer/touch move during drag              | `state == Dragging(_)`                      | `DragMove(position)`          | updates drag position before visual feedback                | CSS transform updated to follow drag   |
-| Pointer/touch up during drag                | `state == Dragging(_)`                      | `DragEnd(position)`           | velocity-based snap resolution runs before state transition | may close drawer if threshold exceeded |
-| Arrow Up on DragHandle                      | drawer open with snap points                | `SnapTo(index)`               | fires after focus validation                                | moves to next larger snap point        |
-| Arrow Down on DragHandle                    | drawer open with snap points                | `SnapTo(index)`               | fires after focus validation                                | moves to next smaller snap point       |
-| Home on DragHandle                          | drawer open with snap points                | `SnapTo(last_index)`          | fires after focus validation                                | moves to largest snap point            |
-| End on DragHandle                           | drawer open with snap points                | `SnapTo(0)`                   | fires after focus validation                                | moves to smallest snap point           |
+| UI event                                    | Preconditions                               | Machine event / callback path  | Ordering notes                                            | Notes                                                                |
+| ------------------------------------------- | ------------------------------------------- | ------------------------------ | --------------------------------------------------------- | -------------------------------------------------------------------- |
+| Trigger click                               | trigger rendered and interactive            | `Toggle`                       | fires before open-change callback                         | standard button activation                                           |
+| Backdrop click                              | drawer open and `close_on_backdrop` enabled | `CloseOnBackdropClick`         | containment check runs before close transition            | Dismissable-mediated when composed                                   |
+| Escape keydown on Content                   | drawer open and `close_on_escape` enabled   | `CloseOnEscape`                | Escape handling runs before notification callbacks        | topmost-only via dialog stack                                        |
+| CloseTrigger click                          | drawer open                                 | `Close`                        | fires before open-change callback                         | direct close path                                                    |
+| Pointer/touch down on Content or DragHandle | drawer open and drag enabled                | `DragStart(position)`          | sets Dragging state before subsequent moves               | initiates swipe gesture tracking                                     |
+| Pointer/touch move during drag              | `state == Dragging(_)`                      | `DragMove(position)`           | updates drag position before visual feedback              | CSS transform updated to follow drag                                 |
+| Pointer/touch up during drag                | `state == Dragging(_)`                      | `DragEnd { offset, velocity }` | core snap/dismiss resolution runs before state transition | offset is normalized, velocity points toward dismissal when positive |
+| Arrow Up on DragHandle                      | drawer open with bottom snap points         | `SnapTo(index)`                | fires after focus validation                              | moves to next larger snap point                                      |
+| Arrow Down on DragHandle                    | drawer open with bottom snap points         | `SnapTo(index)`                | fires after focus validation                              | moves to next smaller snap point                                     |
+| Home on DragHandle                          | drawer open with bottom snap points         | `SnapTo(0)`                    | fires after focus validation                              | moves to `aria-valuemin` / minimum snap index                        |
+| End on DragHandle                           | drawer open with bottom snap points         | `SnapTo(last_index)`           | fires after focus validation                              | moves to `aria-valuemax` / maximum snap index                        |
 
 ## 8. Registration and Cleanup Contract
 
-| Registered entity      | Registration trigger               | Identity key       | Cleanup trigger                               | Cleanup action                                                   | Notes                                                 |
-| ---------------------- | ---------------------------------- | ------------------ | --------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------- |
-| dialog stack entry     | drawer opens (modal)               | drawer instance ID | drawer closes or component cleanup            | `dialog_stack_pop(id)` and re-apply inert for new top            | shared with Dialog                                    |
-| scroll lock            | drawer opens with `prevent_scroll` | drawer instance ID | drawer closes or component cleanup            | restore body scroll position and overflow                        | nested drawer inherits outermost lock                 |
-| focus scope            | drawer opens (modal)               | drawer instance ID | drawer closes or component cleanup            | deactivate focus trap, restore focus to trigger or `final_focus` | FocusScope stacking for nested overlays               |
-| z-index allocation     | portal content mounts              | drawer instance ID | portal content unmounts or component cleanup  | release allocated z-index                                        | via ZIndexAllocator context                           |
-| Dismissable listeners  | drawer opens on the client         | drawer instance ID | drawer closes or component cleanup            | remove document-level pointer/focus/Escape listeners             | client-only (Web); platform-adapted on Desktop/Mobile |
-| Presence animation     | portal content mounts              | drawer instance ID | exit animation completes or component cleanup | unmount portal content                                           | coordinates lazy_mount and unmount_on_exit            |
-| drag gesture listeners | drag starts on the client          | drawer instance ID | drag ends or component cleanup                | remove pointer/touch move/up listeners                           | client-only (Web); platform-adapted on Desktop/Mobile |
+| Registered entity      | Registration trigger               | Identity key       | Cleanup trigger                                 | Cleanup action                                                        | Notes                                                 |
+| ---------------------- | ---------------------------------- | ------------------ | ----------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------- |
+| dialog stack entry     | drawer opens (modal)               | drawer instance ID | drawer closes or component cleanup              | `dialog_stack_pop(id)` and re-apply inert for new top                 | shared with Dialog                                    |
+| scroll lock            | drawer opens with `prevent_scroll` | drawer instance ID | drawer closes or component cleanup              | restore body scroll position and overflow                             | nested drawer inherits outermost lock                 |
+| focus scope            | drawer opens (modal)               | drawer instance ID | drawer closes or component cleanup              | deactivate focus trap, restore focus to trigger or `final_focus`      | FocusScope stacking for nested overlays               |
+| z-index allocation     | core emits `AllocateZIndex`        | `Context::z_index_request` | core emits `ReleaseZIndex` or component cleanup | release allocated z-index and send `SetZIndex { request_id, z_index }` feedback while mounted; stale feedback after close/reopen is ignored by the core | via ZIndexAllocator context                           |
+| Dismissable listeners  | drawer opens on the client         | drawer instance ID | drawer closes or component cleanup              | remove document-level pointer/focus/Escape listeners                  | client-only (Web); platform-adapted on Desktop/Mobile |
+| Presence animation     | portal content mounts              | drawer instance ID | exit animation completes or component cleanup   | unmount portal content                                                | coordinates lazy_mount and unmount_on_exit            |
+| drag gesture listeners | drag starts on the client          | drawer instance ID | drag ends or component cleanup                  | remove pointer/touch move/up listeners                                | client-only (Web); platform-adapted on Desktop/Mobile |
 
 ## 9. Ref and Node Contract
 
@@ -250,8 +250,8 @@ Controlled `open` uses a deferred `use_effect` watcher that sends `Open`/`Close`
 
 ## 10. State Machine Boundary Rules
 
-- Machine-owned state: open/closed/dragging state, current snap index, drag position, placement resolution, and all context fields.
-- Adapter-local derived bookkeeping: pointer position during drag, velocity samples for snap resolution, Presence animation state, CSS transform values, allocated z-index, portal mount state.
+- Machine-owned state: open/closed/dragging state, current snap index, normalized drag offset, placement resolution, snap/dismiss resolution from normalized offset and velocity, z-index context, and all context fields.
+- Adapter-local derived bookkeeping: raw pointer position during drag, recent velocity samples used to produce the normalized `DragEnd` velocity, Presence animation state, live CSS transform values, allocated z-index handle, and portal mount state.
 - Forbidden local mirrors: do not keep a local open/closed flag that can diverge from the machine state or controlled `open` prop.
 - Allowed snapshot-read contexts: render derivation via `machine.derive(...)`, pointer/touch event handlers, cleanup effects via `use_drop`, and animation callbacks.
 
@@ -325,9 +325,9 @@ Controlled `open` uses a deferred `use_effect` watcher that sends `Open`/`Close`
 8. Apply scroll lock and dialog stack push/pop on open/close transitions.
 9. Allocate z-index via ZIndexAllocator on portal mount.
 10. Wire drag gesture listeners (pointer/touch down, move, up) on Content and DragHandle.
-11. Implement velocity-based snap resolution and rubber-band overdrag for bottom-sheet mode.
-12. Wire DragHandle keyboard navigation (Arrow Up/Down, Home/End) to `SnapTo` events.
-13. Add slider ARIA attrs to DragHandle when snap points are configured.
+11. Normalize raw drag offset and velocity, then send `DragEnd { offset, velocity }`; core performs velocity-based snap/dismiss resolution for bottom-sheet mode.
+12. Wire DragHandle keyboard navigation (Arrow Up/Down, Home/End) to the core `on_drag_handle_keydown` result or equivalent `SnapTo` events.
+13. Apply slider ARIA attrs returned by `api.drag_handle_attrs()` when snap points are configured.
 14. Verify cleanup ordering: drag listeners, dismiss listeners, focus scope, scroll lock, dialog stack pop, z-index release, Presence unmount.
 
 ## 18. Anti-Patterns
@@ -346,7 +346,7 @@ Controlled `open` uses a deferred `use_effect` watcher that sends `Open`/`Close`
 
 ## 19. Consumer Expectations and Guarantees
 
-- Consumers may assume the drawer slides from the edge specified by `placement` with logical Start/End resolved based on `dir`.
+- Consumers may assume the drawer slides from the edge specified by `placement` with logical Start/End resolved by the core based on `dir`.
 - Consumers may assume focus is trapped within Content when `modal` is true and the drawer is open.
 - Consumers may assume Escape closes the topmost drawer only in a nested overlay stack.
 - Consumers may assume `on_open_change` fires after the state transition completes.
@@ -562,7 +562,6 @@ pub fn Backdrop() -> Element {
             "data-ars-scope": "drawer",
             "data-ars-part": "backdrop",
             "aria-hidden": "true",
-            inert: true,
             onclick: move |_| ctx.send.call(drawer::Event::CloseOnBackdropClick),
         }
     }
@@ -763,8 +762,8 @@ use_drop(move || {
 
 - Content must have `role="dialog"`, `aria-modal="true"`, `aria-roledescription` from `Messages.role_description`, `aria-labelledby` pointing to the Title ID, and `aria-describedby` pointing to the Description ID.
 - CloseTrigger must have `aria-label` from `Messages.close_label`.
-- DragHandle must have `role="slider"`, `aria-orientation="vertical"`, `aria-valuemin="0"`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext` when snap points are configured.
-- Logical placements (Start/End) must resolve to physical directions based on `dir` before rendering.
+- DragHandle must have `role="slider"`, `tabindex="0"`, an accessible name, `aria-orientation="vertical"`, `aria-valuemin="0"`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext` when bottom-sheet snap points are active.
+- Logical placements (Start/End) must be passed with `dir`; the core resolves them before attrs are rendered.
 - Title and Description IDs are generated deterministically from `ComponentIds` for hydration stability.
 - SSR renders the inline Root and Trigger; portal content is SSR-safe empty unless `default_open` is true.
 - On Desktop/Mobile targets, SSR is not applicable; all rendering happens client-side.
@@ -775,7 +774,7 @@ Parity summary: full core parity, including all twelve parts, all placement opti
 
 Intentional deviations: (1) On Desktop targets, scroll lock may be unavailable depending on the window manager; the adapter degrades gracefully rather than failing. (2) On Mobile targets, focus trapping and keyboard snap navigation are not applicable; swipe gestures are the primary interaction mode.
 
-Traceability note: this adapter spec explicitly restates the following core adapter-owned concerns: portal rendering, backdrop sibling pattern, focus-scope activation timing, scroll-lock stacking, dialog-stack participation, inert-attribute management, dismiss-boundary composition, drag-gesture DOM wiring, velocity sampling, rubber-band factor, CSS transform direct-DOM writes, snap-point keyboard routing, slider ARIA repair on DragHandle, touch-action class application, controlled-open sync pattern, `on_open_change` timing, and multi-platform degradation paths for Desktop and Mobile.
+Traceability note: this adapter spec explicitly restates the following adapter-owned concerns: portal rendering, backdrop sibling pattern, focus-scope activation timing, scroll-lock stacking, dialog-stack participation, inert-attribute management, dismiss-boundary composition, raw drag-gesture DOM wiring, normalized velocity sampling, live CSS transform direct-DOM writes, controlled-open sync pattern, z-index allocation feedback, `on_open_change` timing, and multi-platform degradation paths for Desktop and Mobile. The core owns placement resolution, snap/dismiss math, DragHandle slider attrs, touch-action class output, and `data-ars-placement` output.
 
 ## 29. Test Scenarios
 
@@ -803,8 +802,8 @@ Traceability note: this adapter spec explicitly restates the following core adap
 - Velocity-based snap targeting selects correct snap point
 - Rubber-band overdrag beyond extreme snap points
 - DragHandle Arrow Up/Down navigates between snap points
-- DragHandle Home/End navigates to extreme snap points
-- DragHandle has slider ARIA attrs when snap points configured
+- DragHandle Home navigates to the minimum snap index and End navigates to the maximum snap index
+- DragHandle applies core-returned slider ARIA attrs when bottom-sheet snap points are active
 - `data-ars-dragging` present on Content during drag
 - CSS transition suppressed during drag via `data-ars-dragging`
 - Portal content rendered inside ArsProvider portal root
@@ -829,7 +828,7 @@ Traceability note: this adapter spec explicitly restates the following core adap
 | Escape dismiss                | callback order        | Assert `CloseOnEscape` fires before `on_open_change(false)`.                             |
 | Drag gesture state            | machine state         | Assert `Dragging(position)` during active drag.                                          |
 | Snap resolution               | machine state         | Assert correct snap index after drag end with velocity.                                  |
-| DragHandle slider ARIA        | DOM attrs             | Assert `role="slider"`, `aria-valuenow`, `aria-valuemin`, `aria-valuemax` on DragHandle. |
+| DragHandle slider ARIA        | DOM attrs             | Assert `role="slider"`, `tabindex="0"`, accessible name, `aria-valuenow`, `aria-valuemin`, `aria-valuemax` on DragHandle. |
 | `data-ars-dragging`           | DOM attrs             | Assert presence on Content during drag, absence when not dragging.                       |
 | Portal rendering              | rendered structure    | Assert Backdrop and Content are siblings inside the portal root.                         |
 | Cleanup                       | cleanup side effects  | Verify listeners, scroll lock, dialog stack, and z-index are released on unmount.        |
@@ -852,7 +851,7 @@ Cheap verification recipe:
 - [ ] Backdrop and Positioner/Content are siblings inside the portal root (backdrop sibling pattern).
 - [ ] Content has `role="dialog"`, `aria-modal="true"`, `aria-roledescription`, `aria-labelledby`, `aria-describedby`.
 - [ ] CloseTrigger has `aria-label` from `Messages.close_label`.
-- [ ] DragHandle has `role="slider"` and slider ARIA attrs when snap points configured.
+- [ ] DragHandle applies core-returned `role="slider"`, `tabindex="0"`, accessible name, and slider ARIA attrs when bottom-sheet snap points are active.
 - [ ] Presence composes mount/unmount animation lifecycle for portal content.
 - [ ] FocusScope activates after `animationstart`, not before.
 - [ ] Content has `tabindex="-1"` during animation delay period.
@@ -864,13 +863,13 @@ Cheap verification recipe:
 - [ ] `on_open_change` fires after state transition completes.
 - [ ] Drag gesture listeners attached on the client only; cleaned up on drag end and unmount via `use_drop`.
 - [ ] CSS transform during drag writes directly to DOM, not through reactive signal system.
-- [ ] Velocity sampling uses last 3--5 positions; snap resolution uses velocity threshold.
+- [ ] Velocity sampling uses last 3--5 positions; normalized `DragEnd { offset, velocity }` is passed to the core for snap resolution.
 - [ ] Rubber-band overdrag uses 0.3 factor.
-- [ ] `ars-touch-none` class applied to DragHandle and Content when snap points configured.
-- [ ] `overscroll-behavior: contain` set on Content when snap points configured.
-- [ ] DragHandle keyboard navigation (Arrow Up/Down, Home/End) sends `SnapTo` events.
+- [ ] `ars-touch-none` class applied to DragHandle and Content when bottom-sheet snap points are active.
+- [ ] `overscroll-behavior: contain` set on Content when bottom-sheet snap points are active.
+- [ ] DragHandle keyboard navigation (Arrow Up/Down, Home/End) sends `SnapTo` events only for bottom-sheet snap points.
 - [ ] `data-ars-dragging` present on Content during drag.
-- [ ] Logical Start/End placement resolves to physical Left/Right based on `dir`.
+- [ ] Logical Start/End placement and `dir` are passed to the core, and rendered attrs use the core-resolved physical placement.
 - [ ] `lazy_mount` defers content rendering; `unmount_on_exit` removes content after close.
 - [ ] Portal content is SSR-safe empty when not open.
 - [ ] Title and Description IDs are hydration-stable.

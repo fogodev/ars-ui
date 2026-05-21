@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/overlay/drawer/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).close_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "close-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "drawer",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Dismiss panel",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

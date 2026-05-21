@@ -2,7 +2,7 @@ use core::time::Duration;
 
 use ars_a11y::FocusTarget;
 use ars_components::overlay::{
-    alert_dialog, dialog, floating_panel, hover_card, popover,
+    alert_dialog, dialog, drawer, floating_panel, hover_card, popover,
     positioning::{ArrowOffset, Offset, Placement, PositioningOptions, PositioningSnapshot},
     presence,
     toast::{manager as toast_manager, single as toast_single},
@@ -797,6 +797,276 @@ proptest! {
             had_description |= service.context().has_description;
 
             assert_dialog_state_context_invariants(&service)?;
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Drawer proptest
+// ────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug)]
+enum DrawerStep {
+    Send(drawer::Event),
+    SetProps(drawer::Props),
+}
+
+const DRAWER_EFFECTS: &[drawer::Effect] = &[
+    drawer::Effect::OpenChange,
+    drawer::Effect::FocusInitial,
+    drawer::Effect::FocusFirstTabbable,
+    drawer::Effect::ScrollLockAcquire,
+    drawer::Effect::ScrollLockRelease,
+    drawer::Effect::SetBackgroundInert,
+    drawer::Effect::RemoveBackgroundInert,
+    drawer::Effect::RestoreFocus,
+    drawer::Effect::AllocateZIndex,
+    drawer::Effect::ReleaseZIndex,
+    drawer::Effect::SnapChange,
+];
+
+fn arb_drawer_placement() -> impl Strategy<Value = drawer::Placement> {
+    prop_oneof![
+        Just(drawer::Placement::Top),
+        Just(drawer::Placement::Bottom),
+        Just(drawer::Placement::Left),
+        Just(drawer::Placement::Right),
+        Just(drawer::Placement::Start),
+        Just(drawer::Placement::End),
+    ]
+}
+
+fn arb_drawer_snap_points() -> impl Strategy<Value = Option<Vec<f64>>> {
+    prop_oneof![
+        Just(None),
+        prop::collection::vec(0.0f64..=1.0, 1..=5).prop_map(Some),
+    ]
+}
+
+fn arb_drawer_props() -> impl Strategy<Value = drawer::Props> {
+    (
+        (
+            prop::option::of(any::<bool>()),
+            any::<bool>(),
+            arb_drawer_placement(),
+            arb_direction(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+        ),
+        (
+            any::<bool>(),
+            any::<bool>(),
+            arb_focus_target(),
+            arb_focus_target(),
+            0_u8..=10,
+            arb_drawer_snap_points(),
+            0_usize..=8,
+        ),
+    )
+        .prop_map(
+            |(
+                (open, default_open, placement, dir, modal, close_on_backdrop, close_on_escape),
+                (
+                    prevent_scroll,
+                    restore_focus,
+                    initial_focus,
+                    final_focus,
+                    title_level,
+                    snap_points,
+                    default_snap_index,
+                ),
+            )| drawer::Props {
+                id: "drawer".to_string(),
+                open,
+                default_open,
+                placement,
+                modal,
+                close_on_backdrop,
+                close_on_escape,
+                prevent_scroll,
+                restore_focus,
+                initial_focus,
+                final_focus,
+                dir,
+                title_level,
+                snap_points,
+                default_snap_index,
+                on_open_change: None,
+                lazy_mount: false,
+                unmount_on_exit: false,
+                on_escape_key_down: None,
+                on_interact_outside: None,
+            },
+        )
+}
+
+fn arb_drawer_event() -> impl Strategy<Value = drawer::Event> {
+    prop_oneof![
+        Just(drawer::Event::Open),
+        Just(drawer::Event::Close),
+        Just(drawer::Event::Toggle),
+        (0.0f64..=1.0).prop_map(drawer::Event::DragStart),
+        (0.0f64..=1.0).prop_map(drawer::Event::DragMove),
+        (0.0f64..=1.0, -2.0f64..=2.0)
+            .prop_map(|(offset, velocity)| { drawer::Event::DragEnd { offset, velocity } }),
+        (0_usize..=8).prop_map(drawer::Event::SnapTo),
+        (0_u64..=8, 0..=4_000u32).prop_map(|(request_id, z_index)| {
+            drawer::Event::SetZIndex {
+                request_id,
+                z_index,
+            }
+        }),
+        Just(drawer::Event::CloseOnBackdropClick),
+        Just(drawer::Event::CloseOnEscape),
+        Just(drawer::Event::RegisterTitle),
+        Just(drawer::Event::UnregisterTitle),
+        Just(drawer::Event::RegisterDescription),
+        Just(drawer::Event::UnregisterDescription),
+        Just(drawer::Event::SyncProps),
+    ]
+}
+
+fn arb_drawer_step() -> impl Strategy<Value = DrawerStep> {
+    prop_oneof![
+        arb_drawer_event().prop_map(DrawerStep::Send),
+        arb_drawer_props().prop_map(DrawerStep::SetProps),
+    ]
+}
+
+fn assert_drawer_state_context_invariants(service: &Service<drawer::Machine>) -> TestCaseResult {
+    prop_assert_eq!(
+        service.context().open,
+        matches!(
+            service.state(),
+            drawer::State::Open | drawer::State::Dragging(_)
+        )
+    );
+
+    let expected_direction = service
+        .context()
+        .dir
+        .resolve(ars_core::ResolvedDirection::Ltr);
+
+    prop_assert_eq!(
+        service.context().resolved_placement,
+        service.context().placement.to_physical(expected_direction)
+    );
+
+    if service.context().snap_points.is_empty() {
+        prop_assert_eq!(service.context().current_snap, 0);
+    } else {
+        prop_assert!(service.context().current_snap < service.context().snap_points.len());
+    }
+
+    prop_assert_eq!(service.context().ids.part("trigger"), "drawer-trigger");
+    prop_assert_eq!(service.context().ids.part("content"), "drawer-content");
+    prop_assert_eq!(service.context().ids.part("title"), "drawer-title");
+    prop_assert_eq!(
+        service.context().ids.part("description"),
+        "drawer-description"
+    );
+
+    Ok(())
+}
+
+fn assert_drawer_send_result_invariants(
+    event: &drawer::Event,
+    result: &SendResult<drawer::Machine>,
+    before_context: &drawer::Context,
+) -> TestCaseResult {
+    for effect in &result.pending_effects {
+        prop_assert!(
+            DRAWER_EFFECTS.contains(&effect.name),
+            "unexpected drawer effect: {:?}",
+            effect.name
+        );
+        prop_assert!(effect.metadata.is_none());
+    }
+
+    if matches!(event, drawer::Event::SyncProps) {
+        prop_assert!(!result.state_changed);
+    }
+
+    if matches!(event, drawer::Event::CloseOnBackdropClick) && !before_context.close_on_backdrop {
+        prop_assert!(!result.state_changed);
+    }
+
+    if matches!(event, drawer::Event::CloseOnEscape) && !before_context.close_on_escape {
+        prop_assert!(!result.state_changed);
+    }
+
+    if matches!(event, drawer::Event::SetZIndex { .. }) {
+        prop_assert!(!result.state_changed);
+    }
+
+    let emitted_open_change = result
+        .pending_effects
+        .iter()
+        .any(|effect| effect.name == drawer::Effect::OpenChange);
+
+    if matches!(
+        event,
+        drawer::Event::Open
+            | drawer::Event::Close
+            | drawer::Event::Toggle
+            | drawer::Event::CloseOnBackdropClick
+            | drawer::Event::CloseOnEscape
+    ) {
+        prop_assert_eq!(emitted_open_change, result.state_changed);
+    } else if !matches!(event, drawer::Event::DragEnd { .. }) {
+        prop_assert!(!emitted_open_change);
+    }
+
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(super::common::proptest_config())]
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_drawer_state_context_invariants_hold(
+        props in arb_drawer_props(),
+        steps in prop::collection::vec(arb_drawer_step(), 0..128),
+    ) {
+        let mut service = Service::<drawer::Machine>::new(
+            props,
+            &Env::default(),
+            &drawer::Messages::default(),
+        );
+
+        assert_drawer_state_context_invariants(&service)?;
+
+        for step in steps {
+            match step {
+                DrawerStep::Send(event) => {
+                    let before_context = service.context().clone();
+
+                    let result = service.send(event.clone());
+
+                    assert_drawer_send_result_invariants(&event, &result, &before_context)?;
+                }
+
+                DrawerStep::SetProps(props) => {
+                    drop(service.set_props(props));
+
+                    let p = service.props();
+                    let c = service.context();
+
+                    prop_assert_eq!(c.modal, p.modal);
+                    prop_assert_eq!(c.placement, p.placement);
+                    prop_assert_eq!(c.dir, p.dir);
+                    prop_assert_eq!(c.close_on_backdrop, p.close_on_backdrop);
+                    prop_assert_eq!(c.close_on_escape, p.close_on_escape);
+                    prop_assert_eq!(c.prevent_scroll, p.prevent_scroll);
+                    prop_assert_eq!(c.restore_focus, p.restore_focus);
+                    prop_assert_eq!(c.initial_focus, p.initial_focus);
+                    prop_assert_eq!(c.final_focus, p.final_focus);
+                }
+            }
+
+            assert_drawer_state_context_invariants(&service)?;
         }
     }
 }

@@ -9,6 +9,9 @@ pub mod positioning;
 /// Dialog machine.
 pub mod dialog;
 
+/// Drawer machine.
+pub mod drawer;
+
 /// Floating panel machine.
 pub mod floating_panel;
 
