@@ -300,7 +300,7 @@ The key additions are:
 - The `Dragging(f64)` state tracks drag position during swipe-to-dismiss gestures.
 - `DragStart`, `DragMove`, `DragEnd { offset, velocity }` events handle adapter-normalized drag interactions. The adapter supplies normalized values only; the core owns snap and dismiss math.
 - `SnapTo(usize)` event handles keyboard-initiated snap transitions (see §5 Bottom Sheet).
-- `SetZIndex(u32)` stores the adapter-allocated z-index and renders it as `--ars-z-index`.
+- `SetZIndex(u32)` stores the adapter-allocated z-index while the drawer is open or dragging and renders it as `--ars-z-index`; late adapter acknowledgements after close are ignored.
 - `RegisterTitle` / `UnregisterTitle` and `RegisterDescription` / `UnregisterDescription` gate `aria-labelledby` / `aria-describedby` so optional title and description parts can mount and unmount without stale ARIA IDREFs.
 - `SyncProps` replays context-backed props after prop changes.
 - Controlled opening queues `SyncProps` before `Open` so opening effects use current props. Controlled closing queues `Close` before `SyncProps` so the core does not emit acquire effects for props that only apply after the drawer is closed.
@@ -369,7 +369,9 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
-        attrs.set(HtmlAttr::Inert, "");
+        if !self.ctx.close_on_backdrop {
+            attrs.set(HtmlAttr::Inert, "");
+        }
         attrs
     }
 
@@ -516,7 +518,7 @@ Drawer
 | ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------ |
 | Root         | `<div>`    | `data-ars-scope="drawer"`, `data-ars-state`                                                                        |
 | Trigger      | `<button>` | `aria-haspopup="dialog"`, `aria-expanded`                                                                          |
-| Backdrop     | `<div>`    | `aria-hidden="true"`, `inert`                                                                                      |
+| Backdrop     | `<div>`    | `aria-hidden="true"`, `inert` only when `close_on_backdrop` is false                                                |
 | Positioner   | `<div>`    | `data-ars-scope="drawer"`, `data-ars-placement`, `--ars-z-index` when allocated                                    |
 | Content      | `<div>`    | `role="dialog"`, `aria-modal`, `aria-roledescription`, `aria-labelledby`, `aria-describedby`, `data-ars-placement` |
 | Title        | `<h{n}>`   | `id` for `aria-labelledby` on Content                                                                              |
@@ -538,7 +540,9 @@ Same as Dialog (see [Dialog §3.1](./dialog.md#31-aria-roles-states-and-properti
 
 The agnostic core resolves logical placements (Start/End) to physical directions
 from `Props::dir`. Adapters provide the document `Direction` when constructing
-props; they do not duplicate placement resolution. Start → Left in LTR and Right in RTL.
+props; they do not duplicate placement resolution. When `Props::dir` is
+`Direction::Auto`, the core resolves it against the active environment locale.
+Start → Left in LTR and Right in RTL.
 
 ### 3.2 Keyboard Interaction
 

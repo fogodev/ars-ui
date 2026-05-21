@@ -668,7 +668,7 @@ impl ars_core::Machine for Machine {
         let open = props.open.unwrap_or(props.default_open);
         let state = if open { State::Open } else { State::Closed };
         let ids = ComponentIds::from_id(&props.id);
-        let dir = props.dir.resolve(ResolvedDirection::Ltr);
+        let dir = props.dir.resolve(env.locale.direction());
         let snap_points = normalize_snap_points(props.snap_points.as_deref());
         let current_snap = clamp_snap_index(props.default_snap_index, &snap_points);
         let snap_height = snap_points.get(current_snap).copied().unwrap_or(1.0);
@@ -749,7 +749,7 @@ impl ars_core::Machine for Machine {
                 Some(plan)
             }
 
-            (_, Event::SetZIndex(z_index)) => {
+            (State::Open | State::Dragging(_), Event::SetZIndex(z_index)) => {
                 let z_index = *z_index;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.z_index = Some(z_index);
@@ -781,7 +781,7 @@ impl ars_core::Machine for Machine {
                 let modal = props.modal;
                 let placement = props.placement;
                 let dir = props.dir;
-                let resolved_placement = placement.to_physical(dir.resolve(ResolvedDirection::Ltr));
+                let resolved_placement = placement.to_physical(dir.resolve(ctx.locale.direction()));
                 let close_on_backdrop = props.close_on_backdrop;
                 let close_on_escape = props.close_on_escape;
                 let prevent_scroll = props.prevent_scroll;
@@ -1188,8 +1188,11 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Data("ars-state"), self.state_token())
-            .set(HtmlAttr::Aria(AriaAttr::Hidden), "true")
-            .set(HtmlAttr::Inert, "");
+            .set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+
+        if !self.ctx.close_on_backdrop {
+            attrs.set(HtmlAttr::Inert, "");
+        }
 
         attrs
     }
@@ -1643,6 +1646,39 @@ mod tests {
     }
 
     #[test]
+    fn direction_auto_resolves_logical_placement_from_env_locale_on_init_and_sync() {
+        let env = Env {
+            locale: ars_i18n::locales::ar(),
+            ..Env::default()
+        };
+        let mut service = Service::<Machine>::new(
+            Props {
+                placement: Placement::Start,
+                dir: Direction::Auto,
+                ..test_props()
+            },
+            &env,
+            &Messages::default(),
+        );
+
+        assert_eq!(
+            service.context().resolved_placement,
+            ResolvedPlacement::Right
+        );
+
+        drop(service.set_props(Props {
+            placement: Placement::End,
+            dir: Direction::Auto,
+            ..test_props()
+        }));
+
+        assert_eq!(
+            service.context().resolved_placement,
+            ResolvedPlacement::Left
+        );
+    }
+
+    #[test]
     fn props_builder_round_trips_mutation_sensitive_fields() {
         let open_changes = Arc::new(Mutex::new(Vec::new()));
         let escape_count = Arc::new(Mutex::new(0usize));
@@ -1723,12 +1759,28 @@ mod tests {
 
     #[test]
     fn backdrop_attrs_are_decorative_and_inert() {
-        let service = fresh_service(test_props());
+        let service = fresh_service(Props {
+            close_on_backdrop: false,
+            ..test_props()
+        });
 
         let attrs = service.connect(&|_| {}).backdrop_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Hidden)), Some("true"));
         assert_eq!(attrs.get(&HtmlAttr::Inert), Some(""));
+    }
+
+    #[test]
+    fn backdrop_attrs_leave_click_enabled_backdrop_interactive() {
+        let service = fresh_service(Props {
+            close_on_backdrop: true,
+            ..test_props()
+        });
+
+        let attrs = service.connect(&|_| {}).backdrop_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Hidden)), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Inert), None);
     }
 
     #[test]
@@ -2241,6 +2293,19 @@ mod tests {
                 .styles()
                 .contains(&(CssProperty::Custom("ars-z-index"), "1400".to_string(),))
         );
+    }
+
+    #[test]
+    fn set_z_index_is_ignored_after_close_releases_claim() {
+        let mut service = open_service(test_props());
+
+        drop(service.send(Event::SetZIndex(1400)));
+        drop(service.send(Event::Close));
+        let late = service.send(Event::SetZIndex(1500));
+
+        assert!(!late.context_changed);
+        assert_eq!(service.state(), &State::Closed);
+        assert_eq!(service.context().z_index, None);
     }
 
     #[test]
