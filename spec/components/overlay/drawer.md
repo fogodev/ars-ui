@@ -55,8 +55,13 @@ pub enum Event {
     },
     /// Snap to a snap point.
     SnapTo(usize),
-    /// Adapter reported the z-index allocated for this drawer.
-    SetZIndex(u32),
+    /// Adapter reported the z-index allocated for an active request.
+    SetZIndex {
+        /// Request id read from `Context::z_index_request` when processing `AllocateZIndex`.
+        request_id: u64,
+        /// Allocated z-index value.
+        z_index: u32,
+    },
     /// Close the drawer on backdrop click.
     CloseOnBackdropClick,
     /// Close the drawer on escape key.
@@ -115,6 +120,8 @@ pub struct Context {
     pub snap_height: f64,
     /// Adapter-allocated z-index rendered as `--ars-z-index`.
     pub z_index: Option<u32>,
+    /// Monotonic request id for correlating z-index allocation feedback.
+    pub z_index_request: u64,
     /// The current locale for message resolution.
     pub locale: Locale,
     /// Resolved messages for accessibility labels.
@@ -300,7 +307,7 @@ The key additions are:
 - The `Dragging(f64)` state tracks drag position during swipe-to-dismiss gestures.
 - `DragStart`, `DragMove`, `DragEnd { offset, velocity }` events handle adapter-normalized drag interactions. The adapter supplies normalized values only; the core owns snap and dismiss math.
 - `SnapTo(usize)` event handles keyboard-initiated snap transitions (see §5 Bottom Sheet).
-- `SetZIndex(u32)` stores the adapter-allocated z-index while the drawer is open or dragging and renders it as `--ars-z-index`; late adapter acknowledgements after close are ignored.
+- `SetZIndex { request_id, z_index }` stores the adapter-allocated z-index only while the drawer is open or dragging and the request id matches `Context::z_index_request`; late adapter acknowledgements after close or after a close/reopen cycle are ignored.
 - `RegisterTitle` / `UnregisterTitle` and `RegisterDescription` / `UnregisterDescription` gate `aria-labelledby` / `aria-describedby` so optional title and description parts can mount and unmount without stale ARIA IDREFs.
 - `SyncProps` replays context-backed props after prop changes.
 - Controlled opening queues `SyncProps` before `Open` so opening effects use current props. Controlled closing queues `Close` before `SyncProps` so the core does not emit acquire effects for props that only apply after the drawer is closed.

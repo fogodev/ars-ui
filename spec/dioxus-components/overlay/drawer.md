@@ -147,7 +147,7 @@ pub mod drawer {
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with the core `drawer::Props`.
-- Event parity: Open, Close, Toggle, DragStart, DragMove, `DragEnd { offset, velocity }`, SnapTo, SetZIndex, CloseOnBackdropClick, CloseOnEscape, RegisterTitle, UnregisterTitle, RegisterDescription, UnregisterDescription, and SyncProps all map to adapter-driven UI events or adapter feedback.
+- Event parity: Open, Close, Toggle, DragStart, DragMove, `DragEnd { offset, velocity }`, SnapTo, `SetZIndex { request_id, z_index }`, CloseOnBackdropClick, CloseOnEscape, RegisterTitle, UnregisterTitle, RegisterDescription, UnregisterDescription, and SyncProps all map to adapter-driven UI events or adapter feedback.
 - Structure parity: all twelve parts (Root, Trigger, Backdrop, Positioner, Content, Title, Description, Header, Body, Footer, CloseTrigger, DragHandle) are rendered as compound child components.
 - Placement resolution: the core resolves logical Start/End placements to physical Left/Right from `Props::dir`; the adapter supplies the document `Direction` when constructing or syncing props.
 
@@ -232,7 +232,7 @@ Controlled `open` uses a deferred `use_effect` watcher that sends `Open`/`Close`
 | dialog stack entry     | drawer opens (modal)               | drawer instance ID | drawer closes or component cleanup              | `dialog_stack_pop(id)` and re-apply inert for new top                 | shared with Dialog                                    |
 | scroll lock            | drawer opens with `prevent_scroll` | drawer instance ID | drawer closes or component cleanup              | restore body scroll position and overflow                             | nested drawer inherits outermost lock                 |
 | focus scope            | drawer opens (modal)               | drawer instance ID | drawer closes or component cleanup              | deactivate focus trap, restore focus to trigger or `final_focus`      | FocusScope stacking for nested overlays               |
-| z-index allocation     | core emits `AllocateZIndex`        | drawer instance ID | core emits `ReleaseZIndex` or component cleanup | release allocated z-index and send `SetZIndex` feedback while mounted; late feedback after close is ignored by the core | via ZIndexAllocator context                           |
+| z-index allocation     | core emits `AllocateZIndex`        | `Context::z_index_request` | core emits `ReleaseZIndex` or component cleanup | release allocated z-index and send `SetZIndex { request_id, z_index }` feedback while mounted; stale feedback after close/reopen is ignored by the core | via ZIndexAllocator context                           |
 | Dismissable listeners  | drawer opens on the client         | drawer instance ID | drawer closes or component cleanup              | remove document-level pointer/focus/Escape listeners                  | client-only (Web); platform-adapted on Desktop/Mobile |
 | Presence animation     | portal content mounts              | drawer instance ID | exit animation completes or component cleanup   | unmount portal content                                                | coordinates lazy_mount and unmount_on_exit            |
 | drag gesture listeners | drag starts on the client          | drawer instance ID | drag ends or component cleanup                  | remove pointer/touch move/up listeners                                | client-only (Web); platform-adapted on Desktop/Mobile |

@@ -80,8 +80,15 @@ pub enum Event {
     /// Snap to the requested snap-point index.
     SnapTo(usize),
 
-    /// Adapter reported the allocated z-index.
-    SetZIndex(u32),
+    /// Adapter reported the allocated z-index for an active allocation request.
+    SetZIndex {
+        /// Request id observed on [`Context::z_index_request`] when
+        /// [`Effect::AllocateZIndex`] was processed.
+        request_id: u64,
+
+        /// Allocated z-index value.
+        z_index: u32,
+    },
 
     /// Close because the backdrop was activated.
     CloseOnBackdropClick,
@@ -268,6 +275,9 @@ pub struct Context {
 
     /// Adapter-allocated z-index, when reported.
     pub z_index: Option<u32>,
+
+    /// Monotonic request id for correlating z-index allocation feedback.
+    pub z_index_request: u64,
 
     /// Locale used to resolve messages.
     pub locale: Locale,
@@ -694,6 +704,7 @@ impl ars_core::Machine for Machine {
                 current_snap,
                 snap_height,
                 z_index: None,
+                z_index_request: u64::from(open),
                 locale: env.locale.clone(),
                 messages: messages.clone(),
             },
@@ -749,7 +760,13 @@ impl ars_core::Machine for Machine {
                 Some(plan)
             }
 
-            (State::Open | State::Dragging(_), Event::SetZIndex(z_index)) => {
+            (
+                State::Open | State::Dragging(_),
+                Event::SetZIndex {
+                    request_id,
+                    z_index,
+                },
+            ) if *request_id == ctx.z_index_request => {
                 let z_index = *z_index;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.z_index = Some(z_index);
@@ -917,6 +934,8 @@ fn open_plan(ctx: &Context) -> TransitionPlan<Machine> {
     let mut plan = TransitionPlan::to(State::Open)
         .apply(|ctx: &mut Context| {
             ctx.open = true;
+            ctx.z_index = None;
+            ctx.z_index_request = ctx.z_index_request.wrapping_add(1);
         })
         .with_effect(PendingEffect::named(Effect::OpenChange))
         .with_effect(PendingEffect::named(Effect::FocusInitial))
@@ -1522,6 +1541,13 @@ mod tests {
         };
 
         (sent, handler)
+    }
+
+    fn set_z_index_event(service: &Service<Machine>, z_index: u32) -> Event {
+        Event::SetZIndex {
+            request_id: service.context().z_index_request,
+            z_index,
+        }
     }
 
     fn assert_syncs_when_only(mut mutate: impl FnMut(&mut Props)) {
@@ -2287,7 +2313,7 @@ mod tests {
     fn set_z_index_updates_positioner_style() {
         let mut service = open_service(test_props());
 
-        drop(service.send(Event::SetZIndex(1400)));
+        drop(service.send(set_z_index_event(&service, 1400)));
 
         let attrs = service.connect(&|_| {}).positioner_attrs();
 
@@ -2302,13 +2328,39 @@ mod tests {
     fn set_z_index_is_ignored_after_close_releases_claim() {
         let mut service = open_service(test_props());
 
-        drop(service.send(Event::SetZIndex(1400)));
+        drop(service.send(set_z_index_event(&service, 1400)));
         drop(service.send(Event::Close));
-        let late = service.send(Event::SetZIndex(1500));
+        let late = service.send(Event::SetZIndex {
+            request_id: service.context().z_index_request,
+            z_index: 1500,
+        });
 
         assert!(!late.context_changed);
         assert_eq!(service.state(), &State::Closed);
         assert_eq!(service.context().z_index, None);
+    }
+
+    #[test]
+    fn stale_z_index_request_is_ignored_after_reopen() {
+        let mut service = open_service(test_props());
+        let first_request = service.context().z_index_request;
+
+        drop(service.send(Event::Close));
+        drop(service.send(Event::Open));
+        let second_request = service.context().z_index_request;
+        let stale = service.send(Event::SetZIndex {
+            request_id: first_request,
+            z_index: 1400,
+        });
+        let current = service.send(Event::SetZIndex {
+            request_id: second_request,
+            z_index: 1500,
+        });
+
+        assert_ne!(first_request, second_request);
+        assert!(!stale.context_changed);
+        assert!(current.context_changed);
+        assert_eq!(service.context().z_index, Some(1500));
     }
 
     #[test]
@@ -2318,7 +2370,7 @@ mod tests {
             ..test_props()
         });
 
-        drop(service.send(Event::SetZIndex(1400)));
+        drop(service.send(set_z_index_event(&service, 1400)));
 
         let result = service.send(Event::Close);
         let names = effect_names(&result);
@@ -2868,7 +2920,7 @@ mod tests {
     fn snapshot_drawer_positioner_with_z_index() {
         let mut service = open_service(test_props());
 
-        drop(service.send(Event::SetZIndex(1500)));
+        drop(service.send(set_z_index_event(&service, 1500)));
 
         assert_snapshot!(
             "drawer_positioner_with_z_index",

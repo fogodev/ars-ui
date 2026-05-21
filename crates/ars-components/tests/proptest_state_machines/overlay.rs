@@ -911,7 +911,12 @@ fn arb_drawer_event() -> impl Strategy<Value = drawer::Event> {
         (0.0f64..=1.0, -2.0f64..=2.0)
             .prop_map(|(offset, velocity)| { drawer::Event::DragEnd { offset, velocity } }),
         (0_usize..=8).prop_map(drawer::Event::SnapTo),
-        (0..=4_000u32).prop_map(drawer::Event::SetZIndex),
+        (0_u64..=8, 0..=4_000u32).prop_map(|(request_id, z_index)| {
+            drawer::Event::SetZIndex {
+                request_id,
+                z_index,
+            }
+        }),
         Just(drawer::Event::CloseOnBackdropClick),
         Just(drawer::Event::CloseOnEscape),
         Just(drawer::Event::RegisterTitle),
@@ -991,7 +996,7 @@ fn assert_drawer_send_result_invariants(
         prop_assert!(!result.state_changed);
     }
 
-    if matches!(event, drawer::Event::SetZIndex(_)) {
+    if matches!(event, drawer::Event::SetZIndex { .. }) {
         prop_assert!(!result.state_changed);
     }
 
