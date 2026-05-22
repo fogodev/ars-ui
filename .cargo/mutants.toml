@@ -68,6 +68,21 @@ exclude_re = [
   # cargo-mutants reports the kill as a timeout instead of a caught failure.
   'replace \+= with \*= in contains_byte',
 
+  # Highlight's overlapping-match scanner is killed only by nontermination
+  # when the start/search cursor arithmetic is changed to non-advancing forms.
+  # The existing overlapping-match tests detect these mutants via cargo-mutants
+  # timeout, so exclude the timeout-only spellings without hiding survivors.
+  'highlight/mod\.rs:\d+:\d+: replace \+ with \* in push_contains_matches',
+  'highlight/mod\.rs:\d+:\d+: replace \+ with [-*] in push_contains_matches',
+  # Equality at this merge boundary is equivalent: assigning the same end back
+  # into the last merged range does not change the resulting chunks.
+  'highlight/mod\.rs:\d+:\d+: replace > with >= in merge_ranges',
+
+  # `step_change_plan` rejects `target == current` before checking whether a
+  # forward move requires validation, so `target > current` and
+  # `target >= current` agree for every reachable call at this guard.
+  'steps/mod\.rs:\d+:\d+: replace > with >= in step_change_plan',
+
   # Toast manager auto-id resolver chain (`resolve_or_generate_id`,
   # `make_auto_id`, `auto_id_collides`, `push_decimal`). Each of these
   # mutants either freezes the id counter, pins the candidate to a constant,
@@ -207,6 +222,45 @@ exclude_re = [
   # nontermination on existing slash / percent / scheme-prefix inputs, but
   # cargo-mutants reports them as timeouts. Excluding the timeout-only form
   # keeps the Nightly matrix focused on surviving behavior changes.
+  'download_trigger/mod\.rs:\d+:\d+: replace \+= with \*= in http_https_authority_rest',
+  'download_trigger/mod\.rs:\d+:\d+: replace \+= with [-*]= in percent_decode_host',
+  'download_trigger/mod\.rs:\d+:\d+: replace \+= with \*= in contains_scheme_separator_before_delim',
+  'download_trigger/mod\.rs:\d+:\d+: replace \+= with \*= in starts_with_ignore_case',
+  # The bitwise replacements are equivalent because the high-nibble and
+  # low-nibble / IPv4 component bit ranges do not overlap.
+  'download_trigger/mod\.rs:\d+:\d+: replace \| with \^ in percent_decode_host',
+  'download_trigger/mod\.rs:\d+:\d+: replace \| with \^ in parse_ipv4_address_relaxed',
+  # Empty strings and colon-containing strings already fail the downstream
+  # IPv4 parsers, so weakening this early guard does not change the result.
+  'download_trigger/mod\.rs:\d+:\d+: replace \|\| with && in parse_ipv4_address_relaxed',
+  # Raw "0" parses to the same numeric value as decimal or octal; the branch is
+  # only there to select radix for multi-byte leading-zero components.
+  'download_trigger/mod\.rs:\d+:\d+: replace > with >= in parse_ipv4_component_value',
+  # Once the explicit slash branch is preserved, weakening the later relative
+  # prefixes (`?`, `#`, `./`, `../`) is equivalent because the final
+  # no-scheme fallback still classifies them as relative.
+  'download_trigger/mod\.rs:\d+:\d+: replace \|\| with && in is_relative_reference',
+  # If URL delimiters are not detected early, the same delimiter byte remains
+  # in the would-be scheme prefix and fails `scheme_prefix_bytes_valid`, so the
+  # final scheme-separator result is unchanged.
+  'download_trigger/mod\.rs:\d+:\d+: replace \|\| with && in contains_scheme_separator_before_delim',
+  # `mailto:` and `tel:` share the same NoDownloadHint result, so requiring
+  # both prefixes cannot change observable policy for either scheme.
+  'download_trigger/mod\.rs:\d+:\d+: replace \|\| with && in classify_href',
+  # Equality at the oversized-panel viewport clamp boundary chooses the same
+  # coordinate from both branches.
+  'floating_panel/mod\.rs:\d+:\d+: replace < with <= in clamp_position',
+  # West/north resize positions are recomputed from the original right/bottom
+  # edge after size clamping, so these provisional assignments are overwritten
+  # before the rectangle is returned.
+  'floating_panel/mod\.rs:(662|669|679|686|691|693):\d+: replace \+ with [-*] in resize_rect',
+  # `State::Minimized` with `ctx.open == false` is unreachable: every close
+  # sync/reset transition also targets `State::Idle`, so weakening this restore
+  # guard cannot affect a reachable machine state.
+  'floating_panel/mod\.rs:1126:\d+: replace match guard ctx\.open with true in <impl ars_core::Machine for Machine>::transition',
+  # `State::Maximized` with `ctx.open == false` is likewise unreachable because
+  # every close sync/reset clears maximized state and targets `State::Idle`.
+  'floating_panel/mod\.rs:1146:\d+: replace match guard ctx\.open with true in <impl ars_core::Machine for Machine>::transition',
   'download_trigger\.rs:\d+:\d+: replace \+= with \*= in http_https_authority_rest',
   'download_trigger\.rs:\d+:\d+: replace \+= with [-*]= in percent_decode_host',
   'download_trigger\.rs:\d+:\d+: replace \+= with [-*]= in contains_scheme_separator_before_delim',

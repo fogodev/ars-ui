@@ -313,11 +313,17 @@ impl Context {
         total_items.div_ceil(size).max(1)
     }
 
+    /// Returns the effective one-based page clamped to the current page count.
+    #[must_use]
+    pub fn current_page(&self) -> u32 {
+        clamp_page(*self.page.get(), self.page_count)
+    }
+
     /// Generates the visible one-based page range. `None` represents an ellipsis.
     #[must_use]
     pub fn page_range(&self) -> Vec<Option<u32>> {
         page_range(
-            *self.page.get(),
+            self.current_page(),
             self.page_count,
             self.sibling_count,
             self.boundary_count,
@@ -399,7 +405,7 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        let current = *ctx.page.get();
+        let current = ctx.current_page();
 
         match event {
             Event::GoToPage(page) => {
@@ -426,12 +432,18 @@ impl ars_core::Machine for Machine {
                 let new_size = *page_size;
 
                 let new_count = Context::compute_page_count(ctx.total_items, new_size);
-                let target = clamp_page(current, new_count);
+                let raw_current = props.page.unwrap_or(*ctx.page.get());
+                let target = clamp_page(raw_current, new_count);
                 let emit = target != current;
 
                 let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.page_size = new_size;
                     ctx.page_count = new_count;
+
+                    if ctx.page.is_controlled() {
+                        ctx.page.sync_controlled(Some(target));
+                    }
+
                     ctx.page.set(target);
                 });
 
@@ -449,7 +461,8 @@ impl ars_core::Machine for Machine {
 
                 let new_count = Context::compute_page_count(total_items, page_size);
                 let controlled = props.page.map(|page| clamp_page(page, new_count));
-                let target = controlled.unwrap_or_else(|| clamp_page(current, new_count));
+                let target = controlled
+                    .map_or_else(|| clamp_page(current, new_count), core::convert::identity);
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.page_size = page_size;
@@ -522,7 +535,7 @@ impl Api<'_> {
     /// Returns the current one-based page.
     #[must_use]
     pub fn current_page(&self) -> u32 {
-        *self.ctx.page.get()
+        self.ctx.current_page()
     }
 
     /// Returns the total page count.
@@ -717,7 +730,7 @@ fn clamp_page(page: u32, page_count: u32) -> u32 {
 }
 
 fn page_change_plan(ctx: &Context, _props: &Props, target: u32) -> Option<TransitionPlan<Machine>> {
-    if target == *ctx.page.get() {
+    if target == ctx.current_page() {
         return None;
     }
 
@@ -1063,7 +1076,21 @@ mod tests {
     }
 
     #[test]
-    fn controlled_set_page_size_preserves_controlled_page_until_sync() {
+    fn controlled_initial_page_is_clamped_to_page_count() {
+        let service = service(props().page(20));
+
+        assert_eq!(service.context().page_count, 10);
+        assert_eq!(*service.context().page.get(), 10);
+        assert_eq!(service.context().current_page(), 10);
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.current_page(), 10);
+        assert!(api.is_last_page());
+    }
+
+    #[test]
+    fn controlled_set_page_size_clamps_visible_page_when_page_count_shrinks() {
         let mut service = service(props().page(10));
 
         let result = service.send(Event::SetPageSize(
@@ -1071,9 +1098,96 @@ mod tests {
         ));
 
         assert_eq!(service.context().page_count, 5);
-        assert_eq!(*service.context().page.get(), 10);
+        assert_eq!(*service.context().page.get(), 5);
+        assert_eq!(service.context().current_page(), 5);
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, Effect::PageChange);
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.current_page(), 5);
+        assert!(api.is_last_page());
+    }
+
+    #[test]
+    fn sync_props_clamps_controlled_page_to_new_page_count() {
+        let mut service = service(props().page(4));
+
+        service.set_props(props().page(8).total_items(25));
+
+        drop(service.send(Event::SyncProps));
+
+        assert_eq!(service.context().page_count, 3);
+        assert_eq!(*service.context().page.get(), 3);
+        assert_eq!(service.context().current_page(), 3);
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.current_page(), 3);
+        assert!(api.is_last_page());
+    }
+
+    #[test]
+    fn controlled_page_change_callback_keeps_requested_target_after_clamped_size_change() {
+        let pages = Arc::new(Mutex::new(Vec::new()));
+        let pages_clone = Arc::clone(&pages);
+
+        let mut service = service(
+            props()
+                .page(10)
+                .on_page_change(move |page| lock(&pages_clone).push(page)),
+        );
+
+        let result = service.send(Event::SetPageSize(
+            NonZeroU32::new(20).expect("non-zero page size"),
+        ));
+
+        let send: StrongSend<Event> = Arc::new(|_| {});
+
+        for effect in result.pending_effects {
+            drop(effect.run(service.context(), service.props(), Arc::clone(&send)));
+        }
+
+        assert_eq!(lock(&pages).as_slice(), &[5]);
+    }
+
+    #[test]
+    fn controlled_set_page_size_preserves_parent_page_for_later_expansion() {
+        let pages = Arc::new(Mutex::new(Vec::new()));
+        let pages_clone = Arc::clone(&pages);
+
+        let mut service = service(
+            props()
+                .page(10)
+                .on_page_change(move |page| lock(&pages_clone).push(page)),
+        );
+
+        let shrink = service.send(Event::SetPageSize(
+            NonZeroU32::new(20).expect("non-zero page size"),
+        ));
+
+        let send: StrongSend<Event> = Arc::new(|_| {});
+
+        for effect in shrink.pending_effects {
+            drop(effect.run(service.context(), service.props(), Arc::clone(&send)));
+        }
+
+        assert_eq!(service.context().page_count, 5);
+        assert_eq!(*service.context().page.get(), 5);
+        assert_eq!(service.context().current_page(), 5);
+
+        let expand = service.send(Event::SetPageSize(
+            NonZeroU32::new(10).expect("non-zero page size"),
+        ));
+
+        for effect in expand.pending_effects {
+            drop(effect.run(service.context(), service.props(), Arc::clone(&send)));
+        }
+
+        assert_eq!(service.context().page_count, 10);
+        assert_eq!(*service.context().page.get(), 10);
+        assert_eq!(service.context().current_page(), 10);
+        assert_eq!(lock(&pages).as_slice(), &[5, 10]);
     }
 
     #[test]

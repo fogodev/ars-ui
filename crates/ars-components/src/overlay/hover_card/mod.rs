@@ -2016,6 +2016,7 @@ mod tests {
         let second_mount = service.send(Event::TitleMount);
 
         assert!(!second_mount.state_changed);
+        assert!(!second_mount.context_changed);
         assert!(service.context().has_title);
 
         drop(service.send(Event::TitleUnmount));
@@ -2023,6 +2024,7 @@ mod tests {
         let second_unmount = service.send(Event::TitleUnmount);
 
         assert!(!second_unmount.state_changed);
+        assert!(!second_unmount.context_changed);
         assert!(!service.context().has_title);
     }
 

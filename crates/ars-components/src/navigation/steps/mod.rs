@@ -1047,6 +1047,17 @@ mod tests {
     }
 
     #[test]
+    fn api_reports_last_step_only_at_or_beyond_final_index() {
+        let first = service(props().default_step(0));
+        let middle = service(props().default_step(2));
+        let last = service(props().default_step(3));
+
+        assert!(!first.connect(&|_| {}).is_last_step());
+        assert!(!middle.connect(&|_| {}).is_last_step());
+        assert!(last.connect(&|_| {}).is_last_step());
+    }
+
+    #[test]
     fn next_prev_and_direct_navigation_update_statuses() {
         let mut service = service(props().default_step(0));
 
@@ -1280,6 +1291,17 @@ mod tests {
 
         assert!(!result.context_changed);
         assert_eq!(*service.context().step.get(), 0);
+    }
+
+    #[test]
+    fn validation_blocks_completion_from_last_step() {
+        let mut service = service(props().default_step(3).is_step_valid(|_| false));
+
+        let result = service.send(Event::NextStep);
+
+        assert!(!result.context_changed);
+        assert!(result.pending_effects.is_empty());
+        assert_eq!(*service.context().step.get(), 3);
     }
 
     #[test]

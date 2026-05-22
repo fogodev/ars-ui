@@ -21,6 +21,10 @@ with ellipsis for large page counts.
 `Pagination` is effectively stateless — its only meaningful state is the current page, tracked
 in context. A single `Idle` state is used.
 
+The effective current page is always clamped into `1..=page_count`, including controlled
+`page` props. `Context::page.get()` and `Api::current_page()` must not expose an out-of-range
+page when `page_count` changes.
+
 | State  | Description                                                 |
 | ------ | ----------------------------------------------------------- |
 | `Idle` | The only machine state; current page is in `Context::page`. |
@@ -195,11 +199,16 @@ impl ars_core::Machine for Machine {
     type Messages = Messages;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let page = match props.page {
-            Some(p) => Bindable::controlled(p),
-            None    => Bindable::uncontrolled(props.default_page.max(1)),
-        };
         let page_count = Context::compute_page_count(props.total_items, props.page_size);
+        let initial_page = props
+            .page
+            .unwrap_or(props.default_page)
+            .max(1)
+            .min(page_count);
+        let page = match props.page {
+            Some(_) => Bindable::controlled(initial_page),
+            None    => Bindable::uncontrolled(initial_page),
+        };
         let ids = ComponentIds::from_id(&props.id);
         let locale = env.locale.clone();
         let messages = messages.clone();
@@ -267,6 +276,9 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.page_size  = new_size;
                     ctx.page_count = new_count;
+                    if ctx.page.is_controlled() {
+                        ctx.page.sync_controlled(Some(clamped));
+                    }
                     ctx.page.set(clamped);
                 }))
             }

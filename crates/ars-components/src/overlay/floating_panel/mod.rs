@@ -1879,6 +1879,134 @@ mod tests {
     }
 
     #[test]
+    fn resize_rect_covers_every_handle_and_aspect_ratio_axis() {
+        let props = Props {
+            min_size: (10.0, 10.0),
+            max_size: (1_000.0, 1_000.0),
+            initial_size: (400.0, 200.0),
+            lock_aspect_ratio: false,
+            ..test_props()
+        };
+
+        assert_eq!(
+            resize_rect(
+                (100.0, 100.0),
+                (400.0, 300.0),
+                ResizeHandle::E,
+                20.0,
+                7.0,
+                &props
+            ),
+            ((100.0, 100.0), (420.0, 300.0))
+        );
+        assert_eq!(
+            resize_rect(
+                (100.0, 100.0),
+                (400.0, 300.0),
+                ResizeHandle::W,
+                20.0,
+                7.0,
+                &props
+            ),
+            ((120.0, 100.0), (380.0, 300.0))
+        );
+        assert_eq!(
+            resize_rect(
+                (100.0, 100.0),
+                (400.0, 300.0),
+                ResizeHandle::S,
+                20.0,
+                7.0,
+                &props
+            ),
+            ((100.0, 100.0), (400.0, 307.0))
+        );
+        assert_eq!(
+            resize_rect(
+                (100.0, 100.0),
+                (400.0, 300.0),
+                ResizeHandle::N,
+                20.0,
+                7.0,
+                &props
+            ),
+            ((100.0, 107.0), (400.0, 293.0))
+        );
+        assert_eq!(
+            resize_rect(
+                (100.0, 100.0),
+                (400.0, 300.0),
+                ResizeHandle::SE,
+                20.0,
+                7.0,
+                &props
+            ),
+            ((100.0, 100.0), (420.0, 307.0))
+        );
+        assert_eq!(
+            resize_rect(
+                (100.0, 100.0),
+                (400.0, 300.0),
+                ResizeHandle::SW,
+                20.0,
+                7.0,
+                &props
+            ),
+            ((120.0, 100.0), (380.0, 307.0))
+        );
+        assert_eq!(
+            resize_rect(
+                (100.0, 100.0),
+                (400.0, 300.0),
+                ResizeHandle::NE,
+                20.0,
+                7.0,
+                &props
+            ),
+            ((100.0, 107.0), (420.0, 293.0))
+        );
+        assert_eq!(
+            resize_rect(
+                (100.0, 100.0),
+                (400.0, 300.0),
+                ResizeHandle::NW,
+                20.0,
+                7.0,
+                &props
+            ),
+            ((120.0, 107.0), (380.0, 293.0))
+        );
+
+        let aspect = Props {
+            lock_aspect_ratio: true,
+            ..props
+        };
+
+        assert_eq!(
+            resize_rect(
+                (0.0, 0.0),
+                (400.0, 200.0),
+                ResizeHandle::E,
+                100.0,
+                0.0,
+                &aspect
+            ),
+            ((0.0, 0.0), (500.0, 250.0))
+        );
+        assert_eq!(
+            resize_rect(
+                (0.0, 0.0),
+                (400.0, 200.0),
+                ResizeHandle::N,
+                0.0,
+                -50.0,
+                &aspect
+            ),
+            ((0.0, -50.0), (500.0, 250.0))
+        );
+    }
+
+    #[test]
     fn minimize_maximize_restore_and_close_track_stage() {
         let mut service =
             Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
@@ -2020,6 +2148,23 @@ mod tests {
         assert_eq!(service.context(), &before);
         assert!(!escape.state_changed);
         assert!(effect_names(&escape).is_empty());
+
+        let mut escape_disabled = Service::<Machine>::new(
+            Props {
+                close_on_escape: false,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        let before = escape_disabled.context().clone();
+
+        let escape = escape_disabled.send(Event::CloseOnEscape);
+
+        assert_eq!(escape_disabled.context(), &before);
+        assert!(!escape.state_changed);
+        assert!(effect_names(&escape).is_empty());
     }
 
     #[test]
@@ -2116,6 +2261,35 @@ mod tests {
     }
 
     #[test]
+    fn controlled_close_from_active_resize_returns_to_idle_without_closing() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                open: Some(true),
+                close_on_escape: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(service.send(Event::ResizeStart(ResizeHandle::SE)));
+
+        assert_eq!(
+            service.state(),
+            &State::Resizing {
+                handle: ResizeHandle::SE
+            }
+        );
+
+        let close = service.send(Event::CloseOnEscape);
+
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().open);
+        assert!(service.context().active_resize_handle.is_none());
+        assert_eq!(effect_names(&close), vec![Effect::OpenChange]);
+    }
+
+    #[test]
     fn maximize_from_minimized_uses_supplied_viewport_metrics() {
         let mut service =
             Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
@@ -2196,6 +2370,90 @@ mod tests {
         assert_eq!(service.context(), &before);
         assert!(!focus.state_changed);
         assert!(effect_names(&focus).is_empty());
+    }
+
+    #[test]
+    fn closed_or_disabled_stage_and_resize_events_are_ignored() {
+        let mut closed = Service::<Machine>::new(
+            Props {
+                default_open: false,
+                close_on_escape: false,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        assert!(
+            !closed
+                .send(Event::ResizeStart(ResizeHandle::SE))
+                .state_changed
+        );
+        assert!(!closed.send(Event::Minimize).state_changed);
+        assert!(
+            !closed
+                .send(Event::Maximize(MaximizeMetrics {
+                    viewport: ViewportRect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: 800.0,
+                        height: 600.0,
+                    },
+                }))
+                .state_changed
+        );
+        assert!(!closed.send(Event::CloseOnEscape).state_changed);
+
+        let mut locked = Service::<Machine>::new(
+            Props {
+                resizable: false,
+                minimizable: false,
+                maximizable: false,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        assert!(
+            !locked
+                .send(Event::ResizeStart(ResizeHandle::SE))
+                .state_changed
+        );
+        assert!(!locked.send(Event::Minimize).state_changed);
+        assert!(
+            !locked
+                .send(Event::Maximize(MaximizeMetrics {
+                    viewport: ViewportRect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: 800.0,
+                        height: 600.0,
+                    },
+                }))
+                .state_changed
+        );
+
+        let mut maximized = Service::<Machine>::new(
+            Props {
+                minimizable: false,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        drop(maximized.send(Event::Maximize(MaximizeMetrics {
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: 800.0,
+                height: 600.0,
+            },
+        })));
+
+        assert_eq!(maximized.state(), &State::Maximized);
+        assert!(!maximized.send(Event::Minimize).state_changed);
     }
 
     #[test]
@@ -2377,6 +2635,106 @@ mod tests {
         });
 
         assert!(sync.context_changed);
+    }
+
+    #[test]
+    fn viewport_clamp_preserves_edge_boundaries() {
+        let props = Props {
+            allow_overflow: false,
+            constrain_to_viewport: true,
+            viewport: ViewportRect {
+                x: 10.0,
+                y: 20.0,
+                width: 300.0,
+                height: 200.0,
+            },
+            ..test_props()
+        };
+
+        assert_eq!(
+            clamp_position((110.0, 70.0), (200.0, 150.0), &props),
+            (110.0, 70.0)
+        );
+        assert_eq!(
+            clamp_position((111.0, 71.0), (200.0, 150.0), &props),
+            (110.0, 70.0)
+        );
+        assert_eq!(
+            clamp_position((9.0, 19.0), (200.0, 150.0), &props),
+            (10.0, 20.0)
+        );
+    }
+
+    #[test]
+    fn props_changed_covers_every_sync_field() {
+        let base = test_props();
+
+        assert!(!props_changed(&base, &base));
+
+        let mut changed = base.clone();
+
+        changed.min_size = (201.0, 151.0);
+
+        assert!(props_changed(&base, &changed));
+
+        let mut changed = base.clone();
+
+        changed.max_size = (999.0, 799.0);
+
+        assert!(props_changed(&base, &changed));
+
+        let mut changed = base.clone();
+
+        changed.viewport = ViewportRect {
+            x: 0.0,
+            y: 0.0,
+            width: 640.0,
+            height: 480.0,
+        };
+
+        assert!(props_changed(&base, &changed));
+
+        let mut changed = base.clone();
+
+        changed.draggable = !base.draggable;
+
+        assert!(props_changed(&base, &changed));
+
+        let mut changed = base.clone();
+
+        changed.resizable = !base.resizable;
+
+        assert!(props_changed(&base, &changed));
+
+        let mut changed = base.clone();
+
+        changed.modal = !base.modal;
+
+        assert!(props_changed(&base, &changed));
+
+        let mut changed = base.clone();
+
+        changed.constrain_to_viewport = !base.constrain_to_viewport;
+
+        assert!(props_changed(&base, &changed));
+
+        let mut changed = base.clone();
+
+        changed.close_on_escape = !base.close_on_escape;
+
+        assert!(props_changed(&base, &changed));
+
+        let mut changed = base.clone();
+
+        changed.allow_overflow = !base.allow_overflow;
+
+        assert!(props_changed(&base, &changed));
+
+        let mut changed = base.clone();
+
+        changed.grid_size += 1.0;
+
+        assert!(props_changed(&base, &changed));
     }
 
     #[test]
@@ -2733,6 +3091,52 @@ mod tests {
     }
 
     #[test]
+    fn stage_trigger_restores_from_non_default_stages() {
+        let mut minimized =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(minimized.send(Event::Minimize));
+
+        let minimized_events = RefCell::new(Vec::new());
+        let send = |event| minimized_events.borrow_mut().push(event);
+
+        minimized.connect(&send).on_stage_trigger_click();
+
+        assert_eq!(minimized_events.into_inner(), vec![Event::Restore]);
+
+        let mut maximized =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(maximized.send(Event::Maximize(MaximizeMetrics {
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: 800.0,
+                height: 600.0,
+            },
+        })));
+
+        let maximized_events = RefCell::new(Vec::new());
+        let send = |event| maximized_events.borrow_mut().push(event);
+
+        maximized.connect(&send).on_stage_trigger_click();
+
+        assert_eq!(maximized_events.into_inner(), vec![Event::Restore]);
+    }
+
+    #[test]
+    fn bring_to_front_allocates_z_index_without_state_change() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        let result = service.send(Event::BringToFront);
+
+        assert_eq!(service.state(), &State::Idle);
+        assert!(!result.state_changed);
+        assert_eq!(effect_names(&result), vec![Effect::AllocateZIndex]);
+    }
+
+    #[test]
     fn locked_aspect_ratio_resize_stays_within_constraints() {
         let mut service = Service::<Machine>::new(
             Props {
@@ -2769,6 +3173,7 @@ mod tests {
         let api = service.connect(&send);
 
         assert!(api.on_keydown(&shifted_keyboard_data(KeyboardKey::ArrowRight)));
+        assert!(api.on_keydown(&keyboard_data(KeyboardKey::ArrowLeft)));
         assert!(api.on_keydown(&keyboard_data(KeyboardKey::ArrowUp)));
         assert!(!api.on_keydown(&keyboard_data(KeyboardKey::Tab)));
 
@@ -2776,6 +3181,7 @@ mod tests {
             sent.into_inner(),
             vec![
                 Event::KeyboardMove { dx: 10.0, dy: 0.0 },
+                Event::KeyboardMove { dx: -1.0, dy: 0.0 },
                 Event::KeyboardMove { dx: 0.0, dy: -1.0 }
             ]
         );
@@ -2935,6 +3341,100 @@ mod tests {
         assert_eq!(
             resize.get(&HtmlAttr::Aria(AriaAttr::Label)),
             Some("Resize bottom-right")
+        );
+    }
+
+    #[test]
+    fn api_getters_and_part_attrs_reflect_context() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                initial_position: (33.0, 44.0),
+                initial_size: (222.0, 111.0),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        let api = service.connect(&|_| {});
+
+        assert!(api.is_open());
+        assert!(!api.is_minimized());
+        assert!(!api.is_maximized());
+        assert_eq!(api.position(), (33.0, 44.0));
+        assert_eq!(api.size(), (222.0, 111.0));
+        assert_eq!(
+            api.part_attrs(Part::ResizeHandle {
+                handle: ResizeHandle::W
+            })
+            .get(&HtmlAttr::Data("ars-handle")),
+            Some("w")
+        );
+
+        drop(service.send(Event::Minimize));
+
+        let minimized = service.connect(&|_| {});
+
+        assert!(minimized.is_minimized());
+        assert!(!minimized.is_maximized());
+        assert_eq!(minimized.stage(), Stage::Minimized);
+
+        drop(service.send(Event::Restore));
+        drop(service.send(Event::Maximize(MaximizeMetrics {
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: 800.0,
+                height: 600.0,
+            },
+        })));
+
+        assert!(service.connect(&|_| {}).is_maximized());
+
+        drop(service.send(Event::Close));
+
+        assert!(!service.connect(&|_| {}).is_open());
+    }
+
+    #[test]
+    fn resize_handle_cursor_requires_resizable_non_maximized_panel() {
+        let disabled = Service::<Machine>::new(
+            Props {
+                resizable: false,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        assert!(
+            !disabled
+                .connect(&|_| {})
+                .resize_handle_attrs(ResizeHandle::E)
+                .styles()
+                .iter()
+                .any(|(property, _)| *property == CssProperty::Cursor)
+        );
+
+        let mut maximized =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        drop(maximized.send(Event::Maximize(MaximizeMetrics {
+            viewport: ViewportRect {
+                x: 0.0,
+                y: 0.0,
+                width: 800.0,
+                height: 600.0,
+            },
+        })));
+
+        assert!(
+            !maximized
+                .connect(&|_| {})
+                .resize_handle_attrs(ResizeHandle::E)
+                .styles()
+                .iter()
+                .any(|(property, _)| *property == CssProperty::Cursor)
         );
     }
 

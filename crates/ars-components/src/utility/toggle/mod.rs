@@ -581,6 +581,27 @@ mod tests {
     }
 
     #[test]
+    fn toggle_set_props_syncs_disabled_without_pressed_change() {
+        let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
+
+        let result = service.set_props(Props {
+            disabled: true,
+            ..test_props()
+        });
+
+        assert!(result.context_changed);
+        assert!(service.context().disabled);
+
+        let result = service.set_props(Props {
+            disabled: true,
+            ..test_props()
+        });
+
+        assert!(!result.context_changed);
+        assert!(service.context().disabled);
+    }
+
+    #[test]
     fn toggle_disabled_blocks_value_events() {
         let mut service = Service::<Machine>::new(
             Props {
