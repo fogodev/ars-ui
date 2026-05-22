@@ -81,7 +81,7 @@ AttrMap {
                 DescribedBy,
             ),
             String(
-                "sel-description sel-error-message",
+                "sel-error-message sel-description",
             ),
         ),
         (

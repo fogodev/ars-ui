@@ -650,9 +650,10 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                let next = normalize_selection_state(
+                let mut next = normalize_selection_state(
                     ctx.selection_state.deselect_from_all(key, &ctx.items),
                 );
+                remove_disabled_selection_keys(&mut next);
 
                 if props.disallow_empty_selection && selection_is_empty(&next.selected_keys) {
                     return None;
@@ -1485,6 +1486,16 @@ fn normalize_selection_state(mut state: selection::State) -> selection::State {
     state
 }
 
+fn remove_disabled_selection_keys(state: &mut selection::State) {
+    if let selection::Set::Multiple(keys) = &mut state.selected_keys {
+        keys.retain(|key| !state.disabled_keys.contains(key));
+
+        if keys.is_empty() {
+            state.selected_keys = selection::Set::Empty;
+        }
+    }
+}
+
 fn normalize_selection_for_mode(selected: selection::Set, mode: selection::Mode) -> selection::Set {
     match mode {
         selection::Mode::None => selection::Set::Empty,
@@ -1940,6 +1951,24 @@ mod tests {
         assert_eq!(
             *listbox.context().selection.get(),
             selection::Set::Multiple(BTreeSet::from([key("bravo"), key("charlie")]))
+        );
+    }
+
+    #[test]
+    fn deselect_from_all_excludes_disabled_keys() {
+        let mut listbox = service(
+            Props::new()
+                .id("lb")
+                .selection_mode(selection::Mode::Multiple)
+                .disabled_keys(BTreeSet::from([key("bravo")]))
+                .default_value(selection::Set::All),
+        );
+
+        drop(listbox.send(Event::DeselectItem(key("alpha"))));
+
+        assert_eq!(
+            *listbox.context().selection.get(),
+            selection::Set::Multiple(BTreeSet::from([key("charlie")]))
         );
     }
 

@@ -691,9 +691,10 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                let next = normalize_selection_state(
+                let mut next = normalize_selection_state(
                     ctx.selection_state.deselect_from_all(key, &ctx.items),
                 );
+                remove_disabled_selection_keys(&mut next);
 
                 if props.disallow_empty_selection && selection_is_empty(&next.selected_keys) {
                     return None;
@@ -1026,12 +1027,12 @@ impl Api<'_> {
 
         let mut described_by = Vec::new();
 
-        if self.ctx.has_description {
-            described_by.push(self.ctx.ids.part("description"));
-        }
-
         if self.ctx.invalid {
             described_by.push(self.ctx.ids.part("error-message"));
+        }
+
+        if self.ctx.has_description {
+            described_by.push(self.ctx.ids.part("description"));
         }
 
         if !described_by.is_empty() {
@@ -1089,13 +1090,16 @@ impl Api<'_> {
 
             KeyboardKey::ArrowUp if self.ctx.open => (self.send)(Event::HighlightPrev),
 
-            KeyboardKey::ArrowDown | KeyboardKey::ArrowUp => (self.send)(Event::Open),
-
             KeyboardKey::Enter | KeyboardKey::Space if self.ctx.open => {
                 if let Some(key) = &self.ctx.highlighted_key {
                     (self.send)(Event::SelectItem(key.clone()));
                 }
             }
+
+            KeyboardKey::ArrowDown
+            | KeyboardKey::ArrowUp
+            | KeyboardKey::Enter
+            | KeyboardKey::Space => (self.send)(Event::Open),
 
             KeyboardKey::Escape if self.ctx.open => (self.send)(Event::Close),
 
@@ -1538,6 +1542,7 @@ fn select_item_plan(ctx: &Context, props: &Props, key: Key) -> Option<Transition
 
     let selected = next.selected_keys.clone();
     let close = props.close_on_select.unwrap_or(!ctx.multiple);
+    let was_open = ctx.open;
     let on_open_change = props.on_open_change.clone();
 
     if close {
@@ -1550,7 +1555,7 @@ fn select_item_plan(ctx: &Context, props: &Props, key: Key) -> Option<Transition
                 ctx.highlighted_key = None;
                 ctx.typeahead = typeahead::State::default();
 
-                if let Some(callback) = &on_open_change {
+                if was_open && let Some(callback) = &on_open_change {
                     callback(false);
                 }
             }),
@@ -1756,6 +1761,16 @@ fn normalize_selection_state(mut state: selection::State) -> selection::State {
     state
 }
 
+fn remove_disabled_selection_keys(state: &mut selection::State) {
+    if let selection::Set::Multiple(keys) = &mut state.selected_keys {
+        keys.retain(|key| !state.disabled_keys.contains(key));
+
+        if keys.is_empty() {
+            state.selected_keys = selection::Set::Empty;
+        }
+    }
+}
+
 fn normalize_selection_for_mode(selected: selection::Set, mode: selection::Mode) -> selection::Set {
     match mode {
         selection::Mode::None => selection::Set::Empty,
@@ -1807,7 +1822,7 @@ fn serialize_selection(selection: &selection::Set) -> String {
             .collect::<Vec<_>>()
             .join(","),
 
-        selection::Set::All => "all".to_string(),
+        selection::Set::All => "__ars_all".to_string(),
 
         _ => String::new(),
     }
@@ -2019,7 +2034,7 @@ mod tests {
             all.connect(&|_| {})
                 .hidden_input_attrs()
                 .get(&HtmlAttr::Value),
-            Some("all")
+            Some("__ars_all")
         );
 
         let unnamed = make_service(Props::new().id("unnamed"));
@@ -2114,9 +2129,9 @@ mod tests {
 
         let captured = captured.into_inner();
 
-        assert_eq!(captured.len(), 15);
+        assert_eq!(captured.len(), 17);
         assert_eq!(
-            &captured[..8],
+            &captured[..10],
             &[
                 Event::Toggle,
                 Event::Focus { is_keyboard: true },
@@ -2126,14 +2141,16 @@ mod tests {
                 Event::HighlightItem(None),
                 Event::Clear,
                 Event::Open,
+                Event::Open,
+                Event::Open,
             ]
         );
         assert!(matches!(
-            captured[8],
+            captured[10],
             Event::TypeaheadSearch('a', timestamp) if timestamp > 0
         ));
         assert_eq!(
-            &captured[9..13],
+            &captured[11..15],
             &[
                 Event::HighlightNext,
                 Event::HighlightPrev,
@@ -2142,10 +2159,10 @@ mod tests {
             ]
         );
         assert!(matches!(
-            captured[13],
+            captured[15],
             Event::TypeaheadSearch('d', timestamp) if timestamp > 0
         ));
-        assert_eq!(captured[14], Event::Close);
+        assert_eq!(captured[16], Event::Close);
 
         let open_capture = RefCell::new(Vec::new());
 
@@ -2330,6 +2347,25 @@ mod tests {
     }
 
     #[test]
+    fn deselect_from_all_excludes_disabled_keys() {
+        let mut select = make_service(
+            Props::new()
+                .id("sel")
+                .multiple(true)
+                .selection_mode(selection::Mode::Multiple)
+                .disabled_keys(BTreeSet::from([key("bravo")]))
+                .default_value(selection::Set::All),
+        );
+
+        drop(select.send(Event::DeselectItem(key("alpha"))));
+
+        assert_eq!(
+            *select.context().selection.get(),
+            selection::Set::Multiple(BTreeSet::from([key("charlie")]))
+        );
+    }
+
+    #[test]
     fn stale_item_selection_events_do_not_mutate_selection_or_hidden_value() {
         let mut select = make_service(
             Props::new()
@@ -2348,7 +2384,7 @@ mod tests {
                 .connect(&|_| {})
                 .hidden_input_attrs()
                 .get(&HtmlAttr::Value),
-            Some("all")
+            Some("__ars_all")
         );
 
         let mut empty = make_service(Props::new().id("empty").name("choice"));
@@ -2476,7 +2512,7 @@ mod tests {
 
         assert_eq!(
             attrs.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
-            Some("sel-description sel-error-message")
+            Some("sel-error-message sel-description")
         );
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::AutoComplete)), None);
     }
