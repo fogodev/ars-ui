@@ -271,6 +271,9 @@ impl Default for Props {
 Note: `items` is set during `init()` and does not auto-sync when Props change.
 To update items dynamically (e.g., async search results), send an
 `Event::UpdateItems(StaticCollection<Item>)` event.
+When controlled `value` props change or selection mode changes, `SyncProps`
+normalizes the controlled bindable and internal `selection::State` to the active
+mode before API attrs or hidden-input serialization read it.
 
 ### 1.5 Full Machine Implementation
 
@@ -370,6 +373,7 @@ impl ars_core::Machine for Machine {
                             FilterMode::StartsWith => node.text_value.to_lowercase().starts_with(&val.to_lowercase()),
                             FilterMode::None => true,
                             FilterMode::Custom => true, // adapter handles custom filtering
+                            FilterMode::Inline => true, // completion only; list is not filtered
                             FilterMode::InlineCompletion => node.text_value.to_lowercase().starts_with(&val.to_lowercase()),
                         }
                     });
@@ -386,13 +390,22 @@ impl ars_core::Machine for Machine {
                         ctx.selection_state.disabled_behavior),
                 };
 
+                let completed_value = match ctx.filter_mode {
+                    FilterMode::Inline | FilterMode::InlineCompletion => {
+                        first_prefix_match(&ctx.items, &val)
+                            .map(|node| node.text_value.clone())
+                            .unwrap_or_else(|| val.clone())
+                    }
+                    _ => val.clone(),
+                };
+
                 let should_open = !ctx.disabled
                     && !was_open
                     && (!val.is_empty() || props.allows_empty_collection)
                     && (props.allows_empty_collection || first_key.is_some());
                 if should_open {
                     Some(TransitionPlan::to(State::Open).apply(move |ctx| {
-                        ctx.input_value.set(val);
+                        ctx.input_value.set(completed_value);
                         ctx.open = true;
                         ctx.visible_keys = visible;
                         ctx.highlighted_key = first_key;
@@ -405,7 +418,7 @@ impl ars_core::Machine for Machine {
                     })))
                 } else {
                     Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.input_value.set(val);
+                        ctx.input_value.set(completed_value);
                         ctx.visible_keys = visible;
                         ctx.highlighted_key = first_key;
                     }))
@@ -553,7 +566,11 @@ impl ars_core::Machine for Machine {
                 if !ctx.selection.get().contains(&key) { return None; }
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let new_sel = ctx.selection_state.deselect(&key);
+                    let new_sel = if matches!(ctx.selection.get(), selection::Set::All) {
+                        ctx.selection_state.deselect_from_all(&key, &ctx.items)
+                    } else {
+                        ctx.selection_state.deselect(&key)
+                    };
                     ctx.selection.set(new_sel);
                 }))
             }
@@ -594,6 +611,7 @@ impl ars_core::Machine for Machine {
                     ctx.is_composing = false;
                     ctx.input_value.set(value);
                     recompute_visible_keys_and_highlight(ctx);
+                    apply_inline_completion_if_enabled(ctx);
                     if !ctx.disabled && (!ctx.input_value.get().is_empty() || props.allows_empty_collection) {
                         ctx.open = props.allows_empty_collection || ctx.highlighted_key.is_some();
                     }

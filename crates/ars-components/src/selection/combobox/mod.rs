@@ -749,25 +749,24 @@ impl ars_core::Machine for Machine {
 
             (_, Event::InputChange(value)) => {
                 let value = value.clone();
-                let visible_keys = visible_keys_for(ctx, &value);
-                let highlighted_key = first_visible_key(ctx, visible_keys.as_ref());
+                let (visible_keys, highlighted_key, input_value) = input_change_values(ctx, &value);
                 let should_open = should_open_for_input(ctx, props, &value, visible_keys.as_ref());
 
                 if should_open {
                     Some(open_plan(props).apply(move |ctx: &mut Context| {
-                        ctx.input_value.set(value);
+                        ctx.input_value.set(input_value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
                     }))
                 } else if ctx.open && !props.allows_empty_collection {
                     Some(close_plan(props).apply(move |ctx: &mut Context| {
-                        ctx.input_value.set(value);
+                        ctx.input_value.set(input_value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
                     }))
                 } else {
                     Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                        ctx.input_value.set(value);
+                        ctx.input_value.set(input_value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
                     }))
@@ -928,28 +927,27 @@ impl ars_core::Machine for Machine {
 
             (_, Event::CompositionEnd(value)) => {
                 let value = value.clone();
-                let visible_keys = visible_keys_for(ctx, &value);
-                let highlighted_key = first_visible_key(ctx, visible_keys.as_ref());
+                let (visible_keys, highlighted_key, input_value) = input_change_values(ctx, &value);
                 let should_open = should_open_for_input(ctx, props, &value, visible_keys.as_ref());
 
                 if should_open {
                     Some(open_plan(props).apply(move |ctx: &mut Context| {
                         ctx.is_composing = false;
-                        ctx.input_value.set(value);
+                        ctx.input_value.set(input_value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
                     }))
                 } else if ctx.open && !props.allows_empty_collection {
                     Some(close_plan(props).apply(move |ctx: &mut Context| {
                         ctx.is_composing = false;
-                        ctx.input_value.set(value);
+                        ctx.input_value.set(input_value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
                     }))
                 } else {
                     Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                         ctx.is_composing = false;
-                        ctx.input_value.set(value);
+                        ctx.input_value.set(input_value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
                     }))
@@ -1707,7 +1705,11 @@ fn select_item_plan(
         && ctx.selection_state.behavior == selection::Behavior::Replace
     {
         if ctx.selection_state.is_selected(key) {
-            ctx.selection_state.deselect(key)
+            if matches!(ctx.selection.get(), selection::Set::All) {
+                ctx.selection_state.deselect_from_all(key, &ctx.items)
+            } else {
+                ctx.selection_state.deselect(key)
+            }
         } else {
             let mut selected = match ctx.selection.get() {
                 selection::Set::Multiple(keys) => keys.clone(),
@@ -1799,7 +1801,11 @@ fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
             ctx.input_value.set(value.clone());
         }
 
-        ctx.selection.sync_controlled(props.value.clone());
+        ctx.selection.sync_controlled(if props.value.is_some() {
+            Some(selected.clone())
+        } else {
+            None
+        });
         ctx.selection.set(selected.clone());
         ctx.selection_state.mode = props.selection_mode;
         ctx.selection_state.behavior = props.selection_behavior;
@@ -1809,7 +1815,13 @@ fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
 
         remove_disabled_selection_keys(&mut ctx.selection_state);
 
-        ctx.selection.set(ctx.selection_state.selected_keys.clone());
+        let selected = ctx.selection_state.selected_keys.clone();
+        ctx.selection.sync_controlled(if props.value.is_some() {
+            Some(selected.clone())
+        } else {
+            None
+        });
+        ctx.selection.set(selected);
 
         ctx.disabled = props.disabled;
         ctx.readonly = props.readonly;
@@ -1967,6 +1979,43 @@ fn visible_keys_for(ctx: &Context, input: &str) -> Option<BTreeSet<Key>> {
             .map(|node| node.key.clone())
             .collect(),
     )
+}
+
+fn input_change_values(
+    ctx: &Context,
+    raw_value: &str,
+) -> (Option<BTreeSet<Key>>, Option<Key>, String) {
+    let visible_keys = visible_keys_for(ctx, raw_value);
+    let mut highlighted_key = first_visible_key(ctx, visible_keys.as_ref());
+    let mut input_value = raw_value.to_string();
+
+    if matches!(
+        ctx.filter_mode,
+        FilterMode::Inline | FilterMode::InlineCompletion
+    ) && !raw_value.is_empty()
+    {
+        if let Some((key, label)) = inline_completion(ctx, raw_value) {
+            highlighted_key = Some(key);
+            input_value = label;
+        } else if matches!(ctx.filter_mode, FilterMode::Inline) {
+            highlighted_key = None;
+        }
+    }
+
+    (visible_keys, highlighted_key, input_value)
+}
+
+fn inline_completion(ctx: &Context, input: &str) -> Option<(Key, String)> {
+    let input = input.to_lowercase();
+
+    ctx.items
+        .nodes()
+        .find(|node| {
+            node.node_type == NodeType::Item
+                && node.text_value.to_lowercase().starts_with(&input)
+                && is_focusable_key(ctx, &node.key)
+        })
+        .map(|node| (node.key.clone(), node.text_value.clone()))
 }
 
 fn first_visible_key(ctx: &Context, visible_keys: Option<&BTreeSet<Key>>) -> Option<Key> {
@@ -2784,6 +2833,35 @@ mod tests {
     }
 
     #[test]
+    fn inline_filter_modes_apply_completion_to_input() {
+        let mut inline = make_service(
+            Props::new()
+                .id("combo")
+                .filter_mode(FilterMode::Inline)
+                .open_on_focus(false),
+        );
+
+        send_event(&mut inline, Event::InputChange("ap".into()));
+
+        assert_eq!(inline.context().input_value.get(), "Apple");
+        assert_eq!(inline.context().highlighted_key, Some(key(1)));
+        assert!(inline.context().visible_keys.is_none());
+
+        let mut both = make_service(
+            Props::new()
+                .id("combo")
+                .filter_mode(FilterMode::InlineCompletion)
+                .open_on_focus(false),
+        );
+
+        send_event(&mut both, Event::InputChange("ba".into()));
+
+        assert_eq!(both.context().input_value.get(), "Banana");
+        assert_eq!(both.context().highlighted_key, Some(key(2)));
+        assert_eq!(both.context().visible_keys, Some(BTreeSet::from([key(2)])));
+    }
+
+    #[test]
     fn update_items_invalidates_stale_references() {
         let mut service = make_service(Props::new().id("combo"));
 
@@ -3313,8 +3391,11 @@ mod tests {
         assert_eq!(service.context().highlighted_key, Some(key(1)));
         assert_eq!(
             service.context().selection.get(),
-            &selection::Set::Multiple(BTreeSet::from([key(1), key(2)]))
+            &selection::Set::Single(key(1))
         );
+        with_api(&service, |api| {
+            assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some("1"));
+        });
         assert_eq!(
             service.context().selection_state.mode,
             selection::Mode::Single
@@ -3813,6 +3894,22 @@ mod tests {
         assert_eq!(
             replace_ctrl.context().selection.get(),
             &selection::Set::Multiple(BTreeSet::from([key(1), key(2)]))
+        );
+
+        let mut replace_all_ctrl = make_service(
+            Props::new()
+                .id("combo")
+                .selection_mode(selection::Mode::Multiple)
+                .selection_behavior(selection::Behavior::Replace)
+                .default_value(selection::Set::All),
+        );
+
+        send_event(&mut replace_all_ctrl, Event::Open);
+        send_event(&mut replace_all_ctrl, Event::SelectItemCtrl(key(1)));
+
+        assert_eq!(
+            replace_all_ctrl.context().selection.get(),
+            &selection::Set::Multiple(BTreeSet::from([key(2), key(3)]))
         );
 
         let mut toggle_select = make_service(
