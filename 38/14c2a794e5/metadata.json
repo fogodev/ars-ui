@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3814c2a794e5",
+  "strategy": "manual-commit",
+  "branch": "t3code/03c1ddf1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-dioxus/src/navigation/tabs.rs",
+    "crates/ars-dioxus/src/utility/button.rs",
+    "crates/ars-dioxus/tests/attr_passthrough.rs",
+    "crates/ars-leptos/tests/attr_passthrough.rs",
+    "crates/ars-leptos/tests/test_highlight.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/38/14c2a794e5/0/metadata.json",
+      "transcript": "/38/14c2a794e5/0/full.jsonl",
+      "content_hash": "/38/14c2a794e5/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 117666,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 9767936,
+    "output_tokens": 16854,
+    "api_call_count": 80
+  }
+}
