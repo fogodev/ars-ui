@@ -1,13 +1,1 @@
-We have reviews in our PR, proceed with our review loop flow
-
----
-
-Why is highlight behind the icu4x feature gate?
-
----
-
-Why use an `Arc<Mutex<u64>>`? An `Arc<AtomicU64>` wouldn't work?
-
----
-
-Then go with Atomic
+And after that, commit and push to github. Then use the @.agents/skills/waiting-for-codex-review/SKILL.md to keep watching and solving the reviews on github
