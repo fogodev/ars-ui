@@ -1299,6 +1299,10 @@ impl Api<'_> {
             .set(HtmlAttr::Id, self.ctx.ids.part("content"))
             .set(HtmlAttr::Role, "listbox")
             .set(
+                HtmlAttr::Aria(AriaAttr::Label),
+                (self.ctx.messages.trigger_label)(&self.ctx.locale),
+            )
+            .set(
                 HtmlAttr::Aria(AriaAttr::LabelledBy),
                 self.ctx.ids.part("label"),
             );
@@ -1808,6 +1812,12 @@ fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
         ctx.ids = ComponentIds::from_id(&props.id);
 
         invalidate_collection_references(ctx);
+
+        let input = ctx.input_value.get().clone();
+
+        if !input.is_empty() || ctx.visible_keys.is_some() {
+            refresh_filter_and_highlight(ctx, &input);
+        }
     })
 }
 
@@ -1817,8 +1827,9 @@ fn should_open_for_input(
     value: &str,
     visible_keys: Option<&BTreeSet<Key>>,
 ) -> bool {
-    props.allows_empty_collection
-        || ((ctx.open || !value.is_empty()) && first_visible_key(ctx, visible_keys).is_some())
+    !props.disabled
+        && (props.allows_empty_collection
+            || ((ctx.open || !value.is_empty()) && first_visible_key(ctx, visible_keys).is_some()))
 }
 
 fn refresh_filter_and_highlight(ctx: &mut Context, input: &str) {
@@ -1842,28 +1853,36 @@ fn commit_input_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
 
     if props.allow_custom_value {
         let key = Key::str(input.clone());
-        let mut next = ctx.selection_state.select(key.clone());
-
-        next.selected_keys = selection::Set::Single(key);
-
+        let next = ctx.selection_state.select(key);
         let selected = next.selected_keys.clone();
         let on_open_change = props.on_open_change.clone();
 
-        TransitionPlan::to(State::Closed).apply(move |ctx: &mut Context| {
-            let was_open = ctx.open;
+        if ctx.multiple {
+            TransitionPlan::context_only(move |ctx: &mut Context| {
+                ctx.selection.set(selected.clone());
+                ctx.selection_state = next.clone();
+                ctx.selection_state.selected_keys = ctx.selection.get().clone();
+                ctx.input_value.set(String::new());
+                ctx.highlighted_key = None;
+                ctx.visible_keys = None;
+            })
+        } else {
+            TransitionPlan::to(State::Closed).apply(move |ctx: &mut Context| {
+                let was_open = ctx.open;
 
-            ctx.selection.set(selected.clone());
-            ctx.selection_state = next.clone();
-            ctx.selection_state.selected_keys = ctx.selection.get().clone();
-            ctx.input_value.set(input);
-            ctx.open = false;
-            ctx.highlighted_key = None;
-            ctx.visible_keys = None;
+                ctx.selection.set(selected.clone());
+                ctx.selection_state = next.clone();
+                ctx.selection_state.selected_keys = ctx.selection.get().clone();
+                ctx.input_value.set(input);
+                ctx.open = false;
+                ctx.highlighted_key = None;
+                ctx.visible_keys = None;
 
-            if was_open && let Some(callback) = &on_open_change {
-                callback(false);
-            }
-        })
+                if was_open && let Some(callback) = &on_open_change {
+                    callback(false);
+                }
+            })
+        }
     } else {
         close_plan(props).apply(|ctx: &mut Context| {
             revert_input_to_selection(ctx);
@@ -1872,6 +1891,12 @@ fn commit_input_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
 }
 
 fn revert_input_to_selection(ctx: &mut Context) {
+    if ctx.multiple {
+        ctx.input_value.set(String::new());
+        ctx.visible_keys = None;
+        return;
+    }
+
     let label = ctx
         .selection
         .get()
@@ -2161,7 +2186,7 @@ fn serialize_selection(selection: &selection::Set) -> String {
             .collect::<Vec<_>>()
             .join(","),
 
-        selection::Set::All => "all".to_string(),
+        selection::Set::All => "__ars_all".to_string(),
 
         _ => String::new(),
     }
@@ -2290,6 +2315,10 @@ mod tests {
                 Some("list")
             );
             assert_eq!(api.content_attrs().get(&HtmlAttr::Role), Some("listbox"));
+            assert_eq!(
+                api.content_attrs().get(&HtmlAttr::Aria(AriaAttr::Label)),
+                Some("Show suggestions")
+            );
         });
     }
 
@@ -2438,6 +2467,55 @@ mod tests {
     }
 
     #[test]
+    fn custom_input_commit_preserves_multiple_selection_mode() {
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .selection_mode(selection::Mode::Multiple)
+                .allow_custom_value(true)
+                .default_value(selection::Set::Multiple(BTreeSet::from([key(1)])))
+                .open_on_focus(false),
+        );
+
+        send_event(&mut service, Event::InputChange("Dragonfruit".into()));
+        dispatch_api(&mut service, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Enter, None));
+        });
+
+        assert_eq!(
+            service.context().selection.get(),
+            &selection::Set::Multiple(BTreeSet::from([key(1), Key::str("Dragonfruit")]))
+        );
+        assert_eq!(
+            service.context().selection_state.mode,
+            selection::Mode::Multiple
+        );
+    }
+
+    #[test]
+    fn multi_select_revert_clears_transient_input() {
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .selection_mode(selection::Mode::Multiple)
+                .default_value(selection::Set::Multiple(BTreeSet::from([key(1)])))
+                .open_on_focus(false),
+        );
+
+        send_event(&mut service, Event::InputChange("Dragonfruit".into()));
+        dispatch_api(&mut service, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Enter, None));
+        });
+
+        assert_eq!(
+            service.context().selection.get(),
+            &selection::Set::Multiple(BTreeSet::from([key(1)]))
+        );
+        assert_eq!(service.context().input_value.get(), "");
+        assert_eq!(service.context().visible_keys, None);
+    }
+
+    #[test]
     fn ime_composition_suppresses_filtering_until_end() {
         let mut service = make_service(Props::new().id("combo").open_on_focus(false));
 
@@ -2518,6 +2596,23 @@ mod tests {
     }
 
     #[test]
+    fn hidden_input_serializes_all_without_key_collision() {
+        let service = make_service(
+            Props::new()
+                .id("combo")
+                .selection_mode(selection::Mode::Multiple)
+                .default_value(selection::Set::All),
+        );
+
+        with_api(&service, |api| {
+            assert_eq!(
+                api.hidden_input_attrs().get(&HtmlAttr::Value),
+                Some("__ars_all")
+            );
+        });
+    }
+
+    #[test]
     fn disabled_and_readonly_guards_block_mutation() {
         let mut disabled = make_service(Props::new().id("disabled").disabled(true));
         let mut readonly = make_service(Props::new().id("readonly").readonly(true));
@@ -2531,6 +2626,24 @@ mod tests {
         assert_eq!(disabled.state(), &State::Closed);
         assert_eq!(readonly.state(), &State::Open);
         assert!(readonly.send(Event::SelectItem(key(1))).is_noop());
+    }
+
+    #[test]
+    fn disabled_update_items_does_not_open_popup() {
+        let mut service = Service::<Machine>::new(
+            Props::new()
+                .id("combo")
+                .disabled(true)
+                .default_input_value("ap"),
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        send_event(&mut service, Event::UpdateItems(collection()));
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert_eq!(service.context().highlighted_key, Some(key(1)));
     }
 
     #[test]
@@ -3040,7 +3153,7 @@ mod tests {
         let result = service.set_props(
             Props::new()
                 .id("combo-next")
-                .input_value("synced")
+                .input_value("Ap")
                 .value(selection::Set::Multiple(BTreeSet::from([key(1), key(2)])))
                 .selection_mode(selection::Mode::Single)
                 .selection_behavior(selection::Behavior::Replace)
@@ -3059,7 +3172,12 @@ mod tests {
         );
 
         assert!(result.context_changed);
-        assert_eq!(service.context().input_value.get(), "synced");
+        assert_eq!(service.context().input_value.get(), "Ap");
+        assert_eq!(
+            service.context().visible_keys,
+            Some(BTreeSet::from([key(1), key(3)]))
+        );
+        assert_eq!(service.context().highlighted_key, Some(key(1)));
         assert_eq!(
             service.context().selection.get(),
             &selection::Set::Multiple(BTreeSet::from([key(1), key(2)]))
@@ -3453,7 +3571,7 @@ mod tests {
             normalize_selection_for_mode(selection::Set::Single(key(1)), selection::Mode::None),
             selection::Set::Empty
         );
-        assert_eq!(serialize_selection(&selection::Set::All), "all");
+        assert_eq!(serialize_selection(&selection::Set::All), "__ars_all");
 
         let mut state =
             selection::State::new(selection::Mode::Multiple, selection::Behavior::Toggle);

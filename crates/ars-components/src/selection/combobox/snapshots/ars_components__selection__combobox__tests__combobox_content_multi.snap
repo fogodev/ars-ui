@@ -21,6 +21,14 @@ expression: snapshot_attrs(&api.content_attrs())
     ),
     (
         Aria(
+            Label,
+        ),
+        String(
+            "Show suggestions",
+        ),
+    ),
+    (
+        Aria(
             LabelledBy,
         ),
         String(

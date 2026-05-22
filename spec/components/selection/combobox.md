@@ -386,7 +386,10 @@ impl ars_core::Machine for Machine {
                         ctx.selection_state.disabled_behavior),
                 };
 
-                let should_open = !was_open && !val.is_empty();
+                let should_open = !ctx.disabled
+                    && !was_open
+                    && (!val.is_empty() || props.allows_empty_collection)
+                    && (props.allows_empty_collection || first_key.is_some());
                 if should_open {
                     Some(TransitionPlan::to(State::Open).apply(move |ctx| {
                         ctx.input_value.set(val);
@@ -453,6 +456,13 @@ impl ars_core::Machine for Machine {
 
             (_, Event::Blur) => {
                 Some(TransitionPlan::to(State::Closed).apply(|ctx| {
+                    if !props.allow_custom_value {
+                        if ctx.multiple {
+                            ctx.input_value.set(String::new());
+                        } else {
+                            restore_single_selected_label(ctx);
+                        }
+                    }
                     ctx.focused = false;
                     ctx.focus_visible = false;
                     ctx.open = false;
@@ -560,7 +570,10 @@ impl ars_core::Machine for Machine {
                 let new_items = new_items.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.items = new_items;
-                    ctx.visible_keys = None; // reset filter on new items
+                    recompute_visible_keys_and_highlight(ctx);
+                    if ctx.disabled {
+                        ctx.open = false;
+                    }
                 }))
             }
 
@@ -573,8 +586,32 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.is_composing = false;
                     ctx.input_value.set(value);
-                    // Recompute visible keys and highlight using the final committed value.
+                    recompute_visible_keys_and_highlight(ctx);
+                    if !ctx.disabled && (!ctx.input_value.get().is_empty() || props.allows_empty_collection) {
+                        ctx.open = props.allows_empty_collection || ctx.highlighted_key.is_some();
+                    }
                 }))
+            }
+
+            (_, Event::CommitInput) => {
+                if props.allow_custom_value {
+                    let next = ctx.selection_state.select(Key::str(ctx.input_value.get().clone()));
+                    Some(TransitionPlan::context_only(move |ctx| {
+                        ctx.selection.set(next.selected_keys.clone());
+                        ctx.selection_state = next;
+                        if ctx.multiple {
+                            ctx.input_value.set(String::new());
+                            ctx.visible_keys = None;
+                        } else {
+                            ctx.open = false;
+                        }
+                    }))
+                } else {
+                    Some(TransitionPlan::to(State::Closed).apply(|ctx| {
+                        if ctx.multiple { ctx.input_value.set(String::new()); }
+                        else { restore_single_selected_label(ctx); }
+                    }))
+                }
             }
 
             _ => None,
@@ -817,6 +854,7 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("content"));
         attrs.set(HtmlAttr::Role, "listbox");
         if self.ctx.multiple { attrs.set(HtmlAttr::Aria(AriaAttr::MultiSelectable), "true"); }
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.trigger_label)(&self.ctx.locale));
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
         attrs
     }
@@ -1020,6 +1058,11 @@ impl ConnectApi for Api<'_> {
 > exposes localized loading text and `Event::UpdateItems(StaticCollection<Item>)`;
 > adapters own loading state, `aria-busy`, request cancellation, and replacing the
 > item collection when results arrive.
+>
+> **Form Serialization**: Hidden input serialization uses item keys for `Single` and
+> comma-joined item keys for `Multiple`. `selection::Set::All` serializes as the
+> reserved token `__ars_all` so it cannot collide with a real or custom item key
+> named `all`.
 
 ## 2. Anatomy
 
@@ -1056,6 +1099,7 @@ impl ConnectApi for Api<'_> {
 | `aria-autocomplete`     | Input   | `list` (filter only), `inline` (completion only), or `both` (filter + completion)                                                                                                                   |
 | `aria-activedescendant` | Input   | Highlighted item id (only set when a valid item is highlighted; **omit attribute entirely** when `highlighted_key` is `None` — setting it to an empty string or non-existent ID violates ARIA spec) |
 | `role`                  | Content | `listbox`                                                                                                                                                                                           |
+| `aria-label`            | Content | Trigger label fallback used when the internal Label part is not rendered; `aria-labelledby` still points to the generated Label id when present                                                       |
 | `role`                  | Item    | `option`                                                                                                                                                                                            |
 | `aria-selected`         | Item    | `"true"` when selected, `"false"` when unselected (must be explicitly set, not omitted)                                                                                                             |
 | `role`                  | Empty   | `"none"`                                                                                                                                                                                            | Dedicated LiveRegion announces empty-state text |
