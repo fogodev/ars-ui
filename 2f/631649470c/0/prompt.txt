@@ -1,0 +1,724 @@
+Implement tasks #324, #328, #419 and #421
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Implement Tasks #324, #328, #419, #421 — Heading / Landmark / Highlight adapters (Leptos + Dioxus)
+
+## Context
+
+Four GitHub issues — all 2-point adapter tasks — need to be implemented:
+
+- **#324** (Leptos): Heading + Landmark adapter components.
+- **#328** (Leptos): Highlight adapter component.
+- **#419** (Dioxus): Heading + Landmark adapter components.
+- **#421** (Dioxus): Highlight adapter component.
+
+All upstream dependencies are merged:
+
+- #202 (Heading + Landmark agnostic core) — closed.
+- #204 (Highlight agnostic core) — closed.
+- #190 / #193 (Leptos / Dioxus `ArsProvider` + reactive props) — closed.
+- #191 / #194 (Leptos / Dioxus adapter utilities — emit, event mapping, nonce collector, safe listeners) — closed.
+
+Why this matters: these three utilities are foundational structural primitives (semantic headings, page landmarks, text-match highlight). Without them, downstream components that compose Heading/Landmark/Highlight (Dialog titles, Toast regions, Combobox highlighting, AlertDialog headings) keep accruing TODOs in their adapter specs. Shipping them now unblocks several of the open stateless-utility adapter tasks (#322 Group, #323 Field/Fieldset, #325 keyboard, etc.).
+
+**Per user decision:** one combined PR (closes all four issues), both SSR + wasm tests, and ship `HeadingLevelProvider` + `Section` alongside `Heading` so the spec's "nested heading-level inheritance must flow through published `HeadingContext`" invariant is testable end-to-end in this PR.
+
+## Scope
+
+For each adapter (Leptos + Dioxus), implement:
+
+1. **`heading`** module
+   - `Heading` component — renders `<h1>` … `<h6>` based on resolved level (props override > context > default Level::One). Native heading elements only — no fallback `<div role="heading">` since we can always pick an h-tag.
+   - `HeadingLevelProvider` component — provider-only, publishes a starting `HeadingContext` via framework context.
+   - `Section` component — provider-only, publishes the incremented `HeadingContext` for descendants.
+2. **`landmark`** module
+   - `Landmark` component — renders semantic element per `Role`: `<header>` / `<nav>` / `<main>` / `<aside>` / `<footer>` / `<form>` / `<section>` for non-Search roles, and `<div role="search">` fallback for `Search` (matches `Api::prefers_generic_fallback_element()`). Localized `aria-label` resolved via `use_locale()` + adapter-passed `messages`.
+3. **`highlight`** module
+   - `Highlight` component — renders `<span>` root + iterates `Api::chunks(&locale)`, emitting `<mark>` for highlighted chunks and `<span>` for unmatched. Locale resolved from optional `locale` prop or `use_locale()` provider.
+
+No `AsChild` variants in this PR — the adapter specs do not call for them on these three utilities (the agnostic Props have no `as_child` field), and the canonical implementation sketches in each spec render the semantic element directly without a render callback.
+
+## File Map
+
+Files to create:
+
+```
+crates/ars-leptos/src/utility/heading.rs        (~250 lines)
+crates/ars-leptos/src/utility/landmark.rs       (~200 lines)
+crates/ars-leptos/src/utility/highlight.rs      (~180 lines)
+crates/ars-leptos/tests/heading.rs              (SSR; ~10 tests)
+crates/ars-leptos/tests/heading_wasm.rs         (wasm; ~3 tests)
+crates/ars-leptos/tests/landmark.rs             (SSR; ~12 tests)
+crates/ars-leptos/tests/landmark_wasm.rs        (wasm; ~3 tests)
+crates/ars-leptos/tests/highlight.rs            (SSR; ~8 tests)
+crates/ars-leptos/tests/highlight_wasm.rs       (wasm; ~3 tests)
+
+crates/ars-dioxus/src/utility/heading.rs        (~260 lines)
+crates/ars-dioxus/src/utility/landmark.rs       (~210 lines)
+crates/ars-dioxus/src/utility/highlight.rs      (~190 lines)
+crates/ars-dioxus/tests/heading.rs              (SSR; ~10 tests)
+crates/ars-dioxus/tests/heading_wasm.rs         (wasm; ~3 tests)
+crates/ars-dioxus/tests/landmark.rs             (SSR; ~12 tests)
+crates/ars-dioxus/tests/landmark_wasm.rs        (wasm; ~3 tests)
+crates/ars-dioxus/tests/highlight.rs            (SSR; ~8 tests)
+crates/ars-dioxus/tests/highlight_wasm.rs       (wasm; ~3 tests)
+```
+
+Files to modify:
+
+```
+crates/ars-leptos/src/utility/mod.rs            (add `pub mod heading; pub mod landmark; pub mod highlight;`)
+crates/ars-leptos/src/prelude.rs                (add to utility re-export list)
+crates/ars-dioxus/src/utility/mod.rs            (add same three modules)
+crates/ars-dioxus/src/prelude.rs                (add to utility re-export list)
+```
+
+No `Cargo.toml` changes needed — `ars-i18n` (for `Locale`), `ars-components`, and `ars-core` are already dependencies of both adapter crates. The Highlight module is feature-gated `i18n` in `ars-components`; the existing adapter crates already enable that feature.
+
+No spec changes anticipated — both adapter specs are stable and we are implementing to the documented contract.
+
+## Patterns Reused (Do Not Reinvent)
+
+- `crate::attr_map_to_leptos_inline_attrs` / `crate::attr_map_to_dioxus_inline_attrs` — convert `AttrMap` to spreadable framework attrs. (Already used by `separator.rs` and `visually_hidden.rs` in both adapters.)
+- `crate::use_locale()` — read the locale from `ArsContext`. Both adapters expose this via `provider.rs`.
+- `provide_context(...)` (Leptos) / `use_context_provider(|| ...)` (Dioxus) — publish `HeadingContext` for descendants.
+- `use_context::<HeadingContext>()` (Leptos) / `try_consume_context::<HeadingContext>()` (Dioxus) — read inherited level, defaulting to `HeadingContext::new()` (Level::One) when absent.
+- `leptos::either::{Either, EitherOf6, EitherOf8}` — fan-out for dynamic Leptos element tags (h1-h6 for Heading, six native + fallback `<div>` for Landmark).
+- `ars_components::utility::{heading, landmark, highlight}::{Api, Part, Props, …}` — agnostic core; re-export from the adapter module so end-users can write `heading::Level::Three`, `landmark::Role::Navigation`, `highlight::MatchStrategy::Contains`, etc.
+- Existing test recipes — Leptos uses `view! { … }.to_html()` for SSR, Dioxus uses `VirtualDom::new(app) + rebuild_in_place() + dioxus_ssr::render(&vdom)` (copy the helper from `tests/visually_hidden.rs`). Wasm tests use `wasm_bindgen_test_configure!(run_in_browser);` and either the existing `ars-test-harness-leptos::render(…)` / `ars-test-harness-dioxus::render(…)` for mount/state, or — for stateless utilities — direct DOM assertions on a manually mounted node.
+
+## Component-by-Component Implementation
+
+### 1. `ars-leptos` — `heading` module
+
+Re-export the agnostic surface and provide three components:
+
+```rust
+pub use ars_components::utility::heading::{
+    Api, HeadingContext, Level, Part, Props,
+    heading_level_provider, section,
+};
+
+#[component]
+pub fn Heading(
+    #[prop(optional, into)] id: Option<Oco<'static, str>>,
+    #[prop(optional)] level: Option<Level>,
+    children: Children,
+) -> impl IntoView {
+    let ctx = use_context::<HeadingContext>().unwrap_or_default();
+    let mut props = Props::new();
+    if let Some(id) = id.as_ref() {
+        props = props.id(id.to_string());
+    }
+    if let Some(level) = level {
+        props = props.level(level);
+    }
+    let api = Api::new(props, ctx);
+    let resolved = api.resolved_level();
+    let attrs = attr_map_to_leptos_inline_attrs(api.root_attrs(true));
+
+    match resolved {
+        Level::One   => EitherOf6::A(view! { <h1 {..attrs}>{children()}</h1> }),
+        Level::Two   => EitherOf6::B(view! { <h2 {..attrs}>{children()}</h2> }),
+        Level::Three => EitherOf6::C(view! { <h3 {..attrs}>{children()}</h3> }),
+        Level::Four  => EitherOf6::D(view! { <h4 {..attrs}>{children()}</h4> }),
+        Level::Five  => EitherOf6::E(view! { <h5 {..attrs}>{children()}</h5> }),
+        Level::Six   => EitherOf6::F(view! { <h6 {..attrs}>{children()}</h6> }),
+    }
+}
+
+#[component]
+pub fn HeadingLevelProvider(level: Level, children: Children) -> impl IntoView {
+    let provider_props = heading_level_provider::Props::new().level(level);
+    let ctx = heading_level_provider::context_for(&provider_props);
+    provide_context(ctx);
+    children()
+}
+
+#[component]
+pub fn Section(children: Children) -> impl IntoView {
+    let parent = use_context::<HeadingContext>().unwrap_or_default();
+    provide_context(section::context_for(&parent));
+    children()
+}
+```
+
+Notes:
+- Heading always passes `is_native_heading_element = true` because we can always emit a real `<h{1..6}>` — there is no need for the `role="heading" aria-level=N` fallback path in a Leptos web adapter.
+- When the user provides no `id`, the core emits `id=""`. Strip the empty id before converting to attrs (mirrors how `separator.rs::root_attrs` handles `id`).
+
+### 2. `ars-leptos` — `landmark` module
+
+```rust
+pub use ars_components::utility::landmark::{Api, Messages, Part, Props, Role};
+
+#[component]
+pub fn Landmark(
+    #[prop(optional, into)] id: Option<Oco<'static, str>>,
+    #[prop(optional)] role: Option<Role>,
+    #[prop(optional, into)] labelledby_id: Option<Oco<'static, str>>,
+    #[prop(optional, into)] messages: Option<Messages>,
+    children: Children,
+) -> impl IntoView {
+    let resolved_role = role.unwrap_or(Role::Region);
+    let mut props = Props::new().role(resolved_role);
+    if let Some(id) = id.as_ref() { props = props.id(id.to_string()); }
+    if let Some(lb) = labelledby_id.as_ref() {
+        props = props.labelledby_id(lb.to_string());
+    }
+    let messages = messages.unwrap_or_default();
+    let env = ars_core::Env { locale: use_locale().get(), ..ars_core::Env::default() };
+    let api = Api::new(props, &env, &messages);
+    let is_native = !api.prefers_generic_fallback_element();
+    let attrs = attr_map_to_leptos_inline_attrs(api.root_attrs(is_native));
+
+    if !is_native {
+        Either::Left(view! { <div {..attrs}>{children()}</div> })
+    } else {
+        Either::Right(match resolved_role {
+            Role::Banner        => EitherOf7::A(view! { <header  {..attrs}>{children()}</header> }),
+            Role::Navigation    => EitherOf7::B(view! { <nav     {..attrs}>{children()}</nav> }),
+            Role::Main          => EitherOf7::C(view! { <main    {..attrs}>{children()}</main> }),
+            Role::Complementary => EitherOf7::D(view! { <aside   {..attrs}>{children()}</aside> }),
+            Role::ContentInfo   => EitherOf7::E(view! { <footer  {..attrs}>{children()}</footer> }),
+            Role::Form          => EitherOf7::F(view! { <form    {..attrs}>{children()}</form> }),
+            Role::Region        => EitherOf7::G(view! { <section {..attrs}>{children()}</section> }),
+            Role::Search        => unreachable!("Search role is handled by prefers_generic_fallback_element()"),
+        })
+    }
+}
+```
+
+Notes:
+- Locale comes from `use_locale()`. We need the resolved `Locale` value (not the signal) to construct `Env`. The agnostic API stores it eagerly, so non-reactive read is acceptable for the initial implementation. (Locale changes mid-life will not retrigger label resolution — that matches the agnostic-core contract: `Api::new` snapshots the locale at construction.)
+- `messages` defaults to `Messages::default()` (empty label). For the spec's "Form and Region require accessible name" path, callers pass `Messages { label: MessageFn::static_str("…") }` or wire `use_messages()`.
+- `is_native_landmark_element` is `false` only when `Api::prefers_generic_fallback_element()` is true (currently only `Role::Search`).
+
+### 3. `ars-leptos` — `highlight` module
+
+```rust
+pub use ars_components::utility::highlight::{
+    Api, HighlightChunk, MatchStrategy, Part, Props,
+};
+
+#[component]
+pub fn Highlight(
+    #[prop(optional, into)] query: Vec<String>,
+    #[prop(optional, into)] text: String,
+    #[prop(optional)] ignore_case: Option<bool>,
+    #[prop(optional)] match_strategy: Option<MatchStrategy>,
+    #[prop(optional)] locale: Option<Locale>,
+) -> impl IntoView {
+    let props = Props::new()
+        .query(query)
+        .text(text)
+        .ignore_case(ignore_case.unwrap_or(true))
+        .match_strategy(match_strategy.unwrap_or_default());
+    let api = Api::new(props);
+    let locale = locale.unwrap_or_else(|| use_locale().get());
+
+    let root_attrs = attr_map_to_leptos_inline_attrs(api.root_attrs());
+    let chunks = api.chunks(&locale)
+        .into_iter()
+        .map(|chunk| {
+            let chunk_attrs = attr_map_to_leptos_inline_attrs(api.chunk_attrs(chunk.highlighted));
+            let text = chunk.text.to_string();
+            if chunk.highlighted {
+                Either::Left(view! { <mark {..chunk_attrs}>{text}</mark> })
+            } else {
+                Either::Right(view! { <span {..chunk_attrs}>{text}</span> })
+            }
+        })
+        .collect_view();
+
+    view! { <span {..root_attrs}>{chunks}</span> }
+}
+```
+
+Notes:
+- `api.chunks(&locale)` returns chunks borrowing from `props.text`. We own `props` inside the call so the chunks live long enough; copy each `chunk.text` into an owned `String` before constructing the view.
+- The root `dir="auto"` comes from `api.root_attrs()` already — do not duplicate.
+
+### 4-6. `ars-dioxus` — Same three modules
+
+Dioxus is structurally identical, with these differences:
+
+- Use **explicit `#[derive(Props, Clone, PartialEq, Debug)]` structs** for every component (workspace convention; see `feedback_dioxus_explicit_props.md`).
+- Use **`try_use_context::<HeadingContext>()`** to read inherited context (returns `Option<HeadingContext>`; matches the convention used throughout `crates/ars-dioxus/src/provider.rs`, `nonce.rs`, and `platform.rs`).
+- Use `use_context_provider(|| ctx)` for publishing context.
+- Match arms return `rsx! { … }` directly — Dioxus's `Element` is the universal return type, no `EitherOf*` needed.
+- Read locale via the existing `crate::use_locale()` helper. Both `ars_leptos::use_locale()` and `ars_dioxus::use_locale()` return `Signal<Locale>`. Read the current value with `.get()` (Leptos) or `.read().clone()` (Dioxus) — see `crates/ars-dioxus/src/provider.rs:418` for the canonical "use prop if present, else snapshot from signal" pattern.
+
+Heading skeleton:
+
+```rust
+#[derive(Props, Clone, PartialEq, Debug)]
+pub struct HeadingProps {
+    #[props(optional, into)] pub id: Option<String>,
+    #[props(optional)]       pub level: Option<Level>,
+    pub children: Element,
+}
+
+#[component]
+pub fn Heading(props: HeadingProps) -> Element {
+    let ctx = try_use_context::<HeadingContext>().unwrap_or_default();
+    let mut core_props = Props::new();
+    if let Some(id) = props.id.as_deref() { core_props = core_props.id(id); }
+    if let Some(level) = props.level     { core_props = core_props.level(level); }
+    let api = Api::new(core_props, ctx);
+    let attrs = attr_map_to_dioxus_inline_attrs(api.root_attrs(true));
+    let children = props.children;
+
+    match api.resolved_level() {
+        Level::One   => rsx! { h1 { ..attrs, {children} } },
+        Level::Two   => rsx! { h2 { ..attrs, {children} } },
+        Level::Three => rsx! { h3 { ..attrs, {children} } },
+        Level::Four  => rsx! { h4 { ..attrs, {children} } },
+        Level::Five  => rsx! { h5 { ..attrs, {children} } },
+        Level::Six   => rsx! { h6 { ..attrs, {children} } },
+    }
+}
+
+#[derive(Props, Clone, PartialEq, Debug)]
+pub struct HeadingLevelProviderProps {
+    pub level: Level,
+    pub children: Element,
+}
+
+#[component]
+pub fn HeadingLevelProvider(props: HeadingLevelProviderProps) -> Element {
+    let provider_props = heading_level_provider::Props::new().level(props.level);
+    use_context_provider(|| heading_level_provider::context_for(&provider_props));
+    rsx! { {props.children} }
+}
+
+#[derive(Props, Clone, PartialEq, Debug)]
+pub struct SectionProps { pub children: Element }
+
+#[component]
+pub fn Section(props: SectionProps) -> Element {
+    let parent = try_use_context::<HeadingContext>().unwrap_or_default();
+    use_context_provider(|| section::context_for(&parent));
+    rsx! { {props.children} }
+}
+```
+
+Landmark/Highlight follow the same Leptos shape with Dioxus syntax. See the visually_hidden.rs / separator.rs Dioxus modules for the explicit-Props convention and `attr_map_to_dioxus_inline_attrs` usage.
+
+### 7. Module wiring
+
+Update `crates/ars-leptos/src/utility/mod.rs`:
+
+```rust
+pub mod button;
+pub mod client_only;
+pub mod dismissable;
+pub mod error_boundary;
+pub mod heading;        // <- new
+pub mod highlight;      // <- new
+pub mod landmark;       // <- new
+pub mod separator;
+pub mod visually_hidden;
+pub mod z_index_allocator;
+```
+
+Update `crates/ars-leptos/src/prelude.rs` — extend the utility re-export tuple:
+
+```rust
+pub use crate::utility::{
+    self, button, client_only, dismissable, error_boundary,
+    heading, highlight, landmark,    // <- new
+    separator, visually_hidden, z_index_allocator,
+};
+```
+
+Mirror both changes in `crates/ars-dioxus/`.
+
+## Test Strategy (TDD)
+
+Write tests **first**, then implement. Each test must fail with a clear "missing item" error before the implementation lands.
+
+### SSR tests — Heading (`crates/ars-leptos/tests/heading.rs`)
+
+```rust
+#![cfg(all(not(target_arch = "wasm32"), feature = "ssr"))]
+
+use ars_leptos::utility::heading::{Heading, HeadingLevelProvider, Section, Level};
+use leptos::prelude::*;
+
+#[test]
+fn heading_renders_h1_by_default() {
+    let html = view! { <Heading id="title">"Hello"</Heading> }.to_html();
+    assert!(html.trim_start().starts_with("<h1"));
+    for f in [r#"id="title""#, r#"data-ars-scope="heading""#, r#"data-ars-part="root""#, "Hello"] {
+        assert!(html.contains(f), "missing {f}: {html}");
+    }
+}
+
+#[test]
+fn heading_explicit_level_overrides_default() {
+    let html = view! { <Heading id="t" level=Level::Three>"Three"</Heading> }.to_html();
+    assert!(html.trim_start().starts_with("<h3"));
+}
+
+#[test]
+fn section_increments_inherited_level() {
+    let html = view! {
+        <Section>
+            <Heading id="nested">"Two"</Heading>
+        </Section>
+    }.to_html();
+    assert!(html.contains("<h2"), "Section should bump default Level::One to Level::Two: {html}");
+}
+
+#[test]
+fn heading_level_provider_sets_starting_level() {
+    let html = view! {
+        <HeadingLevelProvider level=Level::Four>
+            <Heading id="four">"Four"</Heading>
+        </HeadingLevelProvider>
+    }.to_html();
+    assert!(html.contains("<h4"));
+}
+
+#[test]
+fn nested_sections_clamp_at_six() {
+    let html = view! {
+        <Section><Section><Section><Section><Section><Section>
+            <Heading id="deep">"Six"</Heading>
+        </Section></Section></Section></Section></Section></Section>
+    }.to_html();
+    assert!(html.contains("<h6"));
+}
+
+#[test]
+fn heading_without_id_does_not_emit_generated_id() {
+    let html = view! { <Heading>"Hello"</Heading> }.to_html();
+    assert!(!html.contains("id="), "passive Heading should not emit id=: {html}");
+}
+
+#[test]
+fn heading_explicit_level_overrides_inherited_context() {
+    let html = view! {
+        <HeadingLevelProvider level=Level::Four>
+            <Heading id="explicit" level=Level::Two>"Two"</Heading>
+        </HeadingLevelProvider>
+    }.to_html();
+    assert!(html.contains("<h2"));
+}
+```
+
+### SSR tests — Landmark (`crates/ars-leptos/tests/landmark.rs`)
+
+Cover one assertion per `Role`: native element rendered + correct `aria-label` (from a stub `Messages { label }`), no `role` attr for native elements, fallback `<div role="search">` for `Search`, `aria-labelledby` precedence, missing-name path emits no `aria-label`.
+
+```rust
+#![cfg(all(not(target_arch = "wasm32"), feature = "ssr"))]
+use ars_core::MessageFn;
+use ars_leptos::utility::landmark::{Landmark, Messages, Role};
+use leptos::prelude::*;
+
+fn messages(label: &'static str) -> Messages {
+    Messages { label: MessageFn::static_str(label) }
+}
+
+#[test]
+fn landmark_navigation_renders_native_nav_with_aria_label() {
+    let html = view! {
+        <Landmark id="nav" role=Role::Navigation messages=messages("Primary navigation")>
+            "links"
+        </Landmark>
+    }.to_html();
+    assert!(html.trim_start().starts_with("<nav"));
+    assert!(html.contains(r#"aria-label="Primary navigation""#));
+    assert!(!html.contains(r#"role="navigation""#), "native nav must not emit explicit role: {html}");
+}
+
+#[test]
+fn landmark_search_falls_back_to_div_with_explicit_role() {
+    let html = view! {
+        <Landmark id="search" role=Role::Search messages=messages("Site search")>
+            "form"
+        </Landmark>
+    }.to_html();
+    assert!(html.trim_start().starts_with("<div"));
+    assert!(html.contains(r#"role="search""#));
+}
+
+#[test]
+fn landmark_labelledby_takes_precedence_over_aria_label() {
+    let html = view! {
+        <Landmark id="r" role=Role::Region labelledby_id="ext" messages=messages("ignored")>
+            "x"
+        </Landmark>
+    }.to_html();
+    assert!(html.contains(r#"aria-labelledby="ext""#));
+    assert!(!html.contains(r#"aria-label="ignored""#), "labelledby must suppress aria-label: {html}");
+}
+
+// Repeat one test per native role (Banner→header, Main→main, Complementary→aside,
+// ContentInfo→footer, Form→form, Region→section) — assert tag, data-ars-scope, and
+// either aria-label or absence-of-aria-label-when-missing.
+```
+
+### SSR tests — Highlight (`crates/ars-leptos/tests/highlight.rs`)
+
+```rust
+#![cfg(all(not(target_arch = "wasm32"), feature = "ssr"))]
+use ars_leptos::utility::highlight::{Highlight, MatchStrategy};
+use leptos::prelude::*;
+
+#[test]
+fn highlight_wraps_match_in_mark() {
+    let html = view! {
+        <Highlight query=vec!["world".into()] text="Hello world!".into() />
+    }.to_html();
+    for f in [
+        r#"data-ars-scope="highlight""#,
+        r#"data-ars-part="root""#,
+        r#"dir="auto""#,
+        r#"<mark"#,
+        r#"data-ars-part="highlight-chunk""#,
+        r#"data-ars-highlighted="true""#,
+        ">world<",
+    ] {
+        assert!(html.contains(f), "missing {f}: {html}");
+    }
+}
+
+#[test]
+fn highlight_non_matched_chunks_use_span() {
+    let html = view! {
+        <Highlight query=vec!["world".into()] text="Hello world!".into() />
+    }.to_html();
+    assert!(html.contains(r#"data-ars-highlighted="false""#));
+    assert!(html.matches("<span").count() >= 2, "should contain root span + unmatched chunk spans: {html}");
+}
+
+#[test]
+fn highlight_empty_query_renders_single_unmatched_chunk() {
+    let html = view! { <Highlight query=Vec::<String>::new() text="Hello".into() /> }.to_html();
+    assert!(!html.contains("<mark"));
+    assert!(html.contains("Hello"));
+}
+
+#[test]
+fn highlight_ignore_case_default_matches_uppercase_query() {
+    let html = view! {
+        <Highlight query=vec!["WORLD".into()] text="Hello world!".into() />
+    }.to_html();
+    assert!(html.contains("<mark"), "case-insensitive match expected: {html}");
+}
+
+#[test]
+fn highlight_starts_with_strategy_only_matches_prefix() {
+    let html = view! {
+        <Highlight
+            query=vec!["world".into()]
+            text="Hello world!".into()
+            match_strategy=MatchStrategy::StartsWith
+        />
+    }.to_html();
+    // "world" is not a prefix of "Hello world!", so no <mark>.
+    assert!(!html.contains("<mark"), "StartsWith should not match mid-string: {html}");
+}
+```
+
+### Wasm tests (Leptos)
+
+`heading_wasm.rs`, `landmark_wasm.rs`, `highlight_wasm.rs` — mount each component into a real DOM and assert the rendered element's attributes / tag name match the SSR output. Use the existing harness pattern from `crates/ars-leptos/tests/visually_hidden_wasm.rs` (read once to confirm; mount with `mount_to_body(|| view! { … })` and query via `web_sys::window().document().query_selector(…)`). Three tests per file covers the SSR-hydration-stability acceptance criterion (matches separator/visually_hidden precedent).
+
+### Dioxus tests
+
+Use the helper convention from `crates/ars-dioxus/tests/visually_hidden.rs`:
+
+```rust
+fn render_app(app: fn() -> Element) -> String {
+    let mut vdom = VirtualDom::new(app);
+    vdom.rebuild_in_place();
+    dioxus_ssr::render(&vdom)
+}
+```
+
+Mirror the Leptos SSR test list, adapted to Dioxus rsx syntax (`Heading { id: "title", "Hello" }` etc.). Same wasm-test scope using `crates/ars-dioxus/tests/visually_hidden_wasm.rs` as the template.
+
+## Step-by-Step Execution Order
+
+Recommend executing per-component in this sequence to keep the diff reviewable and tests green at every commit. Each "phase" maps to one TDD cycle (red → green → refactor → commit) — every commit must `cargo check -p <crate>` clean.
+
+1. **Phase A — Leptos Heading + providers** (issue #324, half-scope)
+   1. Add module + prelude wiring stubs (`pub mod heading;` + tuple update) so the test files compile against re-exports.
+   2. Write `tests/heading.rs` (SSR) — 7 tests as above. Run `cargo test -p ars-leptos --features ssr heading`. Confirm tests FAIL.
+   3. Implement `src/utility/heading.rs` (Heading + HeadingLevelProvider + Section). Run the test command again — all pass.
+   4. Write `tests/heading_wasm.rs` (3 wasm tests). Run `cargo test -p ars-leptos --target wasm32-unknown-unknown --features web heading_wasm`. Pass.
+   5. Commit message: `feat(leptos): add Heading, HeadingLevelProvider, Section adapters (#324)`. **No commit yet — wait for the user's approval per workspace convention.**
+
+2. **Phase B — Leptos Landmark** (issue #324, half-scope)
+   1. Add `pub mod landmark;` + prelude.
+   2. Write `tests/landmark.rs` (SSR; one assertion per role + labelledby precedence + missing-name fallback). Confirm FAIL.
+   3. Implement `src/utility/landmark.rs`. Pass.
+   4. Write `tests/landmark_wasm.rs`.
+
+3. **Phase C — Leptos Highlight** (issue #328)
+   1. Add `pub mod highlight;` + prelude.
+   2. Write `tests/highlight.rs` (SSR; matches, non-matches, empty query, ignore_case, StartsWith). Confirm FAIL.
+   3. Implement `src/utility/highlight.rs`. Pass.
+   4. Write `tests/highlight_wasm.rs`.
+
+4. **Phase D — Dioxus Heading + providers** (issue #419, half-scope)
+5. **Phase E — Dioxus Landmark** (issue #419, half-scope)
+6. **Phase F — Dioxus Highlight** (issue #421)
+
+Phases D-F mirror A-C 1:1 with Dioxus syntax.
+
+7. **Phase G — Post-implementation audit (MANDATORY)** — Invoke the `post-implementation-audit` skill (CLAUDE.md §7) on the six new component files + their test files. Run all three audits sequentially:
+   - **a)** spec/implementation drift against the six adapter spec files in `spec/leptos-components/utility/` and `spec/dioxus-components/utility/`,
+   - **b)** ≥ 2 rounds of "anything else missing?",
+   - **c)** test-coverage audit for unit/snapshot/proptest/spec-conformance/llvm-cov.
+   - Every finding lands in this PR — no deferral.
+
+8. **Phase H — Validation (run sequentially, each must be green)**
+   - `cargo test -p ars-leptos --features ssr` — SSR tests pass.
+   - `cargo test -p ars-leptos --target wasm32-unknown-unknown --features web` — wasm tests pass (requires `wasm-pack` if not already installed via `cargo install wasm-pack --version 0.13.1`; matches the `a11y-audit` job convention).
+   - `cargo test -p ars-dioxus` — SSR + native tests pass.
+   - `cargo test -p ars-dioxus --target wasm32-unknown-unknown --features web` — wasm tests pass.
+   - `cargo xci --profile fast` (alias `cargo xci-fast`) from repo root — covers fmt, clippy, unit, integration, adapter, spec-compile-snippets, error-variant-coverage, mutual-exclusion, snapshot-count. **Must pass before pushing.**
+
+9. **Phase I — Commit + push (only after user approval)** — Single commit with co-author footer, then `gh pr create` targeting `main` with body including `Closes #324`, `Closes #328`, `Closes #419`, `Closes #421`. No snapshot files are expected from this work, but if any `.snap` files appear, add the `snapshot-reviewed` label.
+
+10. **Phase J — Wait for Codex review (MANDATORY)** — Invoke the `waiting-for-codex-review` skill, address any threads with the same rigor as `post-implementation-audit`, repush, re-comment `@codex review`, loop until Codex leaves 👍.
+
+## Verification End-to-End
+
+After Phase H is green, run the following spot-checks before declaring the work ready for user review:
+
+```bash
+# 1. Spec snippets compile (every code block in spec/leptos-components/utility/{heading,landmark,highlight}.md and the Dioxus equivalents).
+cargo test -p xtask spec_compile_snippets
+
+# 2. Per-crate coverage threshold check on ars-leptos and ars-dioxus.
+cargo llvm-cov --workspace \
+  --exclude ars-leptos --exclude ars-dioxus \
+  --exclude ars-test-harness-leptos --exclude ars-test-harness-dioxus \
+  --exclude ars-derive --exclude xtask \
+  --lcov --output-path lcov.info
+# (Adapter coverage lands via the CI wasm-coverage job — locally we just confirm native lcov merges and the existing thresholds still pass.)
+
+# 3. Browse the rendered components in a dev shell (manual smoke test) — use one of the
+#    existing harness binaries or hand-write a tiny example app under `examples/` if needed.
+#    Not strictly required for stateless utilities since SSR + wasm tests already assert
+#    the rendered output, but recommended as a final sanity pass.
+
+# 4. Confirm no public items lack docs and there are no clippy warnings.
+cargo clippy -p ars-leptos --all-features --all-targets -- -D warnings
+cargo clippy -p ars-dioxus --all-features --all-targets -- -D warnings
+```
+
+Expected outcomes:
+- All `cargo test` invocations report **0 failed**.
+- `cargo xci-fast` exits 0.
+- `cargo clippy` exits 0 (workspace policy: zero warnings).
+- `spec compile snippets` exits 0 (the canonical implementation sketches in the adapter specs already compile against the agnostic core; nothing new is needed there).
+
+## Risks / Edge Cases to Watch
+
+- **Locale signal mid-life updates** — Leptos `use_locale()` returns a signal; `Landmark::Api::new(props, env, messages)` snapshots the locale once. If the user changes locale post-mount, the rendered `aria-label` will not update unless we move the `Api` construction into a `Memo`. For this PR's scope (stateless utility, parity with the canonical sketches), one-shot construction is correct per spec §7 "render-time only, no post-mount sync expected". If a downstream component needs reactive locale, we revisit then — not now.
+- **Heading context default** — When `use_context::<HeadingContext>()` returns `None`, default to `HeadingContext::new()` (Level::One). Do NOT panic.
+- **Highlight chunk borrow** — `Api::chunks(&locale)` returns chunks borrowing from `props.text`. The current `props` lives inside the function; clone each `chunk.text` to an owned `String` before constructing the view (cheap — most chunks are short and we are not in a hot path).
+- **Dioxus rsx returns under `match`** — Dioxus 0.7 supports returning `rsx! { … }` from each arm directly as `Element`. No need for unifying types.
+- **`leptos::either::EitherOf*` availability** — Leptos 0.8 ships `Either`, `EitherOf3`…`EitherOfN` up to `EitherOf16`. If a specific arity is missing during implementation, use the next higher size (e.g., `EitherOf8` with one unused variant, marked `unreachable!()`) rather than `AnyView`. Confirm imports via the **leptos** skill before writing code that depends on these types — claudes' training data on Leptos APIs is stale.
+- **Locale read pattern** — both `ars_leptos::use_locale()` and `ars_dioxus::use_locale()` return `Signal<Locale>` (verified). Leptos reads with `.get()`; Dioxus reads with `.read().clone()`. Use the canonical "use prop if present, else snapshot from signal" pattern from `crates/ars-dioxus/src/provider.rs:418` so locale-prop overrides work uniformly.
+- **Search role** — `<search>` is intentionally NOT used; the agnostic core's `prefers_generic_fallback_element()` already signals this; we honor it by rendering `<div role="search">`.
+- **No snapshot files expected** — These adapters render plain HTML attribute strings, so `.to_html()` and `dioxus_ssr::render` assertions use direct string matching. No `insta` fixtures should be created. If any `.snap` files appear in the diff, re-examine — they likely indicate accidental adoption of snapshot tests in adapter crates (those belong in the agnostic core).
+
+---
+
+Don't stop
+
+---
+
+How can we fix this test failing?
+
+---
+
+Great, how implementation docs for adapter level components don't mention that each newly implemented component must have the appropriated fixtures for e2e tests and must be introduced in the widgets examples?
+
+---
+
+Any other thing that we might still be missing?
+
+---
+
+You're only supposed to handoff back to me after you actually finished everything, so I can review. So you do need to move the issues to "In Progress",  run the E2E tests and the wasm coverage
+
+---
+
+Doesn't our adapter level components need to be able to receive some html global attributes like classes and ids to be styled with CSS or tailwind for example? Actual question, don't change any code yet?
+
+---
+
+<task-notification>
+<task-id>bxadawzk6</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson--t3-worktrees-ars-ui-t3code-03c1ddf1/c94bd37f-c575-4595-9f93-472db3f92d4d/tasks/bxadawzk6.output</output-file>
+<status>completed</status>
+<summary>Background command "Run CI coverage pipeline" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+Dioxus has some GlobalAttributes or something like that for this use case, does Leptos has something similar too?
+
+---
+
+Yeah, go ahead. Also put `extends = GlobalAttributes` in all other existing Dioxus components as we will need it
+
+---
+
+Did you finish?
+
+---
+
+Continue from where you were
+
+---
+
+In that part where we mentioned about using `attr:class` in Leptos components, it will properly merge the user defined classes with the classes and other attributes that we use internally?
+
+---
+
+Yeah, proceed with your recommendation
+
+---
+
+Let's use TypedChildren in the Leptos components
+
+---
+
+In the widgets examples, I see no visual difference between each different heading
+
+---
+
+Do we need some kind of visual differentiation between the landmark stuff too?
+
+---
+
+Yeah
+
+---
+
+What is this `COMPONENT_NAMED_ADAPTER_TEST_FILES` in the @xtask/src/lint.rs ?
+
+---
+
+Why not just use the canonical naming instead of increasing the allowlist?
+
+---
+
+Yeah, move everything to the canonical naming and get rid of this allowlist
+
+---
+
+Let's commit and push a PR to github

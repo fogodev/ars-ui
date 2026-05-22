@@ -1,0 +1,444 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "2f631649470c",
+  "session_id": "c94bd37f-c575-4595-9f93-472db3f92d4d",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-22T01:10:52.847943Z",
+  "branch": "t3code/03c1ddf1",
+  "checkpoints_count": 23,
+  "files_touched": [
+    "crates/ars-components/src/utility/landmark/mod.rs",
+    "crates/ars-dioxus/src/navigation/tabs.rs",
+    "crates/ars-dioxus/src/prelude.rs",
+    "crates/ars-dioxus/src/utility/button.rs",
+    "crates/ars-dioxus/src/utility/dismissable.rs",
+    "crates/ars-dioxus/src/utility/heading.rs",
+    "crates/ars-dioxus/src/utility/highlight.rs",
+    "crates/ars-dioxus/src/utility/landmark.rs",
+    "crates/ars-dioxus/src/utility/mod.rs",
+    "crates/ars-dioxus/src/utility/separator.rs",
+    "crates/ars-dioxus/src/utility/visually_hidden.rs",
+    "crates/ars-dioxus/tests/attr_passthrough.rs",
+    "crates/ars-dioxus/tests/separator.rs",
+    "crates/ars-dioxus/tests/separator_wasm.rs",
+    "crates/ars-dioxus/tests/test_heading.rs",
+    "crates/ars-dioxus/tests/test_heading_wasm.rs",
+    "crates/ars-dioxus/tests/test_highlight.rs",
+    "crates/ars-dioxus/tests/test_highlight_wasm.rs",
+    "crates/ars-dioxus/tests/test_landmark.rs",
+    "crates/ars-dioxus/tests/test_landmark_wasm.rs",
+    "crates/ars-dioxus/tests/test_separator.rs",
+    "crates/ars-dioxus/tests/test_separator_wasm.rs",
+    "crates/ars-dioxus/tests/test_visually_hidden.rs",
+    "crates/ars-dioxus/tests/test_visually_hidden_wasm.rs",
+    "crates/ars-dioxus/tests/visually_hidden.rs",
+    "crates/ars-dioxus/tests/visually_hidden_wasm.rs",
+    "crates/ars-e2e/fixtures/dioxus/src/categories/mod.rs",
+    "crates/ars-e2e/fixtures/dioxus/src/categories/navigation.rs",
+    "crates/ars-e2e/fixtures/dioxus/src/categories/utility.rs",
+    "crates/ars-e2e/fixtures/dioxus/src/main.rs",
+    "crates/ars-e2e/fixtures/leptos/src/categories/mod.rs",
+    "crates/ars-e2e/fixtures/leptos/src/categories/navigation.rs",
+    "crates/ars-e2e/fixtures/leptos/src/categories/utility.rs",
+    "crates/ars-e2e/fixtures/leptos/src/main.rs",
+    "crates/ars-e2e/src/utility/heading.rs",
+    "crates/ars-e2e/src/utility/highlight.rs",
+    "crates/ars-e2e/src/utility/landmark.rs",
+    "crates/ars-e2e/src/utility/mod.rs",
+    "crates/ars-leptos/src/attrs.rs",
+    "crates/ars-leptos/src/id.rs",
+    "crates/ars-leptos/src/lib.rs",
+    "crates/ars-leptos/src/navigation/tabs.rs",
+    "crates/ars-leptos/src/prelude.rs",
+    "crates/ars-leptos/src/utility/button.rs",
+    "crates/ars-leptos/src/utility/dismissable.rs",
+    "crates/ars-leptos/src/utility/heading.rs",
+    "crates/ars-leptos/src/utility/highlight.rs",
+    "crates/ars-leptos/src/utility/landmark.rs",
+    "crates/ars-leptos/src/utility/mod.rs",
+    "crates/ars-leptos/src/utility/separator.rs",
+    "crates/ars-leptos/src/utility/visually_hidden.rs",
+    "crates/ars-leptos/tests/attr_class_merge_probe.rs",
+    "crates/ars-leptos/tests/attr_passthrough.rs",
+    "crates/ars-leptos/tests/separator.rs",
+    "crates/ars-leptos/tests/separator_wasm.rs",
+    "crates/ars-leptos/tests/test_heading.rs",
+    "crates/ars-leptos/tests/test_heading_wasm.rs",
+    "crates/ars-leptos/tests/test_highlight.rs",
+    "crates/ars-leptos/tests/test_highlight_wasm.rs",
+    "crates/ars-leptos/tests/test_landmark.rs",
+    "crates/ars-leptos/tests/test_landmark_wasm.rs",
+    "crates/ars-leptos/tests/test_separator.rs",
+    "crates/ars-leptos/tests/test_separator_wasm.rs",
+    "crates/ars-leptos/tests/test_visually_hidden.rs",
+    "crates/ars-leptos/tests/test_visually_hidden_wasm.rs",
+    "crates/ars-leptos/tests/visually_hidden.rs",
+    "crates/ars-leptos/tests/visually_hidden_wasm.rs",
+    "examples/widgets-dioxus-css/src/categories/data_display.rs",
+    "examples/widgets-dioxus-css/src/categories/date_time.rs",
+    "examples/widgets-dioxus-css/src/categories/input.rs",
+    "examples/widgets-dioxus-css/src/categories/layout.rs",
+    "examples/widgets-dioxus-css/src/categories/mod.rs",
+    "examples/widgets-dioxus-css/src/categories/navigation.rs",
+    "examples/widgets-dioxus-css/src/categories/overlay.rs",
+    "examples/widgets-dioxus-css/src/categories/selection.rs",
+    "examples/widgets-dioxus-css/src/categories/specialized.rs",
+    "examples/widgets-dioxus-css/src/categories/utility.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/data_display.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/date_time.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/input.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/layout.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/mod.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/navigation.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/overlay.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/selection.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/specialized.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/utility.rs",
+    "examples/widgets-dioxus/src/categories/data_display.rs",
+    "examples/widgets-dioxus/src/categories/date_time.rs",
+    "examples/widgets-dioxus/src/categories/input.rs",
+    "examples/widgets-dioxus/src/categories/layout.rs",
+    "examples/widgets-dioxus/src/categories/mod.rs",
+    "examples/widgets-dioxus/src/categories/navigation.rs",
+    "examples/widgets-dioxus/src/categories/overlay.rs",
+    "examples/widgets-dioxus/src/categories/selection.rs",
+    "examples/widgets-dioxus/src/categories/specialized.rs",
+    "examples/widgets-dioxus/src/categories/utility.rs",
+    "examples/widgets-leptos-css/src/categories/data_display.rs",
+    "examples/widgets-leptos-css/src/categories/date_time.rs",
+    "examples/widgets-leptos-css/src/categories/input.rs",
+    "examples/widgets-leptos-css/src/categories/layout.rs",
+    "examples/widgets-leptos-css/src/categories/mod.rs",
+    "examples/widgets-leptos-css/src/categories/navigation.rs",
+    "examples/widgets-leptos-css/src/categories/overlay.rs",
+    "examples/widgets-leptos-css/src/categories/selection.rs",
+    "examples/widgets-leptos-css/src/categories/specialized.rs",
+    "examples/widgets-leptos-css/src/categories/utility.rs",
+    "examples/widgets-leptos-tailwind/src/categories/data_display.rs",
+    "examples/widgets-leptos-tailwind/src/categories/date_time.rs",
+    "examples/widgets-leptos-tailwind/src/categories/input.rs",
+    "examples/widgets-leptos-tailwind/src/categories/layout.rs",
+    "examples/widgets-leptos-tailwind/src/categories/mod.rs",
+    "examples/widgets-leptos-tailwind/src/categories/navigation.rs",
+    "examples/widgets-leptos-tailwind/src/categories/overlay.rs",
+    "examples/widgets-leptos-tailwind/src/categories/selection.rs",
+    "examples/widgets-leptos-tailwind/src/categories/specialized.rs",
+    "examples/widgets-leptos-tailwind/src/categories/utility.rs",
+    "examples/widgets-leptos/src/categories/data_display.rs",
+    "examples/widgets-leptos/src/categories/date_time.rs",
+    "examples/widgets-leptos/src/categories/input.rs",
+    "examples/widgets-leptos/src/categories/layout.rs",
+    "examples/widgets-leptos/src/categories/mod.rs",
+    "examples/widgets-leptos/src/categories/navigation.rs",
+    "examples/widgets-leptos/src/categories/overlay.rs",
+    "examples/widgets-leptos/src/categories/selection.rs",
+    "examples/widgets-leptos/src/categories/specialized.rs",
+    "examples/widgets-leptos/src/categories/utility.rs",
+    "xtask/src/lint.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-7",
+  "turn_id": "a640735e2055",
+  "token_usage": {
+    "input_tokens": 1216,
+    "cache_creation_tokens": 7859239,
+    "cache_read_tokens": 391448097,
+    "output_tokens": 556974,
+    "api_call_count": 822
+  },
+  "session_metrics": {
+    "turn_count": 24
+  },
+  "summary": {
+    "intent": "Implement four GitHub issues (#324, #328, #419, #421) adding Heading (with HeadingLevelProvider + Section), Landmark, and Highlight adapter components for both the Leptos and Dioxus frameworks, following the workspace's adapter-component delivery contract.",
+    "outcome": "All six adapter components were implemented with SSR + wasm tests, E2E fixtures/harnesses, and widget demos across all six widget crates; additional improvements included adding GlobalAttributes pass-through to all existing Dioxus components, proper class-merging for Leptos, TypedChildren adoption, fixture modularization by category, and renaming test files to canonical naming while eliminating an allowlist in the parity lint.",
+    "learnings": {
+      "repo": [
+        "Leptos SSR tests that use provide_context/use_context must be wrapped in Owner::new().with(|| ...) — without an Owner, context is never published and all use_context calls return None.",
+        "Leptos attr:class produces a duplicate class= attribute (not merged) when the component also emits an internal class; browsers silently drop one. Fix: pre-merge in the AttrMap layer before converting to attrs using a merge_consumer_class_into helper.",
+        "Dioxus components must use explicit #[derive(Props, Clone, PartialEq, Debug)] structs (not function-style props); any type used in a Props struct must implement PartialEq — including agnostic-core Messages types.",
+        "Dioxus accepts arbitrary HTML attrs via #[props(extends = GlobalAttributes)] attrs: Vec<Attribute>; spread with ..props.attrs inside rsx!. Leptos equivalent is attr:foo= prefix at call-site, which works automatically without prop declaration (unless the component has its own class, in which case merging is needed).",
+        "merge_dioxus_attrs(consumer_attrs, component_attrs) in crates/ars-dioxus/src/as_child.rs tokenizes class/style for additive merge; component attrs win on conflict for non-token attrs (preserving data-ars-* integrity).",
+        "The adapter-component-delivery.md spec requires E2E fixture entries, E2E harness modules, and widget demos in all 6 widget crates — these deliverables were omitted from the initial plan and had to be added after user reminder.",
+        "E2E fixture main.rs should be split into categories/{mod,navigation,utility,...}.rs so parallel agents implementing different component categories never edit the same file.",
+        "Canonical adapter test file naming is test_{component}.rs and test_{component}_wasm.rs. Bare-named files (separator.rs, visually_hidden.rs) were tech debt tracked by a COMPONENT_NAMED_ADAPTER_TEST_FILES allowlist in xtask/src/lint.rs — that allowlist has now been deleted.",
+        "The xtask adapter-parity lint's wasm test regex was missing #[wasm_bindgen_test(async)], causing those tests to be silently excluded from parity counts.",
+        "use_memo is appropriate for merging consumer attrs only when the component already has a reactive machine/derive (Button, Tabs); stateless components (Heading, Landmark, Highlight, Separator, VisuallyHidden) should merge inline — Memo overhead exceeds merge cost there.",
+        "TypedChildren<T> where View<T>: IntoView is the workspace convention for Leptos components taking children; preserves view type for precise reactive diffing and future AddAnyAttr support.",
+        "Tailwind preflight and many CSS resets flatten h1-h6 visual sizes to identical; heading widget demos require explicit font-size styling (inline styles or Tailwind text-* classes) to demonstrate the API behavior.",
+        "Leptos CSR context in E2E fixtures leaks across sibling components when provider and heading are at the same component level; wrap provider subtrees in their own component to get an isolated owner scope.",
+        "HeadingLevelProvider/Section context for an accessible heading hierarchy in E2E fixtures requires careful axe-compliant level ordering (page h1 → fixture h2 → provider h3 → Section h4) to avoid axe heading-order violations."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-leptos/src/id.rs",
+          "line": 34,
+          "end_line": 52,
+          "finding": "ID counter was a process-global AtomicU64 under cfg(not(wasm32)), causing flaky tests from parallel threads racing on reset_id_counter() and a latent bug where concurrent SSR requests interleaved IDs. Fixed by unifying with the wasm32 path: single thread_local! { Cell<u64> } on all targets."
+        },
+        {
+          "path": "crates/ars-components/src/utility/landmark/mod.rs",
+          "line": 158,
+          "end_line": 158,
+          "finding": "landmark::Messages struct was missing PartialEq derive; MessageFn supports it but the derive was absent, preventing Messages from being used in Dioxus Props structs."
+        },
+        {
+          "path": "crates/ars-leptos/src/attrs.rs",
+          "finding": "Added merge_consumer_class_into(&mut AttrMap, Option<&str>) helper that reads existing HtmlAttr::Class, concatenates consumer tokens, and writes a single merged value back — avoids the duplicate class= attribute problem that occurs when using attr:class on a component that already emits class via its own AttrMap."
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "finding": "COMPONENT_NAMED_ADAPTER_TEST_FILES allowlist and its branching logic have been removed. File filter is now name.starts_with('test_') && name.ends_with('.rs'). Test-attribute regex extended to also match #[wasm_bindgen_test(async)]."
+        },
+        {
+          "path": "crates/ars-dioxus/src/provider.rs",
+          "line": 418,
+          "end_line": 418,
+          "finding": "Canonical pattern for 'use prop if present, else snapshot from signal': both Leptos and Dioxus use_locale() return Signal<Locale>; Leptos reads with .get(), Dioxus with .read().clone(). Locale is snapshotted at Api::new() construction time — mid-life locale changes do not retrigger label resolution (per agnostic-core contract)."
+        }
+      ],
+      "workflow": [
+        "cargo xci-fast (alias for cargo xci --profile fast) is the mandatory workspace pre-push gate covering fmt, leptosfmt, check, clippy, unit, integration, adapter, spec-compile-snippets, error-variant-coverage, mutual-exclusion, and snapshot-count.",
+        "leptosfmt must be run separately from cargo +nightly fmt --all; xci-fast enforces both; apply with leptosfmt --edition 2021 **/*.rs and cargo +nightly fmt --all before pushing.",
+        "TDD order in this workspace: write failing tests first (confirm failure), implement, re-run (confirm green), then commit per component.",
+        "E2E tests require chromedriver running on port 9515 (start in background) and the fixture server compiled + served by trunk (Leptos) or dx serve --web (Dioxus).",
+        "GitHub Project issue status must be moved to 'In Progress' at implementation start via gh api (not just creating the PR).",
+        "Wasm coverage is a CI-only gate (requires LLVM toolchain); local confirmation is limited to verifying the test binaries execute and spot-checking per-file coverage metrics from lcov.",
+        "When adapting existing components to add a new prop, always check whether any test struct literals need the new field added (Dioxus test struct cloning tests fail if Props struct gains non-optional fields).",
+        "Use git mv for file renames so git tracks history; naked copy+delete loses blame."
+      ]
+    },
+    "friction": [
+      "Leptos attr:class silently produces duplicate class= attribute when the component emits its own class — browsers drop one without error, making this a hard-to-diagnose silent failure only discovered via empirical probing.",
+      "xci-fast failed multiple times before passing: first on leptosfmt formatting (not applied), then on nightly fmt (applied separately), requiring three attempts total before the gate went green.",
+      "Capturing background xci-fast output was unreliable — the output file was not written correctly when run via the task system, requiring a foreground retry with explicit log redirection.",
+      "CSR context propagation in the E2E Leptos fixture caused Heading to render at an unexpected level (h3 instead of h1 for a 'default' heading) due to HeadingContext leaking from a sibling provider; required restructuring the fixture into a nested component to isolate scope.",
+      "Axe heading-order violations in E2E fixture required careful h1→h2→h3→h4 scaffolding around the demo headings to maintain semantic correctness while still demonstrating the API.",
+      "The adapter-component-delivery.md requirements (E2E fixtures, E2E harness modules, widgets examples) were not in the original plan and were only caught after user reminder, requiring a second large implementation pass.",
+      "The view! macro turbofish Vec::<String>::new() causes a parse error inside view!; must bind to a local variable first.",
+      "Dioxus dx serve output was slow to appear and the process required manual monitoring; determining when the server was actually ready took multiple polling attempts.",
+      "CI wasm coverage could not be fully verified locally (requires LLVM 22 / clang-22); the Dioxus wasm-only coverage dropped to 72.8% (under the 77% threshold) before native merge, creating uncertainty about whether the merged threshold would pass."
+    ],
+    "open_items": [
+      "button.rs and tabs.rs test files in both ars-leptos and ars-dioxus still use bare naming (not renamed to test_button.rs / test_tabs.rs); they were explicitly left out of scope for this rename pass.",
+      "@codex review cycle not yet started — needs to be triggered after first push and iterated until Codex leaves a thumbs-up.",
+      "Merged (native + wasm) coverage threshold verification for ars-leptos and ars-dioxus was not completed locally; CI nightly wasm-coverage job will be the actual gate.",
+      "Leptos Landmark's locale prop and use_messages/resolve_locale integration was added per spec but the i18n message registry wiring in the fixture is minimal (stub Messages only); production callers will need to wire use_messages() for reactive label resolution.",
+      "AsChild variants for Heading, Landmark, and Highlight are not implemented — the adapter specs don't require them, but they may be needed if consumers require full DOM control (e.g., wrapping an existing element). Deferred as a separate task.",
+      "The HeadingLevelProvider and Section components are documented in prose in the adapter specs but not enumerated in the Public Adapter API table (§2) of spec/leptos-components/utility/heading.md and the Dioxus equivalent; spec update was noted but not done.",
+      "Mid-life locale reactivity for Landmark aria-label is not wired — Api::new() snapshots locale at construction; if locale changes post-mount the label won't update. Noted in plan as intentional deferral per agnostic-core contract.",
+      "The plan file at /Users/ericson/.claude/plans/implement-tasks-324-328-tidy-squirrel.md was not updated to reflect the GlobalAttributes, TypedChildren, class-merging, or test-renaming work added after the original scope."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-22T01:09:13.02724Z",
+    "agent_lines": 7371,
+    "agent_removed": 1889,
+    "human_added": 164,
+    "human_modified": 12,
+    "human_removed": 0,
+    "total_committed": 7547,
+    "total_lines_changed": 9436,
+    "agent_percentage": 98.13480288257736,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1045,
+      "agent_lines_removed": 2
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2510,
+      "agent_lines_removed": 5
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2522,
+      "agent_lines_removed": 29
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3891,
+      "agent_lines_removed": 107
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3898,
+      "agent_lines_removed": 108
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 8,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3974,
+      "agent_lines_removed": 108,
+      "user_added_per_file": {
+        "crates/ars-dioxus/src/utility/heading.rs": 8
+      }
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3982,
+      "agent_lines_removed": 108
+    },
+    {
+      "checkpoint_number": 9,
+      "user_lines_added": 111,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3982,
+      "agent_lines_removed": 108,
+      "user_added_per_file": {
+        "crates/ars-leptos/tests/attr_passthrough.rs": 111
+      }
+    },
+    {
+      "checkpoint_number": 10,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 11,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 12,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 13,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 14,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 15,
+      "user_lines_added": 11,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5466,
+      "agent_lines_removed": 938,
+      "user_added_per_file": {
+        "crates/ars-leptos/src/utility/heading.rs": 11
+      }
+    },
+    {
+      "checkpoint_number": 16,
+      "user_lines_added": 11,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5694,
+      "agent_lines_removed": 954,
+      "user_added_per_file": {
+        "crates/ars-dioxus/tests/heading.rs": 5,
+        "crates/ars-dioxus/tests/highlight.rs": 1,
+        "crates/ars-leptos/src/utility/highlight.rs": 5
+      }
+    },
+    {
+      "checkpoint_number": 17,
+      "user_lines_added": 46,
+      "user_lines_removed": 12,
+      "agent_lines_added": 5717,
+      "agent_lines_removed": 954,
+      "user_added_per_file": {
+        "crates/ars-leptos/src/utility/heading.rs": 2,
+        "crates/ars-leptos/src/utility/highlight.rs": 5,
+        "crates/ars-leptos/src/utility/landmark.rs": 10,
+        "crates/ars-leptos/src/utility/separator.rs": 2,
+        "crates/ars-leptos/src/utility/visually_hidden.rs": 5,
+        "crates/ars-leptos/tests/attr_class_merge_probe.rs": 1,
+        "crates/ars-leptos/tests/attr_passthrough.rs": 16,
+        "crates/ars-leptos/tests/heading.rs": 2,
+        "crates/ars-leptos/tests/highlight.rs": 1,
+        "crates/ars-leptos/tests/landmark.rs": 2
+      },
+      "user_removed_per_file": {
+        "crates/ars-leptos/tests/attr_passthrough.rs": 12
+      }
+    },
+    {
+      "checkpoint_number": 18,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 7597,
+      "agent_lines_removed": 954
+    },
+    {
+      "checkpoint_number": 19,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 7597,
+      "agent_lines_removed": 954
+    },
+    {
+      "checkpoint_number": 20,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 6625,
+      "agent_lines_removed": 954
+    },
+    {
+      "checkpoint_number": 21,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 6625,
+      "agent_lines_removed": 954
+    },
+    {
+      "checkpoint_number": 22,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 6625,
+      "agent_lines_removed": 954
+    },
+    {
+      "checkpoint_number": 23,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 7556,
+      "agent_lines_removed": 1901
+    },
+    {
+      "checkpoint_number": 24,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 7559,
+      "agent_lines_removed": 1901
+    }
+  ]
+}
