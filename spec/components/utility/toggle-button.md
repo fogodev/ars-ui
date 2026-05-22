@@ -222,8 +222,15 @@ impl ars_core::Machine for Machine {
         // Disabled guard: blocks value-changing events but allows Focus/Blur
         // so the button remains discoverable by screen readers.
         // Allow SetDisabled so props can re-enable the button.
-        // Allow Reset so form reset works even when disabled.
-        if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetDisabled(_) | Event::Reset) {
+        // Disable user activation without blocking prop sync or form reset.
+        if ctx.disabled && !matches!(
+            event,
+            Event::Focus { .. }
+                | Event::Blur
+                | Event::SetPressed(_)
+                | Event::SetDisabled(_)
+                | Event::Reset
+        ) {
             return None;
         }
 
@@ -272,9 +279,9 @@ impl ars_core::Machine for Machine {
             })),
 
             // ── Toggle ──────────────────────────────────────────────────────
-            // Toggle and SetPressed are intentionally handled from all states,
-            // including Pressed. This allows programmatic control even while
-            // the user is actively pressing the button.
+            // Toggle is intentionally handled from all enabled states, including Pressed.
+            // Disabled blocks user activation events but still allows SetPressed below
+            // so prop-sync can keep controlled values fresh.
             (_, Event::Toggle) => {
                 let new_pressed = !*ctx.pressed.get();
                 Some(value_change_plan(ctx, *state, new_pressed))

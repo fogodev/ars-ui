@@ -318,7 +318,11 @@ impl ars_core::Machine for Machine {
         if ctx.disabled
             && !matches!(
                 event,
-                Event::Focus { .. } | Event::Blur | Event::SetDisabled(_) | Event::Reset
+                Event::Focus { .. }
+                    | Event::Blur
+                    | Event::SetPressed(_)
+                    | Event::SetDisabled(_)
+                    | Event::Reset
             )
         {
             return None;
@@ -775,9 +779,20 @@ mod tests {
         assert!(!service.send(Event::Press).state_changed);
         assert!(!service.send(Event::Release).state_changed);
         assert!(!service.send(Event::Toggle).state_changed);
-        assert!(!service.send(Event::SetPressed(true)).state_changed);
         assert_eq!(service.state(), &State::Idle);
         assert!(!service.context().pressed.get());
+    }
+
+    #[test]
+    fn toggle_button_disabled_allows_set_pressed_for_prop_sync() {
+        let mut service = service(test_props().disabled(true));
+
+        let result = service.send(Event::SetPressed(true));
+
+        assert!(result.context_changed);
+        assert_eq!(service.state(), &State::Idle);
+        assert!(*service.context().pressed.get());
+        assert!(service.context().disabled);
     }
 
     #[test]
@@ -840,19 +855,26 @@ mod tests {
             vec![Event::SetDisabled(true)],
         );
 
-        let mut service = service(old);
+        let mut active = service(old);
 
-        let result = service.set_props(controlled);
-
-        assert!(result.context_changed);
-        assert!(*service.context().pressed.get());
-        assert!(service.context().pressed.is_controlled());
-
-        let result = service.set_props(test_props());
+        let result = active.set_props(controlled);
 
         assert!(result.context_changed);
-        assert!(*service.context().pressed.get());
-        assert!(!service.context().pressed.is_controlled());
+        assert!(*active.context().pressed.get());
+        assert!(active.context().pressed.is_controlled());
+
+        let result = active.set_props(test_props());
+
+        assert!(result.context_changed);
+        assert!(*active.context().pressed.get());
+        assert!(!active.context().pressed.is_controlled());
+
+        let mut disabled_service = service(test_props().pressed(false).disabled(true));
+        let result = disabled_service.set_props(test_props().pressed(true).disabled(true));
+
+        assert!(result.context_changed);
+        assert!(*disabled_service.context().pressed.get());
+        assert!(disabled_service.context().disabled);
     }
 
     #[test]
