@@ -1099,7 +1099,12 @@ impl Api<'_> {
 
             KeyboardKey::Escape if self.ctx.open => (self.send)(Event::Close),
 
-            _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
+            _ if data.key != KeyboardKey::Space
+                && data.character.is_some()
+                && !ctrl
+                && !meta
+                && !data.is_composing =>
+            {
                 (self.send)(Event::TypeaheadSearch(
                     data.character.expect("checked"),
                     typeahead_time(now_ms, &self.ctx.typeahead),
@@ -2076,6 +2081,7 @@ mod tests {
             api.on_item_leave();
             api.on_clear_click();
             api.on_trigger_keydown(&keyboard(KeyboardKey::Enter, None), false, false);
+            api.on_trigger_keydown(&keyboard(KeyboardKey::Space, Some(' ')), false, false);
             api.on_trigger_keydown(&keyboard(KeyboardKey::ArrowDown, None), false, false);
             api.on_trigger_keydown(&keyboard(KeyboardKey::Escape, None), false, false);
             api.on_trigger_keydown(
