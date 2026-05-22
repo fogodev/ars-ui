@@ -14,7 +14,8 @@ pub use ars_interactions::{PressEvent, PressEventType};
 use dioxus::{dioxus_core::AttributeValue, prelude::*};
 
 use crate::{
-    as_child::AsChildRenderProps, attr_map_to_dioxus_inline_attrs, use_machine, use_stable_id,
+    as_child::{AsChildRenderProps, merge_dioxus_attrs},
+    attr_map_to_dioxus_inline_attrs, use_machine, use_stable_id,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -160,6 +161,13 @@ pub struct ButtonProps {
     #[props(optional, into)]
     pub on_press_up: Option<EventHandler<PressEvent>>,
 
+    /// Global HTML attributes forwarded onto the rendered `<button>` root.
+    /// Use this for `data-*`, `lang`, `tabindex`, `aria-*` attrs not already
+    /// covered by an explicit prop, etc. The explicit `class`/`style`/
+    /// `aria_label`/`aria_labelledby` props take precedence for those names.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+
     /// Visible button content.
     pub children: Element,
 }
@@ -245,6 +253,7 @@ pub fn Button(props: ButtonProps) -> Element {
         on_press,
         on_press_change,
         on_press_up,
+        attrs: consumer_attrs,
         children,
     } = props;
 
@@ -300,7 +309,11 @@ pub fn Button(props: ButtonProps) -> Element {
         aria_labelledby,
     };
 
-    let root_attrs = machine.derive(move |api| dioxus_root_attrs(api, &id, &user_attrs, false));
+    let root_attrs = machine.derive(move |api| {
+        let component_attrs = dioxus_root_attrs(api, &id, &user_attrs, false);
+
+        merge_dioxus_attrs(consumer_attrs.clone(), component_attrs)
+    });
 
     let loading_attrs =
         machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.loading_indicator_attrs()));

@@ -78,8 +78,8 @@ pub use crate::navigation::{self, tabs};
 // `spec/foundation/08-adapter-leptos.md` §17. End users reach it as
 // `error_boundary::ArsErrorBoundary` after `use ars_leptos::prelude::*;`.
 pub use crate::utility::{
-    self, button, client_only, dismissable, error_boundary, separator, visually_hidden,
-    z_index_allocator,
+    self, button, client_only, dismissable, error_boundary, heading, highlight, landmark,
+    separator, visually_hidden, z_index_allocator,
 };
 // -- User-facing helpers --
 pub use crate::{Translatable, t, use_number_formatter};

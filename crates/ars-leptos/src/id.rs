@@ -3,8 +3,17 @@
 //! Provides monotonic counters that produce the same ID sequence on both SSR and
 //! client when the component tree renders in the same order.
 
-// On WASM (single-threaded), use a thread-local Cell for zero-overhead counting.
-#[cfg(target_arch = "wasm32")]
+// Thread-local counter on all targets.
+//
+// Leptos SSR renders a single request on one thread (`render_to_string`,
+// `ssr_in_order`), so per-thread counters give each request its own
+// monotonic sequence that matches the WASM-side hydration sequence
+// without races between concurrent requests.
+//
+// A previous global `AtomicU64` implementation was process-wide, which
+// broke both (a) parallel SSR requests interleaving each other's IDs
+// and (b) parallel tests asserting specific counter values racing on the
+// same shared counter.
 mod counter {
     use std::cell::Cell;
 
@@ -20,34 +29,13 @@ mod counter {
         })
     }
 
-    /// Resets the ID counter to zero.
+    /// Resets the ID counter to zero on the current thread.
     ///
     /// Must be called at the start of each SSR request so that server-rendered IDs
     /// match the client-side hydration sequence.
     #[cfg(feature = "ssr")]
     pub(super) fn reset() {
         ID_COUNTER.with(|c| c.set(0));
-    }
-}
-
-// On native (multi-threaded SSR), use an atomic counter.
-#[cfg(not(target_arch = "wasm32"))]
-mod counter {
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    pub(super) fn next_id() -> u64 {
-        ID_COUNTER.fetch_add(1, Ordering::Relaxed)
-    }
-
-    /// Resets the ID counter to zero.
-    ///
-    /// Must be called at the start of each SSR request so that server-rendered IDs
-    /// match the client-side hydration sequence.
-    #[cfg(feature = "ssr")]
-    pub(super) fn reset() {
-        ID_COUNTER.store(0, Ordering::Relaxed);
     }
 }
 

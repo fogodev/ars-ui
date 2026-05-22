@@ -53,6 +53,7 @@ use wasm_bindgen::{JsCast, closure::Closure};
 type IndicatorAutoUpdateCleanup = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
 
 use crate::{
+    as_child::merge_dioxus_attrs,
     attrs::attr_map_to_dioxus_inline_attrs,
     event_mapping::dioxus_key_to_keyboard_key,
     id::use_stable_id,
@@ -355,6 +356,15 @@ pub struct TabsProps<K: TabKey> {
     #[props(optional)]
     pub on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
 
+    /// Global HTML attributes forwarded onto the Tabs root `<div>`.
+    /// Tokenized attributes (`class`, `style`, relationship token lists)
+    /// concatenate with the component's own values; ordinary attributes
+    /// prefer the component's value on conflict so tabs semantics stay
+    /// intact. Inner parts (tab list, triggers, panels) carry their own
+    /// `data-ars-part` attrs for finer-grained styling.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+
     /// Optional adapter-user content rendered inside Root after panels.
     #[props(default)]
     pub children: Element,
@@ -481,6 +491,7 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
         on_value_change,
         on_close_tab,
         on_reorder,
+        attrs: consumer_attrs,
         children,
     } = props;
 
@@ -537,6 +548,11 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
     let ever_selected = use_lazy_mount_tracking(machine);
 
     let root_attrs = tabs_root_attrs(machine);
+    let root_attrs = {
+        let consumer_attrs = consumer_attrs;
+
+        use_memo(move || merge_dioxus_attrs(consumer_attrs.clone(), root_attrs()))
+    };
     let list_attrs = tabs_list_attrs(machine, &config.tabs_meta);
 
     use_auto_direction_sync(machine, dir, &platform);

@@ -42,6 +42,7 @@ use {
 };
 
 use crate::{
+    as_child::merge_dioxus_attrs,
     attrs::attr_map_to_dioxus_inline_attrs,
     id::use_stable_id,
     provider::{resolve_locale, use_messages},
@@ -418,6 +419,14 @@ pub struct RegionProps {
     #[props(optional)]
     pub messages: Option<Messages>,
 
+    /// Global HTML attributes forwarded onto the rendered `<div>` root.
+    /// Tokenized attributes (`class`, `style`, relationship token lists)
+    /// concatenate with the component's own values; ordinary attributes
+    /// prefer the component's value on conflict so dismiss semantics stay
+    /// intact.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+
     /// Children rendered between the start and end dismiss buttons.
     pub children: Element,
 }
@@ -449,6 +458,7 @@ pub fn Region(props: RegionProps) -> Element {
         dismiss_label,
         locale,
         messages,
+        attrs: consumer_attrs,
         children,
     } = props;
 
@@ -467,7 +477,8 @@ pub fn Region(props: RegionProps) -> Element {
 
     let api = Api::new(props.clone(), dismiss_label);
 
-    let root_attrs = attr_map_to_dioxus_inline_attrs(api.root_attrs());
+    let component_root_attrs = attr_map_to_dioxus_inline_attrs(api.root_attrs());
+    let root_attrs = merge_dioxus_attrs(consumer_attrs, component_root_attrs);
 
     let inline_attrs = attr_map_to_dioxus_inline_attrs(api.dismiss_button_attrs());
     let start_attrs = inline_attrs.clone();
@@ -528,6 +539,7 @@ mod tests {
             dismiss_label: Some(String::from("Dismiss")),
             locale: None,
             messages: None,
+            attrs: Vec::new(),
             children: Ok(VNode::placeholder()),
         };
 

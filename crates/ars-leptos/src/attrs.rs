@@ -113,6 +113,39 @@ pub fn attr_map_to_leptos_inline_attrs(map: AttrMap) -> Vec<LeptosAttribute> {
     attr_map_to_leptos(map, &StyleStrategy::Inline, None).attrs
 }
 
+/// Pre-merges a consumer-supplied `class` token string with whatever class
+/// the component already wrote into `map`.
+///
+/// Used by adapter components that expose an explicit `class` prop to let
+/// Tailwind / CSS-utility consumers add their own tokens onto the rendered
+/// root. The merge happens at the [`AttrMap`] layer so the final
+/// conversion emits a *single* `class="…"` attribute — Leptos's
+/// `attr:class="…"` pass-through emits a second `class=` attribute when an
+/// internal class is already present, and HTML5 duplicate-attribute rules
+/// then cause one of the two to be silently dropped by the browser.
+///
+/// Behavior:
+///
+/// - If both the component and the consumer supplied non-empty classes,
+///   the merged value is `"{component} {consumer}"`.
+/// - If only one side is non-empty, that side is kept.
+/// - Empty / whitespace-only consumer strings are ignored.
+pub fn merge_consumer_class_into(map: &mut AttrMap, consumer_class: Option<&str>) {
+    let Some(consumer) = consumer_class.map(str::trim).filter(|s| !s.is_empty()) else {
+        return;
+    };
+
+    let merged = map
+        .get(&ars_core::HtmlAttr::Class)
+        .filter(|existing| !existing.trim().is_empty())
+        .map_or_else(
+            || consumer.to_owned(),
+            |existing| format!("{existing} {consumer}"),
+        );
+
+    map.set(ars_core::HtmlAttr::Class, merged);
+}
+
 fn attr_value_to_leptos_attr(name: String, value: AttrValue) -> Option<LeptosAttribute> {
     use leptos::tachys::html::attribute::any_attribute::IntoAnyAttribute as _;
 

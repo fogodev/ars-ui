@@ -126,7 +126,7 @@ impl Props {
 }
 
 /// Messages for the `Landmark` component.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Accessible name for the landmark region.
     ///

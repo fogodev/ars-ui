@@ -46,7 +46,7 @@ pub use attrs::{
 };
 pub use attrs::{
     LeptosAttrResult, LeptosAttribute, attr_map_to_leptos, attr_map_to_leptos_inline_attrs,
-    use_style_strategy,
+    merge_consumer_class_into, use_style_strategy,
 };
 pub use callbacks::{emit, emit_map};
 pub use controlled::use_controlled_prop;

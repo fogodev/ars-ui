@@ -1,10 +1,14 @@
 use ars_dioxus::{
+    MessageFn,
     prelude::{Orientation, Translate, t},
     utility::{
         button::{self, Button, ButtonAsChild},
         client_only::ClientOnly,
         dismissable,
         error_boundary::{Boundary, CapturedError},
+        heading::{self, Heading, HeadingLevelProvider, Section},
+        highlight::Highlight,
+        landmark::{self, Landmark},
         separator::{Separator, SeparatorAsChild},
         visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
         z_index_allocator::{Context as ZIndexContext, ZIndexAllocatorProvider},
@@ -245,6 +249,117 @@ pub(crate) enum UtilityText {
         pt_BR = "Filho saudável renderizado dentro do limite."
     )]
     HealthyChild,
+
+    #[translate(en_US = "Heading primitive", pt_BR = "Primitivo de cabeçalho")]
+    HeadingPrimitive,
+
+    #[translate(
+        en_US = "Heading resolves its level from explicit props or the nearest HeadingContext.",
+        pt_BR = "O Heading resolve seu nível a partir de props explícitas ou do HeadingContext mais próximo."
+    )]
+    HeadingDescription,
+
+    #[translate(en_US = "Level one (h1)", pt_BR = "Nível um (h1)")]
+    HeadingLevelOne,
+
+    #[translate(en_US = "Level two (h2)", pt_BR = "Nível dois (h2)")]
+    HeadingLevelTwo,
+
+    #[translate(en_US = "Level three (h3)", pt_BR = "Nível três (h3)")]
+    HeadingLevelThree,
+
+    #[translate(en_US = "Level four (h4)", pt_BR = "Nível quatro (h4)")]
+    HeadingLevelFour,
+
+    #[translate(en_US = "Level five (h5)", pt_BR = "Nível cinco (h5)")]
+    HeadingLevelFive,
+
+    #[translate(en_US = "Level six (h6)", pt_BR = "Nível seis (h6)")]
+    HeadingLevelSix,
+
+    #[translate(
+        en_US = "HeadingLevelProvider sets the starting level. Section bumps the nested level by one.",
+        pt_BR = "HeadingLevelProvider define o nível inicial. Section incrementa o nível aninhado em um."
+    )]
+    HeadingNestingDescription,
+
+    #[translate(
+        en_US = "Inside HeadingLevelProvider level=Two (h2)",
+        pt_BR = "Dentro de HeadingLevelProvider level=Two (h2)"
+    )]
+    HeadingProvider,
+
+    #[translate(
+        en_US = "Inside Section, bumped to h3",
+        pt_BR = "Dentro de Section, promovido para h3"
+    )]
+    HeadingSection,
+
+    #[translate(en_US = "Landmark primitive", pt_BR = "Primitivo de marco")]
+    LandmarkPrimitive,
+
+    #[translate(
+        en_US = "Landmark picks the right native element for each WAI-ARIA role.",
+        pt_BR = "O Landmark escolhe o elemento nativo certo para cada papel WAI-ARIA."
+    )]
+    LandmarkDescription,
+
+    #[translate(
+        en_US = "Banner (renders as <header>)",
+        pt_BR = "Banner (renderiza como <header>)"
+    )]
+    LandmarkBanner,
+
+    #[translate(
+        en_US = "Navigation (renders as <nav>)",
+        pt_BR = "Navegação (renderiza como <nav>)"
+    )]
+    LandmarkNavigation,
+
+    #[translate(
+        en_US = "Main (renders as <main>)",
+        pt_BR = "Main (renderiza como <main>)"
+    )]
+    LandmarkMain,
+
+    #[translate(
+        en_US = "Complementary (renders as <aside>)",
+        pt_BR = "Complementary (renderiza como <aside>)"
+    )]
+    LandmarkComplementary,
+
+    #[translate(
+        en_US = "ContentInfo (renders as <footer>)",
+        pt_BR = "ContentInfo (renderiza como <footer>)"
+    )]
+    LandmarkContentInfo,
+
+    #[translate(
+        en_US = "Form (renders as <form>)",
+        pt_BR = "Form (renderiza como <form>)"
+    )]
+    LandmarkForm,
+
+    #[translate(
+        en_US = "Region (renders as <section>)",
+        pt_BR = "Region (renderiza como <section>)"
+    )]
+    LandmarkRegion,
+
+    #[translate(
+        en_US = "Search (fallback: <div role=\"search\">)",
+        pt_BR = "Search (fallback: <div role=\"search\">)"
+    )]
+    LandmarkSearch,
+
+    #[translate(en_US = "Highlight primitive", pt_BR = "Primitivo de destaque")]
+    HighlightPrimitive,
+
+    #[translate(
+        en_US = "Highlight splits text into matched/unmatched chunks with locale-aware case folding.",
+        pt_BR = "O Highlight divide o texto em trechos correspondentes/não correspondentes com dobramento de caso sensível à localidade."
+    )]
+    HighlightDescription,
 }
 
 #[component]
@@ -564,6 +679,177 @@ pub(crate) fn UtilityPanel() -> Element {
                         }
                     }
                     Boundary { ExampleErrorChild {} }
+                }
+            }
+            section {
+                class: "rounded-lg border border-slate-200 bg-white/85 p-5 shadow-lg shadow-slate-900/10",
+                "aria-labelledby": "heading-primitive",
+                div { class: "mb-4",
+                    h2 {
+                        id: "heading-primitive",
+                        class: "text-base font-bold text-slate-950",
+                        {t(UtilityText::HeadingPrimitive)}
+                    }
+                    p { class: "text-sm text-slate-500", {t(UtilityText::HeadingDescription)} }
+                }
+                div { class: "space-y-2 text-slate-900",
+                    Heading {
+                        id: "dioxus-tailwind-heading-h1",
+                        level: heading::Level::One,
+                        class: "text-4xl font-bold",
+                        {t(UtilityText::HeadingLevelOne)}
+                    }
+                    Heading {
+                        id: "dioxus-tailwind-heading-h2",
+                        level: heading::Level::Two,
+                        class: "text-3xl font-bold",
+                        {t(UtilityText::HeadingLevelTwo)}
+                    }
+                    Heading {
+                        id: "dioxus-tailwind-heading-h3",
+                        level: heading::Level::Three,
+                        class: "text-2xl font-bold",
+                        {t(UtilityText::HeadingLevelThree)}
+                    }
+                    Heading {
+                        id: "dioxus-tailwind-heading-h4",
+                        level: heading::Level::Four,
+                        class: "text-xl font-bold",
+                        {t(UtilityText::HeadingLevelFour)}
+                    }
+                    Heading {
+                        id: "dioxus-tailwind-heading-h5",
+                        level: heading::Level::Five,
+                        class: "text-lg font-bold",
+                        {t(UtilityText::HeadingLevelFive)}
+                    }
+                    Heading {
+                        id: "dioxus-tailwind-heading-h6",
+                        level: heading::Level::Six,
+                        class: "text-base font-bold",
+                        {t(UtilityText::HeadingLevelSix)}
+                    }
+                    p { class: "pt-2 text-sm text-slate-500",
+                        {t(UtilityText::HeadingNestingDescription)}
+                    }
+                    HeadingLevelProvider { level: heading::Level::Two,
+                        Heading {
+                            id: "dioxus-tailwind-heading-provided",
+                            class: "text-3xl font-bold",
+                            {t(UtilityText::HeadingProvider)}
+                        }
+                        Section {
+                            Heading {
+                                id: "dioxus-tailwind-heading-section",
+                                class: "text-2xl font-bold",
+                                {t(UtilityText::HeadingSection)}
+                            }
+                        }
+                    }
+                }
+            }
+            section {
+                class: "rounded-lg border border-slate-200 bg-white/85 p-5 shadow-lg shadow-slate-900/10",
+                "aria-labelledby": "landmark-primitive",
+                div { class: "mb-4",
+                    h2 {
+                        id: "landmark-primitive",
+                        class: "text-base font-bold text-slate-950",
+                        {t(UtilityText::LandmarkPrimitive)}
+                    }
+                    p { class: "text-sm text-slate-500", {t(UtilityText::LandmarkDescription)} }
+                }
+                div { class: "space-y-3 text-slate-900",
+                    Landmark {
+                        id: "dioxus-tailwind-landmark-banner",
+                        role: landmark::Role::Banner,
+                        messages: landmark::Messages {
+                            label: MessageFn::static_str("Page banner"),
+                        },
+                        class: "block rounded-md border-2 border-violet-400 bg-violet-50 px-3 py-2",
+                        {t(UtilityText::LandmarkBanner)}
+                    }
+                    Landmark {
+                        id: "dioxus-tailwind-landmark-navigation",
+                        role: landmark::Role::Navigation,
+                        messages: landmark::Messages {
+                            label: MessageFn::static_str("Primary navigation"),
+                        },
+                        class: "block rounded-md border-2 border-blue-400 bg-blue-50 px-3 py-2",
+                        {t(UtilityText::LandmarkNavigation)}
+                    }
+                    Landmark {
+                        id: "dioxus-tailwind-landmark-main",
+                        role: landmark::Role::Main,
+                        messages: landmark::Messages {
+                            label: MessageFn::static_str("Main content"),
+                        },
+                        class: "block rounded-md border-2 border-emerald-400 bg-emerald-50 px-3 py-2",
+                        {t(UtilityText::LandmarkMain)}
+                    }
+                    Landmark {
+                        id: "dioxus-tailwind-landmark-complementary",
+                        role: landmark::Role::Complementary,
+                        messages: landmark::Messages {
+                            label: MessageFn::static_str("Related content"),
+                        },
+                        class: "block rounded-md border-2 border-yellow-400 bg-yellow-50 px-3 py-2",
+                        {t(UtilityText::LandmarkComplementary)}
+                    }
+                    Landmark {
+                        id: "dioxus-tailwind-landmark-contentinfo",
+                        role: landmark::Role::ContentInfo,
+                        messages: landmark::Messages {
+                            label: MessageFn::static_str("Page footer"),
+                        },
+                        class: "block rounded-md border-2 border-slate-400 bg-slate-50 px-3 py-2",
+                        {t(UtilityText::LandmarkContentInfo)}
+                    }
+                    Landmark {
+                        id: "dioxus-tailwind-landmark-form",
+                        role: landmark::Role::Form,
+                        messages: landmark::Messages {
+                            label: MessageFn::static_str("Subscribe form"),
+                        },
+                        class: "block rounded-md border-2 border-teal-400 bg-teal-50 px-3 py-2",
+                        {t(UtilityText::LandmarkForm)}
+                    }
+                    Landmark {
+                        id: "dioxus-tailwind-landmark-region",
+                        role: landmark::Role::Region,
+                        messages: landmark::Messages {
+                            label: MessageFn::static_str("Sidebar region"),
+                        },
+                        class: "block rounded-md border-2 border-rose-400 bg-rose-50 px-3 py-2",
+                        {t(UtilityText::LandmarkRegion)}
+                    }
+                    Landmark {
+                        id: "dioxus-tailwind-landmark-search",
+                        role: landmark::Role::Search,
+                        messages: landmark::Messages {
+                            label: MessageFn::static_str("Site search"),
+                        },
+                        class: "block rounded-md border-2 border-orange-400 bg-orange-50 px-3 py-2",
+                        {t(UtilityText::LandmarkSearch)}
+                    }
+                }
+            }
+            section {
+                class: "rounded-lg border border-slate-200 bg-white/85 p-5 shadow-lg shadow-slate-900/10",
+                "aria-labelledby": "highlight-primitive",
+                div { class: "mb-4",
+                    h2 {
+                        id: "highlight-primitive",
+                        class: "text-base font-bold text-slate-950",
+                        {t(UtilityText::HighlightPrimitive)}
+                    }
+                    p { class: "text-sm text-slate-500", {t(UtilityText::HighlightDescription)} }
+                }
+                p { class: "text-slate-900",
+                    Highlight {
+                        query: vec!["highlighted".to_string()],
+                        text: "Hello highlighted world!",
+                    }
                 }
             }
         }

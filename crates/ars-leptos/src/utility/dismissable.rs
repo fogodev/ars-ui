@@ -384,12 +384,20 @@ pub fn Region<T>(
     #[prop(optional)]
     messages: Option<Messages>,
 
+    /// Consumer class tokens appended to the rendered `<div>` root.
+    /// Merges with whatever class the component itself emits so both reach
+    /// the rendered element as a single `class` attribute.
+    #[prop(optional, into)]
+    class: Option<Oco<'static, str>>,
+
     /// Children rendered between the start and end dismiss buttons.
     children: TypedChildren<T>,
 ) -> impl IntoView
 where
     View<T>: IntoView,
 {
+    let class = class.map(Oco::into_owned);
+
     let root_ref = NodeRef::<html::Div>::new();
 
     let boundaries = inside_boundaries.unwrap_or_else(|| Signal::stored(Vec::new()));
@@ -416,7 +424,9 @@ where
 
     let api = Api::new(props.clone(), move || dismiss_label.get());
 
-    let root_attrs = attr_map_to_leptos_inline_attrs(api.root_attrs());
+    let mut root_attr_map = api.root_attrs();
+    crate::merge_consumer_class_into(&mut root_attr_map, class.as_deref());
+    let root_attrs = attr_map_to_leptos_inline_attrs(root_attr_map);
 
     let inline_attrs = attr_map_to_leptos_inline_attrs(api.dismiss_button_attrs());
     let start_attrs = inline_attrs.clone();

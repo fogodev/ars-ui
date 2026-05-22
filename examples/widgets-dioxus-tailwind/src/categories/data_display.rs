@@ -1,4 +1,4 @@
-use ars_dioxus::prelude::{t, Translate};
+use ars_dioxus::prelude::{Translate, t};
 use dioxus::prelude::*;
 
 #[derive(Clone, Debug, Translate, PartialEq)]

@@ -465,6 +465,14 @@ pub fn Tabs<K: TabKey>(
     #[prop(optional)]
     on_reorder: Option<Callback<ReorderEvent<K>, bool>>,
 
+    /// Consumer class tokens appended to the Tabs root `<div>`. Tokens
+    /// merge with whatever class the component itself emits so both reach
+    /// the rendered root as a single `class` attribute. Inner parts (tab
+    /// list, triggers, panels) carry their own `data-ars-part` attrs for
+    /// finer-grained styling.
+    #[prop(optional, into)]
+    class: Option<Oco<'static, str>>,
+
     /// Optional adapter-user content rendered inside Root after panels.
     #[prop(optional)]
     children: Option<Children>,
@@ -510,7 +518,8 @@ pub fn Tabs<K: TabKey>(
 
     let ever_selected = setup_lazy_mount_tracking(machine);
 
-    let root_attrs = tabs_root_attrs(machine);
+    let class = class.map(Oco::into_owned);
+    let root_attrs = tabs_root_attrs(machine, class.as_deref());
     let list_attrs = tabs_list_attrs(machine, tabs_field);
 
     #[cfg(not(feature = "ssr"))]
@@ -913,6 +922,7 @@ fn setup_lazy_mount_tracking(
 )]
 fn tabs_root_attrs(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
+    consumer_class: Option<&str>,
 ) -> Vec<crate::LeptosAttribute> {
     let mut attrs = machine.with_api_snapshot(|api| api.root_attrs());
 
@@ -936,6 +946,8 @@ fn tabs_root_attrs(
             HtmlAttr::Data("ars-orientation"),
             AttrValue::reactive(move || orientation.get()),
         );
+
+    crate::merge_consumer_class_into(&mut attrs, consumer_class);
 
     attr_map_to_leptos_inline_attrs(attrs)
 }

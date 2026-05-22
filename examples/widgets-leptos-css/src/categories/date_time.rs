@@ -1,4 +1,4 @@
-use ars_leptos::prelude::{t, Translate};
+use ars_leptos::prelude::{Translate, t};
 use leptos::prelude::*;
 
 #[derive(Clone, Debug, Translate)]
