@@ -77,6 +77,9 @@ pub mod swap;
 /// `Toggle` component machine.
 pub mod toggle;
 
+/// `ToggleButton` component machine.
+pub mod toggle_button;
+
 /// `VisuallyHidden` component (stateless attribute mapper).
 pub mod visually_hidden;
 

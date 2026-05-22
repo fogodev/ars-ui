@@ -18,7 +18,7 @@ This spec maps the core [`ToggleButton`](../../components/utility/toggle-button.
 #[component] pub fn ToggleButton(...) -> impl IntoView
 ```
 
-The adapter surfaces the full core prop set including pressed state, form props, value, locale, and hover callbacks.
+The adapter surfaces the full core prop set including pressed state, form props, value, `on_change`, and hover callbacks.
 
 ## 3. Mapping to Core Component Contract
 
@@ -27,17 +27,17 @@ The adapter surfaces the full core prop set including pressed state, form props,
 
 ## 4. Part Mapping
 
-| Core part / structure | Required?                   | Adapter rendering target | Ownership     | Attr source                                 | Notes                                               |
-| --------------------- | --------------------------- | ------------------------ | ------------- | ------------------------------------------- | --------------------------------------------------- |
-| `Root`                | required                    | native `<button>`        | adapter-owned | `api.part_attrs(toggle_button::Part::Root)` | Main interactive root.                              |
-| hidden input          | conditional structural node | hidden `<input>`         | adapter-owned | adapter-owned structural attrs              | Only when standalone form participation is enabled. |
+| Core part / structure | Required?                   | Adapter rendering target | Ownership     | Attr source                                       | Notes                                               |
+| --------------------- | --------------------------- | ------------------------ | ------------- | ------------------------------------------------- | --------------------------------------------------- |
+| `Root`                | required                    | native `<button>`        | adapter-owned | `api.part_attrs(toggle_button::Part::Root)`       | Main interactive root.                              |
+| hidden input          | conditional structural node | hidden `<input>`         | adapter-owned | `api.hidden_input_config()` plus structural attrs | Only when standalone form participation is enabled. |
 
 ## 5. Attr Merge and Ownership Rules
 
 | Target node  | Core attrs                                            | Adapter-owned attrs                                           | Consumer attrs                                     | Merge order                                                                                                                 | Ownership notes                                                |
 | ------------ | ----------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | `Root`       | `api.part_attrs(Part::Root)` or equivalent root attrs | hover-state markers and structural `data-*` helpers if needed | consumer root attrs from the hosting component     | core pressed/disabled/form semantics win; `class`/`style` merge additively; handlers compose around normalized toggle logic | adapter-owned native button                                    |
-| hidden input | core form-participation attrs when standalone         | adapter-owned hidden-input structural attrs                   | no direct consumer attrs unless explicitly exposed | core name/value/checked attrs win                                                                                           | hidden input is adapter-owned and omitted inside `ToggleGroup` |
+| hidden input | `api.hidden_input_config()` when standalone           | adapter-owned hidden-input structural attrs                   | no direct consumer attrs unless explicitly exposed | core name/value/form config wins                                                                                            | hidden input is adapter-owned and omitted inside `ToggleGroup` |
 
 - Inside `ToggleGroup`, group context owns selection semantics and standalone hidden-input ownership is suppressed.
 - Consumers must not override `aria-pressed`, hidden-input value, or disabled semantics in ways that break the contract.
@@ -49,14 +49,14 @@ When form participation is enabled, the adapter should also integrate with surro
 
 ## 7. Prop Sync and Event Mapping
 
-Switching between controlled and uncontrolled pressed state is not supported after mount. `default_pressed` is init-only. `pressed` and `disabled` use immediate effect-based sync when reactive.
+Switching between controlled and uncontrolled pressed state is supported by the core machine's `on_props_changed` path. `default_pressed` is init-only except for form reset. `pressed` and `disabled` use immediate effect-based sync when reactive.
 
 | Adapter prop                                  | Mode                        | Sync trigger                                               | Machine event / update path                                      | Visible effect                                                                 | Notes                                                                                 |
 | --------------------------------------------- | --------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| `pressed`                                     | controlled                  | prop change after mount                                    | `SetPressed` or equivalent                                       | updates pressed state, `aria-pressed`, and hidden-input checkedness            | explicit controlled mode                                                              |
+| `pressed`                                     | controlled or uncontrolled  | prop change after mount                                    | `SetPressed` through core props sync                             | updates pressed state, `aria-pressed`, and hidden-input config                 | `Some(value)` controls; `None` returns ownership to the machine                       |
 | `default_pressed`                             | uncontrolled internal state | initial render only                                        | initial machine props                                            | seeds internal pressed state                                                   | read once at initialization                                                           |
 | `disabled`                                    | controlled                  | prop change after mount                                    | `SetDisabled`                                                    | blocks toggle activation and updates disabled semantics                        | immediate sync                                                                        |
-| `name` / `value`                              | non-reactive adapter prop   | render time only                                           | included in root/hidden-input props                              | controls form participation payload                                            | post-mount changes should be treated as unsupported unless reinitialized              |
+| `name` / `value` / `form`                     | render-derived prop         | render time                                                | read by `root_attrs()` and `hidden_input_config()`               | controls standalone form participation payload                                 | changes are reflected by re-deriving the API attrs/config                             |
 | `required` with standalone form participation | controlled                  | prop change after mount or initial standalone registration | hidden-input validity wiring or `RequiredValidator` registration | unpressed required buttons remain visible to form validation                   | hidden input and context-based validator are alternate adapter-owned validation paths |
 | toggle-group context                          | derived from context        | group registration and selection updates                   | group-driven selection path                                      | suppresses standalone hidden-input ownership and local pressed source of truth | group wins over standalone form participation                                         |
 
