@@ -1,0 +1,107 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "672078156c81",
+  "session_id": "019e4d52-5c59-7253-a1b2-98c2eb5a7612",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-22T11:32:38.944275Z",
+  "branch": "t3code/d9d993f1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/selection/combobox/mod.rs",
+    "spec/components/selection/combobox.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "2b5cdadfe88c",
+  "checkpoint_transcript_start": 3745,
+  "transcript_lines_at_start": 3745,
+  "token_usage": {
+    "input_tokens": 222950,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 18318208,
+    "output_tokens": 23961,
+    "api_call_count": 118
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Address 7 Codex review findings on PR #669 (combobox component) and get the PR approved through the repo's required Codex review loop.",
+    "outcome": "All 7 Codex findings were addressed with regression tests added first, implementations patched, spec updated, and a follow-up commit pushed. The fast pre-push gate passed with 5,953 tests and all 10 CI steps green.",
+    "learnings": {
+      "repo": [
+        "The repo uses a `waiting-for-codex-review` skill that requires posting `@codex review` as a PR comment and then polling reactions/threads: 👀 means in-progress, 👍 means approved, unresolved threads with no 👀 means needs action.",
+        "PRs adding `.snap` files require the `snapshot-reviewed` label before Codex review begins.",
+        "The fast pre-push gate is `cargo xci --profile fast` and runs 10 steps: fmt, check, clippy, workspace unit tests, integration, adapter, spec snippets, and snapshot-count.",
+        "Codex review co-author attribution uses `Co-authored-by: OpenAI Codex <codex@openai.com>` in commit messages.",
+        "`cargo insta test` in this repo does not accept a positional filter argument; the full `--lib` flag without a filter pattern is required for snapshot verification.",
+        "The combobox component has iOS-specific behavior gated on an adapter-supplied runtime prop (`is_ios`) affecting active-descendant and VoiceOver handling.",
+        "The `cargo xci` tool is the project's unified CI gate with named profiles; `--profile fast` is the pre-push variant."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 650,
+          "end_line": 910,
+          "finding": "Open-state gating logic: zero-result collections should block open transitions; this was a contract gap found by Codex."
+        },
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 1080,
+          "end_line": 1145,
+          "finding": "IME (composition) handling: CompositionEnd + Enter key interaction had parity issues with native open behavior."
+        },
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 2298,
+          "end_line": 2312,
+          "finding": "Filter recompute on item replacement (`update_items`) was not invalidating the filtered view, causing stale results."
+        },
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 2540,
+          "end_line": 2635,
+          "finding": "Callback-aware blur handling and commit/revert input logic for custom value mode had gaps identified by Codex."
+        },
+        {
+          "path": "spec/components/selection/combobox.md",
+          "line": 80,
+          "end_line": 264,
+          "finding": "Spec sections for commit/input behavior and adapter-supplied iOS prop surface were updated to reflect new contracts."
+        }
+      ],
+      "workflow": [
+        "Write regression tests that fail first, then implement — confirmed the red/green cycle before pushing fixes.",
+        "Parallel `cargo` invocations contend on the shared build lock; stagger or chain them to avoid silent queuing.",
+        "The GraphQL query for fetching PR review threads must use named variables (`$owner`, `$repo`, `$n`) rather than positional; malformed queries silently return empty results from the GitHub API.",
+        "Codex review polling requires tracking both reactions API and review thread GraphQL state simultaneously; reactions alone are insufficient to detect 'needs action' state.",
+        "Coverage reporting with `cargo llvm-cov` can be separated from test execution by first running `cargo llvm-cov test` and then `cargo llvm-cov report --json` to avoid rerunning tests."
+      ]
+    },
+    "friction": [
+      "First Codex polling script had a malformed GraphQL query (`}` brace mismatch) causing thread lookups to silently return 0; required a full restart of the polling loop.",
+      "The 15-minute polling timeout was hit once due to Codex taking longer than expected, leading to a timeout verdict before Codex actually finished — had to restart polling.",
+      "`cargo insta test` rejected positional filter arguments, requiring fallback to full `--lib` snapshot run instead of a focused combobox-only snapshot check.",
+      "Multiple cargo commands started in parallel hit the shared Cargo build lock, causing silent queuing and delayed feedback.",
+      "Several existing tests had assumptions that conflicted with the stricter zero-result/open semantics introduced by the fix, requiring expectation updates alongside new regression tests.",
+      "`cargo fmt --check` found formatting diffs after the implementation patches, requiring a separate `cargo fmt` pass before the pre-push gate."
+    ],
+    "open_items": [
+      "Coverage report (`cargo llvm-cov report --show-missing-lines`) was fetched but not fully analyzed — uncovered lines in `combobox/mod.rs` were not enumerated or triaged.",
+      "The Codex review loop was not re-triggered after the fix commit was pushed; the transcript ends at the commit without confirming a second `@codex review` trigger or final approval.",
+      "iOS active-descendant behavior relies on an adapter-supplied `is_ios` runtime prop — the adapter integration path was not tested end-to-end in this session."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-22T11:32:07.855841Z",
+    "agent_lines": 306,
+    "agent_removed": 23,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 306,
+    "total_lines_changed": 329,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
