@@ -9,7 +9,10 @@ use ars_core::HtmlAttr;
 pub use ars_i18n::Orientation;
 use dioxus::prelude::*;
 
-use crate::{as_child::AsChildRenderProps, attr_map_to_dioxus_inline_attrs};
+use crate::{
+    as_child::{AsChildRenderProps, merge_dioxus_attrs},
+    attr_map_to_dioxus_inline_attrs,
+};
 
 fn root_attrs(id: Option<&str>, orientation: Orientation, decorative: bool) -> Vec<Attribute> {
     let mut props = Props::new().orientation(orientation).decorative(decorative);
@@ -41,6 +44,14 @@ pub struct SeparatorProps {
     /// Whether the separator is decorative and hidden from the accessibility tree.
     #[props(default = false)]
     pub decorative: bool,
+
+    /// Global HTML attributes forwarded onto the rendered `<hr>` root.
+    /// Tokenized attributes (`class`, `style`, relationship token lists)
+    /// concatenate with the component's own values; ordinary attributes prefer
+    /// the component's value on conflict so accessibility semantics stay
+    /// intact.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
 }
 
 /// Props for the Dioxus [`SeparatorAsChild`] component.
@@ -65,7 +76,9 @@ pub struct SeparatorAsChildProps {
 /// Dioxus Separator component rendered as a single `<hr>` root.
 #[component]
 pub fn Separator(props: SeparatorProps) -> Element {
-    let attrs = root_attrs(props.id.as_deref(), props.orientation, props.decorative);
+    let component_attrs = root_attrs(props.id.as_deref(), props.orientation, props.decorative);
+
+    let attrs = merge_dioxus_attrs(props.attrs, component_attrs);
 
     rsx! {
         hr { ..attrs }

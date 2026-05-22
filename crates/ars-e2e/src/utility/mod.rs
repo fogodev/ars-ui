@@ -24,6 +24,15 @@ pub mod dismissable;
 /// Browser E2E harness for ErrorBoundary.
 pub mod error_boundary;
 
+/// Browser E2E harness for Heading.
+pub mod heading;
+
+/// Browser E2E harness for Highlight.
+pub mod highlight;
+
+/// Browser E2E harness for Landmark.
+pub mod landmark;
+
 /// Browser E2E harness for Separator.
 pub mod separator;
 
@@ -75,6 +84,9 @@ pub async fn run(options: Options) -> Result<(), Error> {
         button::run_button_flow(&session.driver, &session.url, adapter).await?;
         visually_hidden::run_visually_hidden_flow(&session.driver, &session.url, adapter).await?;
         separator::run_separator_flow(&session.driver, &session.url, adapter).await?;
+        heading::run_heading_flow(&session.driver, &session.url, adapter).await?;
+        landmark::run_landmark_flow(&session.driver, &session.url, adapter).await?;
+        highlight::run_highlight_flow(&session.driver, &session.url, adapter).await?;
         client_only::run_client_only_flow(&session.driver, &session.url, adapter).await?;
         z_index_allocator::run_z_index_allocator_flow(&session.driver, &session.url, adapter)
             .await?;

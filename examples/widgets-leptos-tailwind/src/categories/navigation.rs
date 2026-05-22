@@ -1,6 +1,6 @@
 use ars_leptos::{
     navigation::tabs::{Tab, Tabs},
-    prelude::{t, TabKey, Translate},
+    prelude::{TabKey, Translate, t},
 };
 use leptos::prelude::*;
 

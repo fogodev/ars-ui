@@ -3,64 +3,77 @@
 //! Provides monotonic counters that produce the same ID sequence on both SSR and
 //! client when the component tree renders in the same order.
 
-// On WASM (single-threaded), use a thread-local Cell for zero-overhead counting.
-#[cfg(target_arch = "wasm32")]
+// Deterministic counters for generated adapter IDs.
+//
+// Leptos SSR can resume async render segments for one request on different
+// worker threads, so native SSR uses a request-scoped context counter when
+// `reset_id_counter()` runs inside the request owner. Calls outside a reactive
+// owner fall back to a process counter rather than per-thread storage, avoiding
+// duplicate fallback IDs if work crosses worker threads before a request scope
+// is installed.
 mod counter {
-    use std::cell::Cell;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    };
 
-    thread_local! {
-        static ID_COUNTER: Cell<u64> = const { Cell::new(0) };
+    #[cfg(feature = "ssr")]
+    use leptos::prelude::provide_context;
+    use leptos::prelude::use_context;
+
+    #[derive(Clone, Debug)]
+    struct RequestIdCounter {
+        value: Arc<AtomicU64>,
+    }
+
+    impl RequestIdCounter {
+        #[cfg(feature = "ssr")]
+        fn new() -> Self {
+            Self {
+                value: Arc::new(AtomicU64::new(0)),
+            }
+        }
+
+        fn next_id(&self) -> u64 {
+            self.value.fetch_add(1, Ordering::Relaxed)
+        }
+    }
+
+    static FALLBACK_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn next_fallback_id() -> u64 {
+        FALLBACK_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
     }
 
     pub(super) fn next_id() -> u64 {
-        ID_COUNTER.with(|c| {
-            let v = c.get();
-            c.set(v + 1);
-            v
-        })
+        use_context::<RequestIdCounter>().map_or_else(next_fallback_id, |counter| counter.next_id())
     }
 
-    /// Resets the ID counter to zero.
+    /// Provides a fresh request-scoped ID counter on the current reactive owner.
     ///
-    /// Must be called at the start of each SSR request so that server-rendered IDs
-    /// match the client-side hydration sequence.
+    /// Must be called at the start of each SSR request so that server-rendered
+    /// IDs generated under that owner match the client-side hydration sequence.
+    /// Calls outside the owner fall back to the monotonic process-wide counter.
     #[cfg(feature = "ssr")]
     pub(super) fn reset() {
-        ID_COUNTER.with(|c| c.set(0));
-    }
-}
+        let counter = RequestIdCounter::new();
 
-// On native (multi-threaded SSR), use an atomic counter.
-#[cfg(not(target_arch = "wasm32"))]
-mod counter {
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    pub(super) fn next_id() -> u64 {
-        ID_COUNTER.fetch_add(1, Ordering::Relaxed)
-    }
-
-    /// Resets the ID counter to zero.
-    ///
-    /// Must be called at the start of each SSR request so that server-rendered IDs
-    /// match the client-side hydration sequence.
-    #[cfg(feature = "ssr")]
-    pub(super) fn reset() {
-        ID_COUNTER.store(0, Ordering::Relaxed);
+        provide_context(counter);
     }
 }
 
 /// Generates a deterministic component ID with the given prefix.
 ///
-/// Returns a string of the form `"{prefix}-{counter}"`. The counter is global and
-/// monotonically increasing, ensuring uniqueness within a single render pass.
+/// Returns a string of the form `"{prefix}-{counter}"`. IDs generated under an
+/// SSR request owner use that owner's request-scoped sequence. Ownerless calls
+/// use a process-wide monotonic fallback counter.
 ///
 /// # Hydration safety
 ///
-/// The counter produces identical sequences on SSR and client when the component tree
-/// renders in the same order. Call `reset_id_counter()` (available with the `ssr`
-/// feature) at the start of each SSR request to reset the sequence.
+/// The request counter produces identical sequences on SSR and client when the
+/// component tree renders in the same order. Call `reset_id_counter()`
+/// (available with the `ssr` feature) under the request owner at the start of
+/// each SSR request to install a fresh request sequence.
 ///
 /// # Examples
 ///
@@ -76,10 +89,12 @@ pub fn use_id(prefix: &str) -> String {
     format!("{prefix}-{}", counter::next_id())
 }
 
-/// Resets the ID counter to zero for a new SSR request.
+/// Installs a fresh request-scoped ID counter for a new SSR request.
 ///
-/// Must be called at the start of each server-side render pass so that the generated
-/// IDs match the client-side hydration sequence exactly.
+/// Must be called under the request's reactive owner at the start of each
+/// server-side render pass so that IDs generated inside that owner match the
+/// client-side hydration sequence exactly. Ownerless fallback IDs remain
+/// monotonic for the lifetime of the process.
 #[cfg(feature = "ssr")]
 pub fn reset_id_counter() {
     counter::reset();
@@ -100,6 +115,49 @@ mod tests {
         let id1 = use_id("component");
         let id2 = use_id("component");
         assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn use_id_native_fallback_does_not_restart_on_worker_threads() {
+        let id1 = std::thread::spawn(|| use_id("component"))
+            .join()
+            .expect("worker thread should not panic");
+        let id2 = std::thread::spawn(|| use_id("component"))
+            .join()
+            .expect("worker thread should not panic");
+
+        assert_ne!(
+            id1, id2,
+            "fallback ID generation must not emit duplicate IDs when SSR work resumes on a different thread"
+        );
+    }
+
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn reset_id_counter_does_not_restart_global_fallback_counter() {
+        let before = use_id("component");
+
+        let owner = leptos::reactive::owner::Owner::new();
+        owner.with(reset_id_counter);
+        drop(owner);
+
+        let after = use_id("component");
+
+        let before_counter = before
+            .strip_prefix("component-")
+            .expect("generated ID should include the requested prefix")
+            .parse::<u64>()
+            .expect("generated ID suffix should be numeric");
+        let after_counter = after
+            .strip_prefix("component-")
+            .expect("generated ID should include the requested prefix")
+            .parse::<u64>()
+            .expect("generated ID suffix should be numeric");
+
+        assert!(
+            after_counter > before_counter,
+            "reset_id_counter must not rewind the process-wide fallback counter"
+        );
     }
 }
 

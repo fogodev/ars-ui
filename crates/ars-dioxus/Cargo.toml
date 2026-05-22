@@ -37,9 +37,9 @@ web = [
 uuid = ["ars-collections/uuid", "ars-components/uuid"]
 # Pre-compiled CLDR data via ICU4X. Default backend on native targets and the
 # server-side rendering path. Use `--no-default-features --features web,ars-i18n/web-intl`
-# to swap icu4x for the browser-native Intl API on wasm32 builds. Also enables
-# `ars-components/i18n` so locale-aware components (e.g., `Highlight`) are
-# available in the adapter build.
+# to swap icu4x for the browser-native Intl API on wasm32 builds. `Highlight`
+# is available only when `icu4x` enables `ars-components/i18n`, because its
+# agnostic contract requires ICU4X case mapping.
 icu4x = ["ars-i18n/std", "ars-i18n/icu4x", "ars-components/i18n"]
 
 [dependencies]

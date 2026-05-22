@@ -452,9 +452,7 @@ fn leptos_content_attrs(machine: crate::UseMachineReturn<button::Machine>) -> Ve
 }
 
 fn apply_user_root_attrs(attrs: &mut AttrMap, user_attrs: &UserRootAttrs) {
-    if let Some(class) = &user_attrs.class {
-        attrs.set(HtmlAttr::Class, class.as_str());
-    }
+    crate::merge_consumer_class_into(attrs, user_attrs.class.as_deref());
 
     if let Some(label) = &user_attrs.aria_label {
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), label.as_str());

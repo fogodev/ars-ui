@@ -58,6 +58,14 @@ pub struct VisuallyHiddenProps {
     #[props(default = false)]
     pub is_focusable: bool,
 
+    /// Global HTML attributes forwarded onto the rendered `<span>` root.
+    /// Tokenized attributes (`class`, `style`, relationship token lists)
+    /// concatenate with the component's own values; ordinary attributes prefer
+    /// the component's value on conflict so the visually-hidden semantics
+    /// stay intact.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+
     /// Hidden content that remains available to assistive technology.
     pub children: Element,
 }
@@ -80,7 +88,8 @@ pub struct VisuallyHiddenAsChildProps {
 /// Dioxus `VisuallyHidden` component rendered as an adapter-owned `<span>` root.
 #[component]
 pub fn VisuallyHidden(props: VisuallyHiddenProps) -> Element {
-    let attrs = root_attrs(props.id.as_deref(), props.is_focusable, false);
+    let component_attrs = root_attrs(props.id.as_deref(), props.is_focusable, false);
+    let attrs = merge_dioxus_attrs(props.attrs, component_attrs);
     let children = props.children;
 
     rsx! {

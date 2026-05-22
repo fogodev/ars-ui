@@ -1,6 +1,6 @@
 use ars_dioxus::{
     navigation::tabs::{Tab, Tabs},
-    prelude::{t, TabKey, Translate},
+    prelude::{TabKey, Translate, t},
 };
 use dioxus::prelude::*;
 

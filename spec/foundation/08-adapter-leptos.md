@@ -241,7 +241,7 @@ Generated adapter IDs are unique within a render pass and stable only when the
 server and client render the same hook sequence. The ID resolution order is:
 
 1. **`props.id` takes priority** — If the consumer provides an explicit `id` prop, use it as-is. The consumer is responsible for ensuring uniqueness and hydration stability.
-2. **`use_id()` fallback** — If `props.id` is empty, the adapter calls `use_id("component")` to generate a fallback ID. The global `ID_COUNTER` produces deterministic IDs only when SSR and client render components in the same tree order. `reset_id_counter()` must be called at the start of each SSR request to avoid cross-request leakage, but it does not make generated IDs safe when render order diverges.
+2. **`use_id()` fallback** — If `props.id` is empty, the adapter calls `use_id("component")` to generate a fallback ID. During SSR, `reset_id_counter()` must be called inside the request's reactive owner before rendering so `use_id()` installs a request-scoped counter in context. That context counter, not thread-local state, owns the request sequence so streamed async render segments can resume on different worker threads without restarting at zero. Calls outside a reactive owner use a process fallback counter only for client-only or non-hydrated output. Generated IDs are deterministic only when SSR and client render the same hook sequence; hydrated components should still prefer explicit IDs.
 
 ```rust,no_check
 // In use_machine_inner():
@@ -1694,27 +1694,17 @@ mod dialog {
 During SSR, IDs must be consistent between server and client for hydration:
 
 ```rust
-// ID counter: thread_local Cell on WASM (no atomics overhead), AtomicU64 on native.
-// Same pattern as the Dioxus adapter (09-adapter-dioxus.md §2, above use_machine_inner).
-#[cfg(target_arch = "wasm32")]
-thread_local! {
-    static ID_COUNTER: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-#[cfg(target_arch = "wasm32")]
-fn next_id() -> u64 {
-    ID_COUNTER.with(|c| { let v = c.get(); c.set(v + 1); v })
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-static ID_COUNTER: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
-#[cfg(not(target_arch = "wasm32"))]
-fn next_id() -> u64 { ID_COUNTER.fetch_add(1, core::sync::atomic::Ordering::Relaxed) }
+// RequestIdCounter is provided through Leptos context by reset_id_counter()
+// when called inside the SSR request owner. The process fallback is used only
+// outside a reactive owner.
 
 /// Generate a consistent ID that works for both SSR and CSR.
 ///
-/// Uses a global monotonic counter that produces the same sequence on server
-/// and client as long as the component tree is rendered in the same order.
-/// Call `reset_id_counter()` at the start of each SSR request.
+/// Uses a request-scoped counter under the SSR request owner so server and
+/// client produce the same sequence as long as the component tree is rendered
+/// in the same order. Ownerless calls use a process-wide fallback counter that
+/// must remain monotonic and must not be reset per request.
+/// Call `reset_id_counter()` inside the request owner at the start of each SSR request.
 ///
 /// > **Warning:** This counter is NOT inherently hydration-safe. SSR+hydration
 /// > users MUST provide explicit `id` props on all components until a
@@ -1724,18 +1714,12 @@ pub fn use_id(scope: &'static str) -> String {
     format!("ars-{scope}-{}", next_id())
 }
 
-/// Reset the ID counter. MUST be called at the start of each SSR request
-/// on the **server** to ensure server and client counters are in sync.
-/// Not needed on the hydrate client — only the SSR request handler.
-// The wasm32+ssr branch covers WASM-based SSR runtimes (e.g., Cloudflare Workers).
-// The native branch covers standard server-side SSR (Linux, macOS).
-#[cfg(all(feature = "ssr", target_arch = "wasm32"))]
+/// Install a fresh request-scoped ID counter. MUST be called at the start of
+/// each SSR request on the **server**, inside that request's reactive owner, so
+/// the counter is scoped to the request rather than to a worker thread.
+#[cfg(feature = "ssr")]
 pub fn reset_id_counter() {
-    ID_COUNTER.with(|c| c.set(0));
-}
-#[cfg(all(feature = "ssr", not(target_arch = "wasm32")))]
-pub fn reset_id_counter() {
-    ID_COUNTER.store(0, core::sync::atomic::Ordering::Relaxed);
+    provide_context(RequestIdCounter::new());
 }
 
 /// Generate a related ID (for linking label <-> input, trigger <-> content).

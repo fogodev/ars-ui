@@ -66,15 +66,12 @@ pub use ars_i18n::{Direction, IntlBackend, Locale, Orientation, ResolvedDirectio
 // `DismissReason`, …) and the Dioxus-side wrappers (`Handle`, `Region`,
 // `RegionProps`, `use_dismissable`).
 pub use crate::as_child;
-pub use crate::navigation::{self, tabs};
 // The `error_boundary` adapter module exposes the `ArsErrorBoundary`
 // wrapper component spec'd at
 // `spec/foundation/09-adapter-dioxus.md` §21. End users reach it as
 // `error_boundary::ArsErrorBoundary` after `use ars_dioxus::prelude::*;`.
-pub use crate::utility::{
-    self, button, client_only, dismissable, error_boundary, separator, visually_hidden,
-    z_index_allocator,
-};
+#[cfg(feature = "icu4x")]
+pub use crate::utility::highlight;
 // -- Root provider --
 // `ArsProvider` is the single root provider every ars-ui application wraps its
 // tree with. It publishes locale, direction, color mode, disabled/read-only,
@@ -85,3 +82,10 @@ pub use crate::utility::{
 pub use crate::{ArsProvider, ArsProviderProps};
 // -- User-facing helpers --
 pub use crate::{Translatable, t, use_number_formatter};
+pub use crate::{
+    navigation::{self, tabs},
+    utility::{
+        self, button, client_only, dismissable, error_boundary, heading, landmark, separator,
+        visually_hidden, z_index_allocator,
+    },
+};
