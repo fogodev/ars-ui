@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c1e7c771d5a5",
+  "strategy": "manual-commit",
+  "branch": "t3code/03c1ddf1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-dioxus/tests/attr_passthrough.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/c1/e7c771d5a5/0/metadata.json",
+      "transcript": "/c1/e7c771d5a5/0/full.jsonl",
+      "content_hash": "/c1/e7c771d5a5/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 26682,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 3183360,
+    "output_tokens": 3262,
+    "api_call_count": 18
+  }
+}
