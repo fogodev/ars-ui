@@ -363,12 +363,12 @@ impl ars_core::Machine for Machine {
                     State::Idle
                 };
 
-                Some(value_change_plan(ctx, target, next))
+                Some(value_change_plan(ctx, *state, target, next))
             }
 
             (_, Event::Toggle) => {
                 let next = !*ctx.pressed.get();
-                Some(value_change_plan(ctx, *state, next))
+                Some(value_change_plan(ctx, *state, *state, next))
             }
 
             (_, Event::SetPressed(value)) => Some(set_pressed_plan(
@@ -394,7 +394,12 @@ impl ars_core::Machine for Machine {
                 }
             }
 
-            (_, Event::Reset) => Some(value_change_plan(ctx, *state, props.default_pressed)),
+            (_, Event::Reset) => Some(value_change_plan(
+                ctx,
+                *state,
+                *state,
+                props.default_pressed,
+            )),
 
             _ => None,
         }
@@ -621,20 +626,30 @@ const fn clear_focus(ctx: &mut Context) {
     ctx.focus_visible = false;
 }
 
-fn value_change_plan(ctx: &Context, target: State, next: bool) -> TransitionPlan<Machine> {
+fn value_change_plan(
+    ctx: &Context,
+    current: State,
+    target: State,
+    next: bool,
+) -> TransitionPlan<Machine> {
+    let plan = if current == target {
+        TransitionPlan::new()
+    } else {
+        TransitionPlan::to(target)
+    };
+
     if *ctx.pressed.get() == next {
-        return TransitionPlan::to(target);
+        return plan;
     }
 
     if ctx.pressed.is_controlled() {
-        return TransitionPlan::to(target).with_effect(pressed_change_effect(next));
+        return plan.with_effect(pressed_change_effect(next));
     }
 
-    TransitionPlan::to(target)
-        .apply(move |ctx: &mut Context| {
-            ctx.pressed.set(next);
-        })
-        .with_effect(pressed_change_effect(next))
+    plan.apply(move |ctx: &mut Context| {
+        ctx.pressed.set(next);
+    })
+    .with_effect(pressed_change_effect(next))
 }
 
 fn set_pressed_plan(
@@ -960,12 +975,20 @@ mod tests {
     fn toggle_button_reset_restores_default_pressed() {
         let mut service = service(test_props().default_pressed(true));
 
+        let unchanged = service.send(Event::Reset);
+
+        assert!(!unchanged.state_changed);
+        assert!(!unchanged.context_changed);
+        assert!(unchanged.pending_effects.is_empty());
+
         drop(service.send(Event::SetPressed(false)));
 
         assert!(!service.context().pressed.get());
 
-        drop(service.send(Event::Reset));
+        let changed = service.send(Event::Reset);
 
+        assert!(!changed.state_changed);
+        assert!(changed.context_changed);
         assert!(*service.context().pressed.get());
     }
 

@@ -263,7 +263,7 @@ impl ars_core::Machine for Machine {
                 // Toggle the pressed state on release (mirrors physical button behavior).
                 let new_pressed = !*ctx.pressed.get();
                 let next_state = if ctx.focused { State::Focused } else { State::Idle };
-                Some(value_change_plan(ctx, next_state, new_pressed))
+                Some(value_change_plan(ctx, *state, next_state, new_pressed))
             }
             // Touch devices: focus may arrive after press has already started.
             (State::Pressed, Event::Focus { is_keyboard }) => {
@@ -284,7 +284,7 @@ impl ars_core::Machine for Machine {
             // so prop-sync can keep controlled values fresh.
             (_, Event::Toggle) => {
                 let new_pressed = !*ctx.pressed.get();
-                Some(value_change_plan(ctx, *state, new_pressed))
+                Some(value_change_plan(ctx, *state, *state, new_pressed))
             }
 
             // ── SetPressed ──────────────────────────────────────────────────
@@ -314,7 +314,7 @@ impl ars_core::Machine for Machine {
             // ── Reset ───────────────────────────────────────────────────────
             (_, Event::Reset) => {
                 let default = props.default_pressed;
-                Some(value_change_plan(ctx, *state, default))
+                Some(value_change_plan(ctx, *state, *state, default))
             }
 
             _ => None,
@@ -344,19 +344,24 @@ impl ars_core::Machine for Machine {
     }
 }
 
-fn value_change_plan(ctx: &Context, target: State, next: bool) -> TransitionPlan<Machine> {
+fn value_change_plan(ctx: &Context, current: State, target: State, next: bool) -> TransitionPlan<Machine> {
+    let plan = if current == target {
+        TransitionPlan::new()
+    } else {
+        TransitionPlan::to(target)
+    };
+
     if *ctx.pressed.get() == next {
-        return TransitionPlan::to(target);
+        return plan;
     }
 
     if ctx.pressed.is_controlled() {
-        return TransitionPlan::to(target).with_effect(pressed_change_effect(next));
+        return plan.with_effect(pressed_change_effect(next));
     }
 
-    TransitionPlan::to(target)
-        .apply(move |ctx| {
-            ctx.pressed.set(next);
-        })
+    plan.apply(move |ctx| {
+        ctx.pressed.set(next);
+    })
         .with_effect(pressed_change_effect(next))
 }
 
