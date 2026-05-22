@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3624f826fc92",
+  "strategy": "manual-commit",
+  "branch": "t3code/d9d993f1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/selection/combobox/mod.rs",
+    "spec/components/selection/combobox.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/36/24f826fc92/0/metadata.json",
+      "transcript": "/36/24f826fc92/0/full.jsonl",
+      "content_hash": "/36/24f826fc92/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 236439,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 14633216,
+    "output_tokens": 17975,
+    "api_call_count": 123
+  }
+}
