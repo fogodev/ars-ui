@@ -1,0 +1,39 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "f88dc23064c5",
+  "strategy": "manual-commit",
+  "branch": "t3code/a189b923",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/utility/mod.rs",
+    "crates/ars-components/src/utility/toggle_button/mod.rs",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_hidden_input_config_default_on.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_hidden_input_config_explicit.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_disabled.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_focused_keyboard.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_idle_unpressed.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_invalid_required.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_pressed_interaction.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_toggled_on.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_with_value.snap",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "spec/components/utility/toggle-button.md",
+    "spec/dioxus-components/utility/toggle-button.md",
+    "spec/leptos-components/utility/toggle-button.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/f8/8dc23064c5/0/metadata.json",
+      "transcript": "/f8/8dc23064c5/0/full.jsonl",
+      "content_hash": "/f8/8dc23064c5/0/content_hash.txt",
+      "prompt": "/f8/8dc23064c5/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 850729,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 21042048,
+    "output_tokens": 46533,
+    "api_call_count": 190
+  }
+}

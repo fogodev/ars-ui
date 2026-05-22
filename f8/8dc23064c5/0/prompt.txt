@@ -1,0 +1,306 @@
+Implement task #215
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #215 ToggleButton Agnostic Core Implementation Plan
+
+## Summary
+
+Implement `ToggleButton` as a new framework-agnostic utility component in `ars-components`, scoped to GitHub issue #215. The work is unblocked: dependencies #209 and #214 are closed. The implementation will combine `button` press/focus state behavior with `toggle` controlled/uncontrolled `Bindable<bool>` behavior, staying out of Leptos/Dioxus adapter code.
+
+Key locked decisions:
+- Use `Props::on_change` as the callback name, matching the Toggle core and adapter spec wording. Do not expose `on_pressed_change`.
+- Use a pure `Api::hidden_input_config()` return surface for standalone form submission. Do not add a `HiddenInput` anatomy part for this task.
+- Add a small spec sync for `on_change`, because #215 requires a callback but the current core Props snippet omits it.
+
+## Public API / Interface Changes
+
+Create `crates/ars-components/src/utility/toggle_button/mod.rs`.
+
+Add `pub mod toggle_button;` to `crates/ars-components/src/utility/mod.rs`.
+
+Expose these public items from `ars_components::utility::toggle_button`:
+
+- `State`
+  - `Idle`
+  - `Focused`
+  - `Pressed`
+
+- `Event`
+  - `Focus { is_keyboard: bool }`
+  - `Blur`
+  - `Press`
+  - `Release`
+  - `Toggle`
+  - `SetPressed(bool)`
+  - `SetDisabled(bool)`
+  - `Reset`
+
+- `Context`
+  - `pressed: Bindable<bool>`
+  - `disabled: bool`
+  - `focused: bool`
+  - `focus_visible: bool`
+
+- `Props`
+  - `id: String`
+  - `pressed: Option<bool>`
+  - `default_pressed: bool`
+  - `disabled: bool`
+  - `invalid: bool`
+  - `required: bool`
+  - `value: Option<String>`
+  - `name: Option<String>`
+  - `form: Option<String>`
+  - `prevent_focus_on_press: bool`
+  - `on_change: Option<Callback<dyn Fn(bool) + Send + Sync>>`
+  - `on_hover_start: Option<Callback<dyn Fn() + Send + Sync>>`
+  - `on_hover_end: Option<Callback<dyn Fn() + Send + Sync>>`
+  - `on_hover_change: Option<Callback<dyn Fn(bool) + Send + Sync>>`
+
+- `Messages`
+  - no localizable strings, implements `ComponentMessages`
+
+- `Effect`
+  - `PressedChange`
+
+- `Machine`
+  - implements `ars_core::Machine`
+
+- `Part`
+  - `Root`
+  - `#[scope = "toggle-button"]`
+
+- `Api<'a>`
+  - `is_pressed(&self) -> bool`
+  - `is_focused(&self) -> bool`
+  - `is_focus_visible(&self) -> bool`
+  - `is_disabled(&self) -> bool`
+  - `should_prevent_focus_on_press(&self) -> bool`
+  - `root_attrs(&self) -> AttrMap`
+  - `hidden_input_config(&self) -> Option<HiddenInputConfig>`
+  - typed send helpers: `on_focus`, `on_blur`, `on_press`, `on_release`, `on_toggle`, `on_form_reset`
+
+- `HiddenInputConfig`
+  - `name: String`
+  - `value: HiddenInputValue`
+  - `form_id: Option<String>`
+  - `disabled: bool`
+
+- `HiddenInputValue`
+  - `Single(String)`
+
+All public items must have `///` docs.
+
+## Implementation Steps
+
+1. Move issue #215 to `In Progress`.
+
+   Use:
+   ```bash
+   gh project item-edit \
+     --project-id PVT_kwHOAKgEE84BTlkR \
+     --id PVTI_lAHOAKgEE84BTlkRzgppY_s \
+     --field-id PVTSSF_lAHOAKgEE84BTlkRzhAzkdY \
+     --single-select-option-id 47fc9ee4
+   ```
+
+2. Read the specs immediately before editing:
+   ```bash
+   cargo xtask spec digest toggle-button
+   cargo xtask spec digest button
+   cargo xtask spec digest toggle
+   ```
+
+3. Add failing tests first in the new module’s inline `#[cfg(test)]` block:
+   - defaults and builder fields
+   - `default_pressed` initializes `pressed`
+   - controlled `pressed` initializes and does not commit internal user toggles
+   - `Press` then `Release` toggles persistent pressed state
+   - `Toggle` and `SetPressed` work from all states
+   - disabled blocks `Press`, `Release`, `Toggle`, and `SetPressed`
+   - disabled still allows `Focus`, `Blur`, `SetDisabled`, and `Reset`
+   - focus-visible tracks keyboard focus
+   - `Reset` restores `default_pressed`
+   - `on_change` effect fires with the requested pressed value
+   - `root_attrs()` emits scope/part, `type="button"`, `aria-pressed`, `data-ars-state`, `tabindex="0"`, disabled/invalid/required/focus/pressed/value branches
+   - `hidden_input_config()` returns `None` without name, when disabled, or when unpressed; returns `Single(value_or_on)` plus `form_id` when pressed
+   - `part_attrs(Part::Root)` equals `root_attrs()`
+   - API event helpers dispatch the expected typed events
+
+4. Add snapshot tests in `crates/ars-components/src/utility/toggle_button/snapshots/` covering every output-affecting branch:
+   - root idle unpressed
+   - root focused keyboard
+   - root pressed interaction
+   - root toggled on
+   - root disabled
+   - root invalid required
+   - root with group value
+   - hidden input config pressed with explicit value and form
+   - hidden input config pressed default `"on"`
+
+5. Implement `toggle_button/mod.rs` using existing local patterns:
+   - Copy structural conventions from `utility/button/mod.rs` and `utility/toggle/mod.rs`.
+   - Use `alloc::string::String`.
+   - Use `Bindable<bool>` for controlled/uncontrolled pressed state.
+   - Use `PendingEffect<Machine>` and `no_cleanup()` for `Effect::PressedChange`, matching `toggle`.
+   - Do not add dependencies.
+
+6. Transition behavior:
+   - `init`: always starts in `State::Idle`; initializes `ctx.pressed` from `pressed.unwrap_or(default_pressed)`.
+   - disabled guard: when disabled, block value-changing interaction events (`Press`, `Release`, `Toggle`, `SetPressed`) but allow `Focus`, `Blur`, `SetDisabled`, and `Reset`.
+   - `Focus` from `Idle` moves to `Focused`; `Focus` while focused or pressed updates focus metadata.
+   - `Blur` from `Focused` or `Pressed` moves to `Idle` and clears focus metadata.
+   - `Press` from `Idle` or `Focused` moves to `Pressed`.
+   - `Release` from `Pressed` toggles pressed through a shared value-change plan, fires `on_change`, and returns to `Focused` when `ctx.focused` is true, otherwise `Idle`.
+   - `Toggle` toggles pressed without changing interaction state.
+   - `SetPressed(value)` is idempotent when already at `value`.
+   - `Reset` restores `default_pressed`; in controlled mode it emits the callback request rather than silently mutating controlled state.
+   - `SetDisabled(true)` from `Focused` or `Pressed` returns to `Idle`, clears focus, and clears transient press state.
+
+7. Props change behavior:
+   - Assert stable `id` after init, matching `toggle`.
+   - If `pressed` changes, enqueue `SetPressed(value)` for `Some(value)`.
+   - If `pressed` changes to `None`, sync the bindable back to uncontrolled without changing current state.
+   - If `disabled` changes, enqueue `SetDisabled(new.disabled)`.
+   - Do not enqueue events for `invalid`, `required`, `value`, `name`, `form`, hover callbacks, or `prevent_focus_on_press`; those are read directly from props by `connect()`.
+
+8. Root attributes:
+   - Always set:
+     - `data-ars-scope="toggle-button"`
+     - `data-ars-part="root"`
+     - `id` when non-empty, following local convention if existing modules emit empty IDs
+     - `type="button"`
+     - `aria-pressed="true|false"`
+     - `data-ars-state="idle|focused|pressed"`
+     - `tabindex="0"`
+   - Conditionally set:
+     - `aria-disabled="true"` and `data-ars-disabled` when disabled
+     - `aria-invalid="true"` when invalid
+     - `aria-required="true"` when required
+     - `data-ars-focus-visible` when focus-visible
+     - `data-ars-pressed` when pressed
+     - `data-ars-value` when `value` is set
+     - `data-ars-prevent-focus-on-press="true"` when configured
+
+9. Hidden input config:
+   - Return `None` if `name` is absent.
+   - Return `None` if disabled.
+   - Return `None` if unpressed.
+   - Return:
+     ```rust
+     HiddenInputConfig {
+         name,
+         value: HiddenInputValue::Single(props.value.unwrap_or("on")),
+         form_id: props.form.clone(),
+         disabled: false,
+     }
+     ```
+
+10. Add spec-conformance coverage in `crates/ars-components/tests/spec_conformance/utility.rs`:
+    - import `toggle_button`
+    - assert anatomy: `("toggle-button", &[(toggle_button::Part::Root, "root")])`
+    - add event/props contract tests if needed to pin #215’s named public API expectations.
+
+11. Update `spec/components/utility/toggle-button.md` minimally:
+    - add `on_change: Option<Callback<dyn Fn(bool) + Send + Sync>>` to core `Props`
+    - describe it as the core pressed-change callback corresponding to adapter `on_change`
+    - do not add `on_pressed_change`
+    - keep `Part` single-variant and keep hidden input as pure config
+
+12. Run focused red/green verification repeatedly:
+    ```bash
+    cargo test -p ars-components utility::toggle_button
+    cargo test -p ars-components --test spec_conformance utility
+    cargo insta test -p ars-components toggle_button --unreferenced=reject
+    ```
+
+13. Run the required post-implementation audit:
+    - Phase 1: spec/implementation drift against `toggle-button.md`, `button.md`, and `toggle.md`
+    - Phase 2: at least two “anything else missing?” rounds, checking adapter specs, manifest/catalog, feature wiring, and mutation config
+    - Phase 3: coverage audit, mutation testing, spec-conformance breadth, doc/public API review
+    - Land all findings in the same work before presenting to the user
+
+14. Required mutation run for a new agnostic component:
+    ```bash
+    cargo mutants -p ars-components -f crates/ars-components/src/utility/toggle_button/mod.rs
+    ```
+    - Add tests for every real missed mutation.
+    - Add `.cargo/mutants.toml` skips only for true equivalents, with justification.
+    - Re-run until no untriaged survivors remain.
+
+15. Final local verification before user review:
+    ```bash
+    cargo test -p ars-components --all-targets
+    cargo insta test -p ars-components --unreferenced=reject
+    cargo clippy -p ars-components --all-targets --all-features -- -D warnings
+    cargo doc -p ars-components --no-deps --all-features
+    cargo xtask spec validate
+    cargo test -p xtask --test spec_corpus_compile_snippets
+    ```
+
+16. Present the diff and verification output to the user before any commit.
+
+17. After explicit user approval:
+    ```bash
+    cargo xci --profile fast
+    ```
+    Fix any failures before publishing.
+
+18. Commit and push only after approval. The PR must target `main` and include:
+    ```markdown
+    Closes #215
+    ```
+    If snapshots were added or modified, add the `snapshot-reviewed` label to the PR.
+
+19. Immediately after the first push creating the PR, invoke `.agents/skills/waiting-for-codex-review/SKILL.md` and follow its loop until Codex leaves 👍. Re-run it after every subsequent push.
+
+## Test Cases And Scenarios
+
+Required unit tests:
+- `toggle_button_initial_state_reflects_default_pressed`
+- `toggle_button_press_release_toggles_pressed`
+- `toggle_button_controlled_press_emits_change_without_committing_state`
+- `toggle_button_disabled_ignores_press_events`
+- `toggle_button_disabled_allows_focus_blur_reset_and_set_disabled`
+- `toggle_button_tracks_focus_visible_from_keyboard`
+- `toggle_button_root_attrs_emit_accessibility_contract`
+- `toggle_button_root_attrs_emit_invalid_required_and_value_branches`
+- `toggle_button_hidden_input_config_absent_without_name`
+- `toggle_button_hidden_input_config_absent_when_unpressed`
+- `toggle_button_hidden_input_config_absent_when_disabled`
+- `toggle_button_hidden_input_config_uses_value_or_on_and_form_id`
+- `toggle_button_on_change_callback_fires_on_release_toggle_and_reset`
+- `toggle_button_props_builder_sets_expected_fields`
+- `toggle_button_part_attrs_dispatches_root`
+- `toggle_button_api_handlers_dispatch_typed_events`
+
+Required snapshot coverage:
+- idle root
+- focused root
+- transient pressed root
+- toggled-on root
+- disabled root
+- invalid required root
+- value root
+- hidden-input config with explicit value/form
+- hidden-input config with default `"on"`
+
+Required spec-conformance:
+- `toggle_button_anatomy_matches_spec`
+
+Required mutation:
+- targeted `cargo mutants` run for `toggle_button/mod.rs`, with all survivors triaged in this PR.
+
+## Assumptions And Defaults
+
+- The issue is unblocked because #209 and #214 are closed.
+- The GitHub Project item currently has `Status = Todo`; implementation begins by moving it to `In Progress`.
+- `ToggleButton` remains framework-agnostic only; no Leptos/Dioxus adapter code is implemented in #215.
+- The Rust module name is `toggle_button`; the DOM/data scope remains `"toggle-button"`.
+- Hidden input rendering is adapter-owned; core returns pure config.
+- The callback name is `on_change`, not `on_pressed_change`.
+- A small spec sync is required because #215 demands a pressed-change callback and the current core Props snippet omits it.
+- No new dependency crates are needed.
+- Public docs are mandatory for every new public item.

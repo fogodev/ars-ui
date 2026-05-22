@@ -1,0 +1,132 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "f88dc23064c5",
+  "session_id": "019e4d51-c94c-7730-9998-67c49590e4bc",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-22T03:01:31.677942Z",
+  "branch": "t3code/a189b923",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/utility/mod.rs",
+    "crates/ars-components/src/utility/toggle_button/mod.rs",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_hidden_input_config_default_on.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_hidden_input_config_explicit.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_disabled.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_focused_keyboard.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_idle_unpressed.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_invalid_required.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_pressed_interaction.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_toggled_on.snap",
+    "crates/ars-components/src/utility/toggle_button/snapshots/ars_components__utility__toggle_button__tests__toggle_button_root_with_value.snap",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "spec/components/utility/toggle-button.md",
+    "spec/dioxus-components/utility/toggle-button.md",
+    "spec/leptos-components/utility/toggle-button.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "aeeac2fd0574",
+  "token_usage": {
+    "input_tokens": 850729,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 21042048,
+    "output_tokens": 46533,
+    "api_call_count": 190
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement task #215: a new framework-agnostic ToggleButton core component in ars-components, combining Button's focus/press behavior with Toggle's controlled/uncontrolled Bindable<bool> pattern, with full TDD, snapshot tests, mutation testing, spec sync, and a GitHub PR.",
+    "outcome": "The ToggleButton core was fully implemented and all required verification gates passed: 23 unit tests, 9 snapshots, 0 mutation survivors (82 mutants, 61 caught, 21 unviable), 94.63% line coverage, clippy clean, and all 10 cargo xci fast gates passed. A commit was made and a PR push was initiated.",
+    "learnings": {
+      "repo": [
+        "Components follow a strict TDD + post-implementation-audit workflow: failing tests first, then implementation, then two consecutive clean audit rounds before mutation testing.",
+        "cargo xtask provides spec tooling: `cargo xtask spec digest <component>` and `cargo xtask spec validate` are required reading and validation steps before/after editing spec markdown.",
+        "cargo xci --profile fast is the pre-push gate; it runs 10 stages (fmt, check, clippy, unit nextest ~5943 tests, i18n split units, integration, adapter, spec snippets, error-variant coverage, mutual-exclusion/snapshot-count).",
+        "New agnostic components require a targeted `cargo mutants -p ars-components -f <file>` run with zero untriaged survivors before the task is considered complete.",
+        "The GitHub Project board item must be moved to 'In Progress' at the start of implementation using `gh project item-edit` with project-specific IDs.",
+        "Adapter specs (Leptos, Dioxus) and the core spec must be kept in sync; the post-implementation audit explicitly checks adapter-spec drift in two consecutive clean passes.",
+        "Bindable<bool> is the standard pattern for controlled/uncontrolled boolean state across utility components (Toggle, ToggleButton).",
+        "Hidden input rendering is adapter-owned; the core component returns a pure HiddenInputConfig struct, not a HiddenInput anatomy part.",
+        "The `cargo insta test --unreferenced=reject` flag can fail on pre-existing unreferenced snapshots outside the current task scope, so the scoped form `-- toggle_button` is the correct workaround."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/toggle_button/mod.rs",
+          "line": 1,
+          "finding": "New module created. Uses Bindable<bool> for pressed state, PendingEffect<Machine> with no_cleanup() for PressedChange, and mirrors structural conventions from utility/button/mod.rs and utility/toggle/mod.rs."
+        },
+        {
+          "path": "crates/ars-components/src/utility/mod.rs",
+          "line": 77,
+          "finding": "Added `pub mod toggle_button;` export. This is the required registration point for new utility components."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/utility.rs",
+          "line": 41,
+          "finding": "Spec conformance anatomy test added: asserts scope 'toggle-button' maps to Part::Root -> 'root'. This is the required pattern for all utility components."
+        }
+      ],
+      "workflow": [
+        "cargo mutants buffers output heavily; survivors may only appear near the end of a run, so early silence does not indicate a clean pass.",
+        "Multiple mutation runs were needed (3 total): first pass revealed 11 survivors, second pass revealed 2, third pass was clean. Each survivor required a targeted test addition, not a code change.",
+        "The `cargo insta test` CLI syntax in plan documentation (`cargo insta test -p ars-components toggle_button --unreferenced=reject`) did not match the installed version; the correct form is `cargo insta test -p ars-components --unreferenced=reject -- toggle_button`.",
+        "Removing a `const` qualifier from a function that calls non-const methods (like Bindable::get()) is a common early compiler error when porting patterns between modules.",
+        "Post-implementation audit spec syncs (adapter specs, core spec) should be landed within the same PR as the implementation, not deferred."
+      ]
+    },
+    "friction": [
+      "`cargo insta test -p ars-components --unreferenced=reject` failed on pre-existing unreferenced snapshots in utility/highlight and other unrelated components, blocking the full snapshot gate without any way to scope it to just the new component.",
+      "Plan documentation contained an incorrect `cargo insta` CLI invocation that didn't match the installed version, requiring discovery of the correct flag order mid-session.",
+      "Initial implementation hit a `const fn` restriction: a helper marked `const` called `Bindable::get()` which is non-const, causing a compiler error.",
+      "A test naming collision (local `service` variable shadowing a helper) caused a test suite failure after adding new mutation-triage tests, requiring a second fix pass.",
+      "`cargo mutants` produced no progress output during runs, making it impossible to distinguish a slow-but-running pass from a hang until the final summary appeared.",
+      "Three full mutation runs were required to reach 0 survivors, each taking significant wall time due to workspace rebuild overhead."
+    ],
+    "open_items": [
+      "Pre-existing unreferenced snapshots in utility/highlight and other components block `cargo insta test --unreferenced=reject` at the workspace level; these need a separate cleanup task.",
+      "Existing rustdoc broken-link warnings across unrelated ars-components modules were not addressed in this task.",
+      "Leptos and Dioxus adapter implementations for ToggleButton are explicitly out of scope for #215 and will require separate issues.",
+      "PR creation and the post-push Codex review loop (waiting-for-codex-review skill) were initiated at the end of the transcript but not confirmed as completed within the session."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-22T03:00:43.352343Z",
+    "agent_lines": 1788,
+    "agent_removed": 16,
+    "human_added": 40,
+    "human_modified": 38,
+    "human_removed": 0,
+    "total_committed": 1847,
+    "total_lines_changed": 1882,
+    "agent_percentage": 95.85547290116897,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 39,
+      "user_lines_removed": 19,
+      "agent_lines_added": 1846,
+      "agent_lines_removed": 35,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/toggle_button/mod.rs": 31,
+        "spec/dioxus-components/utility/toggle-button.md": 4,
+        "spec/leptos-components/utility/toggle-button.md": 4
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/utility/toggle_button/mod.rs": 11,
+        "spec/dioxus-components/utility/toggle-button.md": 4,
+        "spec/leptos-components/utility/toggle-button.md": 4
+      }
+    }
+  ]
+}
