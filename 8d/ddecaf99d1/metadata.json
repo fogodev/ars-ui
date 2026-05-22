@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8dddecaf99d1",
+  "strategy": "manual-commit",
+  "branch": "t3code/a189b923",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/utility/toggle_button/mod.rs",
+    "spec/components/utility/toggle-button.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/8d/ddecaf99d1/0/metadata.json",
+      "transcript": "/8d/ddecaf99d1/0/full.jsonl",
+      "content_hash": "/8d/ddecaf99d1/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 152389,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 18577664,
+    "output_tokens": 12721,
+    "api_call_count": 103
+  }
+}
