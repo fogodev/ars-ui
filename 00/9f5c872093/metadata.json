@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "009f5c872093",
+  "strategy": "manual-commit",
+  "branch": "t3code/03c1ddf1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-leptos/src/id.rs",
+    "spec/foundation/08-adapter-leptos.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/00/9f5c872093/0/metadata.json",
+      "transcript": "/00/9f5c872093/0/full.jsonl",
+      "content_hash": "/00/9f5c872093/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 129601,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 4632576,
+    "output_tokens": 11981,
+    "api_call_count": 64
+  }
+}
