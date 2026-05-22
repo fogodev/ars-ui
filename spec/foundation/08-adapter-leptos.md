@@ -1700,8 +1700,10 @@ During SSR, IDs must be consistent between server and client for hydration:
 
 /// Generate a consistent ID that works for both SSR and CSR.
 ///
-/// Uses a global monotonic counter that produces the same sequence on server
-/// and client as long as the component tree is rendered in the same order.
+/// Uses a request-scoped counter under the SSR request owner so server and
+/// client produce the same sequence as long as the component tree is rendered
+/// in the same order. Ownerless calls use a process-wide fallback counter that
+/// must remain monotonic and must not be reset per request.
 /// Call `reset_id_counter()` inside the request owner at the start of each SSR request.
 ///
 /// > **Warning:** This counter is NOT inherently hydration-safe. SSR+hydration
@@ -1712,9 +1714,9 @@ pub fn use_id(scope: &'static str) -> String {
     format!("ars-{scope}-{}", next_id())
 }
 
-/// Reset the ID counter. MUST be called at the start of each SSR request
-/// on the **server**, inside that request's reactive owner, so the counter is
-/// scoped to the request rather than to a worker thread.
+/// Install a fresh request-scoped ID counter. MUST be called at the start of
+/// each SSR request on the **server**, inside that request's reactive owner, so
+/// the counter is scoped to the request rather than to a worker thread.
 #[cfg(feature = "ssr")]
 pub fn reset_id_counter() {
     provide_context(RequestIdCounter::new());

@@ -49,30 +49,31 @@ mod counter {
         use_context::<RequestIdCounter>().map_or_else(next_fallback_id, |counter| counter.next_id())
     }
 
-    /// Resets the ID counter to zero on the current thread.
+    /// Provides a fresh request-scoped ID counter on the current reactive owner.
     ///
-    /// Must be called at the start of each SSR request so that server-rendered IDs
-    /// match the client-side hydration sequence.
+    /// Must be called at the start of each SSR request so that server-rendered
+    /// IDs generated under that owner match the client-side hydration sequence.
+    /// Calls outside the owner fall back to the monotonic process-wide counter.
     #[cfg(feature = "ssr")]
     pub(super) fn reset() {
         let counter = RequestIdCounter::new();
 
         provide_context(counter);
-
-        FALLBACK_ID_COUNTER.store(0, Ordering::Relaxed);
     }
 }
 
 /// Generates a deterministic component ID with the given prefix.
 ///
-/// Returns a string of the form `"{prefix}-{counter}"`. The counter is global and
-/// monotonically increasing, ensuring uniqueness within a single render pass.
+/// Returns a string of the form `"{prefix}-{counter}"`. IDs generated under an
+/// SSR request owner use that owner's request-scoped sequence. Ownerless calls
+/// use a process-wide monotonic fallback counter.
 ///
 /// # Hydration safety
 ///
-/// The counter produces identical sequences on SSR and client when the component tree
-/// renders in the same order. Call `reset_id_counter()` (available with the `ssr`
-/// feature) at the start of each SSR request to reset the sequence.
+/// The request counter produces identical sequences on SSR and client when the
+/// component tree renders in the same order. Call `reset_id_counter()`
+/// (available with the `ssr` feature) under the request owner at the start of
+/// each SSR request to install a fresh request sequence.
 ///
 /// # Examples
 ///
@@ -88,10 +89,12 @@ pub fn use_id(prefix: &str) -> String {
     format!("{prefix}-{}", counter::next_id())
 }
 
-/// Resets the ID counter to zero for a new SSR request.
+/// Installs a fresh request-scoped ID counter for a new SSR request.
 ///
-/// Must be called at the start of each server-side render pass so that the generated
-/// IDs match the client-side hydration sequence exactly.
+/// Must be called under the request's reactive owner at the start of each
+/// server-side render pass so that IDs generated inside that owner match the
+/// client-side hydration sequence exactly. Ownerless fallback IDs remain
+/// monotonic for the lifetime of the process.
 #[cfg(feature = "ssr")]
 pub fn reset_id_counter() {
     counter::reset();
@@ -126,6 +129,34 @@ mod tests {
         assert_ne!(
             id1, id2,
             "fallback ID generation must not emit duplicate IDs when SSR work resumes on a different thread"
+        );
+    }
+
+    #[cfg(feature = "ssr")]
+    #[test]
+    fn reset_id_counter_does_not_restart_global_fallback_counter() {
+        let before = use_id("component");
+
+        let owner = leptos::reactive::owner::Owner::new();
+        owner.with(reset_id_counter);
+        drop(owner);
+
+        let after = use_id("component");
+
+        let before_counter = before
+            .strip_prefix("component-")
+            .expect("generated ID should include the requested prefix")
+            .parse::<u64>()
+            .expect("generated ID suffix should be numeric");
+        let after_counter = after
+            .strip_prefix("component-")
+            .expect("generated ID should include the requested prefix")
+            .parse::<u64>()
+            .expect("generated ID suffix should be numeric");
+
+        assert!(
+            after_counter > before_counter,
+            "reset_id_counter must not rewind the process-wide fallback counter"
         );
     }
 }
