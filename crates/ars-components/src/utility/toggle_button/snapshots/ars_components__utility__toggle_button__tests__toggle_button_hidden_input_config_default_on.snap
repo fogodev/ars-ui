@@ -1,0 +1,14 @@
+---
+source: crates/ars-components/src/utility/toggle_button/mod.rs
+expression: "snapshot_config(&hidden_default.connect(&|_| {}).hidden_input_config())"
+---
+Some(
+    HiddenInputConfig {
+        name: "format",
+        value: Single(
+            "on",
+        ),
+        form_id: None,
+        disabled: false,
+    },
+)

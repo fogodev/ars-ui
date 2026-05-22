@@ -1,0 +1,75 @@
+---
+source: crates/ars-components/src/utility/toggle_button/mod.rs
+expression: "snapshot_attrs(&invalid_required.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toggle-button",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Aria(
+                Invalid,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Pressed,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                Required,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "favorite",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

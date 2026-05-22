@@ -1,0 +1,59 @@
+---
+source: crates/ars-components/src/utility/toggle_button/mod.rs
+expression: "snapshot_attrs(&idle.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toggle-button",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Aria(
+                Pressed,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "favorite",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

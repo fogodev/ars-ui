@@ -5,7 +5,9 @@
 
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
-use ars_components::utility::{download_trigger, focus_scope, group, live_region, swap, toggle};
+use ars_components::utility::{
+    download_trigger, focus_scope, group, live_region, swap, toggle, toggle_button,
+};
 use ars_core::{Env, HtmlAttr, Service};
 
 use super::helper::assert_anatomy;
@@ -37,6 +39,11 @@ fn toggle_anatomy_matches_spec() {
             (toggle::Part::Indicator, "indicator"),
         ],
     );
+}
+
+#[test]
+fn toggle_button_anatomy_matches_spec() {
+    assert_anatomy("toggle-button", &[(toggle_button::Part::Root, "root")]);
 }
 
 #[test]

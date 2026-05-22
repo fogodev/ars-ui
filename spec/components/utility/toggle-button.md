@@ -93,6 +93,9 @@ pub struct Props {
     /// widgets (e.g., ComboBox trigger) where pressing should not steal focus from a managed
     /// focus context.
     pub prevent_focus_on_press: bool,
+    /// Core pressed-change callback corresponding to the adapter-level `on_change` prop.
+    /// Fires when user or form-reset intent requests a new pressed state.
+    pub on_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
     /// Fires when the pointer enters the toggle button.
     pub on_hover_start: Option<Callback<dyn Fn() + Send + Sync>>,
     /// Fires when the pointer leaves the toggle button.
@@ -115,6 +118,7 @@ impl Default for Props {
             name: None,
             form: None,
             prevent_focus_on_press: false,
+            on_change: None,
             on_hover_start: None,
             on_hover_end: None,
             on_hover_change: None,
@@ -126,7 +130,7 @@ impl Default for Props {
 ### 1.5 Full Machine Implementation
 
 ```rust
-use ars_core::{TransitionPlan, ComponentIds, AttrMap};
+use ars_core::{AttrMap, ComponentIds, PendingEffect, TransitionPlan, no_cleanup};
 
 // ── States ───────────────────────────────────────────────────────────────────
 
@@ -167,6 +171,13 @@ pub enum Event {
     Reset,
 }
 
+/// Typed effect intents emitted by the toggle button machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes `Props::on_change` with the requested pressed value.
+    PressedChange,
+}
+
 // ── Machine ───────────────────────────────────────────────────────────────────
 
 /// The machine for the `ToggleButton` component.
@@ -183,6 +194,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -210,8 +222,15 @@ impl ars_core::Machine for Machine {
         // Disabled guard: blocks value-changing events but allows Focus/Blur
         // so the button remains discoverable by screen readers.
         // Allow SetDisabled so props can re-enable the button.
-        // Allow Reset so form reset works even when disabled.
-        if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetDisabled(_) | Event::Reset) {
+        // Disable user activation without blocking prop sync or form reset.
+        if ctx.disabled && !matches!(
+            event,
+            Event::Focus { .. }
+                | Event::Blur
+                | Event::SetPressed(_)
+                | Event::SetDisabled(_)
+                | Event::Reset
+        ) {
             return None;
         }
 
@@ -244,9 +263,7 @@ impl ars_core::Machine for Machine {
                 // Toggle the pressed state on release (mirrors physical button behavior).
                 let new_pressed = !*ctx.pressed.get();
                 let next_state = if ctx.focused { State::Focused } else { State::Idle };
-                Some(TransitionPlan::to(next_state).apply(move |ctx| {
-                    ctx.pressed.set(new_pressed);
-                }))
+                Some(value_change_plan(ctx, *state, next_state, new_pressed))
             }
             // Touch devices: focus may arrive after press has already started.
             (State::Pressed, Event::Focus { is_keyboard }) => {
@@ -262,23 +279,18 @@ impl ars_core::Machine for Machine {
             })),
 
             // ── Toggle ──────────────────────────────────────────────────────
-            // Toggle and SetPressed are intentionally handled from all states,
-            // including Pressed. This allows programmatic control even while
-            // the user is actively pressing the button.
+            // Toggle is intentionally handled from all enabled states, including Pressed.
+            // Disabled blocks user activation events but still allows SetPressed below
+            // so prop-sync can keep controlled values fresh.
             (_, Event::Toggle) => {
                 let new_pressed = !*ctx.pressed.get();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.pressed.set(new_pressed);
-                }))
+                Some(value_change_plan(ctx, *state, *state, new_pressed))
             }
 
             // ── SetPressed ──────────────────────────────────────────────────
             (_, Event::SetPressed(value)) => {
                 let value = *value;
-                if *ctx.pressed.get() == value { return None; }
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.pressed.set(value);
-                }))
+                Some(set_pressed_plan(ctx, *state, value, props.pressed.is_some()))
             }
 
             // ── SetDisabled ─────────────────────────────────────────────────
@@ -302,9 +314,7 @@ impl ars_core::Machine for Machine {
             // ── Reset ───────────────────────────────────────────────────────
             (_, Event::Reset) => {
                 let default = props.default_pressed;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.pressed.set(default);
-                }))
+                Some(value_change_plan(ctx, *state, *state, default))
             }
 
             _ => None,
@@ -316,10 +326,10 @@ impl ars_core::Machine for Machine {
         if new.disabled != old.disabled {
             events.push(Event::SetDisabled(new.disabled));
         }
-        match (old.pressed, new.pressed) {
-            (Some(false) | None, Some(true)) => events.push(Event::SetPressed(true)),
-            (Some(true), Some(false)) => events.push(Event::SetPressed(false)),
-            _ => {}
+        if old.pressed != new.pressed {
+            events.push(Event::SetPressed(new.pressed.unwrap_or_else(|| {
+                old.pressed.unwrap_or(new.default_pressed)
+            })));
         }
         events
     }
@@ -332,6 +342,52 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+fn value_change_plan(ctx: &Context, current: State, target: State, next: bool) -> TransitionPlan<Machine> {
+    let plan = if current == target {
+        TransitionPlan::new()
+    } else {
+        TransitionPlan::to(target)
+    };
+
+    if *ctx.pressed.get() == next {
+        return plan;
+    }
+
+    if ctx.pressed.is_controlled() {
+        return plan.with_effect(pressed_change_effect(next));
+    }
+
+    plan.apply(move |ctx| {
+        ctx.pressed.set(next);
+    })
+        .with_effect(pressed_change_effect(next))
+}
+
+fn set_pressed_plan(ctx: &Context, target: State, next: bool, controlled_prop: bool) -> TransitionPlan<Machine> {
+    if *ctx.pressed.get() == next && ctx.pressed.is_controlled() == controlled_prop {
+        return TransitionPlan::new();
+    }
+
+    TransitionPlan::to(target).apply(move |ctx| {
+        if controlled_prop {
+            ctx.pressed.sync_controlled(Some(next));
+        } else {
+            ctx.pressed.sync_controlled(None);
+            ctx.pressed.set(next);
+        }
+    })
+}
+
+fn pressed_change_effect(next: bool) -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::PressedChange, move |_ctx, props: &Props, _send| {
+        if let Some(cb) = &props.on_change {
+            cb(next);
+        }
+
+        no_cleanup()
+    })
 }
 ```
 
@@ -383,6 +439,11 @@ impl<'a> Api<'a> {
         self.ctx.disabled
     }
 
+    /// Returns true when adapters should suppress pointer-induced focus.
+    pub fn should_prevent_focus_on_press(&self) -> bool {
+        self.props.prevent_focus_on_press
+    }
+
     /// Props for the root `<button>` element.
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -424,6 +485,10 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Data("ars-value"), value.as_str());
         }
 
+        if self.props.prevent_focus_on_press {
+            attrs.set(HtmlAttr::Data("ars-prevent-focus-on-press"), "true");
+        }
+
         // Tabindex: when used inside a ToggleGroup with roving tabindex,
         // the group's item_attrs() overrides this value.
         attrs.set(HtmlAttr::TabIndex, "0");
@@ -449,9 +514,16 @@ impl<'a> Api<'a> {
                 self.props.value.clone().unwrap_or_else(|| "on".into()),
             ),
             form_id: self.props.form.clone(),
-            disabled: self.ctx.disabled,
+            disabled: false,
         })
     }
+
+    pub fn on_focus(&self, is_keyboard: bool) { (self.send)(Event::Focus { is_keyboard }); }
+    pub fn on_blur(&self) { (self.send)(Event::Blur); }
+    pub fn on_press(&self) { (self.send)(Event::Press); }
+    pub fn on_release(&self) { (self.send)(Event::Release); }
+    pub fn on_toggle(&self) { (self.send)(Event::Toggle); }
+    pub fn on_form_reset(&self) { (self.send)(Event::Reset); }
 }
 
 impl ConnectApi for Api<'_> {
@@ -608,9 +680,12 @@ In Dioxus fullstack, the hidden `<input>` MUST render during the server componen
 
 ### 6.4 Controlled/Uncontrolled Mode Switching
 
-Switching from uncontrolled (`pressed: None`) to controlled (`pressed: Some(false)`) mode at
-runtime is not supported. The `Bindable` created during `init()` retains its original mode. If
-the consumer needs to switch modes, the component must be unmounted and remounted.
+Runtime mode switching is supported through `Machine::on_props_changed`. When `pressed` changes
+to `Some(value)`, the machine synchronizes the controlled value with `SetPressed(value)`. When
+`pressed` changes back to `None`, the machine clears the controlled slot and preserves the last
+externally controlled value as the uncontrolled internal value. This mirrors the `Toggle` core's
+`Bindable<bool>` behavior and prevents stale controlled values from surviving after a parent hands
+state ownership back to the component.
 
 ## 7. Library Parity
 
