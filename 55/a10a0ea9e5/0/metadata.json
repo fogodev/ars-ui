@@ -1,0 +1,95 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "55a10a0ea9e5",
+  "session_id": "019e4d49-6c4a-7600-b3c6-d93d79a80092",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-22T01:55:29.542637Z",
+  "branch": "t3code/03c1ddf1",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "crates/ars-dioxus/Cargo.toml",
+    "crates/ars-dioxus/src/prelude.rs",
+    "crates/ars-dioxus/src/utility/heading.rs",
+    "crates/ars-dioxus/src/utility/mod.rs",
+    "crates/ars-dioxus/tests/test_heading.rs",
+    "crates/ars-leptos/Cargo.toml",
+    "crates/ars-leptos/src/id.rs",
+    "crates/ars-leptos/src/prelude.rs",
+    "crates/ars-leptos/src/utility/mod.rs",
+    "spec/dioxus-components/utility/heading.md",
+    "spec/dioxus-components/utility/highlight.md",
+    "spec/foundation/08-adapter-leptos.md",
+    "spec/leptos-components/utility/highlight.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "164cd3248632",
+  "token_usage": {
+    "input_tokens": 474901,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 17538560,
+    "output_tokens": 25204,
+    "api_call_count": 109
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-22T01:55:27.857886Z",
+    "agent_lines": 218,
+    "agent_removed": 67,
+    "human_added": 2,
+    "human_modified": 4,
+    "human_removed": 0,
+    "total_committed": 224,
+    "total_lines_changed": 291,
+    "agent_percentage": 97.9381443298969,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 2,
+      "user_lines_removed": 0,
+      "agent_lines_added": 237,
+      "agent_lines_removed": 71,
+      "user_added_per_file": {
+        "crates/ars-dioxus/src/utility/heading.rs": 2
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 4,
+      "user_lines_removed": 4,
+      "agent_lines_added": 239,
+      "agent_lines_removed": 71,
+      "user_added_per_file": {
+        "spec/dioxus-components/utility/heading.md": 4
+      },
+      "user_removed_per_file": {
+        "spec/dioxus-components/utility/heading.md": 4
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 239,
+      "agent_lines_removed": 71
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 228,
+      "agent_lines_removed": 71
+    }
+  ]
+}

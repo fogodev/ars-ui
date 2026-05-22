@@ -1,0 +1,37 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "55a10a0ea9e5",
+  "strategy": "manual-commit",
+  "branch": "t3code/03c1ddf1",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "crates/ars-dioxus/Cargo.toml",
+    "crates/ars-dioxus/src/prelude.rs",
+    "crates/ars-dioxus/src/utility/heading.rs",
+    "crates/ars-dioxus/src/utility/mod.rs",
+    "crates/ars-dioxus/tests/test_heading.rs",
+    "crates/ars-leptos/Cargo.toml",
+    "crates/ars-leptos/src/id.rs",
+    "crates/ars-leptos/src/prelude.rs",
+    "crates/ars-leptos/src/utility/mod.rs",
+    "spec/dioxus-components/utility/heading.md",
+    "spec/dioxus-components/utility/highlight.md",
+    "spec/foundation/08-adapter-leptos.md",
+    "spec/leptos-components/utility/highlight.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/55/a10a0ea9e5/0/metadata.json",
+      "transcript": "/55/a10a0ea9e5/0/full.jsonl",
+      "content_hash": "/55/a10a0ea9e5/0/content_hash.txt",
+      "prompt": "/55/a10a0ea9e5/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 474901,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 17538560,
+    "output_tokens": 25204,
+    "api_call_count": 109
+  }
+}
