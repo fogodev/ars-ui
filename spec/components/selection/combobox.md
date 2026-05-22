@@ -855,7 +855,6 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Role, "listbox");
         if self.ctx.multiple { attrs.set(HtmlAttr::Aria(AriaAttr::MultiSelectable), "true"); }
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.trigger_label)(&self.ctx.locale));
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
         attrs
     }
 
@@ -1099,7 +1098,7 @@ impl ConnectApi for Api<'_> {
 | `aria-autocomplete`     | Input   | `list` (filter only), `inline` (completion only), or `both` (filter + completion)                                                                                                                   |
 | `aria-activedescendant` | Input   | Highlighted item id (only set when a valid item is highlighted; **omit attribute entirely** when `highlighted_key` is `None` — setting it to an empty string or non-existent ID violates ARIA spec) |
 | `role`                  | Content | `listbox`                                                                                                                                                                                           |
-| `aria-label`            | Content | Trigger label fallback used when the internal Label part is not rendered; `aria-labelledby` still points to the generated Label id when present                                                       |
+| `aria-label`            | Content | Trigger label fallback for the listbox; core omits `aria-labelledby` because it does not track whether the Label part is rendered                                                                    |
 | `role`                  | Item    | `option`                                                                                                                                                                                            |
 | `aria-selected`         | Item    | `"true"` when selected, `"false"` when unselected (must be explicitly set, not omitted)                                                                                                             |
 | `role`                  | Empty   | `"none"`                                                                                                                                                                                            | Dedicated LiveRegion announces empty-state text |

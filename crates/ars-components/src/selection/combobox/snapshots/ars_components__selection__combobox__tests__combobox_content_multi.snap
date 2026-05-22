@@ -29,14 +29,6 @@ expression: snapshot_attrs(&api.content_attrs())
     ),
     (
         Aria(
-            LabelledBy,
-        ),
-        String(
-            "combo-label",
-        ),
-    ),
-    (
-        Aria(
             MultiSelectable,
         ),
         String(

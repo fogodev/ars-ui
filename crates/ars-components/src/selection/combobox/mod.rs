@@ -722,6 +722,7 @@ impl ars_core::Machine for Machine {
                     | Event::HighlightLast
                     | Event::HighlightNext
                     | Event::HighlightPrev
+                    | Event::Focus { .. }
                     | Event::Clear
                     | Event::CommitInput
             )
@@ -960,7 +961,7 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            (_, Event::SyncProps) => Some(sync_props_plan(props)),
+            (_, Event::SyncProps) => Some(sync_props_plan(ctx, props)),
 
             _ => None,
         }
@@ -1174,6 +1175,7 @@ impl Api<'_> {
             KeyboardKey::ArrowDown => {
                 if !self.ctx.open {
                     (self.send)(Event::Open);
+                    return;
                 }
 
                 (self.send)(Event::HighlightNext);
@@ -1301,10 +1303,6 @@ impl Api<'_> {
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.trigger_label)(&self.ctx.locale),
-            )
-            .set(
-                HtmlAttr::Aria(AriaAttr::LabelledBy),
-                self.ctx.ids.part("label"),
             );
 
         if self.ctx.multiple {
@@ -1768,10 +1766,17 @@ fn select_item_plan(
     }
 }
 
-fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
+fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
+    let close_open_popup = ctx.open && props.disabled;
     let props = props.clone();
 
-    TransitionPlan::context_only(move |ctx: &mut Context| {
+    let plan = if close_open_popup {
+        close_plan(&props)
+    } else {
+        TransitionPlan::context_only(|_: &mut Context| {})
+    };
+
+    plan.apply(move |ctx: &mut Context| {
         let selected = props
             .value
             .clone()
@@ -2318,6 +2323,10 @@ mod tests {
             assert_eq!(
                 api.content_attrs().get(&HtmlAttr::Aria(AriaAttr::Label)),
                 Some("Show suggestions")
+            );
+            assert!(
+                !api.content_attrs()
+                    .contains(&HtmlAttr::Aria(AriaAttr::LabelledBy))
             );
         });
     }
@@ -3045,6 +3054,51 @@ mod tests {
 
         assert_eq!(click_open.state(), &State::Open);
         assert!(click_open.context().focused);
+
+        let mut disabled_focus = make_service(Props::new().id("combo").disabled(true));
+        let result = disabled_focus.send(Event::Focus { is_keyboard: true });
+
+        assert!(result.is_noop());
+        assert_eq!(disabled_focus.state(), &State::Closed);
+        assert!(!disabled_focus.context().open);
+    }
+
+    #[test]
+    fn prop_sync_disabling_open_combobox_closes_and_notifies() {
+        let opened = Arc::new(Mutex::new(Vec::new()));
+
+        let callback = Callback::new({
+            let opened = Arc::clone(&opened);
+            move |open| {
+                opened.lock().unwrap().push(open);
+            }
+        });
+
+        let mut combo = make_service(
+            Props::new()
+                .id("combo")
+                .on_open_change(callback.clone())
+                .open_on_focus(false),
+        );
+
+        send_event(&mut combo, Event::Open);
+
+        assert_eq!(combo.state(), &State::Open);
+        assert_eq!(*opened.lock().unwrap(), vec![true]);
+
+        combo.set_props(
+            Props::new()
+                .id("combo")
+                .disabled(true)
+                .on_open_change(callback),
+        );
+        send_event(&mut combo, Event::SyncProps);
+
+        assert_eq!(combo.state(), &State::Closed);
+        assert!(!combo.context().open);
+        assert!(combo.context().disabled);
+        assert_eq!(combo.context().highlighted_key, None);
+        assert_eq!(*opened.lock().unwrap(), vec![true, false]);
     }
 
     #[test]
@@ -3281,6 +3335,7 @@ mod tests {
         });
 
         assert_eq!(closed.state(), &State::Open);
+        assert_eq!(closed.context().highlighted_key, Some(key(1)));
 
         let alt_down_events = {
             let mut data = keyboard(KeyboardKey::ArrowDown, None);
