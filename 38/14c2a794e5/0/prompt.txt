@@ -1,0 +1,1 @@
+And after that, commit and push to github. Then use the @.agents/skills/waiting-for-codex-review/SKILL.md to keep watching and solving the reviews on github
