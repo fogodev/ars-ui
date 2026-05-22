@@ -1,0 +1,30 @@
+---
+source: crates/ars-components/src/selection/combobox/mod.rs
+expression: snapshot_attrs(&api.positioner_attrs())
+---
+[
+    (
+        Data(
+            "ars-part",
+        ),
+        String(
+            "positioner",
+        ),
+    ),
+    (
+        Data(
+            "ars-placement",
+        ),
+        String(
+            "bottom",
+        ),
+    ),
+    (
+        Data(
+            "ars-scope",
+        ),
+        String(
+            "combobox",
+        ),
+    ),
+]

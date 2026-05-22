@@ -1,0 +1,36 @@
+---
+source: crates/ars-components/src/selection/combobox/mod.rs
+expression: snapshot_attrs(&api.error_message_attrs())
+---
+[
+    (
+        Data(
+            "ars-part",
+        ),
+        String(
+            "error-message",
+        ),
+    ),
+    (
+        Data(
+            "ars-scope",
+        ),
+        String(
+            "combobox",
+        ),
+    ),
+    (
+        Aria(
+            Live,
+        ),
+        String(
+            "polite",
+        ),
+    ),
+    (
+        Id,
+        String(
+            "combo-error-message",
+        ),
+    ),
+]
