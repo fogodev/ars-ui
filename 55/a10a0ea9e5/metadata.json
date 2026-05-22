@@ -3,7 +3,7 @@
   "checkpoint_id": "55a10a0ea9e5",
   "strategy": "manual-commit",
   "branch": "t3code/03c1ddf1",
-  "checkpoints_count": 4,
+  "checkpoints_count": 5,
   "files_touched": [
     "crates/ars-dioxus/Cargo.toml",
     "crates/ars-dioxus/src/prelude.rs",
@@ -25,13 +25,19 @@
       "transcript": "/55/a10a0ea9e5/0/full.jsonl",
       "content_hash": "/55/a10a0ea9e5/0/content_hash.txt",
       "prompt": "/55/a10a0ea9e5/0/prompt.txt"
+    },
+    {
+      "metadata": "/55/a10a0ea9e5/1/metadata.json",
+      "transcript": "/55/a10a0ea9e5/1/full.jsonl",
+      "content_hash": "/55/a10a0ea9e5/1/content_hash.txt",
+      "prompt": "/55/a10a0ea9e5/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 474901,
-    "cache_creation_tokens": 0,
-    "cache_read_tokens": 17538560,
-    "output_tokens": 25204,
-    "api_call_count": 109
+    "input_tokens": 476127,
+    "cache_creation_tokens": 7871522,
+    "cache_read_tokens": 410579326,
+    "output_tokens": 584270,
+    "api_call_count": 937
   }
 }
