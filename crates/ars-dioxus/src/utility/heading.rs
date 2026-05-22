@@ -15,6 +15,10 @@ use dioxus::prelude::*;
 use crate::{as_child::merge_dioxus_attrs, attr_map_to_dioxus_inline_attrs};
 
 fn inherited_context() -> HeadingContext {
+    if let Some(ctx) = try_use_context::<Signal<HeadingContext>>() {
+        return ctx();
+    }
+
     try_use_context::<HeadingContext>().unwrap_or_default()
 }
 
@@ -118,7 +122,13 @@ pub struct HeadingLevelProviderProps {
 pub fn HeadingLevelProvider(props: HeadingLevelProviderProps) -> Element {
     let provider_props = heading_level_provider::Props::new().level(props.level);
 
-    use_context_provider(|| heading_level_provider::context_for(&provider_props));
+    let next_context = heading_level_provider::context_for(&provider_props);
+
+    let mut context = use_context_provider(|| Signal::new(next_context));
+
+    if *context.peek() != next_context {
+        context.set(next_context);
+    }
 
     rsx! {
         {props.children}
@@ -141,7 +151,13 @@ pub struct SectionProps {
 pub fn Section(props: SectionProps) -> Element {
     let parent = inherited_context();
 
-    use_context_provider(|| section::context_for(&parent));
+    let next_context = section::context_for(&parent);
+
+    let mut context = use_context_provider(|| Signal::new(next_context));
+
+    if *context.peek() != next_context {
+        context.set(next_context);
+    }
 
     rsx! {
         {props.children}

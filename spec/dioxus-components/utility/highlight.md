@@ -11,6 +11,9 @@ source_foundation: foundation/09-adapter-dioxus.md
 ## 1. Purpose and Adapter Scope
 
 This spec maps the core [`Highlight`](../../components/utility/highlight.md) utility to Dioxus 0.7.x.
+The adapter module is compiled when the adapter's `icu4x` feature enables
+`ars-components/i18n`; pure `web-intl` adapter builds omit `Highlight` because
+the agnostic component contract requires ICU4X case mapping.
 
 ## 2. Public Adapter API
 

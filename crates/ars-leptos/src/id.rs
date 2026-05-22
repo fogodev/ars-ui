@@ -3,30 +3,50 @@
 //! Provides monotonic counters that produce the same ID sequence on both SSR and
 //! client when the component tree renders in the same order.
 
-// Thread-local counter on all targets.
+// Deterministic counters for generated adapter IDs.
 //
-// Leptos SSR renders a single request on one thread (`render_to_string`,
-// `ssr_in_order`), so per-thread counters give each request its own
-// monotonic sequence that matches the WASM-side hydration sequence
-// without races between concurrent requests.
-//
-// A previous global `AtomicU64` implementation was process-wide, which
-// broke both (a) parallel SSR requests interleaving each other's IDs
-// and (b) parallel tests asserting specific counter values racing on the
-// same shared counter.
+// Leptos SSR can resume async render segments for one request on different
+// worker threads, so native SSR uses a request-scoped context counter when
+// `reset_id_counter()` runs inside the request owner. Calls outside a reactive
+// owner fall back to a process counter rather than per-thread storage, avoiding
+// duplicate fallback IDs if work crosses worker threads before a request scope
+// is installed.
 mod counter {
-    use std::cell::Cell;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    };
 
-    thread_local! {
-        static ID_COUNTER: Cell<u64> = const { Cell::new(0) };
+    #[cfg(feature = "ssr")]
+    use leptos::prelude::provide_context;
+    use leptos::prelude::use_context;
+
+    #[derive(Clone, Debug)]
+    struct RequestIdCounter {
+        value: Arc<AtomicU64>,
+    }
+
+    impl RequestIdCounter {
+        #[cfg(feature = "ssr")]
+        fn new() -> Self {
+            Self {
+                value: Arc::new(AtomicU64::new(0)),
+            }
+        }
+
+        fn next_id(&self) -> u64 {
+            self.value.fetch_add(1, Ordering::Relaxed)
+        }
+    }
+
+    static FALLBACK_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn next_fallback_id() -> u64 {
+        FALLBACK_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
     }
 
     pub(super) fn next_id() -> u64 {
-        ID_COUNTER.with(|c| {
-            let v = c.get();
-            c.set(v + 1);
-            v
-        })
+        use_context::<RequestIdCounter>().map_or_else(next_fallback_id, |counter| counter.next_id())
     }
 
     /// Resets the ID counter to zero on the current thread.
@@ -35,7 +55,11 @@ mod counter {
     /// match the client-side hydration sequence.
     #[cfg(feature = "ssr")]
     pub(super) fn reset() {
-        ID_COUNTER.with(|c| c.set(0));
+        let counter = RequestIdCounter::new();
+
+        provide_context(counter);
+
+        FALLBACK_ID_COUNTER.store(0, Ordering::Relaxed);
     }
 }
 
@@ -88,6 +112,21 @@ mod tests {
         let id1 = use_id("component");
         let id2 = use_id("component");
         assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn use_id_native_fallback_does_not_restart_on_worker_threads() {
+        let id1 = std::thread::spawn(|| use_id("component"))
+            .join()
+            .expect("worker thread should not panic");
+        let id2 = std::thread::spawn(|| use_id("component"))
+            .join()
+            .expect("worker thread should not panic");
+
+        assert_ne!(
+            id1, id2,
+            "fallback ID generation must not emit duplicate IDs when SSR work resumes on a different thread"
+        );
     }
 }
 

@@ -48,15 +48,18 @@ pub fn Heading(props: HeadingProps) -> Element
 
 ## 6. Composition / Context Contract
 
-Heading-level providers or section helpers must publish `HeadingContext` for nested headings. `Section`-style helpers increment the inherited level and provide the incremented value through framework context so descendant headings at arbitrary depth resolve their level without prop drilling.
+Heading-level providers or section helpers must publish a reactive `HeadingContext` for nested headings. `Section`-style helpers increment the inherited level and provide the incremented value through framework context so descendant headings at arbitrary depth resolve their level without prop drilling. If a provider's `level` prop or an ancestor heading context changes, descendants must observe the new resolved level on the next render.
 
 ## 7. Prop Sync and Event Mapping
 
-Heading level and label semantics are typically init-only render concerns.
+Heading level and label semantics are render-derived concerns. Explicit `Heading`
+`level` props and provider/section context changes must recompute rendered
+heading tags on the next render.
 
-| Adapter prop      | Mode                      | Sync trigger     | Machine event / update path | Visible effect               | Notes                       |
-| ----------------- | ------------------------- | ---------------- | --------------------------- | ---------------------------- | --------------------------- |
-| level / tag props | non-reactive adapter prop | render time only | heading attr derivation     | determines heading semantics | no post-mount sync expected |
+| Adapter prop / context | Mode       | Sync trigger               | Machine event / update path | Visible effect                   | Notes                                      |
+| ---------------------- | ---------- | -------------------------- | --------------------------- | -------------------------------- | ------------------------------------------ |
+| `Heading::level`       | controlled | prop render change         | heading attr derivation     | updates rendered semantic tag    | explicit prop wins over inherited context  |
+| provider context       | controlled | prop/context render change | heading attr derivation     | updates descendant semantic tags | context storage must be reactive in Dioxus |
 
 ## 8. Registration and Cleanup Contract
 
@@ -152,7 +155,7 @@ Heading level and label semantics are typically init-only render concerns.
 
 ## 23. Framework-Specific Behavior
 
-Dioxus may select the semantic tag dynamically or use a fallback generic node with heading role. When heading text can mix document directions, the rendered heading node should set `dir="auto"` so the browser resolves reading order from the content instead of inheriting a misleading page-level direction. Heading level providers and `Section` helpers must publish the incremented `HeadingContext` with `use_context_provider(...)` rather than relying on prop drilling.
+Dioxus may select the semantic tag dynamically or use a fallback generic node with heading role. When heading text can mix document directions, the rendered heading node should set `dir="auto"` so the browser resolves reading order from the content instead of inheriting a misleading page-level direction. Heading level providers and `Section` helpers must publish the incremented `HeadingContext` through a reactive context value (for example, `Signal<HeadingContext>`) rather than relying on prop drilling or a plain one-time context value.
 
 ## 24. Canonical Implementation Sketch
 
@@ -178,6 +181,7 @@ No expanded skeleton beyond the canonical sketch is required for this utility.
 - Heading-level resolution must be deterministic and must not drift between server and client render paths.
 - Fallback role behavior must be explicit whenever the adapter does not render a native heading element.
 - Nested heading-level inheritance must flow through published `HeadingContext`, not through manual prop threading.
+- Published heading contexts must update when the provider prop or parent context changes.
 
 ## 27. Accessibility and SSR Notes
 
@@ -195,6 +199,7 @@ Intentional deviations: none.
 - root mapping
 - semantic heading vs fallback role
 - nested heading-level context
+- provider and section context updates after prop changes
 - mixed-direction heading content preserves expected text direction
 - `Section` or heading-level providers publish incremented context for descendants
 

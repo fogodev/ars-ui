@@ -2,8 +2,13 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::{cell::RefCell, rc::Rc};
+
 use ars_dioxus::utility::heading::{Heading, HeadingLevelProvider, Level, Section};
-use dioxus::prelude::*;
+use dioxus::{
+    dioxus_core::{NoOpMutations, ScopeId},
+    prelude::*,
+};
 
 fn render_app(app: fn() -> Element) -> String {
     let mut vdom = VirtualDom::new(app);
@@ -248,5 +253,99 @@ fn section_renders_no_dom_of_its_own() {
     assert!(
         html.trim_start().starts_with("<span"),
         "Section must be provider-only with no DOM wrapper: {html}"
+    );
+}
+
+#[test]
+fn heading_level_provider_updates_descendants_when_level_prop_changes() {
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "Dioxus root props are moved into the render function."
+    )]
+    fn app(level_slot: Rc<RefCell<Option<Signal<Level>>>>) -> Element {
+        let level = use_signal(|| Level::Two);
+
+        *level_slot.borrow_mut() = Some(level);
+
+        rsx! {
+            HeadingLevelProvider { level: level(),
+                Heading { id: "reactive-heading", "Reactive" }
+            }
+        }
+    }
+
+    let level_slot = Rc::new(RefCell::new(None));
+    let mut dom = VirtualDom::new_with_props(app, Rc::clone(&level_slot));
+
+    dom.rebuild_in_place();
+
+    let html = dioxus_ssr::render(&dom);
+
+    assert!(
+        html.trim_start().starts_with("<h2"),
+        "initial provider level should render h2: {html}"
+    );
+
+    level_slot
+        .borrow()
+        .expect("level signal initialized")
+        .set(Level::Four);
+
+    dom.mark_dirty(ScopeId::APP);
+    dom.render_immediate(&mut NoOpMutations);
+
+    let html = dioxus_ssr::render(&dom);
+
+    assert!(
+        html.trim_start().starts_with("<h4"),
+        "updated provider level should render h4: {html}"
+    );
+}
+
+#[test]
+fn section_recomputes_descendant_level_when_parent_provider_changes() {
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "Dioxus root props are moved into the render function."
+    )]
+    fn app(level_slot: Rc<RefCell<Option<Signal<Level>>>>) -> Element {
+        let level = use_signal(|| Level::Two);
+
+        *level_slot.borrow_mut() = Some(level);
+
+        rsx! {
+            HeadingLevelProvider { level: level(),
+                Section {
+                    Heading { id: "reactive-section-heading", "Reactive section" }
+                }
+            }
+        }
+    }
+
+    let level_slot = Rc::new(RefCell::new(None));
+    let mut dom = VirtualDom::new_with_props(app, Rc::clone(&level_slot));
+
+    dom.rebuild_in_place();
+
+    let html = dioxus_ssr::render(&dom);
+
+    assert!(
+        html.trim_start().starts_with("<h3"),
+        "initial section level should render h3: {html}"
+    );
+
+    level_slot
+        .borrow()
+        .expect("level signal initialized")
+        .set(Level::Four);
+
+    dom.mark_dirty(ScopeId::APP);
+    dom.render_immediate(&mut NoOpMutations);
+
+    let html = dioxus_ssr::render(&dom);
+
+    assert!(
+        html.trim_start().starts_with("<h5"),
+        "updated section level should render h5: {html}"
     );
 }

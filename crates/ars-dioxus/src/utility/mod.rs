@@ -5,6 +5,7 @@ pub mod client_only;
 pub mod dismissable;
 pub mod error_boundary;
 pub mod heading;
+#[cfg(feature = "icu4x")]
 pub mod highlight;
 pub mod landmark;
 pub mod separator;
