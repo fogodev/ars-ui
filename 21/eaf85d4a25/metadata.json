@@ -1,0 +1,58 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "21eaf85d4a25",
+  "strategy": "manual-commit",
+  "branch": "t3code/d9d993f1",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/selection/combobox/mod.rs",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_clear_trigger.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_clear_trigger_disabled.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_content_multi.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_control.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_description.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_empty.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_error_message.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_hidden_input.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_closed_disabled.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_mode_contains.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_mode_custom.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_mode_inline.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_mode_inlinecompletion.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_mode_none.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_mode_startswith.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_open.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_item_group.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_item_group_label.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_item_indicator_selected.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_item_selected_highlighted.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_item_text.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_label.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_live_region.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_positioner.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_root_disabled.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_root_open_invalid.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_trigger.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_trigger_disabled.snap",
+    "crates/ars-components/src/selection/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "crates/ars-components/tests/spec_conformance/selection.rs",
+    "spec/components/selection/combobox.md",
+    "spec/shared/selection-patterns.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/21/eaf85d4a25/0/metadata.json",
+      "transcript": "/21/eaf85d4a25/0/full.jsonl",
+      "content_hash": "/21/eaf85d4a25/0/content_hash.txt",
+      "prompt": "/21/eaf85d4a25/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1217976,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 157214464,
+    "output_tokens": 115632,
+    "api_call_count": 957
+  }
+}

@@ -1,0 +1,154 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "21eaf85d4a25",
+  "session_id": "019e4d52-5c59-7253-a1b2-98c2eb5a7612",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-22T10:53:53.550545Z",
+  "branch": "t3code/d9d993f1",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/selection/combobox/mod.rs",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_clear_trigger.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_clear_trigger_disabled.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_content_multi.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_control.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_description.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_empty.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_error_message.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_hidden_input.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_closed_disabled.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_mode_contains.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_mode_custom.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_mode_inline.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_mode_inlinecompletion.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_mode_none.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_mode_startswith.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_input_open.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_item_group.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_item_group_label.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_item_indicator_selected.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_item_selected_highlighted.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_item_text.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_label.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_live_region.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_positioner.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_root_disabled.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_root_open_invalid.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_trigger.snap",
+    "crates/ars-components/src/selection/combobox/snapshots/ars_components__selection__combobox__tests__combobox_trigger_disabled.snap",
+    "crates/ars-components/src/selection/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "crates/ars-components/tests/spec_conformance/selection.rs",
+    "spec/components/selection/combobox.md",
+    "spec/shared/selection-patterns.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "2b5cdadfe88c",
+  "token_usage": {
+    "input_tokens": 1217976,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 157214464,
+    "output_tokens": 115632,
+    "api_call_count": 957
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #252: add a framework-agnostic Combobox core component to `ars-components`, including the machine, API attr methods, event helpers, snapshot tests, spec-conformance tests, and proptest invariants, following the project's TDD + post-implementation audit workflow.",
+    "outcome": "All implementation tasks completed: `selection::combobox` module created with zero missed mutants (281 tested), spec-conformance and all verification gates passed, spec drift fixes landed, commit created and PR opened targeting `main` with `Closes #252`.",
+    "learnings": {
+      "repo": [
+        "`ComponentPart` derive already includes standard traits (Clone, PartialEq, etc.) — adding them manually causes compile errors.",
+        "Selection sets in `ars-collections` are `#[non_exhaustive]`, so match arms need wildcard fallbacks.",
+        "`type Effect = NoEffect` is the agnostic-component pattern; closures must not be stored in public enums like `FilterMode`.",
+        "Project board state is managed via `gh project item-edit --id <PVTI_…> --project-id <PVT_…> --field-id <PVTSSF_…> --single-select-option-id <…>`.",
+        "`cargo insta test --unreferenced=reject` must be run as `cargo insta test --unreferenced=reject -p ars-components --features i18n --lib`; the positional test-filter form (`selection::combobox`) is not supported by the installed cargo-insta.",
+        "`cargo xci --profile fast` is the mandatory CI gate before any commit/push; it runs fmt, check, clippy, nextest, adapter tests, spec snippet tests, and snapshot-count checks.",
+        "Proptest invariants for new selection components follow the existing pattern of being added but marked `#[ignore]`.",
+        "Post-implementation audit is a first-class step and includes spec-drift review, two 'anything else?' rounds, llvm-cov coverage, and `cargo mutants` mutation testing against the new file."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "finding": "Test helper function named `service()` collided with local variables in the expanded test suite; renamed to `make_service()` to resolve shadowing."
+        },
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "finding": "`Part::Empty` is the correct public variant with data-part string `\"empty\"` (spec anatomy table said `EmptyState` but spec code blocks said `Empty`; code blocks win)."
+        },
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "finding": "`empty_attrs` must emit `role=\"none\"` (not `role=\"status\"`) because the Combobox already has a dedicated `LiveRegion` part."
+        },
+        {
+          "path": "spec/components/selection/combobox.md",
+          "finding": "Audit found spec still described core-owned async/debounced effects and a closure-carrying `FilterMode::Custom`; both were corrected to reflect the closure-free agnostic-core contract."
+        },
+        {
+          "path": "spec/shared/selection-patterns.md",
+          "finding": "`CompositionEnd` event signature was updated from `CompositionEnd` to `CompositionEnd(String)` to carry the final composed value."
+        }
+      ],
+      "workflow": [
+        "Mutation testing with `cargo mutants -p ars-components -f <single-file>` takes ~2 hours per pass on this machine; plan for it when scheduling audit time.",
+        "Running a concurrent `cargo mutants` job (from a different process) significantly slows each pass — 281 mutants went from ~50 min to ~2 h.",
+        "TDD red-first discipline paid off: the failing spec-conformance test before any production code proved the public surface was missing, not just broken.",
+        "First mutation pass had 102 missed mutants; a second targeted pass after adding branch-coverage tests cut it to 2; a third pass confirmed zero — three full passes were needed.",
+        "Spec drift fixes belong in the same commit as the implementation — the audit discovered that 'FilterMode::Custom' semantics and loading/live-region timing were incorrectly specified; landing those fixes together avoids a mismatched spec+code state in git history."
+      ]
+    },
+    "friction": [
+      "Mutation testing dominated wall-clock time: three full 2-hour passes (~6 hours total) to reach zero missed mutants.",
+      "The polling loop for `cargo mutants` output required hundreds of sequential `write_stdin` calls because the tool streams results incrementally with long silent intervals.",
+      "A concurrent `cargo mutants` process from another worktree was already running on the machine, compounding build contention and doubling pass time.",
+      "`cargo insta test ... selection::combobox` positional filter form silently failed with the installed cargo-insta version; had to fall back to `--lib` with feature flag.",
+      "Initial test harness assumed `Service::new` without `Env`/messages args and `connect` without an explicit send closure — both required adjustment after compile failure.",
+      "First `cargo check` pass after module creation surfaced multiple compile errors from `ComponentPart` trait collision, non-exhaustive selection-set match arms, and missing `Key` display impls.",
+      "102 missed mutants in the first mutation pass required a large test-writing session covering builder round-trips, lifecycle events, prop sync, keyboard branches, and navigation edge cases."
+    ],
+    "open_items": [
+      "Leptos and Dioxus adapter component wrappers for Combobox are explicitly out of scope for #252 and deferred to separate issues.",
+      "Combobox proptest invariants (highlight visibility, selection validity after UpdateItems, composition suppression) are compiled but `#[ignore]`d — they should be enabled once the proptest harness is wired for this component.",
+      "Codex review loop (Task 12) must still be completed: post `@codex review`, address any threads, and wait for 👍 before closing issue #252.",
+      "Existing rustdoc link warnings in `ars-components` outside the combobox module were present before this change and were not fixed.",
+      "CI must pass and the PR must be merged before issue #252 can formally be closed on the project board."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-22T10:52:53.9478Z",
+    "agent_lines": 4745,
+    "agent_removed": 72,
+    "human_added": 346,
+    "human_modified": 28,
+    "human_removed": 0,
+    "total_committed": 5105,
+    "total_lines_changed": 5191,
+    "agent_percentage": 92.7952225004816,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 187,
+      "user_lines_removed": 14,
+      "agent_lines_added": 4946,
+      "agent_lines_removed": 86,
+      "user_added_per_file": {
+        "crates/ars-components/src/selection/combobox/mod.rs": 184,
+        "crates/ars-components/tests/proptest_state_machines/selection.rs": 3
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/selection/combobox/mod.rs": 14
+      }
+    }
+  ]
+}

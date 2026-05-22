@@ -1,0 +1,346 @@
+Implement task #252
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #252 Combobox Agnostic Core Implementation Plan
+
+## Summary
+
+Implement the framework-agnostic `Combobox` core for `ars-components`, scoped exactly to GitHub issue #252. The work adds a new `selection::combobox` module, exports it from `selection`, covers unit/snapshot/spec-conformance tests, runs the mandatory post-implementation audit, then waits for user review before any commit or push.
+
+Issue context verified:
+- `#252` is open and in `Todo`.
+- Dependencies `#234` Listbox and `#240` Select are closed and `Done`.
+- Scope is agnostic core only. No Leptos/Dioxus adapter component work.
+- Public no-results part will be `Part::Empty`, per the spec code block and user choice.
+
+## Public API / Interface Changes
+
+Add `crates/ars-components/src/selection/combobox/mod.rs` and export it from `crates/ars-components/src/selection/mod.rs`:
+
+```rust
+/// Combobox component machine.
+pub mod combobox;
+```
+
+Public API to expose in `selection::combobox`:
+- `Item { label: String }`
+- `State::{Closed, Open}`
+- `Event::{InputChange, Focus, Blur, Open, Close, SelectItem, SelectItemCtrl, DeselectItem, HighlightItem, HighlightFirst, HighlightLast, HighlightNext, HighlightPrev, Dismiss, ClickOutside, Clear, UpdateItems, CompositionStart, CompositionEnd, SetDescriptionPresent, SyncProps}`
+- `FilterMode::{Contains, StartsWith, None, Inline, InlineCompletion, Custom}` as a pure, cloneable enum. Do not store closures in `FilterMode`; `Custom` means built-in filtering is disabled and adapters own filtering.
+- `Context`, `Props`, `Props::new()` plus builder setters matching the established `select`/`listbox` style.
+- `Messages`, `LocaleMessage`, `ResultCountMessage`, `OpenChangeCallback`.
+- `Part::{Root, Label, Control, Input, Trigger, ClearTrigger, Positioner, Content, ItemGroup, ItemGroupLabel, Item, ItemText, ItemIndicator, Empty, Description, ErrorMessage, LiveRegion}`
+- `Machine`
+- `Api<'a>` with `*_attrs()` methods and event helper methods.
+
+`ConnectApi::part_attrs()` must cover every `Part` variant.
+
+No new dependency crates are allowed.
+
+## File Plan
+
+Create:
+- `crates/ars-components/src/selection/combobox/mod.rs`
+- `crates/ars-components/src/selection/combobox/snapshots/*.snap`
+
+Modify:
+- `crates/ars-components/src/selection/mod.rs`
+- `crates/ars-components/tests/spec_conformance/selection.rs`
+- `.cargo/mutants.toml` only if mutation testing proves a true equivalent mutation needs a justified skip.
+
+Do not modify adapter crates in the initial implementation. During post-implementation audit, inspect adapter specs and feature wiring, but only change them if the audit finds real drift caused by the new core surface.
+
+## Implementation Tasks
+
+### Task 1: Project State And TDD Setup
+
+1. Move GitHub issue #252 to `In Progress` on `ars-ui implementation roadmap`.
+2. Re-read:
+   - `spec/components/selection/combobox.md`
+   - `spec/shared/selection-patterns.md`
+   - `spec/foundation/03-accessibility.md` §3.6
+   - `spec/foundation/05-interactions.md` §11.5
+3. Add the failing spec-conformance test in `crates/ars-components/tests/spec_conformance/selection.rs` for all combobox parts, using `combobox::Part::Empty` with expected data part `"empty"`.
+4. Run:
+   ```bash
+   cargo test -p ars-components --test spec_conformance selection::combobox_anatomy_matches_spec
+   ```
+   Expected before implementation: compile failure or unresolved `combobox`.
+
+### Task 2: Module Skeleton And Public Types
+
+1. Create `crates/ars-components/src/selection/combobox/mod.rs`.
+2. Implement documented public types, derives, defaults, and builder methods.
+3. Use existing `select` and `listbox` conventions:
+   - `type Effect = NoEffect`
+   - `Props::new()`
+   - `#[must_use]` on value-returning public helpers
+   - `ComponentPart` derive for `Part`
+   - public docs on every public item.
+4. Export `pub mod combobox;`.
+5. Run:
+   ```bash
+   cargo check -p ars-components
+   ```
+   Expected: combobox compiles, but behavior tests are still absent or failing.
+
+### Task 3: Core Machine State Transitions
+
+Implement the machine behavior from spec §1:
+- `init()` initializes controlled/uncontrolled input and selection bindables.
+- `UpdateItems` replaces the collection and invalidates stale highlighted/selected keys.
+- `InputChange` updates input, computes `visible_keys`, opens on non-empty input, and highlights first visible enabled item.
+- During `is_composing`, `InputChange` is ignored for filtering/highlight changes.
+- `Open`, `Close`, `Dismiss`, `ClickOutside`, `Focus`, `Blur`, `Clear` match spec behavior.
+- Highlight navigation respects visible keys, disabled keys, and `loop_focus`.
+- Single select sets input text to selected option label and closes.
+- Multi select updates selection, clears input, resets filter, and stays open.
+- `SelectItemCtrl` toggles only for multiple + replace behavior.
+- `CompositionStart`/`CompositionEnd` track `is_composing`.
+
+Add unit tests first for the issue’s named cases:
+- typing filters options
+- arrow keys navigate filtered list
+- enter selects highlighted option
+- IME composition does not filter prematurely
+- autocomplete modes: list, both, none
+- form integration via hidden input attrs
+
+Run:
+```bash
+cargo test -p ars-components selection::combobox -- --nocapture
+```
+
+### Task 4: Connect API And AttrMap Output
+
+Implement `Api` methods:
+- `root_attrs`
+- `label_attrs`
+- `control_attrs`
+- `input_attrs`
+- `trigger_attrs`
+- `clear_trigger_attrs`
+- `positioner_attrs`
+- `content_attrs`
+- `item_group_attrs`
+- `item_group_label_attrs`
+- `item_attrs`
+- `item_text_attrs`
+- `item_indicator_attrs`
+- `empty_attrs`
+- `description_attrs`
+- `error_message_attrs`
+- `live_region_attrs`
+- `hidden_input_attrs`
+- `visible_items`, `items`, `visible_count`, `selected_text`
+- `no_results_text`, `loading_text`, `trigger_label`, `clear_label`
+
+Required output:
+- input has `role="combobox"`, `aria-expanded`, `aria-haspopup="listbox"`, `aria-autocomplete`
+- content has `role="listbox"`
+- item has `role="option"` and explicit `aria-selected`
+- `aria-activedescendant` is omitted when no valid highlight exists
+- `aria-describedby` orders error before description
+- empty uses `role="none"` because Combobox has `LiveRegion`
+- hidden input serializes selected value and includes `name`, `form`, disabled state where applicable.
+
+Run:
+```bash
+cargo test -p ars-components selection::combobox
+```
+
+### Task 5: Event Helper Methods
+
+Add API helpers:
+- `on_input_change(value)`
+- `on_input_focus(is_keyboard)`
+- `on_input_blur()`
+- `on_input_keydown(&KeyboardEventData)`
+- `on_input_keydown_after_composition_check(&KeyboardEventData)` or equivalent agnostic helper for Firefox late-fire handoff
+- `on_input_composition_start()`
+- `on_input_composition_end(final_value)`
+- `on_trigger_click()`
+- `on_clear_click()`
+- `on_item_click(key)`
+- `on_item_ctrl_click(key)`
+- `on_item_hover(key)`
+- `on_item_leave()`
+
+IME rules:
+- Treat `KeyboardKey::Process` as composition-in-progress.
+- Suppress Enter/Tab/custom keyboard processing when `data.is_composing`, `ctx.is_composing`, or key is `Process`.
+- Agnostic core should not schedule real microtasks; expose a helper/event shape that lets adapters perform the Firefox late-fire check after composition state settles.
+
+Run:
+```bash
+cargo test -p ars-components selection::combobox
+```
+
+### Task 6: Snapshot Tests
+
+Add inline insta snapshot tests in `combobox/mod.rs` matching existing selection component style.
+
+Snapshots must cover every anatomy part and every output-affecting branch:
+- root open/closed, disabled, invalid, readonly
+- input closed/open, highlighted/unhighlighted, required, invalid, disabled, readonly, placeholder, described-by
+- `aria-autocomplete` for `Contains`, `StartsWith`, `Custom`, `None`, `Inline`, `InlineCompletion`
+- trigger enabled/disabled
+- clear trigger enabled/disabled
+- content single/multi
+- item selected/unselected/highlighted/disabled
+- item group and group label
+- item text and indicator
+- empty
+- description/error/live region
+- hidden input empty/selected/name/form/disabled.
+
+Run:
+```bash
+cargo insta test -p ars-components --unreferenced=reject selection::combobox
+```
+
+### Task 7: Spec-Conformance And Proptest Coverage
+
+Update `crates/ars-components/tests/spec_conformance/selection.rs`:
+- import `combobox`
+- add `combobox_anatomy_matches_spec()`
+- assert scope `"combobox"` and all `Part` data attrs.
+
+Assess whether `crates/ars-components/tests/proptest_state_machines/selection.rs` should include combobox invariants. Add focused proptests if the machine has non-trivial invariants not covered by unit tests:
+- highlighted key is always visible and focusable after filtering/navigation
+- selected keys remain valid after `UpdateItems`
+- composition never changes visible keys through intermediate input events.
+
+Run:
+```bash
+cargo test -p ars-components --test spec_conformance selection
+cargo test -p ars-components --test proptest_state_machines selection
+```
+
+### Task 8: Mandatory Local Verification Before Audit
+
+Run:
+```bash
+cargo fmt --check
+cargo clippy -p ars-components --all-targets --all-features -- -D warnings
+cargo test -p ars-components selection::combobox
+cargo test -p ars-components --test spec_conformance selection
+cargo insta test -p ars-components --unreferenced=reject selection::combobox
+cargo doc -p ars-components --no-deps --all-features
+cargo xtask spec validate
+```
+
+Fix every failure before continuing.
+
+### Task 9: Mandatory Post-Implementation Audit
+
+Invoke `.agents/skills/post-implementation-audit/SKILL.md`.
+
+Audit phases must be completed in order:
+1. Spec/implementation drift audit against `spec/components/selection/combobox.md`, `selection-patterns`, accessibility IME section, and interactions IME section.
+2. Minimum two “anything else missing?” rounds. Include adapter specs, manifest/catalog, feature wiring, prelude scope, and `.cargo/mutants.toml`.
+3. Test coverage audit:
+   ```bash
+   cargo llvm-cov test -p ars-components --lib --no-fail-fast --text -- selection::combobox
+   cargo mutants -p ars-components -f crates/ars-components/src/selection/combobox/mod.rs
+   ```
+   Every `MISSED` mutant must be killed with a test or documented as equivalent in `.cargo/mutants.toml`.
+
+Land all audit findings in the same worktree before presenting the result.
+
+### Task 10: Final User Review Handoff
+
+Before committing, present:
+- changed files
+- issue acceptance criteria mapping
+- audit findings and dispositions
+- verification commands and results
+- snapshot files created
+- mutation test result summary
+- any spec updates made by audit.
+
+Stop here for user review. Do not commit or push.
+
+### Task 11: After Explicit User Approval
+
+Run:
+```bash
+cargo xci --profile fast
+```
+
+Fix any failures.
+
+Then commit with co-author:
+```bash
+git add crates/ars-components/src/selection/mod.rs \
+        crates/ars-components/src/selection/combobox \
+        crates/ars-components/tests/spec_conformance/selection.rs \
+        .cargo/mutants.toml
+git commit -m "feat(components): add combobox agnostic core" \
+           -m "Closes #252" \
+           -m "Co-authored-by: OpenAI Codex <codex@openai.com>"
+```
+
+Open a regular PR targeting `main` with body including `Closes #252`.
+
+If `.snap` files are created or modified, add:
+```bash
+gh pr edit <pr-number> --add-label "snapshot-reviewed"
+```
+
+### Task 12: Mandatory Codex Review Loop
+
+Immediately after first push, invoke `.agents/skills/waiting-for-codex-review/SKILL.md`.
+
+Required loop:
+- post `@codex review`
+- poll for 👀 / 👍 / unresolved Codex threads
+- address every Codex thread with TDD and no coverage regression
+- reply inline and resolve threads
+- push fixes
+- re-comment `@codex review`
+- repeat until Codex leaves 👍.
+
+Only after CI passes, Codex has 👍, and the PR is merged may issue #252 be closed.
+
+## Test Scenarios
+
+Required unit scenarios:
+- input field exposes `role="combobox"` and correct `aria-autocomplete`
+- listbox popup exposes filtered options
+- typing filters options
+- arrow keys navigate filtered list
+- Enter selects highlighted option
+- IME composition suppresses filtering and premature Enter selection
+- `KeyboardKey::Process` is treated as composition-in-progress
+- autocomplete modes: `Contains`/`StartsWith`/`Custom` => `list`, `Inline` => `inline`, `InlineCompletion` => `both`, `None` => `none`
+- hidden input form integration
+- disabled/readonly guards
+- single and multiple selection
+- disabled item skip/focus behavior
+- custom filtering disables built-in filtering
+- `UpdateItems` invalidates stale references
+- description/error `aria-describedby` ordering
+- empty state + live region output.
+
+Required snapshot scenarios:
+- every `Part` attr output
+- every output-affecting state/prop/context branch.
+
+Required conformance:
+- `combobox::Part` anatomy test in `spec_conformance/selection.rs`.
+
+Required mutation:
+- targeted `cargo mutants` on `combobox/mod.rs`, with zero untriaged `MISSED`.
+
+## Assumptions And Defaults
+
+- `Part::Empty` is the public variant and data part is `"empty"`.
+- No adapter component implementation is included.
+- No new dependency crate is added.
+- Built-in filtering uses simple case-insensitive matching consistent with current spec examples unless audit determines locale-aware filtering must be implemented now.
+- `FilterMode::Custom` is closure-free in core; adapters own custom predicates.
+- Real browser microtask scheduling for Firefox IME late-fire belongs to adapters; core exposes suppression helpers/events and testable state.
+- Spec changes are not expected initially, but audit may update spec if implementation exposes unavoidable drift.
