@@ -15,7 +15,9 @@ use dioxus::{dioxus_core::AttributeValue, prelude::*};
 
 use crate::{
     as_child::{AsChildRenderProps, merge_dioxus_attrs},
-    attr_map_to_dioxus_inline_attrs, use_machine, use_stable_id,
+    attr_map_to_dioxus_inline_attrs, use_machine,
+    use_machine::UseMachineReturn,
+    use_stable_id,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -309,11 +311,7 @@ pub fn Button(props: ButtonProps) -> Element {
         aria_labelledby,
     };
 
-    let root_attrs = machine.derive(move |api| {
-        let component_attrs = dioxus_root_attrs(api, &id, &user_attrs, false);
-
-        merge_dioxus_attrs(consumer_attrs.clone(), component_attrs)
-    });
+    let root_attrs = use_button_root_attrs(machine, &id, &user_attrs, &consumer_attrs, false);
 
     let loading_attrs =
         machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.loading_indicator_attrs()));
@@ -472,7 +470,7 @@ pub fn ButtonAsChild(props: ButtonAsChildProps) -> Element {
         aria_labelledby,
     };
 
-    let attrs = machine.derive(move |api| dioxus_root_attrs(api, &id, &user_attrs, true));
+    let attrs = use_button_root_attrs(machine, &id, &user_attrs, &[], true);
 
     render.call(AsChildRenderProps { attrs: attrs() })
 }
@@ -514,6 +512,38 @@ fn dioxus_root_attrs(
     }
 
     dioxus_attrs
+}
+
+fn use_button_root_attrs(
+    machine: UseMachineReturn<button::Machine>,
+    id: &str,
+    user_attrs: &UserRootAttrs,
+    consumer_attrs: &[Attribute],
+    filter_native: bool,
+) -> Memo<Vec<Attribute>> {
+    let id = id.to_owned();
+    let user_attrs = user_attrs.clone();
+    let consumer_attrs = consumer_attrs.to_vec();
+    let state = machine.state;
+    let context_version = machine.context_version;
+    let service = machine.service;
+
+    use_memo(use_reactive!(|id,
+                            user_attrs,
+                            consumer_attrs,
+                            filter_native| {
+        let _ = &*state.read();
+        let _ = &*context_version.read();
+
+        let svc = service.peek();
+        let api = svc.connect(&|_e| {
+            #[cfg(debug_assertions)]
+            panic!("Cannot send events inside button root attr derivation");
+        });
+        let component_attrs = dioxus_root_attrs(&api, &id, &user_attrs, filter_native);
+
+        merge_dioxus_attrs(consumer_attrs.clone(), component_attrs)
+    }))
 }
 
 fn apply_user_root_attrs(attrs: &mut AttrMap, user_attrs: &UserRootAttrs) {

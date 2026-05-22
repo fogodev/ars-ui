@@ -8,7 +8,7 @@
 //! prop that pre-merges with the component's own class tokens in the
 //! `AttrMap` layer.
 
-#![cfg(all(not(target_arch = "wasm32"), feature = "ssr"))]
+#![cfg(all(not(target_arch = "wasm32"), feature = "ssr", feature = "icu4x"))]
 
 use ars_leptos::utility::{
     heading::{Heading, Level},

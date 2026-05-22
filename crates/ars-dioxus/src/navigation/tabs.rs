@@ -548,11 +548,10 @@ pub fn Tabs<K: TabKey>(props: TabsProps<K>) -> Element {
     let ever_selected = use_lazy_mount_tracking(machine);
 
     let root_attrs = tabs_root_attrs(machine);
-    let root_attrs = {
-        let consumer_attrs = consumer_attrs;
-
-        use_memo(move || merge_dioxus_attrs(consumer_attrs.clone(), root_attrs()))
-    };
+    let root_attrs = use_memo(use_reactive!(|consumer_attrs| merge_dioxus_attrs(
+        consumer_attrs.clone(),
+        root_attrs()
+    )));
     let list_attrs = tabs_list_attrs(machine, &config.tabs_meta);
 
     use_auto_direction_sync(machine, dir, &platform);

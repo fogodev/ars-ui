@@ -8,14 +8,21 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+use std::{cell::RefCell, rc::Rc};
+
+use ars_dioxus::navigation::tabs::{Tab, Tabs};
 use ars_dioxus::utility::{
+    button::Button,
     heading::{Heading, Level},
     highlight::Highlight,
     landmark::{Landmark, Role},
     separator::Separator,
     visually_hidden::VisuallyHidden,
 };
-use dioxus::prelude::*;
+use dioxus::{
+    dioxus_core::{NoOpMutations, ScopeId},
+    prelude::*,
+};
 
 fn render_app(app: fn() -> Element) -> String {
     let mut vdom = VirtualDom::new(app);
@@ -164,5 +171,122 @@ fn heading_data_ars_scope_wins_over_consumer_override() {
     assert!(
         !html.contains(r#"data-ars-scope="consumer-tried""#),
         "consumer override must NOT win on component-managed attrs: {html}"
+    );
+}
+
+#[test]
+fn button_updates_root_attrs_when_props_change() {
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "Dioxus root props are moved into the render function."
+    )]
+    fn app(class_slot: Rc<RefCell<Option<Signal<&'static str>>>>) -> Element {
+        let class_name = use_signal(|| "initial-button");
+
+        *class_slot.borrow_mut() = Some(class_name);
+
+        rsx! {
+            Button {
+                id: "reactive-button",
+                class: "{class_name}",
+                "data-state": "{class_name}",
+                "Save"
+            }
+        }
+    }
+
+    let class_slot = Rc::new(RefCell::new(None));
+    let mut dom = VirtualDom::new_with_props(app, Rc::clone(&class_slot));
+
+    dom.rebuild_in_place();
+
+    let html = dioxus_ssr::render(&dom);
+
+    assert!(
+        html.contains(r#"class="initial-button""#),
+        "initial class should render: {html}"
+    );
+    assert!(
+        html.contains(r#"data-state="initial-button""#),
+        "initial pass-through attr should render: {html}"
+    );
+
+    class_slot
+        .borrow()
+        .expect("class signal initialized")
+        .set("updated-button");
+
+    dom.mark_dirty(ScopeId::APP);
+    dom.render_immediate(&mut NoOpMutations);
+
+    let html = dioxus_ssr::render(&dom);
+
+    assert!(
+        html.contains(r#"class="updated-button""#),
+        "updated class should render after prop-only changes: {html}"
+    );
+    assert!(
+        html.contains(r#"data-state="updated-button""#),
+        "updated pass-through attr should render after prop-only changes: {html}"
+    );
+}
+
+#[test]
+fn tabs_updates_root_attrs_when_props_change() {
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "Dioxus root props are moved into the render function."
+    )]
+    fn app(class_slot: Rc<RefCell<Option<Signal<&'static str>>>>) -> Element {
+        let class_name = use_signal(|| "initial-tabs");
+
+        *class_slot.borrow_mut() = Some(class_name);
+
+        rsx! {
+            Tabs {
+                default_value: "first",
+                class: "{class_name}",
+                "data-state": "{class_name}",
+                tabs: [
+                    Tab::new_static("first", "First", rsx! { p { "First panel" } }),
+                    Tab::new_static("second", "Second", rsx! { p { "Second panel" } }),
+                ],
+            }
+        }
+    }
+
+    let class_slot = Rc::new(RefCell::new(None));
+    let mut dom = VirtualDom::new_with_props(app, Rc::clone(&class_slot));
+
+    dom.rebuild_in_place();
+
+    let html = dioxus_ssr::render(&dom);
+
+    assert!(
+        html.contains(r#"class="initial-tabs""#),
+        "initial class should render: {html}"
+    );
+    assert!(
+        html.contains(r#"data-state="initial-tabs""#),
+        "initial pass-through attr should render: {html}"
+    );
+
+    class_slot
+        .borrow()
+        .expect("class signal initialized")
+        .set("updated-tabs");
+
+    dom.mark_dirty(ScopeId::APP);
+    dom.render_immediate(&mut NoOpMutations);
+
+    let html = dioxus_ssr::render(&dom);
+
+    assert!(
+        html.contains(r#"class="updated-tabs""#),
+        "updated class should render after prop-only changes: {html}"
+    );
+    assert!(
+        html.contains(r#"data-state="updated-tabs""#),
+        "updated pass-through attr should render after prop-only changes: {html}"
     );
 }

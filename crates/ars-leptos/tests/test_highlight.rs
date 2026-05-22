@@ -1,6 +1,6 @@
 //! SSR tests for the Leptos `Highlight` adapter.
 
-#![cfg(all(not(target_arch = "wasm32"), feature = "ssr"))]
+#![cfg(all(not(target_arch = "wasm32"), feature = "ssr", feature = "icu4x"))]
 
 use ars_leptos::utility::highlight::{Highlight, MatchStrategy};
 use leptos::{prelude::*, reactive::owner::Owner};
