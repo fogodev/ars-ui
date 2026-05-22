@@ -456,7 +456,9 @@ impl ars_core::Machine for Machine {
 
             (_, Event::Blur) => {
                 Some(TransitionPlan::to(State::Closed).apply(|ctx| {
-                    if !props.allow_custom_value {
+                    if props.allow_custom_value {
+                        commit_raw_input_as_selection(ctx);
+                    } else {
                         if ctx.multiple {
                             ctx.input_value.set(String::new());
                         } else {
@@ -571,6 +573,11 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.items = new_items;
                     recompute_visible_keys_and_highlight(ctx);
+                    if props.allow_custom_value {
+                        preserve_selection_keys_even_when_absent_from_items(ctx);
+                    } else {
+                        drop_selection_keys_absent_from_items(ctx);
+                    }
                     if ctx.disabled {
                         ctx.open = false;
                     }
@@ -767,12 +774,20 @@ impl<'a> Api<'a> {
         (self.send)(Event::InputChange(value));
     }
 
+    /// The event handler for the input pointer click event.
+    pub fn on_input_click(&self) {
+        (self.send)(Event::Focus { is_keyboard: false });
+    }
+
     /// The event handler for the input keydown event.
     pub fn on_input_keydown(&self, data: &KeyboardEventData) {
         match data.key {
             KeyboardKey::ArrowDown if data.alt_key => (self.send)(Event::Open),
             KeyboardKey::ArrowDown => {
-                if !self.ctx.open { (self.send)(Event::Open); }
+                if !self.ctx.open {
+                    (self.send)(Event::Open);
+                    return;
+                }
                 (self.send)(Event::HighlightNext);
             }
             KeyboardKey::ArrowUp if data.alt_key => (self.send)(Event::Close),
