@@ -10,14 +10,16 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use ars_dioxus::navigation::tabs::{Tab, Tabs};
-use ars_dioxus::utility::{
-    button::Button,
-    heading::{Heading, Level},
-    highlight::Highlight,
-    landmark::{Landmark, Role},
-    separator::Separator,
-    visually_hidden::VisuallyHidden,
+use ars_dioxus::{
+    navigation::tabs::{Tab, Tabs},
+    utility::{
+        button::Button,
+        heading::{Heading, Level},
+        highlight::Highlight,
+        landmark::{Landmark, Role},
+        separator::Separator,
+        visually_hidden::VisuallyHidden,
+    },
 };
 use dioxus::{
     dioxus_core::{NoOpMutations, ScopeId},
