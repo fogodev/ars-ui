@@ -102,6 +102,8 @@ pub enum Event {
     CompositionStart,
     /// IME composition ended with the final committed input value.
     CompositionEnd(String),
+    /// Commit the current input value when no option is highlighted.
+    CommitInput,
 }
 ```
 
@@ -236,6 +238,8 @@ pub struct Props {
     /// even if it doesn't match any item in the collection.
     /// When `false` (default), non-matching input is reverted to the last valid selection on blur.
     pub allow_custom_value: bool,
+    /// Whether adapters detected an iOS VoiceOver focus strategy.
+    pub is_ios: bool,
     // Change callbacks provided by the adapter layer
 }
 
@@ -258,6 +262,7 @@ impl Default for Props {
             disabled_keys: BTreeSet::new(),
             on_open_change: None,
             allow_custom_value: false,
+            is_ios: false,
         }
     }
 }
@@ -741,6 +746,8 @@ impl<'a> Api<'a> {
                 if !self.ctx.is_composing {
                     if let Some(k) = &self.ctx.highlighted_key {
                         (self.send)(Event::SelectItem(k.clone()));
+                    } else {
+                        (self.send)(Event::CommitInput);
                     }
                 }
             }
@@ -1076,7 +1083,7 @@ Additional accessibility notes:
 | Typing    | Filters list, opens if closed                                                                                                         |
 | ArrowDown | Open or highlight next                                                                                                                |
 | ArrowUp   | Highlight previous                                                                                                                    |
-| Enter     | Select highlighted item                                                                                                               |
+| Enter     | Select highlighted item, or commit/revert the raw input according to `allow_custom_value` when no option is highlighted                |
 | Escape    | 3-phase (per APG inline autocomplete): (1) clear inline completion text if present, (2) close dropdown if open, (3) clear input value |
 
 > **Inline Autocomplete Announcements**: When using `FilterMode::InlineCompletion`,

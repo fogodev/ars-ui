@@ -109,6 +109,9 @@ pub enum Event {
     /// IME composition ended with the final committed input value.
     CompositionEnd(String),
 
+    /// Commit the current input value when no option is highlighted.
+    CommitInput,
+
     /// Mark whether a description element is rendered.
     SetDescriptionPresent(bool),
 
@@ -298,6 +301,9 @@ pub struct Props {
 
     /// Whether free-form values that do not match an item are accepted.
     pub allow_custom_value: bool,
+
+    /// Whether adapters detected an iOS `VoiceOver` focus strategy.
+    pub is_ios: bool,
 }
 
 impl Default for Props {
@@ -328,6 +334,7 @@ impl Default for Props {
             on_open_change: None,
             disabled_keys: BTreeSet::new(),
             allow_custom_value: false,
+            is_ios: false,
         }
     }
 }
@@ -513,6 +520,13 @@ impl Props {
         self.allow_custom_value = value;
         self
     }
+
+    /// Sets [`Self::is_ios`].
+    #[must_use]
+    pub const fn is_ios(mut self, value: bool) -> Self {
+        self.is_ios = value;
+        self
+    }
 }
 
 /// Messages for the Combobox component.
@@ -681,7 +695,7 @@ impl ars_core::Machine for Machine {
                 loop_focus: props.loop_focus,
                 is_composing: false,
                 has_description: false,
-                is_ios: false,
+                is_ios: props.is_ios,
                 ids: ComponentIds::from_id(&props.id),
                 locale: env.locale.clone(),
                 messages: messages.clone(),
@@ -709,6 +723,7 @@ impl ars_core::Machine for Machine {
                     | Event::HighlightNext
                     | Event::HighlightPrev
                     | Event::Clear
+                    | Event::CommitInput
             )
         {
             return None;
@@ -722,6 +737,7 @@ impl ars_core::Machine for Machine {
                     | Event::SelectItemCtrl(_)
                     | Event::DeselectItem(_)
                     | Event::Clear
+                    | Event::CommitInput
             )
         {
             return None;
@@ -734,10 +750,16 @@ impl ars_core::Machine for Machine {
                 let value = value.clone();
                 let visible_keys = visible_keys_for(ctx, &value);
                 let highlighted_key = first_visible_key(ctx, visible_keys.as_ref());
-                let should_open = !ctx.open && (!value.is_empty() || props.allows_empty_collection);
+                let should_open = should_open_for_input(ctx, props, &value, visible_keys.as_ref());
 
                 if should_open {
                     Some(open_plan(props).apply(move |ctx: &mut Context| {
+                        ctx.input_value.set(value);
+                        ctx.visible_keys = visible_keys;
+                        ctx.highlighted_key = highlighted_key;
+                    }))
+                } else if ctx.open && !props.allows_empty_collection {
+                    Some(close_plan(props).apply(move |ctx: &mut Context| {
                         ctx.input_value.set(value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
@@ -764,7 +786,9 @@ impl ars_core::Machine for Machine {
 
             (_, Event::Focus { is_keyboard }) => {
                 let is_keyboard = *is_keyboard;
-                if ctx.open_on_focus && !ctx.open {
+                let should_open = ctx.open_on_focus || (!is_keyboard && ctx.open_on_click);
+
+                if should_open && !ctx.open {
                     let highlighted_key = default_open_highlight(ctx, props);
                     Some(open_plan(props).apply(move |ctx: &mut Context| {
                         ctx.focused = true;
@@ -779,14 +803,19 @@ impl ars_core::Machine for Machine {
                 }
             }
 
-            (_, Event::Blur) => Some(TransitionPlan::to(State::Closed).apply(
-                |ctx: &mut Context| {
+            (_, Event::Blur) => Some(close_plan(props).apply({
+                let allow_custom_value = props.allow_custom_value;
+
+                move |ctx: &mut Context| {
+                    if !allow_custom_value {
+                        revert_input_to_selection(ctx);
+                    }
+
                     ctx.focused = false;
                     ctx.focus_visible = false;
-                    ctx.open = false;
                     ctx.highlighted_key = None;
-                },
-            )),
+                }
+            })),
 
             (State::Open, Event::HighlightNext) => {
                 let key = next_visible_key(ctx);
@@ -853,10 +882,37 @@ impl ars_core::Machine for Machine {
 
             (_, Event::UpdateItems(items)) => {
                 let items = items.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.items = items;
-                    invalidate_collection_references(ctx);
-                }))
+                let mut next_ctx = ctx.clone();
+                let input = next_ctx.input_value.get().clone();
+
+                next_ctx.items = items.clone();
+                next_ctx.visible_keys = visible_keys_for(&next_ctx, &input);
+                invalidate_collection_references(&mut next_ctx);
+
+                let should_open =
+                    should_open_for_input(&next_ctx, props, &input, next_ctx.visible_keys.as_ref());
+
+                if should_open {
+                    let input = input.clone();
+                    Some(open_plan(props).apply(move |ctx: &mut Context| {
+                        ctx.items = items;
+                        refresh_filter_and_highlight(ctx, &input);
+                        invalidate_collection_references(ctx);
+                    }))
+                } else if ctx.open && !props.allows_empty_collection {
+                    let input = input.clone();
+                    Some(close_plan(props).apply(move |ctx: &mut Context| {
+                        ctx.items = items;
+                        refresh_filter_and_highlight(ctx, &input);
+                        invalidate_collection_references(ctx);
+                    }))
+                } else {
+                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.items = items;
+                        refresh_filter_and_highlight(ctx, &input);
+                        invalidate_collection_references(ctx);
+                    }))
+                }
             }
 
             (_, Event::CompositionStart) => {
@@ -869,13 +925,33 @@ impl ars_core::Machine for Machine {
                 let value = value.clone();
                 let visible_keys = visible_keys_for(ctx, &value);
                 let highlighted_key = first_visible_key(ctx, visible_keys.as_ref());
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.is_composing = false;
-                    ctx.input_value.set(value);
-                    ctx.visible_keys = visible_keys;
-                    ctx.highlighted_key = highlighted_key;
-                }))
+                let should_open = should_open_for_input(ctx, props, &value, visible_keys.as_ref());
+
+                if should_open {
+                    Some(open_plan(props).apply(move |ctx: &mut Context| {
+                        ctx.is_composing = false;
+                        ctx.input_value.set(value);
+                        ctx.visible_keys = visible_keys;
+                        ctx.highlighted_key = highlighted_key;
+                    }))
+                } else if ctx.open && !props.allows_empty_collection {
+                    Some(close_plan(props).apply(move |ctx: &mut Context| {
+                        ctx.is_composing = false;
+                        ctx.input_value.set(value);
+                        ctx.visible_keys = visible_keys;
+                        ctx.highlighted_key = highlighted_key;
+                    }))
+                } else {
+                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.is_composing = false;
+                        ctx.input_value.set(value);
+                        ctx.visible_keys = visible_keys;
+                        ctx.highlighted_key = highlighted_key;
+                    }))
+                }
             }
+
+            (_, Event::CommitInput) => Some(commit_input_plan(ctx, props)),
 
             (_, Event::SetDescriptionPresent(present)) => {
                 let present = *present;
@@ -1006,7 +1082,8 @@ impl Api<'_> {
             );
         }
 
-        if !self.ctx.is_ios
+        if self.ctx.open
+            && !self.ctx.is_ios
             && let Some(key) = valid_highlight(self.ctx)
         {
             attrs.set(
@@ -1113,6 +1190,8 @@ impl Api<'_> {
             KeyboardKey::Enter if !composing || after_composition_check => {
                 if let Some(key) = &self.ctx.highlighted_key {
                     (self.send)(Event::SelectItem(key.clone()));
+                } else {
+                    (self.send)(Event::CommitInput);
                 }
             }
 
@@ -1725,10 +1804,84 @@ fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
         ctx.name = props.name.clone();
         ctx.form = props.form.clone();
         ctx.loop_focus = props.loop_focus;
+        ctx.is_ios = props.is_ios;
         ctx.ids = ComponentIds::from_id(&props.id);
 
         invalidate_collection_references(ctx);
     })
+}
+
+fn should_open_for_input(
+    ctx: &Context,
+    props: &Props,
+    value: &str,
+    visible_keys: Option<&BTreeSet<Key>>,
+) -> bool {
+    props.allows_empty_collection
+        || ((ctx.open || !value.is_empty()) && first_visible_key(ctx, visible_keys).is_some())
+}
+
+fn refresh_filter_and_highlight(ctx: &mut Context, input: &str) {
+    ctx.visible_keys = visible_keys_for(ctx, input);
+
+    if !ctx
+        .highlighted_key
+        .as_ref()
+        .is_some_and(|key| is_visible_focusable_key(ctx, key))
+    {
+        ctx.highlighted_key = first_visible_key(ctx, ctx.visible_keys.as_ref());
+    }
+}
+
+fn commit_input_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
+    if ctx.input_value.get().is_empty() {
+        return close_plan(props);
+    }
+
+    let input = ctx.input_value.get().clone();
+
+    if props.allow_custom_value {
+        let key = Key::str(input.clone());
+        let mut next = ctx.selection_state.select(key.clone());
+
+        next.selected_keys = selection::Set::Single(key);
+
+        let selected = next.selected_keys.clone();
+        let on_open_change = props.on_open_change.clone();
+
+        TransitionPlan::to(State::Closed).apply(move |ctx: &mut Context| {
+            let was_open = ctx.open;
+
+            ctx.selection.set(selected.clone());
+            ctx.selection_state = next.clone();
+            ctx.selection_state.selected_keys = ctx.selection.get().clone();
+            ctx.input_value.set(input);
+            ctx.open = false;
+            ctx.highlighted_key = None;
+            ctx.visible_keys = None;
+
+            if was_open && let Some(callback) = &on_open_change {
+                callback(false);
+            }
+        })
+    } else {
+        close_plan(props).apply(|ctx: &mut Context| {
+            revert_input_to_selection(ctx);
+        })
+    }
+}
+
+fn revert_input_to_selection(ctx: &mut Context) {
+    let label = ctx
+        .selection
+        .get()
+        .first()
+        .and_then(|key| ctx.items.get(key))
+        .map(|node| node.text_value.clone())
+        .unwrap_or_default();
+
+    ctx.input_value.set(label);
+    ctx.visible_keys = None;
 }
 
 fn default_open_highlight(ctx: &Context, props: &Props) -> Option<Key> {
@@ -2186,6 +2339,28 @@ mod tests {
     }
 
     #[test]
+    fn zero_result_input_respects_empty_collection_policy() {
+        let mut disallowed = make_service(Props::new().id("combo").open_on_focus(false));
+
+        send_event(&mut disallowed, Event::InputChange("zz".into()));
+
+        assert_eq!(disallowed.state(), &State::Closed);
+        assert_eq!(disallowed.context().highlighted_key, None);
+
+        let mut allowed = make_service(
+            Props::new()
+                .id("combo")
+                .open_on_focus(false)
+                .allows_empty_collection(true),
+        );
+
+        send_event(&mut allowed, Event::InputChange("zz".into()));
+
+        assert_eq!(allowed.state(), &State::Open);
+        assert_eq!(allowed.context().highlighted_key, None);
+    }
+
+    #[test]
     fn arrow_keys_navigate_filtered_list() {
         let mut service = make_service(Props::new().id("combo").open_on_focus(false));
 
@@ -2223,6 +2398,46 @@ mod tests {
     }
 
     #[test]
+    fn enter_commits_or_reverts_unmatched_custom_input() {
+        let mut custom = make_service(
+            Props::new()
+                .id("combo")
+                .open_on_focus(false)
+                .allow_custom_value(true),
+        );
+
+        send_event(&mut custom, Event::InputChange("Dragonfruit".into()));
+
+        dispatch_api(&mut custom, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Enter, None));
+        });
+
+        assert_eq!(custom.state(), &State::Closed);
+        assert_eq!(
+            custom.context().selection.get(),
+            &selection::Set::Single(Key::str("Dragonfruit"))
+        );
+        assert_eq!(custom.context().input_value.get(), "Dragonfruit");
+
+        let mut strict = make_service(Props::new().id("combo").open_on_focus(false));
+
+        send_event(&mut strict, Event::Open);
+        send_event(&mut strict, Event::SelectItem(key(1)));
+        send_event(&mut strict, Event::InputChange("Dragonfruit".into()));
+
+        dispatch_api(&mut strict, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Enter, None));
+        });
+
+        assert_eq!(strict.state(), &State::Closed);
+        assert_eq!(
+            strict.context().selection.get(),
+            &selection::Set::Single(key(1))
+        );
+        assert_eq!(strict.context().input_value.get(), "Apple");
+    }
+
+    #[test]
     fn ime_composition_suppresses_filtering_until_end() {
         let mut service = make_service(Props::new().id("combo").open_on_focus(false));
 
@@ -2237,6 +2452,7 @@ mod tests {
 
         assert!(!service.context().is_composing);
         assert_eq!(service.context().input_value.get(), "ba");
+        assert_eq!(service.state(), &State::Open);
         assert_eq!(service.context().highlighted_key, Some(key(2)));
     }
 
@@ -2380,6 +2596,7 @@ mod tests {
         send_event(&mut service, Event::Open);
         send_event(&mut service, Event::SelectItem(key(1)));
         send_event(&mut service, Event::Open);
+        send_event(&mut service, Event::InputChange(String::new()));
         send_event(&mut service, Event::HighlightItem(Some(key(2))));
         send_event(
             &mut service,
@@ -2394,6 +2611,45 @@ mod tests {
 
         assert_eq!(service.context().highlighted_key, Some(key(9)));
         assert!(service.context().selection.get().is_empty());
+    }
+
+    #[test]
+    fn update_items_recomputes_filter_against_replacement_collection() {
+        let mut service = make_service(Props::new().id("combo").open_on_focus(false));
+
+        send_event(&mut service, Event::InputChange("cher".into()));
+
+        assert_eq!(service.state(), &State::Closed);
+
+        let replacement = CollectionBuilder::new()
+            .item(
+                key(10),
+                "Cherry",
+                Item {
+                    label: "Cherry".into(),
+                },
+            )
+            .item(
+                key(11),
+                "Cherimoya",
+                Item {
+                    label: "Cherimoya".into(),
+                },
+            )
+            .build();
+
+        send_event(&mut service, Event::UpdateItems(replacement));
+
+        assert_eq!(service.state(), &State::Open);
+        assert_eq!(service.context().highlighted_key, Some(key(10)));
+
+        let visible = with_api(&service, |api| {
+            api.visible_items()
+                .map(|node| node.key.clone())
+                .collect::<Vec<_>>()
+        });
+
+        assert_eq!(visible, vec![key(10), key(11)]);
     }
 
     #[test]
@@ -2574,7 +2830,7 @@ mod tests {
 
         let props = Props::new()
             .id("combo")
-            .input_value("controlled input")
+            .input_value("ap")
             .default_input_value("default input")
             .value(selection::Set::Single(key(1)))
             .default_value(selection::Set::Single(key(2)))
@@ -2585,9 +2841,10 @@ mod tests {
             .default_highlighted_key(key(3))
             .allows_empty_collection(true)
             .on_open_change(callback)
+            .is_ios(true)
             .allow_custom_value(true);
 
-        assert_eq!(props.input_value.as_deref(), Some("controlled input"));
+        assert_eq!(props.input_value.as_deref(), Some("ap"));
         assert_eq!(props.default_input_value, "default input");
         assert_eq!(props.value, Some(selection::Set::Single(key(1))));
         assert_eq!(props.default_value, selection::Set::Single(key(2)));
@@ -2598,6 +2855,7 @@ mod tests {
         assert_eq!(props.default_highlighted_key, Some(key(3)));
         assert!(props.allows_empty_collection);
         assert!(props.on_open_change.is_some());
+        assert!(props.is_ios);
         assert!(props.allow_custom_value);
 
         let mut service = make_service(props);
@@ -2605,8 +2863,9 @@ mod tests {
         send_event(&mut service, Event::Open);
 
         assert_eq!(*opened.lock().unwrap(), vec![true]);
-        assert_eq!(service.context().input_value.get(), "controlled input");
+        assert_eq!(service.context().input_value.get(), "ap");
         assert_eq!(service.context().highlighted_key, Some(key(3)));
+        assert!(service.context().is_ios);
     }
 
     #[test]
@@ -2650,6 +2909,10 @@ mod tests {
         assert_eq!(combo.state(), &State::Closed);
         assert!(!combo.context().focused);
         assert!(!combo.context().focus_visible);
+        assert_eq!(
+            *opened.lock().unwrap(),
+            vec![true, false, true, false, true, false, true, false]
+        );
 
         let mut no_focus_open = make_service(Props::new().id("combo").open_on_focus(false));
 
@@ -2657,6 +2920,18 @@ mod tests {
 
         assert_eq!(no_focus_open.state(), &State::Closed);
         assert!(no_focus_open.context().focused);
+
+        let mut click_open = make_service(
+            Props::new()
+                .id("combo")
+                .open_on_focus(false)
+                .open_on_click(true),
+        );
+
+        send_event(&mut click_open, Event::Focus { is_keyboard: false });
+
+        assert_eq!(click_open.state(), &State::Open);
+        assert!(click_open.context().focused);
     }
 
     #[test]
@@ -3053,6 +3328,7 @@ mod tests {
             Props::new()
                 .id("combo")
                 .selection_mode(selection::Mode::Multiple)
+                .allows_empty_collection(true)
                 .default_value(selection::Set::Multiple(BTreeSet::from([key(1)]))),
         );
 
