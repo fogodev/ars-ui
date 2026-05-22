@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/selection/listbox/mod.rs
+expression: "snapshot_attrs(&api.item_group_label_attrs(&key(\"group\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item-group-label",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "listbox",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "lb-group-group-label",
+            ),
+        ),
+    ],
+    styles: [],
+}

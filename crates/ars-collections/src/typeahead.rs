@@ -98,6 +98,36 @@ impl State {
         (new_state, found)
     }
 
+    /// Process a new character with a caller-provided locale value.
+    ///
+    /// In non-i18n builds this delegates to [`process_char`](Self::process_char)
+    /// and ignores the locale, giving downstream crates a stable call shape
+    /// when dependency feature unification enables `ars-collections/i18n`.
+    #[cfg(not(feature = "i18n"))]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "stable locale-aware wrapper mirrors process_char inputs"
+    )]
+    pub fn process_char_with_locale<T, C: Collection<T>, L: ?Sized>(
+        &self,
+        ch: char,
+        now_ms: u64,
+        current_focus: Option<&Key>,
+        collection: &C,
+        _locale: &L,
+        disabled_keys: &BTreeSet<Key>,
+        disabled_behavior: DisabledBehavior,
+    ) -> (Self, Option<Key>) {
+        self.process_char(
+            ch,
+            now_ms,
+            current_focus,
+            collection,
+            disabled_keys,
+            disabled_behavior,
+        )
+    }
+
     /// Find the first item whose `text_value` starts with `search` using ASCII
     /// case folding, beginning the search from the item *after* `current_focus`
     /// (single-char, cycling) or *at* `current_focus` (multi-char, refining).
@@ -223,6 +253,37 @@ impl State {
         };
 
         (new_state, found)
+    }
+
+    /// Process a new character with locale-aware case folding.
+    ///
+    /// This is the stable downstream call shape for components that always
+    /// carry a locale in context, regardless of how Cargo feature unification
+    /// activates `ars-collections/i18n`.
+    #[cfg(feature = "i18n")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "stable locale-aware wrapper mirrors process_char inputs"
+    )]
+    pub fn process_char_with_locale<T, C: Collection<T>>(
+        &self,
+        ch: char,
+        now_ms: u64,
+        current_focus: Option<&Key>,
+        collection: &C,
+        locale: &Locale,
+        disabled_keys: &BTreeSet<Key>,
+        disabled_behavior: DisabledBehavior,
+    ) -> (Self, Option<Key>) {
+        self.process_char(
+            ch,
+            now_ms,
+            current_focus,
+            collection,
+            locale,
+            disabled_keys,
+            disabled_behavior,
+        )
     }
 
     /// Find the first item whose `text_value` starts with `search` using

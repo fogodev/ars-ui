@@ -24,7 +24,7 @@ debug = ["dep:log", "ars-core/debug", "ars-interactions/debug"]
 # `Intl` backend instead can build with `--no-default-features --features
 # std,ars-i18n/web-intl`; in that combination, modules gated on `i18n`
 # (Highlight) are not available.
-i18n = ["ars-i18n/icu4x"]
+i18n = ["ars-collections/i18n", "ars-i18n/icu4x"]
 uuid = ["ars-collections/uuid"]
 
 [dependencies]

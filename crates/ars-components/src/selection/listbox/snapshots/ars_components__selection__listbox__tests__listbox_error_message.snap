@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/selection/listbox/mod.rs
+expression: snapshot_attrs(&api.error_message_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "error-message",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "listbox",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "lb-error-message",
+            ),
+        ),
+    ],
+    styles: [],
+}

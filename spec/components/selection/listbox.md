@@ -84,6 +84,12 @@ pub enum Event {
     DeselectAll,
     /// The listbox performed a typeahead search.
     TypeaheadSearch(char, u64),
+    /// Clear the typeahead search buffer.
+    ClearTypeahead,
+    /// IME composition started.
+    CompositionStart,
+    /// IME composition ended.
+    CompositionEnd,
     /// Replace the item collection dynamically.
     UpdateItems(StaticCollection<Item>),
     /// An item was activated (Enter/double-click) — distinct from selection.
@@ -122,6 +128,8 @@ pub struct Context {
     pub focus_visible: bool,
     /// The orientation of the listbox.
     pub orientation: Orientation,
+    /// The resolved text direction used for horizontal arrow-key behavior.
+    pub dir: Direction,
     /// Whether the listbox loops focus.
     pub loop_focus: bool,
     /// True while an IME composition session is active (between CompositionStart
@@ -171,6 +179,8 @@ pub struct Props {
     pub invalid: bool,
     /// The orientation of the listbox.
     pub orientation: Orientation,
+    /// The resolved text direction used for horizontal arrow-key behavior.
+    pub dir: Direction,
     /// Whether the listbox loops focus.
     pub loop_focus: bool,
     /// When true, prevents deselecting the last selected item
@@ -207,6 +217,7 @@ impl Default for Props {
             required: false,
             invalid: false,
             orientation: Orientation::Vertical,
+            dir: Direction::Ltr,
             loop_focus: true,
             disallow_empty_selection: false,
             disabled_keys: BTreeSet::new(),
@@ -523,6 +534,7 @@ pub enum Part {
     ItemText { key: Key },
     ItemIndicator { key: Key },
     Description,
+    ErrorMessage,
     LoadingSentinel,
 }
 
@@ -690,6 +702,17 @@ impl<'a> Api<'a> {
         attrs
     }
 
+    /// The attributes for the error message element.
+    pub fn error_message_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ErrorMessage.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("error-message"));
+        attrs.set(HtmlAttr::Aria(AriaAttr::Live), "polite");
+        attrs
+    }
+
     /// Attributes for the loading sentinel element, rendered after the last item
     /// when `on_load_more` is configured. The framework adapter attaches an
     /// `IntersectionObserver` to this element; when it enters the viewport, the
@@ -795,6 +818,7 @@ impl ConnectApi for Api<'_> {
             Part::ItemText { ref key } => self.item_text_attrs(key),
             Part::ItemIndicator { ref key } => self.item_indicator_attrs(key),
             Part::Description => self.description_attrs(),
+            Part::ErrorMessage => self.error_message_attrs(),
             Part::LoadingSentinel => self.loading_sentinel_attrs().unwrap_or_default(),
         }
     }
@@ -814,6 +838,7 @@ impl ConnectApi for Api<'_> {
 | `ItemText`        | `[data-ars-scope="listbox"][data-ars-part="item-text"]`        | `<span>`                                                                      |
 | `ItemIndicator`   | `[data-ars-scope="listbox"][data-ars-part="item-indicator"]`   | `<div>`                                                                       |
 | `Description`     | `[data-ars-scope="listbox"][data-ars-part="description"]`      | `<div>`                                                                       |
+| `ErrorMessage`    | `[data-ars-scope="listbox"][data-ars-part="error-message"]`    | `<div>`                                                                       |
 | `LoadingSentinel` | `[data-ars-scope="listbox"][data-ars-part="loading-sentinel"]` | `<div>` (optional, after last Item; rendered only when `on_load_more` is set) |
 
 ## 3. Accessibility
@@ -851,17 +876,19 @@ impl ConnectApi for Api<'_> {
 
 ### 3.2 Keyboard Interaction
 
-| Key                  | Action                                |
-| -------------------- | ------------------------------------- |
-| ArrowDown/ArrowRight | Highlight next                        |
-| ArrowUp/ArrowLeft    | Highlight previous                    |
-| Home                 | Highlight first                       |
-| End                  | Highlight last                        |
-| Space / Enter        | Select/deselect highlighted           |
-| Ctrl+A               | Select all (multi-select)             |
-| Shift+ArrowDown      | Extend selection range (multi-select) |
-| Escape               | Deselect all                          |
-| a-z                  | Typeahead highlight                   |
+| Key                  | Action                                 |
+| -------------------- | -------------------------------------- |
+| ArrowDown/ArrowRight | Highlight next                         |
+| ArrowUp/ArrowLeft    | Highlight previous                     |
+| Home                 | Highlight first                        |
+| End                  | Highlight last                         |
+| PageUp               | Highlight up to 10 enabled items back  |
+| PageDown             | Highlight up to 10 enabled items ahead |
+| Space / Enter        | Select/deselect highlighted            |
+| Ctrl+A               | Select all (multi-select)              |
+| Shift+ArrowDown      | Extend selection range (multi-select)  |
+| Escape               | Deselect all                           |
+| a-z                  | Typeahead highlight                    |
 
 #### 3.2.1 RTL Arrow Key Handling
 

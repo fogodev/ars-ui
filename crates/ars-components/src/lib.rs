@@ -23,6 +23,9 @@ pub mod layout;
 /// Navigation component machines.
 pub mod navigation;
 
+/// Selection component machines.
+pub mod selection;
+
 /// Utility component machines.
 pub mod utility;
 
