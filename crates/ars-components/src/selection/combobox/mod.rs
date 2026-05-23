@@ -931,6 +931,12 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (_, Event::CompositionEnd(_)) if ctx.disabled || ctx.readonly => {
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.is_composing = false;
+                }))
+            }
+
             (_, Event::CompositionEnd(value)) => {
                 let value = value.clone();
                 let (visible_keys, highlighted_key, input_value) = input_change_values(ctx, &value);
@@ -1784,73 +1790,87 @@ fn select_item_plan(
 }
 
 fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
-    let close_open_popup = ctx.open && props.disabled;
     let props = props.clone();
+    let mut next_ctx = ctx.clone();
 
-    let plan = if close_open_popup {
+    apply_props_to_context(&mut next_ctx, &props);
+
+    let input = next_ctx.input_value.get().clone();
+    let should_open =
+        should_open_for_input(&next_ctx, &props, &input, next_ctx.visible_keys.as_ref());
+
+    let plan = if ctx.open && props.disabled {
+        close_plan(&props)
+    } else if should_open {
+        open_plan(&props)
+    } else if ctx.open && !props.allows_empty_collection {
         close_plan(&props)
     } else {
         TransitionPlan::context_only(|_: &mut Context| {})
     };
 
     plan.apply(move |ctx: &mut Context| {
-        let selected = props
-            .value
-            .clone()
-            .unwrap_or_else(|| ctx.selection.get().clone());
-
-        let selected = normalize_selection_for_mode(selected, props.selection_mode);
-
-        ctx.input_value.sync_controlled(props.input_value.clone());
-
-        if let Some(value) = &props.input_value {
-            ctx.input_value.set(value.clone());
-        }
-
-        ctx.selection.sync_controlled(if props.value.is_some() {
-            Some(selected.clone())
-        } else {
-            None
-        });
-        ctx.selection.set(selected.clone());
-        ctx.selection_state.mode = props.selection_mode;
-        ctx.selection_state.behavior = props.selection_behavior;
-        ctx.selection_state.disabled_behavior = props.disabled_behavior;
-        ctx.selection_state.disabled_keys = props.disabled_keys.clone();
-        ctx.selection_state.selected_keys = selected;
-
-        remove_disabled_selection_keys(&mut ctx.selection_state);
-
-        let selected = ctx.selection_state.selected_keys.clone();
-        ctx.selection.sync_controlled(if props.value.is_some() {
-            Some(selected.clone())
-        } else {
-            None
-        });
-        ctx.selection.set(selected);
-
-        ctx.disabled = props.disabled;
-        ctx.readonly = props.readonly;
-        ctx.required = props.required;
-        ctx.invalid = props.invalid;
-        ctx.multiple = props.selection_mode == selection::Mode::Multiple;
-        ctx.filter_mode = props.filter_mode;
-        ctx.open_on_focus = props.open_on_focus;
-        ctx.open_on_click = props.open_on_click;
-        ctx.name = props.name.clone();
-        ctx.form = props.form.clone();
-        ctx.loop_focus = props.loop_focus;
-        ctx.is_ios = props.is_ios;
-        ctx.ids = ComponentIds::from_id(&props.id);
-
-        invalidate_collection_references(ctx, props.allow_custom_value);
-
-        let input = ctx.input_value.get().clone();
-
-        if !input.is_empty() || ctx.visible_keys.is_some() {
-            refresh_filter_and_highlight(ctx, &input);
-        }
+        apply_props_to_context(ctx, &props);
     })
+}
+
+fn apply_props_to_context(ctx: &mut Context, props: &Props) {
+    let selected = props
+        .value
+        .clone()
+        .unwrap_or_else(|| ctx.selection.get().clone());
+
+    let selected = normalize_selection_for_mode(selected, props.selection_mode);
+
+    ctx.input_value.sync_controlled(props.input_value.clone());
+
+    if let Some(value) = &props.input_value {
+        ctx.input_value.set(value.clone());
+    }
+
+    ctx.selection.sync_controlled(if props.value.is_some() {
+        Some(selected.clone())
+    } else {
+        None
+    });
+    ctx.selection.set(selected.clone());
+    ctx.selection_state.mode = props.selection_mode;
+    ctx.selection_state.behavior = props.selection_behavior;
+    ctx.selection_state.disabled_behavior = props.disabled_behavior;
+    ctx.selection_state.disabled_keys = props.disabled_keys.clone();
+    ctx.selection_state.selected_keys = selected;
+
+    remove_disabled_selection_keys(&mut ctx.selection_state);
+
+    let selected = ctx.selection_state.selected_keys.clone();
+    ctx.selection.sync_controlled(if props.value.is_some() {
+        Some(selected.clone())
+    } else {
+        None
+    });
+    ctx.selection.set(selected);
+
+    ctx.disabled = props.disabled;
+    ctx.readonly = props.readonly;
+    ctx.required = props.required;
+    ctx.invalid = props.invalid;
+    ctx.multiple = props.selection_mode == selection::Mode::Multiple;
+    ctx.filter_mode = props.filter_mode;
+    ctx.open_on_focus = props.open_on_focus;
+    ctx.open_on_click = props.open_on_click;
+    ctx.name = props.name.clone();
+    ctx.form = props.form.clone();
+    ctx.loop_focus = props.loop_focus;
+    ctx.is_ios = props.is_ios;
+    ctx.ids = ComponentIds::from_id(&props.id);
+
+    invalidate_collection_references(ctx, props.allow_custom_value);
+
+    let input = ctx.input_value.get().clone();
+
+    if !input.is_empty() || ctx.visible_keys.is_some() {
+        refresh_filter_and_highlight(ctx, &input);
+    }
 }
 
 fn should_open_for_input(
@@ -2281,18 +2301,36 @@ fn normalize_selection_for_mode(selected: selection::Set, mode: selection::Mode)
 
 fn serialize_selection(selection: &selection::Set) -> String {
     match selection {
-        selection::Set::Single(key) => key.to_string(),
+        selection::Set::Single(key) => serialize_key(key),
 
-        selection::Set::Multiple(keys) => keys
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(","),
+        selection::Set::Multiple(keys) => {
+            keys.iter().map(serialize_key).collect::<Vec<_>>().join(",")
+        }
 
         selection::Set::All => ALL_SELECTION_SENTINEL.to_string(),
 
         _ => String::new(),
     }
+}
+
+fn serialize_key(key: &Key) -> String {
+    let raw = key.to_string();
+
+    if raw == ALL_SELECTION_SENTINEL {
+        return "%5F%5Fars_all".to_string();
+    }
+
+    let mut encoded = String::new();
+
+    for ch in raw.chars() {
+        match ch {
+            '%' => encoded.push_str("%25"),
+            ',' => encoded.push_str("%2C"),
+            _ => encoded.push(ch),
+        }
+    }
+
+    encoded
 }
 
 #[cfg(test)]
@@ -2728,6 +2766,43 @@ mod tests {
     }
 
     #[test]
+    fn composition_end_is_ignored_when_disabled_or_readonly() {
+        let mut disabled = make_service(
+            Props::new()
+                .id("disabled")
+                .disabled(true)
+                .default_input_value("before"),
+        );
+        let disabled_visible = disabled.context().visible_keys.clone();
+        let disabled_highlighted = disabled.context().highlighted_key.clone();
+
+        send_event(&mut disabled, Event::CompositionStart);
+        send_event(&mut disabled, Event::CompositionEnd("ba".into()));
+
+        assert!(!disabled.context().is_composing);
+        assert_eq!(disabled.context().input_value.get(), "before");
+        assert_eq!(disabled.context().visible_keys, disabled_visible);
+        assert_eq!(disabled.context().highlighted_key, disabled_highlighted);
+
+        let mut readonly = make_service(
+            Props::new()
+                .id("readonly")
+                .readonly(true)
+                .default_input_value("before"),
+        );
+        let readonly_visible = readonly.context().visible_keys.clone();
+        let readonly_highlighted = readonly.context().highlighted_key.clone();
+
+        send_event(&mut readonly, Event::CompositionStart);
+        send_event(&mut readonly, Event::CompositionEnd("ba".into()));
+
+        assert!(!readonly.context().is_composing);
+        assert_eq!(readonly.context().input_value.get(), "before");
+        assert_eq!(readonly.context().visible_keys, readonly_visible);
+        assert_eq!(readonly.context().highlighted_key, readonly_highlighted);
+    }
+
+    #[test]
     fn keyboard_process_marks_composition_and_suppresses_enter() {
         let mut service = make_service(Props::new().id("combo").open_on_focus(false));
 
@@ -2801,6 +2876,56 @@ mod tests {
             assert_eq!(
                 api.hidden_input_attrs().get(&HtmlAttr::Value),
                 Some("__ars_all")
+            );
+        });
+
+        let mut sentinel_key = Service::<Machine>::new(
+            Props::new().id("combo").name("fruit"),
+            &Env::default(),
+            &Messages::default(),
+        );
+        let sentinel = Key::str("__ars_all");
+
+        send_event(
+            &mut sentinel_key,
+            Event::UpdateItems(StaticCollection::new([(
+                sentinel.clone(),
+                "__ars_all".to_string(),
+                Item {
+                    label: "__ars_all".into(),
+                },
+            )])),
+        );
+        send_event(&mut sentinel_key, Event::SelectItem(sentinel));
+
+        with_api(&sentinel_key, |api| {
+            assert_eq!(
+                api.hidden_input_attrs().get(&HtmlAttr::Value),
+                Some("%5F%5Fars_all")
+            );
+        });
+    }
+
+    #[test]
+    fn hidden_input_escapes_multiple_key_delimiters() {
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .name("fruit")
+                .selection_mode(selection::Mode::Multiple)
+                .allow_custom_value(true)
+                .open_on_focus(false),
+        );
+
+        send_event(&mut service, Event::InputChange("a,b".into()));
+        dispatch_api(&mut service, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Enter, None));
+        });
+
+        with_api(&service, |api| {
+            assert_eq!(
+                api.hidden_input_attrs().get(&HtmlAttr::Value),
+                Some("a%2Cb")
             );
         });
     }
@@ -3357,6 +3482,44 @@ mod tests {
         assert!(!combo.context().open);
         assert!(combo.context().disabled);
         assert_eq!(combo.context().highlighted_key, None);
+        assert_eq!(*opened.lock().unwrap(), vec![true, false]);
+    }
+
+    #[test]
+    fn prop_sync_controlled_input_recomputes_open_state() {
+        let opened = Arc::new(Mutex::new(Vec::new()));
+
+        let callback = Callback::new({
+            let opened = Arc::clone(&opened);
+            move |open| {
+                opened.lock().unwrap().push(open);
+            }
+        });
+
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .on_open_change(callback.clone())
+                .open_on_focus(false),
+        );
+
+        send_event(&mut service, Event::Open);
+
+        assert_eq!(service.state(), &State::Open);
+
+        service.set_props(
+            Props::new()
+                .id("combo")
+                .input_value("zz")
+                .on_open_change(callback)
+                .open_on_focus(false),
+        );
+        send_event(&mut service, Event::SyncProps);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert_eq!(service.context().visible_keys, Some(BTreeSet::new()));
+        assert_eq!(service.context().highlighted_key, None);
         assert_eq!(*opened.lock().unwrap(), vec![true, false]);
     }
 
