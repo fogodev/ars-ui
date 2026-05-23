@@ -820,13 +820,16 @@ impl ars_core::Machine for Machine {
 
             (_, Event::Blur) => Some(close_plan(props).apply({
                 let allow_custom_value = props.allow_custom_value;
+                let was_open = ctx.open;
 
                 move |ctx: &mut Context| {
                     if !ctx.disabled && !ctx.readonly {
                         if allow_custom_value {
                             let input = ctx.input_value.get().clone();
 
-                            if !input_matches_selected_item_label(ctx, &input) {
+                            if (!ctx.multiple || !was_open)
+                                && !input_matches_selected_item_label(ctx, &input)
+                            {
                                 apply_custom_input_commit(ctx, input);
                             }
                         } else {
@@ -1971,7 +1974,9 @@ fn refresh_filter_and_highlight(ctx: &mut Context, input: &str) {
 fn commit_input_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
     if ctx.input_value.get().is_empty() {
         return if props.allow_custom_value {
-            close_plan(props)
+            close_plan(props).apply(|ctx: &mut Context| {
+                apply_custom_input_commit(ctx, String::new());
+            })
         } else {
             close_plan(props).apply(|ctx: &mut Context| {
                 revert_input_to_selection(ctx);
@@ -1982,6 +1987,10 @@ fn commit_input_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
     let input = ctx.input_value.get().clone();
 
     if props.allow_custom_value {
+        if input_matches_selected_item_label(ctx, &input) {
+            return close_plan(props);
+        }
+
         let on_open_change = props.on_open_change.clone();
 
         if ctx.multiple {
@@ -2008,7 +2017,22 @@ fn commit_input_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
 }
 
 fn apply_custom_input_commit(ctx: &mut Context, input: String) {
-    if input.is_empty() || input == ALL_SELECTION_SENTINEL {
+    if input.is_empty() {
+        if !ctx.multiple {
+            let next = ctx.selection_state.clear();
+            ctx.selection_state = next;
+            let selected = ctx.selection_state.selected_keys.clone();
+            ctx.selection_state.selected_keys = set_selection_value(ctx, selected);
+        }
+
+        ctx.input_value.set(String::new());
+        ctx.visible_keys = None;
+        ctx.highlighted_key = None;
+        ctx.inline_completion_prefix = None;
+        return;
+    }
+
+    if input == ALL_SELECTION_SENTINEL {
         return;
     }
 
@@ -2699,6 +2723,21 @@ mod tests {
         );
         assert_eq!(custom.context().input_value.get(), "Dragonfruit");
 
+        send_event(&mut custom, Event::Open);
+        send_event(&mut custom, Event::SelectItem(key(1)));
+
+        dispatch_api(&mut custom, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Enter, None));
+        });
+
+        assert_eq!(
+            custom.context().selection.get(),
+            &selection::Set::Single(key(1))
+        );
+        with_api(&custom, |api| {
+            assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some("1"));
+        });
+
         let mut strict = make_service(Props::new().id("combo").open_on_focus(false));
 
         send_event(&mut strict, Event::Open);
@@ -2853,6 +2892,38 @@ mod tests {
             service.context().selection.get(),
             &selection::Set::Single(Key::str("Dragonfruit"))
         );
+
+        send_event(&mut service, Event::InputChange(String::new()));
+        send_event(&mut service, Event::Blur);
+
+        assert!(service.context().selection.get().is_empty());
+        with_api(&service, |api| {
+            assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some(""));
+        });
+    }
+
+    #[test]
+    fn multi_select_item_click_after_custom_blur_does_not_add_filter_text() {
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .name("fruit")
+                .selection_mode(selection::Mode::Multiple)
+                .allow_custom_value(true)
+                .open_on_focus(false),
+        );
+
+        send_event(&mut service, Event::InputChange("ap".into()));
+        send_event(&mut service, Event::Blur);
+        send_event(&mut service, Event::SelectItem(key(1)));
+
+        assert_eq!(
+            service.context().selection.get(),
+            &selection::Set::Multiple(BTreeSet::from([key(1)]))
+        );
+        with_api(&service, |api| {
+            assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some("1"));
+        });
     }
 
     #[test]
