@@ -2178,7 +2178,11 @@ fn input_change_values(
     raw_value: &str,
 ) -> (Option<BTreeSet<Key>>, Option<Key>, String, Option<String>) {
     let visible_keys = visible_keys_for(ctx, raw_value);
-    let mut highlighted_key = first_visible_key(ctx, visible_keys.as_ref());
+    let mut highlighted_key = if matches!(ctx.filter_mode, FilterMode::Custom) {
+        None
+    } else {
+        first_visible_key(ctx, visible_keys.as_ref())
+    };
     let mut input_value = raw_value.to_string();
     let mut inline_completion_prefix = None;
 
@@ -3408,6 +3412,7 @@ mod tests {
             Props::new()
                 .id("combo")
                 .filter_mode(FilterMode::Custom)
+                .allow_custom_value(true)
                 .open_on_focus(false),
         );
 
@@ -3419,6 +3424,17 @@ mod tests {
 
         assert_eq!(api.visible_count(), 3);
         assert_eq!(service.context().visible_keys, None);
+        assert_eq!(service.context().highlighted_key, None);
+
+        dispatch_api(&mut service, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Enter, None));
+        });
+
+        assert_eq!(
+            service.context().selection.get(),
+            &selection::Set::Single(Key::str("does-not-match"))
+        );
+        assert_eq!(service.context().input_value.get(), "does-not-match");
     }
 
     #[test]

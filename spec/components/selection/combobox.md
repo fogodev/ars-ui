@@ -381,13 +381,19 @@ impl ars_core::Machine for Machine {
                     Some(keys)
                 };
 
-                // Highlight first visible enabled item
-                let first_key = match &visible {
-                    Some(keys) => keys.iter()
-                        .find(|k| !ctx.selection_state.is_disabled(k))
-                        .cloned(),
-                    None => first_enabled_key(&ctx.items, &ctx.selection_state.disabled_keys,
-                        ctx.selection_state.disabled_behavior),
+                // Highlight first visible enabled item. Custom filtering is
+                // adapter-owned, so raw input changes do not pre-highlight
+                // stale collection items before the adapter sends UpdateItems.
+                let first_key = if matches!(ctx.filter_mode, FilterMode::Custom) {
+                    None
+                } else {
+                    match &visible {
+                        Some(keys) => keys.iter()
+                            .find(|k| !ctx.selection_state.is_disabled(k))
+                            .cloned(),
+                        None => first_enabled_key(&ctx.items, &ctx.selection_state.disabled_keys,
+                            ctx.selection_state.disabled_behavior),
+                    }
                 };
 
                 let completed_value = match ctx.filter_mode {
@@ -844,7 +850,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Trigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.trigger_label)(&self.ctx.locale));
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.listbox_label)(&self.ctx.locale));
         attrs.set(HtmlAttr::TabIndex, "-1");
         attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.part("content"));
         if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
@@ -1131,7 +1137,7 @@ impl ConnectApi for Api<'_> {
 | `aria-autocomplete`     | Input   | `list` (filter only), `inline` (completion only), or `both` (filter + completion)                                                                                                                   |
 | `aria-activedescendant` | Input   | Highlighted item id (only set when a valid item is highlighted; **omit attribute entirely** when `highlighted_key` is `None` — setting it to an empty string or non-existent ID violates ARIA spec) |
 | `role`                  | Content | `listbox`                                                                                                                                                                                           |
-| `aria-label`            | Content | Trigger label fallback for the listbox; core omits `aria-labelledby` because it does not track whether the Label part is rendered                                                                    |
+| `aria-label`            | Content | Dedicated localized listbox label from `Messages.listbox_label`; core omits `aria-labelledby` because it does not track whether the Label part is rendered                                           |
 | `role`                  | Item    | `option`                                                                                                                                                                                            |
 | `aria-selected`         | Item    | `"true"` when selected, `"false"` when unselected (must be explicitly set, not omitted)                                                                                                             |
 | `role`                  | Empty   | `"none"`                                                                                                                                                                                            | Dedicated LiveRegion announces empty-state text |
@@ -1217,12 +1223,16 @@ pub struct Messages {
     pub trigger_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Accessible label for the clear button. Default: `"Clear value"`.
     pub clear_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Accessible label for the listbox popup. Default: `"Suggestions"`.
+    pub listbox_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Text shown when no results match the filter. Default: `"No results found"`.
     pub no_results: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Text shown while async options are loading. Default: `"Loading options…"`.
     pub loading: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Live region announcement for filtered result count.
     pub results_count: MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>,
+    /// Live region announcement for the highlighted inline-completion result.
+    pub result_highlight: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
@@ -1230,9 +1240,11 @@ impl Default for Messages {
         Self {
             trigger_label: MessageFn::static_str("Show suggestions"),
             clear_label: MessageFn::static_str("Clear value"),
+            listbox_label: MessageFn::static_str("Suggestions"),
             no_results: MessageFn::static_str("No results found"),
             loading: MessageFn::static_str("Loading options…"),
             results_count: MessageFn::new(|n, _locale| format!("{} results available", n)),
+            result_highlight: MessageFn::new(|label, _locale| format!("{} highlighted", label)),
         }
     }
 }
@@ -1247,8 +1259,9 @@ most common cases, but applications may need domain-specific filtering — for e
 matching, server-side search, or filtering on hidden metadata.
 
 When `filter_mode: FilterMode::Custom` is set, the machine **skips all built-in filtering**
-(the `InputChange` transition sets `visible_keys = None`, showing all items). Instead, the
-consumer provides a custom filter at the adapter level:
+(the `InputChange` transition sets `visible_keys = None` and leaves `highlighted_key = None` so
+Enter cannot select a stale item before adapter filtering completes). Instead, the consumer
+provides a custom filter at the adapter level:
 
 ```rust
 /// Signature of the custom filter callback provided via the adapter.
