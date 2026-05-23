@@ -811,7 +811,10 @@ impl ars_core::Machine for Machine {
                 move |ctx: &mut Context| {
                     if allow_custom_value {
                         let input = ctx.input_value.get().clone();
-                        apply_custom_input_commit(ctx, input);
+
+                        if !input_matches_selected_item_label(ctx, &input) {
+                            apply_custom_input_commit(ctx, input);
+                        }
                     } else {
                         revert_input_to_selection(ctx);
                     }
@@ -1209,7 +1212,9 @@ impl Api<'_> {
             KeyboardKey::End if data.alt_key => (self.send)(Event::HighlightLast),
 
             KeyboardKey::Enter if !composing || after_composition_check => {
-                if let Some(key) = &self.ctx.highlighted_key {
+                if self.ctx.open
+                    && let Some(key) = &self.ctx.highlighted_key
+                {
                     (self.send)(Event::SelectItem(key.clone()));
                 } else {
                     (self.send)(Event::CommitInput);
@@ -1797,7 +1802,7 @@ fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
 
     let input = next_ctx.input_value.get().clone();
     let should_open =
-        should_open_for_input(&next_ctx, &props, &input, next_ctx.visible_keys.as_ref());
+        should_open_for_items_update(&next_ctx, &props, &input, next_ctx.visible_keys.as_ref());
 
     let plan = if ctx.open && props.disabled {
         close_plan(&props)
@@ -1962,6 +1967,16 @@ fn apply_custom_input_commit(ctx: &mut Context, input: String) {
 
     ctx.highlighted_key = None;
     ctx.visible_keys = None;
+}
+
+fn input_matches_selected_item_label(ctx: &Context, input: &str) -> bool {
+    match ctx.selection.get() {
+        selection::Set::Single(key) => ctx
+            .items
+            .get(key)
+            .is_some_and(|node| node.text_value == input),
+        _ => false,
+    }
 }
 
 fn revert_input_to_selection(ctx: &mut Context) {
@@ -2721,6 +2736,31 @@ mod tests {
             service.context().selection.get(),
             &selection::Set::Single(Key::str("Dragonfruit"))
         );
+    }
+
+    #[test]
+    fn custom_value_blur_preserves_selected_item_key() {
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .name("fruit")
+                .allow_custom_value(true),
+        );
+
+        send_event(&mut service, Event::Open);
+        send_event(&mut service, Event::SelectItem(key(1)));
+
+        assert_eq!(service.context().input_value.get(), "Apple");
+
+        send_event(&mut service, Event::Blur);
+
+        assert_eq!(
+            service.context().selection.get(),
+            &selection::Set::Single(key(1))
+        );
+        with_api(&service, |api| {
+            assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some("1"));
+        });
     }
 
     #[test]
@@ -3524,6 +3564,35 @@ mod tests {
     }
 
     #[test]
+    fn prop_sync_does_not_passively_open_empty_allowed_combobox() {
+        let mut service = Service::<Machine>::new(
+            Props::new()
+                .id("combo")
+                .allows_empty_collection(true)
+                .open_on_focus(false),
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        send_event(&mut service, Event::UpdateItems(collection()));
+
+        assert_eq!(service.state(), &State::Closed);
+
+        service.set_props(
+            Props::new()
+                .id("combo")
+                .allows_empty_collection(true)
+                .open_on_focus(false)
+                .invalid(true),
+        );
+        send_event(&mut service, Event::SyncProps);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert!(service.context().invalid);
+    }
+
+    #[test]
     fn highlight_first_last_explicit_and_no_loop_edges() {
         let mut combo = make_service(Props::new().id("combo").loop_focus(false));
 
@@ -3782,6 +3851,20 @@ mod tests {
             })
             .is_empty()
         );
+
+        let mut closed_highlight = make_service(
+            Props::new()
+                .id("combo")
+                .default_highlighted_key(key(1))
+                .open_on_focus(false),
+        );
+
+        dispatch_api(&mut closed_highlight, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Enter, None));
+        });
+
+        assert_eq!(closed_highlight.state(), &State::Closed);
+        assert!(closed_highlight.context().selection.get().is_empty());
 
         let mut service = make_service(Props::new().id("combo").open_on_focus(false));
 
