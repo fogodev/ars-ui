@@ -1,0 +1,87 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3e4309d80bfc",
+  "session_id": "019e4d52-5c59-7253-a1b2-98c2eb5a7612",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-23T22:35:12.571047Z",
+  "branch": "t3code/d9d993f1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/selection/combobox/mod.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "09790feda1ed",
+  "checkpoint_transcript_start": 8327,
+  "transcript_lines_at_start": 8327,
+  "token_usage": {
+    "input_tokens": 93672,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 3763840,
+    "output_tokens": 9552,
+    "api_call_count": 52
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Fix three Codex-identified edge cases in the combobox component around custom-value commits: blur-before-item-click adding filter text, Enter preserving canonical keys instead of custom text, and clearing stale selection on empty custom input.",
+    "outcome": "All three regressions were fixed via TDD (failing tests added first, then minimal machine changes), 54 combobox unit tests pass green, and changes were committed and pushed as a follow-up to the inline-completion fix (c54e7d7e).",
+    "learnings": {
+      "repo": [
+        "The combobox state machine uses a closure-captured context, so checking ctx.open inside a blur closure reads already-closed state; the pre-blur open state must be captured before building the close transition.",
+        "cargo test only accepts a single test filter argument — multiple space-separated test names are silently ignored; use a module-level filter instead.",
+        "The repo has existing stable-rustfmt warnings that appear during cargo fmt --check but do not block CI.",
+        "Codex review is triggered via '@codex review' PR comment and signals in-progress status with a 👀 reaction; completion is indicated by the reaction being removed and/or new review threads appearing.",
+        "The project uses llvm-cov for coverage (cargo llvm-cov test) and has a multi-job CI matrix including clippy, formatting, mutual-exclusion, snapshot, unit, adapter, coverage, release verification, and feature-flag variants (Dioxus, Leptos, subsystems)."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 2030,
+          "end_line": 2075,
+          "finding": "CommitInput path applied custom text even when input matched the label of an already-selected item, causing canonical key to be overwritten with display label."
+        },
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 2858,
+          "end_line": 2915,
+          "finding": "Blur handler closure checked ctx.open after close transition was already applied, making the open-state check always see closed; fix requires capturing open state before building the transition."
+        },
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 760,
+          "end_line": 880,
+          "finding": "Multi-select blur committed filter text as a custom value before the subsequent item-click event could fire, resulting in spurious additions to the selection."
+        }
+      ],
+      "workflow": [
+        "TDD cycle: add focused regression tests that reproduce the exact Codex findings (RED), then apply minimal machine changes (GREEN) before committing — avoids fixing the wrong thing.",
+        "Pre-commit verification sequence: cargo fmt --check, git diff --check, cargo clippy -p <crate> --all-targets --all-features -- -D warnings, cargo llvm-cov test scoped to affected module.",
+        "Codex review polling used 2-minute sleep intervals with combined reaction + thread + CI checks in a single shell compound to minimize round trips.",
+        "Inline review thread replies include the fixing commit SHA for traceability before resolving threads."
+      ]
+    },
+    "friction": [
+      "cargo test silently ignores multiple space-separated test name filters — only the first is used, requiring a switch to module-level filtering.",
+      "Blur closure captured stale context state, requiring a non-obvious fix (pre-capture open flag) that was only discovered after the first GREEN attempt still had one failing test.",
+      "Codex review polling required ~8 two-minute sleep cycles (~16 minutes) before findings appeared, with no way to get an earlier signal than the 👀 reaction drop."
+    ],
+    "open_items": [
+      "CI coverage, release verification, and Dioxus feature-flag jobs were still pending at commit time — final CI green status not confirmed in transcript.",
+      "The existing stable-rustfmt warnings that appear during cargo fmt --check were noted but not addressed."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-23T22:34:49.513205Z",
+    "agent_lines": 74,
+    "agent_removed": 3,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 74,
+    "total_lines_changed": 77,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
