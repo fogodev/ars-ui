@@ -1974,7 +1974,7 @@ fn should_open_for_input(
 ) -> bool {
     !props.disabled
         && (props.allows_empty_collection
-            || ((ctx.open || !value.is_empty()) && first_visible_key(ctx, visible_keys).is_some()))
+            || ((ctx.open || !value.is_empty()) && has_visible_items(ctx, visible_keys)))
 }
 
 fn should_open_for_items_update(
@@ -1984,9 +1984,8 @@ fn should_open_for_items_update(
     visible_keys: Option<&BTreeSet<Key>>,
 ) -> bool {
     !props.disabled
-        && ((ctx.open
-            && (props.allows_empty_collection || first_visible_key(ctx, visible_keys).is_some()))
-            || (!ctx.open && !value.is_empty() && first_visible_key(ctx, visible_keys).is_some()))
+        && ((ctx.open && (props.allows_empty_collection || has_visible_items(ctx, visible_keys)))
+            || (!ctx.open && !value.is_empty() && has_visible_items(ctx, visible_keys)))
 }
 
 fn refresh_filter_and_highlight(ctx: &mut Context, input: &str) {
@@ -2204,6 +2203,12 @@ fn first_visible_key(ctx: &Context, visible_keys: Option<&BTreeSet<Key>>) -> Opt
                 && is_focusable_key(ctx, &node.key)
         })
         .map(|node| node.key.clone())
+}
+
+fn has_visible_items(ctx: &Context, visible_keys: Option<&BTreeSet<Key>>) -> bool {
+    ctx.items.nodes().any(|node| {
+        node.node_type == NodeType::Item && visible_keys.is_none_or(|keys| keys.contains(&node.key))
+    })
 }
 
 fn last_visible_key(ctx: &Context) -> Option<Key> {
@@ -3324,6 +3329,54 @@ mod tests {
         send_event(&mut service, Event::HighlightNext);
 
         assert_eq!(service.context().highlighted_key, Some(key(3)));
+    }
+
+    #[test]
+    fn disabled_only_matches_keep_popup_visible_without_highlight() {
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .disabled_keys(BTreeSet::from([key(1)]))
+                .open_on_focus(false),
+        );
+
+        send_event(&mut service, Event::InputChange("app".into()));
+
+        assert_eq!(service.state(), &State::Open);
+        assert_eq!(service.context().highlighted_key, None);
+        with_api(&service, |api| {
+            assert_eq!(api.visible_count(), 1);
+        });
+    }
+
+    #[test]
+    fn update_items_keeps_popup_open_for_disabled_only_visible_results() {
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .disabled_keys(BTreeSet::from([key(1)]))
+                .open_on_focus(false),
+        );
+
+        send_event(&mut service, Event::InputChange("ap".into()));
+        assert_eq!(service.state(), &State::Open);
+        assert_eq!(service.context().highlighted_key, Some(key(3)));
+
+        let next_items = StaticCollection::new([(
+            key(1),
+            "Apple".to_string(),
+            Item {
+                label: "Apple".into(),
+            },
+        )]);
+
+        send_event(&mut service, Event::UpdateItems(next_items));
+
+        assert_eq!(service.state(), &State::Open);
+        assert_eq!(service.context().highlighted_key, None);
+        with_api(&service, |api| {
+            assert_eq!(api.visible_count(), 1);
+        });
     }
 
     #[test]
