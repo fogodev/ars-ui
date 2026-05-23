@@ -114,6 +114,9 @@ pub enum Event {
     /// Commit the current input value when no option is highlighted.
     CommitInput,
 
+    /// Clear the inline completion suffix while preserving the typed prefix.
+    ClearInlineCompletion,
+
     /// Mark whether a description element is rendered.
     SetDescriptionPresent(bool),
 
@@ -209,6 +212,9 @@ pub struct Context {
 
     /// Whether IME composition is active.
     pub is_composing: bool,
+
+    /// Typed prefix that produced the current inline completion, if any.
+    pub inline_completion_prefix: Option<String>,
 
     /// Whether a description element is rendered.
     pub has_description: bool,
@@ -696,6 +702,7 @@ impl ars_core::Machine for Machine {
                 form: props.form.clone(),
                 loop_focus: props.loop_focus,
                 is_composing: false,
+                inline_completion_prefix: None,
                 has_description: false,
                 is_ios: props.is_ios,
                 ids: ComponentIds::from_id(&props.id),
@@ -727,6 +734,7 @@ impl ars_core::Machine for Machine {
                     | Event::Focus { .. }
                     | Event::Clear
                     | Event::CommitInput
+                    | Event::ClearInlineCompletion
             )
         {
             return None;
@@ -741,6 +749,7 @@ impl ars_core::Machine for Machine {
                     | Event::DeselectItem(_)
                     | Event::Clear
                     | Event::CommitInput
+                    | Event::ClearInlineCompletion
             )
         {
             return None;
@@ -751,7 +760,8 @@ impl ars_core::Machine for Machine {
 
             (_, Event::InputChange(value)) => {
                 let value = value.clone();
-                let (visible_keys, highlighted_key, input_value) = input_change_values(ctx, &value);
+                let (visible_keys, highlighted_key, input_value, inline_completion_prefix) =
+                    input_change_values(ctx, &value);
                 let should_open = should_open_for_input(ctx, props, &value, visible_keys.as_ref());
 
                 if should_open {
@@ -759,18 +769,21 @@ impl ars_core::Machine for Machine {
                         ctx.input_value.set(input_value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
+                        ctx.inline_completion_prefix = inline_completion_prefix;
                     }))
                 } else if ctx.open && !props.allows_empty_collection {
                     Some(close_plan(props).apply(move |ctx: &mut Context| {
                         ctx.input_value.set(input_value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
+                        ctx.inline_completion_prefix = inline_completion_prefix;
                     }))
                 } else {
                     Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                         ctx.input_value.set(input_value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
+                        ctx.inline_completion_prefix = inline_completion_prefix;
                     }))
                 }
             }
@@ -889,6 +902,7 @@ impl ars_core::Machine for Machine {
                 ctx.input_value.set(String::new());
                 ctx.visible_keys = None;
                 ctx.highlighted_key = None;
+                ctx.inline_completion_prefix = None;
             })),
 
             (_, Event::UpdateItems(items)) => {
@@ -945,7 +959,8 @@ impl ars_core::Machine for Machine {
 
             (_, Event::CompositionEnd(value)) => {
                 let value = value.clone();
-                let (visible_keys, highlighted_key, input_value) = input_change_values(ctx, &value);
+                let (visible_keys, highlighted_key, input_value, inline_completion_prefix) =
+                    input_change_values(ctx, &value);
                 let should_open = should_open_for_input(ctx, props, &value, visible_keys.as_ref());
 
                 if should_open {
@@ -954,6 +969,7 @@ impl ars_core::Machine for Machine {
                         ctx.input_value.set(input_value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
+                        ctx.inline_completion_prefix = inline_completion_prefix;
                     }))
                 } else if ctx.open && !props.allows_empty_collection {
                     Some(close_plan(props).apply(move |ctx: &mut Context| {
@@ -961,6 +977,7 @@ impl ars_core::Machine for Machine {
                         ctx.input_value.set(input_value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
+                        ctx.inline_completion_prefix = inline_completion_prefix;
                     }))
                 } else {
                     Some(TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -968,11 +985,21 @@ impl ars_core::Machine for Machine {
                         ctx.input_value.set(input_value);
                         ctx.visible_keys = visible_keys;
                         ctx.highlighted_key = highlighted_key;
+                        ctx.inline_completion_prefix = inline_completion_prefix;
                     }))
                 }
             }
 
             (_, Event::CommitInput) => Some(commit_input_plan(ctx, props)),
+
+            (_, Event::ClearInlineCompletion) => {
+                ctx.inline_completion_prefix.clone().map(|prefix| {
+                    TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.input_value.set(prefix);
+                        ctx.inline_completion_prefix = None;
+                    })
+                })
+            }
 
             (_, Event::SetDescriptionPresent(present)) => {
                 let present = *present;
@@ -1227,7 +1254,14 @@ impl Api<'_> {
             KeyboardKey::Tab if !composing => (self.send)(Event::Close),
 
             KeyboardKey::Escape => {
-                if self.ctx.open {
+                if self.ctx.inline_completion_prefix.is_some()
+                    && matches!(
+                        self.ctx.filter_mode,
+                        FilterMode::Inline | FilterMode::InlineCompletion
+                    )
+                {
+                    (self.send)(Event::ClearInlineCompletion);
+                } else if self.ctx.open {
                     (self.send)(Event::Close);
                 } else if !self.ctx.input_value.get().is_empty() {
                     (self.send)(Event::Clear);
@@ -1603,7 +1637,17 @@ impl Api<'_> {
         if self.visible_count() == 0 {
             self.no_results_text()
         } else {
-            (self.ctx.messages.results_count)(self.visible_count(), &self.ctx.locale)
+            let count_text =
+                (self.ctx.messages.results_count)(self.visible_count(), &self.ctx.locale);
+
+            if self.ctx.filter_mode == FilterMode::InlineCompletion
+                && let Some(key) = valid_highlight(self.ctx)
+                && let Some(node) = self.ctx.items.get(key)
+            {
+                format!("{count_text}. {} highlighted.", node.text_value)
+            } else {
+                count_text
+            }
         }
     }
 
@@ -1774,6 +1818,7 @@ fn select_item_plan(
             ctx.selection_state.selected_keys = set_selection_value(ctx, selected.clone());
             ctx.input_value.set(String::new());
             ctx.visible_keys = None;
+            ctx.inline_completion_prefix = None;
         }))
     } else {
         let label = ctx
@@ -1794,6 +1839,7 @@ fn select_item_plan(
                 ctx.open = false;
                 ctx.highlighted_key = None;
                 ctx.visible_keys = None;
+                ctx.inline_completion_prefix = None;
 
                 if was_open && let Some(callback) = &on_open_change {
                     callback(false);
@@ -1981,6 +2027,7 @@ fn apply_custom_input_commit(ctx: &mut Context, input: String) {
 
     ctx.highlighted_key = None;
     ctx.visible_keys = None;
+    ctx.inline_completion_prefix = None;
 }
 
 fn input_matches_selected_item_label(ctx: &Context, input: &str) -> bool {
@@ -1997,6 +2044,7 @@ fn revert_input_to_selection(ctx: &mut Context) {
     if ctx.multiple {
         ctx.input_value.set(String::new());
         ctx.visible_keys = None;
+        ctx.inline_completion_prefix = None;
         return;
     }
 
@@ -2010,6 +2058,7 @@ fn revert_input_to_selection(ctx: &mut Context) {
 
     ctx.input_value.set(label);
     ctx.visible_keys = None;
+    ctx.inline_completion_prefix = None;
 }
 
 fn default_open_highlight(ctx: &Context, props: &Props) -> Option<Key> {
@@ -2051,10 +2100,11 @@ fn visible_keys_for(ctx: &Context, input: &str) -> Option<BTreeSet<Key>> {
 fn input_change_values(
     ctx: &Context,
     raw_value: &str,
-) -> (Option<BTreeSet<Key>>, Option<Key>, String) {
+) -> (Option<BTreeSet<Key>>, Option<Key>, String, Option<String>) {
     let visible_keys = visible_keys_for(ctx, raw_value);
     let mut highlighted_key = first_visible_key(ctx, visible_keys.as_ref());
     let mut input_value = raw_value.to_string();
+    let mut inline_completion_prefix = None;
 
     if matches!(
         ctx.filter_mode,
@@ -2063,13 +2113,19 @@ fn input_change_values(
     {
         if let Some((key, label)) = inline_completion(ctx, raw_value) {
             highlighted_key = Some(key);
+            inline_completion_prefix = (label != raw_value).then(|| raw_value.to_string());
             input_value = label;
         } else if matches!(ctx.filter_mode, FilterMode::Inline) {
             highlighted_key = None;
         }
     }
 
-    (visible_keys, highlighted_key, input_value)
+    (
+        visible_keys,
+        highlighted_key,
+        input_value,
+        inline_completion_prefix,
+    )
 }
 
 fn inline_completion(ctx: &Context, input: &str) -> Option<(Key, String)> {
@@ -3189,6 +3245,41 @@ mod tests {
     }
 
     #[test]
+    fn escape_clears_inline_completion_before_closing_or_clearing_input() {
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .filter_mode(FilterMode::InlineCompletion)
+                .open_on_focus(false),
+        );
+
+        send_event(&mut service, Event::InputChange("ap".into()));
+
+        assert_eq!(service.context().input_value.get(), "Apple");
+        assert_eq!(service.state(), &State::Open);
+
+        dispatch_api(&mut service, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Escape, None));
+        });
+
+        assert_eq!(service.context().input_value.get(), "ap");
+        assert_eq!(service.state(), &State::Open);
+
+        dispatch_api(&mut service, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Escape, None));
+        });
+
+        assert_eq!(service.context().input_value.get(), "ap");
+        assert_eq!(service.state(), &State::Closed);
+
+        dispatch_api(&mut service, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Escape, None));
+        });
+
+        assert_eq!(service.context().input_value.get(), "");
+    }
+
+    #[test]
     fn update_items_invalidates_stale_references() {
         let mut service = make_service(Props::new().id("combo"));
 
@@ -4205,6 +4296,22 @@ mod tests {
         with_api(&combobox, |api| {
             assert_eq!(api.results_count_text(), "2 results available");
             assert!(api.is_open());
+        });
+
+        let mut inline_completion = make_service(
+            Props::new()
+                .id("inline-completion")
+                .filter_mode(FilterMode::InlineCompletion)
+                .open_on_focus(false),
+        );
+
+        send_event(&mut inline_completion, Event::InputChange("ap".into()));
+
+        with_api(&inline_completion, |api| {
+            assert_eq!(
+                api.results_count_text(),
+                "2 results available. Apple highlighted."
+            );
         });
     }
 
