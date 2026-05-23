@@ -809,14 +809,16 @@ impl ars_core::Machine for Machine {
                 let allow_custom_value = props.allow_custom_value;
 
                 move |ctx: &mut Context| {
-                    if allow_custom_value {
-                        let input = ctx.input_value.get().clone();
+                    if !ctx.disabled && !ctx.readonly {
+                        if allow_custom_value {
+                            let input = ctx.input_value.get().clone();
 
-                        if !input_matches_selected_item_label(ctx, &input) {
-                            apply_custom_input_commit(ctx, input);
+                            if !input_matches_selected_item_label(ctx, &input) {
+                                apply_custom_input_commit(ctx, input);
+                            }
+                        } else {
+                            revert_input_to_selection(ctx);
                         }
-                    } else {
-                        revert_input_to_selection(ctx);
                     }
 
                     ctx.focused = false;
@@ -1922,7 +1924,13 @@ fn refresh_filter_and_highlight(ctx: &mut Context, input: &str) {
 
 fn commit_input_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
     if ctx.input_value.get().is_empty() {
-        return close_plan(props);
+        return if props.allow_custom_value {
+            close_plan(props)
+        } else {
+            close_plan(props).apply(|ctx: &mut Context| {
+                revert_input_to_selection(ctx);
+            })
+        };
     }
 
     let input = ctx.input_value.get().clone();
@@ -2651,6 +2659,17 @@ mod tests {
             &selection::Set::Single(key(1))
         );
         assert_eq!(strict.context().input_value.get(), "Apple");
+
+        send_event(&mut strict, Event::InputChange(String::new()));
+        dispatch_api(&mut strict, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Enter, None));
+        });
+
+        assert_eq!(
+            strict.context().selection.get(),
+            &selection::Set::Single(key(1))
+        );
+        assert_eq!(strict.context().input_value.get(), "Apple");
     }
 
     #[test]
@@ -3026,6 +3045,32 @@ mod tests {
         assert_eq!(disabled.state(), &State::Closed);
         assert_eq!(readonly.state(), &State::Open);
         assert!(readonly.send(Event::SelectItem(key(1))).is_noop());
+
+        let mut disabled_custom = make_service(
+            Props::new()
+                .id("disabled-custom")
+                .disabled(true)
+                .default_input_value("Dragonfruit")
+                .allow_custom_value(true),
+        );
+
+        send_event(&mut disabled_custom, Event::Blur);
+
+        assert!(disabled_custom.context().selection.get().is_empty());
+        assert_eq!(disabled_custom.context().input_value.get(), "Dragonfruit");
+
+        let mut readonly_custom = make_service(
+            Props::new()
+                .id("readonly-custom")
+                .readonly(true)
+                .default_input_value("Dragonfruit")
+                .allow_custom_value(true),
+        );
+
+        send_event(&mut readonly_custom, Event::Blur);
+
+        assert!(readonly_custom.context().selection.get().is_empty());
+        assert_eq!(readonly_custom.context().input_value.get(), "Dragonfruit");
     }
 
     #[test]
