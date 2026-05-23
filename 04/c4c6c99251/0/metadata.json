@@ -1,0 +1,87 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "04c4c6c99251",
+  "session_id": "019e4d52-5c59-7253-a1b2-98c2eb5a7612",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-23T21:16:49.753518Z",
+  "branch": "t3code/d9d993f1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/selection/combobox/mod.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "09790feda1ed",
+  "checkpoint_transcript_start": 7183,
+  "transcript_lines_at_start": 7183,
+  "token_usage": {
+    "input_tokens": 91352,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 14564352,
+    "output_tokens": 10765,
+    "api_call_count": 73
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Address a third round of Codex review findings on PR #669 in the ars-ui repo, specifically fixing blur key-preservation, passive SyncProps opening, and closed-popup Enter behavior in the combobox component.",
+    "outcome": "Three regression tests were written, verified to fail, then fixed. Local gates (fmt, clippy, tests, llvm-cov) passed. Fixes were committed to combobox/mod.rs and pushed, with Codex threads replied to, resolved, and a new @codex review triggered.",
+    "learnings": {
+      "repo": [
+        "The combobox component lives at crates/ars-components/src/selection/combobox/mod.rs and has a rich local test suite exercised via `cargo test -p ars-components selection::combobox`.",
+        "The review loop with Codex uses GitHub reactions (eyes = reviewing) and unresolved thread count as state signals, polled via `gh api graphql` on a ~2-minute cadence.",
+        "CI matrix for this repo includes: snapshot, formatting, clippy, unit tests, I18n, browser checks, coverage, Feature Flags Dioxus, and Release Verification — several run in parallel and complete at different times.",
+        "Codex is mentioned as a co-author in commits: `Co-authored-by: OpenAI Codex <codex@openai.com>`."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 800,
+          "end_line": 822,
+          "finding": "Blur handler was rewriting the selected item's key to its label — fix preserves the key on blur for custom-value-allowed comboboxes."
+        },
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 1188,
+          "end_line": 1225,
+          "finding": "Passive SyncProps was incorrectly triggering popup open on an empty-allowed combobox — fix gates the open on active user interaction."
+        },
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 1795,
+          "end_line": 1815,
+          "finding": "Enter key while popup is closed was not selecting the highlighted item — fix routes closed-state Enter through the selection path."
+        }
+      ],
+      "workflow": [
+        "TDD approach used: write failing regression tests first, confirm they fail against current code, then implement the fix and confirm they pass.",
+        "`cargo fmt` must be run before committing — `cargo fmt --check` will fail CI if skipped, even for cosmetic multiline if-let layout differences.",
+        "Polling strategy: `sleep 120 && gh api ...` chained in a single shell command to batch the wait and the state fetch, avoiding extra round-trips.",
+        "Codex review state is tracked by: (1) presence of eyes reaction on the PR comment, (2) count of unresolved Codex-authored threads via GraphQL."
+      ]
+    },
+    "friction": [
+      "Multiple polling cycles (10+) were needed for a single Codex review pass, with no output during sleep windows — the loop is slow and opaque.",
+      "`cargo fmt` introduced a formatting change post-fix that required an extra gate cycle before committing.",
+      "CI matrix is large and staggered; several gates (Coverage, Feature Flags Dioxus, Release Verification) consistently lag behind the others, extending the wait before a clean green state."
+    ],
+    "open_items": [
+      "A fourth @codex review pass was triggered at end of session — outcome (approval or further findings) is not yet known.",
+      "Coverage, Feature Flags Dioxus, and Release Verification CI gates were still pending when the session ended.",
+      "The iterative fix-loop pattern (fix → push → @codex review → repeat) may benefit from batching more findings per cycle to reduce total round-trips."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-23T21:16:27.342974Z",
+    "agent_lines": 86,
+    "agent_removed": 3,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 86,
+    "total_lines_changed": 89,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
