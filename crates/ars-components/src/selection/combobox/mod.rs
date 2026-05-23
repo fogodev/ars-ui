@@ -555,6 +555,9 @@ pub struct Messages {
     /// Accessible label for the clear button.
     pub clear_label: MessageFn<LocaleMessage>,
 
+    /// Accessible label for the listbox popup.
+    pub listbox_label: MessageFn<LocaleMessage>,
+
     /// Text shown when no results match the filter.
     pub no_results: MessageFn<LocaleMessage>,
 
@@ -573,6 +576,7 @@ impl Default for Messages {
         Self {
             trigger_label: MessageFn::static_str("Show suggestions"),
             clear_label: MessageFn::static_str("Clear value"),
+            listbox_label: MessageFn::static_str("Suggestions"),
             no_results: MessageFn::static_str("No results found"),
             loading: MessageFn::static_str("Loading options..."),
             results_count: MessageFn::new(|count: usize, _locale: &Locale| {
@@ -1397,8 +1401,8 @@ impl Api<'_> {
             .set(HtmlAttr::Id, self.ctx.ids.part("content"))
             .set(HtmlAttr::Role, "listbox")
             .set(
-                HtmlAttr::Aria(AriaAttr::LabelledBy),
-                self.ctx.ids.part("label"),
+                HtmlAttr::Aria(AriaAttr::Label),
+                (self.ctx.messages.listbox_label)(&self.ctx.locale),
             );
 
         if self.ctx.multiple {
@@ -1665,6 +1669,12 @@ impl Api<'_> {
         (self.ctx.messages.trigger_label)(&self.ctx.locale)
     }
 
+    /// Accessible listbox popup label.
+    #[must_use]
+    pub fn listbox_label(&self) -> String {
+        (self.ctx.messages.listbox_label)(&self.ctx.locale)
+    }
+
     /// Accessible clear trigger label.
     #[must_use]
     pub fn clear_label(&self) -> String {
@@ -1902,12 +1912,12 @@ fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
     apply_props_to_context(&mut next_ctx, &props);
 
     let input = next_ctx.input_value.get().clone();
-    let should_open =
-        should_open_for_items_update(&next_ctx, &props, &input, next_ctx.visible_keys.as_ref());
+    let should_remain_open = ctx.open
+        && should_open_for_items_update(&next_ctx, &props, &input, next_ctx.visible_keys.as_ref());
 
     let plan = if ctx.open && props.disabled {
         close_plan(&props)
-    } else if should_open {
+    } else if should_remain_open {
         open_plan(&props)
     } else if ctx.open && !props.allows_empty_collection {
         close_plan(&props)
@@ -2618,13 +2628,12 @@ mod tests {
             );
             assert_eq!(api.content_attrs().get(&HtmlAttr::Role), Some("listbox"));
             assert_eq!(
-                api.content_attrs()
-                    .get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
-                Some("combo-label")
+                api.content_attrs().get(&HtmlAttr::Aria(AriaAttr::Label)),
+                Some("Suggestions")
             );
             assert!(
                 !api.content_attrs()
-                    .contains(&HtmlAttr::Aria(AriaAttr::Label))
+                    .contains(&HtmlAttr::Aria(AriaAttr::LabelledBy))
             );
         });
     }
@@ -3992,6 +4001,50 @@ mod tests {
     }
 
     #[test]
+    fn prop_sync_does_not_reopen_user_closed_filtered_combobox() {
+        let opened = Arc::new(Mutex::new(Vec::new()));
+
+        let callback = Callback::new({
+            let opened = Arc::clone(&opened);
+            move |open| {
+                opened.lock().unwrap().push(open);
+            }
+        });
+
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .on_open_change(callback.clone())
+                .open_on_focus(false),
+        );
+
+        send_event(&mut service, Event::InputChange("ap".into()));
+        send_event(&mut service, Event::Close);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert_eq!(
+            service.context().visible_keys,
+            Some(BTreeSet::from([key(1), key(3)]))
+        );
+
+        service.set_props(
+            Props::new()
+                .id("combo")
+                .on_open_change(callback)
+                .open_on_focus(false)
+                .invalid(true),
+        );
+        send_event(&mut service, Event::SyncProps);
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+        assert!(service.context().invalid);
+        assert_eq!(service.context().input_value.get(), "ap");
+        assert_eq!(*opened.lock().unwrap(), vec![true, false]);
+    }
+
+    #[test]
     fn highlight_first_last_explicit_and_no_loop_edges() {
         let mut combo = make_service(Props::new().id("combo").loop_focus(false));
 
@@ -4451,6 +4504,7 @@ mod tests {
             assert_eq!(api.no_results_text(), "No results found");
             assert_eq!(api.loading_text(), "Loading options...");
             assert_eq!(api.trigger_label(), "Show suggestions");
+            assert_eq!(api.listbox_label(), "Suggestions");
             assert_eq!(api.clear_label(), "Clear value");
             assert_eq!(api.results_count_text(), "No results found");
             assert!(format!("{api:?}").contains("Api"));
@@ -4516,6 +4570,7 @@ mod tests {
         });
 
         let localized_messages = Messages {
+            listbox_label: MessageFn::static_str("Sugestoes"),
             result_highlight: MessageFn::new(|label: &str, _locale: &Locale| {
                 format!("{label} destacado")
             }),
@@ -4537,6 +4592,15 @@ mod tests {
         );
 
         with_api(&localized_inline_completion, |api| {
+            assert_eq!(api.listbox_label(), "Sugestoes");
+            assert_eq!(
+                api.content_attrs().get(&HtmlAttr::Aria(AriaAttr::Label)),
+                Some("Sugestoes")
+            );
+            assert!(
+                !api.content_attrs()
+                    .contains(&HtmlAttr::Aria(AriaAttr::LabelledBy))
+            );
             assert_eq!(
                 api.results_count_text(),
                 "2 results available. Apple destacado."
