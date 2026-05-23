@@ -19,6 +19,8 @@ use ars_interactions::KeyboardEventData;
 
 use crate::overlay::positioning::PositioningOptions;
 
+const ALL_SELECTION_SENTINEL: &str = "__ars_all";
+
 /// Message function used by Combobox single-locale messages.
 pub type LocaleMessage = dyn Fn(&Locale) -> String + Send + Sync;
 
@@ -893,8 +895,12 @@ impl ars_core::Machine for Machine {
                 next_ctx.visible_keys = visible_keys_for(&next_ctx, &input);
                 invalidate_collection_references(&mut next_ctx, allow_custom_value);
 
-                let should_open =
-                    should_open_for_input(&next_ctx, props, &input, next_ctx.visible_keys.as_ref());
+                let should_open = should_open_for_items_update(
+                    &next_ctx,
+                    props,
+                    &input,
+                    next_ctx.visible_keys.as_ref(),
+                );
 
                 if should_open {
                     let input = input.clone();
@@ -1274,7 +1280,7 @@ impl Api<'_> {
             )
             .set(HtmlAttr::TabIndex, "-1");
 
-        if self.ctx.disabled {
+        if self.ctx.disabled || self.ctx.readonly {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
@@ -1858,6 +1864,18 @@ fn should_open_for_input(
             || ((ctx.open || !value.is_empty()) && first_visible_key(ctx, visible_keys).is_some()))
 }
 
+fn should_open_for_items_update(
+    ctx: &Context,
+    props: &Props,
+    value: &str,
+    visible_keys: Option<&BTreeSet<Key>>,
+) -> bool {
+    !props.disabled
+        && ((ctx.open
+            && (props.allows_empty_collection || first_visible_key(ctx, visible_keys).is_some()))
+            || (!ctx.open && !value.is_empty() && first_visible_key(ctx, visible_keys).is_some()))
+}
+
 fn refresh_filter_and_highlight(ctx: &mut Context, input: &str) {
     ctx.visible_keys = visible_keys_for(ctx, input);
 
@@ -1904,7 +1922,7 @@ fn commit_input_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
 }
 
 fn apply_custom_input_commit(ctx: &mut Context, input: String) {
-    if input.is_empty() {
+    if input.is_empty() || input == ALL_SELECTION_SENTINEL {
         return;
     }
 
@@ -2126,7 +2144,13 @@ fn invalidate_collection_references(ctx: &mut Context, allow_custom_value: bool)
 
     remove_disabled_selection_keys(&mut ctx.selection_state);
 
-    ctx.selection.set(ctx.selection_state.selected_keys.clone());
+    let selected = ctx.selection_state.selected_keys.clone();
+
+    if ctx.selection.is_controlled() {
+        ctx.selection.sync_controlled(Some(selected.clone()));
+    }
+
+    ctx.selection.set(selected);
 
     if ctx
         .selection_state
@@ -2265,7 +2289,7 @@ fn serialize_selection(selection: &selection::Set) -> String {
             .collect::<Vec<_>>()
             .join(","),
 
-        selection::Set::All => "__ars_all".to_string(),
+        selection::Set::All => ALL_SELECTION_SENTINEL.to_string(),
 
         _ => String::new(),
     }
@@ -2473,6 +2497,23 @@ mod tests {
     }
 
     #[test]
+    fn passive_update_items_does_not_open_empty_allowed_combobox() {
+        let mut service = Service::<Machine>::new(
+            Props::new()
+                .id("combo")
+                .open_on_focus(false)
+                .allows_empty_collection(true),
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        send_event(&mut service, Event::UpdateItems(collection()));
+
+        assert_eq!(service.state(), &State::Closed);
+        assert!(!service.context().open);
+    }
+
+    #[test]
     fn arrow_keys_navigate_filtered_list() {
         let mut service = make_service(Props::new().id("combo").open_on_focus(false));
 
@@ -2547,6 +2588,28 @@ mod tests {
             &selection::Set::Single(key(1))
         );
         assert_eq!(strict.context().input_value.get(), "Apple");
+    }
+
+    #[test]
+    fn reserved_all_sentinel_custom_input_is_not_selected() {
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .name("fruit")
+                .open_on_focus(false)
+                .allow_custom_value(true),
+        );
+
+        send_event(&mut service, Event::InputChange("__ars_all".into()));
+
+        dispatch_api(&mut service, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Enter, None));
+        });
+
+        assert!(service.context().selection.get().is_empty());
+        with_api(&service, |api| {
+            assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some(""));
+        });
     }
 
     #[test]
@@ -2759,6 +2822,18 @@ mod tests {
     }
 
     #[test]
+    fn readonly_clear_trigger_is_disabled() {
+        let service = make_service(Props::new().id("readonly").readonly(true));
+
+        with_api(&service, |api| {
+            assert_eq!(
+                api.clear_trigger_attrs().get(&HtmlAttr::Disabled),
+                Some("true")
+            );
+        });
+    }
+
+    #[test]
     fn disabled_update_items_does_not_open_popup() {
         let mut service = Service::<Machine>::new(
             Props::new()
@@ -2883,6 +2958,33 @@ mod tests {
 
         assert_eq!(service.context().highlighted_key, Some(key(9)));
         assert!(service.context().selection.get().is_empty());
+    }
+
+    #[test]
+    fn update_items_prunes_controlled_selection_value() {
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .name("fruit")
+                .value(selection::Set::Single(key(1))),
+        );
+
+        send_event(
+            &mut service,
+            Event::UpdateItems(StaticCollection::new([(
+                key(9),
+                "Pear".to_string(),
+                Item {
+                    label: "Pear".into(),
+                },
+            )])),
+        );
+
+        assert!(service.context().selection.get().is_empty());
+        assert!(service.context().selection_state.selected_keys.is_empty());
+        with_api(&service, |api| {
+            assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some(""));
+        });
     }
 
     #[test]
