@@ -81,6 +81,9 @@ pub enum Event {
     /// The item is highlighted.
     HighlightItem(Option<Key>),
 
+    /// An item pointer-down happened before the input blur/click sequence completes.
+    ItemPointerDown(Key),
+
     /// The first item is highlighted.
     HighlightFirst,
 
@@ -215,6 +218,9 @@ pub struct Context {
 
     /// Typed prefix that produced the current inline completion, if any.
     pub inline_completion_prefix: Option<String>,
+
+    /// Item key whose pointer-down should suppress a blur-time custom commit.
+    pub pending_item_selection_key: Option<Key>,
 
     /// Whether a description element is rendered.
     pub has_description: bool,
@@ -703,6 +709,7 @@ impl ars_core::Machine for Machine {
                 loop_focus: props.loop_focus,
                 is_composing: false,
                 inline_completion_prefix: None,
+                pending_item_selection_key: None,
                 has_description: false,
                 is_ios: props.is_ios,
                 ids: ComponentIds::from_id(&props.id),
@@ -727,6 +734,7 @@ impl ars_core::Machine for Machine {
                     | Event::SelectItemCtrl(_)
                     | Event::DeselectItem(_)
                     | Event::HighlightItem(_)
+                    | Event::ItemPointerDown(_)
                     | Event::HighlightFirst
                     | Event::HighlightLast
                     | Event::HighlightNext
@@ -821,13 +829,16 @@ impl ars_core::Machine for Machine {
             (_, Event::Blur) => Some(close_plan(props).apply({
                 let allow_custom_value = props.allow_custom_value;
                 let was_open = ctx.open;
+                let had_pending_item_selection = ctx.pending_item_selection_key.is_some();
 
                 move |ctx: &mut Context| {
                     if !ctx.disabled && !ctx.readonly {
                         if allow_custom_value {
                             let input = ctx.input_value.get().clone();
+                            let should_suppress_custom_commit =
+                                ctx.multiple && was_open && had_pending_item_selection;
 
-                            if (!ctx.multiple || !was_open)
+                            if !should_suppress_custom_commit
                                 && !input_matches_selected_item_label(ctx, &input)
                             {
                                 apply_custom_input_commit(ctx, input);
@@ -840,6 +851,7 @@ impl ars_core::Machine for Machine {
                     ctx.focused = false;
                     ctx.focus_visible = false;
                     ctx.highlighted_key = None;
+                    ctx.pending_item_selection_key = None;
                 }
             })),
 
@@ -875,6 +887,17 @@ impl ars_core::Machine for Machine {
                 let key = key.clone().filter(|key| is_visible_focusable_key(ctx, key));
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.highlighted_key = key;
+                }))
+            }
+
+            (_, Event::ItemPointerDown(key)) => {
+                let key = if is_selectable_key(ctx, key) {
+                    Some(key.clone())
+                } else {
+                    None
+                };
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.pending_item_selection_key = key;
                 }))
             }
 
@@ -1491,6 +1514,11 @@ impl Api<'_> {
         (self.send)(Event::SelectItemCtrl(key));
     }
 
+    /// Dispatches item pointer-down before a blur/click sequence completes.
+    pub fn on_item_pointer_down(&self, key: Key) {
+        (self.send)(Event::ItemPointerDown(key));
+    }
+
     /// Dispatches item hover.
     pub fn on_item_hover(&self, key: Key) {
         (self.send)(Event::HighlightItem(Some(key)));
@@ -1822,6 +1850,7 @@ fn select_item_plan(
             ctx.input_value.set(String::new());
             ctx.visible_keys = None;
             ctx.inline_completion_prefix = None;
+            ctx.pending_item_selection_key = None;
         }))
     } else {
         let label = ctx
@@ -1843,6 +1872,7 @@ fn select_item_plan(
                 ctx.highlighted_key = None;
                 ctx.visible_keys = None;
                 ctx.inline_completion_prefix = None;
+                ctx.pending_item_selection_key = None;
 
                 if was_open && let Some(callback) = &on_open_change {
                     callback(false);
@@ -2914,6 +2944,9 @@ mod tests {
         );
 
         send_event(&mut service, Event::InputChange("ap".into()));
+        dispatch_api(&mut service, |api| {
+            api.on_item_pointer_down(key(1));
+        });
         send_event(&mut service, Event::Blur);
         send_event(&mut service, Event::SelectItem(key(1)));
 
@@ -2923,6 +2956,32 @@ mod tests {
         );
         with_api(&service, |api| {
             assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some("1"));
+        });
+    }
+
+    #[test]
+    fn multi_select_open_blur_without_pending_item_click_commits_custom_text() {
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .name("fruit")
+                .selection_mode(selection::Mode::Multiple)
+                .allow_custom_value(true)
+                .open_on_focus(false),
+        );
+
+        send_event(&mut service, Event::InputChange("Dragonfruit".into()));
+        send_event(&mut service, Event::Blur);
+
+        assert_eq!(
+            service.context().selection.get(),
+            &selection::Set::Multiple(BTreeSet::from([Key::str("Dragonfruit")]))
+        );
+        with_api(&service, |api| {
+            assert_eq!(
+                api.hidden_input_attrs().get(&HtmlAttr::Value),
+                Some("Dragonfruit")
+            );
         });
     }
 
@@ -4108,6 +4167,10 @@ mod tests {
         assert_eq!(
             api_events(&service, |api| api.on_item_ctrl_click(key(1))),
             vec![Event::SelectItemCtrl(key(1))]
+        );
+        assert_eq!(
+            api_events(&service, |api| api.on_item_pointer_down(key(1))),
+            vec![Event::ItemPointerDown(key(1))]
         );
         assert_eq!(
             api_events(&service, |api| api.on_item_hover(key(1))),
