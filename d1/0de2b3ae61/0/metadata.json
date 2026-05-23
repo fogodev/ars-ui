@@ -1,0 +1,103 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d10de2b3ae61",
+  "session_id": "019e4d52-5c59-7253-a1b2-98c2eb5a7612",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-23T23:47:40.269977Z",
+  "branch": "t3code/d9d993f1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/selection/combobox/mod.rs",
+    "spec/testing/05-adapter-harness.md",
+    "spec/components/selection/combobox.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "09790feda1ed",
+  "checkpoint_transcript_start": 9450,
+  "transcript_lines_at_start": 9450,
+  "token_usage": {
+    "input_tokens": 56516,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 6613888,
+    "output_tokens": 7536,
+    "api_call_count": 45
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Fix review findings from an automated Codex review pass on PR #669 in fogodev/ars-ui, covering a behavior bug in FilterMode::Custom and two spec sync issues related to public API/label changes.",
+    "outcome": "Three Codex review threads were resolved: the Custom filter mode highlight bug was fixed (highlight now left empty on raw input changes when filtering is adapter-owned), and two spec files were updated to match the closure-free Custom variant and the new listbox_label message. Changes were committed as 464d4dbf (earlier pass) and a subsequent commit, CI passed, and the PR was advanced.",
+    "learnings": {
+      "repo": [
+        "The repo uses an automated Codex reviewer bot that signals state via GitHub reactions (eyes = reviewing, +1 = approved) and PR review threads; polling both is necessary to detect terminal state.",
+        "CI runs in two waves: first wave covers formatting, clippy, workspace check, mutual exclusion, snapshot change check, and unit tests; second wave covers coverage, release verification, adapter parity, and feature-flag jobs.",
+        "Spec conformance is validated via `cargo xtask spec validate`, which must pass alongside unit tests and clippy.",
+        "The combobox FilterMode::Custom variant is closure-free; the spec and adapter harness must reflect this.",
+        "The listbox aria-label uses a dedicated localized `listbox_label` message rather than an unconditional `aria-labelledby` reference pointing at a potentially-omitted label element.",
+        "SyncProps is scoped to only preserve or close an already-open popup; it must not passively reopen a user-dismissed filtered combobox on unrelated prop changes."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 2138,
+          "end_line": 2205,
+          "finding": "FilterMode::Custom handling; highlight must be left empty on raw input changes when filtering is adapter-owned to avoid stale highlight state."
+        },
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 2850,
+          "end_line": 2915,
+          "finding": "SyncProps logic for popup open/close state; must not reopen a user-closed filtered combobox when unrelated props change."
+        },
+        {
+          "path": "crates/ars-components/src/selection/combobox/mod.rs",
+          "line": 3408,
+          "end_line": 3435,
+          "finding": "custom_filter_mode function region; patched as part of the custom highlight fix."
+        },
+        {
+          "path": "spec/components/selection/combobox.md",
+          "line": 850,
+          "end_line": 905,
+          "finding": "Spec section describing FilterMode::Custom and listbox label behavior; updated to match closure-free Custom variant and listbox_label message."
+        },
+        {
+          "path": "spec/testing/05-adapter-harness.md",
+          "line": 370,
+          "end_line": 398,
+          "finding": "Adapter harness spec for Custom filter mode; updated to reflect closure-free Custom variant."
+        }
+      ],
+      "workflow": [
+        "Polling Codex state requires checking both the reactions API and the review threads GraphQL endpoint; relying on only one can miss the terminal signal.",
+        "Defensive re-checks of reactions and threads are useful when the polling loop has been running for an extended period (~10 min) without a terminal signal.",
+        "Resolving Codex threads requires both posting a reply comment (referencing the fix commit) and calling the resolveReviewThread GraphQL mutation explicitly.",
+        "After pushing a fix, triggering a new `@codex review` pass with a PR comment restarts the review cycle; verifying zero unresolved Codex threads before triggering avoids re-reviewing already-resolved issues.",
+        "`cargo llvm-cov test` output is piped to a temp file and tailed to avoid truncation in terminal output."
+      ]
+    },
+    "friction": [
+      "Codex review cycle is slow (~10+ minutes per pass), requiring extended polling loops with 60-second sleep intervals.",
+      "Determining Codex terminal state requires correlating two separate API endpoints (reactions and review threads), which adds complexity to the polling logic.",
+      "The two-wave CI structure means full validation feedback is delayed; some checks (coverage, adapter parity) only run after the first wave completes."
+    ],
+    "open_items": [
+      "No explicitly deferred items were mentioned; all three Codex findings from this pass were addressed and resolved.",
+      "A subsequent Codex review pass was triggered after the fix commit — its verdict is pending and may produce additional findings."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-23T23:47:15.900946Z",
+    "agent_lines": 47,
+    "agent_removed": 19,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 47,
+    "total_lines_changed": 66,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}

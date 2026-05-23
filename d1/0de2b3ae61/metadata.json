@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d10de2b3ae61",
+  "strategy": "manual-commit",
+  "branch": "t3code/d9d993f1",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/selection/combobox/mod.rs",
+    "spec/components/selection/combobox.md",
+    "spec/testing/05-adapter-harness.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d1/0de2b3ae61/0/metadata.json",
+      "transcript": "/d1/0de2b3ae61/0/full.jsonl",
+      "content_hash": "/d1/0de2b3ae61/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 56516,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 6613888,
+    "output_tokens": 7536,
+    "api_call_count": 45
+  }
+}
