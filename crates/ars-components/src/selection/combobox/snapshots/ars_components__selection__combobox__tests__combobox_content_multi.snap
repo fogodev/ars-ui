@@ -21,10 +21,10 @@ expression: snapshot_attrs(&api.content_attrs())
     ),
     (
         Aria(
-            Label,
+            LabelledBy,
         ),
         String(
-            "Show suggestions",
+            "combo-label",
         ),
     ),
     (

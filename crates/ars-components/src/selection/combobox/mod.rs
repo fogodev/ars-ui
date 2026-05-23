@@ -27,6 +27,9 @@ pub type LocaleMessage = dyn Fn(&Locale) -> String + Send + Sync;
 /// Message function used by Combobox result-count announcements.
 pub type ResultCountMessage = dyn Fn(usize, &Locale) -> String + Send + Sync;
 
+/// Message function used by Combobox highlighted-result announcements.
+pub type ResultHighlightMessage = dyn Fn(&str, &Locale) -> String + Send + Sync;
+
 /// Open-state change callback.
 pub type OpenChangeCallback = dyn Fn(bool) + Send + Sync;
 
@@ -560,6 +563,9 @@ pub struct Messages {
 
     /// Live region announcement for filtered result count.
     pub results_count: MessageFn<ResultCountMessage>,
+
+    /// Live region announcement for the highlighted inline-completion result.
+    pub result_highlight: MessageFn<ResultHighlightMessage>,
 }
 
 impl Default for Messages {
@@ -571,6 +577,9 @@ impl Default for Messages {
             loading: MessageFn::static_str("Loading options..."),
             results_count: MessageFn::new(|count: usize, _locale: &Locale| {
                 format!("{count} results available")
+            }),
+            result_highlight: MessageFn::new(|label: &str, _locale: &Locale| {
+                format!("{label} highlighted")
             }),
         }
     }
@@ -1388,8 +1397,8 @@ impl Api<'_> {
             .set(HtmlAttr::Id, self.ctx.ids.part("content"))
             .set(HtmlAttr::Role, "listbox")
             .set(
-                HtmlAttr::Aria(AriaAttr::Label),
-                (self.ctx.messages.trigger_label)(&self.ctx.locale),
+                HtmlAttr::Aria(AriaAttr::LabelledBy),
+                self.ctx.ids.part("label"),
             );
 
         if self.ctx.multiple {
@@ -1675,7 +1684,11 @@ impl Api<'_> {
                 && let Some(key) = valid_highlight(self.ctx)
                 && let Some(node) = self.ctx.items.get(key)
             {
-                format!("{count_text}. {} highlighted.", node.text_value)
+                let highlight_text = (self.ctx.messages.result_highlight)(
+                    node.text_value.as_str(),
+                    &self.ctx.locale,
+                );
+                format!("{count_text}. {highlight_text}.")
             } else {
                 count_text
             }
@@ -2605,12 +2618,13 @@ mod tests {
             );
             assert_eq!(api.content_attrs().get(&HtmlAttr::Role), Some("listbox"));
             assert_eq!(
-                api.content_attrs().get(&HtmlAttr::Aria(AriaAttr::Label)),
-                Some("Show suggestions")
+                api.content_attrs()
+                    .get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+                Some("combo-label")
             );
             assert!(
                 !api.content_attrs()
-                    .contains(&HtmlAttr::Aria(AriaAttr::LabelledBy))
+                    .contains(&HtmlAttr::Aria(AriaAttr::Label))
             );
         });
     }
@@ -4498,6 +4512,34 @@ mod tests {
             assert_eq!(
                 api.results_count_text(),
                 "2 results available. Apple highlighted."
+            );
+        });
+
+        let localized_messages = Messages {
+            result_highlight: MessageFn::new(|label: &str, _locale: &Locale| {
+                format!("{label} destacado")
+            }),
+            ..Messages::default()
+        };
+        let mut localized_inline_completion = Service::<Machine>::new(
+            Props::new()
+                .id("inline-completion-localized")
+                .filter_mode(FilterMode::InlineCompletion)
+                .open_on_focus(false),
+            &Env::default(),
+            &localized_messages,
+        );
+
+        localized_inline_completion.context_mut().items = collection();
+        send_event(
+            &mut localized_inline_completion,
+            Event::InputChange("ap".into()),
+        );
+
+        with_api(&localized_inline_completion, |api| {
+            assert_eq!(
+                api.results_count_text(),
+                "2 results available. Apple destacado."
             );
         });
     }
