@@ -881,8 +881,9 @@ impl ars_core::Machine for Machine {
 
             (_, Event::Clear) => Some(TransitionPlan::context_only(|ctx: &mut Context| {
                 let next = ctx.selection_state.clear();
-                ctx.selection.set(next.selected_keys.clone());
                 ctx.selection_state = next;
+                let selected = ctx.selection_state.selected_keys.clone();
+                ctx.selection_state.selected_keys = set_selection_value(ctx, selected);
                 ctx.input_value.set(String::new());
                 ctx.visible_keys = None;
                 ctx.highlighted_key = None;
@@ -1701,10 +1702,18 @@ fn apply_selection_plan(next: selection::State) -> TransitionPlan<Machine> {
     let selected = next.selected_keys.clone();
 
     TransitionPlan::context_only(move |ctx: &mut Context| {
-        ctx.selection.set(selected.clone());
         ctx.selection_state = next.clone();
-        ctx.selection_state.selected_keys = ctx.selection.get().clone();
+        ctx.selection_state.selected_keys = set_selection_value(ctx, selected.clone());
     })
+}
+
+fn set_selection_value(ctx: &mut Context, selected: selection::Set) -> selection::Set {
+    if ctx.selection.is_controlled() {
+        ctx.selection.sync_controlled(Some(selected.clone()));
+    }
+
+    ctx.selection.set(selected);
+    ctx.selection.get().clone()
 }
 
 fn select_item_plan(
@@ -1759,9 +1768,8 @@ fn select_item_plan(
 
     if ctx.multiple {
         Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-            ctx.selection.set(selected.clone());
             ctx.selection_state = next.clone();
-            ctx.selection_state.selected_keys = ctx.selection.get().clone();
+            ctx.selection_state.selected_keys = set_selection_value(ctx, selected.clone());
             ctx.input_value.set(String::new());
             ctx.visible_keys = None;
         }))
@@ -1778,9 +1786,8 @@ fn select_item_plan(
             TransitionPlan::to(State::Closed).apply(move |ctx: &mut Context| {
                 let was_open = ctx.open;
 
-                ctx.selection.set(selected.clone());
                 ctx.selection_state = next.clone();
-                ctx.selection_state.selected_keys = ctx.selection.get().clone();
+                ctx.selection_state.selected_keys = set_selection_value(ctx, selected.clone());
                 ctx.input_value.set(label.clone());
                 ctx.open = false;
                 ctx.highlighted_key = None;
@@ -1955,9 +1962,8 @@ fn apply_custom_input_commit(ctx: &mut Context, input: String) {
     let next = ctx.selection_state.select(key);
     let selected = next.selected_keys.clone();
 
-    ctx.selection.set(selected);
     ctx.selection_state = next;
-    ctx.selection_state.selected_keys = ctx.selection.get().clone();
+    ctx.selection_state.selected_keys = set_selection_value(ctx, selected);
 
     if ctx.multiple {
         ctx.input_value.set(String::new());
@@ -2158,6 +2164,9 @@ fn visible_focusable_keys(ctx: &Context) -> Vec<Key> {
 }
 
 fn invalidate_collection_references(ctx: &mut Context, allow_custom_value: bool) {
+    let selected_single_was_pruned = matches!(ctx.selection.get(), selection::Set::Single(key) if !ctx.items.contains_key(key))
+        && !allow_custom_value;
+
     if ctx
         .highlighted_key
         .as_ref()
@@ -2181,11 +2190,12 @@ fn invalidate_collection_references(ctx: &mut Context, allow_custom_value: bool)
 
     let selected = ctx.selection_state.selected_keys.clone();
 
-    if ctx.selection.is_controlled() {
-        ctx.selection.sync_controlled(Some(selected.clone()));
-    }
+    let selected = set_selection_value(ctx, selected);
 
-    ctx.selection.set(selected);
+    if selected_single_was_pruned && selected.is_empty() && !ctx.multiple {
+        ctx.input_value.set(String::new());
+        ctx.visible_keys = None;
+    }
 
     if ctx
         .selection_state
@@ -2641,6 +2651,38 @@ mod tests {
             &selection::Set::Single(key(1))
         );
         assert_eq!(strict.context().input_value.get(), "Apple");
+    }
+
+    #[test]
+    fn controlled_custom_input_commit_preserves_pending_selection() {
+        let mut service = make_service(
+            Props::new()
+                .id("combo")
+                .name("fruit")
+                .value(selection::Set::Empty)
+                .open_on_focus(false)
+                .allow_custom_value(true),
+        );
+
+        send_event(&mut service, Event::InputChange("Dragonfruit".into()));
+        dispatch_api(&mut service, |api| {
+            api.on_input_keydown(&keyboard(KeyboardKey::Enter, None));
+        });
+
+        assert_eq!(
+            service.context().selection.get(),
+            &selection::Set::Single(Key::str("Dragonfruit"))
+        );
+        assert_eq!(
+            service.context().selection_state.selected_keys,
+            selection::Set::Single(Key::str("Dragonfruit"))
+        );
+        with_api(&service, |api| {
+            assert_eq!(
+                api.hidden_input_attrs().get(&HtmlAttr::Value),
+                Some("Dragonfruit")
+            );
+        });
     }
 
     #[test]
@@ -3153,6 +3195,30 @@ mod tests {
     }
 
     #[test]
+    fn update_items_pruning_selected_single_value_clears_input() {
+        let mut service = make_service(Props::new().id("combo").open_on_focus(false));
+
+        send_event(&mut service, Event::Open);
+        send_event(&mut service, Event::SelectItem(key(1)));
+
+        assert_eq!(service.context().input_value.get(), "Apple");
+
+        send_event(
+            &mut service,
+            Event::UpdateItems(StaticCollection::new([(
+                key(9),
+                "Pear".to_string(),
+                Item {
+                    label: "Pear".into(),
+                },
+            )])),
+        );
+
+        assert!(service.context().selection.get().is_empty());
+        assert_eq!(service.context().input_value.get(), "");
+    }
+
+    #[test]
     fn update_items_recomputes_filter_against_replacement_collection() {
         let mut service = make_service(Props::new().id("combo").open_on_focus(false));
 
@@ -3662,6 +3728,28 @@ mod tests {
         assert_eq!(service.context().input_value.get(), "");
         assert_eq!(service.context().visible_keys, None);
         assert_eq!(service.context().highlighted_key, None);
+
+        let mut controlled = make_service(
+            Props::new()
+                .id("combo")
+                .name("fruit")
+                .value(selection::Set::Single(key(1))),
+        );
+
+        send_event(&mut controlled, Event::InputChange("ap".into()));
+        send_event(&mut controlled, Event::Clear);
+
+        assert!(controlled.context().selection.get().is_empty());
+        assert!(
+            controlled
+                .context()
+                .selection_state
+                .selected_keys
+                .is_empty()
+        );
+        with_api(&controlled, |api| {
+            assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some(""));
+        });
 
         let mut single = make_service(
             Props::new()
