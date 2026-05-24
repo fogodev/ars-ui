@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/overlay/tour/mod.rs
+expression: snapshot_attrs(&api.progress_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "progress",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tour",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+    ],
+    styles: [],
+}

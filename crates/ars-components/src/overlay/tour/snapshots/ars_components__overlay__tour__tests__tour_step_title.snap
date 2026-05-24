@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/overlay/tour/mod.rs
+expression: snapshot_attrs(&api.step_title_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "step-title",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tour",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "tour-step-title",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,66 @@
+---
+source: crates/ars-components/src/overlay/tour/mod.rs
+expression: snapshot_attrs(&api.highlight_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "highlight",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tour",
+            ),
+        ),
+        (
+            Data(
+                "ars-target",
+            ),
+            String(
+                "#one",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Width,
+            "92px",
+        ),
+        (
+            Height,
+            "52px",
+        ),
+        (
+            BorderRadius,
+            "10px",
+        ),
+        (
+            Position,
+            "fixed",
+        ),
+        (
+            Top,
+            "24px",
+        ),
+        (
+            Left,
+            "14px",
+        ),
+    ],
+}

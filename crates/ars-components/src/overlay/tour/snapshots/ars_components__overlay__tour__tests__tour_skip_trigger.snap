@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/overlay/tour/mod.rs
+expression: snapshot_attrs(&api.skip_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "skip-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tour",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Skip tour",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
