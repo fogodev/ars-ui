@@ -754,21 +754,13 @@ impl Api<'_> {
     /// Attributes for an action menu item.
     #[must_use]
     pub fn item_attrs(&self, key: &Key) -> AttrMap {
-        let mut attrs = self.item_base_attrs(
+        self.item_base_attrs(
             &Part::Item {
                 key: Key::default(),
             },
             key,
             "menuitem",
-        );
-
-        if let Some(item) = self.item_payload(key)
-            && let Some(shortcut) = &item.aria_keyshortcuts
-        {
-            attrs.set(HtmlAttr::Aria(AriaAttr::KeyShortcuts), shortcut);
-        }
-
-        attrs
+        )
     }
 
     /// Attributes for an item's text label.
@@ -1011,7 +1003,9 @@ impl Api<'_> {
 
     /// Dispatches a content pointer-leave event.
     pub fn on_content_pointer_leave(&self) {
-        (self.send)(Event::HighlightItem(None));
+        if self.ctx.submenu_open.is_none() {
+            (self.send)(Event::HighlightItem(None));
+        }
     }
 
     fn on_trigger_keydown_impl(
@@ -1130,6 +1124,12 @@ impl Api<'_> {
             attrs
                 .set(HtmlAttr::Aria(AriaAttr::Disabled), "true")
                 .set_bool(HtmlAttr::Data("ars-disabled"), true);
+        }
+
+        if let Some(item) = self.item_payload(key)
+            && let Some(shortcut) = &item.aria_keyshortcuts
+        {
+            attrs.set(HtmlAttr::Aria(AriaAttr::KeyShortcuts), shortcut);
         }
 
         attrs
@@ -1569,6 +1569,46 @@ mod tests {
             .build()
     }
 
+    fn shortcut_variants_collection() -> ars_collections::StaticCollection<Item> {
+        CollectionBuilder::new()
+            .item(
+                key("check"),
+                "Check",
+                Item {
+                    label: "Check".into(),
+                    item_type: ItemType::Checkbox,
+                    shortcut: None,
+                    aria_keyshortcuts: Some("Control+K".into()),
+                    close_on_action: None,
+                },
+            )
+            .item(
+                key("radio"),
+                "Radio",
+                Item {
+                    label: "Radio".into(),
+                    item_type: ItemType::Radio {
+                        group: "density".into(),
+                    },
+                    shortcut: None,
+                    aria_keyshortcuts: Some("Control+R".into()),
+                    close_on_action: None,
+                },
+            )
+            .item(
+                key("sub"),
+                "Sub",
+                Item {
+                    label: "Sub".into(),
+                    item_type: ItemType::Submenu,
+                    shortcut: None,
+                    aria_keyshortcuts: Some("Control+S".into()),
+                    close_on_action: None,
+                },
+            )
+            .build()
+    }
+
     fn service(props: Props) -> Service<Machine> {
         let mut service = Service::<Machine>::new(props, &Env::default(), &Messages);
 
@@ -1886,6 +1926,21 @@ mod tests {
     }
 
     #[test]
+    fn pointer_leave_preserves_highlight_while_submenu_is_open() {
+        let mut menu = service(Props::new().id("menu"));
+
+        drop(menu.send(Event::Open));
+        drop(menu.send(Event::OpenSubmenu(key("delta"))));
+
+        assert_eq!(
+            captured_events(&menu, |api| {
+                api.on_content_pointer_leave();
+            }),
+            Vec::new()
+        );
+    }
+
+    #[test]
     fn typeahead_matches_next_enabled_item() {
         let mut menu = service(Props::new().id("menu"));
 
@@ -2013,6 +2068,31 @@ mod tests {
             api.radio_item_attrs(&key("charlie"), &key("density"))
                 .get(&HtmlAttr::Aria(AriaAttr::Checked)),
             Some("true")
+        );
+    }
+
+    #[test]
+    fn menuitem_variants_emit_aria_keyshortcuts() {
+        let mut menu = service(Props::new().id("menu"));
+
+        drop(menu.send(Event::UpdateItems(shortcut_variants_collection())));
+
+        let api = menu.connect(&|_| {});
+
+        assert_eq!(
+            api.checkbox_item_attrs(&key("check"))
+                .get(&HtmlAttr::Aria(AriaAttr::KeyShortcuts)),
+            Some("Control+K")
+        );
+        assert_eq!(
+            api.radio_item_attrs(&key("radio"), &key("density"))
+                .get(&HtmlAttr::Aria(AriaAttr::KeyShortcuts)),
+            Some("Control+R")
+        );
+        assert_eq!(
+            api.sub_trigger_attrs(&key("sub"))
+                .get(&HtmlAttr::Aria(AriaAttr::KeyShortcuts)),
+            Some("Control+S")
         );
     }
 
