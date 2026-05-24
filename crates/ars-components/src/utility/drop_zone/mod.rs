@@ -649,16 +649,18 @@ impl ars_core::Machine for Machine {
                 let valid = validate_drag_types(ctx, &data.types);
                 let was_terminal = matches!(state, State::DropAccepted | State::DropRejected);
 
-                let plan = TransitionPlan::to(State::DragOver)
-                    .apply(move |ctx: &mut Context| {
+                let mut plan =
+                    TransitionPlan::to(State::DragOver).apply(move |ctx: &mut Context| {
                         ctx.valid_drag = valid;
                         ctx.is_drop_target = true;
-
-                        ctx.dropped_items.clear();
                         ctx.last_rejection = None;
-                    })
-                    .with_effect(drop_enter_effect(data))
-                    .with_effect(PendingEffect::named(Effect::ArmDropActivate));
+                    });
+
+                if valid {
+                    plan = plan
+                        .with_effect(drop_enter_effect(data))
+                        .with_effect(PendingEffect::named(Effect::ArmDropActivate));
+                }
 
                 Some(if was_terminal {
                     plan.cancel_effect(Effect::ResetAfterDrop)
@@ -669,29 +671,43 @@ impl ars_core::Machine for Machine {
 
             (State::DragOver, Event::DragOver(data)) => {
                 let data = data.clone();
+                let was_valid = ctx.valid_drag;
                 let valid = validate_drag_types(ctx, &data.types);
 
-                Some(
-                    TransitionPlan::context_only(move |ctx: &mut Context| {
-                        ctx.valid_drag = valid;
-                    })
-                    .with_effect(drop_move_effect(data)),
-                )
+                let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.valid_drag = valid;
+                });
+
+                if valid {
+                    plan = plan.with_effect(drop_move_effect(data));
+                    if !was_valid {
+                        plan = plan.with_effect(PendingEffect::named(Effect::ArmDropActivate));
+                    }
+                } else if was_valid {
+                    plan = plan.cancel_effect(Effect::ArmDropActivate);
+                }
+
+                Some(plan)
             }
 
-            (State::DragOver, Event::DropActivate) => {
-                Some(TransitionPlan::new().with_effect(drop_activate_effect()))
-            }
+            (State::DragOver, Event::DropActivate) => ctx
+                .valid_drag
+                .then(|| TransitionPlan::new().with_effect(drop_activate_effect())),
 
-            (State::DragOver, Event::DragLeave) => Some(
-                TransitionPlan::to(State::Idle)
-                    .apply(|ctx: &mut Context| {
-                        ctx.valid_drag = false;
-                        ctx.is_drop_target = false;
-                    })
-                    .with_effect(drop_exit_effect())
-                    .cancel_effect(Effect::ArmDropActivate),
-            ),
+            (State::DragOver, Event::DragLeave) => Some({
+                let mut plan = TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
+                    ctx.valid_drag = false;
+                    ctx.is_drop_target = false;
+                });
+
+                if ctx.valid_drag {
+                    plan = plan
+                        .with_effect(drop_exit_effect())
+                        .cancel_effect(Effect::ArmDropActivate);
+                }
+
+                plan
+            }),
 
             (State::DragOver, Event::Drop(data)) => {
                 let errors = validate_drop(ctx, &data.items);
@@ -1298,6 +1314,83 @@ mod tests {
     }
 
     #[test]
+    fn drop_zone_new_hover_preserves_previous_accepted_payload_until_replaced_or_reset() {
+        let mut service = service(props().accept(["image/png"]).name("files"));
+        let accepted = vec![file("accepted.png", "image/png", 10)];
+
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["image/png"]))));
+        drop(service.send(Event::Drop(drag_data(accepted.clone(), &["image/png"]))));
+        drop(service.send(Event::AutoReset));
+
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["text/plain"]))));
+        drop(service.send(Event::DragLeave));
+
+        assert_eq!(service.state(), &State::Idle);
+        assert_eq!(service.context().dropped_items, accepted);
+        assert_eq!(service.connect(&|_| {}).form_data(), accepted.as_slice());
+    }
+
+    #[test]
+    fn drop_zone_rejected_followup_drop_preserves_previous_accepted_payload() {
+        let mut service = service(props().accept(["image/png"]).name("files"));
+        let accepted = vec![file("accepted.png", "image/png", 10)];
+
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["image/png"]))));
+        drop(service.send(Event::Drop(drag_data(accepted.clone(), &["image/png"]))));
+        drop(service.send(Event::AutoReset));
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["text/plain"]))));
+        drop(service.send(Event::Drop(drag_data(
+            vec![DragItem::Text("bad".into())],
+            &["text/plain"],
+        ))));
+
+        assert_eq!(service.state(), &State::DropRejected);
+        assert_eq!(service.context().dropped_items, accepted);
+        assert_eq!(service.connect(&|_| {}).form_data(), accepted.as_slice());
+    }
+
+    #[test]
+    fn drop_zone_invalid_drag_does_not_emit_valid_drop_target_effects() {
+        let mut service = service(props().accept(["image/png"]));
+
+        let enter = service.send(Event::DragEnter(drag_data(Vec::new(), &["text/plain"])));
+
+        assert_eq!(service.state(), &State::DragOver);
+        assert!(!service.context().valid_drag);
+        assert!(enter.pending_effects.is_empty());
+
+        let move_result = service.send(Event::DragOver(drag_data(Vec::new(), &["text/plain"])));
+
+        assert!(move_result.pending_effects.is_empty());
+
+        let leave = service.send(Event::DragLeave);
+
+        assert!(leave.pending_effects.is_empty());
+        assert!(leave.cancel_effects.is_empty());
+    }
+
+    #[test]
+    fn drop_zone_drag_over_validity_changes_arm_and_suppress_activation() {
+        let mut service = service(props().accept(["image/png"]));
+
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["text/plain"]))));
+
+        let invalid_activate = service.send(Event::DropActivate);
+
+        assert!(invalid_activate.pending_effects.is_empty());
+
+        let valid_move = service.send(Event::DragOver(drag_data(Vec::new(), &["image/png"])));
+
+        assert!(service.context().valid_drag);
+        assert_eq!(valid_move.pending_effects[0].name, Effect::DropMove);
+        assert_eq!(valid_move.pending_effects[1].name, Effect::ArmDropActivate);
+
+        let valid_activate = service.send(Event::DropActivate);
+
+        assert_eq!(valid_activate.pending_effects[0].name, Effect::DropActivate);
+    }
+
+    #[test]
     fn drop_zone_drop_rejects_and_aggregates_validation_failures() {
         let mut service = service(
             props()
@@ -1417,7 +1510,7 @@ mod tests {
 
         let mut service = service(
             props()
-                .accept(["image/png"])
+                .accept(["image/*"])
                 .on_drop_enter(callback({
                     let entered = Arc::clone(&entered);
                     move |data: DragData| entered.lock().unwrap().push(data)
@@ -1632,7 +1725,8 @@ mod tests {
         let move_result = service.send(Event::DragOver(drag_data(Vec::new(), &["text/plain"])));
 
         assert!(!service.context().valid_drag);
-        assert_eq!(move_result.pending_effects[0].name, Effect::DropMove);
+        assert!(move_result.pending_effects.is_empty());
+        assert_eq!(move_result.cancel_effects, vec![Effect::ArmDropActivate]);
 
         drop(service.send(Event::Focus { is_keyboard: true }));
 

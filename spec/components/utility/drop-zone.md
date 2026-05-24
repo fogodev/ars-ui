@@ -208,14 +208,14 @@ pub struct Props {
     /// Callback fired when a drop is rejected. Receives the rejected payload and
     /// every validation failure.
     pub on_drop_rejected: Option<Callback<DropRejectionFn>>,
-    /// Fired when a drag operation enters the drop zone (drag hover starts).
+    /// Fired when a valid drag operation enters the drop zone (drag hover starts).
     /// Receives the `DragData` associated with the entering drag.
     /// Maps to the `DragEnter` machine event.
     pub on_drop_enter: Option<Callback<DragDataFn>>,
-    /// Fired when a drag operation leaves the drop zone (drag hover ends without dropping).
+    /// Fired when a valid drag operation leaves the drop zone (drag hover ends without dropping).
     /// Maps to the `DragLeave` machine event.
     pub on_drop_exit: Option<Callback<VoidFn>>,
-    /// Fired continuously as the pointer moves over the drop zone during a drag.
+    /// Fired continuously as the pointer moves over the drop zone during a valid drag.
     pub on_drop_move: Option<Callback<DragDataFn>>,
     /// Fired when the pointer enters the drop zone (non-drag hover).
     pub on_hover_start: Option<Callback<VoidFn>>,
@@ -492,51 +492,73 @@ impl ars_core::Machine for Machine {
             // ── Drag enter ──────────────────────────────────────────────────
             // If `get_drop_operation` is set, call it to determine the operation;
             // otherwise fall back to static `allowed_operations` matching.
-            // Adapter invokes `on_drop_enter` callback with the DragData.
+            // Adapter invokes `on_drop_enter` and arms activation only for valid drags.
             (State::Idle, Event::DragEnter(data)) => {
                 let valid = Self::validate_types(&ctx.accept, &data.types);
-                Some(TransitionPlan::to(State::DragOver).apply(move |ctx| {
+                let mut plan = TransitionPlan::to(State::DragOver).apply(move |ctx| {
                     ctx.valid_drag = valid;
                     ctx.is_drop_target = true;
-                }).with_effect(PendingEffect::named(Effect::DropEnter))
-                  .with_effect(PendingEffect::named(Effect::ArmDropActivate)))
+                });
+                if valid {
+                    plan = plan.with_effect(PendingEffect::named(Effect::DropEnter))
+                               .with_effect(PendingEffect::named(Effect::ArmDropActivate));
+                }
+                Some(plan)
             }
 
             // ── Drag enter from terminal states (auto-reset) ────────────────
-            // Adapter invokes `on_drop_enter` callback with the DragData.
+            // Adapter invokes `on_drop_enter` and arms activation only for valid drags.
+            // Existing accepted payload remains available until explicit reset
+            // or until a later accepted drop replaces it.
             (State::DropAccepted | State::DropRejected, Event::DragEnter(data)) => {
                 let valid = Self::validate_types(&ctx.accept, &data.types);
-                Some(TransitionPlan::to(State::DragOver).apply(move |ctx| {
-                    ctx.dropped_items.clear();
+                let mut plan = TransitionPlan::to(State::DragOver).apply(move |ctx| {
                     ctx.last_rejection = None;
                     ctx.valid_drag = valid;
                     ctx.is_drop_target = true;
-                }).with_effect(PendingEffect::named(Effect::DropEnter))
-                  .with_effect(PendingEffect::named(Effect::ArmDropActivate))
-                  .cancel_effect(Effect::ResetAfterDrop))
+                });
+                if valid {
+                    plan = plan.with_effect(PendingEffect::named(Effect::DropEnter))
+                               .with_effect(PendingEffect::named(Effect::ArmDropActivate));
+                }
+                Some(plan.cancel_effect(Effect::ResetAfterDrop))
             }
 
             // ── Drag over (continuous feedback) ─────────────────────────────
-            (State::DragOver, Event::DragOver(_)) => {
-                // Stay in DragOver — no state or context change needed.
-                // The adapter handles `preventDefault()` to allow the drop.
-                // The drop_activate timer continues running from DragEnter.
-                None
+            (State::DragOver, Event::DragOver(data)) => {
+                let was_valid = ctx.valid_drag;
+                let valid = Self::validate_types(&ctx.accept, &data.types);
+                let mut plan = TransitionPlan::context_only(move |ctx| {
+                    ctx.valid_drag = valid;
+                });
+                if valid {
+                    plan = plan.with_effect(PendingEffect::named(Effect::DropMove));
+                    if !was_valid {
+                        plan = plan.with_effect(PendingEffect::named(Effect::ArmDropActivate));
+                    }
+                } else if was_valid {
+                    plan = plan.cancel_effect(Effect::ArmDropActivate);
+                }
+                Some(plan)
             }
 
             // ── DropActivate (timer expired while hovering) ─────────────────
             (State::DragOver, Event::DropActivate) => {
-                Some(TransitionPlan::new().with_effect(PendingEffect::named(Effect::DropActivate)))
+                ctx.valid_drag.then(|| TransitionPlan::new().with_effect(PendingEffect::named(Effect::DropActivate)))
             }
 
             // ── Drag leave ──────────────────────────────────────────────────
             // Adapter invokes `on_drop_exit` callback.
             (State::DragOver, Event::DragLeave) => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                let mut plan = TransitionPlan::to(State::Idle).apply(|ctx| {
                     ctx.valid_drag = false;
                     ctx.is_drop_target = false;
-                }).with_effect(PendingEffect::named(Effect::DropExit))
-                  .cancel_effect(Effect::ArmDropActivate))
+                });
+                if ctx.valid_drag {
+                    plan = plan.with_effect(PendingEffect::named(Effect::DropExit))
+                               .cancel_effect(Effect::ArmDropActivate);
+                }
+                Some(plan)
             }
 
             // ── Drop ────────────────────────────────────────────────────────
