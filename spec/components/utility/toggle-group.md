@@ -852,8 +852,12 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown on a toggle-group item.
-    /// Arrow keys navigate between items with RTL-aware direction swapping.
+    /// Arrow keys navigate between items with RTL-aware direction swapping when roving focus is enabled.
     pub fn on_item_keydown(&self, data: &KeyboardEventData) {
+        if !self.ctx.roving_focus {
+            return;
+        }
+
         let is_horizontal = self.ctx.orientation == Orientation::Horizontal;
         let is_rtl = self.ctx.dir == Direction::Rtl;
 
@@ -959,8 +963,12 @@ toggle-group
 
 ### 3.2 Keyboard Interaction
 
-- Arrow keys navigate between items; Tab moves focus out of the group entirely.
-- Space or Enter activates the focused item.
+- When `roving_focus=true`, arrow keys navigate between items; Tab moves focus out of the group entirely.
+- When `roving_focus=false`, keyboard focus follows native button tab order and the agnostic core does
+  not dispatch arrow/Home/End focus events from `on_item_keydown()`.
+- Space or Enter activation is handled through native button click behavior. `on_item_keydown()` does
+  not dispatch `ToggleItem` for activation keys, avoiding duplicate toggles when browsers synthesize
+  click from keyboard activation.
 
 | Key                         | Action                  |
 | --------------------------- | ----------------------- |
@@ -972,7 +980,6 @@ toggle-group
 | ArrowUp (vertical)          | Focus previous item     |
 | Home                        | Focus first item        |
 | End                         | Focus last item         |
-| Space / Enter               | Toggle the focused item |
 
 ### 3.3 Forced-Colors Mode
 
@@ -1007,9 +1014,9 @@ invisible. Selected items MUST have a visible border or outline fallback:
 - In RTL layouts (`dir: Direction::Rtl`), ArrowLeft and ArrowRight meanings reverse for
   horizontal groups: ArrowLeft focuses the next item, ArrowRight focuses the previous item.
 - The `on_item_keydown()` method reads `ctx.dir` and swaps `FocusNext`/`FocusPrev` for
-  horizontal orientations in RTL automatically.
+  horizontal orientations in RTL automatically when `ctx.roving_focus` is enabled.
 
-**RTL Arrow Keys:** In RTL mode (detected from nearest `ArsProvider` or document direction), horizontal arrow keys are flipped: ArrowLeft moves to the next item, ArrowRight moves to the previous item. This mapping is exposed through `Api::on_item_keydown()`, which converts physical keys into abstract `FocusNext` / `FocusPrev` events using `ctx.dir`. Adapters may also dispatch those abstract events directly when they own keyboard mapping.
+**RTL Arrow Keys:** In RTL mode (detected from nearest `ArsProvider` or document direction), horizontal arrow keys are flipped: ArrowLeft moves to the next item, ArrowRight moves to the previous item. This mapping is exposed through `Api::on_item_keydown()`, which converts physical keys into abstract `FocusNext` / `FocusPrev` events using `ctx.dir` when roving focus is enabled. Adapters may also dispatch those abstract events directly when they own keyboard mapping.
 
 ### 4.1 Messages
 

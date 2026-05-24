@@ -1024,8 +1024,12 @@ impl Api<'_> {
         (self.send)(Event::Blur);
     }
 
-    /// Dispatches keyboard navigation or activation for an item.
-    pub fn on_item_keydown(&self, item_id: &Key, data: &KeyboardEventData) {
+    /// Dispatches keyboard navigation for an item.
+    pub fn on_item_keydown(&self, _item_id: &Key, data: &KeyboardEventData) {
+        if !self.ctx.roving_focus {
+            return;
+        }
+
         let horizontal = self.ctx.orientation == Orientation::Horizontal;
         let rtl = self.ctx.dir == Direction::Rtl;
 
@@ -1038,9 +1042,6 @@ impl Api<'_> {
             KeyboardKey::ArrowUp if !horizontal => (self.send)(Event::FocusPrev),
             KeyboardKey::Home => (self.send)(Event::FocusFirst),
             KeyboardKey::End => (self.send)(Event::FocusLast),
-            KeyboardKey::Space | KeyboardKey::Enter => {
-                (self.send)(Event::ToggleItem(item_id.clone()));
-            }
             _ => {}
         }
     }
@@ -2068,7 +2069,7 @@ mod tests {
     }
 
     #[test]
-    fn toggle_group_keydown_dispatch_matrix_covers_orientation_and_activation() {
+    fn toggle_group_keydown_dispatch_matrix_covers_roving_navigation() {
         let horizontal = Arc::new(Mutex::new(Vec::new()));
         let horizontal_send = {
             let horizontal = Arc::clone(&horizontal);
@@ -2095,10 +2096,30 @@ mod tests {
                 Event::FocusPrev,
                 Event::FocusFirst,
                 Event::FocusLast,
-                Event::ToggleItem(key("bold")),
-                Event::ToggleItem(key("bold")),
             ],
         );
+    }
+
+    #[test]
+    fn toggle_group_keydown_ignores_activation_and_roving_disabled_navigation() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let send = {
+            let sent = Arc::clone(&sent);
+            move |event| sent.lock().unwrap().push(event)
+        };
+
+        let service = service(props().roving_focus(false));
+
+        let api = service.connect(&send);
+
+        api.on_item_keydown(&key("bold"), &keyboard(KeyboardKey::ArrowRight));
+        api.on_item_keydown(&key("bold"), &keyboard(KeyboardKey::ArrowLeft));
+        api.on_item_keydown(&key("bold"), &keyboard(KeyboardKey::Home));
+        api.on_item_keydown(&key("bold"), &keyboard(KeyboardKey::End));
+        api.on_item_keydown(&key("bold"), &keyboard(KeyboardKey::Space));
+        api.on_item_keydown(&key("bold"), &keyboard(KeyboardKey::Enter));
+
+        assert!(sent.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -2459,7 +2480,6 @@ mod tests {
                     item: key("bold"),
                     is_keyboard: true,
                 },
-                Event::ToggleItem(key("bold")),
                 Event::ToggleItem(key("bold")),
                 Event::Blur,
                 Event::UnregisterItem(key("bold")),
