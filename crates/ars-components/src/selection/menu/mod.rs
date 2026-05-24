@@ -3,6 +3,8 @@
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     string::{String, ToString as _},
+    vec,
+    vec::Vec,
 };
 use core::fmt::{self, Debug};
 
@@ -136,6 +138,9 @@ pub enum Event {
 
     /// Replace the item collection dynamically.
     UpdateItems(StaticCollection<Item>),
+
+    /// Synchronize context values derived from updated props.
+    SyncProps,
 }
 
 /// Menu machine context.
@@ -580,7 +585,17 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (_, Event::SyncProps) => Some(sync_props_plan(props)),
+
             _ => None,
+        }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        if old == new {
+            Vec::new()
+        } else {
+            vec![Event::SyncProps]
         }
     }
 
@@ -1048,7 +1063,7 @@ impl Api<'_> {
                 }
             }
 
-            KeyboardKey::ArrowRight => {
+            key if key == submenu_open_key(self.ctx) => {
                 if let Some(key) = &self.ctx.highlighted_key
                     && item_type_matches(self.ctx, key, |item_type| {
                         matches!(item_type, ItemType::Submenu)
@@ -1058,7 +1073,7 @@ impl Api<'_> {
                 }
             }
 
-            KeyboardKey::ArrowLeft if self.ctx.submenu_open.is_some() => {
+            key if key == submenu_close_key(self.ctx) && self.ctx.submenu_open.is_some() => {
                 (self.send)(Event::CloseSubmenu);
             }
 
@@ -1193,6 +1208,15 @@ fn close_plan(props: &Props) -> TransitionPlan<Machine> {
     })
 }
 
+fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
+    let props = props.clone();
+
+    TransitionPlan::context_only(move |ctx: &mut Context| {
+        ctx.loop_focus = props.loop_focus;
+        ctx.ids = ComponentIds::from_id(&props.id);
+    })
+}
+
 fn select_item_plan(ctx: &Context, props: &Props, key: Key) -> Option<TransitionPlan<Machine>> {
     if !is_selectable_item(ctx, props, &key) {
         return None;
@@ -1297,6 +1321,8 @@ fn action_plan(
             ctx.highlighted_key = None;
             ctx.submenu_open = None;
             ctx.typeahead = typeahead::State::default();
+            ctx.focused = false;
+            ctx.focus_visible = false;
 
             if was_open && let Some(callback) = &on_open_change {
                 callback(false);
@@ -1320,33 +1346,29 @@ fn last_key(ctx: &Context, props: &Props) -> Option<Key> {
 }
 
 fn next_key(ctx: &Context, props: &Props) -> Option<Key> {
-    ctx.highlighted_key
-        .as_ref()
-        .and_then(|key| {
-            next_enabled_key(
-                &ctx.items,
-                key,
-                &props.disabled_keys,
-                props.disabled_behavior,
-                ctx.loop_focus,
-            )
-        })
-        .or_else(|| first_key(ctx, props))
+    match &ctx.highlighted_key {
+        Some(key) => next_enabled_key(
+            &ctx.items,
+            key,
+            &props.disabled_keys,
+            props.disabled_behavior,
+            ctx.loop_focus,
+        ),
+        None => first_key(ctx, props),
+    }
 }
 
 fn prev_key(ctx: &Context, props: &Props) -> Option<Key> {
-    ctx.highlighted_key
-        .as_ref()
-        .and_then(|key| {
-            prev_enabled_key(
-                &ctx.items,
-                key,
-                &props.disabled_keys,
-                props.disabled_behavior,
-                ctx.loop_focus,
-            )
-        })
-        .or_else(|| last_key(ctx, props))
+    match &ctx.highlighted_key {
+        Some(key) => prev_enabled_key(
+            &ctx.items,
+            key,
+            &props.disabled_keys,
+            props.disabled_behavior,
+            ctx.loop_focus,
+        ),
+        None => last_key(ctx, props),
+    }
 }
 
 fn is_focusable_key(ctx: &Context, props: &Props, key: &Key) -> bool {
@@ -1391,14 +1413,71 @@ fn invalidate_collection_references(ctx: &mut Context) {
         ctx.submenu_open = None;
     }
 
+    let checkbox_keys = ctx
+        .items
+        .nodes()
+        .filter_map(|node| {
+            node.value
+                .as_ref()
+                .filter(|item| item.item_type == ItemType::Checkbox)
+                .map(|_| node.key.clone())
+        })
+        .collect::<BTreeSet<_>>();
+    let radio_keys = ctx
+        .items
+        .nodes()
+        .filter_map(|node| {
+            node.value.as_ref().and_then(|item| match &item.item_type {
+                ItemType::Radio { group } => Some((node.key.clone(), group.clone())),
+                _ => None,
+            })
+        })
+        .collect::<BTreeMap<_, _>>();
+
     ctx.checked_items
-        .retain(|key, _| ctx.items.contains_key(key));
-    ctx.radio_groups
-        .retain(|_, key| ctx.items.contains_key(key));
+        .retain(|key, _| checkbox_keys.contains(key));
+    ctx.radio_groups.retain(|group, key| {
+        radio_keys
+            .get(key)
+            .is_some_and(|item_group| item_group == group)
+    });
+}
+
+fn submenu_open_key(ctx: &Context) -> KeyboardKey {
+    if ctx.locale.is_rtl() {
+        KeyboardKey::ArrowLeft
+    } else {
+        KeyboardKey::ArrowRight
+    }
+}
+
+fn submenu_close_key(ctx: &Context) -> KeyboardKey {
+    if ctx.locale.is_rtl() {
+        KeyboardKey::ArrowRight
+    } else {
+        KeyboardKey::ArrowLeft
+    }
 }
 
 fn typeahead_time(now_ms: Option<u64>, state: &typeahead::State) -> u64 {
-    now_ms.unwrap_or_else(|| state.last_key_time_ms.saturating_add(1))
+    now_ms.unwrap_or_else(|| {
+        current_time_ms().unwrap_or_else(|| state.last_key_time_ms.saturating_add(1))
+    })
+}
+
+#[cfg(feature = "std")]
+fn current_time_ms() -> Option<u64> {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis();
+
+    Some(u64::try_from(millis).unwrap_or(u64::MAX))
+}
+
+#[cfg(not(feature = "std"))]
+const fn current_time_ms() -> Option<u64> {
+    None
 }
 
 #[cfg(test)]
@@ -1408,7 +1487,7 @@ mod tests {
     use std::sync::Mutex;
 
     use ars_collections::{Collection, CollectionBuilder, DisabledBehavior, Key, NodeType};
-    use ars_core::{AriaAttr, Callback, ConnectApi, Env, HtmlAttr, KeyboardKey, Service};
+    use ars_core::{AriaAttr, Callback, ConnectApi, Env, HtmlAttr, KeyboardKey, Locale, Service};
     use ars_interactions::KeyboardEventData;
 
     use super::{Event, Item, ItemType, Machine, Messages, Part, Props, State};
@@ -1492,6 +1571,14 @@ mod tests {
 
     fn service(props: Props) -> Service<Machine> {
         let mut service = Service::<Machine>::new(props, &Env::default(), &Messages);
+
+        drop(service.send(Event::UpdateItems(collection())));
+
+        service
+    }
+
+    fn service_with_env(props: Props, env: &Env) -> Service<Machine> {
+        let mut service = Service::<Machine>::new(props, env, &Messages);
 
         drop(service.send(Event::UpdateItems(collection())));
 
@@ -1716,6 +1803,34 @@ mod tests {
     }
 
     #[test]
+    fn submenu_arrow_keys_follow_rtl_locale_direction() {
+        let env = Env {
+            locale: Locale::parse("ar").expect("ar locale parses"),
+            ..Env::default()
+        };
+        let mut menu = service_with_env(Props::new().id("menu"), &env);
+
+        drop(menu.send(Event::Open));
+        drop(menu.send(Event::HighlightItem(Some(key("delta")))));
+
+        assert_eq!(
+            captured_events(&menu, |api| {
+                api.on_content_keydown(&keyboard(KeyboardKey::ArrowLeft, None), false, false);
+            }),
+            vec![Event::OpenSubmenu(key("delta"))]
+        );
+
+        drop(menu.send(Event::OpenSubmenu(key("delta"))));
+
+        assert_eq!(
+            captured_events(&menu, |api| {
+                api.on_content_keydown(&keyboard(KeyboardKey::ArrowRight, None), false, false);
+            }),
+            vec![Event::CloseSubmenu]
+        );
+    }
+
+    #[test]
     fn enter_and_space_activate_normal_checkbox_radio_and_submenu_items() {
         let mut menu = service(Props::new().id("menu").close_on_action(false));
 
@@ -1931,6 +2046,19 @@ mod tests {
     }
 
     #[test]
+    fn close_on_action_clears_focus_state() {
+        let mut menu = service(Props::new().id("menu"));
+
+        drop(menu.send(Event::Open));
+        drop(menu.send(Event::Focus { is_keyboard: true }));
+        drop(menu.send(Event::SelectItem(key("alpha"))));
+
+        assert_eq!(menu.state(), &State::Closed);
+        assert!(!menu.context().focused);
+        assert!(!menu.context().focus_visible);
+    }
+
+    #[test]
     fn disallow_empty_selection_blocks_final_checkbox_uncheck() {
         let mut menu = service(
             Props::new()
@@ -2125,6 +2253,51 @@ mod tests {
     }
 
     #[test]
+    fn update_items_clears_selection_state_for_retyped_keys() {
+        let mut menu = service(Props::new().id("menu").close_on_action(false));
+        let retyped = CollectionBuilder::new()
+            .item(key("bravo"), "Bravo", item("Bravo", ItemType::Normal))
+            .item(
+                key("charlie"),
+                "Charlie",
+                item(
+                    "Charlie",
+                    ItemType::Radio {
+                        group: "spacing".into(),
+                    },
+                ),
+            )
+            .build();
+
+        drop(menu.send(Event::Open));
+        drop(menu.send(Event::ToggleCheckboxItem(key("bravo"))));
+        drop(menu.send(Event::SelectRadioItem {
+            group: "density".into(),
+            value: key("charlie"),
+        }));
+        drop(menu.send(Event::UpdateItems(retyped)));
+
+        assert!(menu.context().checked_items.is_empty());
+        assert!(menu.context().radio_groups.is_empty());
+    }
+
+    #[test]
+    fn set_props_syncs_cached_ids_and_loop_focus() {
+        let mut menu = service(Props::new().id("menu"));
+
+        drop(menu.send(Event::Open));
+        drop(menu.send(Event::HighlightItem(Some(key("delta")))));
+        drop(menu.set_props(Props::new().id("renamed").loop_focus(false)));
+        drop(menu.send(Event::HighlightNext));
+
+        assert_eq!(menu.context().highlighted_key, None);
+        assert_eq!(
+            menu.connect(&|_| {}).trigger_attrs().get(&HtmlAttr::Id),
+            Some("renamed-trigger")
+        );
+    }
+
+    #[test]
     fn keyboard_helpers_emit_typeahead_with_or_without_adapter_timestamps() {
         let menu = service(Props::new().id("menu"));
 
@@ -2162,6 +2335,27 @@ mod tests {
         ));
         assert_eq!(captured[1], Event::TypeaheadSearch('b', 100));
         assert_eq!(captured[2], Event::TypeaheadSearch('d', 200));
+    }
+
+    #[test]
+    fn keyboard_helpers_use_wall_clock_for_default_typeahead_after_pause() {
+        let mut menu = service(Props::new().id("menu"));
+
+        drop(menu.send(Event::Open));
+        drop(menu.send(Event::TypeaheadSearch('b', 100)));
+
+        let captured = captured_events(&menu, |api| {
+            api.on_content_keydown(
+                &keyboard(KeyboardKey::Unidentified, Some('d')),
+                false,
+                false,
+            );
+        });
+
+        assert!(matches!(
+            captured.as_slice(),
+            [Event::TypeaheadSearch('d', timestamp)] if timestamp.saturating_sub(100) > 500
+        ));
     }
 
     #[test]
