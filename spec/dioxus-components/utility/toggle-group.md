@@ -31,7 +31,7 @@ pub struct ToggleGroupProps {
     pub orientation: Orientation,
     #[props(default = Direction::Ltr)]
     pub dir: Direction,
-    #[props(default = false)]
+    #[props(default = true)]
     pub loop_focus: bool,
     #[props(optional, default = true)]
     pub roving_focus: bool,
@@ -107,14 +107,17 @@ The group surfaces the full core prop set, including controlled/uncontrolled val
 
 ## 7. Prop Sync and Event Mapping
 
-Switching between controlled and uncontrolled group value is not supported after mount. `default_value` is init-only. `value` uses effect-based controlled sync.
+Switching between controlled and uncontrolled group value is supported after mount by dispatching
+`SetValue(Some(value))` for controlled updates and `SetValue(None)` when returning to uncontrolled
+mode. `default_value` is init-only except for native form reset, where the core `Reset` event
+restores the uncontrolled value. `value` uses effect-based controlled sync.
 
-| Adapter prop                                          | Mode                        | Sync trigger            | Machine event / update path | Visible effect                                                | Notes                                                                    |
-| ----------------------------------------------------- | --------------------------- | ----------------------- | --------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `value`                                               | controlled                  | prop change after mount | `SetValue`                  | updates selected items, roving state, and hidden-input output | immediate sync                                                           |
-| `default_value`                                       | uncontrolled internal state | initial render only     | initial machine props       | seeds internal selection                                      | read once                                                                |
-| `selection_mode`                                      | non-reactive adapter prop   | render time only        | initial/group props         | changes selection behavior and root role                      | post-mount changes should be treated as unsupported unless reinitialized |
-| `orientation` / `dir` / `loop_focus` / `roving_focus` | non-reactive adapter prop   | render time only        | initial/group props         | configures keyboard and layout semantics                      | adapter may reinitialize if wrappers want dynamic support                |
+| Adapter prop                                          | Mode                        | Sync trigger            | Machine event / update path | Visible effect                                                | Notes                                          |
+| ----------------------------------------------------- | --------------------------- | ----------------------- | --------------------------- | ------------------------------------------------------------- | ---------------------------------------------- |
+| `value`                                               | controlled                  | prop change after mount | `SetValue`                  | updates selected items, roving state, and hidden-input output | immediate sync                                 |
+| `default_value`                                       | uncontrolled internal state | initial render only     | initial machine props       | seeds internal selection                                      | read once                                      |
+| `selection_mode`                                      | reactive adapter prop       | prop change after mount | `SetProps`                  | changes selection behavior and root role                      | selected values are normalized to the new mode |
+| `orientation` / `dir` / `loop_focus` / `roving_focus` | reactive adapter prop       | prop change after mount | `SetProps`                  | configures keyboard and layout semantics                      | applies without reinitializing the group       |
 
 | UI event                | Preconditions                    | Machine event / callback path  | Ordering notes                                   | Notes                                                                   |
 | ----------------------- | -------------------------------- | ------------------------------ | ------------------------------------------------ | ----------------------------------------------------------------------- |

@@ -1,0 +1,69 @@
+---
+source: crates/ars-components/src/utility/toggle_group/mod.rs
+expression: "snapshot_attrs(&focused.connect(&|_| {}).item_attrs(&key(\"bold\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-focus-visible",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-focused",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toggle-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-value",
+            ),
+            String(
+                "bold",
+            ),
+        ),
+        (
+            Aria(
+                Checked,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "radio",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

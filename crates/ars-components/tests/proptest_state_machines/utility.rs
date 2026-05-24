@@ -1,11 +1,15 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 
 use ars_a11y::AriaRelevant;
+use ars_collections::Key;
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
 use ars_components::utility::{
     button, download_trigger, error_boundary, field, fieldset, focus_scope, form, form_submit,
-    live_region, separator, swap, toggle, visually_hidden,
+    live_region, separator, swap, toggle, toggle_group, visually_hidden,
 };
 use ars_core::{ConnectApi, Env, HtmlAttr, Service, WeakSend, callback};
 use ars_forms::{
@@ -98,6 +102,101 @@ fn arb_toggle_event() -> impl Strategy<Value = toggle::Event> {
         Just(toggle::Event::Blur),
         any::<bool>().prop_map(toggle::Event::SetDisabled),
         prop::option::of(any::<bool>()).prop_map(toggle::Event::SetValue),
+    ]
+}
+
+fn arb_toggle_group_key() -> impl Strategy<Value = Key> {
+    prop_oneof![
+        Just(Key::str("bold")),
+        Just(Key::str("italic")),
+        Just(Key::str("strike")),
+        Just(Key::str("code")),
+    ]
+}
+
+fn arb_toggle_group_key_set() -> impl Strategy<Value = BTreeSet<Key>> {
+    prop::collection::btree_set(arb_toggle_group_key(), 0..=4)
+}
+
+fn arb_toggle_group_mode() -> impl Strategy<Value = toggle_group::SelectionMode> {
+    prop_oneof![
+        Just(toggle_group::SelectionMode::None),
+        Just(toggle_group::SelectionMode::Single),
+        Just(toggle_group::SelectionMode::Multiple),
+    ]
+}
+
+fn arb_toggle_group_props() -> impl Strategy<Value = toggle_group::Props> {
+    (
+        prop::option::of(arb_toggle_group_key_set()),
+        arb_toggle_group_key_set(),
+        arb_toggle_group_mode(),
+        any::<bool>(),
+        prop_oneof![Just(Orientation::Horizontal), Just(Orientation::Vertical)],
+        prop_oneof![
+            Just(ars_core::Direction::Ltr),
+            Just(ars_core::Direction::Rtl)
+        ],
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        arb_toggle_group_key_set(),
+    )
+        .prop_map(
+            |(
+                value,
+                default_value,
+                selection_mode,
+                disabled,
+                orientation,
+                dir,
+                loop_focus,
+                roving_focus,
+                disallow_empty_selection,
+                read_only,
+                disabled_items,
+            )| toggle_group::Props {
+                id: "toggle-group".to_string(),
+                value,
+                default_value,
+                selection_mode,
+                disabled,
+                orientation,
+                dir,
+                loop_focus,
+                roving_focus,
+                aria_label: Some("Format".to_string()),
+                aria_labelledby: None,
+                disallow_empty_selection,
+                name: Some("format".to_string()),
+                invalid: false,
+                required: false,
+                form: None,
+                read_only,
+                disabled_items,
+                on_change: None,
+            },
+        )
+}
+
+fn arb_toggle_group_event() -> impl Strategy<Value = toggle_group::Event> {
+    prop_oneof![
+        arb_toggle_group_key().prop_map(toggle_group::Event::SelectItem),
+        arb_toggle_group_key().prop_map(toggle_group::Event::DeselectItem),
+        arb_toggle_group_key().prop_map(toggle_group::Event::ToggleItem),
+        (arb_toggle_group_key(), any::<bool>())
+            .prop_map(|(item, is_keyboard)| { toggle_group::Event::Focus { item, is_keyboard } }),
+        Just(toggle_group::Event::Blur),
+        Just(toggle_group::Event::FocusNext),
+        Just(toggle_group::Event::FocusPrev),
+        Just(toggle_group::Event::FocusFirst),
+        Just(toggle_group::Event::FocusLast),
+        arb_toggle_group_key().prop_map(toggle_group::Event::RegisterItem),
+        arb_toggle_group_key().prop_map(toggle_group::Event::UnregisterItem),
+        Just(toggle_group::Event::Reset),
+        prop::option::of(arb_toggle_group_key_set()).prop_map(toggle_group::Event::SetValue),
+        Just(toggle_group::Event::SetProps),
     ]
 }
 
@@ -455,6 +554,126 @@ proptest! {
                     before_pressed,
                     "disabled toggle must not change pressed value"
                 );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_toggle_group_event_sequences_preserve_invariants(
+        props in arb_toggle_group_props(),
+        events in prop::collection::vec(arb_toggle_group_event(), 0..128),
+    ) {
+        let mut service = Service::<toggle_group::Machine>::new(
+            props,
+            &Env::default(),
+            &toggle_group::Messages::default(),
+        );
+
+        for event in events {
+            let before_value = service.context().value.get().clone();
+            let before_disabled = service.context().disabled;
+            let before_read_only = service.props().read_only;
+
+            let value_item_event = matches!(
+                event,
+                toggle_group::Event::SelectItem(_)
+                    | toggle_group::Event::DeselectItem(_)
+                    | toggle_group::Event::ToggleItem(_)
+            );
+
+            let disabled_value_event = value_item_event || matches!(event, toggle_group::Event::Reset);
+
+            drop(service.send(event));
+
+            let state = service.state();
+            let ctx = service.context();
+
+            match state {
+                toggle_group::State::Idle => {
+                    prop_assert!(ctx.focused_item.is_none());
+                    prop_assert!(!ctx.focus_visible);
+                }
+
+                toggle_group::State::Focused { item } => {
+                    prop_assert_eq!(ctx.focused_item.as_ref(), Some(item));
+                    prop_assert!(
+                        ctx.registered_items.iter().any(|registered| registered == item),
+                        "focused item must be registered"
+                    );
+                    prop_assert!(
+                        !ctx.disabled_items.contains(item) && !ctx.disabled,
+                        "focused item must be enabled"
+                    );
+                }
+            }
+
+            match ctx.selection_mode {
+                toggle_group::SelectionMode::None => {
+                    prop_assert!(ctx.value.get().is_empty(), "none mode cannot select");
+                }
+
+                toggle_group::SelectionMode::Single => {
+                    prop_assert!(ctx.value.get().len() <= 1, "single mode selects at most one");
+                }
+
+                toggle_group::SelectionMode::Multiple => {}
+            }
+
+            if before_disabled && disabled_value_event {
+                prop_assert_eq!(
+                    ctx.value.get(),
+                    &before_value,
+                    "disabled group cannot change selection from value events"
+                );
+            }
+
+            if before_read_only && value_item_event {
+                prop_assert_eq!(
+                    ctx.value.get(),
+                    &before_value,
+                    "read-only group cannot change selection from item events"
+                );
+            }
+
+            let registered = ctx.registered_items.iter().collect::<BTreeSet<_>>();
+
+            prop_assert_eq!(
+                registered.len(),
+                ctx.registered_items.len(),
+                "registered item list must be deduplicated"
+            );
+
+            if let Some(focused) = &ctx.focused_item {
+                prop_assert!(ctx.registered_items.iter().any(|item| item == focused));
+                prop_assert!(!ctx.disabled_items.contains(focused));
+            }
+
+            if ctx.roving_focus {
+                let enabled = ctx
+                    .registered_items
+                    .iter()
+                    .filter(|item| !ctx.disabled && !ctx.disabled_items.contains(*item))
+                    .collect::<Vec<_>>();
+
+                if !enabled.is_empty() {
+                    let api = service.connect(&|_| {});
+
+                    let zero_count = enabled
+                        .iter()
+                        .filter(|item| {
+                            api.item_attrs(item)
+                                .get(&HtmlAttr::TabIndex)
+                                .is_some_and(|value| value == "0")
+                        })
+                        .count();
+
+                    prop_assert_eq!(
+                        zero_count,
+                        1,
+                        "exactly one enabled item anchors roving tabindex"
+                    );
+                }
             }
         }
     }

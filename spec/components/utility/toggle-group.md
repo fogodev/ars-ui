@@ -28,20 +28,22 @@ depending on the `selection_mode`. Common uses: text alignment toolbar (single),
 
 ### 1.2 Events
 
-| Event          | Payload                        | Description                                          |
-| -------------- | ------------------------------ | ---------------------------------------------------- |
-| `SelectItem`   | `Key`                          | Activate an item by id.                              |
-| `DeselectItem` | `Key`                          | Deactivate an item by id.                            |
-| `ToggleItem`   | `Key`                          | Toggle an item's active state by id.                 |
-| `Focus`        | `item: Key, is_keyboard: bool` | An item received focus.                              |
-| `Blur`         | —                              | Focus left the group.                                |
-| `FocusNext`    | —                              | Move focus to the next item (Arrow key).             |
-| `FocusPrev`    | —                              | Move focus to the previous item (Arrow key).         |
-| `FocusFirst`   | —                              | Move focus to the first item (Home key).             |
-| `FocusLast`    | —                              | Move focus to the last item (End key).               |
-| `Reset`        | —                              | Restore `value` to `default_value`.                  |
-| `SetValue`     | `BTreeSet<Key>`                | Set the controlled value directly (from props sync). |
-| `SetProps`     | —                              | Sync context fields from updated props.              |
+| Event            | Payload                        | Description                                          |
+| ---------------- | ------------------------------ | ---------------------------------------------------- |
+| `SelectItem`     | `Key`                          | Activate an item by id.                              |
+| `DeselectItem`   | `Key`                          | Deactivate an item by id.                            |
+| `ToggleItem`     | `Key`                          | Toggle an item's active state by id.                 |
+| `Focus`          | `item: Key, is_keyboard: bool` | An item received focus.                              |
+| `Blur`           | —                              | Focus left the group.                                |
+| `FocusNext`      | —                              | Move focus to the next item (Arrow key).             |
+| `FocusPrev`      | —                              | Move focus to the previous item (Arrow key).         |
+| `FocusFirst`     | —                              | Move focus to the first item (Home key).             |
+| `FocusLast`      | —                              | Move focus to the last item (End key).               |
+| `RegisterItem`   | `Key`                          | Register a rendered item value in logical order.     |
+| `UnregisterItem` | `Key`                          | Unregister a rendered item value.                    |
+| `Reset`          | —                              | Restore `value` to `default_value`.                  |
+| `SetValue`       | `Option<BTreeSet<Key>>`        | Set the controlled value directly (from props sync). |
+| `SetProps`       | —                              | Sync context fields from updated props.              |
 
 ### 1.3 Context
 
@@ -84,10 +86,14 @@ pub enum Event {
     FocusFirst,
     /// Move focus to the last item (End key).
     FocusLast,
+    /// Register a rendered item value in logical DOM order.
+    RegisterItem(Key),
+    /// Unregister a rendered item value.
+    UnregisterItem(Key),
     /// Restore `value` to `default_value`.
     Reset,
     /// Set the controlled value directly (from `on_props_changed`).
-    SetValue(BTreeSet<Key>),
+    SetValue(Option<BTreeSet<Key>>),
     /// Sync context fields from updated props (disabled, orientation, etc.).
     SetProps,
 }
@@ -109,7 +115,7 @@ pub enum SelectionMode {
 }
 
 use std::collections::BTreeSet;
-use ars_core::Key;
+use ars_collections::Key;
 use ars_i18n::{Direction, Orientation};
 
 /// The context of the `ToggleGroup` component.
@@ -151,6 +157,8 @@ pub struct Context {
     /// the adapter removes the item. This keeps `registered_items` in sync with
     /// the actual DOM order.
     pub registered_items: Vec<Key>,
+    /// Per-item disabled set mirrored from props for focus and roving tabindex checks.
+    pub disabled_items: BTreeSet<Key>,
     /// The active locale, inherited from ArsProvider context.
     pub locale: Locale,
     /// Resolved translatable messages.
@@ -230,6 +238,8 @@ pub struct Props {
     /// disabled: `aria-disabled="true"`, press handlers skipped, excluded from
     /// roving tabindex navigation.
     pub disabled_items: BTreeSet<Key>,
+    /// Callback invoked when user intent requests a new selected set.
+    pub on_change: Option<Callback<dyn Fn(BTreeSet<Key>) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -253,6 +263,7 @@ impl Default for Props {
             form: None,
             read_only: false,
             disabled_items: BTreeSet::new(),
+            on_change: None,
         }
     }
 }
@@ -271,6 +282,7 @@ impl ars_core::Machine for Machine {
     type Props = Props;
     type Api<'a> = Api<'a>;
     type Messages = Messages;
+    type Effect = Effect;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
@@ -278,8 +290,8 @@ impl ars_core::Machine for Machine {
         let messages = messages.clone();
 
         let value = match &props.value {
-            Some(v) => Bindable::controlled(v.clone()),
-            None    => Bindable::uncontrolled(props.default_value.clone()),
+            Some(v) => Bindable::controlled(normalize_value(v.clone(), props.selection_mode)),
+            None    => Bindable::uncontrolled(normalize_value(props.default_value.clone(), props.selection_mode)),
         };
 
         let ctx = Context {
@@ -294,6 +306,7 @@ impl ars_core::Machine for Machine {
             roving_focus: props.roving_focus,
             disallow_empty_selection: props.disallow_empty_selection,
             registered_items: Vec::new(),
+            disabled_items: props.disabled_items.clone(),
             locale,
             messages,
         };
@@ -322,9 +335,11 @@ impl ars_core::Machine for Machine {
         match (state, event) {
             // ── SetValue (controlled value sync from on_props_changed) ───────
             (_, Event::SetValue(new_value)) => {
-                let new_value = new_value.clone();
+                let new_value = new_value
+                    .clone()
+                    .map(|value| normalize_value(value, props.selection_mode));
                 Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.value.set(new_value);
+                    ctx.value.sync_controlled(new_value);
                 }))
             }
 
@@ -337,6 +352,7 @@ impl ars_core::Machine for Machine {
                 let loop_focus = props.loop_focus;
                 let roving_focus = props.roving_focus;
                 let disallow_empty_selection = props.disallow_empty_selection;
+                let disabled_items = props.disabled_items.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.disabled = disabled;
                     ctx.selection_mode = selection_mode;
@@ -345,6 +361,7 @@ impl ars_core::Machine for Machine {
                     ctx.loop_focus = loop_focus;
                     ctx.roving_focus = roving_focus;
                     ctx.disallow_empty_selection = disallow_empty_selection;
+                    ctx.disabled_items = disabled_items;
                 }))
             }
             // ── SelectItem ───────────────────────────────────────────────────
@@ -416,6 +433,9 @@ impl ars_core::Machine for Machine {
 
             // ── Focus ────────────────────────────────────────────────────────
             (_, Event::Focus { item, is_keyboard }) => {
+                if !ctx.registered_items.contains(item) || ctx.disabled_items.contains(item) {
+                    return None;
+                }
                 let item = item.clone();
                 let is_keyboard = *is_keyboard;
                 Some(TransitionPlan::to(State::Focused { item: item.clone() })
@@ -536,13 +556,40 @@ impl ars_core::Machine for Machine {
                     item: last_for_state.unwrap_or_default(),
                 }).apply(move |ctx| {
                     ctx.focused_item = last;
-                    ctx.focus_visible = true;
+                        ctx.focus_visible = true;
+                    }))
+            }
+
+            // ── RegisterItem / UnregisterItem ───────────────────────────────
+            (_, Event::RegisterItem(item)) => {
+                if ctx.registered_items.contains(item) {
+                    return None;
+                }
+                let item = item.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.registered_items.push(item);
+                }))
+            }
+
+            (_, Event::UnregisterItem(item)) => {
+                let item = item.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.registered_items.retain(|registered| registered != &item);
+                    if !ctx.value.is_controlled() {
+                        let mut next = ctx.value.get().clone();
+                        next.remove(&item);
+                        ctx.value.set(next);
+                    }
+                    if ctx.focused_item.as_ref() == Some(&item) {
+                        ctx.focused_item = None;
+                        ctx.focus_visible = false;
+                    }
                 }))
             }
 
             // ── Reset ────────────────────────────────────────────────────────
             (_, Event::Reset) => {
-                let default = props.default_value.clone();
+                let default = normalize_value(props.default_value.clone(), ctx.selection_mode);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(default);
                 }))
@@ -555,9 +602,7 @@ impl ars_core::Machine for Machine {
     fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
         let mut events = Vec::new();
         if old.value != new.value {
-            if let Some(ref new_value) = new.value {
-                events.push(Event::SetValue(new_value.clone()));
-            }
+            events.push(Event::SetValue(new.value.clone()));
         }
         if old.disabled != new.disabled
             || old.orientation != new.orientation
@@ -567,6 +612,7 @@ impl ars_core::Machine for Machine {
             || old.selection_mode != new.selection_mode
             || old.read_only != new.read_only
             || old.disallow_empty_selection != new.disallow_empty_selection
+            || old.disabled_items != new.disabled_items
         {
             events.push(Event::SetProps);
         }
@@ -607,7 +653,25 @@ by the connect layer based on the selected item's DOM measurements.
 > Desktop adapters should either omit the indicator or use a CSS-only highlight approach (e.g.,
 > background color on `[data-ars-selected]`) instead of absolute positioning.
 
-### 1.7 Connect / API
+### 1.7 Effect Contract
+
+```rust
+/// Typed effect intents emitted by the toggle group machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes `Props::on_change` with the requested selected set.
+    ValueChange,
+    /// Adapter moves DOM focus to the item keyed by `ctx.focused_item`.
+    FocusItem,
+}
+```
+
+`FocusItem` is keyed by stable item `Key` values, not DOM IDs. The agnostic core updates
+`ctx.focused_item` and emits this intent; framework adapters resolve the live mounted item handle
+and perform the actual focus operation. IDs remain valid for ARIA, form association, hydration,
+and test attributes, but they are not the live focus or measurement lookup mechanism.
+
+### 1.8 Connect / API
 
 ```rust
 #[derive(ComponentPart)]
@@ -937,7 +1001,7 @@ invisible. Selected items MUST have a visible border or outline fallback:
 - The `on_item_keydown()` method reads `ctx.dir` and swaps `FocusNext`/`FocusPrev` for
   horizontal orientations in RTL automatically.
 
-**RTL Arrow Keys:** In RTL mode (detected from nearest `ArsProvider` or document direction), horizontal arrow keys are flipped: ArrowLeft moves to the next item, ArrowRight moves to the previous item. This flipping is handled at the adapter level (same as RadioGroup). The machine always uses abstract 'Next'/'Previous' navigation; adapters map physical arrow keys to abstract directions based on document direction.
+**RTL Arrow Keys:** In RTL mode (detected from nearest `ArsProvider` or document direction), horizontal arrow keys are flipped: ArrowLeft moves to the next item, ArrowRight moves to the previous item. This mapping is exposed through `Api::on_item_keydown()`, which converts physical keys into abstract `FocusNext` / `FocusPrev` events using `ctx.dir`. Adapters may also dispatch those abstract events directly when they own keyboard mapping.
 
 ### 4.1 Messages
 
@@ -953,7 +1017,7 @@ pub struct Messages {
 impl Default for Messages {
     fn default() -> Self {
         Self {
-            group_label: MessageFn::static_str("Toggle group"),
+            group_label: MessageFn::new(|_locale: &Locale| String::from("Toggle group")),
         }
     }
 }

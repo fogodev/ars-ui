@@ -1,0 +1,77 @@
+---
+source: crates/ars-components/src/utility/toggle_group/mod.rs
+expression: "snapshot_attrs(&multiple.connect(&|_| {}).item_attrs(&key(\"bold\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-disabled",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toggle-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-selected",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-value",
+            ),
+            String(
+                "bold",
+            ),
+        ),
+        (
+            Aria(
+                Disabled,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Pressed,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "button",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

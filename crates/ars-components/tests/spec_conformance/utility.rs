@@ -3,10 +3,11 @@
 //! Each test pulls the expected anatomy from the corresponding component
 //! spec's §2 anatomy table and asserts the impl's `Part` enum matches.
 
+use ars_collections::Key;
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
 use ars_components::utility::{
-    download_trigger, focus_scope, group, live_region, swap, toggle, toggle_button,
+    download_trigger, focus_scope, group, live_region, swap, toggle, toggle_button, toggle_group,
 };
 use ars_core::{Env, HtmlAttr, Service};
 
@@ -44,6 +45,23 @@ fn toggle_anatomy_matches_spec() {
 #[test]
 fn toggle_button_anatomy_matches_spec() {
     assert_anatomy("toggle-button", &[(toggle_button::Part::Root, "root")]);
+}
+
+#[test]
+fn toggle_group_anatomy_matches_spec() {
+    assert_anatomy(
+        "toggle-group",
+        &[
+            (toggle_group::Part::Root, "root"),
+            (
+                toggle_group::Part::Item {
+                    value: Key::default(),
+                },
+                "item",
+            ),
+            (toggle_group::Part::Indicator, "indicator"),
+        ],
+    );
 }
 
 #[test]
