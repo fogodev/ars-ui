@@ -1,0 +1,77 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "721fb80430e3",
+  "session_id": "019e57b4-d408-79f0-a00a-a5a5ed45921f",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-24T14:56:08.20076Z",
+  "branch": "t3code/0b3d63ff",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/selection/menu/mod.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "18cc7be8506f",
+  "checkpoint_transcript_start": 1782,
+  "transcript_lines_at_start": 1782,
+  "token_usage": {
+    "input_tokens": 86618,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 4611072,
+    "output_tokens": 13139,
+    "api_call_count": 52
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Address five Codex review findings on a menu component PR (#672) in the ars-ui repo, using a TDD approach to patch submenu RTL arrows, prop-derived context sync, focus flag clearing on action close, wall-clock typeahead timing, and stale checkbox/radio state after item updates.",
+    "outcome": "All five regression tests were written, confirmed failing, then made green with minimal production changes. Formatting and clippy passed. A follow-up commit was pushed to the same PR branch with only the menu file staged.",
+    "learnings": {
+      "repo": [
+        "The ars-components crate uses nightly rustfmt; fmt differences must be resolved before committing even when logic is correct.",
+        "Locale direction (RTL/LTR) lives in ars-i18n and must be consulted by menu key handlers for correct ArrowLeft/ArrowRight submenu navigation.",
+        "Prop-derived cached state (ids, loop_focus) must be explicitly re-synced in on_props/props_changed; the menu did not do this automatically.",
+        "Typeahead timing falls back to wall-clock (SystemTime/Instant) when no timestamp is provided; the previous implementation did not apply this fallback consistently.",
+        "Stale checkbox/radio selection state must be cleared when UpdateItems is processed, not lazily on next interaction.",
+        "Snapshot tests are run via `cargo insta test` and must be checked before committing menu changes.",
+        "Property-based state machine tests for the menu are run with `--ignored` flag via `cargo test proptest_state_machines`.",
+        "An unrelated ars-dioxus working-tree change was present during the session and deliberately left unstaged."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/menu/mod.rs",
+          "finding": "Central file for all five fixes: RTL submenu arrows, prop sync, focus-on-close clearing, wall-clock typeahead fallback, and stale selection state after UpdateItems."
+        }
+      ],
+      "workflow": [
+        "TDD loop: write failing regression tests first, confirm they fail against current code, then apply minimal production fix until tests go green.",
+        "PR label `snapshot-reviewed` must be added and `@codex review` must be posted as a comment to trigger the Codex bot; reactions (👀) indicate the bot has checked out the review.",
+        "Codex review state is polled via GitHub API reactions on the triggering comment, combined with GraphQL queries for unresolved review threads.",
+        "CI check progression (Clippy → Workspace Check → Unit Tests) can be tracked via `gh pr view --json statusCheckRollup`.",
+        "Stage only the intentionally changed files before committing to avoid pulling in unrelated working-tree diffs."
+      ]
+    },
+    "friction": [
+      "Codex review required multiple long polling intervals (60s, 120s, 120s, 180s, 180s+) before findings appeared, blocking progress for ~12 minutes.",
+      "Nightly fmt introduced a wrapping difference that was only caught after all logic checks passed, requiring an extra fmt application and re-verification round.",
+      "Four iterative apply_patch + test cycles were needed to get all five fixes green, suggesting the fixes were not all correct on the first attempt."
+    ],
+    "open_items": [
+      "The unrelated ars-dioxus working-tree change was intentionally left unstaged and is not addressed in this PR.",
+      "Codex review final state (approved vs. pending further comments) was not confirmed in the transcript before the follow-up commit was pushed."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-24T14:55:47.751642Z",
+    "agent_lines": 225,
+    "agent_removed": 31,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 225,
+    "total_lines_changed": 256,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
