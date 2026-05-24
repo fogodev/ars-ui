@@ -1,0 +1,182 @@
+Implement task #265
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #265: Tour Agnostic Core Implementation Plan
+
+**Summary**
+Implement the framework-agnostic `Tour` core in `ars-components`, scoped to issue #265. The work will add the Tour state machine, connect API, public documented types, snapshots, spec-conformance coverage, proptest invariants, targeted mutation validation, and any minimal spec sync needed to remove agnostic DOM/focus lookup from the Tour spec while preserving the public contract.
+
+**Source Of Truth**
+- GitHub issue: `fogodev/ars-ui#265`
+- Dependencies checked live: `#238 Presence` closed, `#246 Popover` closed
+- Component spec: `spec/components/overlay/tour.md`
+- Shared spec: `spec/shared/z-index-stacking.md`
+- Primary implementation pattern: `crates/ars-components/src/overlay/popover/mod.rs`
+
+## Assumptions And Defaults
+- No adapter components are in scope.
+- No new dependency crate is needed.
+- Tour will follow Popover’s DOM-free architecture: the core owns state, intent, ARIA/data attrs, placement preferences, z-index value storage, and adapter-feedback events; adapters own live element refs, target lookup, target measurement, scrolling, focus movement, portal mounting, and geometry computation.
+- `Step::target` / `Context::target_element_id` will remain string data for semantic hooks and adapter hints only. The core will not use it for DOM lookup.
+- “Completion callback” will be satisfied without inventing a new spec prop: completing the tour emits the existing open-change callback intent with `false`, and step-changing emits the existing step-change callback intent with the new step index.
+- If implementation exposes spec drift in the sample code, update `spec/components/overlay/tour.md` narrowly to describe typed effect intents and adapter feedback, without changing the state/event/props/anatomy contract.
+
+## Public API / Interface Changes
+Add `crates/ars-components/src/overlay/tour/mod.rs` and export it from `crates/ars-components/src/overlay/mod.rs`.
+
+Public Tour module will define documented:
+- `State`: `Inactive`, `Active { step_index }`, `Completed`
+- `Event`: spec events plus adapter feedback events needed by the DOM-free implementation:
+  - Spec events: `Start`, `NextStep`, `PrevStep`, `GoToStep(usize)`, `Skip`, `Complete`, `Dismiss`, `AddStep { index, step }`, `RemoveStep(usize)`, `UpdateStep { index, step }`, `StepChange(usize)`, `Focus { is_keyboard }`, `Blur`
+  - Adapter feedback: `SetZIndex(u32)`, `PositioningUpdate(PositioningSnapshot)`, `SpotlightUpdate(SpotlightSnapshot)`, `SyncProps`
+- `Effect`: typed named intents:
+  - `OpenChange`
+  - `StepChange`
+  - `AllocateZIndex`
+  - `ReleaseZIndex`
+  - `AttachOverlayClick`
+  - `DetachOverlayClick`
+  - `FocusStepContent`
+  - `ScrollTargetIntoView`
+  - `PositionStepContent`
+  - `MeasureSpotlight`
+- `StepType`: `Tooltip`, `Dialog`, `Floating`, `Wait`
+- `Step`
+- `SpotlightRect` and `SpotlightSnapshot`
+- `Context`
+- `Props` with builder methods for every prop
+- `Messages`, using `MessageFn<dyn Fn(&Locale) -> String + Send + Sync>` for simple labels and `MessageFn<dyn Fn(usize, usize, &Locale) -> String + Send + Sync>` for progress text
+- `Part` with `#[derive(ComponentPart)]`, `#[scope = "tour"]`, and the 12 spec parts:
+  `Root`, `Overlay`, `Highlight`, `StepContent`, `StepTitle`, `StepDescription`, `NextTrigger`, `PrevTrigger`, `SkipTrigger`, `CloseTrigger`, `Progress`, `StepIndicator { index }`
+- `Machine`
+- `Api<'a>` with:
+  - attr methods for every part
+  - accessors: `current_step`, `total_steps`, `is_first_step`, `is_last_step`, `is_open`, `current_step_def`, `progress_percent`, `progress_text`, `has_next_step`, `has_prev_step`, `positioning`, `spotlight_snapshot`, `z_index`, `lazy_mount`, `unmount_on_exit`
+  - handlers: `on_next_trigger_click`, `on_prev_trigger_click`, `on_skip_trigger_click`, `on_close_trigger_click`, `on_overlay_click`, `on_keydown`, `on_focus`, `on_blur`
+  - `ConnectApi` implementation mapping each `Part` to the corresponding attrs
+
+## Implementation Tasks
+1. **Board and branch prep**
+   - Move issue #265 to `In Progress` on the GitHub Project board.
+   - Confirm clean or understood worktree with `git status --short`.
+   - Do not commit or push until the user explicitly approves the completed diff.
+
+2. **Add failing unit tests first**
+   - Create `crates/ars-components/src/overlay/tour/mod.rs` with the public skeleton and tests first, or add tests in the file as it is created.
+   - Cover issue-named behavior:
+     - initial inactive state
+     - `Start` activates step 0 when steps exist
+     - empty steps do not open
+     - `NextStep` advances
+     - `NextStep` on last step completes and closes
+     - `PrevStep` moves back and first step is guarded
+     - `GoToStep` accepts in-range and rejects out-of-range
+     - `Skip` and `Dismiss` close to inactive
+     - keyboard Escape / ArrowRight / ArrowLeft dispatches correct events under props guards
+     - overlay click dispatches dismissal only when `close_on_overlay_click`
+     - dynamic add/remove/update keeps `current_step`, `total_steps`, and target string coherent
+     - focus/blur toggles `focused` and `focus_visible`
+     - `SetZIndex`, `PositioningUpdate`, and `SpotlightUpdate` store adapter feedback without DOM access
+     - callback effects for open change and step change run and pass expected values
+
+3. **Implement Tour core**
+   - Follow Popover module structure: module docs, imports, effect enum, state/event/messages/context/props/part helpers, `Machine`, `Api`, tests.
+   - Use `ComponentIds::from_id(&props.id)` for stable IDs:
+     - root: `id`
+     - step content: `id-step-content`
+     - title: `id-step-title`
+     - description: `id-step-description`
+   - Implement lifecycle helpers:
+     - `open_plan(step_index)`
+     - `close_to_inactive_plan()`
+     - `complete_plan()`
+     - `step_change_plan(next_index)`
+     - `open_lifecycle_effects()`
+     - `close_lifecycle_effects()`
+   - `initial_effects` must mirror active initial state from `auto_start`, `default_open`, or controlled `open: Some(true)`.
+   - `on_props_changed` must:
+     - panic if `id` changes after init
+     - emit `Start` / `Dismiss` for controlled `open` changes
+     - emit `SyncProps` for steps and behavior props that back context or output
+   - Never call DOM APIs or resolve elements by ID.
+
+4. **Implement attrs and snapshots**
+   - `root_attrs`: scope/part, `id`, `aria-label`, `data-ars-state`.
+   - `overlay_attrs`: scope/part, `aria-hidden="true"`, optional z-index style if allocated.
+   - `highlight_attrs`: scope/part, `aria-hidden="true"`, `data-ars-target` when a current target string exists, and fixed-position styles only from adapter-provided `SpotlightSnapshot`.
+   - `step_content_attrs`: scope/part, `id`, `role="dialog"`, `aria-modal="false"`, labelled/described-by IDs, `data-ars-step`, `data-ars-placement`, and z-index custom property when allocated.
+   - triggers/progress/indicator attrs exactly as spec §1.6 and §2 describe.
+   - Add insta snapshots for every anatomy part and each output-affecting branch: inactive, active first step, active middle step, active last step, completed, disabled previous, done label, custom messages, positioning update, spotlight update, z-index.
+
+5. **Spec conformance**
+   - Update `crates/ars-components/tests/spec_conformance/overlay.rs` imports to include `tour`.
+   - Add `tour_anatomy_matches_spec()` using the 12 parts from spec §2.
+   - Add a focused assertion that `StepIndicator { index: 0 }` emits name `step-indicator` and carries `data-ars-step` through `Api::step_indicator_attrs(0)`.
+
+6. **Property tests**
+   - Update `crates/ars-components/tests/proptest_state_machines/overlay.rs`.
+   - Add Tour strategies for `Step`, `Props`, `SpotlightSnapshot`, `PositioningSnapshot`, and `Event`.
+   - Add ignored nightly proptest:
+     - state and `ctx.open` agree
+     - `current_step < total_steps` whenever active and total > 0
+     - inactive/completed are closed
+     - close transitions clear z-index/positioning/spotlight feedback
+     - out-of-range `GoToStep` does not change state
+     - guarded keyboard/dismiss behavior does not emit effects when disabled
+     - every emitted effect is in the documented `Effect` allow-list and has no unexpected metadata unless callback effects intentionally carry closures
+
+7. **Spec sync if required**
+   - If the implementation must replace spec sample code that calls platform focus by ID, update `spec/components/overlay/tour.md` §1.5 and §5 to state:
+     - focus movement, scroll, target lookup, and measurement are adapter effect handlers
+     - core emits typed effects and accepts `PositioningUpdate` / `SpotlightUpdate`
+     - string target data is a semantic/adapter hint, not live lookup
+   - Do not change declared states, spec events, props, messages, or anatomy unless the audit proves a real contract issue.
+
+8. **Focused verification**
+   - Run:
+     - `cargo test -p ars-components overlay::tour`
+     - `cargo test -p ars-components --test spec_conformance tour`
+     - `cargo test -p ars-components --test proptest_state_machines proptest_tour_state_context_invariants_hold -- --ignored`
+     - `cargo insta test -p ars-components --unreferenced=reject`
+     - `cargo xtask spec validate`
+     - `cargo llvm-cov test -p ars-components --lib --no-fail-fast --text -- overlay::tour`
+     - `cargo mutants -p ars-components -f crates/ars-components/src/overlay/tour/mod.rs`
+   - Triage every `MISSED` mutant in this PR by adding tests or a justified `.cargo/mutants.toml` skip.
+
+9. **Mandatory post-implementation audit**
+   - Invoke `.agents/skills/post-implementation-audit/SKILL.md`.
+   - Complete all three phases:
+     - spec/implementation drift audit
+     - at least two “anything else missing?” rounds
+     - test coverage audit
+   - Land every finding in this same diff.
+   - Re-run the focused verification after audit fixes.
+
+10. **User review gate**
+   - Present the final local diff and verification results to the user.
+   - Do not commit or push until the user approves.
+
+11. **Pre-push gate after approval**
+   - Run `cargo xci-fast`.
+   - Fix failures locally.
+   - Commit and push a PR targeting `main`.
+   - PR body must include `Closes #265`.
+   - Because `.snap` files will be added, label the PR with `snapshot-reviewed`.
+
+12. **Codex review loop after PR push**
+   - Invoke `.agents/skills/waiting-for-codex-review/SKILL.md`.
+   - Post `@codex review`.
+   - Poll until Codex leaves 👍.
+   - Address any Codex review threads in the same PR with TDD, reply inline, resolve threads, push, and re-trigger review after every push.
+
+## Acceptance Criteria
+- `Tour` agnostic core exists under `ars_components::overlay::tour`.
+- All public items have `///` docs and compile with zero warnings.
+- State machine behavior matches Tour spec §1, adjusted only for DOM-free effect intents where the issue explicitly assigns live work to adapters.
+- `ConnectApi` produces the ARIA/data attrs required by spec §2 and issue #265.
+- Snapshot fixtures cover every anatomy part and output-affecting state/prop/context branch.
+- Unit, snapshot, spec-conformance, proptest, coverage, and mutation validation have all been run and repaired.
+- No adapter implementation is included.
+- No GitHub issue is closed manually; closure happens through the merged PR with `Closes #265`.
