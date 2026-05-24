@@ -1,0 +1,134 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "4091f6eb6314",
+  "session_id": "019e56aa-18c9-7122-9658-3077c7106725",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-24T01:33:58.068441Z",
+  "branch": "t3code/e567e91b",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/proptest-regressions/state-machines.txt",
+    "crates/ars-components/src/utility/mod.rs",
+    "crates/ars-components/src/utility/toggle_group/mod.rs",
+    "crates/ars-components/src/utility/toggle_group/snapshots/ars_components__utility__toggle_group__tests__toggle_group_hidden_input_config_multiple.snap",
+    "crates/ars-components/src/utility/toggle_group/snapshots/ars_components__utility__toggle_group__tests__toggle_group_indicator_selected.snap",
+    "crates/ars-components/src/utility/toggle_group/snapshots/ars_components__utility__toggle_group__tests__toggle_group_item_focused_keyboard.snap",
+    "crates/ars-components/src/utility/toggle_group/snapshots/ars_components__utility__toggle_group__tests__toggle_group_item_multiple_disabled_selected.snap",
+    "crates/ars-components/src/utility/toggle_group/snapshots/ars_components__utility__toggle_group__tests__toggle_group_item_single_selected.snap",
+    "crates/ars-components/src/utility/toggle_group/snapshots/ars_components__utility__toggle_group__tests__toggle_group_item_single_unselected.snap",
+    "crates/ars-components/src/utility/toggle_group/snapshots/ars_components__utility__toggle_group__tests__toggle_group_root_idle.snap",
+    "crates/ars-components/src/utility/toggle_group/snapshots/ars_components__utility__toggle_group__tests__toggle_group_root_none_disabled_invalid_required_readonly.snap",
+    "crates/ars-components/tests/proptest_state_machines/utility.rs",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "spec/components/utility/toggle-group.md",
+    "spec/dioxus-components/utility/toggle-group.md",
+    "spec/leptos-components/utility/toggle-group.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "4a063454dcd9",
+  "token_usage": {
+    "input_tokens": 948456,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 52564224,
+    "output_tokens": 76541,
+    "api_call_count": 455
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement task #216: a new framework-agnostic ToggleGroup core component under crates/ars-components/src/utility/toggle_group/mod.rs, following the existing spec and TDD workflow, including tests, snapshots, proptest invariants, post-implementation audit, and a committed PR.",
+    "outcome": "ToggleGroup core fully implemented and committed. All verification gates passed: 50 unit tests, anatomy spec-conformance test, 256-case proptest invariant, snapshot reject gate (2583 tests), spec validation, and mutation testing (196 mutants, 0 missed). PR pushed with Closes #216.",
+    "learnings": {
+      "repo": [
+        "Key is sourced from ars_collections, not ars_core — spec examples importing ars_core::Key were incorrect and required fixing in toggle-group.md, leptos, and dioxus adapter specs.",
+        "cargo xci-fast is the required 10-step pre-push gate (fmt, check, clippy, unit, i18n unit, etc.); it must pass before committing after user review approval.",
+        "cargo +nightly fmt --all can introduce unrelated formatting churn in other crates (e.g., crates/ars-dioxus/tests/attr_passthrough.rs) during xci-fast; these must be manually reverted before staging.",
+        "Snapshot files (.snap) require the snapshot-reviewed label on the PR per repo policy.",
+        "Proptest regression seeds are stored in crates/ars-components/proptest-regressions/state-machines.txt and must be committed alongside new proptest tests.",
+        "Both Leptos and Dioxus adapter specs must be updated for controlled/uncontrolled prop behavior drift when a new agnostic core is added.",
+        "GitHub project item status must be moved to In Progress (via gh project item-edit) before editing code, using the project field and option IDs.",
+        "cargo xtask spec validate and cargo xtask spec toc are the spec consistency gates; spec changes must pass both before the implementation is considered complete.",
+        "The post-implementation audit skill requires at least two rounds of spec/API drift checking plus llvm-cov coverage and cargo mutants mutation testing with 0 missed."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/toggle_group/mod.rs",
+          "line": 553,
+          "end_line": 610,
+          "finding": "Roving tabindex fallback bug: a controlled value can reference an unregistered item, leaving all rendered items at tabindex=-1. Fix anchors to first enabled registered item when no registered selected item exists."
+        },
+        {
+          "path": "crates/ars-components/src/utility/toggle_group/mod.rs",
+          "line": 592,
+          "end_line": 600,
+          "finding": "Blur must repair stale idle context: if Blur fires while state is already Idle but focused_item/focus_visible are non-default, those fields must be cleared. Mutation testing (line 592:49) caught this missing invariant."
+        },
+        {
+          "path": "crates/ars-components/src/utility/toggle_group/mod.rs",
+          "line": 1,
+          "end_line": 2200,
+          "finding": "Controlled-mode normalization: when selection_mode changes via SetProps while the group is controlled, the controlled value must be normalized to the new mode immediately in sync_props_plan, not deferred to the next SetValue."
+        }
+      ],
+      "workflow": [
+        "cargo mutants without --jobs N is very slow on large files; use --jobs 8 for parallel evaluation to reduce wall time significantly.",
+        "First full mutation pass surfaces the complete survivor set; fixing all survivors at once before a second pass is more efficient than iterative single-mutant fixes.",
+        "INSTA_UPDATE=always cargo test <specific_test> is the correct way to accept new insta snapshots for a targeted test rather than running the full suite.",
+        "Mutation testing should be run after all other gates pass; survivors indicate genuine test gaps (not equivalent mutants) when the implementation is sound.",
+        "Per-field prop sync tests are needed for OR-chain conditions; a single test that changes all fields at once will leave individual field survivors in mutation testing.",
+        "Keydown dispatch must be tested as a full matrix (horizontal LTR, horizontal RTL, vertical, Home, End, Space, Enter, ignored cross-axis) rather than a single representative case to kill all keydown handler mutants."
+      ]
+    },
+    "friction": [
+      "cargo-mutants sequential run (no --jobs) took extremely long for 196 mutants — required extensive write_stdin polling across dozens of turns before the terminal summary appeared.",
+      "Two overlapping cargo test commands were accidentally launched simultaneously, causing one to wait on the other's build lock.",
+      "cargo xci-fast formatter introduced unrelated churn in crates/ars-dioxus/tests/attr_passthrough.rs that had to be detected manually and reverted before staging.",
+      "Mutation testing required three passes (40 missed → 1 missed → 0 missed) due to discovering survivors incrementally rather than all at once, adding significant wall time.",
+      "write_stdin polling was the only mechanism to observe long-running cargo-mutants output, requiring dozens of polling calls with no timeout feedback."
+    ],
+    "open_items": [
+      "Leptos and Dioxus adapter components for ToggleGroup are explicitly out of scope for this task and not yet implemented.",
+      "The PR needs the snapshot-reviewed label applied since .snap files changed — this was noted but depended on the post-push flow.",
+      "Codex review loop (waiting-for-codex-review skill, inline thread replies, re-trigger until 👍) must be run after the PR is opened.",
+      "llvm-cov coverage report still emits an existing <WORKSPACE>/src/macros.rs source warning unrelated to ToggleGroup — pre-existing issue, not introduced by this task.",
+      "Adapter spec drift notes were added to Leptos and Dioxus adapter specs but the adapter component implementations remain unscheduled."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-24T01:33:07.781692Z",
+    "agent_lines": 3148,
+    "agent_removed": 40,
+    "human_added": 244,
+    "human_modified": 12,
+    "human_removed": 0,
+    "total_committed": 3398,
+    "total_lines_changed": 3444,
+    "agent_percentage": 92.56678281068524,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 128,
+      "user_lines_removed": 6,
+      "agent_lines_added": 3282,
+      "agent_lines_removed": 46,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/toggle_group/mod.rs": 121,
+        "crates/ars-components/tests/proptest_state_machines/utility.rs": 7
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/utility/toggle_group/mod.rs": 6
+      }
+    }
+  ]
+}
