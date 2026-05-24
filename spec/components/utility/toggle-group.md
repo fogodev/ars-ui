@@ -134,6 +134,9 @@ pub struct Context {
     /// The selection mode for the `ToggleGroup` component.
     pub selection_mode: SelectionMode,
     /// Whether the group is disabled.
+    /// Disabled groups block selection changes and expose disabled semantics,
+    /// but registered items remain keyboard-focusable unless individually
+    /// disabled by `disabled_items`.
     pub disabled: bool,
     /// The orientation of the `ToggleGroup` component.
     pub orientation: Orientation,
@@ -949,6 +952,8 @@ toggle-group
 - Single selection items: `role="radio"` + `aria-checked="true|false"`. Roving tabindex applies.
 - Multiple selection items: `role="button"` + `aria-pressed="true|false"`. All items tab-focusable
   unless `roving_focus=true`.
+- Disabled groups expose disabled semantics and block activation, but registered items remain
+  keyboard-focusable for discoverability. Values in `disabled_items` are excluded from roving focus.
 - When all items are deselected in `Single` mode, the first item should still have `tabindex=0`
   so the group is reachable via Tab.
 

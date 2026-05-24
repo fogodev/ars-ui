@@ -582,8 +582,6 @@ proptest! {
                     | toggle_group::Event::ToggleItem(_)
             );
 
-            let disabled_value_event = value_item_event || matches!(event, toggle_group::Event::Reset);
-
             drop(service.send(event));
 
             let state = service.state();
@@ -602,8 +600,8 @@ proptest! {
                         "focused item must be registered"
                     );
                     prop_assert!(
-                        !ctx.disabled_items.contains(item) && !ctx.disabled,
-                        "focused item must be enabled"
+                        !ctx.disabled_items.contains(item),
+                        "focused item must not be item-disabled"
                     );
                 }
             }
@@ -620,11 +618,11 @@ proptest! {
                 toggle_group::SelectionMode::Multiple => {}
             }
 
-            if before_disabled && disabled_value_event {
+            if before_disabled && value_item_event {
                 prop_assert_eq!(
                     ctx.value.get(),
                     &before_value,
-                    "disabled group cannot change selection from value events"
+                    "disabled group cannot change selection from item value events"
                 );
             }
 
@@ -653,7 +651,7 @@ proptest! {
                 let enabled = ctx
                     .registered_items
                     .iter()
-                    .filter(|item| !ctx.disabled && !ctx.disabled_items.contains(*item))
+                    .filter(|item| !ctx.disabled_items.contains(*item))
                     .collect::<Vec<_>>();
 
                 if !enabled.is_empty() {

@@ -902,7 +902,7 @@ impl Api<'_> {
             .set(part_attr, part_val)
             .set(HtmlAttr::Data("ars-value"), item_id.to_string())
             .set(HtmlAttr::Type, "button")
-            .set(HtmlAttr::TabIndex, self.item_tabindex(item_id, disabled));
+            .set(HtmlAttr::TabIndex, self.item_tabindex(item_id));
 
         match self.ctx.selection_mode {
             SelectionMode::Single => {
@@ -1060,13 +1060,13 @@ impl Api<'_> {
         (self.send)(Event::Reset);
     }
 
-    fn item_tabindex(&self, item_id: &Key, disabled: bool) -> &'static str {
-        if !self.ctx.roving_focus {
-            return if disabled { "-1" } else { "0" };
+    fn item_tabindex(&self, item_id: &Key) -> &'static str {
+        if is_item_focus_disabled(self.ctx, item_id) {
+            return "-1";
         }
 
-        if disabled {
-            return "-1";
+        if !self.ctx.roving_focus {
+            return "0";
         }
 
         if self.is_roving_anchor(item_id) {
@@ -1081,11 +1081,10 @@ impl Api<'_> {
             State::Focused { item } => item == item_id,
 
             State::Idle => {
-                let first_registered_selected = self
-                    .ctx
-                    .registered_items
-                    .iter()
-                    .find(|item| !is_item_disabled(self.ctx, item) && self.is_selected(item));
+                let first_registered_selected =
+                    self.ctx.registered_items.iter().find(|item| {
+                        !is_item_focus_disabled(self.ctx, item) && self.is_selected(item)
+                    });
 
                 if let Some(selected) = first_registered_selected {
                     return selected == item_id;
@@ -1146,17 +1145,21 @@ fn is_item_disabled(ctx: &Context, item: &Key) -> bool {
     ctx.disabled || ctx.disabled_items.contains(item)
 }
 
+fn is_item_focus_disabled(ctx: &Context, item: &Key) -> bool {
+    ctx.disabled_items.contains(item)
+}
+
 fn can_focus_item(ctx: &Context, item: &Key) -> bool {
     ctx.registered_items
         .iter()
         .any(|registered| registered == item)
-        && !is_item_disabled(ctx, item)
+        && !is_item_focus_disabled(ctx, item)
 }
 
 fn first_enabled(ctx: &Context) -> Option<Key> {
     ctx.registered_items
         .iter()
-        .find(|item| !is_item_disabled(ctx, item))
+        .find(|item| !is_item_focus_disabled(ctx, item))
         .cloned()
 }
 
@@ -1164,7 +1167,7 @@ fn last_enabled(ctx: &Context) -> Option<Key> {
     ctx.registered_items
         .iter()
         .rev()
-        .find(|item| !is_item_disabled(ctx, item))
+        .find(|item| !is_item_focus_disabled(ctx, item))
         .cloned()
 }
 
@@ -1172,7 +1175,7 @@ fn idle_focus_seed(ctx: &Context, step: FocusStep) -> Option<Key> {
     if let Some(selected) = ctx
         .registered_items
         .iter()
-        .find(|item| ctx.value.get().contains(*item) && !is_item_disabled(ctx, item))
+        .find(|item| ctx.value.get().contains(*item) && !is_item_focus_disabled(ctx, item))
         .cloned()
     {
         return Some(selected);
@@ -1188,7 +1191,7 @@ fn step_focus(ctx: &Context, current: &Key, step: FocusStep) -> Option<Key> {
     let enabled = ctx
         .registered_items
         .iter()
-        .filter(|item| !is_item_disabled(ctx, item))
+        .filter(|item| !is_item_focus_disabled(ctx, item))
         .collect::<Vec<_>>();
 
     if enabled.is_empty() {
@@ -1280,7 +1283,7 @@ fn sync_props_plan(state: &State, ctx: &Context, props: &Props) -> TransitionPla
     let focused_will_be_disabled = ctx
         .focused_item
         .as_ref()
-        .is_some_and(|focused| disabled || disabled_items.contains(focused));
+        .is_some_and(|focused| disabled_items.contains(focused));
 
     let target_idle = matches!(state, State::Focused { .. }) && focused_will_be_disabled;
 
@@ -1988,6 +1991,34 @@ mod tests {
     }
 
     #[test]
+    fn toggle_group_disabled_group_preserves_keyboard_focus_navigation() {
+        let mut service = service(props().disabled(true));
+
+        register(&mut service, &["bold", "italic"]);
+
+        let result = service.send(Event::FocusFirst);
+
+        assert!(result.state_changed);
+        assert_eq!(service.context().focused_item, Some(key("bold")));
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(
+            api.item_attrs(&key("bold"))
+                .get(&HtmlAttr::Aria(AriaAttr::Disabled)),
+            Some("true"),
+        );
+        assert_eq!(
+            api.item_attrs(&key("bold")).get(&HtmlAttr::TabIndex),
+            Some("0"),
+        );
+        assert_eq!(
+            api.item_attrs(&key("italic")).get(&HtmlAttr::TabIndex),
+            Some("-1"),
+        );
+    }
+
+    #[test]
     fn toggle_group_rtl_swaps_horizontal_arrow_left_right() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let send = {
@@ -2461,7 +2492,7 @@ mod tests {
     }
 
     #[test]
-    fn toggle_group_set_props_clears_focus_when_group_or_item_becomes_disabled() {
+    fn toggle_group_set_props_preserves_focus_when_group_becomes_disabled() {
         let mut group_disabled = service(props());
 
         register(&mut group_disabled, &["bold"]);
@@ -2473,10 +2504,16 @@ mod tests {
 
         let result = group_disabled.set_props(props().disabled(true));
 
-        assert!(result.state_changed);
-        assert_eq!(group_disabled.state(), &State::Idle);
-        assert_eq!(group_disabled.context().focused_item, None);
+        assert!(!result.state_changed);
+        assert_eq!(
+            group_disabled.state(),
+            &State::Focused { item: key("bold") }
+        );
+        assert_eq!(group_disabled.context().focused_item, Some(key("bold")));
+    }
 
+    #[test]
+    fn toggle_group_set_props_clears_focus_when_item_becomes_disabled() {
         let mut item_disabled = service(props());
 
         register(&mut item_disabled, &["bold"]);
