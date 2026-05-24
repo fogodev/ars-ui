@@ -20,7 +20,7 @@ This spec maps the core [`ActionGroup`](../../components/utility/action-group.md
 #[component] pub fn OverflowTrigger(children: Children) -> impl IntoView
 ```
 
-The adapter surfaces the full core prop set, including orientation, overflow mode, variant, selection mode, disabled state, disabled items, max visible actions, and localized messages.
+The adapter surfaces the full core prop set, including orientation, overflow mode, variant, selection mode, disabled state, disabled items, max visible actions, activation and selection callbacks, and localized messages.
 
 ## 3. Mapping to Core Component Contract
 
@@ -102,12 +102,11 @@ Action-group configuration props are generally non-reactive after mount unless a
 
 ## 12. Failure and Degradation Rules
 
-| Condition                                                                          | Policy             | Notes                                                                                                                                  |
-| ---------------------------------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| duplicate item IDs or unstable repeated-item identity                              | fail fast          | Overflow bookkeeping and focus order depend on stable identities.                                                                      |
-| measurement unsupported on the current platform                                    | degrade gracefully | Preserve structure and fall back to a non-measured overflow/default presentation if documented.                                        |
-| overflow trigger/content ref missing after mount while overflow mode requires them | fail fast          | The overflow interaction model depends on concrete nodes.                                                                              |
-| toolbar root rendered without an accessible name                                   | warn and ignore    | Preserve the toolbar structure, but emit a debug-oriented warning because `role="toolbar"` requires `aria-label` or `aria-labelledby`. |
+| Condition                                                                          | Policy             | Notes                                                                                           |
+| ---------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------- |
+| duplicate item IDs or unstable repeated-item identity                              | fail fast          | Overflow bookkeeping and focus order depend on stable identities.                               |
+| measurement unsupported on the current platform                                    | degrade gracefully | Preserve structure and fall back to a non-measured overflow/default presentation if documented. |
+| overflow trigger/content ref missing after mount while overflow mode requires them | fail fast          | The overflow interaction model depends on concrete nodes.                                       |
 
 ## 13. Identity and Key Policy
 
@@ -159,29 +158,26 @@ Action-group configuration props are generally non-reactive after mount unless a
 
 ## 20. Platform Support Matrix
 
-| Capability / behavior               | Browser client | SSR            | Notes                                                                                  |
-| ----------------------------------- | -------------- | -------------- | -------------------------------------------------------------------------------------- |
-| overflow measurement and reflow     | full support   | client-only    | Responsive measurement is client-owned; SSR renders the stable non-measured structure. |
-| toolbar accessible-name diagnostics | full support   | not applicable | Diagnostics are authoring-time only and do not change SSR structure.                   |
+| Capability / behavior           | Browser client | SSR         | Notes                                                                                  |
+| ------------------------------- | -------------- | ----------- | -------------------------------------------------------------------------------------- |
+| overflow measurement and reflow | full support   | client-only | Responsive measurement is client-owned; SSR renders the stable non-measured structure. |
 
 ## 21. Debug Diagnostics and Production Policy
 
-| Condition                                                | Debug build behavior | Production behavior | Notes                                                                                 |
-| -------------------------------------------------------- | -------------------- | ------------------- | ------------------------------------------------------------------------------------- |
-| toolbar semantics lack `aria-label` or `aria-labelledby` | debug warning        | warn and ignore     | `role="toolbar"` still renders, but the accessible-name requirement remains explicit. |
-| duplicate item IDs or unstable registry identity         | fail fast            | fail fast           | Registration and overflow bookkeeping depend on stable identities.                    |
+| Condition                                        | Debug build behavior | Production behavior | Notes                                                              |
+| ------------------------------------------------ | -------------------- | ------------------- | ------------------------------------------------------------------ |
+| duplicate item IDs or unstable registry identity | fail fast            | fail fast           | Registration and overflow bookkeeping depend on stable identities. |
 
 ## 22. Shared Adapter Helper Notes
 
-| Helper concept                     | Required?   | Responsibility                                                                         | Reused by                                      | Notes                                                                      |
-| ---------------------------------- | ----------- | -------------------------------------------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------- |
-| registry helper for repeated items | required    | Keep stable item identity, DOM order, and overflow bookkeeping aligned.                | `action-group`, `toggle-group`                 | Do not rebuild the whole registry on unrelated rerenders.                  |
-| measurement helper                 | required    | Own overflow and selected-item geometry measurements plus fallback strategy selection. | `action-group`, `toggle-group`                 | Measurement remains adapter-owned state, never consumer-owned layout data. |
-| debug-warning helper               | recommended | Emit toolbar accessible-name diagnostics in debug builds.                              | `action-group`, `as-child`, `download-trigger` | Warnings stay diagnostic-only.                                             |
+| Helper concept                     | Required? | Responsibility                                                                         | Reused by                      | Notes                                                                      |
+| ---------------------------------- | --------- | -------------------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------- |
+| registry helper for repeated items | required  | Keep stable item identity, DOM order, and overflow bookkeeping aligned.                | `action-group`, `toggle-group` | Do not rebuild the whole registry on unrelated rerenders.                  |
+| measurement helper                 | required  | Own overflow and selected-item geometry measurements plus fallback strategy selection. | `action-group`, `toggle-group` | Measurement remains adapter-owned state, never consumer-owned layout data. |
 
 ## 23. Framework-Specific Behavior
 
-Leptos client-only measurement can drive overflow behavior, but the spec must still document the overflow menu content as a concrete structural node when present. Any selected-item or indicator-position geometry used for overflow, underline, or active-item presentation remains adapter-owned measurement state rather than consumer-managed layout data. When the root uses toolbar semantics, the adapter should emit a debug-oriented warning if neither `aria-label` nor `aria-labelledby` is present.
+Leptos client-only measurement can drive overflow behavior, but the spec must still document the overflow menu content as a concrete structural node when present. Any selected-item or indicator-position geometry used for overflow, underline, or active-item presentation remains adapter-owned measurement state rather than consumer-managed layout data. The core root attrs provide a localized toolbar label fallback when neither `aria-label` nor `aria-labelledby` is set.
 
 ## 24. Canonical Implementation Sketch
 
@@ -223,14 +219,14 @@ on_cleanup(|| registry.release_all());
 - Overflow trigger and overflow content must remain structurally distinct when the adapter owns those nodes.
 - Activation semantics must stay separate from selection or overflow-management semantics.
 - Disabled items must not receive click or keydown activation handlers that could synthesize normalized activation.
-- Toolbar semantics must not be rendered without an accessible name requirement being documented and verified.
+- Toolbar semantics must preserve the core accessible-name fallback.
 - Responsive measurement observers, resize handlers, or overflow bookkeeping must be cleaned up on unmount.
 - Platform limitations must be documented in framework-specific behavior rather than hidden in the invariant list.
 
 ## 27. Accessibility and SSR Notes
 
 - `Root` must preserve toolbar semantics.
-- `Root` must provide an accessible name through `aria-label` or `aria-labelledby` when toolbar semantics are used.
+- `Root` must provide an accessible name through `aria-label`, `aria-labelledby`, or the core localized toolbar label fallback when toolbar semantics are used.
 - Repeated items must remain focus-addressable by key.
 - Overflow trigger and overflow content must be structurally explicit when present.
 
@@ -250,18 +246,17 @@ Traceability note: This adapter spec now makes explicit the core adapter-owned c
 - activation vs selection behavior
 - disabled items suppress activation wiring and do not produce normalized click or keydown activation
 - selected-item or indicator geometry measurement remains adapter-owned and cleanup-safe where documented
-- toolbar root without `aria-label` or `aria-labelledby` emits the documented warning
+- toolbar root without `aria-label` or `aria-labelledby` uses the core localized toolbar label fallback
 
 ## 30. Test Oracle Notes
 
-| Behavior                        | Preferred oracle type | Notes                                                                                                               |
-| ------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| visible vs overflowed structure | rendered structure    | Assert the documented overflow trigger/content structure explicitly.                                                |
-| repeated item bookkeeping       | context registration  | Verify stable item registration order and removal.                                                                  |
-| observer/listener teardown      | cleanup side effects  | Assert measurement resources are disconnected on cleanup.                                                           |
-| activation timing               | callback order        | Verify item and overflow trigger callbacks follow normalized transitions.                                           |
-| disabled item suppression       | callback order        | Verify disabled items do not invoke normalized activation callbacks from click or keydown paths.                    |
-| toolbar accessible-name warning | cleanup side effects  | Verify the documented debug-oriented warning appears when toolbar semantics lack `aria-label` or `aria-labelledby`. |
+| Behavior                        | Preferred oracle type | Notes                                                                                            |
+| ------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
+| visible vs overflowed structure | rendered structure    | Assert the documented overflow trigger/content structure explicitly.                             |
+| repeated item bookkeeping       | context registration  | Verify stable item registration order and removal.                                               |
+| observer/listener teardown      | cleanup side effects  | Assert measurement resources are disconnected on cleanup.                                        |
+| activation timing               | callback order        | Verify item and overflow trigger callbacks follow normalized transitions.                        |
+| disabled item suppression       | callback order        | Verify disabled items do not invoke normalized activation callbacks from click or keydown paths. |
 
 Cheap verification recipe:
 
@@ -275,5 +270,5 @@ Cheap verification recipe:
 - [ ] Overflow trigger and overflow content render when required.
 - [ ] Measurement setup and cleanup are instance-scoped.
 - [ ] Disabled items do not receive activation wiring from click or keydown paths.
-- [ ] Toolbar semantics include an accessible name, or the documented debug warning path is verified.
+- [ ] Toolbar semantics include an accessible name through explicit props or the core localized fallback.
 - [ ] Item and overflow callback ordering is verified.

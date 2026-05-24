@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/utility/action_group/mod.rs
+expression: "snapshot_attrs(&custom.connect(&|_| {}).overflow_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "overflow-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "action-group",
+            ),
+        ),
+        (
+            Aria(
+                Expanded,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                HasPopup,
+            ),
+            String(
+                "menu",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "More document actions",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

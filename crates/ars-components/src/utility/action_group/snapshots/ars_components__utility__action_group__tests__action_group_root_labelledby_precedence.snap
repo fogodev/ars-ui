@@ -1,0 +1,77 @@
+---
+source: crates/ars-components/src/utility/action_group/mod.rs
+expression: "snapshot_attrs(&labelledby.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-label-behavior",
+            ),
+            String(
+                "show",
+            ),
+        ),
+        (
+            Data(
+                "ars-overflow-mode",
+            ),
+            String(
+                "wrap",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "action-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-variant",
+            ),
+            String(
+                "toolbar",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "actions-heading",
+            ),
+        ),
+        (
+            Aria(
+                Orientation,
+            ),
+            String(
+                "horizontal",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "actions",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "toolbar",
+            ),
+        ),
+    ],
+    styles: [],
+}

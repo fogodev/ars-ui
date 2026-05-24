@@ -1,0 +1,61 @@
+---
+source: crates/ars-components/src/utility/action_group/mod.rs
+expression: "snapshot_attrs(&focused.connect(&|_| {}).item_attrs(&key(\"copy\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-focused",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-key",
+            ),
+            String(
+                "copy",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "action-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

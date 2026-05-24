@@ -7,7 +7,8 @@ use ars_collections::Key;
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
 use ars_components::utility::{
-    download_trigger, focus_scope, group, live_region, swap, toggle, toggle_button, toggle_group,
+    action_group, download_trigger, focus_scope, group, live_region, swap, toggle, toggle_button,
+    toggle_group,
 };
 use ars_core::{Env, HtmlAttr, Service};
 
@@ -60,6 +61,23 @@ fn toggle_group_anatomy_matches_spec() {
                 "item",
             ),
             (toggle_group::Part::Indicator, "indicator"),
+        ],
+    );
+}
+
+#[test]
+fn action_group_anatomy_matches_spec() {
+    assert_anatomy(
+        "action-group",
+        &[
+            (action_group::Part::Root, "root"),
+            (
+                action_group::Part::Item {
+                    item_id: Key::default(),
+                },
+                "item",
+            ),
+            (action_group::Part::OverflowTrigger, "overflow-trigger"),
         ],
     );
 }

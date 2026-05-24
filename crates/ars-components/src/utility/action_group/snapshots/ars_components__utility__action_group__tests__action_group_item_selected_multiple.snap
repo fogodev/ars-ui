@@ -1,0 +1,69 @@
+---
+source: crates/ars-components/src/utility/action_group/mod.rs
+expression: "snapshot_attrs(&multiple.connect(&|_| {}).item_attrs(&key(\"copy\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-key",
+            ),
+            String(
+                "copy",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "action-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-selected",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "selected",
+            ),
+        ),
+        (
+            Aria(
+                Pressed,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
