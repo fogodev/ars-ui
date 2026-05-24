@@ -6,7 +6,7 @@ use ars_components::overlay::{
     positioning::{ArrowOffset, Offset, Placement, PositioningOptions, PositioningSnapshot},
     presence,
     toast::{manager as toast_manager, single as toast_single},
-    tooltip,
+    tooltip, tour,
 };
 use ars_core::{Direction, Env, SendResult, Service};
 use proptest::{prelude::*, test_runner::TestCaseResult};
@@ -145,6 +145,281 @@ proptest! {
             prop_assert!(ctx.size.1 >= ctx.min_size.1);
             prop_assert!(ctx.size.0 <= ctx.max_size.0);
             prop_assert!(ctx.size.1 <= ctx.max_size.1);
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Tour proptest
+// ────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug)]
+enum TourStep {
+    Send(tour::Event),
+    SetProps(tour::Props),
+}
+
+const TOUR_EFFECTS: &[tour::Effect] = &[
+    tour::Effect::OpenChange,
+    tour::Effect::StepChange,
+    tour::Effect::AllocateZIndex,
+    tour::Effect::ReleaseZIndex,
+    tour::Effect::AttachOverlayClick,
+    tour::Effect::DetachOverlayClick,
+    tour::Effect::FocusStepContent,
+    tour::Effect::ScrollTargetIntoView,
+    tour::Effect::PositionStepContent,
+    tour::Effect::MeasureSpotlight,
+];
+
+fn arb_tour_step_type() -> impl Strategy<Value = tour::StepType> {
+    prop_oneof![
+        Just(tour::StepType::Tooltip),
+        Just(tour::StepType::Dialog),
+        Just(tour::StepType::Floating),
+        Just(tour::StepType::Wait),
+    ]
+}
+
+fn arb_tour_step_def() -> impl Strategy<Value = tour::Step> {
+    (
+        prop::option::of("[a-z]{1,8}".prop_map(|target| format!("#{target}"))),
+        "[a-z]{1,12}",
+        "[a-z ]{0,24}",
+        arb_tour_step_type(),
+        arb_placement(),
+        0.0f64..=32.0,
+        0.0f64..=32.0,
+    )
+        .prop_map(
+            |(target, title, content, step_type, placement, spotlight_radius, spotlight_offset)| {
+                tour::Step {
+                    target,
+                    title,
+                    content,
+                    step_type,
+                    placement,
+                    spotlight_radius,
+                    spotlight_offset,
+                }
+            },
+        )
+}
+
+fn arb_spotlight_snapshot() -> impl Strategy<Value = tour::SpotlightSnapshot> {
+    (
+        -200.0f64..=200.0,
+        -200.0f64..=200.0,
+        0.0f64..=600.0,
+        0.0f64..=600.0,
+        0.0f64..=32.0,
+        0.0f64..=32.0,
+    )
+        .prop_map(
+            |(x, y, width, height, offset, radius)| tour::SpotlightSnapshot {
+                rect: tour::SpotlightRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                },
+                offset,
+                radius,
+            },
+        )
+}
+
+fn arb_tour_props() -> impl Strategy<Value = tour::Props> {
+    (
+        prop::collection::vec(arb_tour_step_def(), 0..8),
+        prop::option::of(any::<bool>()),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+    )
+        .prop_map(
+            |(
+                steps,
+                open,
+                default_open,
+                auto_start,
+                close_on_overlay_click,
+                close_on_escape,
+                keyboard_navigation,
+                lazy_mount,
+                unmount_on_exit,
+            )| {
+                tour::Props::new()
+                    .id("tour")
+                    .steps(steps)
+                    .open(open)
+                    .default_open(default_open)
+                    .auto_start(auto_start)
+                    .close_on_overlay_click(close_on_overlay_click)
+                    .close_on_escape(close_on_escape)
+                    .keyboard_navigation(keyboard_navigation)
+                    .lazy_mount(lazy_mount)
+                    .unmount_on_exit(unmount_on_exit)
+            },
+        )
+}
+
+fn arb_tour_event() -> impl Strategy<Value = tour::Event> {
+    prop_oneof![
+        Just(tour::Event::Start),
+        Just(tour::Event::NextStep),
+        Just(tour::Event::PrevStep),
+        (0usize..12).prop_map(tour::Event::GoToStep),
+        Just(tour::Event::Skip),
+        Just(tour::Event::Complete),
+        Just(tour::Event::Dismiss),
+        (0usize..12, arb_tour_step_def())
+            .prop_map(|(index, step)| tour::Event::AddStep { index, step }),
+        (0usize..12).prop_map(tour::Event::RemoveStep),
+        (0usize..12, arb_tour_step_def())
+            .prop_map(|(index, step)| tour::Event::UpdateStep { index, step }),
+        (0usize..12).prop_map(tour::Event::StepChange),
+        any::<bool>().prop_map(|is_keyboard| tour::Event::Focus { is_keyboard }),
+        Just(tour::Event::Blur),
+        (0..=4_000u32).prop_map(tour::Event::SetZIndex),
+        arb_positioning_snapshot().prop_map(tour::Event::PositioningUpdate),
+        arb_spotlight_snapshot().prop_map(tour::Event::SpotlightUpdate),
+        Just(tour::Event::SyncProps),
+    ]
+}
+
+fn arb_tour_step() -> impl Strategy<Value = TourStep> {
+    prop_oneof![
+        arb_tour_event().prop_map(TourStep::Send),
+        arb_tour_props().prop_map(TourStep::SetProps),
+    ]
+}
+
+fn assert_tour_invariants(service: &Service<tour::Machine>) -> TestCaseResult {
+    prop_assert_eq!(
+        service.context().open,
+        matches!(service.state(), tour::State::Active { .. })
+    );
+
+    if let tour::State::Active { step_index } = service.state() {
+        prop_assert!(*step_index < service.context().total_steps);
+        prop_assert_eq!(*step_index, service.context().current_step);
+    }
+
+    if matches!(
+        service.state(),
+        tour::State::Inactive | tour::State::Completed
+    ) {
+        prop_assert!(!service.context().open);
+    }
+
+    Ok(())
+}
+
+fn assert_tour_result_invariants(
+    before_state: tour::State,
+    before_context: &tour::Context,
+    event: &tour::Event,
+    result: &SendResult<tour::Machine>,
+    service: &Service<tour::Machine>,
+) -> TestCaseResult {
+    for effect in &result.pending_effects {
+        prop_assert!(
+            TOUR_EFFECTS.contains(&effect.name),
+            "unexpected tour effect: {:?}",
+            effect.name
+        );
+        prop_assert!(effect.metadata.is_none());
+    }
+
+    if matches!(event, tour::Event::GoToStep(index) if *index >= before_context.total_steps) {
+        prop_assert!(!result.state_changed);
+    }
+
+    if result.state_changed
+        && matches!(before_state, tour::State::Active { .. })
+        && matches!(
+            event,
+            tour::Event::Skip
+                | tour::Event::Dismiss
+                | tour::Event::Complete
+                | tour::Event::NextStep
+        )
+        && !matches!(service.state(), tour::State::Active { .. })
+    {
+        prop_assert!(service.context().z_index.is_none());
+        prop_assert!(service.context().spotlight.is_none());
+    }
+
+    if matches!(
+        event,
+        tour::Event::PositioningUpdate(_) | tour::Event::SpotlightUpdate(_)
+    ) && !matches!(before_state, tour::State::Active { .. })
+    {
+        prop_assert!(!result.context_changed);
+        prop_assert!(!result.state_changed);
+    }
+
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(super::common::proptest_config())]
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_tour_state_context_invariants_hold(
+        props in arb_tour_props(),
+        steps in prop::collection::vec(arb_tour_step(), 0..128),
+    ) {
+        let mut service = Service::<tour::Machine>::new(
+            props,
+            &Env::default(),
+            &tour::Messages::default(),
+        );
+
+        let initial_effects = service
+            .take_initial_effects()
+            .into_iter()
+            .map(|effect| effect.name)
+            .collect::<Vec<_>>();
+
+        if matches!(service.state(), tour::State::Active { .. }) {
+            prop_assert!(initial_effects.contains(&tour::Effect::OpenChange));
+            prop_assert!(initial_effects.contains(&tour::Effect::StepChange));
+            prop_assert!(initial_effects.contains(&tour::Effect::AllocateZIndex));
+        } else {
+            prop_assert!(initial_effects.is_empty());
+        }
+
+        assert_tour_invariants(&service)?;
+
+        for step in steps {
+            match step {
+                TourStep::Send(event) => {
+                    let before_state = *service.state();
+                    let before_context = service.context().clone();
+                    let result = service.send(event.clone());
+
+                    assert_tour_result_invariants(
+                        before_state,
+                        &before_context,
+                        &event,
+                        &result,
+                        &service,
+                    )?;
+                }
+
+                TourStep::SetProps(props) => {
+                    drop(service.set_props(props));
+                }
+            }
+
+            assert_tour_invariants(&service)?;
         }
     }
 }

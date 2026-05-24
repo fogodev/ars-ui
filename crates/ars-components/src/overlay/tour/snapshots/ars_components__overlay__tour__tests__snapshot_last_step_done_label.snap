@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/overlay/tour/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).next_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-last-step",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "next-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tour",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Done",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

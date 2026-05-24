@@ -10,7 +10,13 @@ source_foundation: foundation/09-adapter-dioxus.md
 
 ## 1. Purpose and Adapter Scope
 
-This spec maps the core [`Tour`](../../components/overlay/tour.md) behavior to Dioxus 0.7.x. The adapter owns portal rendering, z-index allocation, overlay and spotlight positioning, scroll-to-target behavior, step content positioning via the `ars-dom` engine, keyboard event normalization, and all 12 compound sub-components. Step definitions are passed as a `Vec<tour::Step>` prop; target elements are resolved by CSS selector or ID on the client. On Desktop and Mobile, target resolution uses the webview DOM; non-webview targets degrade gracefully.
+This spec maps the core [`Tour`](../../components/overlay/tour.md) behavior to Dioxus 0.7.x. The adapter owns portal rendering, z-index allocation, overlay and spotlight positioning, scroll-to-target behavior, step content positioning via the `ars-dom` engine, keyboard event normalization, and all 12 compound sub-components. Step definitions are passed as a `Vec<tour::Step>` prop; target strings are adapter hints resolved by CSS selector, ID, or adapter-managed target token on the client. On Desktop and Mobile, target resolution uses the webview DOM; non-webview targets degrade gracefully.
+
+The framework-agnostic core emits typed `tour::Effect` intents and never reads
+live DOM handles. The adapter responds to those intents with framework-native
+DOM work, then sends `tour::Event::SetZIndex`, `PositioningUpdate`, and
+`SpotlightUpdate` feedback events so core attrs can expose the latest
+z-index, placement, and spotlight snapshot.
 
 ## 2. Public Adapter API
 
@@ -382,7 +388,7 @@ On Desktop and Mobile targets, DOM APIs (`querySelector`, `scrollIntoView`, `Res
 
 ```rust
 use dioxus::prelude::*;
-use ars_core::tour;
+use ars_components::overlay::tour;
 
 /// Context shared by all Tour sub-components.
 #[derive(Clone, Copy)]
@@ -410,8 +416,6 @@ pub fn Tour(props: TourProps) -> Element {
         on_step_change: props.on_step_change,
         lazy_mount: props.lazy_mount,
         unmount_on_exit: props.unmount_on_exit,
-        messages: props.messages,
-        locale: props.locale,
     };
 
     let machine = use_machine::<tour::Machine>(core_props);

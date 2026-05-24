@@ -70,6 +70,14 @@ pub enum Event {
     },
     /// Focus lost from tour content.
     Blur,
+    /// Adapter reported the z-index allocated for this tour instance.
+    SetZIndex(u32),
+    /// Adapter reported resolved positioning output for the current step.
+    PositioningUpdate(PositioningSnapshot),
+    /// Adapter reported spotlight measurement output for the current target.
+    SpotlightUpdate(SpotlightSnapshot),
+    /// Re-apply context-backed props after a prop change.
+    SyncProps,
 }
 ```
 
@@ -94,8 +102,12 @@ pub enum StepType {
 /// The definition of a step in the tour.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Step {
-    /// CSS selector or element ID for the target element to highlight.
-    /// Ignored for `StepType::Dialog` and `StepType::Floating`.
+    /// CSS selector, element ID, or adapter-facing target token for the target
+    /// element to highlight. Ignored for `StepType::Dialog` and
+    /// `StepType::Floating`.
+    ///
+    /// The core treats this as semantic data and an adapter hint only; it never
+    /// resolves the string into a live element.
     pub target: Option<String>,
     /// Step title text.
     pub title: String,
@@ -126,6 +138,30 @@ impl Default for Step {
     }
 }
 
+/// Adapter-reported rectangle for the spotlight highlight.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SpotlightRect {
+    /// Left coordinate in CSS pixels.
+    pub x: f64,
+    /// Top coordinate in CSS pixels.
+    pub y: f64,
+    /// Width in CSS pixels.
+    pub width: f64,
+    /// Height in CSS pixels.
+    pub height: f64,
+}
+
+/// Adapter-reported spotlight measurement.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SpotlightSnapshot {
+    /// Measured rectangle for the highlighted target.
+    pub rect: SpotlightRect,
+    /// Padding applied around the target.
+    pub offset: f64,
+    /// Border radius for the spotlight cutout.
+    pub radius: f64,
+}
+
 /// The context of the `Tour` component.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
@@ -137,7 +173,7 @@ pub struct Context {
     pub current_step: usize,
     /// Total number of steps.
     pub total_steps: usize,
-    /// ID of the current target element (resolved from `steps[current_step].target`).
+    /// Current target token copied from `steps[current_step].target`.
     pub target_element_id: Option<String>,
     /// Whether the tour content is focused.
     pub focused: bool,
@@ -149,8 +185,21 @@ pub struct Context {
     pub ids: ComponentIds,
     /// Resolved messages for accessibility labels.
     pub messages: Messages,
+    /// Positioning preferences for the current step.
+    pub positioning: PositioningOptions,
+    /// Current resolved placement reported by the adapter.
+    pub current_placement: Placement,
+    /// Latest adapter-reported spotlight measurement.
+    pub spotlight: Option<SpotlightSnapshot>,
+    /// Adapter-allocated z-index.
+    pub z_index: Option<u32>,
 }
 ```
+
+Framework adapters own target lookup through native handles (`NodeRef`,
+`MountedData`, or equivalent), target measurement, scrolling, focus movement,
+portal mounting, and overlay geometry. The agnostic core receives only DOM-free
+feedback snapshots.
 
 ### 1.4 Props
 
@@ -175,9 +224,9 @@ pub struct Props {
     /// Whether keyboard navigation (arrow keys) between steps is enabled.
     pub keyboard_navigation: bool,
     /// Callback invoked when the tour open state changes.
-    pub on_open_change: Option<Callback<bool>>,
+    pub on_open_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
     /// Callback invoked when the current step changes. Receives the new step index.
-    pub on_step_change: Option<Callback<usize>>,
+    pub on_step_change: Option<Callback<dyn Fn(usize) + Send + Sync>>,
     /// When true, tour content is not mounted until started. Default: false.
     pub lazy_mount: bool,
     /// When true, tour content is removed from the DOM after completing. Default: false.
@@ -204,10 +253,48 @@ impl Default for Props {
 }
 ```
 
+### 1.4.1 Adapter Effects
+
+The agnostic Tour core emits typed named effects rather than performing live DOM
+work. Adapters handle each intent with framework-native element handles and send
+DOM-free feedback events (`SetZIndex`, `PositioningUpdate`,
+`SpotlightUpdate`) back to the machine.
+
+```rust
+/// Typed identifier for named effect intents emitted by Tour.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes `Props::on_open_change`.
+    OpenChange,
+    /// Adapter invokes `Props::on_step_change`.
+    StepChange,
+    /// Adapter allocates a z-index.
+    AllocateZIndex,
+    /// Adapter releases the allocated z-index.
+    ReleaseZIndex,
+    /// Adapter attaches overlay click handling.
+    AttachOverlayClick,
+    /// Adapter detaches overlay click handling.
+    DetachOverlayClick,
+    /// Adapter moves focus to step content.
+    FocusStepContent,
+    /// Adapter scrolls the current target into view.
+    ScrollTargetIntoView,
+    /// Adapter positions step content.
+    PositionStepContent,
+    /// Adapter measures the spotlight target.
+    MeasureSpotlight,
+}
+```
+
+The sample implementation below shows the agnostic contract shape. Concrete
+code emits `Effect::*` intents and stores adapter feedback; it does not call
+platform focus, scroll, lookup, portal, or measurement APIs.
+
 ### 1.5 Full Machine Implementation
 
 ```rust
-use ars_core::{TransitionPlan, PendingEffect, ComponentIds, AttrMap, Bindable};
+use ars_core::{ComponentIds, PendingEffect, TransitionPlan};
 
 /// The machine of the `Tour` component.
 pub struct Machine;
@@ -218,6 +305,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props   = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -242,6 +330,10 @@ impl ars_core::Machine for Machine {
             open,
             ids,
             messages,
+            positioning: PositioningOptions::default(),
+            current_placement: Placement::Bottom,
+            spotlight: None,
+            z_index: None,
         })
     }
 
@@ -260,12 +352,11 @@ impl ars_core::Machine for Machine {
                         ctx.target_element_id = ctx.steps.first().and_then(|s| s.target.clone());
                         ctx.open = true;
                     })
-                    .with_named_effect("focus-step", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let content_id = ctx.ids.part("step-content");
-                        platform.focus_element_by_id(&content_id);
-                        no_cleanup()
-                    }))
+                    .with_effect(PendingEffect::named(Effect::OpenChange))
+                    .with_effect(PendingEffect::named(Effect::StepChange))
+                    .with_effect(PendingEffect::named(Effect::AllocateZIndex))
+                    .with_effect(PendingEffect::named(Effect::FocusStepContent))
+                    .with_effect(PendingEffect::named(Effect::AttachOverlayClick)))
             }
 
             // ── Next step ───────────────────────────────────────────────
@@ -281,12 +372,8 @@ impl ars_core::Machine for Machine {
                             ctx.current_step = next;
                             ctx.target_element_id = ctx.steps.get(next).and_then(|s| s.target.clone());
                         })
-                        .with_named_effect("focus-step", |ctx, _props, _send| {
-                            let platform = use_platform_effects();
-                            let content_id = ctx.ids.part("step-content");
-                            platform.focus_element_by_id(&content_id);
-                            no_cleanup()
-                        }))
+                        .with_effect(PendingEffect::named(Effect::StepChange))
+                        .with_effect(PendingEffect::named(Effect::FocusStepContent)))
                 }
             }
 
@@ -298,12 +385,8 @@ impl ars_core::Machine for Machine {
                         ctx.current_step = prev;
                         ctx.target_element_id = ctx.steps.get(prev).and_then(|s| s.target.clone());
                     })
-                    .with_named_effect("focus-step", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let content_id = ctx.ids.part("step-content");
-                        platform.focus_element_by_id(&content_id);
-                        no_cleanup()
-                    }))
+                    .with_effect(PendingEffect::named(Effect::StepChange))
+                    .with_effect(PendingEffect::named(Effect::FocusStepContent)))
             }
 
             // ── Go to step ──────────────────────────────────────────────
@@ -314,12 +397,8 @@ impl ars_core::Machine for Machine {
                         ctx.current_step = idx;
                         ctx.target_element_id = ctx.steps.get(idx).and_then(|s| s.target.clone());
                     })
-                    .with_named_effect("focus-step", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let content_id = ctx.ids.part("step-content");
-                        platform.focus_element_by_id(&content_id);
-                        no_cleanup()
-                    }))
+                    .with_effect(PendingEffect::named(Effect::StepChange))
+                    .with_effect(PendingEffect::named(Effect::FocusStepContent)))
             }
 
             // ── Skip / Dismiss ──────────────────────────────────────────
@@ -327,14 +406,20 @@ impl ars_core::Machine for Machine {
             | (State::Active { .. }, Event::Dismiss) => {
                 Some(TransitionPlan::to(State::Inactive).apply(|ctx| {
                     ctx.open = false;
-                }))
+                })
+                .with_effect(PendingEffect::named(Effect::OpenChange))
+                .with_effect(PendingEffect::named(Effect::DetachOverlayClick))
+                .with_effect(PendingEffect::named(Effect::ReleaseZIndex)))
             }
 
             // ── Complete ────────────────────────────────────────────────
             (State::Active { .. }, Event::Complete) => {
                 Some(TransitionPlan::to(State::Completed).apply(|ctx| {
                     ctx.open = false;
-                }))
+                })
+                .with_effect(PendingEffect::named(Effect::OpenChange))
+                .with_effect(PendingEffect::named(Effect::DetachOverlayClick))
+                .with_effect(PendingEffect::named(Effect::ReleaseZIndex)))
             }
 
             // ── Restart from completed ──────────────────────────────────
@@ -483,6 +568,9 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+        if let Some(z_index) = self.ctx.z_index {
+            attrs.set_style(CssProperty::Custom("ars-z-index"), z_index.to_string());
+        }
         attrs
     }
 
@@ -492,6 +580,17 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+        if let Some(target) = &self.ctx.target_element_id {
+            attrs.set(HtmlAttr::Data("ars-target"), target.clone());
+        }
+        if let Some(snapshot) = self.ctx.spotlight {
+            attrs.set_style(CssProperty::Position, "fixed");
+            attrs.set_style(CssProperty::Left, format!("{}px", snapshot.rect.x - snapshot.offset));
+            attrs.set_style(CssProperty::Top, format!("{}px", snapshot.rect.y - snapshot.offset));
+            attrs.set_style(CssProperty::Width, format!("{}px", snapshot.rect.width + snapshot.offset * 2.0));
+            attrs.set_style(CssProperty::Height, format!("{}px", snapshot.rect.height + snapshot.offset * 2.0));
+            attrs.set_style(CssProperty::BorderRadius, format!("{}px", snapshot.radius));
+        }
         attrs
     }
 
@@ -505,8 +604,13 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Modal), "false");
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("step-title"));
         attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), self.ctx.ids.part("step-description"));
+        attrs.set(HtmlAttr::Data("ars-state"), self.state_token());
+        attrs.set(HtmlAttr::Data("ars-placement"), self.ctx.current_placement.as_str());
         if let State::Active { step_index } = self.state {
             attrs.set(HtmlAttr::Data("ars-step"), step_index.to_string());
+        }
+        if let Some(z_index) = self.ctx.z_index {
+            attrs.set_style(CssProperty::Custom("ars-z-index"), z_index.to_string());
         }
         attrs
     }
@@ -617,7 +721,11 @@ impl<'a> Api<'a> {
 
     /// Progress as a localized text string (e.g., "Step 2 of 5").
     pub fn progress_text(&self) -> String {
-        (self.ctx.messages.progress_text)(self.ctx.current_step + 1, self.ctx.total_steps)
+        (self.ctx.messages.progress_text)(
+            self.ctx.current_step + 1,
+            self.ctx.total_steps,
+            &self.ctx.locale,
+        )
     }
 
     /// Whether there is a next step.
@@ -630,10 +738,20 @@ impl<'a> Api<'a> {
         self.ctx.current_step > 0
     }
 
-    /// The current step definition.
-    pub fn current_step_info(&self) -> Option<&Step> {
-        self.ctx.steps.get(self.ctx.current_step)
-    }
+    /// Current positioning preferences.
+    pub fn positioning(&self) -> &PositioningOptions { &self.ctx.positioning }
+
+    /// Latest adapter-reported spotlight snapshot.
+    pub fn spotlight_snapshot(&self) -> Option<SpotlightSnapshot> { self.ctx.spotlight }
+
+    /// Adapter-allocated z-index.
+    pub fn z_index(&self) -> Option<u32> { self.ctx.z_index }
+
+    /// Whether content is lazily mounted.
+    pub fn lazy_mount(&self) -> bool { self.props.lazy_mount }
+
+    /// Whether content unmounts on exit.
+    pub fn unmount_on_exit(&self) -> bool { self.props.unmount_on_exit }
 
     pub fn on_keydown(&self, data: &KeyboardEventData) {
         match data.key {
@@ -643,6 +761,16 @@ impl<'a> Api<'a> {
             _ => {}
         }
     }
+
+    pub fn on_next_trigger_click(&self) { (self.send)(Event::NextStep); }
+    pub fn on_prev_trigger_click(&self) { (self.send)(Event::PrevStep); }
+    pub fn on_skip_trigger_click(&self) { (self.send)(Event::Skip); }
+    pub fn on_close_trigger_click(&self) { (self.send)(Event::Dismiss); }
+    pub fn on_overlay_click(&self) {
+        if self.props.close_on_overlay_click { (self.send)(Event::Dismiss); }
+    }
+    pub fn on_focus(&self, is_keyboard: bool) { (self.send)(Event::Focus { is_keyboard }); }
+    pub fn on_blur(&self) { (self.send)(Event::Blur); }
 }
 
 impl ConnectApi for Api<'_> {
