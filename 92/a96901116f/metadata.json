@@ -1,0 +1,43 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "92a96901116f",
+  "strategy": "manual-commit",
+  "branch": "t3code/0baff5e5",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/utility/action_group/mod.rs",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_item_disabled.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_item_focused.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_item_idle.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_item_selected_multiple.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_item_selected_single.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_overflow_trigger_custom_label.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_overflow_trigger_default_label.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_root_default.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_root_disabled.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_root_labelledby_precedence.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_root_styling_hooks.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_root_vertical.snap",
+    "crates/ars-components/src/utility/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility.rs",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "spec/components/utility/action-group.md",
+    "spec/dioxus-components/utility/action-group.md",
+    "spec/leptos-components/utility/action-group.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/92/a96901116f/0/metadata.json",
+      "transcript": "/92/a96901116f/0/full.jsonl",
+      "content_hash": "/92/a96901116f/0/content_hash.txt",
+      "prompt": "/92/a96901116f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 904043,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 90104832,
+    "output_tokens": 94793,
+    "api_call_count": 674
+  }
+}

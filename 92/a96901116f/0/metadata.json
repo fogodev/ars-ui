@@ -1,0 +1,157 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "92a96901116f",
+  "session_id": "019e57fe-8571-7122-a65d-3a151cb21cc1",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-24T14:01:24.73893Z",
+  "branch": "t3code/0baff5e5",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/utility/action_group/mod.rs",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_item_disabled.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_item_focused.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_item_idle.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_item_selected_multiple.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_item_selected_single.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_overflow_trigger_custom_label.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_overflow_trigger_default_label.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_root_default.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_root_disabled.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_root_labelledby_precedence.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_root_styling_hooks.snap",
+    "crates/ars-components/src/utility/action_group/snapshots/ars_components__utility__action_group__tests__action_group_root_vertical.snap",
+    "crates/ars-components/src/utility/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility.rs",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "spec/components/utility/action-group.md",
+    "spec/dioxus-components/utility/action-group.md",
+    "spec/leptos-components/utility/action-group.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "31fbd9d24612",
+  "token_usage": {
+    "input_tokens": 904043,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 90104832,
+    "output_tokens": 94793,
+    "api_call_count": 674
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement the framework-agnostic ActionGroup core component for GitHub issue #217 in fogodev/ars-ui, following a detailed pre-approved plan including TDD, mutation testing, coverage auditing, and a post-implementation spec audit.",
+    "outcome": "The ActionGroup agnostic core was fully implemented in crates/ars-components/src/utility/action_group/mod.rs with 49+ unit tests, 13 committed snapshots, spec conformance and proptest coverage, 0 missed mutants across 149 mutants, 1284/1284 line coverage, a post-implementation spec audit landing findings in-diff, and a PR opened against main with Closes #217.",
+    "learnings": {
+      "repo": [
+        "The pre-push gate is `cargo xci-fast`, which runs fmt-check, check, clippy, tests, and a snapshot-count row — all must pass before committing.",
+        "Mutation testing uses `cargo mutants -p ars-components -f <file>` per module; missed mutants must be triaged in the same PR — real gaps get tests, true equivalents get `.cargo/mutants.toml` skips.",
+        "Snapshot tests use `cargo insta`; `INSTA_UPDATE=always` auto-accepts new snapshots, and `--unreferenced=reject` enforces no orphan fixtures.",
+        "The project board is updated via `gh project item-edit` with hardcoded project ID `PVT_kwHOAKgEE84BTlkR`; field and option IDs must be resolved from `gh project field-list` before any status change.",
+        "ActionGroup follows the `toggle_group::Machine` structural pattern: `State`, `Event`, `Props`, `Context`, `Effect`, `Part`, and `Api<'a>` with `root_attrs`, `item_attrs`, `overflow_trigger_attrs`.",
+        "Item registration order is maintained in a `Vec<Key>` (render order), separate from the `BTreeSet<Key>` used for selected items.",
+        "Group-level `disabled` must NOT erase roving focus state — only item-level disabled or explicit navigation should shift `tabindex`; the spec explicitly allows focus/navigation on a disabled group.",
+        "The spec sync scope for this task extended to adapter specs in `spec/leptos-components/` and `spec/dioxus-components/` — stale debug-warning requirements and API sketches needed updating alongside the core spec.",
+        "Selection Mode::Single with the ActionGroup spec requires that re-selecting the already-selected item clears selection (differs from a typical radio pattern).",
+        "Post-implementation audit is a three-phase skill: (1) spec/impl drift section-by-section, (2) two-round 'anything else missing' passes until clean, (3) test-type breadth check."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/action_group/mod.rs",
+          "line": 480,
+          "end_line": 515,
+          "finding": "Focus no-op guard (repeated FocusItem on already-focused key) and Blur no-op guard (Blur in Idle state) were mutation survivors until explicit state-unchanged assertions were added — mutation testing is the only reliable way to find these guards."
+        },
+        {
+          "path": "crates/ars-components/src/utility/action_group/mod.rs",
+          "line": 585,
+          "end_line": 600,
+          "finding": "OverflowChanged with the same count is a no-op; this guard also survived mutation until a test that sent the same count twice and asserted no context change was added."
+        },
+        {
+          "path": "crates/ars-components/src/utility/action_group/mod.rs",
+          "line": 990,
+          "end_line": 1024,
+          "finding": "Previous-focus wrap logic had two arithmetic mutant survivors that required a test for FocusPrev from the first item (wrapping to last enabled) AND a test where the final wrap candidate is disabled (requiring scanning backward past it)."
+        },
+        {
+          "path": "crates/ars-components/src/utility/mod.rs",
+          "line": 1,
+          "end_line": 10,
+          "finding": "New utility modules must be added to the pub mod list here; the file uses explicit pub mod declarations, not a glob."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/utility.rs",
+          "line": 620,
+          "end_line": 660,
+          "finding": "Proptest invariants for ActionGroup must be run with `-- --ignored` because the test is annotated #[ignore] to avoid slowing the default test suite."
+        }
+      ],
+      "workflow": [
+        "Mutation testing runs for a ~1300-line Rust module take 75-90 minutes per pass; plan for 3+ passes when doing targeted remediation.",
+        "cargo-mutants emits per-mutant output ONLY on misses — long stretches of silence are normal and do not indicate a hang.",
+        "Coverage gaps found by llvm-cov often correlate exactly with mutation survivors: if a guard condition has no test that produces a no-op vs state-change branch, both tools will flag it.",
+        "The TDD ordering — failing compile (red), minimal impl (green), hardened tests (mutation/coverage) — is enforced by project conventions, not just preference; the post-implementation audit checks test-type breadth as a phase.",
+        "Unrelated formatter drift can appear in files touched by `xci-fast` compilation; always check `git diff` after the gate and restore unintended changes before committing.",
+        "The Codex review loop (post-PR) requires inline replies, regression tests for each finding, and re-triggering `@codex review` until a thumbs-up — it is a required gate before the issue auto-closes via the PR merge."
+      ]
+    },
+    "friction": [
+      "Mutation testing required ~5 hours total across three full passes (initial run, remediation rerun, final clean rerun after coverage edits) with hundreds of polling iterations due to no progress output between misses.",
+      "cargo package-cache lock contention from other local Cargo processes caused delays at both the test phase and the xci-fast gate.",
+      "An unrelated formatter change in crates/ars-dioxus/tests/attr_passthrough.rs appeared after xci-fast and needed manual revert before committing to keep the PR scope clean.",
+      "The initial test scaffold had a function name shadowing compile error that required a patch before the focused tests could run.",
+      "The visible-count drift repair path (stale overflow count after unregister) was difficult to test directly because the service's mutable context hook was needed to model externally-drifted state.",
+      "The lcov coverage output covered the whole crate by default; a separate awk script was needed to isolate ActionGroup module stats."
+    ],
+    "open_items": [
+      "Leptos and Dioxus adapter implementations for ActionGroup are explicitly out of scope for this task — the adapter specs were updated but no adapter code was written.",
+      "The Codex review loop has not yet completed — PR is open but @codex review has not been posted and no Codex threads have been resolved.",
+      "CI has not yet passed and the issue will remain open until the PR merges with green CI and Codex thumbs-up.",
+      "The snapshot-reviewed label needs to be added to the PR (13 new .snap fixtures were committed).",
+      "The .cargo/mutants.toml was not modified — if any true equivalent mutants appear in future passes they would need documented skips there."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-24T14:00:23.048702Z",
+    "agent_lines": 3089,
+    "agent_removed": 402,
+    "human_added": 208,
+    "human_modified": 124,
+    "human_removed": 0,
+    "total_committed": 3359,
+    "total_lines_changed": 3823,
+    "agent_percentage": 91.31572063824221,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 166,
+      "user_lines_removed": 62,
+      "agent_lines_added": 3317,
+      "agent_lines_removed": 464,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/action_group/mod.rs": 113,
+        "crates/ars-components/tests/proptest_state_machines/utility.rs": 1,
+        "spec/components/utility/action-group.md": 18,
+        "spec/dioxus-components/utility/action-group.md": 15,
+        "spec/leptos-components/utility/action-group.md": 19
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/utility/action_group/mod.rs": 10,
+        "spec/components/utility/action-group.md": 18,
+        "spec/dioxus-components/utility/action-group.md": 15,
+        "spec/leptos-components/utility/action-group.md": 19
+      }
+    }
+  ]
+}

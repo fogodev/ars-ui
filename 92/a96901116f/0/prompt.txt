@@ -1,0 +1,294 @@
+Implement task #217
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #217 ActionGroup Agnostic Core Implementation Plan
+
+## Summary
+
+Implement the framework-agnostic `ActionGroup` core for issue #217 in `fogodev/ars-ui`, targeting only `ars-components` and spec/test artifacts. The implementation will follow the ActionGroup spec, reuse the existing `button` and `toggle_group` machine/connect patterns, and include the agreed spec sync for item registration events so adapters can maintain roving focus order without querying DOM IDs.
+
+Issue #214 is closed, so #217 is unblocked. Because this session is in Plan Mode, the execution phase must start by performing the required project-board update and then implementing the code.
+
+## Public API And Contract Changes
+
+Add `crates/ars-components/src/utility/action_group/mod.rs` and export it from `crates/ars-components/src/utility/mod.rs`.
+
+Public module surface:
+
+- `State`
+  - `Idle`
+  - `Focused { item: Key }`
+- `Event`
+  - Spec events: `FocusItem(Key)`, `Blur`, `FocusNext`, `FocusPrev`, `FocusFirst`, `FocusLast`, `ActivateItem(Key)`, `SelectItem(Key)`, `OverflowChanged(usize)`, `SetProps`
+  - Spec-sync additions: `RegisterItem(Key)`, `UnregisterItem(Key)`
+- `ButtonLabelBehavior`
+  - `Show`, `Collapse`, `Hide`
+- `Variant`
+  - `Toolbar`, `Outlined`, `Flat`
+- `OverflowMode`
+  - `Wrap`, `Collapse`, `Menu`
+- `Props`
+  - `id`, `orientation`, `dir`, `overflow_mode`, `variant`, `disabled`, `disabled_items`, `selection_mode`, `max_visible_actions`, `button_label_behavior`, `density`, `justified`, `aria_label`, `aria_labelledby`
+- `Context`
+  - `disabled`, `focused_item`, `selected_items`, `overflow_count`, `visible_count`, `registered_items`, `dir`, `locale`, `messages`
+- `Messages`
+  - `overflow_trigger_label`, default `"More actions"`
+  - `toolbar_label`, default `"Actions"`
+- `Effect`
+  - `Action`
+  - `SelectionChange`
+  - `FocusItem`
+- `Part`
+  - `Root`
+  - `Item { item_id: Key }`
+  - `OverflowTrigger`
+- `Api<'a>`
+  - `root_attrs()`
+  - `item_attrs(&Key)`
+  - `overflow_trigger_attrs()`
+  - `is_item_disabled(&Key)`
+  - `is_overflowed(index: usize)`
+  - `on_item_keydown(&KeyboardEventData)`
+  - `on_item_focus(&Key)`
+  - `on_item_blur()`
+  - `on_item_click(&Key)`
+  - `on_item_mount(&Key)`
+  - `on_item_unmount(&Key)`
+
+Spec sync:
+
+- Update `spec/components/utility/action-group.md` §1.2 and §1.6 to include `RegisterItem(Key)` and `UnregisterItem(Key)`.
+- Keep adapter implementation out of scope.
+- Do not add new dependency crates.
+
+## Implementation Steps
+
+1. Move GitHub issue #217 to `In Progress` on the `ars-ui implementation roadmap` project board before editing.
+   - Use the existing project-board workflow from this repo: resolve project field IDs with `gh project field-list 2 --owner fogodev --format json --limit 100`, then update the issue item status to `In Progress`.
+
+2. Add failing tests first in `crates/ars-components/src/utility/action_group/mod.rs`.
+   - Cover all issue-named tests:
+     - initial state is `Idle`
+     - `FocusItem` transitions to `Focused`
+     - activation emits an `Action` effect and does not alter selection
+     - ArrowRight/ArrowLeft navigation
+     - Home/End navigation
+     - RTL horizontal arrow inversion
+     - `OverflowChanged` updates overflow and visible counts
+     - overflow trigger attrs expose menu semantics
+     - single and multiple selection behavior
+     - root attrs emit `role="toolbar"`, accessible name, and `aria-orientation`
+     - item attrs emit roving `tabindex` and `data-ars-state`
+     - overflow trigger attrs emit `aria-haspopup="menu"` and message label
+     - default messages are `"More actions"` and `"Actions"`
+     - prop defaults match spec
+   - Add extra regression tests for the spec-sync events:
+     - duplicate `RegisterItem` is a no-op
+     - `UnregisterItem` removes the key, clears focus when unregistering the focused item, and normalizes selected items if needed
+     - disabled group blocks activation/selection but still allows focus/navigation/overflow/prop sync as specified
+
+3. Implement `action_group::Machine`.
+   - Mirror the shape of `toggle_group::Machine` where applicable.
+   - Use `ars_collections::Key`.
+   - Use `ars_collections::selection::Mode` for `selection_mode`.
+   - Use `ars_core::{AttrMap, Callback, ComponentMessages, ComponentPart, ConnectApi, Direction, Env, HtmlAttr, AriaAttr, KeyboardKey, Locale, MessageFn, Orientation, PendingEffect, TransitionPlan}` and `ars_interactions::KeyboardEventData`.
+   - Use `BTreeSet<Key>` for `selected_items`.
+   - Keep DOM focus effects as logical intents only; do not query/focus DOM nodes.
+
+4. Implement selection behavior.
+   - `Mode::None`: `SelectItem` returns `None`.
+   - `Mode::Single`: selecting an unselected key replaces the set with that key; selecting the already selected key clears the set, matching the current ActionGroup spec wording.
+   - `Mode::Multiple`: selecting toggles membership.
+   - Disabled group and disabled item keys block `ActivateItem` and `SelectItem`.
+
+5. Implement roving focus.
+   - `RegisterItem` appends keys in logical render order.
+   - `UnregisterItem` removes keys and clears focused state if the focused key is removed.
+   - `FocusItem` only focuses registered, non-item-disabled keys.
+   - `FocusNext` and `FocusPrev` wrap among registered non-item-disabled keys.
+   - `FocusFirst` and `FocusLast` choose the first/last registered non-item-disabled key.
+   - `item_attrs()` gives `tabindex="0"` to the focused item, or the first registered focusable item in idle state; every other item gets `tabindex="-1"`.
+
+6. Implement overflow behavior.
+   - `OverflowChanged(count)` sets `overflow_count = count`.
+   - `visible_count = registered_items.len().saturating_sub(count)`.
+   - `is_overflowed(index)` returns `index >= visible_count`.
+   - `overflow_trigger_attrs()` always returns the trigger attributes; adapters decide whether to render it based on overflow state.
+
+7. Implement connect attributes.
+   - Root:
+     - `data-ars-scope="action-group"`
+     - `data-ars-part="root"`
+     - `role="toolbar"`
+     - `aria-orientation`
+     - `aria-disabled="true"` and `data-ars-disabled` when disabled
+     - `data-ars-variant`
+     - `data-ars-overflow-mode`
+     - `data-ars-label-behavior`
+     - optional `data-ars-density`
+     - optional `data-ars-justified`
+     - `aria-labelledby` takes precedence over `aria-label`
+     - fallback `aria-label` uses `messages.toolbar_label`
+   - Item:
+     - `data-ars-scope="action-group"`
+     - `data-ars-part="item"`
+     - `data-ars-key`
+     - `type="button"`
+     - `tabindex`
+     - `data-ars-state="selected"` or `"idle"`
+     - `aria-disabled` and `data-ars-disabled` for disabled items
+     - `aria-pressed` only for `Mode::Single` and `Mode::Multiple`
+   - Overflow trigger:
+     - `data-ars-scope="action-group"`
+     - `data-ars-part="overflow-trigger"`
+     - `type="button"`
+     - `aria-label` from `messages.overflow_trigger_label`
+     - `aria-haspopup="menu"`
+     - `aria-expanded="false"` initially
+
+8. Add utility spec-conformance coverage.
+   - Modify `crates/ars-components/tests/spec_conformance/utility.rs`.
+   - Assert `action_group::Part::{Root, Item { item_id: Key::default() }, OverflowTrigger}` matches the spec anatomy tokens.
+
+9. Add proptest coverage.
+   - Modify `crates/ars-components/tests/proptest_state_machines/utility.rs`.
+   - Add strategies for ActionGroup props/events.
+   - Assert invariants:
+     - `Idle` has no focused item.
+     - `Focused { item }` matches `ctx.focused_item`.
+     - focused item is registered and not item-disabled.
+     - selection is empty in `Mode::None`.
+     - selection length is at most one in `Mode::Single`.
+     - `visible_count + overflow_count <= registered_items.len()` unless saturating overflow count exceeds registered count, in which case `visible_count == 0`.
+     - disabled activation/selection does not change selected items.
+
+10. Add snapshot tests and committed `.snap` fixtures.
+    - Snapshot every anatomy part and output-affecting branch:
+      - root default
+      - root vertical
+      - root disabled
+      - root labelledby precedence
+      - root variant/density/justified/overflow/menu label behavior
+      - item idle
+      - item focused
+      - item disabled
+      - item selected single
+      - item selected multiple
+      - overflow trigger default label
+      - overflow trigger custom message label
+    - Run `cargo insta test --unreferenced=reject -p ars-components --features i18n --lib`.
+
+11. Run focused validation while iterating.
+    - `cargo test -p ars-components utility::action_group --features i18n`
+    - `cargo test -p ars-components --test spec_conformance utility::action_group --features i18n`
+    - `cargo test -p ars-components --test proptest_state_machines utility::proptest_action_group_event_sequences_preserve_invariants --features i18n -- --ignored`
+    - `cargo xtask spec validate`
+
+12. Run targeted mutation testing.
+    - `cargo mutants -p ars-components -f crates/ars-components/src/utility/action_group/mod.rs`
+    - Triage every `MISSED` mutant in the same PR:
+      - Add tests for real gaps.
+      - Add justified `.cargo/mutants.toml` skips only for true equivalent mutations.
+
+13. Run focused coverage audit.
+    - `cargo llvm-cov test -p ars-components --features i18n --lib --no-fail-fast --text -- utility::action_group`
+    - Inspect every uncovered branch marker in the new module.
+    - Add tests or remove unreachable defensive code as needed.
+
+14. Invoke `.agents/skills/post-implementation-audit/SKILL.md`.
+    - Phase 1: section-by-section spec/implementation drift audit.
+    - Phase 2: at least two “anything else missing?” rounds.
+    - Phase 3: coverage/test-type audit.
+    - Land every finding in the same PR before presenting the result.
+
+15. Present the final diff to the user before any commit.
+    - Include issue scope, files changed, spec sync, tests run, snapshot review status, mutation status, and coverage notes.
+    - Do not commit or push until explicit user approval.
+
+16. After user approval, run the pre-push gate.
+    - `cargo xci-fast`
+    - Fix failures before committing.
+
+17. Commit, push, and open a PR targeting `main`.
+    - PR body must include `Closes #217`.
+    - If `.snap` fixtures changed, add the `snapshot-reviewed` label to the PR.
+
+18. Invoke `.agents/skills/waiting-for-codex-review/SKILL.md`.
+    - Post `@codex review`.
+    - Poll until Codex leaves 👍.
+    - For every Codex thread:
+      - read context
+      - write failing regression test first
+      - fix in the same PR
+      - validate no coverage regression
+      - push
+      - reply inline
+      - resolve the thread
+      - trigger another `@codex review`
+
+19. Wait for CI.
+    - Do not close #217 manually.
+    - Only after PR merge with green CI and Codex 👍 should GitHub close the issue via `Closes #217`.
+
+## Test Cases And Scenarios
+
+Unit tests:
+
+- `initial_state_is_idle`
+- `focus_item_transitions_to_focused_with_roving_tabindex`
+- `focus_item_ignores_unregistered_item`
+- `focus_item_ignores_item_disabled_key`
+- `activate_item_emits_action_effect`
+- `disabled_group_blocks_activation_and_selection`
+- `arrow_right_left_move_focus_between_registered_items`
+- `home_end_move_focus_to_first_last_registered_items`
+- `rtl_swaps_horizontal_arrow_left_and_right`
+- `vertical_arrow_up_down_move_prev_next`
+- `overflow_changed_updates_overflow_and_visible_counts`
+- `overflow_count_saturates_visible_count`
+- `overflow_trigger_attrs_include_menu_semantics`
+- `single_selection_toggles_selected_item`
+- `multiple_selection_toggles_membership`
+- `selection_mode_none_omits_aria_pressed`
+- `root_attrs_include_toolbar_accessibility`
+- `root_labelledby_precedes_label_and_message_fallback`
+- `item_attrs_emit_tabindex_state_and_disabled_attrs`
+- `messages_default_to_more_actions_and_actions`
+- `props_defaults_match_spec`
+- `register_item_is_idempotent`
+- `unregister_item_clears_removed_focus`
+
+Snapshot tests:
+
+- Root default, disabled, vertical, labelledby, styling hooks
+- Item idle, focused, disabled, selected single, selected multiple
+- Overflow trigger default/custom message
+
+Spec-conformance tests:
+
+- Anatomy tokens for `Root`, `Item`, `OverflowTrigger`
+
+Property tests:
+
+- Event-sequence invariants across focus, disabled, selection, registration, and overflow state
+
+Mutation tests:
+
+- Full targeted mutation run for `crates/ars-components/src/utility/action_group/mod.rs`
+
+Coverage:
+
+- Focused `cargo llvm-cov` on `utility::action_group`, with uncovered branches triaged before handoff
+
+## Explicit Assumptions And Defaults
+
+- The implementation is agnostic core only; no Leptos or Dioxus adapter code will be added.
+- The selected plan includes a spec sync for `RegisterItem(Key)` and `UnregisterItem(Key)`, because the current ActionGroup spec requires `registered_items` but otherwise gives adapters no contract-safe way to populate it.
+- `selection::Mode` means `ars_collections::selection::Mode`, not a local `SelectionMode` enum.
+- `selection::Mode::Single` follows the ActionGroup spec text: selecting the currently selected item clears the selection.
+- `ActivateItem` emits a logical effect/callback intent and does not mutate selection.
+- Overflow measurement stays adapter-owned; the core only tracks `overflow_count` and derives `visible_count`.
+- Stable string IDs remain semantic only; the core will not focus DOM nodes or use IDs as live element handles.
+- Existing workspace conventions apply: public docs, zero warnings, no new dependency crates, TDD, snapshots reviewed, mutation triage, post-implementation audit, `cargo xci-fast`, and Codex review loop before merge.
