@@ -512,7 +512,7 @@ impl ars_core::Machine for Machine {
         if ctx.disabled
             && matches!(
                 event,
-                Event::SelectItem(_) | Event::DeselectItem(_) | Event::ToggleItem(_) | Event::Reset
+                Event::SelectItem(_) | Event::DeselectItem(_) | Event::ToggleItem(_)
             )
         {
             return None;
@@ -840,8 +840,11 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Role, root_role(self.ctx.selection_mode))
-            .set(HtmlAttr::Aria(AriaAttr::Orientation), orientation)
             .set(HtmlAttr::Data("ars-orientation"), orientation);
+
+        if self.ctx.selection_mode == SelectionMode::Single {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), orientation);
+        }
 
         if !self.props.id.is_empty() {
             attrs.set(HtmlAttr::Id, self.props.id.clone());
@@ -870,7 +873,7 @@ impl Api<'_> {
                 .set_bool(HtmlAttr::Data("ars-invalid"), true);
         }
 
-        if self.props.required {
+        if self.props.required && self.ctx.selection_mode == SelectionMode::Single {
             attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
 
@@ -898,6 +901,7 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Data("ars-value"), item_id.to_string())
+            .set(HtmlAttr::Type, "button")
             .set(HtmlAttr::TabIndex, self.item_tabindex(item_id, disabled));
 
         match self.ctx.selection_mode {
@@ -1166,10 +1170,9 @@ fn last_enabled(ctx: &Context) -> Option<Key> {
 
 fn idle_focus_seed(ctx: &Context, step: FocusStep) -> Option<Key> {
     if let Some(selected) = ctx
-        .value
-        .get()
+        .registered_items
         .iter()
-        .find(|item| can_focus_item(ctx, item))
+        .find(|item| ctx.value.get().contains(*item) && !is_item_disabled(ctx, item))
         .cloned()
     {
         return Some(selected);
@@ -1723,6 +1726,17 @@ mod tests {
     }
 
     #[test]
+    fn toggle_group_reset_restores_default_value_when_disabled() {
+        let mut service = service(props().default_value(key_set(&["italic"])).disabled(true));
+
+        service.context_mut().value.set(key_set(&["bold"]));
+
+        drop(service.send(Event::Reset));
+
+        assert_eq!(service.context().value.get(), &key_set(&["italic"]));
+    }
+
+    #[test]
     fn toggle_group_register_unregister_maintain_item_list() {
         let mut service = service(props());
 
@@ -1874,6 +1888,21 @@ mod tests {
         drop(service.send(Event::FocusPrev));
 
         assert_eq!(service.context().focused_item, Some(key("italic")));
+    }
+
+    #[test]
+    fn toggle_group_idle_focus_uses_registered_selected_order() {
+        let mut service = service(
+            props()
+                .selection_mode(SelectionMode::Multiple)
+                .default_value(key_set(&["z-first", "a-second"])),
+        );
+
+        register(&mut service, &["z-first", "a-second"]);
+
+        drop(service.send(Event::FocusNext));
+
+        assert_eq!(service.context().focused_item, Some(key("z-first")));
     }
 
     #[test]
@@ -2112,6 +2141,23 @@ mod tests {
     }
 
     #[test]
+    fn toggle_group_group_role_root_attrs_omit_unsupported_aria() {
+        for mode in [SelectionMode::Multiple, SelectionMode::None] {
+            let service = service(props().selection_mode(mode).required(true));
+
+            let attrs = service.connect(&|_| {}).root_attrs();
+
+            assert_eq!(attrs.get(&HtmlAttr::Role), Some("group"));
+            assert_eq!(
+                attrs.get(&HtmlAttr::Data("ars-orientation")),
+                Some("horizontal")
+            );
+            assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Orientation)), None);
+            assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Required)), None);
+        }
+    }
+
+    #[test]
     fn toggle_group_item_attrs_emit_single_mode_radio_contract() {
         let mut service = service(props().default_value(key_set(&["bold"])));
 
@@ -2121,6 +2167,7 @@ mod tests {
 
         assert_eq!(attrs.get(&HtmlAttr::Role), Some("radio"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Checked)), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Type), Some("button"));
         assert_eq!(attrs.get(&HtmlAttr::Data("ars-selected")), Some("true"));
     }
 
@@ -2138,6 +2185,7 @@ mod tests {
 
         assert_eq!(attrs.get(&HtmlAttr::Role), Some("button"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Pressed)), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Type), Some("button"));
     }
 
     #[test]

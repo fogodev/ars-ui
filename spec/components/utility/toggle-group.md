@@ -320,9 +320,9 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // Disabled groups still allow keyboard navigation for screen reader discoverability (WAI-ARIA)
+        // Disabled groups still allow keyboard navigation and form reset synchronization.
         if ctx.disabled && matches!(event,
-            Event::SelectItem(_) | Event::DeselectItem(_) | Event::ToggleItem(_) | Event::Reset
+            Event::SelectItem(_) | Event::DeselectItem(_) | Event::ToggleItem(_)
         ) {
             return None;
         }
@@ -717,7 +717,9 @@ impl<'a> Api<'a> {
             Orientation::Vertical => "vertical",
         };
         attrs.set(HtmlAttr::Data("ars-orientation"), orientation_str);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), orientation_str);
+        if self.ctx.selection_mode == SelectionMode::Single {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), orientation_str);
+        }
         // aria-label or aria-labelledby is REQUIRED on group/radiogroup roles.
         // Priority: aria_labelledby > aria_label > messages.group_label fallback.
         if let Some(ref labelledby) = self.props.aria_labelledby {
@@ -741,7 +743,7 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
             attrs.set_bool(HtmlAttr::Data("ars-invalid"), true);
         }
-        if self.props.required {
+        if self.props.required && self.ctx.selection_mode == SelectionMode::Single {
             attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
         attrs
@@ -754,6 +756,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Data("ars-value"), item_id.to_string());
+        attrs.set(HtmlAttr::Type, "button");
         let selected = self.is_selected(item_id);
         // Focused item data attribute for CSS-based focus styling.
         let is_focused = match &self.state {
@@ -925,8 +928,8 @@ toggle-group
 
 | Part      | Element    | Key Attributes                                                         |
 | --------- | ---------- | ---------------------------------------------------------------------- |
-| Root      | `<div>`    | `role="group"\|"radiogroup"`, `aria-orientation`, `aria-label`         |
-| Item      | `<button>` | `aria-pressed` or `role="radio"` + `aria-checked`, `data-ars-selected` |
+| Root      | `<div>`    | `role="group"\|"radiogroup"`, `aria-label`, `aria-orientation` in single mode |
+| Item      | `<button>` | `type="button"`, `aria-pressed` or `role="radio"` + `aria-checked`, `data-ars-selected` |
 | Indicator | `<div>`    | `aria-hidden="true"`, `data-ars-active-value`                          |
 
 ## 3. Accessibility
@@ -935,14 +938,14 @@ toggle-group
 
 | Part            | Role                    | Properties                                                                                           |
 | --------------- | ----------------------- | ---------------------------------------------------------------------------------------------------- |
-| Root            | `group` or `radiogroup` | `aria-label`/`aria-labelledby`, `aria-orientation`, `aria-disabled`, `aria-invalid`, `aria-required` |
+| Root            | `group` or `radiogroup` | `aria-label`/`aria-labelledby`, `aria-disabled`, `aria-invalid`; `aria-orientation` and `aria-required` only when `role="radiogroup"` |
 | Item (single)   | `radio`                 | `aria-checked="true\|false"`, `aria-disabled`                                                        |
 | Item (multiple) | `button`                | `aria-pressed="true\|false"`, `aria-disabled`                                                        |
 | Item (none)     | `button`                | `aria-disabled`                                                                                      |
 | Indicator       | (none)                  | `aria-hidden="true"`                                                                                 |
 
 - Root: `role="group"` with `aria-label` or `aria-labelledby` identifying the group purpose.
-  For single-selection, `role="radiogroup"`.
+  For single-selection, `role="radiogroup"` and may include `aria-orientation` and `aria-required`.
 - Single selection items: `role="radio"` + `aria-checked="true|false"`. Roving tabindex applies.
 - Multiple selection items: `role="button"` + `aria-pressed="true|false"`. All items tab-focusable
   unless `roving_focus=true`.
@@ -1051,11 +1054,13 @@ When the `name` prop is set, `ToggleGroup` participates in native HTML form subm
 - **Disabled**: When the group is disabled, `hidden_input_config()` returns
   `Some(HiddenInputConfig { disabled: true, .. })` so the adapter can decide whether to render
   disabled hidden inputs (rather than returning `None` and losing the field entirely).
-- **Reset**: The `Reset` event restores `ctx.value` to `props.default_value`, which also
+- **Reset**: The `Reset` event restores `ctx.value` to `props.default_value`, including while
+  the group is disabled, which also
   updates the hidden input values accordingly.
-- **Validation**: `aria-invalid` and `aria-required` on the root element communicate
-  validation state to assistive technology. The `invalid` and `required` props are typically
-  set by the `Field` component wrapping the group.
+- **Validation**: `aria-invalid` on the root element communicates invalid state to assistive
+  technology. In single-selection mode, `aria-required` on the `radiogroup` root communicates
+  required state. The `invalid` and `required` props are typically set by the `Field` component
+  wrapping the group.
 
 The adapter renders hidden inputs using `hidden_input_attrs()` or `multi_hidden_input_attrs()`
 from `ars-forms`, based on the `HiddenInputConfig` returned by `Api::hidden_input_config()`.

@@ -77,22 +77,6 @@ AttrMap {
             ),
         ),
         (
-            Aria(
-                Orientation,
-            ),
-            String(
-                "horizontal",
-            ),
-        ),
-        (
-            Aria(
-                Required,
-            ),
-            String(
-                "true",
-            ),
-        ),
-        (
             Id,
             String(
                 "format",
