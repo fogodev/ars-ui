@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/selection/menu/mod.rs
+expression: "snapshot_attrs(&api.item_shortcut_attrs(&key(\"save\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "shortcut",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "menu",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "menu-item-save-shortcut",
+            ),
+        ),
+    ],
+    styles: [],
+}

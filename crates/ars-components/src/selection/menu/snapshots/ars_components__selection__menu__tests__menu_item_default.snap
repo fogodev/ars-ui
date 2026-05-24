@@ -1,0 +1,43 @@
+---
+source: crates/ars-components/src/selection/menu/mod.rs
+expression: "snapshot_attrs(&api.item_attrs(&key(\"bravo\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "menu",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "menu-item-bravo",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "menuitem",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}
