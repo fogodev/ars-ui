@@ -572,17 +572,23 @@ fn open_lifecycle_effects(step: &Step) -> Vec<PendingEffect<Machine>> {
         PendingEffect::named(Effect::FocusStepContent),
     ];
 
-    if step.target.is_some() && matches!(step.step_type, StepType::Tooltip) {
-        effects.extend([
-            PendingEffect::named(Effect::ScrollTargetIntoView),
-            PendingEffect::named(Effect::PositionStepContent),
-            PendingEffect::named(Effect::MeasureSpotlight),
-        ]);
-    }
+    effects.extend(target_geometry_effects(step));
 
     effects.push(PendingEffect::named(Effect::AttachOverlayClick));
 
     effects
+}
+
+fn target_geometry_effects(step: &Step) -> Vec<PendingEffect<Machine>> {
+    if step.target.is_some() && matches!(step.step_type, StepType::Tooltip) {
+        vec![
+            PendingEffect::named(Effect::ScrollTargetIntoView),
+            PendingEffect::named(Effect::PositionStepContent),
+            PendingEffect::named(Effect::MeasureSpotlight),
+        ]
+    } else {
+        Vec::new()
+    }
 }
 
 fn close_lifecycle_effects() -> [PendingEffect<Machine>; 2] {
@@ -639,11 +645,8 @@ fn step_change_plan(next: usize, ctx: &Context) -> TransitionPlan<Machine> {
     plan = plan.with_effect(step_change_effect(next));
     plan = plan.with_effect(PendingEffect::named(Effect::FocusStepContent));
 
-    if step.target.is_some() && matches!(step.step_type, StepType::Tooltip) {
-        plan = plan
-            .with_effect(PendingEffect::named(Effect::ScrollTargetIntoView))
-            .with_effect(PendingEffect::named(Effect::PositionStepContent))
-            .with_effect(PendingEffect::named(Effect::MeasureSpotlight));
+    for effect in target_geometry_effects(&step) {
+        plan = plan.with_effect(effect);
     }
 
     plan
@@ -835,24 +838,37 @@ impl ars_core::Machine for Machine {
                         step_index
                     };
 
-                    Some(
-                        TransitionPlan::to(State::Active {
-                            step_index: new_step,
-                        })
-                        .apply(move |ctx: &mut Context| {
-                            ctx.steps.remove(index);
+                    let mut next_steps = ctx.steps.clone();
+                    next_steps.remove(index);
+                    let next_step = next_steps[new_step].clone();
+                    let active_step_changed = index <= step_index;
 
-                            ctx.total_steps = ctx.steps.len();
-                            ctx.current_step = new_step;
+                    let mut plan = TransitionPlan::to(State::Active {
+                        step_index: new_step,
+                    })
+                    .apply(move |ctx: &mut Context| {
+                        ctx.steps.remove(index);
 
-                            let (target, positioning) = current_step_data(&ctx.steps, new_step);
+                        ctx.total_steps = ctx.steps.len();
+                        ctx.current_step = new_step;
 
-                            ctx.target_element_id = target;
-                            ctx.current_placement = positioning.placement;
-                            ctx.positioning = positioning;
-                            ctx.spotlight = None;
-                        }),
-                    )
+                        let (target, positioning) = current_step_data(&ctx.steps, new_step);
+
+                        ctx.target_element_id = target;
+                        ctx.current_placement = positioning.placement;
+                        ctx.positioning = positioning;
+                        ctx.spotlight = None;
+                    });
+
+                    if active_step_changed {
+                        plan = plan.with_effect(step_change_effect(new_step));
+
+                        for effect in target_geometry_effects(&next_step) {
+                            plan = plan.with_effect(effect);
+                        }
+                    }
+
+                    Some(plan)
                 }
             }
 
@@ -861,7 +877,9 @@ impl ars_core::Machine for Machine {
             {
                 let index = *index;
                 let step = step.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                let effect_step = step.clone();
+                let emits_geometry = index == ctx.current_step;
+                let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.steps[index] = step.clone();
 
                     if index == ctx.current_step {
@@ -872,7 +890,15 @@ impl ars_core::Machine for Machine {
                         ctx.positioning = positioning;
                         ctx.spotlight = None;
                     }
-                }))
+                });
+
+                if emits_geometry {
+                    for effect in target_geometry_effects(&effect_step) {
+                        plan = plan.with_effect(effect);
+                    }
+                }
+
+                Some(plan)
             }
 
             (_, Event::SetZIndex(z_index)) => {
@@ -896,39 +922,46 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            (State::Active { .. }, Event::SyncProps) if props.steps.is_empty() => Some(
-                TransitionPlan::to(State::Inactive).apply(|ctx: &mut Context| {
+            (State::Active { .. }, Event::SyncProps) if props.steps.is_empty() => {
+                Some(close_to_inactive_plan().apply(|ctx: &mut Context| {
                     ctx.steps.clear();
 
                     ctx.total_steps = 0;
                     ctx.current_step = 0;
                     ctx.target_element_id = None;
-                    ctx.open = false;
-                    ctx.spotlight = None;
-                    ctx.z_index = None;
-                }),
-            ),
+                }))
+            }
 
             (State::Active { .. }, Event::SyncProps) => {
                 let steps = props.steps.clone();
                 let new_step = ctx.current_step.min(steps.len().saturating_sub(1));
-                Some(
-                    TransitionPlan::to(State::Active {
-                        step_index: new_step,
-                    })
-                    .apply(move |ctx: &mut Context| {
-                        ctx.steps = steps.clone();
-                        ctx.total_steps = ctx.steps.len();
-                        ctx.current_step = new_step;
+                let step_changed = new_step != ctx.current_step;
+                let next_step = steps[new_step].clone();
+                let mut plan = TransitionPlan::to(State::Active {
+                    step_index: new_step,
+                })
+                .apply(move |ctx: &mut Context| {
+                    ctx.steps = steps.clone();
+                    ctx.total_steps = ctx.steps.len();
+                    ctx.current_step = new_step;
 
-                        let (target, positioning) = current_step_data(&ctx.steps, ctx.current_step);
+                    let (target, positioning) = current_step_data(&ctx.steps, ctx.current_step);
 
-                        ctx.target_element_id = target;
-                        ctx.current_placement = positioning.placement;
-                        ctx.positioning = positioning;
-                        ctx.spotlight = None;
-                    }),
-                )
+                    ctx.target_element_id = target;
+                    ctx.current_placement = positioning.placement;
+                    ctx.positioning = positioning;
+                    ctx.spotlight = None;
+                });
+
+                if step_changed {
+                    plan = plan.with_effect(step_change_effect(new_step));
+                }
+
+                for effect in target_geometry_effects(&next_step) {
+                    plan = plan.with_effect(effect);
+                }
+
+                Some(plan)
             }
 
             (_, Event::SyncProps) => {
@@ -1080,11 +1113,13 @@ impl Api<'_> {
     /// Returns localized progress text.
     #[must_use]
     pub fn progress_text(&self) -> String {
-        (self.ctx.messages.progress_text)(
-            self.ctx.current_step + 1,
-            self.ctx.total_steps,
-            &self.ctx.locale,
-        )
+        let current_step = if self.ctx.total_steps == 0 {
+            0
+        } else {
+            self.ctx.current_step + 1
+        };
+
+        (self.ctx.messages.progress_text)(current_step, self.ctx.total_steps, &self.ctx.locale)
     }
 
     /// Returns whether there is a next step.
@@ -1687,6 +1722,43 @@ mod tests {
     }
 
     #[test]
+    fn remove_step_that_changes_active_step_emits_step_change_effect() {
+        let mut service = open_service();
+
+        drop(service.send(Event::GoToStep(2)));
+
+        let result = service.send(Event::RemoveStep(0));
+
+        assert_eq!(service.state(), &State::Active { step_index: 1 });
+        assert!(effect_names(&result).contains(&Effect::StepChange));
+
+        let mut service = open_service();
+
+        drop(service.send(Event::GoToStep(1)));
+
+        let result = service.send(Event::RemoveStep(1));
+
+        assert_eq!(service.state(), &State::Active { step_index: 1 });
+        assert!(effect_names(&result).contains(&Effect::StepChange));
+    }
+
+    #[test]
+    fn update_current_step_emits_geometry_effects() {
+        let mut service = open_service();
+
+        let result = service.send(Event::UpdateStep {
+            index: 0,
+            step: step("#one-updated", "One updated"),
+        });
+
+        let names = effect_names(&result);
+
+        assert!(names.contains(&Effect::ScrollTargetIntoView));
+        assert!(names.contains(&Effect::PositionStepContent));
+        assert!(names.contains(&Effect::MeasureSpotlight));
+    }
+
+    #[test]
     fn dynamic_remove_and_update_guard_boundary_indexes() {
         let mut service = open_service();
 
@@ -1815,6 +1887,63 @@ mod tests {
     }
 
     #[test]
+    fn sync_props_empty_steps_emits_close_lifecycle_effects() {
+        let mut service = open_service();
+
+        drop(service.send(Event::SetZIndex(1400)));
+
+        let result = service.set_props(Props {
+            steps: Vec::new(),
+            ..props()
+        });
+
+        let names = effect_names(&result);
+
+        assert_eq!(service.state(), &State::Inactive);
+        assert!(names.contains(&Effect::OpenChange));
+        assert!(names.contains(&Effect::DetachOverlayClick));
+        assert!(names.contains(&Effect::ReleaseZIndex));
+    }
+
+    #[test]
+    fn sync_props_active_step_changes_emit_step_change_and_geometry_effects() {
+        let mut service = open_service();
+
+        drop(service.send(Event::GoToStep(2)));
+
+        let result = service.set_props(Props {
+            steps: vec![step("#one-new", "One new"), step("#two-new", "Two new")],
+            ..props()
+        });
+
+        let names = effect_names(&result);
+
+        assert_eq!(service.state(), &State::Active { step_index: 1 });
+        assert!(names.contains(&Effect::StepChange));
+        assert!(names.contains(&Effect::ScrollTargetIntoView));
+        assert!(names.contains(&Effect::PositionStepContent));
+        assert!(names.contains(&Effect::MeasureSpotlight));
+
+        let result = service.set_props(Props {
+            steps: vec![
+                Step {
+                    placement: Placement::TopStart,
+                    ..step("#one-retargeted", "One retargeted")
+                },
+                step("#two-retargeted", "Two retargeted"),
+            ],
+            ..props()
+        });
+
+        let names = effect_names(&result);
+
+        assert!(!names.contains(&Effect::StepChange));
+        assert!(names.contains(&Effect::ScrollTargetIntoView));
+        assert!(names.contains(&Effect::PositionStepContent));
+        assert!(names.contains(&Effect::MeasureSpotlight));
+    }
+
+    #[test]
     fn focus_and_blur_update_focus_flags() {
         let mut service = open_service();
 
@@ -1852,6 +1981,16 @@ mod tests {
         assert_eq!(service.context().z_index, Some(1550));
         assert_eq!(service.context().current_placement, Placement::TopStart);
         assert!(service.context().spotlight.is_some());
+    }
+
+    #[test]
+    fn progress_text_clamps_empty_tours_to_zero_of_zero() {
+        let service = service(Props {
+            steps: Vec::new(),
+            ..props()
+        });
+
+        assert_eq!(service.connect(&|_| {}).progress_text(), "Step 0 of 0");
     }
 
     #[test]
