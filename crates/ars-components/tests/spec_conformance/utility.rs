@@ -7,8 +7,8 @@ use ars_collections::Key;
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
 use ars_components::utility::{
-    action_group, download_trigger, focus_scope, group, live_region, swap, toggle, toggle_button,
-    toggle_group,
+    action_group, download_trigger, drop_zone, focus_scope, group, live_region, swap, toggle,
+    toggle_button, toggle_group,
 };
 use ars_core::{Env, HtmlAttr, Service};
 
@@ -79,6 +79,46 @@ fn action_group_anatomy_matches_spec() {
             ),
             (action_group::Part::OverflowTrigger, "overflow-trigger"),
         ],
+    );
+}
+
+#[test]
+fn drop_zone_anatomy_matches_spec() {
+    assert_anatomy("drop-zone", &[(drop_zone::Part::Root, "root")]);
+}
+
+#[test]
+fn drop_zone_connect_api_uses_current_spec_attrs_not_stale_issue_attrs() {
+    let mut service = Service::<drop_zone::Machine>::new(
+        drop_zone::Props::new().id("uploads").accept(["image/*"]),
+        &Env::default(),
+        &drop_zone::Messages::default(),
+    );
+
+    drop(
+        service.send(drop_zone::Event::DragEnter(drop_zone::DragData {
+            items: Vec::new(),
+            types: vec!["image/png".to_string()],
+        })),
+    );
+
+    let attrs = service.connect(&|_| {}).root_attrs();
+
+    assert_eq!(
+        attrs.get(&HtmlAttr::Aria(ars_core::AriaAttr::Description)),
+        Some("Release to drop files"),
+        "spec §3.1 uses aria-description because aria-dropeffect is deprecated",
+    );
+    assert_eq!(
+        attrs.get(&HtmlAttr::Aria(ars_core::AriaAttr::DropEffect)),
+        None,
+        "issue #218 mentions aria-dropeffect, but the current spec is authoritative",
+    );
+    assert_eq!(attrs.get(&HtmlAttr::Data("ars-drag-over")), Some("true"));
+    assert_eq!(
+        attrs.get(&HtmlAttr::Data("ars-dragging-over")),
+        None,
+        "issue #218 mentions data-ars-dragging-over, but the current spec uses data-ars-drag-over",
     );
 }
 
