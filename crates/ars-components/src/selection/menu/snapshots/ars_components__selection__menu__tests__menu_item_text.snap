@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/selection/menu/mod.rs
+expression: "snapshot_attrs(&api.item_text_attrs(&key(\"save\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item-text",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "menu",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "menu-item-save-text",
+            ),
+        ),
+    ],
+    styles: [],
+}

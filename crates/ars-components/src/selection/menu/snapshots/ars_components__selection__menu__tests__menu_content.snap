@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/selection/menu/mod.rs
+expression: snapshot_attrs(&api.content_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "content",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "menu",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "menu-trigger",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "menu-content",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "menu",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

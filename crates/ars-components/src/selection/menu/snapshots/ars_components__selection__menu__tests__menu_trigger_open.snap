@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/selection/menu/mod.rs
+expression: snapshot_attrs(&api.trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "menu",
+            ),
+        ),
+        (
+            Aria(
+                Expanded,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                HasPopup,
+            ),
+            String(
+                "menu",
+            ),
+        ),
+        (
+            Aria(
+                Controls,
+            ),
+            String(
+                "menu-content",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "menu-trigger",
+            ),
+        ),
+    ],
+    styles: [],
+}

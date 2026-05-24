@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/selection/menu/mod.rs
+expression: "snapshot_attrs(&api.item_attrs(&key(\"alpha\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-highlighted",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "menu",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "menu-item-alpha",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "menuitem",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

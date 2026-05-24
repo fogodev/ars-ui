@@ -1,0 +1,67 @@
+---
+source: crates/ars-components/src/selection/menu/mod.rs
+expression: "snapshot_attrs(&api.item_attrs(&key(\"save\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-disabled",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "menu",
+            ),
+        ),
+        (
+            Aria(
+                Disabled,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                KeyShortcuts,
+            ),
+            String(
+                "Control+S",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "menu-item-save",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "menuitem",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}
