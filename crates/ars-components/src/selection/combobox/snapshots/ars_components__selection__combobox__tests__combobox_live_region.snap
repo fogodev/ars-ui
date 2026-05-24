@@ -1,0 +1,38 @@
+---
+source: crates/ars-components/src/selection/combobox/mod.rs
+expression: snapshot_attrs(&api.live_region_attrs())
+---
+[
+    (
+        Data(
+            "ars-part",
+        ),
+        String(
+            "live-region",
+        ),
+    ),
+    (
+        Data(
+            "ars-scope",
+        ),
+        String(
+            "combobox",
+        ),
+    ),
+    (
+        Aria(
+            Atomic,
+        ),
+        String(
+            "true",
+        ),
+    ),
+    (
+        Aria(
+            Live,
+        ),
+        String(
+            "polite",
+        ),
+    ),
+]

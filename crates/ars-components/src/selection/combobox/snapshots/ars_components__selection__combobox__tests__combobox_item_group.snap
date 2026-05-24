@@ -1,0 +1,36 @@
+---
+source: crates/ars-components/src/selection/combobox/mod.rs
+expression: "snapshot_attrs(&api.item_group_attrs(&Key::str(\"group\")))"
+---
+[
+    (
+        Data(
+            "ars-part",
+        ),
+        String(
+            "item-group",
+        ),
+    ),
+    (
+        Data(
+            "ars-scope",
+        ),
+        String(
+            "combobox",
+        ),
+    ),
+    (
+        Aria(
+            LabelledBy,
+        ),
+        String(
+            "combo-group-group-label",
+        ),
+    ),
+    (
+        Role,
+        String(
+            "group",
+        ),
+    ),
+]

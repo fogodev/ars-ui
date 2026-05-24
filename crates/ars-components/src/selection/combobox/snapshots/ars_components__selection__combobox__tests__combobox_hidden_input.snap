@@ -1,0 +1,44 @@
+---
+source: crates/ars-components/src/selection/combobox/mod.rs
+expression: snapshot_attrs(&api.hidden_input_attrs())
+---
+[
+    (
+        Aria(
+            Hidden,
+        ),
+        String(
+            "true",
+        ),
+    ),
+    (
+        TabIndex,
+        String(
+            "-1",
+        ),
+    ),
+    (
+        Form,
+        String(
+            "checkout",
+        ),
+    ),
+    (
+        Name,
+        String(
+            "fruit",
+        ),
+    ),
+    (
+        Type,
+        String(
+            "hidden",
+        ),
+    ),
+    (
+        Value,
+        String(
+            "1",
+        ),
+    ),
+]

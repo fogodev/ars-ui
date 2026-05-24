@@ -378,16 +378,15 @@ fn aria_parity_search_input() {
 ### 6.2.1 FilterMode::Custom Cfg-Gate Compilation Test
 
 ```rust
-/// Verify FilterMode::Custom compiles and works with shared `Arc` ownership.
+/// Verify FilterMode::Custom compiles as a closure-free adapter-owned filtering mode.
 #[test]
 fn filter_mode_custom_compiles_on_both_targets() {
-    let filter = FilterMode::Custom(Arc::new(|input: &str, label: &str| {
-        label.to_lowercase().contains(&input.to_lowercase())
-    }));
+    let filter = FilterMode::Custom;
 
-    match &filter {
-        FilterMode::Custom(f) => assert!(f("app", "Apple"),
-            "Custom filter should match case-insensitively"),
+    match filter {
+        FilterMode::Custom => {
+            // Adapters own custom predicates and send updated collections to the core.
+        }
         _ => panic!("expected Custom variant"),
     }
 }

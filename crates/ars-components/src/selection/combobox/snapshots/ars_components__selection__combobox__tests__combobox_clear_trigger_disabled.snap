@@ -1,0 +1,48 @@
+---
+source: crates/ars-components/src/selection/combobox/mod.rs
+expression: snapshot_attrs(&api.clear_trigger_attrs())
+---
+[
+    (
+        Data(
+            "ars-part",
+        ),
+        String(
+            "clear-trigger",
+        ),
+    ),
+    (
+        Data(
+            "ars-scope",
+        ),
+        String(
+            "combobox",
+        ),
+    ),
+    (
+        Aria(
+            Label,
+        ),
+        String(
+            "Clear value",
+        ),
+    ),
+    (
+        TabIndex,
+        String(
+            "-1",
+        ),
+    ),
+    (
+        Disabled,
+        Bool(
+            true,
+        ),
+    ),
+    (
+        Type,
+        String(
+            "button",
+        ),
+    ),
+]

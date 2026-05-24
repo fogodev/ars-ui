@@ -100,8 +100,10 @@ pub enum Event {
     UpdateItems(StaticCollection<Item>),
     /// IME composition started (CJK, etc.).
     CompositionStart,
-    /// IME composition ended — committed text is in the next InputChange.
-    CompositionEnd,
+    /// IME composition ended with the final committed input value.
+    CompositionEnd(String),
+    /// Commit the current input value when no option is highlighted.
+    CommitInput,
 }
 ```
 
@@ -236,6 +238,8 @@ pub struct Props {
     /// even if it doesn't match any item in the collection.
     /// When `false` (default), non-matching input is reverted to the last valid selection on blur.
     pub allow_custom_value: bool,
+    /// Whether adapters detected an iOS VoiceOver focus strategy.
+    pub is_ios: bool,
     // Change callbacks provided by the adapter layer
 }
 
@@ -258,6 +262,7 @@ impl Default for Props {
             disabled_keys: BTreeSet::new(),
             on_open_change: None,
             allow_custom_value: false,
+            is_ios: false,
         }
     }
 }
@@ -266,6 +271,9 @@ impl Default for Props {
 Note: `items` is set during `init()` and does not auto-sync when Props change.
 To update items dynamically (e.g., async search results), send an
 `Event::UpdateItems(StaticCollection<Item>)` event.
+When controlled `value` props change or selection mode changes, `SyncProps`
+normalizes the controlled bindable and internal `selection::State` to the active
+mode before API attrs or hidden-input serialization read it.
 
 ### 1.5 Full Machine Implementation
 
@@ -365,6 +373,7 @@ impl ars_core::Machine for Machine {
                             FilterMode::StartsWith => node.text_value.to_lowercase().starts_with(&val.to_lowercase()),
                             FilterMode::None => true,
                             FilterMode::Custom => true, // adapter handles custom filtering
+                            FilterMode::Inline => true, // completion only; list is not filtered
                             FilterMode::InlineCompletion => node.text_value.to_lowercase().starts_with(&val.to_lowercase()),
                         }
                     });
@@ -372,19 +381,37 @@ impl ars_core::Machine for Machine {
                     Some(keys)
                 };
 
-                // Highlight first visible enabled item
-                let first_key = match &visible {
-                    Some(keys) => keys.iter()
-                        .find(|k| !ctx.selection_state.is_disabled(k))
-                        .cloned(),
-                    None => first_enabled_key(&ctx.items, &ctx.selection_state.disabled_keys,
-                        ctx.selection_state.disabled_behavior),
+                // Highlight first visible enabled item. Custom filtering is
+                // adapter-owned, so raw input changes do not pre-highlight
+                // stale collection items before the adapter sends UpdateItems.
+                let first_key = if matches!(ctx.filter_mode, FilterMode::Custom) {
+                    None
+                } else {
+                    match &visible {
+                        Some(keys) => keys.iter()
+                            .find(|k| !ctx.selection_state.is_disabled(k))
+                            .cloned(),
+                        None => first_enabled_key(&ctx.items, &ctx.selection_state.disabled_keys,
+                            ctx.selection_state.disabled_behavior),
+                    }
                 };
 
-                let should_open = !was_open && !val.is_empty();
+                let completed_value = match ctx.filter_mode {
+                    FilterMode::Inline | FilterMode::InlineCompletion => {
+                        first_prefix_match(&ctx.items, &val)
+                            .map(|node| node.text_value.clone())
+                            .unwrap_or_else(|| val.clone())
+                    }
+                    _ => val.clone(),
+                };
+
+                let should_open = !ctx.disabled
+                    && !was_open
+                    && (!val.is_empty() || props.allows_empty_collection)
+                    && (props.allows_empty_collection || first_key.is_some());
                 if should_open {
                     Some(TransitionPlan::to(State::Open).apply(move |ctx| {
-                        ctx.input_value.set(val);
+                        ctx.input_value.set(completed_value);
                         ctx.open = true;
                         ctx.visible_keys = visible;
                         ctx.highlighted_key = first_key;
@@ -397,7 +424,7 @@ impl ars_core::Machine for Machine {
                     })))
                 } else {
                     Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.input_value.set(val);
+                        ctx.input_value.set(completed_value);
                         ctx.visible_keys = visible;
                         ctx.highlighted_key = first_key;
                     }))
@@ -448,6 +475,15 @@ impl ars_core::Machine for Machine {
 
             (_, Event::Blur) => {
                 Some(TransitionPlan::to(State::Closed).apply(|ctx| {
+                    if props.allow_custom_value {
+                        commit_raw_input_as_selection(ctx);
+                    } else {
+                        if ctx.multiple {
+                            ctx.input_value.set(String::new());
+                        } else {
+                            restore_single_selected_label(ctx);
+                        }
+                    }
                     ctx.focused = false;
                     ctx.focus_visible = false;
                     ctx.open = false;
@@ -536,7 +572,11 @@ impl ars_core::Machine for Machine {
                 if !ctx.selection.get().contains(&key) { return None; }
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let new_sel = ctx.selection_state.deselect(&key);
+                    let new_sel = if matches!(ctx.selection.get(), selection::Set::All) {
+                        ctx.selection_state.deselect_from_all(&key, &ctx.items)
+                    } else {
+                        ctx.selection_state.deselect(&key)
+                    };
                     ctx.selection.set(new_sel);
                 }))
             }
@@ -555,7 +595,15 @@ impl ars_core::Machine for Machine {
                 let new_items = new_items.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.items = new_items;
-                    ctx.visible_keys = None; // reset filter on new items
+                    recompute_visible_keys_and_highlight(ctx);
+                    if props.allow_custom_value {
+                        preserve_selection_keys_even_when_absent_from_items(ctx);
+                    } else {
+                        drop_selection_keys_absent_from_items(ctx);
+                    }
+                    if ctx.disabled {
+                        ctx.open = false;
+                    }
                 }))
             }
 
@@ -563,8 +611,38 @@ impl ars_core::Machine for Machine {
             (_, Event::CompositionStart) => {
                 Some(TransitionPlan::context_only(|ctx| { ctx.is_composing = true; }))
             }
-            (_, Event::CompositionEnd) => {
-                Some(TransitionPlan::context_only(|ctx| { ctx.is_composing = false; }))
+            (_, Event::CompositionEnd(value)) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.is_composing = false;
+                    ctx.input_value.set(value);
+                    recompute_visible_keys_and_highlight(ctx);
+                    apply_inline_completion_if_enabled(ctx);
+                    if !ctx.disabled && (!ctx.input_value.get().is_empty() || props.allows_empty_collection) {
+                        ctx.open = props.allows_empty_collection || ctx.highlighted_key.is_some();
+                    }
+                }))
+            }
+
+            (_, Event::CommitInput) => {
+                if props.allow_custom_value {
+                    let next = ctx.selection_state.select(Key::str(ctx.input_value.get().clone()));
+                    Some(TransitionPlan::context_only(move |ctx| {
+                        ctx.selection.set(next.selected_keys.clone());
+                        ctx.selection_state = next;
+                        if ctx.multiple {
+                            ctx.input_value.set(String::new());
+                            ctx.visible_keys = None;
+                        } else {
+                            ctx.open = false;
+                        }
+                    }))
+                } else {
+                    Some(TransitionPlan::to(State::Closed).apply(|ctx| {
+                        if ctx.multiple { ctx.input_value.set(String::new()); }
+                        else { restore_single_selected_label(ctx); }
+                    }))
+                }
             }
 
             _ => None,
@@ -720,12 +798,20 @@ impl<'a> Api<'a> {
         (self.send)(Event::InputChange(value));
     }
 
+    /// The event handler for the input pointer click event.
+    pub fn on_input_click(&self) {
+        (self.send)(Event::Focus { is_keyboard: false });
+    }
+
     /// The event handler for the input keydown event.
     pub fn on_input_keydown(&self, data: &KeyboardEventData) {
         match data.key {
             KeyboardKey::ArrowDown if data.alt_key => (self.send)(Event::Open),
             KeyboardKey::ArrowDown => {
-                if !self.ctx.open { (self.send)(Event::Open); }
+                if !self.ctx.open {
+                    (self.send)(Event::Open);
+                    return;
+                }
                 (self.send)(Event::HighlightNext);
             }
             KeyboardKey::ArrowUp if data.alt_key => (self.send)(Event::Close),
@@ -736,6 +822,8 @@ impl<'a> Api<'a> {
                 if !self.ctx.is_composing {
                     if let Some(k) = &self.ctx.highlighted_key {
                         (self.send)(Event::SelectItem(k.clone()));
+                    } else {
+                        (self.send)(Event::CommitInput);
                     }
                 }
             }
@@ -762,7 +850,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Trigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.trigger_label)(&self.ctx.locale));
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.listbox_label)(&self.ctx.locale));
         attrs.set(HtmlAttr::TabIndex, "-1");
         attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.part("content"));
         if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
@@ -805,7 +893,7 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("content"));
         attrs.set(HtmlAttr::Role, "listbox");
         if self.ctx.multiple { attrs.set(HtmlAttr::Aria(AriaAttr::MultiSelectable), "true"); }
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.trigger_label)(&self.ctx.locale));
         attrs
     }
 
@@ -1004,47 +1092,55 @@ impl ConnectApi for Api<'_> {
 }
 ```
 
-> **Async Loading**: When integrated with `AsyncCollection<T>` (see `06-collections.md` §5), `Combobox` supports server-driven search with `loading_state: LoadingState` and `LoadMore` event. The adapter shows a loading spinner in the listbox and sets `aria-busy="true"` on the listbox during loading.
+> **Async Loading**: Server-driven search remains adapter-owned. The agnostic core
+> exposes localized loading text and `Event::UpdateItems(StaticCollection<Item>)`;
+> adapters own loading state, `aria-busy`, request cancellation, and replacing the
+> item collection when results arrive.
+>
+> **Form Serialization**: Hidden input serialization uses item keys for `Single` and
+> comma-joined item keys for `Multiple`. `selection::Set::All` serializes as the
+> reserved token `__ars_all` so it cannot collide with a real or custom item key
+> named `all`.
 
 ## 2. Anatomy
 
-| Part             | Selector                                                        | Element                                                   |
-| ---------------- | --------------------------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
-| `Root`           | `[data-ars-scope="combobox"][data-ars-part="root"]`             | `<div>`                                                   |
-| `Label`          | `[data-ars-scope="combobox"][data-ars-part="label"]`            | `<label>`                                                 |
-| `Control`        | `[data-ars-scope="combobox"][data-ars-part="control"]`          | `<div>`                                                   |
-| `Input`          | `[data-ars-scope="combobox"][data-ars-part="input"]`            | `<input>`                                                 |
-| `Trigger`        | `[data-ars-scope="combobox"][data-ars-part="trigger"]`          | `<button>`                                                |
-| `ClearTrigger`   | `[data-ars-scope="combobox"][data-ars-part="clear-trigger"]`    | `<button>`                                                |
-| `Positioner`     | `[data-ars-scope="combobox"][data-ars-part="positioner"]`       | `<div>`                                                   |
-| `Content`        | `[data-ars-scope="combobox"][data-ars-part="content"]`          | `<div>`                                                   |
-| `ItemGroup`      | `[data-ars-scope="combobox"][data-ars-part="item-group"]`       | `<div>`                                                   |
-| `ItemGroupLabel` | `[data-ars-scope="combobox"][data-ars-part="item-group-label"]` | `<div>`                                                   |
-| `Item`           | `[data-ars-scope="combobox"][data-ars-part="item"]`             | `<div>`                                                   |
-| `ItemText`       | `[data-ars-scope="combobox"][data-ars-part="item-text"]`        | `<span>`                                                  |
-| `ItemIndicator`  | `[data-ars-scope="combobox"][data-ars-part="item-indicator"]`   | `<div>`                                                   |
-| `Description`    | `[data-ars-scope="combobox"][data-ars-part="description"]`      | `<div>`                                                   |
-| `ErrorMessage`   | `[data-ars-scope="combobox"][data-ars-part="error-message"]`    | `<div>`                                                   |
-| `LiveRegion`     | `[data-ars-scope="combobox"][data-ars-part="live-region"]`      | `<div>`                                                   | `aria-live="polite" aria-atomic="true"` — announces result count |
-| **EmptyState**   | `<div>`                                                         | Message displayed when the listbox has no matching items. |
+| Part             | Selector                                                        | Element    | Notes                                                            |
+| ---------------- | --------------------------------------------------------------- | ---------- | ---------------------------------------------------------------- |
+| `Root`           | `[data-ars-scope="combobox"][data-ars-part="root"]`             | `<div>`    |                                                                  |
+| `Label`          | `[data-ars-scope="combobox"][data-ars-part="label"]`            | `<label>`  |                                                                  |
+| `Control`        | `[data-ars-scope="combobox"][data-ars-part="control"]`          | `<div>`    |                                                                  |
+| `Input`          | `[data-ars-scope="combobox"][data-ars-part="input"]`            | `<input>`  |                                                                  |
+| `Trigger`        | `[data-ars-scope="combobox"][data-ars-part="trigger"]`          | `<button>` |                                                                  |
+| `ClearTrigger`   | `[data-ars-scope="combobox"][data-ars-part="clear-trigger"]`    | `<button>` |                                                                  |
+| `Positioner`     | `[data-ars-scope="combobox"][data-ars-part="positioner"]`       | `<div>`    |                                                                  |
+| `Content`        | `[data-ars-scope="combobox"][data-ars-part="content"]`          | `<div>`    |                                                                  |
+| `ItemGroup`      | `[data-ars-scope="combobox"][data-ars-part="item-group"]`       | `<div>`    |                                                                  |
+| `ItemGroupLabel` | `[data-ars-scope="combobox"][data-ars-part="item-group-label"]` | `<div>`    |                                                                  |
+| `Item`           | `[data-ars-scope="combobox"][data-ars-part="item"]`             | `<div>`    |                                                                  |
+| `ItemText`       | `[data-ars-scope="combobox"][data-ars-part="item-text"]`        | `<span>`   |                                                                  |
+| `ItemIndicator`  | `[data-ars-scope="combobox"][data-ars-part="item-indicator"]`   | `<div>`    |                                                                  |
+| `Empty`          | `[data-ars-scope="combobox"][data-ars-part="empty"]`            | `<div>`    | Message displayed when the listbox has no matching items.        |
+| `Description`    | `[data-ars-scope="combobox"][data-ars-part="description"]`      | `<div>`    |                                                                  |
+| `ErrorMessage`   | `[data-ars-scope="combobox"][data-ars-part="error-message"]`    | `<div>`    |                                                                  |
+| `LiveRegion`     | `[data-ars-scope="combobox"][data-ars-part="live-region"]`      | `<div>`    | `aria-live="polite" aria-atomic="true"` — announces result count |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Property                | Element    | Value                                                                                                                                                                                               |
-| ----------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `role`                  | Input      | `combobox`                                                                                                                                                                                          |
-| `aria-expanded`         | Input      | `true` when open                                                                                                                                                                                    |
-| `aria-haspopup`         | Input      | `listbox`                                                                                                                                                                                           |
-| `aria-controls`         | Input      | Content id                                                                                                                                                                                          |
-| `aria-autocomplete`     | Input      | `list` (filter only), `inline` (completion only), or `both` (filter + completion)                                                                                                                   |
-| `aria-activedescendant` | Input      | Highlighted item id (only set when a valid item is highlighted; **omit attribute entirely** when `highlighted_key` is `None` — setting it to an empty string or non-existent ID violates ARIA spec) |
-| `role`                  | Content    | `listbox`                                                                                                                                                                                           |
-| `role`                  | Item       | `option`                                                                                                                                                                                            |
-| `aria-selected`         | Item       | `"true"` when selected, `"false"` when unselected (must be explicitly set, not omitted)                                                                                                             |
-| `role`                  | EmptyState | `"status"`                                                                                                                                                                                          | Implicit `aria-live="polite"` and `aria-atomic="true"` |
-| `aria-atomic`           | EmptyState | `"true"`                                                                                                                                                                                            | Entire message announced as a unit                     |
+| Property                | Element | Value                                                                                                                                                                                               |
+| ----------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `role`                  | Input   | `combobox`                                                                                                                                                                                          |
+| `aria-expanded`         | Input   | `true` when open                                                                                                                                                                                    |
+| `aria-haspopup`         | Input   | `listbox`                                                                                                                                                                                           |
+| `aria-controls`         | Input   | Content id                                                                                                                                                                                          |
+| `aria-autocomplete`     | Input   | `list` (filter only), `inline` (completion only), or `both` (filter + completion)                                                                                                                   |
+| `aria-activedescendant` | Input   | Highlighted item id (only set when a valid item is highlighted; **omit attribute entirely** when `highlighted_key` is `None` — setting it to an empty string or non-existent ID violates ARIA spec) |
+| `role`                  | Content | `listbox`                                                                                                                                                                                           |
+| `aria-label`            | Content | Dedicated localized listbox label from `Messages.listbox_label`; core omits `aria-labelledby` because it does not track whether the Label part is rendered                                           |
+| `role`                  | Item    | `option`                                                                                                                                                                                            |
+| `aria-selected`         | Item    | `"true"` when selected, `"false"` when unselected (must be explicitly set, not omitted)                                                                                                             |
+| `role`                  | Empty   | `"none"`                                                                                                                                                                                            | Dedicated LiveRegion announces empty-state text |
 
 > **Double announcement resolution**: The `Combobox` has a dedicated `LiveRegion` part
 > (`[data-ars-part="live-region"]`) that announces result counts via `aria-live="polite"`.
@@ -1060,7 +1156,7 @@ Additional accessibility notes:
 
 - Trigger sets `aria-controls` pointing to the listbox ID
 - `aria-expanded` changes immediately on state change (not after animation)
-- Trigger sets `aria-activedescendant` to the focused option ID
+- Input sets `aria-activedescendant` to the highlighted option ID when a valid highlighted option exists
 
 ### 3.2 Keyboard Interaction
 
@@ -1069,7 +1165,7 @@ Additional accessibility notes:
 | Typing    | Filters list, opens if closed                                                                                                         |
 | ArrowDown | Open or highlight next                                                                                                                |
 | ArrowUp   | Highlight previous                                                                                                                    |
-| Enter     | Select highlighted item                                                                                                               |
+| Enter     | Select highlighted item, or commit/revert the raw input according to `allow_custom_value` when no option is highlighted                |
 | Escape    | 3-phase (per APG inline autocomplete): (1) clear inline completion text if present, (2) close dropdown if open, (3) clear input value |
 
 > **Inline Autocomplete Announcements**: When using `FilterMode::InlineCompletion`,
@@ -1085,10 +1181,10 @@ highlighted."` (localized). The auto-selected (inline completion) text that appe
 
 ### 3.3 Screen Reader Announcements
 
-**Filtered Result Announcement**: When the listbox filters (after input debounce completes),
-a live region announces the result count. Format: `'{count} results available'` (localized,
-pluralized via `ars-i18n`). Timing: announcement fires once after the debounce period, not
-during typing. If count is 0: `'No results found'`. The live region uses `aria-live='polite'`
+**Filtered Result Announcement**: When the listbox filters, adapters render the
+current result-count text into the `LiveRegion` after their debounce period.
+Format: `'{count} results available'` (localized, pluralized via `ars-i18n`).
+If count is 0: `'No results found'`. The live region uses `aria-live='polite'`
 and `aria-atomic='true'`.
 
 **Screen Reader Compatibility**: Result count announcements use an assertive live region
@@ -1099,11 +1195,15 @@ compatibility (NVDA, JAWS, VoiceOver). The announcement element is a dedicated `
 **Live Region**: When filter results change, announce count:
 `"{N} results available"` or `"No results found"`.
 
-> **LiveRegion Timing**: The results count announcement fires 500ms after the last `InputChange` event (debounced), not on every keystroke. This prevents screen reader announcement spam, particularly on NVDA+Firefox which aggressively interrupts with polite announcements. The debounce timer resets on each keystroke. On `Open` with an initial query, the count fires immediately.
+> **LiveRegion Timing**: The agnostic core does not schedule timers or platform
+> effects. Adapters debounce result-count announcements, typically 500ms after
+> the last `InputChange`, and render the localized text into `LiveRegion`.
 
 ## 4. Internationalization
 
-- **Filter matching**: Uses `Collator` for locale-aware case/accent folding.
+- **Filter matching**: Built-in matching uses simple case-insensitive matching.
+  Applications that need locale-aware case/accent folding should use
+  `FilterMode::Custom` and adapter-owned filtering.
 - **Result count announcement**: Localized, with plural rules from `PluralCategory`.
   Result count announcement uses ICU4X PluralRules for locale-correct pluralization:
   "1 result" (en), "2 results" (en), "1 résultat" (fr), "2 résultats" (fr).
@@ -1123,12 +1223,16 @@ pub struct Messages {
     pub trigger_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Accessible label for the clear button. Default: `"Clear value"`.
     pub clear_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Accessible label for the listbox popup. Default: `"Suggestions"`.
+    pub listbox_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Text shown when no results match the filter. Default: `"No results found"`.
     pub no_results: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Text shown while async options are loading. Default: `"Loading options…"`.
     pub loading: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Live region announcement for filtered result count.
     pub results_count: MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>,
+    /// Live region announcement for the highlighted inline-completion result.
+    pub result_highlight: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
@@ -1136,9 +1240,11 @@ impl Default for Messages {
         Self {
             trigger_label: MessageFn::static_str("Show suggestions"),
             clear_label: MessageFn::static_str("Clear value"),
+            listbox_label: MessageFn::static_str("Suggestions"),
             no_results: MessageFn::static_str("No results found"),
             loading: MessageFn::static_str("Loading options…"),
             results_count: MessageFn::new(|n, _locale| format!("{} results available", n)),
+            result_highlight: MessageFn::new(|label, _locale| format!("{} highlighted", label)),
         }
     }
 }
@@ -1153,8 +1259,9 @@ most common cases, but applications may need domain-specific filtering — for e
 matching, server-side search, or filtering on hidden metadata.
 
 When `filter_mode: FilterMode::Custom` is set, the machine **skips all built-in filtering**
-(the `InputChange` transition sets `visible_keys = None`, showing all items). Instead, the
-consumer provides a custom filter at the adapter level:
+(the `InputChange` transition sets `visible_keys = None` and leaves `highlighted_key = None` so
+Enter cannot select a stale item before adapter filtering completes). Instead, the consumer
+provides a custom filter at the adapter level:
 
 ```rust
 /// Signature of the custom filter callback provided via the adapter.
@@ -1176,15 +1283,15 @@ See `06-collections.md` §3 for `FilteredCollection` API details.
 
 ### 5.1 Behavior
 
-The state machine maintains `filter_text: String` in `Context` (updated by `InputChange`).
-The adapter is responsible for wiring the actual `FilteredCollection` filtering:
+The state machine maintains `input_value: Bindable<String>` in `Context`
+(updated by `InputChange`). The adapter is responsible for custom filtering:
 
-- The machine stores the filter text but does NOT directly execute the filter predicate
-  (predicates are closures, which are not `Clone`/`PartialEq`).
-- The adapter reads `ctx.filter_text` and calls `FilteredCollection::set_filter()` or
-  constructs a new `FilteredCollection` with the appropriate predicate on each change.
-- After filtering, the adapter calls `apply_filter()` and sends `Event::UpdateVisibleKeys`
-  to sync the machine's `visible_keys` with the filtered results.
+- The machine stores the input value but does NOT store or execute custom
+  predicates (predicates are closures, which are not `Clone`/`PartialEq`).
+- The adapter reads `ctx.input_value` and constructs a `FilteredCollection` with
+  the appropriate predicate on each change.
+- After filtering, the adapter sends `Event::UpdateItems(new_items)` with the
+  filtered or server-returned collection.
 - **Highlighted item invariant**: After filtering, the machine checks whether
   `ctx.highlighted_key` is still within the filtered results. If not, it resets to
   the first visible item (or `None` if no results match).

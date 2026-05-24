@@ -1,0 +1,50 @@
+---
+source: crates/ars-components/src/selection/combobox/mod.rs
+expression: snapshot_attrs(&api.content_attrs())
+---
+[
+    (
+        Data(
+            "ars-part",
+        ),
+        String(
+            "content",
+        ),
+    ),
+    (
+        Data(
+            "ars-scope",
+        ),
+        String(
+            "combobox",
+        ),
+    ),
+    (
+        Aria(
+            Label,
+        ),
+        String(
+            "Suggestions",
+        ),
+    ),
+    (
+        Aria(
+            MultiSelectable,
+        ),
+        String(
+            "true",
+        ),
+    ),
+    (
+        Id,
+        String(
+            "combo-content",
+        ),
+    ),
+    (
+        Role,
+        String(
+            "listbox",
+        ),
+    ),
+]

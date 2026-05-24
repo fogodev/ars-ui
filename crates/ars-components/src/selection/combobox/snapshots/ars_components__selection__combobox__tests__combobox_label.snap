@@ -1,0 +1,34 @@
+---
+source: crates/ars-components/src/selection/combobox/mod.rs
+expression: snapshot_attrs(&api.label_attrs())
+---
+[
+    (
+        Data(
+            "ars-part",
+        ),
+        String(
+            "label",
+        ),
+    ),
+    (
+        Data(
+            "ars-scope",
+        ),
+        String(
+            "combobox",
+        ),
+    ),
+    (
+        Id,
+        String(
+            "combo-label",
+        ),
+    ),
+    (
+        For,
+        String(
+            "combo-input",
+        ),
+    ),
+]

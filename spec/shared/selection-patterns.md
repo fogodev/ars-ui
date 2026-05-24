@@ -389,16 +389,17 @@ displayed item list is filtered against user input.
 
 ```rust
 /// Controls how a searchable selection component filters items in its collection.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilterMode {
     /// Case-insensitive substring match (default).
     Contains,
     /// Case-insensitive starts-with match.
     StartsWith,
-    /// Custom filter function. Receives the input text and an item label,
-    /// returns `true` if the item should be visible.
-    /// Uses shared `Arc` ownership on all targets.
-    Custom(Arc<dyn Fn(&str, &str) -> bool + Send + Sync>),
+    /// Custom filtering performed by the adapter or application.
+    ///
+    /// The core stores no closures. This variant disables built-in filtering so
+    /// adapters can replace the collection or otherwise own the visible item set.
+    Custom,
     /// No filtering — show all items always.
     None,
     /// Inline text completion only — completes the input value without filtering the list
@@ -413,31 +414,9 @@ impl Default for FilterMode {
         FilterMode::Contains
     }
 }
-
-impl FilterMode {
-    /// Apply the filter to an item label given the current input text.
-    ///
-    /// For `Custom`, delegates to the user-provided function.
-    /// For `None`, `Inline`, and `InlineCompletion`, always returns `true`
-    /// (these modes do not filter the list).
-    pub fn matches(&self, input: &str, item_label: &str) -> bool {
-        if input.is_empty() {
-            return true;
-        }
-
-        match self {
-            FilterMode::Contains => {
-                // NOTE: to_lowercase() uses Unicode default casing, not locale-specific.
-                // Turkish/Azerbaijani "I" → "i" (not "ı"). Use FilterMode::Custom for
-                // locale-aware matching via ICU4X CaseMapper.
-                item_label.to_lowercase().contains(&input.to_lowercase())
-            }
-            FilterMode::StartsWith => {
-                item_label.to_lowercase().starts_with(&input.to_lowercase())
-            }
-            FilterMode::Custom(f) => f(input, item_label),
-            FilterMode::None | FilterMode::Inline | FilterMode::InlineCompletion => true,
-        }
-    }
-}
 ```
+
+Built-in matching is intentionally simple and case-insensitive. Locale-aware,
+fuzzy, metadata-driven, or server-driven filtering uses `FilterMode::Custom`,
+with the adapter owning the predicate and sending `UpdateItems` or an equivalent
+component event to update the rendered collection.

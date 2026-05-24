@@ -1,0 +1,52 @@
+---
+source: crates/ars-components/src/selection/combobox/mod.rs
+expression: snapshot_attrs(&api.root_attrs())
+---
+[
+    (
+        Data(
+            "ars-disabled",
+        ),
+        Bool(
+            true,
+        ),
+    ),
+    (
+        Data(
+            "ars-part",
+        ),
+        String(
+            "root",
+        ),
+    ),
+    (
+        Data(
+            "ars-readonly",
+        ),
+        Bool(
+            true,
+        ),
+    ),
+    (
+        Data(
+            "ars-scope",
+        ),
+        String(
+            "combobox",
+        ),
+    ),
+    (
+        Data(
+            "ars-state",
+        ),
+        String(
+            "closed",
+        ),
+    ),
+    (
+        Id,
+        String(
+            "disabled",
+        ),
+    ),
+]
