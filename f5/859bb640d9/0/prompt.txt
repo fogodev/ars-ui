@@ -1,0 +1,183 @@
+Implement task #218
+
+---
+
+Proceed with the best outcome possible
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #218 DropZone Agnostic Core Plan
+
+## Summary
+
+Implement `DropZone` as a framework-agnostic `ars-components` utility component for issue #218, scoped to core state, validation, callbacks/effect intents, `ConnectApi` attributes, snapshots, spec conformance, proptest, coverage, mutation, and the required audit/review workflow.
+
+Issue dependencies #159, #160, and #161 are closed. The roadmap project item is currently `Todo`; the first implementation action is to move it to `In Progress`.
+
+## Contract Decisions
+
+- Follow the current spec over stale issue wording for ARIA:
+  - Use `aria-description`, not deprecated `aria-dropeffect`.
+  - Use `data-ars-drag-over`, not `data-ars-dragging-over`.
+  - Add a regression/spec-conformance assertion documenting that issue text drift.
+- Apply the user’s “best outcome possible” direction for real public API gaps:
+  - Add `Props::on_drop_rejected`.
+  - Add structured aggregated rejection details.
+  - Add explicit terminal auto-reset timing, since the issue requires accepted/rejected states to return to `Idle` after timeout while the current spec says explicit reset only.
+  - Update `spec/components/utility/drop-zone.md` in the same PR for these API/behavior corrections.
+
+## Public API / Types
+
+Create `crates/ars-components/src/utility/drop_zone/mod.rs` and export it from `crates/ars-components/src/utility/mod.rs`.
+
+Implement:
+
+- `State`: `Idle`, `DragOver`, `DropAccepted`, `DropRejected`.
+- `Event`: `DragEnter(DragData)`, `DragOver(DragData)`, `DragLeave`, `Drop(DragData)`, `Reset`, `SetProps`, `DropActivate`, `Focus { is_keyboard: bool }`, `Blur`.
+- `DragData { items: Vec<ars_interactions::DragItem>, types: Vec<String> }`.
+- Reuse `ars_interactions::{DragItem, DropOperation}` directly.
+- `DropValidationError`:
+  - `UnsupportedType { mime_type: String }`
+  - `TooManyFiles { actual: usize, max: usize }`
+  - `FileTooLarge { name: String, size: u64, max: u64 }`
+- `DropRejection { data: DragData, errors: Vec<DropValidationError> }`.
+- `Props` with spec fields plus:
+  - `on_drop_rejected: Option<Callback<dyn Fn(DropRejection) + Send + Sync>>`
+  - `reset_delay_ms: u32`, default `1500`.
+- `Effect`:
+  - `DropEnter`
+  - `DropExit`
+  - `DropMove`
+  - `ArmDropActivate`
+  - `DropActivate`
+  - `DropAccepted`
+  - `DropRejected`
+  - `ResetAfterDrop`
+- `Context` as spec plus `last_rejection: Option<DropRejection>`.
+- `Messages` per spec.
+- `Part`: `Root`.
+- `Api<'a>` with:
+  - `root_attrs()`
+  - `form_data() -> &[DragItem]`
+  - `part_attrs(Part::Root)`
+  - small event helper methods only if matching local component convention.
+
+Validation rules:
+
+- Empty `accept` accepts all.
+- MIME matching is case-insensitive, trims whitespace, normalizes `image/jpg` to `image/jpeg`, and supports `type/*` wildcards, matching `ars-interactions` DnD semantics.
+- For hover type validation, validate advertised `DragData::types`.
+- For dropped items, validate every item with MIME-bearing data:
+  - `Text` -> `text/plain`
+  - `Html` -> `text/html`
+  - `Uri` -> `text/uri-list`
+  - `File` -> file MIME
+  - `Custom` -> custom MIME
+  - `Directory` has no MIME and is not rejected by accept-list alone.
+- Aggregate all failures before choosing `DropRejected`.
+
+## Implementation Steps
+
+1. Move project item to `In Progress`:
+   ```bash
+   gh project item-edit \
+     --project-id PVT_kwHOAKgEE84BTlkR \
+     --id PVTI_lAHOAKgEE84BTlkRzgppZGY \
+     --field-id PVTSSF_lAHOAKgEE84BTlkRzhAzkdY \
+     --single-select-option-id 47fc9ee4
+   ```
+
+2. Write failing tests first in `drop_zone/mod.rs`:
+   - initial `Idle`
+   - `DragEnter` -> `DragOver`
+   - `DragLeave` -> `Idle`
+   - accepted `Drop` -> `DropAccepted`
+   - rejected `Drop` -> `DropRejected`
+   - terminal reset effect returns to `Idle`
+   - MIME filtering, max count, max size, aggregated failures
+   - disabled/read-only guards
+   - focus/focus-visible
+   - callback effects for enter, exit, activate, accepted, rejected
+   - `form_data()` behavior
+   - root attrs and `ConnectApi`
+
+3. Add snapshots for every output-affecting root branch:
+   - idle
+   - drag-over valid
+   - drag-over invalid
+   - accepted
+   - rejected
+   - disabled
+   - read-only
+   - required/invalid/focus-visible
+   - label fallback and explicit label
+
+4. Implement the minimal machine and API until the focused tests pass.
+
+5. Add `drop_zone` to:
+   - `crates/ars-components/src/utility/mod.rs`
+   - `crates/ars-components/tests/spec_conformance/utility.rs`
+   - `crates/ars-components/tests/proptest_state_machines/utility.rs`
+
+6. Update `spec/components/utility/drop-zone.md` to match the final best-outcome public contract:
+   - add `on_drop_rejected`
+   - add `DropRejection` / `DropValidationError`
+   - describe aggregated validation
+   - define `reset_delay_ms`
+   - keep `aria-description` and `data-ars-drag-over`
+
+7. Run post-implementation audit and land all findings in the same PR:
+   - `.agents/skills/post-implementation-audit/SKILL.md`
+
+8. Present the diff for user review before any commit.
+
+9. After explicit user approval, run publish gate:
+   ```bash
+   cargo xci --profile fast
+   ```
+
+10. Commit, push, and open PR with auto-close keyword:
+   - PR body includes `Closes #218`.
+   - If `.snap` files changed, add `snapshot-reviewed`.
+
+11. Invoke Codex review loop immediately after the first push:
+   - `.agents/skills/waiting-for-codex-review/SKILL.md`
+   - Post `@codex review`, address threads with tests, resolve inline, repeat until Codex leaves 👍.
+
+## Verification Commands
+
+Focused red/green loop:
+
+```bash
+cargo test -p ars-components utility::drop_zone
+cargo insta test --unreferenced=reject -p ars-components --features i18n --lib
+cargo test -p ars-components --test spec_conformance drop_zone
+cargo test -p ars-components --test proptest_state_machines drop_zone -- --ignored
+cargo xtask spec validate
+cargo clippy -p ars-components --all-targets --all-features -- -D warnings
+cargo llvm-cov test -p ars-components --lib --no-fail-fast --summary-only -- utility::drop_zone
+cargo mutants -p ars-components -f crates/ars-components/src/utility/drop_zone/mod.rs
+```
+
+Pre-push gate after user approval:
+
+```bash
+cargo xci --profile fast
+```
+
+## Assumptions / Defaults
+
+- No new dependency crates.
+- No Leptos/Dioxus adapter implementation in this task.
+- Browser event extraction, DOM listeners, file handles, hit testing, and live element references remain adapter/platform concerns.
+- The PR may update the DropZone spec because the issue and current spec conflict on public callback and terminal reset behavior.
+- The issue remains open until the PR is merged with green CI and Codex 👍.
+
+---
+
+Make sure to use the `Duration` type whenever you have to deal with time stuff, don't use `ms` with `u32`
+
+---
+
+Why are we ignoring the announcement at @crates/ars-components/src/utility/drop_zone/mod.rs in `let _announcement = ...`?

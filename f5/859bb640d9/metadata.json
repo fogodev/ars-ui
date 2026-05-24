@@ -1,0 +1,40 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "f5859bb640d9",
+  "strategy": "manual-commit",
+  "branch": "t3code/b1539d4b",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "crates/ars-components/src/utility/drop_zone/mod.rs",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_accepted.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_disabled.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_drag_over_invalid.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_drag_over_valid.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_idle_default_label.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_idle_explicit_label.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_readonly.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_rejected.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_required_invalid_focus_visible.snap",
+    "crates/ars-components/src/utility/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility.rs",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "spec/components/utility/drop-zone.md",
+    "spec/dioxus-components/utility/drop-zone.md",
+    "spec/leptos-components/utility/drop-zone.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/f5/859bb640d9/0/metadata.json",
+      "transcript": "/f5/859bb640d9/0/full.jsonl",
+      "content_hash": "/f5/859bb640d9/0/content_hash.txt",
+      "prompt": "/f5/859bb640d9/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1004973,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 52033024,
+    "output_tokens": 73472,
+    "api_call_count": 410
+  }
+}

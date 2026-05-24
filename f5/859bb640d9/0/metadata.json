@@ -1,0 +1,161 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "f5859bb640d9",
+  "session_id": "019e5a74-3fc0-77c0-b631-82e44d1ee65b",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-24T23:08:24.35681Z",
+  "branch": "t3code/b1539d4b",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "crates/ars-components/src/utility/drop_zone/mod.rs",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_accepted.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_disabled.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_drag_over_invalid.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_drag_over_valid.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_idle_default_label.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_idle_explicit_label.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_readonly.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_rejected.snap",
+    "crates/ars-components/src/utility/drop_zone/snapshots/ars_components__utility__drop_zone__tests__drop_zone_root_required_invalid_focus_visible.snap",
+    "crates/ars-components/src/utility/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility.rs",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "spec/components/utility/drop-zone.md",
+    "spec/dioxus-components/utility/drop-zone.md",
+    "spec/leptos-components/utility/drop-zone.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "a6498839599b",
+  "token_usage": {
+    "input_tokens": 1004973,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 52033024,
+    "output_tokens": 73472,
+    "api_call_count": 410
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Implement task #218: a framework-agnostic DropZone core component for the `ars-components` Rust library, including state machine, MIME validation, callbacks, ConnectApi attributes, snapshots, spec conformance, proptest, coverage, and mutation testing.",
+    "outcome": "The DropZone core was fully implemented with all verification gates passing (18 unit tests, spec conformance, proptest, 96.34% line coverage, 0 missed mutants out of 124). The commit was made but the PR push was the final step in the transcript.",
+    "learnings": {
+      "repo": [
+        "The spec file is authoritative over issue body text when they conflict — issue text had stale `aria-dropeffect` and `data-ars-dragging-over` while the spec correctly uses `aria-description` and `data-ars-drag-over`.",
+        "All time/delay fields must use `core::time::Duration`, never `u32` millisecond aliases (e.g., `activate_delay: Duration` not `activate_delay_ms: u32`).",
+        "The announcement pattern follows Tabs: the agnostic `Api` exposes localized announcement string accessors (`drop_accepted_announcement()`, `drop_rejected_announcement()`) for adapters to pass to their live region — discarding them with `let _announcement = ...` is incorrect.",
+        "GitHub Project board item must be moved to `In Progress` as the first mutating action when starting implementation.",
+        "Adapter specs (Leptos and Dioxus) must be updated in the same PR as the core spec when public API changes.",
+        "The repo has mandatory `.agents/skills/post-implementation-audit` and `.agents/skills/waiting-for-codex-review` workflows that must be invoked.",
+        "`cargo xci --profile fast` is the required pre-push gate; a clean pass is required before committing.",
+        "`cargo insta test --unreferenced=reject` is the correct snapshot validation command for `ars-components`.",
+        "`cargo xtask spec validate` validates all spec markdown files (340 files).",
+        "The `ars-interactions::{DragItem, DropOperation}` types are reused directly in component public APIs without re-wrapping."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/drop_zone/mod.rs",
+          "line": 930,
+          "end_line": 985,
+          "finding": "Effects originally discarded announcement strings with `let _announcement = ...`. The correct pattern (matching Tabs) is to expose them via `Api::drop_accepted_announcement()` and `Api::drop_rejected_announcement()` so adapters can pass them to a live region."
+        },
+        {
+          "path": "crates/ars-components/src/utility/drop_zone/mod.rs",
+          "line": 1,
+          "end_line": 1455,
+          "finding": "Public delay props use `core::time::Duration` with `Duration::from_millis(500)` and `Duration::from_millis(1500)` defaults, not `u32` millisecond fields."
+        }
+      ],
+      "workflow": [
+        "TDD red-green loop: write failing tests first targeting the public API, then implement the machine until green — this was enforced as a prerequisite before implementation.",
+        "Mutation testing with `cargo mutants` is a mandatory audit step; 31 missed mutants on the first pass required adding focused builder, prop-sync, boundary, and API dispatch tests before the second pass achieved 0 missed.",
+        "After `cargo xci --profile fast`, check `git status` before committing — the formatter can stage unrelated files (e.g., `crates/ars-dioxus/tests/attr_passthrough.rs`) that must be restored to keep the PR scope clean.",
+        "Transient test failures in the fast gate (e.g., `ars-e2e` fixture server timeout) should be reproduced in isolation before rerunning the full gate — a clean isolated rerun indicating a flake justifies rerunning the gate.",
+        "Mutation run duration scales with test suite timeout: 124 mutants × ~82s timeout = ~61 minutes for the full run; plan for this in workflow.",
+        "Co-authored-by trailers and non-draft PR are explicit repo expectations for commits from automated sessions."
+      ]
+    },
+    "friction": [
+      "Mutation testing took ~61 minutes for 124 mutants, blocking the implementation loop for an extended period.",
+      "First mutation pass had 31 missed mutants (builder surface, prop syncing, boundary checks) requiring a second round of test writing and another full mutation run.",
+      "`cargo xci --profile fast` staged an unrelated formatter change in `crates/ars-dioxus/tests/attr_passthrough.rs`, requiring manual `git restore` before commit.",
+      "Transient failure in `ars-e2e::fixtures::tests::fixture_server_wait_reports_timeout_output_and_removes_log` during fast gate required a full re-run of `cargo xci --profile fast`.",
+      "Issue body had multiple stale API references (`aria-dropeffect`, `data-ars-dragging-over`, missing `on_drop_rejected`) that diverged from the current spec, requiring explicit contract resolution before planning.",
+      "Plan Mode restrictions prevented any file mutations during the planning phase, extending the session length before implementation could begin.",
+      "The `let _announcement = ...` antipattern was not caught until user code review, meaning announcement API design was deferred to a review finding rather than being planned upfront."
+    ],
+    "open_items": [
+      "Leptos and Dioxus adapter implementations for DropZone are explicitly out of scope and deferred to future tasks.",
+      "Browser event extraction, DOM listeners, file handle access, hit testing, and live element references remain adapter/platform concerns not implemented here.",
+      "Codex review loop (`waiting-for-codex-review`) was not yet started — transcript ends at commit, before PR push and `@codex review` invocation.",
+      "PR push to GitHub and opening the non-draft PR with `Closes #218` and `snapshot-reviewed` label was the final deferred step.",
+      "Issue #218 remains open until the PR is merged with green CI and Codex thumbs-up."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-24T23:07:35.491323Z",
+    "agent_lines": 2654,
+    "agent_removed": 71,
+    "human_added": 140,
+    "human_modified": 48,
+    "human_removed": 0,
+    "total_committed": 2840,
+    "total_lines_changed": 2913,
+    "agent_percentage": 93.5461723309303,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 14,
+      "user_lines_removed": 14,
+      "agent_lines_added": 2732,
+      "agent_lines_removed": 76,
+      "user_added_per_file": {
+        "spec/dioxus-components/utility/drop-zone.md": 7,
+        "spec/leptos-components/utility/drop-zone.md": 7
+      },
+      "user_removed_per_file": {
+        "spec/dioxus-components/utility/drop-zone.md": 7,
+        "spec/leptos-components/utility/drop-zone.md": 7
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 36,
+      "user_lines_removed": 30,
+      "agent_lines_added": 2763,
+      "agent_lines_removed": 100,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/drop_zone/mod.rs": 17,
+        "crates/ars-components/tests/proptest_state_machines/utility.rs": 2,
+        "spec/components/utility/drop-zone.md": 17
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/utility/drop_zone/mod.rs": 13,
+        "spec/components/utility/drop-zone.md": 17
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 69,
+      "user_lines_removed": 2,
+      "agent_lines_added": 2819,
+      "agent_lines_removed": 117,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/drop_zone/mod.rs": 69
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/utility/drop_zone/mod.rs": 2
+      }
+    }
+  ]
+}
