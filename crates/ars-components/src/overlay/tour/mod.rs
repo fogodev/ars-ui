@@ -567,16 +567,22 @@ fn step_change_effect(index: usize) -> PendingEffect<Machine> {
 }
 
 fn open_lifecycle_effects(step: &Step) -> Vec<PendingEffect<Machine>> {
-    let mut effects = vec![
-        PendingEffect::named(Effect::AllocateZIndex),
-        PendingEffect::named(Effect::FocusStepContent),
-    ];
+    let mut effects = vec![PendingEffect::named(Effect::AllocateZIndex)];
+
+    if let Some(effect) = focus_step_content_effect(step) {
+        effects.push(effect);
+    }
 
     effects.extend(target_geometry_effects(step));
 
     effects.push(PendingEffect::named(Effect::AttachOverlayClick));
 
     effects
+}
+
+fn focus_step_content_effect(step: &Step) -> Option<PendingEffect<Machine>> {
+    (!matches!(step.step_type, StepType::Wait))
+        .then(|| PendingEffect::named(Effect::FocusStepContent))
 }
 
 fn target_geometry_effects(step: &Step) -> Vec<PendingEffect<Machine>> {
@@ -643,7 +649,10 @@ fn step_change_plan(next: usize, ctx: &Context) -> TransitionPlan<Machine> {
         });
 
     plan = plan.with_effect(step_change_effect(next));
-    plan = plan.with_effect(PendingEffect::named(Effect::FocusStepContent));
+
+    if let Some(effect) = focus_step_content_effect(&step) {
+        plan = plan.with_effect(effect);
+    }
 
     for effect in target_geometry_effects(&step) {
         plan = plan.with_effect(effect);
@@ -863,6 +872,10 @@ impl ars_core::Machine for Machine {
                     if active_step_changed {
                         plan = plan.with_effect(step_change_effect(new_step));
 
+                        if let Some(effect) = focus_step_content_effect(&next_step) {
+                            plan = plan.with_effect(effect);
+                        }
+
                         for effect in target_geometry_effects(&next_step) {
                             plan = plan.with_effect(effect);
                         }
@@ -901,7 +914,7 @@ impl ars_core::Machine for Machine {
                 Some(plan)
             }
 
-            (_, Event::SetZIndex(z_index)) => {
+            (State::Active { .. }, Event::SetZIndex(z_index)) => {
                 let z_index = *z_index;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.z_index = Some(z_index);
@@ -955,6 +968,10 @@ impl ars_core::Machine for Machine {
 
                 if step_changed {
                     plan = plan.with_effect(step_change_effect(new_step));
+
+                    if let Some(effect) = focus_step_content_effect(&next_step) {
+                        plan = plan.with_effect(effect);
+                    }
                 }
 
                 for effect in target_geometry_effects(&next_step) {
@@ -1007,13 +1024,7 @@ impl ars_core::Machine for Machine {
 
         let mut events = Vec::new();
 
-        if old.steps != new.steps
-            || old.close_on_overlay_click != new.close_on_overlay_click
-            || old.close_on_escape != new.close_on_escape
-            || old.keyboard_navigation != new.keyboard_navigation
-            || old.lazy_mount != new.lazy_mount
-            || old.unmount_on_exit != new.unmount_on_exit
-        {
+        if old.steps != new.steps {
             events.push(Event::SyncProps);
         }
 
@@ -1021,6 +1032,8 @@ impl ars_core::Machine for Machine {
             && was != Some(now)
         {
             events.push(if now { Event::Start } else { Event::Dismiss });
+        } else if new.open == Some(true) && old.steps.is_empty() && !new.steps.is_empty() {
+            events.push(Event::Start);
         }
 
         events
@@ -1920,6 +1933,7 @@ mod tests {
 
         assert_eq!(service.state(), &State::Active { step_index: 1 });
         assert!(names.contains(&Effect::StepChange));
+        assert!(names.contains(&Effect::FocusStepContent));
         assert!(names.contains(&Effect::ScrollTargetIntoView));
         assert!(names.contains(&Effect::PositionStepContent));
         assert!(names.contains(&Effect::MeasureSpotlight));
@@ -1941,6 +1955,77 @@ mod tests {
         assert!(names.contains(&Effect::ScrollTargetIntoView));
         assert!(names.contains(&Effect::PositionStepContent));
         assert!(names.contains(&Effect::MeasureSpotlight));
+    }
+
+    #[test]
+    fn behavior_only_prop_updates_do_not_emit_sync_props() {
+        let old = props();
+
+        let events = Machine::on_props_changed(
+            &old,
+            &Props {
+                close_on_overlay_click: !old.close_on_overlay_click,
+                close_on_escape: !old.close_on_escape,
+                keyboard_navigation: !old.keyboard_navigation,
+                lazy_mount: !old.lazy_mount,
+                unmount_on_exit: !old.unmount_on_exit,
+                ..old.clone()
+            },
+        );
+
+        assert!(!events.contains(&Event::SyncProps));
+    }
+
+    #[test]
+    fn wait_steps_do_not_emit_focus_content_effects() {
+        let mut service = service(Props {
+            steps: vec![
+                Step {
+                    step_type: StepType::Wait,
+                    ..step("#wait", "Wait")
+                },
+                step("#tooltip", "Tooltip"),
+            ],
+            ..props()
+        });
+
+        let start = service.send(Event::Start);
+
+        assert!(!effect_names(&start).contains(&Effect::FocusStepContent));
+
+        let next = service.send(Event::NextStep);
+
+        assert!(effect_names(&next).contains(&Effect::FocusStepContent));
+
+        let back = service.send(Event::PrevStep);
+
+        assert!(!effect_names(&back).contains(&Effect::FocusStepContent));
+    }
+
+    #[test]
+    fn controlled_open_true_starts_when_steps_load() {
+        let mut service = service(Props {
+            open: Some(true),
+            steps: Vec::new(),
+            ..props()
+        });
+
+        let result = service.set_props(Props {
+            open: Some(true),
+            steps: vec![step("#loaded", "Loaded")],
+            ..props()
+        });
+
+        assert_eq!(
+            effect_names(&result)[..2],
+            [Effect::OpenChange, Effect::StepChange]
+        );
+        assert_eq!(service.state(), &State::Active { step_index: 0 });
+        assert!(service.context().open);
+        assert_eq!(
+            service.context().target_element_id.as_deref(),
+            Some("#loaded")
+        );
     }
 
     #[test]
@@ -1981,6 +2066,24 @@ mod tests {
         assert_eq!(service.context().z_index, Some(1550));
         assert_eq!(service.context().current_placement, Placement::TopStart);
         assert!(service.context().spotlight.is_some());
+    }
+
+    #[test]
+    fn z_index_feedback_is_ignored_when_tour_is_closed() {
+        let mut service = service(props());
+
+        let inactive = service.send(Event::SetZIndex(1550));
+
+        assert!(!inactive.context_changed);
+        assert_eq!(service.context().z_index, None);
+
+        drop(service.send(Event::Start));
+        drop(service.send(Event::Complete));
+
+        let completed = service.send(Event::SetZIndex(1550));
+
+        assert!(!completed.context_changed);
+        assert_eq!(service.context().z_index, None);
     }
 
     #[test]
@@ -2221,7 +2324,7 @@ mod tests {
             [Event::SyncProps]
         );
 
-        let sync_cases = [
+        let behavior_cases = [
             Props {
                 close_on_overlay_click: false,
                 ..props()
@@ -2244,8 +2347,8 @@ mod tests {
             },
         ];
 
-        for new in sync_cases {
-            assert_eq!(Machine::on_props_changed(&old, &new), [Event::SyncProps]);
+        for new in behavior_cases {
+            assert!(Machine::on_props_changed(&old, &new).is_empty());
         }
     }
 
