@@ -1,0 +1,164 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "b87ffc47ed9f",
+  "session_id": "019e5aa2-3b6a-75b2-9a34-ee01736f2667",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-24T23:58:10.795073Z",
+  "branch": "t3code/497b39cd",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/input/checkbox_group/mod.rs",
+    "crates/ars-components/src/input/checkbox_group/snapshots/ars_components__input__checkbox_group__tests__checkbox_group_description.snap",
+    "crates/ars-components/src/input/checkbox_group/snapshots/ars_components__input__checkbox_group__tests__checkbox_group_error_message.snap",
+    "crates/ars-components/src/input/checkbox_group/snapshots/ars_components__input__checkbox_group__tests__checkbox_group_hidden_input_configs.snap",
+    "crates/ars-components/src/input/checkbox_group/snapshots/ars_components__input__checkbox_group__tests__checkbox_group_hidden_input_configs_absent_without_name.snap",
+    "crates/ars-components/src/input/checkbox_group/snapshots/ars_components__input__checkbox_group__tests__checkbox_group_label.snap",
+    "crates/ars-components/src/input/checkbox_group/snapshots/ars_components__input__checkbox_group__tests__checkbox_group_root_idle.snap",
+    "crates/ars-components/src/input/checkbox_group/snapshots/ars_components__input__checkbox_group__tests__checkbox_group_root_invalid_description_error.snap",
+    "crates/ars-components/src/input/mod.rs",
+    "crates/ars-components/src/input/radio_group/mod.rs",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_description.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_error_message.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_item_control_disabled.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_item_control_selected.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_item_disabled.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_item_hidden_input.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_item_hidden_input_disabled.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_item_indicator.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_item_label.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_item_selected_focus_visible.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_item_unselected.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_label.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_root_idle.snap",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_root_invalid_description.snap",
+    "crates/ars-components/tests/spec_conformance/input.rs",
+    "spec/components/input/checkbox-group.md",
+    "spec/components/input/radio-group.md",
+    "spec/dioxus-components/input/checkbox-group.md",
+    "spec/dioxus-components/input/radio-group.md",
+    "spec/leptos-components/input/checkbox-group.md",
+    "spec/leptos-components/input/radio-group.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "edcaded43aa2",
+  "token_usage": {
+    "input_tokens": 898596,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 65904384,
+    "output_tokens": 92346,
+    "api_call_count": 436
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement two framework-agnostic input components — RadioGroup (#239) and CheckboxGroup (#248) — as Rust state machine cores in the ars-components crate, following the existing checkbox/switch/toggle_group patterns with full TDD coverage, snapshot tests, spec updates, and mutation verification.",
+    "outcome": "Both core modules were fully implemented, all quality gates passed (40 RadioGroup tests, 26 CheckboxGroup tests, 0 mutation survivors after triage, clean clippy/fmt/spec/snapshot), spec drift corrected across component and adapter specs, and a ready-for-review PR opened on GitHub with Closes #239 and Closes #248.",
+    "learnings": {
+      "repo": [
+        "The spec_conformance test enforces strict Part enum ordering that must match the anatomy order in the spec markdown; mismatches cause test failures at runtime, not compile time.",
+        "cargo xtask spec validate checks 340 spec files and must pass before PR; adapter specs (spec/leptos-components/, spec/dioxus-components/) are in scope and need updating when core API changes.",
+        "cargo xci-fast is the required pre-push gate; it may reformat files outside the current PR scope (e.g. unrelated test files), which must be reverted before committing to keep the diff scoped.",
+        "cargo insta test --unreferenced=reject requires --features i18n to avoid false orphan failures from the utility/highlight component whose snapshots only exist under that feature flag.",
+        "The workspace uses a Bindable<T> type for controlled/uncontrolled value state; SetValue events for controlled prop synchronization must bypass disabled/readonly guards, unlike user-driven Toggle/Check/Uncheck events.",
+        "Builder clearer methods (methods that reset optional Props fields to None) are a systematic mutation testing blind spot; they need explicit round-trip tests that assert the cleared state differs from the set state.",
+        "The .agents/skills/ directory contains local repo-specific skills (post-implementation-audit, leptos, dioxus, waiting-for-codex-review) that define required workflow steps and must be loaded before their phases execute.",
+        "GitHub Project item IDs and field IDs for the board status transitions are stored in MEMORY.md; the Status field option ID for 'In Progress' is 47fc9ee4 on project PVT_kwHOAKgEE84BTlkR."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/input/checkbox_group/mod.rs",
+          "line": 1000,
+          "end_line": 1095,
+          "finding": "SetValue must not be guarded by disabled/readonly checks because it is the controlled-mode prop synchronization event, not a user-initiated value change. All other value-mutating events (Toggle, Check, Uncheck, CheckAll, UncheckAll) should be guarded."
+        },
+        {
+          "path": "crates/ars-components/src/input/radio_group/mod.rs",
+          "line": 1070,
+          "end_line": 1165,
+          "finding": "Roving focus tabindex assignment priority: focused item > selected item > first enabled item. No DOM focus effect should be emitted; adapters resolve Api::focused_item() to live framework refs."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/input.rs",
+          "finding": "Anatomy conformance tests require Part enum variants in the exact order listed in the spec markdown. RadioGroup needed Description/ErrorMessage moved after the per-item part variants to match spec anatomy order."
+        },
+        {
+          "path": "spec/components/input/radio-group.md",
+          "line": 130,
+          "end_line": 340,
+          "finding": "Spec previously described platform.focus_element_by_id() for programmatic focus, which contradicts the issue contract requiring DOM-free key-based focus. Spec must describe adapter-resolvable focus by item Key with no core DOM effect."
+        }
+      ],
+      "workflow": [
+        "cargo-mutants process completion is unreliable to detect via PTY/stdin; artifact files (mutants.out/missed.txt, caught.txt, unviable.txt) are the reliable terminal signal and should be polled with wc -l rather than waiting on stdout.",
+        "Running mutation in pre-patch source while patching tests in parallel is valid because cargo-mutants uses its own temp copies; this saves one full rerun cycle when survivors are identified mid-run.",
+        "Post-implementation audit should cover adapter specs (leptos/dioxus) in Phase 2, not just core component specs; old granular SetDisabled/SetReadonly event names frequently survive in adapter specs after a core refactor to SetProps.",
+        "TDD red-green: add spec_conformance anatomy references first (compilation failure is the red state), then implement modules. This validates that the conformance test itself is wired before production code exists.",
+        "Mutation survivor clusters by category: builder clearers need round-trip tests; no-op guards need boundary tests with a case that does and does not short-circuit; per-field prop-change detection needs individual field assertions rather than aggregate ones."
+      ]
+    },
+    "friction": [
+      "RadioGroup mutation testing required 3 full rerun cycles (~60+ minutes total for 185 mutants) because survivors were discovered incrementally across runs rather than being patchable from a single complete survivor list.",
+      "cargo-mutants PTY wrapper kept stdin open after the process exited, making it appear still running; had to cross-reference ps output and artifact file line counts to confirm terminal state.",
+      "cargo xci-fast reformatted crates/ars-dioxus/tests/attr_passthrough.rs (an unrelated file) as a side effect, requiring manual inspection and revert to keep the commit diff scoped to #239/#248.",
+      "The spec_conformance Part enum ordering failure only manifests at runtime, not compile time, producing a confusing test failure that required reading the conformance test harness source to diagnose.",
+      "CheckboxGroup SetValue disabled/readonly behavioral edge was discovered late during audit rather than at spec-reading time; required a targeted patch and rerun of focused tests mid-implementation.",
+      "cargo insta test --unreferenced=reject gave false failures without --features i18n due to pre-existing highlight snapshots, requiring a second invocation with the correct feature flag."
+    ],
+    "open_items": [
+      "Leptos adapter component for RadioGroup (spec/leptos-components/input/radio-group.md exists and was updated but no implementation; explicitly out of scope per #239).",
+      "Dioxus adapter component for RadioGroup (same status as Leptos adapter).",
+      "Leptos and Dioxus adapter components for CheckboxGroup (spec updated, implementation deferred; out of scope per #248).",
+      "E2E fixtures and widget implementations for both components are deferred per both issue contracts.",
+      "Pre-existing rustdoc broken-link warnings in workspace (outside radio_group/checkbox_group modules) were noted but not addressed as they predate this PR.",
+      "PR needs snapshot-reviewed label applied after reviewer inspects the 21 new .snap files."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-24T23:57:10.947074Z",
+    "agent_lines": 4689,
+    "agent_removed": 2,
+    "human_added": 134,
+    "human_modified": 118,
+    "human_removed": 0,
+    "total_committed": 4882,
+    "total_lines_changed": 4943,
+    "agent_percentage": 94.90188144851305,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 126,
+      "user_lines_removed": 59,
+      "agent_lines_added": 4874,
+      "agent_lines_removed": 61,
+      "user_added_per_file": {
+        "crates/ars-components/src/input/checkbox_group/mod.rs": 29,
+        "crates/ars-components/src/input/radio_group/mod.rs": 47,
+        "spec/components/input/checkbox-group.md": 16,
+        "spec/dioxus-components/input/checkbox-group.md": 6,
+        "spec/dioxus-components/input/radio-group.md": 11,
+        "spec/leptos-components/input/checkbox-group.md": 6,
+        "spec/leptos-components/input/radio-group.md": 11
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/input/checkbox_group/mod.rs": 3,
+        "crates/ars-components/src/input/radio_group/mod.rs": 6,
+        "spec/components/input/checkbox-group.md": 16,
+        "spec/dioxus-components/input/checkbox-group.md": 6,
+        "spec/dioxus-components/input/radio-group.md": 11,
+        "spec/leptos-components/input/checkbox-group.md": 6,
+        "spec/leptos-components/input/radio-group.md": 11
+      }
+    }
+  ]
+}

@@ -1,0 +1,171 @@
+Implement task #239 and #248
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Implement #239 RadioGroup Core and #248 CheckboxGroup Core
+
+**Summary**
+
+Implement both issue-backed framework-agnostic input components in one scoped PR targeting `main`: `RadioGroup` (#239) and `CheckboxGroup` (#248). #248 is unblocked because dependency #229 is closed and Done. No adapter components are in scope.
+
+The implementation will follow the existing `checkbox`, `switch`, and `toggle_group` machine patterns: documented public APIs, `Bindable` controlled/uncontrolled value state, typed effects for change callbacks, inline unit/snapshot tests, spec-conformance anatomy tests, targeted mutation runs, and same-task spec corrections where the current spec is incomplete or contradicts the issue contract.
+
+**Public API / Contract Changes**
+
+Add modules:
+
+- `crates/ars-components/src/input/radio_group/mod.rs`
+- `crates/ars-components/src/input/checkbox_group/mod.rs`
+
+Update exports:
+
+- `crates/ars-components/src/input/mod.rs`
+  - `pub mod radio_group;`
+  - `pub mod checkbox_group;`
+
+RadioGroup public surface:
+
+- `State::{Idle, Focused { item: Key }}`
+- `Event::{SelectValue, FocusItem, Blur, FocusNext, FocusPrev, FocusFirst, FocusLast, RegisterItem, UnregisterItem, Reset, SetValue, SetProps, SetHasDescription}`
+- `Radio { value: Key, disabled: bool }`
+- `Props` matching the spec, plus `on_value_change: Option<Callback<dyn Fn(Option<Key>) + Send + Sync>>` to preserve the workspace controlled-component convention.
+- `Effect::ValueChange`
+- `Part::{Root, Label, Description, ErrorMessage, Item { item_value }, ItemControl { item_value }, ItemIndicator { item_value }, ItemLabel { item_value }, ItemHiddenInput { item_value }}`
+- `Api` methods for all part attrs, event helpers, `focused_item()`, `selected_value()`, `is_item_disabled()`, and form/reset helpers.
+
+RadioGroup focus design:
+
+- The core must not call DOM APIs or emit `focus_element_by_id`.
+- Roving focus is represented by stable `Key` values in state/context and by `tabindex` attrs.
+- Adapters will later resolve `Api::focused_item()` to live framework refs.
+- The spec will be updated to remove the existing `platform.focus_element_by_id()` language and describe adapter-resolvable focus by item key.
+
+CheckboxGroup public surface:
+
+- `State::Idle`
+- `Event::{Toggle, Check, Uncheck, SetValue, CheckAll, UncheckAll, Focus, Blur, Reset, SetProps, SetHasDescription, SetHasErrorMessage}`
+- `Props` matching the spec, plus `on_change: Option<Callback<dyn Fn(BTreeSet<Key>) + Send + Sync>>`.
+- `Effect::ValueChange`
+- `ChildContext<'a>` with the spec fields and helper methods:
+  - `is_checked(&self, value: &Key) -> bool`
+  - `checked_state(&self, value: &Key) -> checkbox::State`
+  - `is_child_disabled(&self, value: &Key) -> bool`
+- `HiddenInputConfig { name, value, form_id, disabled, required }`
+- `Api::hidden_input_configs() -> Vec<HiddenInputConfig>` for one checked checkbox value per native hidden checkbox input.
+- `Part::{Root, Label, Description, ErrorMessage}`
+
+Spec updates:
+
+- `spec/components/input/radio-group.md`
+  - Replace ID-based programmatic focus with key-based adapter-resolvable focus.
+  - Add controlled `on_value_change` callback/effect contract if implementation follows the workspace pattern.
+  - Clarify arrow navigation updates focused item and selected value except when disabled/readonly prevents value changes.
+- `spec/components/input/checkbox-group.md`
+  - Add controlled `on_change` callback/effect contract.
+  - Add `HiddenInputConfig` / `hidden_input_configs()` as the agnostic form-submission surface for multiple checked values.
+
+**Implementation Tasks**
+
+1. Move GitHub Project status for #239 and #248 to `In Progress` before file edits.
+
+2. Write failing TDD coverage first:
+   - Add `radio_group` and `checkbox_group` anatomy entries to `crates/ars-components/tests/spec_conformance/input.rs`.
+   - Add inline tests in each new module for the issue-named behavior.
+   - Initial expected result: compilation fails because modules/types do not exist.
+
+3. Implement `radio_group/mod.rs`:
+   - Use `alloc::{string::String, string::ToString, vec::Vec}` and `ars_collections::Key`.
+   - Use `ars_core::{AttrMap, Bindable, Callback, ComponentIds, ComponentPart, ConnectApi, Direction, Env, HtmlAttr, AriaAttr, KeyboardKey, NoEffect/PendingEffect as needed, Orientation, TransitionPlan}` following local imports.
+   - Register/unregister item values in logical order.
+   - Navigate only enabled items, honoring `loop_focus`, orientation, and RTL.
+   - Set roving `tabindex` to focused item, else selected item, else first enabled item.
+   - Select via pointer and Space/Enter.
+   - Select via arrow/Home/End navigation when value changes are allowed.
+   - Do not add any DOM focus effect.
+
+4. Implement `checkbox_group/mod.rs`:
+   - Use `BTreeSet<Key>` for value tracking.
+   - Enforce disabled/readonly guards for value-changing events.
+   - Enforce `max_checked` only when adding unchecked values.
+   - Implement `CheckAll` with deterministic truncation to `max_checked` using `BTreeSet` iteration order.
+   - Implement parent select-all state via `parent_checked_state(&all_values)`.
+   - Expose `ChildContext` and hidden input configs.
+
+5. Update specs in the same change:
+   - RadioGroup focus text/code must match the new DOM-free key contract.
+   - CheckboxGroup form integration must document `hidden_input_configs()`.
+   - Keep no TODO/deferral language.
+
+6. Add snapshots:
+   - `crates/ars-components/src/input/radio_group/snapshots/*`
+   - `crates/ars-components/src/input/checkbox_group/snapshots/*`
+   - Cover every anatomy part and output-affecting branch named by the issues: state, selected/unchecked, disabled, readonly, invalid, required, orientation, RTL, description/error association, focus-visible, item disabled, checked/indeterminate select-all, max-checked, hidden input configs.
+
+7. Run focused verification while implementing:
+   - `cargo test -p ars-components --lib radio_group`
+   - `cargo test -p ars-components --lib checkbox_group`
+   - `cargo test -p ars-components --test spec_conformance input`
+   - `cargo insta test -p ars-components --unreferenced=reject`
+
+8. Run targeted quality gates:
+   - `cargo llvm-cov test -p ars-components --lib --no-fail-fast --text -- radio_group`
+   - `cargo llvm-cov test -p ars-components --lib --no-fail-fast --text -- checkbox_group`
+   - `cargo mutants -p ars-components -f crates/ars-components/src/input/radio_group/mod.rs`
+   - `cargo mutants -p ars-components -f crates/ars-components/src/input/checkbox_group/mod.rs`
+   - Triage every `MISSED` mutant in this PR with either stronger tests or justified `.cargo/mutants.toml` skips for true equivalents.
+
+9. Invoke `.agents/skills/post-implementation-audit/SKILL.md` after named tests pass:
+   - Phase 1: spec/implementation drift for both components.
+   - Phase 2: at least two “anything else missing?” rounds.
+   - Phase 3: coverage/test-type audit.
+   - Land every finding in the same PR scope.
+
+10. Present the final local diff to the user before committing.
+
+11. After explicit user approval only:
+   - Run `cargo xci-fast`.
+   - Commit and push a PR targeting `main`.
+   - PR body must include `Closes #239` and `Closes #248`.
+   - If `.snap` files changed, add the `snapshot-reviewed` label.
+   - Invoke `.agents/skills/waiting-for-codex-review/SKILL.md` after the first push and after every subsequent push.
+   - Do not close either issue manually; GitHub should close them after merge via the PR auto-close keywords.
+
+**Test Scenarios**
+
+RadioGroup:
+
+- Initial state is `Idle` with selected value from controlled/default props.
+- `ConnectApi` emits `role="radiogroup"` on root and `role="radio"` on item controls.
+- `aria-checked` reflects selected value.
+- Pointer selection updates uncontrolled value and emits `ValueChange`.
+- Controlled selection emits `ValueChange` without changing visible controlled value.
+- Disabled group prevents value changes.
+- Readonly group prevents value changes but still permits focus tracking where appropriate.
+- Per-item disabled prevents selection and focus targeting.
+- Register/unregister maintains logical item order and removes stale focus when needed.
+- Arrow/Home/End navigation updates focused key and roving `tabindex`.
+- Horizontal RTL swaps left/right behavior.
+- Hidden radio input attrs include shared `name`, item `value`, `form`, `checked`, `required`, `disabled`, and `aria-hidden`.
+- No pending effect performs DOM focus by ID.
+
+CheckboxGroup:
+
+- Initial state is `Idle` with `BTreeSet` from controlled/default props.
+- `Toggle`, `Check`, `Uncheck`, `SetValue`, `CheckAll`, `UncheckAll`, and `Reset` update values correctly.
+- Controlled mode emits `ValueChange` without changing visible controlled value.
+- Disabled/readonly prevent value changes.
+- `max_checked` blocks adding unchecked values after the limit but still allows unchecking.
+- `parent_checked_state()` returns unchecked, indeterminate, and checked.
+- `child_context()` propagates name, form, disabled, readonly, invalid, current values, and at-max state.
+- `hidden_input_configs()` returns one config per checked value, sorted deterministically by `BTreeSet`.
+- Root attrs emit `role="group"`, `aria-labelledby`, `aria-orientation`, `aria-invalid`, `aria-disabled`, `dir`, focus-visible, and at-max data attrs.
+- ErrorMessage attrs use `role="alert"` without explicit `aria-live`.
+
+**Assumptions / Defaults**
+
+- One combined PR is the default because the user requested #239 and #248 together and both belong to the same agnostic input epic.
+- No new dependency crates will be added.
+- Adapter code, adapter tests, widgets, and E2E fixtures are out of scope because both issues explicitly exclude framework-specific adapters.
+- Spec changes are allowed only where needed to remove drift or document implementation surfaces required by the issues and existing workspace conventions.
+- The implementation uses directory-backed modules with `mod.rs` because these components own snapshots and tests alongside the module.
