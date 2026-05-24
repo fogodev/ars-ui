@@ -126,6 +126,11 @@ pub enum Event {
     /// Clear transient state and return to idle.
     Reset,
 
+    /// Return terminal visual state to idle after the drop affordance delay.
+    ///
+    /// Unlike [`Reset`](Self::Reset), this preserves accepted form data.
+    AutoReset,
+
     /// Synchronize context fields from updated props.
     SetProps,
 
@@ -583,7 +588,11 @@ impl ars_core::Machine for Machine {
         if ctx.disabled
             && !matches!(
                 event,
-                Event::Focus { .. } | Event::Blur | Event::SetProps | Event::Reset
+                Event::Focus { .. }
+                    | Event::Blur
+                    | Event::SetProps
+                    | Event::Reset
+                    | Event::AutoReset
             )
         {
             return None;
@@ -610,31 +619,52 @@ impl ars_core::Machine for Machine {
                 let disabled = props.disabled;
                 let read_only = props.read_only;
 
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.accept = accept;
-                    ctx.max_files = max_files;
-                    ctx.max_file_size = max_file_size;
-                    ctx.disabled = disabled;
-                    ctx.read_only = read_only;
-                }))
+                if matches!(state, State::DragOver) && (disabled || read_only) {
+                    Some(
+                        TransitionPlan::to(State::Idle)
+                            .apply(move |ctx: &mut Context| {
+                                ctx.accept = accept;
+                                ctx.max_files = max_files;
+                                ctx.max_file_size = max_file_size;
+                                ctx.disabled = disabled;
+                                ctx.read_only = read_only;
+                                ctx.valid_drag = false;
+                                ctx.is_drop_target = false;
+                            })
+                            .cancel_effect(Effect::ArmDropActivate),
+                    )
+                } else {
+                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.accept = accept;
+                        ctx.max_files = max_files;
+                        ctx.max_file_size = max_file_size;
+                        ctx.disabled = disabled;
+                        ctx.read_only = read_only;
+                    }))
+                }
             }
 
             (State::Idle | State::DropAccepted | State::DropRejected, Event::DragEnter(data)) => {
                 let data = data.clone();
                 let valid = validate_drag_types(ctx, &data.types);
+                let was_terminal = matches!(state, State::DropAccepted | State::DropRejected);
 
-                Some(
-                    TransitionPlan::to(State::DragOver)
-                        .apply(move |ctx: &mut Context| {
-                            ctx.valid_drag = valid;
-                            ctx.is_drop_target = true;
+                let plan = TransitionPlan::to(State::DragOver)
+                    .apply(move |ctx: &mut Context| {
+                        ctx.valid_drag = valid;
+                        ctx.is_drop_target = true;
 
-                            ctx.dropped_items.clear();
-                            ctx.last_rejection = None;
-                        })
-                        .with_effect(drop_enter_effect(data))
-                        .with_effect(PendingEffect::named(Effect::ArmDropActivate)),
-                )
+                        ctx.dropped_items.clear();
+                        ctx.last_rejection = None;
+                    })
+                    .with_effect(drop_enter_effect(data))
+                    .with_effect(PendingEffect::named(Effect::ArmDropActivate));
+
+                Some(if was_terminal {
+                    plan.cancel_effect(Effect::ResetAfterDrop)
+                } else {
+                    plan
+                })
             }
 
             (State::DragOver, Event::DragOver(data)) => {
@@ -706,6 +736,10 @@ impl ars_core::Machine for Machine {
 
             (State::DragOver | State::DropAccepted | State::DropRejected, Event::Reset) => {
                 Some(reset_plan())
+            }
+
+            (State::DropAccepted | State::DropRejected, Event::AutoReset) => {
+                Some(auto_reset_plan())
             }
 
             (_, Event::Focus { is_keyboard }) => {
@@ -937,6 +971,16 @@ fn reset_plan() -> TransitionPlan<Machine> {
         .cancel_effect(Effect::ResetAfterDrop)
 }
 
+fn auto_reset_plan() -> TransitionPlan<Machine> {
+    TransitionPlan::to(State::Idle)
+        .apply(|ctx: &mut Context| {
+            ctx.valid_drag = false;
+            ctx.is_drop_target = false;
+            ctx.last_rejection = None;
+        })
+        .cancel_effect(Effect::ResetAfterDrop)
+}
+
 fn drop_enter_effect(data: DragData) -> PendingEffect<Machine> {
     PendingEffect::new(Effect::DropEnter, move |_ctx, props: &Props, _send| {
         if let Some(callback) = &props.on_drop_enter {
@@ -1016,11 +1060,16 @@ fn validate_drag_types(ctx: &Context, types: &[String]) -> bool {
 fn validate_drop(ctx: &Context, items: &[DragItem]) -> Vec<DropValidationError> {
     let mut errors = Vec::new();
 
+    let file_count = items
+        .iter()
+        .filter(|item| matches!(item, DragItem::File { .. }))
+        .count();
+
     if let Some(max) = ctx.max_files
-        && items.len() > max
+        && file_count > max
     {
         errors.push(DropValidationError::TooManyFiles {
-            actual: items.len(),
+            actual: file_count,
             max,
         });
     }
@@ -1216,6 +1265,39 @@ mod tests {
     }
 
     #[test]
+    fn drop_zone_auto_reset_returns_to_idle_without_clearing_accepted_payload() {
+        let mut service = service(props().name("files"));
+        let items = vec![file("icon.png", "image/png", 10)];
+
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["image/png"]))));
+        drop(service.send(Event::Drop(drag_data(items.clone(), &["image/png"]))));
+
+        let result = service.send(Event::AutoReset);
+
+        assert!(result.state_changed);
+        assert_eq!(service.state(), &State::Idle);
+        assert_eq!(service.context().dropped_items, items);
+        assert_eq!(service.connect(&|_| {}).form_data(), items.as_slice());
+        assert_eq!(result.cancel_effects, vec![Effect::ResetAfterDrop]);
+    }
+
+    #[test]
+    fn drop_zone_new_drag_cancels_stale_terminal_auto_reset_timer() {
+        let mut service = service(props());
+
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["image/png"]))));
+        drop(service.send(Event::Drop(drag_data(
+            vec![file("icon.png", "image/png", 10)],
+            &["image/png"],
+        ))));
+
+        let result = service.send(Event::DragEnter(drag_data(Vec::new(), &["image/png"])));
+
+        assert_eq!(service.state(), &State::DragOver);
+        assert_eq!(result.cancel_effects, vec![Effect::ResetAfterDrop]);
+    }
+
+    #[test]
     fn drop_zone_drop_rejects_and_aggregates_validation_failures() {
         let mut service = service(
             props()
@@ -1270,6 +1352,23 @@ mod tests {
     }
 
     #[test]
+    fn drop_zone_max_files_counts_only_file_items() {
+        let mut service = service(props().max_files(1));
+        let items = vec![
+            DragItem::Text("metadata".into()),
+            file("icon.png", "image/png", 10),
+        ];
+
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["image/png"]))));
+
+        let result = service.send(Event::Drop(drag_data(items.clone(), &["image/png"])));
+
+        assert!(result.state_changed);
+        assert_eq!(service.state(), &State::DropAccepted);
+        assert_eq!(service.context().dropped_items, items);
+    }
+
+    #[test]
     fn drop_zone_reset_clears_terminal_states() {
         let mut service = service(props().accept(["image/png"]));
 
@@ -1287,6 +1386,24 @@ mod tests {
         assert!(service.context().dropped_items.is_empty());
         assert!(service.context().last_rejection.is_none());
         assert!(result.state_changed);
+    }
+
+    #[test]
+    fn drop_zone_explicit_reset_clears_accepted_payload() {
+        let mut service = service(props().name("files"));
+
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["image/png"]))));
+        drop(service.send(Event::Drop(drag_data(
+            vec![file("icon.png", "image/png", 10)],
+            &["image/png"],
+        ))));
+
+        let result = service.send(Event::Reset);
+
+        assert!(result.state_changed);
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().dropped_items.is_empty());
+        assert!(service.connect(&|_| {}).form_data().is_empty());
     }
 
     #[test]
@@ -1578,6 +1695,24 @@ mod tests {
         assert_eq!(service.context().max_file_size, Some(300));
         assert!(service.context().disabled);
         assert!(service.context().read_only);
+    }
+
+    #[test]
+    fn drop_zone_set_props_disabling_mid_drag_clears_drag_state() {
+        let mut service = service(props().accept(["image/png"]));
+
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["image/png"]))));
+        assert_eq!(service.state(), &State::DragOver);
+        assert!(service.context().valid_drag);
+        assert!(service.context().is_drop_target);
+
+        let result = service.set_props(props().disabled(true).accept(["image/png"]));
+
+        assert!(result.state_changed);
+        assert_eq!(service.state(), &State::Idle);
+        assert!(!service.context().valid_drag);
+        assert!(!service.context().is_drop_target);
+        assert_eq!(result.cancel_effects, vec![Effect::ArmDropActivate]);
     }
 
     #[test]

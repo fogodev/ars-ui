@@ -194,6 +194,7 @@ fn arb_drop_zone_event() -> impl Strategy<Value = drop_zone::Event> {
         Just(drop_zone::Event::DragLeave),
         arb_drop_zone_data().prop_map(drop_zone::Event::Drop),
         Just(drop_zone::Event::Reset),
+        Just(drop_zone::Event::AutoReset),
         Just(drop_zone::Event::SetProps),
         Just(drop_zone::Event::DropActivate),
         any::<bool>().prop_map(|is_keyboard| drop_zone::Event::Focus { is_keyboard }),
@@ -1791,8 +1792,8 @@ proptest! {
 
     /// Arbitrary DropZone event sequences must keep the public state and
     /// connect API internally consistent: drag-over state owns the drop-target
-    /// marker, terminal accepted state is the only state that contributes form
-    /// data, and disabled/read-only instances never enter drag/drop states.
+    /// marker, named enabled instances expose stored accepted form data, and
+    /// disabled/read-only instances never enter drag/drop states.
     #[test]
     #[ignore = "proptest — nightly extended-proptest job"]
     fn proptest_drop_zone_event_sequences_preserve_invariants(
@@ -1832,13 +1833,18 @@ proptest! {
                 );
             }
 
-            if service.state() != &drop_zone::State::DropAccepted
-                || service.props().name.is_none()
-                || service.context().disabled
-            {
+            if service.props().name.is_none() || service.context().disabled {
+                let form_data = service.connect(&|_| {}).form_data().to_vec();
                 prop_assert!(
-                    service.connect(&|_| {}).form_data().is_empty(),
-                    "form_data must only expose accepted items for named enabled instances"
+                    form_data.is_empty(),
+                    "form_data must be empty for unnamed or disabled instances"
+                );
+            } else {
+                let form_data = service.connect(&|_| {}).form_data().to_vec();
+                prop_assert_eq!(
+                    form_data.as_slice(),
+                    service.context().dropped_items.as_slice(),
+                    "form_data must expose stored accepted items for named enabled instances"
                 );
             }
 
