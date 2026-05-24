@@ -485,6 +485,13 @@ impl ars_core::Machine for Machine {
                 Some(close_plan(props))
             }
 
+            (State::Closed, Event::Blur) => {
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.focused = false;
+                    ctx.focus_visible = false;
+                }))
+            }
+
             (_, Event::Focus { is_keyboard }) => {
                 let focus_visible = *is_keyboard;
 
@@ -500,7 +507,7 @@ impl ars_core::Machine for Machine {
                     .filter(|key| ctx.items.contains_key(key) && is_focusable_key(ctx, props, key));
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.highlighted_key = key;
+                    set_highlight(ctx, key);
                 }))
             }
 
@@ -508,7 +515,7 @@ impl ars_core::Machine for Machine {
                 let key = first_key(ctx, props);
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.highlighted_key = key;
+                    set_highlight(ctx, key);
                 }))
             }
 
@@ -516,7 +523,7 @@ impl ars_core::Machine for Machine {
                 let key = last_key(ctx, props);
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.highlighted_key = key;
+                    set_highlight(ctx, key);
                 }))
             }
 
@@ -524,7 +531,7 @@ impl ars_core::Machine for Machine {
                 let key = next_key(ctx, props);
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.highlighted_key = key;
+                    set_highlight(ctx, key);
                 }))
             }
 
@@ -532,7 +539,7 @@ impl ars_core::Machine for Machine {
                 let key = prev_key(ctx, props);
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.highlighted_key = key;
+                    set_highlight(ctx, key);
                 }))
             }
 
@@ -571,7 +578,7 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.typeahead = typeahead;
                     if let Some(key) = found {
-                        ctx.highlighted_key = Some(key);
+                        set_highlight(ctx, Some(key));
                     }
                 }))
             }
@@ -1214,6 +1221,14 @@ fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
     TransitionPlan::context_only(move |ctx: &mut Context| {
         ctx.loop_focus = props.loop_focus;
         ctx.ids = ComponentIds::from_id(&props.id);
+
+        if ctx
+            .highlighted_key
+            .as_ref()
+            .is_some_and(|key| !is_focusable_key(ctx, &props, key))
+        {
+            set_highlight(ctx, None);
+        }
     })
 }
 
@@ -1389,6 +1404,14 @@ fn item_type_matches(ctx: &Context, key: &Key, predicate: impl FnOnce(&ItemType)
     item_payload(ctx, key).is_some_and(|item| predicate(&item.item_type))
 }
 
+fn set_highlight(ctx: &mut Context, key: Option<Key>) {
+    if ctx.submenu_open.as_ref() != key.as_ref() {
+        ctx.submenu_open = None;
+    }
+
+    ctx.highlighted_key = key;
+}
+
 fn checked_count(ctx: &Context) -> usize {
     ctx.checked_items
         .values()
@@ -1400,16 +1423,14 @@ fn invalidate_collection_references(ctx: &mut Context) {
     if ctx
         .highlighted_key
         .as_ref()
-        .is_some_and(|key| !ctx.items.contains_key(key))
+        .is_some_and(|key| !ctx.items.get(key).is_some_and(Node::is_focusable))
     {
-        ctx.highlighted_key = None;
+        set_highlight(ctx, None);
     }
 
-    if ctx
-        .submenu_open
-        .as_ref()
-        .is_some_and(|key| !ctx.items.contains_key(key))
-    {
+    if ctx.submenu_open.as_ref().is_some_and(|key| {
+        !item_type_matches(ctx, key, |item_type| matches!(item_type, ItemType::Submenu))
+    }) {
         ctx.submenu_open = None;
     }
 
@@ -1543,6 +1564,18 @@ mod tests {
     fn alternate_collection() -> ars_collections::StaticCollection<Item> {
         CollectionBuilder::new()
             .item(key("echo"), "Echo", item("Echo", ItemType::Normal))
+            .build()
+    }
+
+    fn structural_alpha_collection() -> ars_collections::StaticCollection<Item> {
+        CollectionBuilder::new()
+            .section(key("alpha"), "Alpha")
+            .build()
+    }
+
+    fn non_submenu_delta_collection() -> ars_collections::StaticCollection<Item> {
+        CollectionBuilder::new()
+            .item(key("delta"), "Delta", item("Delta", ItemType::Normal))
             .build()
     }
 
@@ -1778,6 +1811,18 @@ mod tests {
         drop(menu.send(Event::Blur));
 
         assert_eq!(menu.state(), &State::Closed);
+    }
+
+    #[test]
+    fn blur_clears_focus_state_when_menu_is_closed() {
+        let mut menu = service(Props::new().id("menu"));
+
+        drop(menu.send(Event::Focus { is_keyboard: true }));
+        drop(menu.send(Event::Blur));
+
+        assert_eq!(menu.state(), &State::Closed);
+        assert!(!menu.context().focused);
+        assert!(!menu.context().focus_visible);
     }
 
     #[test]
@@ -2375,6 +2420,61 @@ mod tests {
             menu.connect(&|_| {}).trigger_attrs().get(&HtmlAttr::Id),
             Some("renamed-trigger")
         );
+    }
+
+    #[test]
+    fn set_props_revalidates_highlight_against_disabled_keys() {
+        let mut menu = service(Props::new().id("menu"));
+
+        drop(menu.send(Event::Open));
+        drop(menu.send(Event::HighlightItem(Some(key("alpha")))));
+        drop(
+            menu.set_props(
+                Props::new()
+                    .id("menu")
+                    .disabled_keys(BTreeSet::from([key("alpha")]))
+                    .disabled_behavior(DisabledBehavior::Skip),
+            ),
+        );
+
+        assert_eq!(menu.context().highlighted_key, None);
+        assert_eq!(
+            menu.connect(&|_| {})
+                .item_attrs(&key("alpha"))
+                .get(&HtmlAttr::TabIndex),
+            Some("-1")
+        );
+    }
+
+    #[test]
+    fn update_items_clears_retyped_highlight_and_submenu() {
+        let mut highlighted = service(Props::new().id("menu"));
+
+        drop(highlighted.send(Event::Open));
+        drop(highlighted.send(Event::HighlightItem(Some(key("alpha")))));
+        drop(highlighted.send(Event::UpdateItems(structural_alpha_collection())));
+
+        assert_eq!(highlighted.context().highlighted_key, None);
+
+        let mut submenu = service(Props::new().id("menu"));
+
+        drop(submenu.send(Event::Open));
+        drop(submenu.send(Event::OpenSubmenu(key("delta"))));
+        drop(submenu.send(Event::UpdateItems(non_submenu_delta_collection())));
+
+        assert_eq!(submenu.context().submenu_open, None);
+    }
+
+    #[test]
+    fn highlight_movement_clears_stale_submenu_state() {
+        let mut menu = service(Props::new().id("menu"));
+
+        drop(menu.send(Event::Open));
+        drop(menu.send(Event::OpenSubmenu(key("delta"))));
+        drop(menu.send(Event::HighlightItem(Some(key("bravo")))));
+
+        assert_eq!(menu.context().highlighted_key, Some(key("bravo")));
+        assert_eq!(menu.context().submenu_open, None);
     }
 
     #[test]
