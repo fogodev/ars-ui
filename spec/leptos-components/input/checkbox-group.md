@@ -34,7 +34,7 @@ The adapter also forwards shared group props from the core contract, including l
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with the core checkbox-group contract, including orientation, selection limits, and form naming.
-- Event parity: `Toggle`, `SetValue`, `SetDisabled`, `SetReadonly`, `SetRequired`, and `SetInvalid` remain machine-owned.
+- Event parity: `Toggle`, `SetValue`, `CheckAll`, `UncheckAll`, `Reset`, and `SetProps` remain machine-owned.
 - Core machine ownership: `use_machine::<checkbox_group::Machine>(...)` owns selection state, group-level ARIA attrs, and child delegation rules.
 
 ## 4. Part Mapping
@@ -59,12 +59,12 @@ The adapter also forwards shared group props from the core contract, including l
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop            | Mode          | Sync trigger              | Machine event / update path   | Visible effect                                   |
-| ----------------------- | ------------- | ------------------------- | ----------------------------- | ------------------------------------------------ |
-| `value`                 | controlled    | signal change             | `SetValue`                    | updates selected set and group validation        |
-| `disabled` / `readonly` | controlled    | signal change             | `SetDisabled` / `SetReadonly` | updates group guards and child context           |
-| `required` / `invalid`  | controlled    | signal change             | `SetRequired` / `SetInvalid`  | updates group ARIA and error wiring              |
-| child toggle            | machine-owned | child checkbox activation | `Toggle(item)`                | updates selected set and hidden submission state |
+| Adapter prop            | Mode          | Sync trigger              | Machine event / update path | Visible effect                                   |
+| ----------------------- | ------------- | ------------------------- | --------------------------- | ------------------------------------------------ |
+| `value`                 | controlled    | signal change             | `SetValue`                  | updates selected set and group validation        |
+| `disabled` / `readonly` | controlled    | signal change             | `SetProps`                  | updates group guards and child context           |
+| `required` / `invalid`  | controlled    | signal change             | `SetProps`                  | updates group ARIA and error wiring              |
+| child toggle            | machine-owned | child checkbox activation | `Toggle(item)`              | updates selected set and hidden submission state |
 
 Child checkboxes must not maintain an independent checked source of truth when group context is present.
 
@@ -84,7 +84,7 @@ Child checkboxes must not maintain an independent checked source of truth when g
 
 - The machine owns the selected set and selection-limit enforcement.
 - Child checkboxes inside the group must delegate toggles to the group machine rather than mutating their own standalone state.
-- Form submission semantics for grouped checkboxes are derived from the machine-owned selected set.
+- Form submission semantics for grouped checkboxes are derived from the machine-owned selected set via `Api::hidden_input_configs()`, one hidden checkbox config per checked value.
 
 ## 11. Callback Payload Contract
 

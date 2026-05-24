@@ -4,7 +4,8 @@
 //! spec's §2 anatomy table and asserts the impl's `Part` enum matches.
 
 use ars_components::input::{
-    checkbox, number_input, password_input, pin_input, search_input, switch, text_field, textarea,
+    checkbox, checkbox_group, number_input, password_input, pin_input, radio_group, search_input,
+    switch, text_field, textarea,
 };
 
 use super::helper::assert_anatomy;
@@ -21,6 +22,62 @@ fn checkbox_anatomy_matches_spec() {
             (checkbox::Part::HiddenInput, "hidden-input"),
             (checkbox::Part::Description, "description"),
             (checkbox::Part::ErrorMessage, "error-message"),
+        ],
+    );
+}
+
+#[test]
+fn checkbox_group_anatomy_matches_spec() {
+    assert_anatomy(
+        "checkbox-group",
+        &[
+            (checkbox_group::Part::Root, "root"),
+            (checkbox_group::Part::Label, "label"),
+            (checkbox_group::Part::Description, "description"),
+            (checkbox_group::Part::ErrorMessage, "error-message"),
+        ],
+    );
+}
+
+#[test]
+fn radio_group_anatomy_matches_spec() {
+    assert_anatomy(
+        "radio-group",
+        &[
+            (radio_group::Part::Root, "root"),
+            (radio_group::Part::Label, "label"),
+            (
+                radio_group::Part::Item {
+                    item_value: Default::default(),
+                },
+                "item",
+            ),
+            (
+                radio_group::Part::ItemControl {
+                    item_value: Default::default(),
+                },
+                "item-control",
+            ),
+            (
+                radio_group::Part::ItemIndicator {
+                    item_value: Default::default(),
+                },
+                "item-indicator",
+            ),
+            (
+                radio_group::Part::ItemLabel {
+                    item_value: Default::default(),
+                },
+                "item-label",
+            ),
+            (
+                radio_group::Part::ItemHiddenInput {
+                    item_value: Default::default(),
+                },
+                "item-hidden-input",
+            ),
+            (radio_group::Part::Description, "description"),
+            (radio_group::Part::ErrorMessage, "error-message"),
         ],
     );
 }

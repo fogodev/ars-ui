@@ -76,12 +76,12 @@ The adapter also forwards shared group props from the core contract, including l
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                  | Mode          | Sync trigger                        | Machine event / update path   | Visible effect                                |
-| ----------------------------- | ------------- | ----------------------------------- | ----------------------------- | --------------------------------------------- |
-| `value`                       | controlled    | prop change                         | `SetValue`                    | updates selected item and roving focus target |
-| `disabled` / `readonly`       | controlled    | prop change                         | `SetDisabled` / `SetReadonly` | guards group and item selection               |
-| `required` / `invalid`        | controlled    | prop change                         | `SetRequired` / `SetInvalid`  | updates root-level validation attrs           |
-| item activation or navigation | machine-owned | click, `Space`, `Enter`, arrow keys | `SelectValue` / focus events  | updates selected value and roving tabindex    |
+| Adapter prop                  | Mode          | Sync trigger                        | Machine event / update path  | Visible effect                                |
+| ----------------------------- | ------------- | ----------------------------------- | ---------------------------- | --------------------------------------------- |
+| `value`                       | controlled    | prop change                         | `SetValue`                   | updates selected item and roving focus target |
+| `disabled` / `readonly`       | controlled    | prop change                         | `SetProps`                   | guards group and item selection               |
+| `required` / `invalid`        | controlled    | prop change                         | `SetProps`                   | updates root-level validation attrs           |
+| item activation or navigation | machine-owned | click, `Space`, `Enter`, arrow keys | `SelectValue` / focus events | updates selected value and roving tabindex    |
 
 ## 8. Registration and Cleanup Contract
 
@@ -92,7 +92,7 @@ The adapter also forwards shared group props from the core contract, including l
 ## 9. Ref and Node Contract
 
 - `Root` may own a group-level ref for focus-entry logic.
-- Each `ItemControl` owns its own live ref for roving focus.
+- Each `ItemControl` owns its own live ref. When the core `Api::focused_item()` changes, the adapter resolves that item key to the current live ref or mounted data and performs DOM focus outside the core machine.
 - Hidden inputs remain non-focusable and must never become the roving target.
 
 ## 10. State Machine Boundary Rules
@@ -109,11 +109,11 @@ The adapter also forwards shared group props from the core contract, including l
 
 ## 12. Failure and Degradation Rules
 
-| Condition                                                     | Policy             | Notes                                                   |
-| ------------------------------------------------------------- | ------------------ | ------------------------------------------------------- |
-| controlled and uncontrolled value props are mixed after mount | warn and ignore    | first mode wins                                         |
-| repeated items are missing stable values                      | fail fast          | roving focus and submission depend on stable identity   |
-| platform focus repair is unavailable                          | degrade gracefully | selection still updates even if focus repair is reduced |
+| Condition                                                     | Policy             | Notes                                                 |
+| ------------------------------------------------------------- | ------------------ | ----------------------------------------------------- |
+| controlled and uncontrolled value props are mixed after mount | warn and ignore    | first mode wins                                       |
+| repeated items are missing stable values                      | fail fast          | roving focus and submission depend on stable identity |
+| item ref for the focused key is unavailable                   | degrade gracefully | selection and roving `tabindex` still update by key   |
 
 ## 13. Identity and Key Policy
 

@@ -1,0 +1,24 @@
+---
+source: crates/ars-components/src/input/checkbox_group/mod.rs
+expression: "snapshot_configs(&service.connect(&|_| {}).hidden_input_configs())"
+---
+[
+    HiddenInputConfig {
+        name: "features",
+        value: "alpha",
+        form_id: Some(
+            "settings",
+        ),
+        disabled: false,
+        required: true,
+    },
+    HiddenInputConfig {
+        name: "features",
+        value: "gamma",
+        form_id: Some(
+            "settings",
+        ),
+        disabled: false,
+        required: true,
+    },
+]

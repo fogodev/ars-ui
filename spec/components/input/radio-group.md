@@ -59,6 +59,18 @@ pub enum Event {
     FocusFirst,
     /// Focus the last item.
     FocusLast,
+    /// Register a rendered item in logical DOM order.
+    RegisterItem(Radio),
+    /// Unregister a rendered item by value.
+    UnregisterItem(Key),
+    /// Restore the selected value to `Props::default_value`.
+    Reset,
+    /// Synchronize the externally controlled value prop.
+    SetValue(Option<Key>),
+    /// Synchronize output-affecting props stored in context.
+    SetProps,
+    /// Track whether a Description part is rendered.
+    SetHasDescription(bool),
 }
 ```
 
@@ -142,6 +154,8 @@ pub struct Props {
     pub form: Option<String>,
     /// Whether the focus should loop.
     pub loop_focus: bool,
+    /// Called when user intent requests a new selected value.
+    pub on_value_change: Option<Callback<dyn Fn(Option<Key>) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -159,6 +173,7 @@ impl Default for Props {
             name: None,
             form: None,
             loop_focus: true,
+            on_value_change: None,
         }
     }
 }
@@ -182,12 +197,20 @@ pub struct Machine;
 pub struct Messages;
 impl ComponentMessages for Messages {}
 
+/// Typed identifier for every named effect intent the RadioGroup emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes `Props::on_value_change` with the requested value.
+    ValueChange,
+}
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -221,9 +244,8 @@ impl ars_core::Machine for Machine {
         _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         if is_disabled(ctx) || is_readonly(ctx) {
-            match event {
-                Event::SelectValue(_) => return None,
-                _ => {}
+            if matches!(event, Event::SelectValue(_)) {
+                return None;
             }
         }
 
@@ -267,14 +289,7 @@ impl ars_core::Machine for Machine {
                     let val_clone = val.clone();
                     Some(TransitionPlan::to(State::Focused { item: val }).apply(move |ctx| {
                         ctx.focused_item = Some(val_clone);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(key) = &ctx.focused_item {
-                            let platform = use_platform_effects();
-                            let item_id = ctx.ids.item("item", key);
-                            platform.focus_element_by_id(&item_id);
-                        }
-                        no_cleanup()
-                    })))
+                    }))
                 } else {
                     None
                 }
@@ -286,14 +301,7 @@ impl ars_core::Machine for Machine {
                     let val_clone = val.clone();
                     Some(TransitionPlan::to(State::Focused { item: val }).apply(move |ctx| {
                         ctx.focused_item = Some(val_clone);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(key) = &ctx.focused_item {
-                            let platform = use_platform_effects();
-                            let item_id = ctx.ids.item("item", &key);
-                            platform.focus_element_by_id(&item_id);
-                        }
-                        no_cleanup()
-                    })))
+                    }))
                 } else {
                     None
                 }
@@ -305,14 +313,7 @@ impl ars_core::Machine for Machine {
                     let val_clone = val.clone();
                     Some(TransitionPlan::to(State::Focused { item: val }).apply(move |ctx| {
                         ctx.focused_item = Some(val_clone);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(first) = ctx.items.iter().find(|i| !i.disabled) {
-                            let platform = use_platform_effects();
-                            let item_id = ctx.ids.item("item", &first.value);
-                            platform.focus_element_by_id(&item_id);
-                        }
-                        no_cleanup()
-                    })))
+                    }))
                 } else {
                     None
                 }
@@ -324,20 +325,62 @@ impl ars_core::Machine for Machine {
                     let val_clone = val.clone();
                     Some(TransitionPlan::to(State::Focused { item: val }).apply(move |ctx| {
                         ctx.focused_item = Some(val_clone);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(last) = ctx.items.iter().rev().find(|i| !i.disabled) {
-                            let platform = use_platform_effects();
-                            let item_id = ctx.ids.item("item", &last.value);
-                            platform.focus_element_by_id(&item_id);
-                        }
-                        no_cleanup()
-                    })))
+                    }))
                 } else {
                     None
                 }
             }
 
-            _ => None,
+            Event::RegisterItem(radio) => {
+                let radio = radio.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    register_item(&mut ctx.items, radio);
+                }))
+            }
+            Event::UnregisterItem(value) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    unregister_item(ctx, &value);
+                }))
+            }
+            Event::Reset => {
+                let value = props.default_value.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.value.set(value);
+                }))
+            }
+            Event::SetValue(value) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.value.set(value);
+                }))
+            }
+            Event::SetProps => {
+                let disabled = props.disabled;
+                let readonly = props.readonly;
+                let required = props.required;
+                let invalid = props.invalid;
+                let orientation = props.orientation;
+                let dir = props.dir;
+                let name = props.name.clone();
+                let loop_focus = props.loop_focus;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.disabled = disabled;
+                    ctx.readonly = readonly;
+                    ctx.required = required;
+                    ctx.invalid = invalid;
+                    ctx.orientation = orientation;
+                    ctx.dir = dir;
+                    ctx.name = name.clone();
+                    ctx.loop_focus = loop_focus;
+                }))
+            }
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_description = has_description;
+                }))
+            }
         }
     }
 
@@ -390,13 +433,13 @@ fn navigate_items(
 pub enum Part {
     Root,
     Label,
-    Description,
-    ErrorMessage,
     Item { item_value: Key },
     ItemControl { item_value: Key },
     ItemIndicator { item_value: Key },
     ItemLabel { item_value: Key },
     ItemHiddenInput { item_value: Key },
+    Description,
+    ErrorMessage,
 }
 
 /// API for the RadioGroup component.
@@ -692,7 +735,8 @@ The `aria-orientation` attribute informs assistive technology whether navigation
 
 - Roving tabindex: only the selected item (or first if none selected) has `tabindex="0"`.
 - Arrow keys cycle focus through enabled items; wraps when `loop_focus` is enabled.
-- Focus moves programmatically via `platform.focus_element_by_id()` (see `PlatformEffects` trait in `01-architecture.md` section 2.2.7).
+- Core represents focus movement by updating `focused_item: Option<Key>` and roving `tabindex` attributes only. Framework adapters resolve the focused item key to a live `NodeRef`, `MountedData`, or host handle and perform any DOM focus movement.
+- Arrow/Home/End navigation updates both focused item and selected value when the group is not disabled or readonly. In readonly mode, focus may move but selection does not change; disabled items are never focus targets.
 
 ## 4. Internationalization
 

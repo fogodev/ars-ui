@@ -1,0 +1,59 @@
+---
+source: crates/ars-components/src/input/checkbox_group/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "checkbox-group",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "features-label",
+            ),
+        ),
+        (
+            Aria(
+                Orientation,
+            ),
+            String(
+                "vertical",
+            ),
+        ),
+        (
+            Dir,
+            String(
+                "ltr",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "features",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}
