@@ -80,6 +80,9 @@ pub mod toggle;
 /// `ToggleButton` component machine.
 pub mod toggle_button;
 
+/// `ToggleGroup` component machine.
+pub mod toggle_group;
+
 /// `VisuallyHidden` component (stateless attribute mapper).
 pub mod visually_hidden;
 

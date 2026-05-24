@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/utility/toggle_group/mod.rs
+expression: "snapshot_attrs(&selected.connect(&|_| {}).indicator_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-active-value",
+            ),
+            String(
+                "bold",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toggle-group",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

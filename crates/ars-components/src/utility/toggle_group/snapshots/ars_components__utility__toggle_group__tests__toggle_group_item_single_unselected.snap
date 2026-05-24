@@ -1,0 +1,59 @@
+---
+source: crates/ars-components/src/utility/toggle_group/mod.rs
+expression: "snapshot_attrs(&idle.connect(&|_| {}).item_attrs(&key(\"italic\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toggle-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-value",
+            ),
+            String(
+                "italic",
+            ),
+        ),
+        (
+            Aria(
+                Checked,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "radio",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
