@@ -6,6 +6,9 @@ pub mod as_child;
 /// Button component machine.
 pub mod button;
 
+/// `ActionGroup` component machine.
+pub mod action_group;
+
 /// `ClientOnly` logical boundary props.
 pub mod client_only;
 

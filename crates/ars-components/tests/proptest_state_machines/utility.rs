@@ -4,12 +4,12 @@ use std::{
 };
 
 use ars_a11y::AriaRelevant;
-use ars_collections::Key;
+use ars_collections::{Key, selection};
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
 use ars_components::utility::{
-    button, download_trigger, error_boundary, field, fieldset, focus_scope, form, form_submit,
-    live_region, separator, swap, toggle, toggle_group, visually_hidden,
+    action_group, button, download_trigger, error_boundary, field, fieldset, focus_scope, form,
+    form_submit, live_region, separator, swap, toggle, toggle_group, visually_hidden,
 };
 use ars_core::{ConnectApi, Env, HtmlAttr, Service, WeakSend, callback};
 use ars_forms::{
@@ -197,6 +197,119 @@ fn arb_toggle_group_event() -> impl Strategy<Value = toggle_group::Event> {
         Just(toggle_group::Event::Reset),
         prop::option::of(arb_toggle_group_key_set()).prop_map(toggle_group::Event::SetValue),
         Just(toggle_group::Event::SetProps),
+    ]
+}
+
+fn arb_action_group_key() -> impl Strategy<Value = Key> {
+    prop_oneof![
+        Just(Key::str("copy")),
+        Just(Key::str("delete")),
+        Just(Key::str("archive")),
+        Just(Key::str("share")),
+    ]
+}
+
+fn arb_action_group_key_set() -> impl Strategy<Value = BTreeSet<Key>> {
+    prop::collection::btree_set(arb_action_group_key(), 0..=4)
+}
+
+fn arb_action_group_selection_mode() -> impl Strategy<Value = selection::Mode> {
+    prop_oneof![
+        Just(selection::Mode::None),
+        Just(selection::Mode::Single),
+        Just(selection::Mode::Multiple),
+    ]
+}
+
+fn arb_action_group_overflow_mode() -> impl Strategy<Value = action_group::OverflowMode> {
+    prop_oneof![
+        Just(action_group::OverflowMode::Wrap),
+        Just(action_group::OverflowMode::Collapse),
+        Just(action_group::OverflowMode::Menu),
+    ]
+}
+
+fn arb_action_group_label_behavior() -> impl Strategy<Value = action_group::ButtonLabelBehavior> {
+    prop_oneof![
+        Just(action_group::ButtonLabelBehavior::Show),
+        Just(action_group::ButtonLabelBehavior::Collapse),
+        Just(action_group::ButtonLabelBehavior::Hide),
+    ]
+}
+
+fn arb_action_group_variant() -> impl Strategy<Value = action_group::Variant> {
+    prop_oneof![
+        Just(action_group::Variant::Toolbar),
+        Just(action_group::Variant::Outlined),
+        Just(action_group::Variant::Flat),
+    ]
+}
+
+fn arb_action_group_props() -> impl Strategy<Value = action_group::Props> {
+    (
+        prop_oneof![Just(Orientation::Horizontal), Just(Orientation::Vertical)],
+        prop_oneof![
+            Just(ars_core::Direction::Ltr),
+            Just(ars_core::Direction::Rtl)
+        ],
+        arb_action_group_overflow_mode(),
+        arb_action_group_variant(),
+        any::<bool>(),
+        arb_action_group_key_set(),
+        arb_action_group_selection_mode(),
+        prop::option::of(0_usize..=4),
+        arb_action_group_label_behavior(),
+        prop::option::of("[a-z]{1,10}".prop_map(String::from)),
+        any::<bool>(),
+    )
+        .prop_map(
+            |(
+                orientation,
+                dir,
+                overflow_mode,
+                variant,
+                disabled,
+                disabled_items,
+                selection_mode,
+                max_visible_actions,
+                button_label_behavior,
+                density,
+                justified,
+            )| action_group::Props {
+                id: "action-group".to_string(),
+                orientation,
+                dir,
+                overflow_mode,
+                variant,
+                disabled,
+                disabled_items,
+                selection_mode,
+                max_visible_actions,
+                button_label_behavior,
+                density,
+                justified,
+                aria_label: Some("Actions".to_string()),
+                aria_labelledby: None,
+                on_action: None,
+                on_selection_change: None,
+            },
+        )
+}
+
+fn arb_action_group_event() -> impl Strategy<Value = action_group::Event> {
+    prop_oneof![
+        arb_action_group_key().prop_map(action_group::Event::FocusItem),
+        Just(action_group::Event::Blur),
+        Just(action_group::Event::FocusNext),
+        Just(action_group::Event::FocusPrev),
+        Just(action_group::Event::FocusFirst),
+        Just(action_group::Event::FocusLast),
+        arb_action_group_key().prop_map(action_group::Event::ActivateItem),
+        arb_action_group_key().prop_map(action_group::Event::SelectItem),
+        (0_usize..=8).prop_map(action_group::Event::OverflowChanged),
+        arb_action_group_key().prop_map(action_group::Event::RegisterItem),
+        arb_action_group_key().prop_map(action_group::Event::UnregisterItem),
+        Just(action_group::Event::SetProps),
     ]
 }
 
@@ -672,6 +785,97 @@ proptest! {
                         "exactly one enabled item anchors roving tabindex"
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_action_group_event_sequences_preserve_invariants(
+        props in arb_action_group_props(),
+        events in prop::collection::vec(arb_action_group_event(), 0..128),
+    ) {
+        let mut service = Service::<action_group::Machine>::new(
+            props,
+            &Env::default(),
+            &action_group::Messages::default(),
+        );
+
+        for event in events {
+            let before_selected = service.context().selected_items.clone();
+            let before_disabled = service.context().disabled;
+
+            let value_event = matches!(
+                event,
+                action_group::Event::ActivateItem(_) | action_group::Event::SelectItem(_)
+            );
+
+            drop(service.send(event));
+
+            let state = service.state();
+            let ctx = service.context();
+
+            match state {
+                action_group::State::Idle => {
+                    prop_assert!(ctx.focused_item.is_none());
+                }
+
+                action_group::State::Focused { item } => {
+                    prop_assert_eq!(ctx.focused_item.as_ref(), Some(item));
+                    prop_assert!(
+                        ctx.registered_items.iter().any(|registered| registered == item),
+                        "focused item must be registered"
+                    );
+                    prop_assert!(
+                        !service.props().disabled_items.contains(item),
+                        "focused item must not be item-disabled"
+                    );
+                }
+            }
+
+            match service.props().selection_mode {
+                selection::Mode::None => {
+                    prop_assert!(ctx.selected_items.is_empty(), "none mode cannot select");
+                }
+
+                selection::Mode::Single => {
+                    prop_assert!(
+                        ctx.selected_items.len() <= 1,
+                        "single mode selects at most one"
+                    );
+                }
+
+                selection::Mode::Multiple => {}
+            }
+
+            if ctx.overflow_count <= ctx.registered_items.len() {
+                prop_assert_eq!(
+                    ctx.visible_count + ctx.overflow_count,
+                    ctx.registered_items.len(),
+                    "visible plus overflowed items should cover registered items"
+                );
+            } else {
+                prop_assert_eq!(
+                    ctx.visible_count,
+                    0,
+                    "overflow beyond the registered count saturates visible count at zero"
+                );
+            }
+
+            let registered = ctx.registered_items.iter().collect::<BTreeSet<_>>();
+
+            prop_assert_eq!(
+                registered.len(),
+                ctx.registered_items.len(),
+                "registered item list must be deduplicated"
+            );
+
+            if before_disabled && value_event {
+                prop_assert_eq!(
+                    &ctx.selected_items,
+                    &before_selected,
+                    "disabled action group cannot change selection from value events"
+                );
             }
         }
     }
