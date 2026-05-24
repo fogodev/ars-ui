@@ -1,0 +1,169 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "4fd092d6f797",
+  "session_id": "019e57b4-d408-79f0-a00a-a5a5ed45921f",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-24T14:34:22.48418Z",
+  "branch": "t3code/0b3d63ff",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "crates/ars-components/src/selection/menu/mod.rs",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_arrow.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_checkbox_checked.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_checkbox_disabled.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_checkbox_unchecked.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_content.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_default.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_group.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_group_label.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_highlighted.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_indicator.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_shortcut.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_text.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_positioner.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_radio_checked.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_radio_disabled.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_radio_unchecked.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_root_default.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_root_disabled.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_separator.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_shortcut.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_sub_content.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_sub_positioner.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_sub_trigger_closed.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_sub_trigger_open.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_trigger_closed_disabled.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_trigger_open.snap",
+    "crates/ars-components/src/selection/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "crates/ars-components/tests/spec_conformance/selection.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "18cc7be8506f",
+  "token_usage": {
+    "input_tokens": 1224111,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 58524928,
+    "output_tokens": 67479,
+    "api_call_count": 404
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #237: add a framework-agnostic `selection::menu` core in `ars-components`, covering the state machine, public API, ConnectApi attributes, keyboard/typeahead behavior, submenu state, checkbox/radio item state, snapshot tests, spec-conformance tests, proptests, and mutation testing.",
+    "outcome": "The full agnostic menu core was implemented, passed all required gates including three rounds of mutation testing (ending at 0 survivors), and was committed and pushed as a ready PR with `Closes #237` and the `snapshot-reviewed` label. A post-implementation i18n typeahead bug was also caught and fixed before the commit.",
+    "learnings": {
+      "repo": [
+        "New agnostic component cores require a mandatory mutation testing gate via `cargo mutants -p ars-components -f <file>` before committing; 0 survivors is the bar.",
+        "`cargo xci-fast` runs 10 sequential gates (fmt, check, clippy, unit, integration, adapter) and must pass before any commit/push.",
+        "The `typeahead` API exposes `process_char_with_locale` as the stable cross-feature call; plain `process_char` compiles without `i18n` but breaks under `--features i18n`. All selection components must use the locale-aware variant.",
+        "Issue tracking lives in a GitHub Project board; issues must be moved to 'In Progress' before implementation work begins (via `gh project item-edit`).",
+        "`cargo insta test --unreferenced=reject` operates package-wide and surfaces unrelated existing unreferenced snapshots; scoping with `--lib --glob-filter` is necessary to isolate the new module's snapshot gate.",
+        "The agnostic core owns state and HTML attributes only — no focus management, outside containment, safe-hover triangles, scroll-into-view, or submenu positioning. Those are adapter-owned effects consumed in separate Leptos/Dioxus tasks.",
+        "Component tests follow a tests-first (red-green) discipline: failing tests are committed to the file before the implementation is filled in.",
+        "The `ConnectApi` pattern is used for all attribute generation; `Part::*.data_attrs()` provides the `data-ars-part` surface for spec-conformance tests.",
+        "The `DisabledBehavior::FocusOnly` variant allows highlighting disabled keys but not activating them — this is a key invariant asserted in the proptest."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-collections/src/typeahead.rs",
+          "line": 1,
+          "end_line": 150,
+          "finding": "`process_char_with_locale` is the only safe call shape across feature sets; `process_char` without locale arg fails to compile when `ars-collections/i18n` feature is enabled."
+        },
+        {
+          "path": "crates/ars-components/src/selection/select/mod.rs",
+          "line": 1540,
+          "end_line": 1690,
+          "finding": "Reference implementation for storing `Env::locale` in Context and routing typeahead through `process_char_with_locale` — the pattern menu was missing."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/selection.rs",
+          "line": 157,
+          "end_line": 157,
+          "finding": "Added `menu_anatomy_matches_spec()` covering every `Part` variant and its expected `data-ars-part` value."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/selection.rs",
+          "line": 546,
+          "end_line": 546,
+          "finding": "Added ignored proptest `menu_preserves_open_highlight_and_selection_invariants`; must be run explicitly with `-- --ignored` flag."
+        }
+      ],
+      "workflow": [
+        "Mutation testing on a ~2000-line Rust file takes ~80-90 minutes per pass; plan for 3+ passes when iterating on survivor fixes.",
+        "Running `INSTA_UPDATE=always cargo test` is the correct way to accept new insta snapshots; `cargo insta review` is for interactive triage.",
+        "The `--ignored` flag is required to actually run proptest state machine tests since they are marked `#[ignore]` to avoid slow CI by default.",
+        "Scoping `cargo insta` with both `--lib` and `--glob-filter '*/selection/menu/snapshots/*.snap'` avoids false positives from unrelated package snapshots.",
+        "Co-author trailers in commit messages should name the actual agent/assistant doing the work."
+      ]
+    },
+    "friction": [
+      "Mutation testing required 3 full passes (~4.5 hours total) to reach 0 survivors; each pass took ~80-90 minutes.",
+      "`cargo insta test --unreferenced=reject` triggered false failures from pre-existing unreferenced snapshots in other modules, requiring a non-obvious `--glob-filter` workaround.",
+      "The `i18n` feature incompatibility with `process_char` was only surfaced by rust-analyzer after implementation was complete, not by the default `cargo test` or `cargo check` runs.",
+      "The user had to explicitly remind the assistant not to commit without approval — the assistant had not committed but needed the reminder mid-session.",
+      "The wrong co-author was used in the commit trailer (`OpenAI Codex` instead of the actual assistant identity)."
+    ],
+    "open_items": [
+      "Pre-existing unreferenced snapshots outside the menu module need cleanup before `cargo insta --unreferenced=reject` can be used cleanly package-wide.",
+      "One unstaged change in `crates/ars-dioxus/tests/attr_passthrough.rs` was deliberately excluded from the menu commit and is still pending.",
+      "DOM-side adapter tasks (focus management, outside containment, safe-hover triangle, scroll-into-view, submenu positioning) for the new menu are deferred to separate Leptos and Dioxus adapter issues.",
+      "The `waiting-for-codex-review` skill invocation after the PR push was called out in the workflow plan but not shown as completed in the transcript — needs to be verified.",
+      "The `SubPositioner` placement attribute was intentionally removed from the agnostic API; adapter implementations will need to re-add placement logic based on their own positioning primitives."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-24T14:33:26.964376Z",
+    "agent_lines": 3762,
+    "agent_removed": 0,
+    "human_added": 88,
+    "human_modified": 16,
+    "human_removed": 0,
+    "total_committed": 3858,
+    "total_lines_changed": 3866,
+    "agent_percentage": 97.30988101396792,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3817,
+      "agent_lines_removed": 2
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3817,
+      "agent_lines_removed": 2
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 58,
+      "user_lines_removed": 10,
+      "agent_lines_added": 3822,
+      "agent_lines_removed": 2,
+      "user_added_per_file": {
+        "crates/ars-components/src/selection/menu/mod.rs": 51,
+        "crates/ars-components/tests/proptest_state_machines/selection.rs": 1,
+        "crates/ars-dioxus/tests/attr_passthrough.rs": 6
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/selection/menu/mod.rs": 8,
+        "crates/ars-dioxus/tests/attr_passthrough.rs": 2
+      }
+    }
+  ]
+}

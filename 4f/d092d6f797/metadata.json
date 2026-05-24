@@ -1,0 +1,54 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "4fd092d6f797",
+  "strategy": "manual-commit",
+  "branch": "t3code/0b3d63ff",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "crates/ars-components/src/selection/menu/mod.rs",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_arrow.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_checkbox_checked.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_checkbox_disabled.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_checkbox_unchecked.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_content.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_default.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_group.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_group_label.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_highlighted.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_indicator.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_shortcut.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_item_text.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_positioner.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_radio_checked.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_radio_disabled.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_radio_unchecked.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_root_default.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_root_disabled.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_separator.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_shortcut.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_sub_content.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_sub_positioner.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_sub_trigger_closed.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_sub_trigger_open.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_trigger_closed_disabled.snap",
+    "crates/ars-components/src/selection/menu/snapshots/ars_components__selection__menu__tests__menu_trigger_open.snap",
+    "crates/ars-components/src/selection/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "crates/ars-components/tests/spec_conformance/selection.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/4f/d092d6f797/0/metadata.json",
+      "transcript": "/4f/d092d6f797/0/full.jsonl",
+      "content_hash": "/4f/d092d6f797/0/content_hash.txt",
+      "prompt": "/4f/d092d6f797/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1224111,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 58524928,
+    "output_tokens": 67479,
+    "api_call_count": 404
+  }
+}
