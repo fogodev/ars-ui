@@ -534,7 +534,6 @@ fn current_step_data(steps: &[Step], index: usize) -> (Option<String>, Positioni
 
     if let Some(step) = step {
         positioning.placement = step.placement;
-        positioning.offset.main_axis = step.spotlight_offset;
     }
 
     (target, positioning)
@@ -807,24 +806,29 @@ impl ars_core::Machine for Machine {
                     ctx.current_step
                 };
 
-                Some(
-                    TransitionPlan::to(State::Active {
-                        step_index: new_step,
-                    })
-                    .apply(move |ctx: &mut Context| {
-                        let clamped = index.min(ctx.steps.len());
+                let step_changed = new_step != ctx.current_step;
+                let mut plan = TransitionPlan::to(State::Active {
+                    step_index: new_step,
+                })
+                .apply(move |ctx: &mut Context| {
+                    let clamped = index.min(ctx.steps.len());
 
-                        ctx.steps.insert(clamped, step.clone());
-                        ctx.total_steps = ctx.steps.len();
-                        ctx.current_step = new_step;
+                    ctx.steps.insert(clamped, step.clone());
+                    ctx.total_steps = ctx.steps.len();
+                    ctx.current_step = new_step;
 
-                        let (target, positioning) = current_step_data(&ctx.steps, ctx.current_step);
+                    let (target, positioning) = current_step_data(&ctx.steps, ctx.current_step);
 
-                        ctx.target_element_id = target;
-                        ctx.current_placement = positioning.placement;
-                        ctx.positioning = positioning;
-                    }),
-                )
+                    ctx.target_element_id = target;
+                    ctx.current_placement = positioning.placement;
+                    ctx.positioning = positioning;
+                });
+
+                if step_changed {
+                    plan = plan.with_effect(step_change_effect(new_step));
+                }
+
+                Some(plan)
             }
 
             (State::Active { .. }, Event::RemoveStep(index)) if *index < ctx.total_steps => {
@@ -1023,16 +1027,27 @@ impl ars_core::Machine for Machine {
         assert_eq!(old.id, new.id, "Tour id cannot change after initialization");
 
         let mut events = Vec::new();
+        let steps_changed = old.steps != new.steps;
+        let controlled_open_change = if let (was, Some(now)) = (old.open, new.open)
+            && was != Some(now)
+        {
+            Some(if now { Event::Start } else { Event::Dismiss })
+        } else {
+            None
+        };
 
-        if old.steps != new.steps {
+        if controlled_open_change == Some(Event::Dismiss) {
+            events.push(Event::Dismiss);
+        }
+
+        if steps_changed {
             events.push(Event::SyncProps);
         }
 
-        if let (was, Some(now)) = (old.open, new.open)
-            && was != Some(now)
-        {
-            events.push(if now { Event::Start } else { Event::Dismiss });
-        } else if new.open == Some(true) && old.steps.is_empty() && !new.steps.is_empty() {
+        let controlled_open_loads_steps =
+            new.open == Some(true) && old.steps.is_empty() && !new.steps.is_empty();
+
+        if controlled_open_change == Some(Event::Start) || controlled_open_loads_steps {
             events.push(Event::Start);
         }
 
@@ -1756,6 +1771,21 @@ mod tests {
     }
 
     #[test]
+    fn add_step_that_shifts_current_index_emits_step_change_effect() {
+        let mut service = open_service();
+
+        drop(service.send(Event::GoToStep(1)));
+
+        let result = service.send(Event::AddStep {
+            index: 0,
+            step: step("#zero", "Zero"),
+        });
+
+        assert_eq!(service.state(), &State::Active { step_index: 2 });
+        assert!(effect_names(&result).contains(&Effect::StepChange));
+    }
+
+    #[test]
     fn update_current_step_emits_geometry_effects() {
         let mut service = open_service();
 
@@ -1958,6 +1988,23 @@ mod tests {
     }
 
     #[test]
+    fn spotlight_offset_does_not_change_positioning_offset() {
+        let mut service = service(Props {
+            steps: vec![Step {
+                spotlight_offset: 32.0,
+                placement: Placement::Top,
+                ..step("#one", "One")
+            }],
+            ..props()
+        });
+
+        drop(service.send(Event::Start));
+
+        assert_eq!(service.context().positioning.placement, Placement::Top);
+        assert_eq!(service.context().positioning.offset.main_axis, 0.0);
+    }
+
+    #[test]
     fn behavior_only_prop_updates_do_not_emit_sync_props() {
         let old = props();
 
@@ -1974,6 +2021,24 @@ mod tests {
         );
 
         assert!(!events.contains(&Event::SyncProps));
+    }
+
+    #[test]
+    fn controlled_close_is_processed_before_step_sync() {
+        let old = Props {
+            open: Some(true),
+            ..props()
+        };
+        let new = Props {
+            open: Some(false),
+            steps: vec![step("#new", "New")],
+            ..props()
+        };
+
+        assert_eq!(
+            Machine::on_props_changed(&old, &new),
+            [Event::Dismiss, Event::SyncProps]
+        );
     }
 
     #[test]
