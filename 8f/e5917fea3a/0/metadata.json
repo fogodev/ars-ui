@@ -1,0 +1,92 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8fe5917fea3a",
+  "session_id": "019e56aa-18c9-7122-9658-3077c7106725",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-24T01:56:55.876704Z",
+  "branch": "t3code/e567e91b",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/utility/toggle_group/mod.rs",
+    "spec/components/utility/toggle-group.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "4a063454dcd9",
+  "checkpoint_transcript_start": 1916,
+  "transcript_lines_at_start": 1916,
+  "token_usage": {
+    "input_tokens": 139996,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 8729472,
+    "output_tokens": 12491,
+    "api_call_count": 66
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement a ToggleGroup component for the ars-ui library, open a draft PR (#670), and shepherd it through automated Codex review by addressing all review threads.",
+    "outcome": "PR #670 was opened, Codex review completed with 5 threads, all issues were remediated (invalid ARIA attributes, missing type=\"button\", disabled reset logic, idle focus seed order), tests/snapshots/spec passed, and fixes were committed and pushed.",
+    "learnings": {
+      "repo": [
+        "Codex review is triggered by commenting '@codex review' on a PR and polled via GraphQL reviewThreads; 👀 reaction signals active review, threads appear when issues are found.",
+        "aria-orientation and aria-required are only valid on role='radiogroup', not role='group' — ToggleGroup emits these conditionally based on role.",
+        "Items in ToggleGroup require explicit type=\"button\" to prevent implicit form submission.",
+        "Idle focus seeding must follow DOM registration order, not key-sort order.",
+        "Disabled state should not block form reset — reset and disabled are orthogonal concerns.",
+        "Snapshot tests use INSTA_UPDATE=always to accept new/changed snapshots; cargo insta test --unreferenced=reject must be run without a test filter to avoid false positives.",
+        "Spec files in spec/components/utility/ are validated with 'cargo xtask spec validate' and have a TOC generated via 'cargo xtask spec toc'.",
+        "PRs with insta snapshots require the 'snapshot-reviewed' label.",
+        "Nightly fmt (cargo +nightly fmt --all) is required before commit; regular fmt may miss some formatting issues."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/toggle_group/mod.rs",
+          "line": 1710,
+          "end_line": 1735,
+          "finding": "aria-orientation and aria-required emission gated to radiogroup role only"
+        },
+        {
+          "path": "crates/ars-components/src/utility/toggle_group/mod.rs",
+          "line": 1870,
+          "end_line": 1895,
+          "finding": "type=\"button\" added to item attribute output"
+        },
+        {
+          "path": "crates/ars-components/src/utility/toggle_group/mod.rs",
+          "line": 2090,
+          "end_line": 2145,
+          "finding": "idle focus seed changed from key-sort to registration order; disabled no longer blocks form reset"
+        }
+      ],
+      "workflow": [
+        "Polling Codex review via GraphQL with a 2-minute sleep loop is the standard pattern; ~6-10 minutes is normal for larger diffs.",
+        "cargo insta test --unreferenced=reject -p <crate> --features i18n --lib (without test filter) is the correct full snapshot validation command.",
+        "Running 'gh pr checks 670 --watch --fail-fast' in parallel with Codex polling provides CI visibility without blocking.",
+        "Applying patches and running targeted tests before updating snapshots avoids noise in snapshot diffs."
+      ]
+    },
+    "friction": [
+      "Codex review took ~10+ minutes with multiple 2-minute polling cycles before threads appeared.",
+      "cargo insta test --unreferenced=reject cannot be combined with a narrow test filter — it incorrectly flags all other snapshots as unreferenced, requiring a full library run.",
+      "cargo +nightly fmt caught formatting issues that the standard formatter missed, requiring an extra fix-and-recheck cycle."
+    ],
+    "open_items": [
+      "PR #670 is still in draft; it needs CI to fully complete (Coverage, Dioxus feature flags, Release Verification were still running at commit time) before it can be marked ready for review.",
+      "Codex may re-review after the remediation push — thread resolution loop may need another pass."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-24T01:56:35.165817Z",
+    "agent_lines": 71,
+    "agent_removed": 18,
+    "human_added": 24,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 95,
+    "total_lines_changed": 129,
+    "agent_percentage": 68.9922480620155,
+    "metric_version": 2
+  }
+}
