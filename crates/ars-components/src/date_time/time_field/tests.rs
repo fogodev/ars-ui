@@ -2,7 +2,8 @@ use alloc::{string::String, sync::Arc};
 use core::{cell::RefCell, num::NonZeroU8};
 
 use ars_core::{
-    AriaAttr, AttrMap, ConnectApi, Direction, Env, HtmlAttr, KeyboardKey, Service, StubIntlBackend,
+    AriaAttr, AttrMap, ComponentIds, ConnectApi, Direction, Env, HtmlAttr, KeyboardKey, Service,
+    StubIntlBackend,
 };
 use ars_i18n::{HourCycle, IntlBackend, Locale, Time, WeekInfo, Weekday};
 use ars_interactions::KeyboardEventData;
@@ -611,6 +612,83 @@ fn connect_api_segment_attrs_include_spinbutton_range_and_value_text() {
     assert_eq!(
         attr(&period_attrs, HtmlAttr::Aria(AriaAttr::ValueText)),
         Some("PM")
+    );
+}
+
+#[test]
+fn connect_api_attrs_cover_alternate_labeling_state_and_disabled_segments() {
+    let mut focused = Service::<Machine>::new(
+        props()
+            .aria_label(Some(String::from("Starts at")))
+            .aria_describedby(Some(String::from("external-help")))
+            .description(Some(String::from("Pick a start time")))
+            .disabled(true)
+            .readonly(true)
+            .invalid(true)
+            .required(true)
+            .error_message(Some(String::from("Unavailable"))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(focused.set_props(focused.props().clone().disabled(false)));
+    drop(focused.send(Event::FocusSegment {
+        kind: DateSegmentKind::Hour,
+    }));
+
+    let api = focused.connect(&|_| {});
+    let root_attrs = api.root_attrs();
+    let group_attrs = api.field_group_attrs();
+
+    assert_eq!(
+        attr(&root_attrs, HtmlAttr::Data("ars-state")),
+        Some("focused")
+    );
+    assert_eq!(
+        attr(&group_attrs, HtmlAttr::Aria(AriaAttr::Label)),
+        Some("Starts at")
+    );
+    assert_eq!(
+        attr(&group_attrs, HtmlAttr::Aria(AriaAttr::DescribedBy)),
+        Some("meeting-time-description meeting-time-error-message external-help")
+    );
+
+    let disabled = Service::<Machine>::new(
+        props()
+            .disabled(true)
+            .readonly(true)
+            .invalid(true)
+            .error_message(Some(String::from("Unavailable"))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let disabled_api = disabled.connect(&|_| {});
+    let group_attrs = disabled_api.field_group_attrs();
+    let segment_attrs = disabled_api.segment_attrs(&DateSegmentKind::Hour);
+
+    assert_eq!(
+        attr(&group_attrs, HtmlAttr::Aria(AriaAttr::Disabled)),
+        Some("true")
+    );
+    assert_eq!(
+        attr(&group_attrs, HtmlAttr::Aria(AriaAttr::ReadOnly)),
+        Some("true")
+    );
+    assert_eq!(
+        attr(&segment_attrs, HtmlAttr::Aria(AriaAttr::Disabled)),
+        Some("true")
+    );
+    assert_eq!(
+        attr(&segment_attrs, HtmlAttr::Aria(AriaAttr::ReadOnly)),
+        Some("true")
+    );
+    assert_eq!(attr(&segment_attrs, HtmlAttr::TabIndex), Some("-1"));
+    assert!(
+        disabled_api
+            .segment_attrs(&DateSegmentKind::Year)
+            .attrs()
+            .is_empty()
     );
 }
 
@@ -1259,6 +1337,43 @@ fn context_debug_and_partial_eq_ignore_backend_identity() {
     left.set_segment_value(DateSegmentKind::Hour, 3);
 
     assert_ne!(left, right);
+
+    let api = service.connect(&|_| {});
+
+    assert!(format!("{api:?}").contains("Api"));
+}
+
+#[test]
+fn context_partial_eq_observes_every_stored_field() {
+    let base = service().context().clone();
+
+    let assert_different = |mutate: fn(&mut Context)| {
+        let mut changed = base.clone();
+
+        mutate(&mut changed);
+
+        assert_ne!(changed, base);
+    };
+
+    assert_different(|ctx| ctx.value.set(Some(time(1, 2, 3))));
+    assert_different(|ctx| ctx.set_segment_value(DateSegmentKind::Hour, 3));
+    assert_different(|ctx| ctx.focused_segment = Some(DateSegmentKind::Hour));
+    assert_different(|ctx| ctx.type_buffer = String::from("1"));
+    assert_different(|ctx| ctx.locale = Locale::parse("de-DE").expect("locale parses"));
+    assert_different(|ctx| {
+        ctx.messages = Messages {
+            hour_label: MessageFn::static_str("H"),
+            ..Messages::default()
+        };
+    });
+    assert_different(|ctx| ctx.granularity = TimeGranularity::Second);
+    assert_different(|ctx| ctx.hour_cycle = HourCycle::H23);
+    assert_different(|ctx| ctx.disabled = true);
+    assert_different(|ctx| ctx.readonly = true);
+    assert_different(|ctx| ctx.min_value = Some(time(1, 0, 0)));
+    assert_different(|ctx| ctx.max_value = Some(time(23, 0, 0)));
+    assert_different(|ctx| ctx.ids = ComponentIds::from_id("other-time"));
+    assert_different(|ctx| ctx.force_leading_zeros = true);
 }
 
 #[test]
@@ -1281,6 +1396,13 @@ fn context_segment_helpers_preserve_completion_and_wrapping_contracts() {
     assert_eq!(ctx.assemble_time(), None);
 
     assert!(ctx.segment_mut(DateSegmentKind::Year).is_none());
+    assert_eq!(ctx.next_editable_after(DateSegmentKind::Year), None);
+    assert_eq!(ctx.prev_editable_before(DateSegmentKind::Year), None);
+
+    ctx.set_segment_value(DateSegmentKind::Literal, 9);
+    ctx.clear_segment_value(DateSegmentKind::Year);
+
+    assert_eq!(ctx.get_segment_value(DateSegmentKind::Literal), None);
 
     ctx.segment_mut(DateSegmentKind::Hour)
         .expect("hour segment exists")
@@ -1351,6 +1473,39 @@ fn context_segment_helpers_preserve_completion_and_wrapping_contracts() {
     h12.decrement_segment(DateSegmentKind::DayPeriod);
 
     assert_eq!(h12.get_segment_value(DateSegmentKind::DayPeriod), Some(0));
+
+    h12.increment_segment(DateSegmentKind::Year);
+
+    assert_eq!(h12.get_segment_value(DateSegmentKind::Year), None);
+
+    let mut hour_only = Service::<Machine>::new(
+        props()
+            .granularity(TimeGranularity::Hour)
+            .hour_cycle(Some(HourCycle::H23)),
+        &Env::default(),
+        &Messages::default(),
+    )
+    .context()
+    .clone();
+
+    hour_only.set_segment_value(DateSegmentKind::Hour, 22);
+
+    assert_eq!(hour_only.assemble_time(), Some(time(22, 0, 0)));
+
+    let mut second_granularity = Service::<Machine>::new(
+        props()
+            .granularity(TimeGranularity::Second)
+            .hour_cycle(Some(HourCycle::H23)),
+        &Env::default(),
+        &Messages::default(),
+    )
+    .context()
+    .clone();
+
+    second_granularity.set_segment_value(DateSegmentKind::Hour, 7);
+    second_granularity.set_segment_value(DateSegmentKind::Minute, 30);
+
+    assert_eq!(second_granularity.assemble_time(), None);
 }
 
 #[test]
@@ -1406,6 +1561,73 @@ fn machine_guards_and_prop_sync_reconcile_focus() {
 
     assert_eq!(disabled.state(), &State::Idle);
     assert_eq!(disabled.context().focused_segment, None);
+}
+
+#[test]
+fn machine_focus_editing_and_clear_guards_cover_idle_and_readonly_paths() {
+    let mut idle = service();
+
+    drop(idle.send(Event::FocusPrevSegment));
+
+    assert_eq!(idle.state(), &State::Idle);
+
+    drop(idle.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::Hour,
+        ch: '4',
+    }));
+
+    assert_eq!(
+        idle.context().get_segment_value(DateSegmentKind::Hour),
+        None
+    );
+
+    drop(idle.send(Event::FocusNextSegment));
+
+    assert_eq!(idle.state(), &State::Focused(DateSegmentKind::Hour));
+
+    drop(idle.send(Event::FocusPrevSegment));
+
+    assert_eq!(idle.state(), &State::Focused(DateSegmentKind::Hour));
+
+    drop(idle.send(Event::SetValue(Some(time(8, 15, 0)))));
+    drop(idle.send(Event::ClearAll));
+
+    assert_eq!(idle.state(), &State::Idle);
+    assert_eq!(idle.context().focused_segment, None);
+    assert_eq!(idle.context().value.get(), &None);
+    assert!(
+        idle.context()
+            .segments
+            .iter()
+            .filter(|segment| segment.is_editable)
+            .all(|segment| segment.value.is_none() && segment.text.is_empty())
+    );
+
+    let mut readonly = Service::<Machine>::new(
+        props().readonly(true).default_value(Some(time(8, 15, 0))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    readonly.context_mut().type_buffer = String::from("9");
+
+    drop(readonly.send(Event::DecrementSegment {
+        kind: DateSegmentKind::Hour,
+    }));
+    drop(readonly.send(Event::TypeBufferCommit {
+        kind: DateSegmentKind::Hour,
+    }));
+    drop(readonly.send(Event::ClearSegment {
+        kind: DateSegmentKind::Hour,
+    }));
+    drop(readonly.send(Event::ClearAll));
+
+    assert_eq!(readonly.context().value.get(), &Some(time(8, 15, 0)));
+    assert_eq!(
+        readonly.context().get_segment_value(DateSegmentKind::Hour),
+        Some(8)
+    );
+    assert_eq!(readonly.context().type_buffer, "9");
 }
 
 #[test]
