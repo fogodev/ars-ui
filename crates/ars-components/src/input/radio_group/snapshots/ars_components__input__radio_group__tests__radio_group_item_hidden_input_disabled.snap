@@ -29,6 +29,12 @@ AttrMap {
             ),
         ),
         (
+            Id,
+            String(
+                "shipping-item-drone-input",
+            ),
+        ),
+        (
             TabIndex,
             String(
                 "-1",

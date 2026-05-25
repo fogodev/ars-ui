@@ -29,6 +29,12 @@ AttrMap {
             ),
         ),
         (
+            Id,
+            String(
+                "shipping-item-express-input",
+            ),
+        ),
+        (
             TabIndex,
             String(
                 "-1",

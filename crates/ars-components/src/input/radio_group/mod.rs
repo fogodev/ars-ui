@@ -493,15 +493,15 @@ impl ars_core::Machine for Machine {
                 };
 
                 Some(plan.apply(move |ctx: &mut Context| {
-                    if let Some(existing) = ctx
+                    if let Some(index) = ctx
                         .items
-                        .iter_mut()
-                        .find(|existing| existing.value == item.value)
+                        .iter()
+                        .position(|existing| existing.value == item.value)
                     {
-                        *existing = item;
-                    } else {
-                        ctx.items.push(item);
+                        ctx.items.remove(index);
                     }
+
+                    ctx.items.push(item);
 
                     if clears_focus {
                         ctx.focused_item = None;
@@ -984,6 +984,10 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
+            .set(
+                HtmlAttr::Id,
+                self.ctx.ids.item_part("item", item_value, "input"),
+            )
             .set(HtmlAttr::Type, "radio")
             .set(HtmlAttr::TabIndex, "-1")
             .set(HtmlAttr::Aria(AriaAttr::Hidden), "true")
@@ -1796,6 +1800,22 @@ mod tests {
     }
 
     #[test]
+    fn radio_group_register_existing_item_moves_to_latest_logical_order() {
+        let mut service = service(props());
+
+        drop(service.send(Event::RegisterItem(Radio::new(key("standard")))));
+
+        let values = service
+            .context()
+            .items
+            .iter()
+            .map(|item| item.value.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(values, vec![key("express"), key("drone"), key("standard")]);
+    }
+
+    #[test]
     fn radio_group_unregister_preserves_controlled_selected_value() {
         let mut service = service(props().value(key("express")));
 
@@ -2064,12 +2084,26 @@ mod tests {
             .item_hidden_input_attrs(&key("express"));
 
         assert_eq!(attrs.get(&HtmlAttr::Type), Some("radio"));
+        assert_eq!(
+            attrs.get(&HtmlAttr::Id),
+            Some("shipping-item-express-input")
+        );
         assert_eq!(attrs.get(&HtmlAttr::Name), Some("shipping_method"));
         assert_eq!(attrs.get(&HtmlAttr::Form), Some("checkout"));
         assert_eq!(attrs.get(&HtmlAttr::Value), Some("express"));
         assert!(attrs.contains(&HtmlAttr::Checked));
         assert!(attrs.contains(&HtmlAttr::Required));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Hidden)), Some("true"));
+    }
+
+    #[test]
+    fn radio_group_item_label_for_matches_hidden_input_id() {
+        let service = service(props());
+        let api = service.connect(&|_| {});
+        let label = api.item_label_attrs(&key("standard"));
+        let input = api.item_hidden_input_attrs(&key("standard"));
+
+        assert_eq!(label.get(&HtmlAttr::For), input.get(&HtmlAttr::Id));
     }
 
     #[test]

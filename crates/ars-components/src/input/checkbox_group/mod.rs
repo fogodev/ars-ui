@@ -467,9 +467,12 @@ impl ars_core::Machine for Machine {
             State::Idle,
             Context {
                 value: if let Some(value) = &props.value {
-                    Bindable::controlled(value.clone())
+                    Bindable::controlled(clamp_to_max(value.clone(), props.max_checked))
                 } else {
-                    Bindable::uncontrolled(props.default_value.clone())
+                    Bindable::uncontrolled(clamp_to_max(
+                        props.default_value.clone(),
+                        props.max_checked,
+                    ))
                 },
                 name: props.name.clone(),
                 disabled: props.disabled,
@@ -551,8 +554,15 @@ impl ars_core::Machine for Machine {
             }
 
             Event::SetValue(value) => {
-                let next = clamp_to_max(value.clone(), ctx.max_checked);
-                Some(sync_value_plan(props.value.clone(), next))
+                let controlled = props
+                    .value
+                    .clone()
+                    .map(|value| clamp_to_max(value, ctx.max_checked));
+                let next = controlled
+                    .clone()
+                    .unwrap_or_else(|| clamp_to_max(value.clone(), ctx.max_checked));
+
+                Some(sync_value_plan(controlled, next))
             }
 
             Event::CheckAll => {
@@ -592,8 +602,10 @@ impl ars_core::Machine for Machine {
                 let max_checked = props.max_checked;
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let controlled = controlled.map(|value| clamp_to_max(value, max_checked));
+
                     if let Some(value) = &controlled {
-                        ctx.value.set(clamp_to_max(value.clone(), max_checked));
+                        ctx.value.set(value.clone());
                     } else {
                         ctx.value
                             .set(clamp_to_max(ctx.value.get().clone(), max_checked));
@@ -1087,6 +1099,23 @@ mod tests {
     }
 
     #[test]
+    fn checkbox_group_controlled_value_is_clamped_to_max_checked() {
+        let service = service(props().value(set(&["alpha", "beta"])).max_checked(1));
+
+        assert_eq!(service.context().value.get(), &set(&["alpha"]));
+        assert_eq!(
+            service.connect(&|_| {}).hidden_input_configs(),
+            vec![HiddenInputConfig {
+                name: "features".to_string(),
+                value: "alpha".to_string(),
+                form_id: Some("settings".to_string()),
+                disabled: false,
+                required: false,
+            }]
+        );
+    }
+
+    #[test]
     fn checkbox_group_on_change_callback_receives_requested_set() {
         let changes = Arc::new(Mutex::new(Vec::new()));
 
@@ -1325,6 +1354,36 @@ mod tests {
         drop(service.set_props(props().max_checked(1)));
 
         assert_eq!(service.context().value.get(), &set(&["alpha"]));
+    }
+
+    #[test]
+    fn checkbox_group_set_props_clamps_controlled_value_when_max_checked_shrinks() {
+        let mut service = service(props().value(set(&["alpha", "beta", "gamma"])));
+
+        assert_eq!(
+            service.context().value.get(),
+            &set(&["alpha", "beta", "gamma"])
+        );
+
+        drop(
+            service.set_props(
+                props()
+                    .value(set(&["alpha", "beta", "gamma"]))
+                    .max_checked(1),
+            ),
+        );
+
+        assert_eq!(service.context().value.get(), &set(&["alpha"]));
+        assert_eq!(
+            service.connect(&|_| {}).hidden_input_configs(),
+            vec![HiddenInputConfig {
+                name: "features".to_string(),
+                value: "alpha".to_string(),
+                form_id: Some("settings".to_string()),
+                disabled: false,
+                required: false,
+            }]
+        );
     }
 
     #[test]

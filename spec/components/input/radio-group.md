@@ -606,6 +606,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemHiddenInput { item_value: Key::default() }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.item_part("item", item_value, "input"));
         attrs.set(HtmlAttr::Type, "radio");
         if let Some(ref name) = self.ctx.name {
             attrs.set(HtmlAttr::Name, name);
@@ -710,7 +711,7 @@ RadioGroup
 | ItemControl     | `<div>`   | `role="radio"`, `aria-checked`, roving `tabindex`      |
 | ItemIndicator   | `<div>`   | `aria-hidden="true"` — visual radio dot                |
 | ItemLabel       | `<label>` | `for` points to ItemHiddenInput                        |
-| ItemHiddenInput | `<input>` | `type="radio"`, `aria-hidden="true"` — form submission |
+| ItemHiddenInput | `<input>` | stable item input `id`, `type="radio"`, `aria-hidden="true"` — form submission |
 
 ## 3. Accessibility
 
