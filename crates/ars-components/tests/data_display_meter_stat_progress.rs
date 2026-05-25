@@ -780,7 +780,7 @@ fn progress_events_update_value_max_completion_reset_and_orientation() {
 
     drop(service.send(progress::Event::Reset));
 
-    assert_eq!(service.state(), &progress::State::Idle);
+    assert_eq!(service.state(), &progress::State::Loading);
     assert!(service.context().indeterminate);
     assert_eq!(service.context().percent, 0.0);
 }
@@ -807,6 +807,17 @@ fn progress_range_value_text_and_circle_attrs_are_derived() {
 
     assert!(circle.get(&HtmlAttr::StrokeDasharray).is_some());
     assert!(circle.get(&HtmlAttr::StrokeDashoffset).is_some());
+    assert_eq!(api.circle_stroke_dashoffset(-10.0), 0.0);
+    assert_eq!(
+        api.circle_range_attrs(f64::NAN)
+            .get(&HtmlAttr::StrokeDasharray),
+        Some("0")
+    );
+    assert_eq!(
+        api.circle_range_attrs(f64::INFINITY)
+            .get(&HtmlAttr::StrokeDashoffset),
+        Some("0")
+    );
 }
 
 #[test]

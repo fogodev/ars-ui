@@ -314,8 +314,8 @@ mod progress_proptests {
                 match ctx.value.get() {
                     None => {
                         prop_assert!(
-                            matches!(service.state(), progress::State::Loading | progress::State::Idle),
-                            "indeterminate value must be either active loading or reset idle"
+                            matches!(service.state(), progress::State::Loading),
+                            "indeterminate value must report loading state"
                         );
 
                         let attrs = service.connect(&|_| {}).root_attrs();

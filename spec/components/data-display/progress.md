@@ -33,7 +33,7 @@ and indeterminate (unknown duration) modes.
 | `SetValue`  | `Option<f64>` | Update value; `None` = indeterminate.                     |
 | `SetMax`    | `f64`         | Update the maximum bound.                                 |
 | `Complete`  | —             | Jump to complete state.                                   |
-| `Reset`     | —             | Return to initial/idle state.                             |
+| `Reset`     | —             | Return to the indeterminate loading state.                |
 | `SyncProps` | —             | Synchronize min, max, and orientation after prop changes. |
 
 ### 1.3 Context
@@ -230,7 +230,7 @@ impl ars_core::Machine for Machine {
                 }))
             }
             Event::Reset => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                Some(TransitionPlan::to(State::Loading).apply(|ctx| {
                     ctx.value.set(None);
                     ctx.indeterminate = true;
                     ctx.percent = 0.0;
@@ -392,6 +392,7 @@ impl<'a> Api<'a> {
 
     /// Stroke-dashoffset for an SVG circle with the given radius.
     pub fn circle_stroke_dashoffset(&self, radius: f64) -> f64 {
+        let radius = sanitize_radius(radius);
         let circumference = 2.0 * std::f64::consts::PI * radius;
         let pct = if self.ctx.indeterminate { 0.0 } else { self.ctx.percent / 100.0 };
         circumference * (1.0 - pct)
@@ -412,11 +413,20 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::CircleRange.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        let radius = sanitize_radius(radius);
         let offset = self.circle_stroke_dashoffset(radius);
         let circumference = 2.0 * std::f64::consts::PI * radius;
         attrs.set(HtmlAttr::StrokeDasharray, circumference.to_string());
         attrs.set(HtmlAttr::StrokeDashoffset, offset.to_string());
         attrs
+    }
+
+    fn sanitize_radius(radius: f64) -> f64 {
+        if radius.is_finite() && radius >= 0.0 {
+            radius
+        } else {
+            0.0
+        }
     }
 }
 

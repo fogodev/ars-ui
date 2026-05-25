@@ -166,7 +166,7 @@ pub enum Event {
     /// Jump to complete state.
     Complete,
 
-    /// Return to the idle state with an indeterminate value.
+    /// Return to the indeterminate loading state.
     Reset,
 
     /// Synchronize non-value props from adapter-owned prop changes.
@@ -441,11 +441,7 @@ impl ars_core::Machine for Machine {
             Event::Reset => {
                 let controlled_prop = props.value;
                 let value = effective_event_value(None, controlled_prop);
-                let next_state = if controlled_prop.is_some() {
-                    state_for_value(value, ctx.min, ctx.max)
-                } else {
-                    State::Idle
-                };
+                let next_state = state_for_value(value, ctx.min, ctx.max);
 
                 Some(
                     TransitionPlan::to(next_state).apply(move |ctx: &mut Context| {
@@ -651,6 +647,7 @@ impl Api<'_> {
     /// Computes stroke-dashoffset for an SVG circle with the given radius.
     #[must_use]
     pub fn circle_stroke_dashoffset(&self, radius: f64) -> f64 {
+        let radius = sanitize_radius(radius);
         let circumference = 2.0 * core::f64::consts::PI * radius;
 
         let percent = if self.ctx.indeterminate {
@@ -673,6 +670,7 @@ impl Api<'_> {
     pub fn circle_range_attrs(&self, radius: f64) -> AttrMap {
         let mut attrs = part_attrs(&Part::CircleRange { radius });
 
+        let radius = sanitize_radius(radius);
         let circumference = 2.0 * core::f64::consts::PI * radius;
         let offset = self.circle_stroke_dashoffset(radius);
 
@@ -800,6 +798,14 @@ const fn display_value_now(value: f64, raw_min: f64, raw_max: f64) -> f64 {
         clamp_value(value, min, max)
     } else {
         min
+    }
+}
+
+fn sanitize_radius(radius: f64) -> f64 {
+    if radius.is_finite() && radius >= 0.0 {
+        radius
+    } else {
+        0.0
     }
 }
 
