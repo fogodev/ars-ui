@@ -76,6 +76,8 @@ pub enum Event {
     SyncValue(Option<f64>),
     /// Synchronize output-affecting props stored in context.
     SetProps,
+    /// Track whether a Label part is rendered.
+    SetHasLabel(bool),
     /// Track whether a Description part is rendered.
     SetHasDescription(bool),
 }
@@ -130,6 +132,8 @@ pub struct Context {
     pub discrete: bool,
     /// Optional labels for discrete value positions.
     pub value_labels: Option<Vec<String>>,
+    /// Whether a Label part is rendered (gates aria-labelledby).
+    pub has_label: bool,
     /// Whether a Description part is rendered (gates aria-describedby).
     pub has_description: bool,
     /// Resolved locale for i18n.
@@ -528,6 +532,12 @@ impl ars_core::Machine for Machine {
                     ctx.value.set(snapped);
                 }))
             }
+            Event::SetHasLabel(has_label) => {
+                let has_label = *has_label;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_label = has_label;
+                }))
+            }
             Event::SetHasDescription(has_description) => {
                 let has_description = *has_description;
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -710,10 +720,12 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), value_text);
         attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), if is_horizontal { "horizontal" } else { "vertical" });
         // aria-label from messages provides the accessible name.
-        // When the adapter renders a visible <label> element, it sets aria-labelledby
-        // on the thumb which takes precedence over aria-label per WAI-ARIA.
+        // When the adapter renders a visible <label> element, it sends
+        // SetHasLabel(true) so the thumb can reference the concrete label id.
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.thumb_label)(&self.ctx.locale));
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
+        if self.ctx.has_label {
+            attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
+        }
         if self.ctx.disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); }
         if self.ctx.readonly { attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true"); }
         if self.ctx.invalid { attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true"); }
@@ -977,7 +989,7 @@ Slider
 | `aria-orientation` | Thumb             | `"horizontal"` or `"vertical"`                                |
 | `aria-disabled`    | Thumb             | Present when `disabled=true`                                  |
 | `aria-readonly`    | Thumb             | Present when `readonly=true`                                  |
-| `aria-labelledby`  | Thumb             | Points to Label id                                            |
+| `aria-labelledby`  | Thumb             | Points to Label id when the Label part is rendered            |
 | `aria-hidden`      | DraggingIndicator | `"true"` — purely decorative visual feedback during drag      |
 | `hidden`           | DraggingIndicator | Present when not dragging (indicator is invisible when idle)  |
 

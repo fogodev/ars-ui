@@ -94,6 +94,9 @@ pub enum Event {
     /// Synchronize output-affecting props stored in context.
     SetProps,
 
+    /// Track whether the label part is rendered.
+    SetHasLabel(bool),
+
     /// Track whether the description part is rendered.
     SetHasDescription(bool),
 }
@@ -208,6 +211,9 @@ pub struct Context {
 
     /// Whether a description part is rendered.
     pub has_description: bool,
+
+    /// Whether a label part is rendered.
+    pub has_label: bool,
 
     /// Resolved locale.
     pub locale: Locale,
@@ -414,6 +420,7 @@ impl ars_core::Machine for Machine {
                 discrete: props.discrete,
                 value_labels: props.value_labels.clone(),
                 has_description: false,
+                has_label: false,
                 locale: env.locale.clone(),
                 messages: messages.clone(),
                 ids: ComponentIds::from_id(&props.id),
@@ -551,6 +558,13 @@ impl ars_core::Machine for Machine {
                 let has_description = *has_description;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.has_description = has_description;
+                }))
+            }
+
+            Event::SetHasLabel(has_label) => {
+                let has_label = *has_label;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.has_label = has_label;
                 }))
             }
         }
@@ -920,10 +934,6 @@ impl Api<'_> {
                 (self.ctx.messages.thumb_label)(&self.ctx.locale),
             )
             .set(
-                HtmlAttr::Aria(AriaAttr::LabelledBy),
-                self.ctx.ids.part("label"),
-            )
-            .set(
                 HtmlAttr::TabIndex,
                 if self.ctx.disabled { "-1" } else { "0" },
             )
@@ -947,6 +957,13 @@ impl Api<'_> {
 
         if self.ctx.invalid {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+        }
+
+        if self.ctx.has_label {
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::LabelledBy),
+                self.ctx.ids.part("label"),
+            );
         }
 
         if self.ctx.has_description {
@@ -1714,6 +1731,25 @@ mod tests {
         assert_eq!(
             attrs.get(&HtmlAttr::Aria(AriaAttr::ValueText)),
             Some("2 of 3 (Low)")
+        );
+    }
+
+    #[test]
+    fn thumb_attrs_only_reference_label_when_label_part_is_rendered() {
+        let mut svc = service(props());
+
+        let attrs = svc.connect(&|_| {}).thumb_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Label)), Some("Value"));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::LabelledBy)));
+
+        drop(svc.send(Event::SetHasLabel(true)));
+
+        let attrs = svc.connect(&|_| {}).thumb_attrs();
+
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+            Some("volume-label")
         );
     }
 

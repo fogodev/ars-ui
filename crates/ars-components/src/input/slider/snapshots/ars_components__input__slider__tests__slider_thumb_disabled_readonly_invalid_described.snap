@@ -62,14 +62,6 @@ AttrMap {
         ),
         (
             Aria(
-                LabelledBy,
-            ),
-            String(
-                "volume-label",
-            ),
-        ),
-        (
-            Aria(
                 Orientation,
             ),
             String(
