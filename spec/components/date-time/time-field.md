@@ -466,7 +466,7 @@ fn day_period_from_cjk_buffer(
 }
 ```
 
-The `TypeIntoSegment` handler for `DateSegmentKind::DayPeriod` in the TimeField state machine MUST delegate to this logic for CJK locales instead of the current ASCII-only `'a'`/`'p'` check. When the buffer is ambiguous after the first character, the handler schedules a `TypeBufferCommit` effect (500ms) exactly as numeric segments do. On `TypeBufferCommit` for a `DayPeriod` segment, call `day_period_from_cjk_buffer` with the resolved hour cycle, current hour segment value, and current day-period segment value to apply the timeout fallback without flipping H11 PM values.
+The `TypeIntoSegment` handler for `DateSegmentKind::DayPeriod` in the TimeField state machine MUST delegate to this logic for CJK locales instead of the current ASCII-only `'a'`/`'p'` check. When the buffer is ambiguous after the first character, the handler schedules a `TypeBufferCommit` effect (500ms) exactly as numeric segments do. When a later character resolves the day period, the handler cancels the pending `TypeBufferCommit` effect before publishing the resolved value. On `TypeBufferCommit` for a `DayPeriod` segment, call `day_period_from_cjk_buffer` with the resolved hour cycle, current hour segment value, and current day-period segment value to apply the timeout fallback without flipping H11 PM values.
 
 ### 1.7 Timezone Handling
 
@@ -754,7 +754,7 @@ impl ars_core::Machine for Machine {
                             ctx.set_segment_value(DateSegmentKind::DayPeriod, value);
                             ctx.type_buffer.clear();
                             Machine::maybe_publish(ctx);
-                        }))
+                        }).cancel_effect(Effect::TypeBufferCommit))
                     }
                     k2 if k2.is_numeric() => {
                         if !ch.is_ascii_digit() { return None; }

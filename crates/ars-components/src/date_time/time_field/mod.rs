@@ -1378,17 +1378,21 @@ fn type_into_segment(
 
         let target = next.map_or_else(|| state.clone(), State::Focused);
 
-        return Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
-            ctx.set_segment_value(kind, value);
+        return Some(
+            TransitionPlan::to(target)
+                .apply(move |ctx: &mut Context| {
+                    ctx.set_segment_value(kind, value);
 
-            ctx.type_buffer.clear();
+                    ctx.type_buffer.clear();
 
-            if let Some(next) = next {
-                ctx.focused_segment = Some(next);
-            }
+                    if let Some(next) = next {
+                        ctx.focused_segment = Some(next);
+                    }
 
-            maybe_publish(ctx);
-        }));
+                    maybe_publish(ctx);
+                })
+                .cancel_effect(Effect::TypeBufferCommit),
+        );
     }
 
     if !matches!(
@@ -1531,6 +1535,14 @@ fn apply_value(ctx: &mut Context, value: Option<Time>) {
     ctx.rebuild_segments();
 }
 
+fn apply_controlled_value(ctx: &mut Context, value: Option<Time>) {
+    let value = value.map(|time| clamp_time(time, ctx.min_value.as_ref(), ctx.max_value.as_ref()));
+
+    ctx.value.set(value);
+    ctx.value.sync_controlled(Some(value));
+    ctx.rebuild_segments();
+}
+
 fn sync_props(ctx: &mut Context, props: &Props) {
     let was_controlled = ctx.value.is_controlled();
 
@@ -1545,9 +1557,9 @@ fn sync_props(ctx: &mut Context, props: &Props) {
     ctx.force_leading_zeros = props.force_leading_zeros;
 
     if let Some(value) = props.value {
-        apply_value(ctx, Some(value));
+        apply_controlled_value(ctx, Some(value));
     } else if was_controlled {
-        apply_value(ctx, None);
+        apply_controlled_value(ctx, None);
     } else {
         ctx.value.sync_controlled(None);
 

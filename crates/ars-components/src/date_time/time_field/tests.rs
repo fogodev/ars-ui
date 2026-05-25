@@ -288,6 +288,38 @@ fn cjk_day_period_input_buffers_ambiguous_prefix_and_commits_disambiguation() {
 }
 
 #[test]
+fn cjk_day_period_resolution_cancels_pending_commit_effect() {
+    let mut service = Service::<Machine>::new(
+        props().hour_cycle(Some(HourCycle::H12)),
+        &env("ja-JP"),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment {
+        kind: DateSegmentKind::DayPeriod,
+    }));
+    drop(service.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::DayPeriod,
+        ch: '午',
+    }));
+
+    let result = service.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::DayPeriod,
+        ch: '後',
+    });
+
+    assert_eq!(result.cancel_effects, vec![Effect::TypeBufferCommit]);
+    assert!(result.pending_effects.is_empty());
+    assert_eq!(service.context().type_buffer, "");
+    assert_eq!(
+        service
+            .context()
+            .get_segment_value(DateSegmentKind::DayPeriod),
+        Some(1)
+    );
+}
+
+#[test]
 fn cjk_day_period_timeout_uses_current_hour_as_fallback() {
     let mut ctx = Service::<Machine>::new(
         props().hour_cycle(Some(HourCycle::H12)),
@@ -598,6 +630,45 @@ fn controlled_prop_sync_can_clear_value_without_submitting_stale_time() {
     assert_eq!(
         service.context().get_segment_value(DateSegmentKind::Hour),
         None
+    );
+}
+
+#[test]
+fn uncontrolled_prop_sync_to_value_enters_controlled_mode() {
+    let mut service = Service::<Machine>::new(
+        props()
+            .hour_cycle(Some(HourCycle::H23))
+            .default_value(Some(time(8, 30, 0)))
+            .name(Some(String::from("meeting_time"))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    assert!(!service.context().value.is_controlled());
+
+    drop(
+        service.set_props(
+            props()
+                .hour_cycle(Some(HourCycle::H23))
+                .value(Some(time(14, 30, 0)))
+                .name(Some(String::from("meeting_time"))),
+        ),
+    );
+
+    assert!(service.context().value.is_controlled());
+    assert_eq!(service.context().value.get(), &Some(time(14, 30, 0)));
+
+    drop(service.send(Event::IncrementSegment {
+        kind: DateSegmentKind::Hour,
+    }));
+
+    assert_eq!(service.context().value.get(), &Some(time(14, 30, 0)));
+    assert_eq!(
+        attr(
+            &service.connect(&|_| {}).hidden_input_attrs(),
+            HtmlAttr::Value
+        ),
+        Some("14:30:00")
     );
 }
 
