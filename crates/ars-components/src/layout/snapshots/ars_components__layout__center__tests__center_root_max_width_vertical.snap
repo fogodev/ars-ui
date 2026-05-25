@@ -1,0 +1,46 @@
+---
+source: crates/ars-components/src/layout/center.rs
+expression: "snapshot_attrs(&Api::new(Props::new().max_width(Spacing::Css(\"80ch\".into())).horizontal(true).vertical(true),\nfalse, None,).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "center",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            MaxInlineSize,
+            "80ch",
+        ),
+        (
+            MarginInline,
+            "auto",
+        ),
+        (
+            Display,
+            "flex",
+        ),
+        (
+            AlignItems,
+            "center",
+        ),
+        (
+            JustifyContent,
+            "center",
+        ),
+    ],
+}

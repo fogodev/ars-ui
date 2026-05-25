@@ -1,0 +1,46 @@
+---
+source: crates/ars-components/src/layout/splitter.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).panel_attrs(0))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-collapsed",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-panel-id",
+            ),
+            String(
+                "left",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "panel",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "splitter",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Width,
+            "0%",
+        ),
+    ],
+}

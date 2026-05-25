@@ -1,0 +1,50 @@
+---
+source: crates/ars-components/src/layout/stack.rs
+expression: "snapshot_attrs(&Api::new(Props::new().full_width(true).full_height(true),\nfalse, None).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "stack",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Width,
+            "100%",
+        ),
+        (
+            Height,
+            "100%",
+        ),
+        (
+            Display,
+            "flex",
+        ),
+        (
+            FlexDirection,
+            "row",
+        ),
+        (
+            AlignItems,
+            "stretch",
+        ),
+        (
+            JustifyContent,
+            "flex-start",
+        ),
+    ],
+}

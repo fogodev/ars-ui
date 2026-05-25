@@ -83,6 +83,26 @@ exclude_re = [
   # `target >= current` agree for every reachable call at this guard.
   'steps/mod\.rs:\d+:\d+: replace > with >= in step_change_plan',
 
+  # In Splitter's resize sign branch, `delta == 0.0` produces zero movement
+  # through either side. The left and right snap guards below remain the
+  # observable zero-delta contract and are covered separately.
+  'splitter\.rs:\d+:46: replace > with >= in compute_resize',
+
+  # Splitter snap equality changes only enter assignments that write the value
+  # already present: `size == min_size` sets `min_size`, and
+  # `size == collapsed_size` sets `collapsed_size`.
+  'splitter\.rs:\d+:28: replace < with <= in snap_if_collapsible',
+  'splitter\.rs:\d+:61: replace > with >= in snap_if_collapsible',
+  # Splitter End-key arithmetic is capped by the same adjacent panel shrink
+  # and explicit max-size constraints: `max + current` is always at least as
+  # large as the intended `max - current`, so the later clamp applies the same
+  # observable movement.
+  'splitter\.rs:\d+:29: replace - with \+ in handle_keyboard',
+  # Invalid Collapse/Expand events deliberately produce the same public service
+  # result whether represented as `Some(no-op plan)` or `None`: no state,
+  # context, or effect changes.
+  'splitter\.rs:\d+:\d+: delete match arm \(State::Idle, Event::CollapsePanel\{\.\.\} \| Event::ExpandPanel\{\.\.\}\) in <impl ars_core::Machine for Machine>::transition',
+
   # Toast manager auto-id resolver chain (`resolve_or_generate_id`,
   # `make_auto_id`, `auto_id_collides`, `push_decimal`). Each of these
   # mutants either freezes the id counter, pins the candidate to a constant,

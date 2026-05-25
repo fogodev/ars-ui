@@ -1,0 +1,34 @@
+---
+source: crates/ars-components/src/layout/grid.rs
+expression: "snapshot_attrs(&Api::new(Props::new(), None).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "grid",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Display,
+            "grid",
+        ),
+        (
+            GridTemplateColumns,
+            "repeat(1, minmax(0, 1fr))",
+        ),
+    ],
+}
