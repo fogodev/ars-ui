@@ -316,13 +316,21 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            (_, Event::Blur) => Some(TransitionPlan::to(State::Inactive).apply(
-                |ctx: &mut Context| {
-                    ctx.active_menu = None;
-                    ctx.focused_item = None;
-                    ctx.focus_visible = false;
-                },
-            )),
+            (_, Event::Blur) => {
+                let disabled = props.disabled;
+
+                Some(
+                    TransitionPlan::to(State::Inactive).apply(move |ctx: &mut Context| {
+                        ctx.active_menu = None;
+                        ctx.focus_visible = false;
+                        if disabled {
+                            ctx.focused_item = None;
+                        } else {
+                            ensure_focused_entry(ctx, false);
+                        }
+                    }),
+                )
+            }
 
             (State::Active { .. }, Event::MoveToNextMenu) => {
                 move_active_plan(ctx, props, DirectionIntent::Next)
@@ -342,6 +350,7 @@ impl ars_core::Machine for Machine {
 
             (_, Event::UpdateMenus(menus)) => {
                 let menus = menus.clone();
+                let disabled = props.disabled;
                 let active_removed = ctx
                     .active_menu
                     .as_ref()
@@ -355,6 +364,7 @@ impl ars_core::Machine for Machine {
                 plan = plan.apply(move |ctx: &mut Context| {
                     ctx.menus = menus;
                     invalidate_menu_references(ctx);
+                    ensure_focused_entry(ctx, disabled);
                 });
 
                 Some(plan)
@@ -770,6 +780,16 @@ fn invalidate_menu_references(ctx: &mut Context) {
     }
 }
 
+fn ensure_focused_entry(ctx: &mut Context, disabled: bool) {
+    if disabled {
+        return;
+    }
+
+    if ctx.focused_item.is_none() {
+        ctx.focused_item = ctx.menus.first_key().cloned();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::{format, string::String};
@@ -873,6 +893,14 @@ mod tests {
     #[test]
     fn root_trigger_and_content_attrs_emit_menu_roles() {
         let mut menu_bar = service(Props::new().id("menu-bar"));
+        let initial_api = menu_bar.connect(&|_| {});
+
+        assert_eq!(
+            initial_api
+                .menu_trigger_attrs(&key("file"))
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
 
         drop(menu_bar.send(Event::Focus { is_keyboard: true }));
 
@@ -882,6 +910,11 @@ mod tests {
         assert_eq!(
             api.menu_trigger_attrs(&key("file")).get(&HtmlAttr::Role),
             Some("menuitem")
+        );
+        assert_eq!(
+            api.menu_trigger_attrs(&key("file"))
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
         );
         assert_eq!(
             api.menu_content_attrs(&key("file")).get(&HtmlAttr::Role),
@@ -1093,7 +1126,7 @@ mod tests {
 
         drop(menu_bar.send(Event::Blur));
 
-        assert_eq!(menu_bar.context().focused_item, None);
+        assert_eq!(menu_bar.context().focused_item, Some(key("file")));
         assert!(!menu_bar.context().focus_visible);
     }
 
@@ -1114,7 +1147,7 @@ mod tests {
 
         drop(menu_bar.send(Event::FocusItem(key("missing"))));
 
-        assert_eq!(menu_bar.context().focused_item, None);
+        assert_eq!(menu_bar.context().focused_item, Some(key("file")));
 
         drop(menu_bar.send(Event::ActivateMenu(key("file"))));
         drop(menu_bar.set_props(new_props));
@@ -1203,7 +1236,7 @@ mod tests {
 
         assert_eq!(menu_bar.state(), &State::Inactive);
         assert_eq!(menu_bar.context().active_menu, None);
-        assert_eq!(menu_bar.context().focused_item, None);
+        assert_eq!(menu_bar.context().focused_item, Some(key("file")));
     }
 
     #[test]

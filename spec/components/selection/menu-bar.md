@@ -147,11 +147,13 @@ Transition requirements:
   in active state it also switches the active menu to that trigger.
 - `Focus { is_keyboard }` updates focus-visible state and initializes focus to the first menu
   if no trigger is focused.
-- `Blur` returns to inactive state and clears active/focused/focus-visible state.
+- `Blur` returns to inactive state, clears active/focus-visible state, and preserves or
+  restores a focused trigger so one enabled menu trigger remains tabbable.
 - `MoveToNextMenu` and `MoveToPrevMenu` use collection order and `loop_focus`; in active
   state they switch the active menu, and in inactive state they only move focused trigger.
 - `UpdateMenus` replaces the top-level collection and invalidates stale active/focused keys;
-  if the active menu key is removed, the machine transitions to `Inactive`.
+  if the active menu key is removed, the machine transitions to `Inactive`; when enabled,
+  it restores focus to the first menu if no focused trigger remains.
 - `SyncProps` updates ids; when the menubar becomes disabled, it transitions to `Inactive`
   and clears active/focused/focus-visible state.
 - Keyboard dispatch helpers resolve `Direction::Auto` through `Context::locale` before
@@ -222,7 +224,7 @@ Nested item-type parts (`Item`, `CheckboxItem`, `RadioItem`, `Separator`, `SubTr
 | `role`             | `MenuTrigger` | `menuitem`                                   |
 | `aria-haspopup`    | `MenuTrigger` | `menu`                                       |
 | `aria-expanded`    | `MenuTrigger` | `true` when menu is open                     |
-| `tabindex`         | `MenuTrigger` | Roving: active trigger gets `0`, others `-1` |
+| `tabindex`         | `MenuTrigger` | Roving: focused trigger gets `0`, others `-1`; when enabled and menus exist, exactly one trigger is tabbable |
 
 ### 3.2 Keyboard Interaction
 

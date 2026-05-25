@@ -1073,6 +1073,8 @@ fn open_plan(
         ctx.open = true;
         ctx.position = Some(position);
         ctx.highlighted_key = highlighted_key.clone();
+        ctx.submenu_open = None;
+        ctx.typeahead = typeahead::State::default();
 
         if !was_open && let Some(callback) = &on_open_change {
             callback(true);
@@ -1514,6 +1516,19 @@ mod tests {
         assert!(menu.context().open);
         assert_eq!(menu.context().position, Some((12.0, 34.0)));
         assert_eq!(menu.context().highlighted_key, Some(key("alpha")));
+
+        drop(menu.send(Event::OpenSubmenu(key("delta"))));
+        drop(menu.send(Event::TypeaheadSearch('d', 10)));
+
+        assert_eq!(menu.context().submenu_open, Some(key("delta")));
+        assert_eq!(menu.context().typeahead.search, "d");
+
+        drop(menu.send(Event::ContextOpen { x: 24.0, y: 48.0 }));
+
+        assert_eq!(menu.context().position, Some((24.0, 48.0)));
+        assert_eq!(menu.context().highlighted_key, Some(key("alpha")));
+        assert_eq!(menu.context().submenu_open, None);
+        assert_eq!(menu.context().typeahead.search, "");
     }
 
     #[test]

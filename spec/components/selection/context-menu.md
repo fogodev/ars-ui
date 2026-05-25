@@ -185,7 +185,8 @@ Transition requirements:
 
 - `ContextOpen { x, y }` is ignored when disabled. Otherwise it opens the menu, stores
   `position = Some((x, y))`, and highlights the first enabled item. Re-opening while already
-  open updates the stored position and recomputes the first enabled highlight.
+  open updates the stored position, recomputes the first enabled highlight, and clears
+  transient submenu and typeahead state.
 - `Close` and `ClickOutside` close the menu and clear `highlighted_key`, `submenu_open`,
   `typeahead`, and `position`.
 - `Highlight*` events only target focusable collection items, honoring `disabled_keys` and
