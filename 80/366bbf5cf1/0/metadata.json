@@ -1,0 +1,93 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "80366bbf5cf1",
+  "session_id": "019e5d7f-a558-7063-8337-1cefa62f884e",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-25T20:56:58.58816Z",
+  "branch": "t3code/39110ddb",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "21836597e18a",
+  "token_usage": {
+    "input_tokens": 2681845,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 178466560,
+    "output_tokens": 193919,
+    "api_call_count": 1211
+  },
+  "summary": {
+    "intent": "Implement GitHub issues #245 (ContextMenu agnostic core) and #249 (MenuBar agnostic core) in one combined PR targeting fogodev/ars-ui, following the repo's TDD, spec-conformance, proptest, mutation, and post-implementation-audit workflow.",
+    "outcome": "Both modules were fully implemented, reviewed by Codex across six review passes (addressing 12 findings), all behavior tests and proptests pass, specs were updated, and the PR (#679) is open with Codex approval—but the CI branch-coverage ratchet kept failing due to a mismatch between local crate-only coverage and the CI merged-LCOV denominator; the final coverage fix commit was pushed but its CI result is unconfirmed.",
+    "learnings": {
+      "repo": [
+        "Snapshot tests follow a per-part/per-branch naming convention—one `.snap` file per named anatomy part or output-affecting state branch—not one aggregate snapshot per component.",
+        "The post-implementation audit skill requires at least two 'anything else missing?' rounds and coverage audit across unit, snapshot, proptest, mutation, spec-conformance, llvm-cov, and doc coverage.",
+        "The waiting-for-codex-review loop uses PR issue reactions as state: 👀 = reviewing in progress, 👍 = approved; all unresolved Codex threads must be addressed before the next @codex review trigger.",
+        "The `cargo xtask coverage check` ratchet runs against a merged workspace LCOV artifact produced by CI, whose branch denominator is significantly larger than a crate-local `cargo llvm-cov nextest -p ars-components` run—local crate coverage can pass while CI fails.",
+        "The `cargo mutants` baseline invocation does not pass `--features i18n`; any test file that conditionally compiles helpers under that feature must be gated consistently, or the baseline compile fails before any mutant runs.",
+        "The agnostic core pattern uses `NoEffect` as the machine's effect type; all platform side effects (live focus, positioning, dismissal timers) belong in framework adapters, not the core machine.",
+        "Direction::Auto must be resolved from the stored locale at dispatch-helper call time, not stored as Auto in the resolved direction field used for arrow-key routing.",
+        "`ContextOpen` must reset transient submenu and typeahead state when re-opening an already-open context menu.",
+        "Disabling a component mid-session must synchronize all dependent state fields (open/active, highlight, typeahead, callbacks) in a single SyncProps transition, not just flip the disabled flag.",
+        "MenuBar must always maintain a valid roving-tabindex entry trigger (one trigger with tabindex=0) while enabled—both after UpdateMenus and after re-enable via SyncProps."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/utility/mod.rs",
+          "line": 780,
+          "end_line": 865,
+          "finding": "The highlight proptest helpers were not gated under #[cfg(feature = \"i18n\")], causing cargo mutants baseline compile failure even though the module only compiles meaningfully with that feature enabled."
+        },
+        {
+          "path": "crates/ars-components/src/selection/menu_bar/mod.rs",
+          "line": 532,
+          "end_line": 560,
+          "finding": "The trigger keydown ArrowDown activation arm was originally guarded with `dir == Ltr`, breaking RTL horizontal menubars; the arm must be unconditional because ArrowDown means 'open menu' regardless of text direction."
+        },
+        {
+          "path": "crates/ars-components/src/selection/menu_bar/mod.rs",
+          "line": 730,
+          "end_line": 755,
+          "finding": "The adjacent_key helper loop-wrap branch (line 733) was consistently uncovered; exercising it requires starting from the actual last item in the collection, not a middle item."
+        },
+        {
+          "path": "crates/ars-components/src/selection/context_menu/mod.rs",
+          "line": 1240,
+          "end_line": 1252,
+          "finding": "The action_plan close-via-item-selection branch was uncovered; on_open_change fires when an action item selection closes the menu, which requires a test that dispatches SelectItem in the open state."
+        },
+        {
+          "path": "crates/ars-components/src/selection/menu/mod.rs",
+          "line": 1,
+          "end_line": 1880,
+          "finding": "The existing menu module is the canonical template for new selection core machines: item types, typeahead delegation, disabled behavior, StaticCollection, ComponentIds, ComponentPart, ConnectApi, and proptest invariant shape."
+        }
+      ],
+      "workflow": [
+        "Running local `cargo llvm-cov nextest -p <crate> --branch` is necessary but not sufficient to verify CI coverage—the CI gate runs against a merged workspace LCOV whose branch denominator includes integration and feature-flag test runs; download the CI coverage artifact with `gh run download --name coverage-diagnostics` and run the xtask check against that file before committing a coverage fix.",
+        "Adding assertion-heavy test functions can lower branch percentage even when they exercise product code, because test control flow adds branches to the denominator; prefer extending existing test functions with a few extra calls over adding new standalone functions.",
+        "cargo mutants can stall in the final `cargo test --no-run` compile step when other cargo jobs are running concurrently; SIGKILL the process and rely on previously-completed per-file passes rather than waiting indefinitely.",
+        "When a CI job produces a flaky failure unrelated to the branch changes, `gh run rerun --failed` restarts only the failed jobs without re-running the entire workflow.",
+        "The repo's pre-push gate is `cargo xci-fast`; running it locally before the first push catches clippy, fmt, spec, snapshot, and integration issues that would otherwise surface as CI failures.",
+        "Spec files in spec/components and spec/leptos-components and spec/dioxus-components must all be updated consistently when an agnostic-core contract changes, not just the primary component spec."
+      ]
+    },
+    "friction": [
+      "Local crate branch coverage consistently reported passing (90.0%+) while CI merged-LCOV kept failing by 2–7 branches, requiring four separate coverage-fix commits and multiple full CI runs before the gap was diagnosed.",
+      "cargo mutants silently stalled in the final compile phase for over 30 minutes before being force-killed; it produced no error output and appeared to be making progress.",
+      "The CI coverage artifact download (`gh run download --name coverage-diagnostics`) was not attempted until after three failed coverage-fix commits; discovering this tool earlier would have saved two full CI run cycles.",
+      "A flaky e2e test (ars-e2e::fixtures::fixture_server_wait_reports_timeout_output_and_removes_log) failed a CI run unrelated to the selection changes, consuming a full CI cycle before diagnosis.",
+      "Codex posted findings across six review passes (12 total threads); while all were valid, the review loop took longer than expected because each @codex review trigger required waiting through a full CI fan-out before Codex began reviewing.",
+      "The nightly rustfmt formatter disagreed with stable fmt on the split match arms in the RTL ArrowDown fix, requiring an additional format-fix commit."
+    ],
+    "open_items": [
+      "Final CI Coverage ratchet result for the last commit (covering context menu ratchet gaps) is unconfirmed in the transcript—PR #679 must be verified green before merge.",
+      "Adapter components for ContextMenu and MenuBar (Leptos and Dioxus) are explicitly out of scope for this PR and remain unimplemented.",
+      "cargo mutants was run once against context_menu and menu_bar at initial implementation; the post-review behavioral fixes were not re-verified by mutation testing due to the stuck mutants process.",
+      "The spec/leptos-components and spec/dioxus-components adapter specs received automated text replacements but were not validated against actual adapter implementations.",
+      "PR #679 requires issues #245 and #249 to auto-close via the 'Closes' keywords upon merge—verify both issues close correctly after merge."
+    ]
+  }
+}
