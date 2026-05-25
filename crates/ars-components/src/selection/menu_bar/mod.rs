@@ -541,24 +541,24 @@ impl Api<'_> {
 
     /// Dispatches trigger keydown events.
     pub fn on_trigger_keydown(&self, key: &Key, data: &KeyboardEventData) {
+        let dir = self.resolved_dir();
+
         match (self.props.orientation, data.key) {
             (_, KeyboardKey::Enter | KeyboardKey::Space)
             | (Orientation::Horizontal, KeyboardKey::ArrowDown) => {
                 (self.send)(Event::ActivateMenu(key.clone()));
             }
 
-            (Orientation::Vertical, KeyboardKey::ArrowRight)
-                if self.props.dir == Direction::Ltr =>
-            {
+            (Orientation::Vertical, KeyboardKey::ArrowRight) if dir == Direction::Ltr => {
                 (self.send)(Event::ActivateMenu(key.clone()));
             }
 
-            (Orientation::Vertical, KeyboardKey::ArrowLeft) if self.props.dir == Direction::Rtl => {
+            (Orientation::Vertical, KeyboardKey::ArrowLeft) if dir == Direction::Rtl => {
                 (self.send)(Event::ActivateMenu(key.clone()));
             }
 
             (Orientation::Horizontal, KeyboardKey::ArrowRight) => {
-                if self.props.dir == Direction::Rtl {
+                if dir == Direction::Rtl {
                     (self.send)(Event::MoveToPrevMenu);
                 } else {
                     (self.send)(Event::MoveToNextMenu);
@@ -566,7 +566,7 @@ impl Api<'_> {
             }
 
             (Orientation::Horizontal, KeyboardKey::ArrowLeft) => {
-                if self.props.dir == Direction::Rtl {
+                if dir == Direction::Rtl {
                     (self.send)(Event::MoveToNextMenu);
                 } else {
                     (self.send)(Event::MoveToPrevMenu);
@@ -594,9 +594,11 @@ impl Api<'_> {
 
     /// Dispatches content keydown events handled by the menu bar shell.
     pub fn on_content_keydown(&self, data: &KeyboardEventData) {
+        let dir = self.resolved_dir();
+
         match (self.props.orientation, data.key) {
             (Orientation::Horizontal, KeyboardKey::ArrowRight) => {
-                if self.props.dir == Direction::Rtl {
+                if dir == Direction::Rtl {
                     (self.send)(Event::MoveToPrevMenu);
                 } else {
                     (self.send)(Event::MoveToNextMenu);
@@ -604,7 +606,7 @@ impl Api<'_> {
             }
 
             (Orientation::Horizontal, KeyboardKey::ArrowLeft) => {
-                if self.props.dir == Direction::Rtl {
+                if dir == Direction::Rtl {
                     (self.send)(Event::MoveToNextMenu);
                 } else {
                     (self.send)(Event::MoveToPrevMenu);
@@ -633,6 +635,14 @@ impl Api<'_> {
     /// Dispatches root blur.
     pub fn on_root_blur(&self) {
         (self.send)(Event::Blur);
+    }
+
+    fn resolved_dir(&self) -> Direction {
+        if self.props.dir == Direction::Auto {
+            Direction::from(self.ctx.locale.direction())
+        } else {
+            self.props.dir
+        }
     }
 }
 
@@ -767,7 +777,7 @@ mod tests {
 
     use ars_collections::{CollectionBuilder, Key};
     use ars_core::{
-        AriaAttr, ConnectApi, Direction, Env, HtmlAttr, KeyboardKey, Orientation, Service,
+        AriaAttr, ConnectApi, Direction, Env, HtmlAttr, KeyboardKey, Locale, Orientation, Service,
     };
     use ars_interactions::KeyboardEventData;
 
@@ -819,6 +829,18 @@ mod tests {
 
     fn service(props: Props) -> Service<Machine> {
         let mut service = Service::<Machine>::new(props, &Env::default(), &Messages);
+
+        drop(service.send(Event::UpdateMenus(collection())));
+
+        service
+    }
+
+    fn service_with_locale(props: Props, locale: &str) -> Service<Machine> {
+        let env = Env {
+            locale: Locale::parse(locale).expect("locale should parse"),
+            ..Env::default()
+        };
+        let mut service = Service::<Machine>::new(props, &env, &Messages);
 
         drop(service.send(Event::UpdateMenus(collection())));
 
@@ -884,6 +906,7 @@ mod tests {
     #[test]
     fn rtl_reverses_left_and_right_trigger_keys() {
         let menu_bar = service(Props::new().id("menu-bar").dir(Direction::Rtl));
+        let auto_rtl = service_with_locale(Props::new().id("menu-bar").dir(Direction::Auto), "ar");
 
         assert_eq!(
             captured_events(&menu_bar, |api| api
@@ -892,6 +915,16 @@ mod tests {
         );
         assert_eq!(
             captured_events(&menu_bar, |api| api
+                .on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowLeft))),
+            vec![Event::MoveToNextMenu]
+        );
+        assert_eq!(
+            captured_events(&auto_rtl, |api| api
+                .on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowRight))),
+            vec![Event::MoveToPrevMenu]
+        );
+        assert_eq!(
+            captured_events(&auto_rtl, |api| api
                 .on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowLeft))),
             vec![Event::MoveToNextMenu]
         );

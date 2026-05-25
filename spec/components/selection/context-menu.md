@@ -198,7 +198,8 @@ Transition requirements:
 - `UpdateItems` replaces the collection and invalidates stale highlight, submenu, checked,
   and radio references.
 - `SyncProps` updates `loop_focus` and `ids`; if the component becomes disabled while open,
-  it transitions to `Closed`, clears interactive state, and emits `on_open_change(false)`.
+  it transitions to `Closed`, clears interactive state including the typeahead buffer, and
+  emits `on_open_change(false)`.
 
 ```rust
 pub struct Machine;

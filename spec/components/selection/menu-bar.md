@@ -154,6 +154,8 @@ Transition requirements:
   if the active menu key is removed, the machine transitions to `Inactive`.
 - `SyncProps` updates ids; when the menubar becomes disabled, it transitions to `Inactive`
   and clears active/focused/focus-visible state.
+- Keyboard dispatch helpers resolve `Direction::Auto` through `Context::locale` before
+  applying Left/Right semantics.
 
 ```rust
 pub struct Machine;

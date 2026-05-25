@@ -1127,6 +1127,7 @@ fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
             ctx.highlighted_key = None;
             ctx.submenu_open = None;
             ctx.position = None;
+            ctx.typeahead = typeahead::State::default();
 
             if was_open && let Some(callback) = &on_open_change {
                 callback(false);
@@ -2036,6 +2037,8 @@ mod tests {
 
         drop(menu.send(Event::ContextOpen { x: 1.0, y: 2.0 }));
         drop(menu.send(Event::OpenSubmenu(key("delta"))));
+        drop(menu.send(Event::TypeaheadSearch('d', 10)));
+        assert_eq!(menu.context().typeahead.search, "d");
         drop(menu.set_props(new_props));
 
         assert_eq!(menu.state(), &State::Closed);
@@ -2043,6 +2046,7 @@ mod tests {
         assert_eq!(menu.context().highlighted_key, None);
         assert_eq!(menu.context().submenu_open, None);
         assert_eq!(menu.context().position, None);
+        assert_eq!(menu.context().typeahead.search, "");
         assert_eq!(
             open_changes
                 .lock()
