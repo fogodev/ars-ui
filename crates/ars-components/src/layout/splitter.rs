@@ -563,28 +563,30 @@ fn collapse_panel(sizes: &mut [f64], index: usize, panels: &[Panel]) {
 
     let freed = (sizes[index] - collapsed_size).max(0.0);
 
-    let recipient = if index + 1 < sizes.len() {
-        Some(index + 1)
-    } else if index > 0 {
-        Some(index - 1)
-    } else {
-        None
-    };
+    if sizes.len() == 1 {
+        sizes[index] = collapsed_size;
+        return;
+    }
 
-    let transferable = recipient.map_or(freed, |recipient| {
-        panels
+    let mut remaining = freed;
+
+    for recipient in (index + 1..sizes.len()).chain((0..index).rev()) {
+        let capacity = panels
             .get(recipient)
             .and_then(|panel| panel.max_size)
-            .map_or(freed, |max_size| {
-                (max_size - sizes[recipient]).max(0.0).min(freed)
-            })
-    });
+            .map_or(remaining, |max_size| {
+                (max_size - sizes[recipient]).max(0.0).min(remaining)
+            });
 
-    sizes[index] = collapsed_size;
+        sizes[recipient] += capacity;
+        remaining -= capacity;
 
-    if let Some(recipient) = recipient {
-        sizes[recipient] += transferable;
+        if remaining <= 0.0 {
+            break;
+        }
     }
+
+    sizes[index] = collapsed_size + remaining;
 }
 
 fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel], restore_size: Option<f64>) {
@@ -604,7 +606,8 @@ fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel], restore_size:
 
     let target_size = restore_size
         .filter(|size| size.is_finite())
-        .unwrap_or(panel.default_size);
+        .unwrap_or(panel.default_size)
+        .min(panel.max_size.unwrap_or(f64::INFINITY));
 
     let need = (target_size - sizes[index]).max(0.0);
 
@@ -1155,22 +1158,13 @@ impl Api<'_> {
 
         let total = sizes.iter().copied().sum::<f64>().max(1.0);
 
-        let to_percent = |value: f64| {
-            if self.ctx.size_unit == SizeUnit::Percent {
-                value
-            } else {
-                value / total * 100.0
-            }
-        };
+        let to_percent = |value: f64| value / total * 100.0;
 
         let value_now = to_percent(sizes[left]);
 
         let value_min = to_percent(effective_min(&self.ctx.panels[left]));
 
-        let fallback_max = match self.ctx.size_unit {
-            SizeUnit::Percent => 100.0 - effective_min(&self.ctx.panels[right]),
-            SizeUnit::Pixels => total - effective_min(&self.ctx.panels[right]),
-        };
+        let fallback_max = total - effective_min(&self.ctx.panels[right]);
 
         let value_max = to_percent(
             self.ctx.panels[left]
@@ -1806,7 +1800,7 @@ mod tests {
 
         drop(service.send(Event::CollapsePanel { panel_index: 0 }));
 
-        assert_eq!(service.context().sizes.get(), &vec![0.0, 65.0]);
+        assert_eq!(service.context().sizes.get(), &vec![35.0, 65.0]);
     }
 
     #[test]
@@ -1980,6 +1974,23 @@ mod tests {
         );
 
         assert_eq!(sizes, vec![20.0, 70.0]);
+    }
+
+    #[test]
+    fn expand_panel_respects_own_max_size() {
+        let mut left = collapsible_panel("left", 50.0);
+
+        left.max_size = Some(30.0);
+
+        let mut right = panel("right", 50.0);
+
+        right.min_size = 0.0;
+
+        let mut sizes = vec![0.0, 100.0];
+
+        expand_panel(&mut sizes, 0, &[left, right], Some(50.0));
+
+        assert_eq!(sizes, vec![30.0, 70.0]);
     }
 
     #[test]
@@ -2711,6 +2722,29 @@ mod tests {
 
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("100"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("100"));
+    }
+
+    #[test]
+    fn handle_aria_max_uses_current_total_before_percent_conversion() {
+        let mut left = panel("left", 20.0);
+
+        left.max_size = None;
+
+        let mut right = panel("right", 45.0);
+
+        right.min_size = 20.0;
+
+        let service = service(
+            Props::new()
+                .id("split")
+                .panels(vec![left, right])
+                .default_sizes(vec![20.0, 45.0]),
+        );
+
+        let attrs = service.connect(&|_| {}).handle_attrs(0);
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("31"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("69"));
     }
 
     #[test]

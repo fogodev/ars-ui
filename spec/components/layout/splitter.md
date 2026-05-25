@@ -335,33 +335,49 @@ fn finite_positive(value: f64, fallback: f64) -> f64 {
     if value.is_finite() && value > 0.0 { value } else { fallback }
 }
 
-fn collapse_panel(sizes: &mut Vec<f64>, index: usize, panels: &[Panel]) {
-    if index >= sizes.len() || index >= panels.len() { return; }
-    if !panels[index].collapsible { return; }
+fn collapse_panel(sizes: &mut [f64], index: usize, panels: &[Panel]) {
+    if index >= sizes.len() || index >= panels.len() || !panels[index].collapsible {
+        return;
+    }
     let collapsed_size = panels[index].collapsed_size;
     let freed = (sizes[index] - collapsed_size).max(0.0);
-    let recipient = if index + 1 < sizes.len() { Some(index + 1) }
-        else if index > 0 { Some(index - 1) }
-        else { None };
-    let transferable = recipient.map_or(freed, |recipient| {
-        panels
+
+    if sizes.len() == 1 {
+        sizes[index] = collapsed_size;
+        return;
+    }
+
+    let mut remaining = freed;
+
+    for recipient in (index + 1..sizes.len()).chain((0..index).rev()) {
+        let capacity = panels
             .get(recipient)
             .and_then(|panel| panel.max_size)
-            .map_or(freed, |max_size| (max_size - sizes[recipient]).max(0.0).min(freed))
-    });
-    sizes[index] = collapsed_size;
-    if let Some(recipient) = recipient {
-        sizes[recipient] += transferable;
+            .map_or(remaining, |max_size| {
+                (max_size - sizes[recipient]).max(0.0).min(remaining)
+            });
+
+        sizes[recipient] += capacity;
+        remaining -= capacity;
+
+        if remaining <= 0.0 {
+            break;
+        }
     }
+
+    sizes[index] = collapsed_size + remaining;
 }
 
-fn expand_panel(sizes: &mut Vec<f64>, index: usize, panels: &[Panel], restore_size: Option<f64>) {
+fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel], restore_size: Option<f64>) {
     if index >= sizes.len() || index >= panels.len() { return; }
     let p = &panels[index];
     if !p.collapsible { return; }
     if sizes[index] > p.collapsed_size { return; }
-    let target_size = restore_size.filter(|size| size.is_finite()).unwrap_or(p.default_size);
-    let need = target_size - sizes[index];
+    let target_size = restore_size
+        .filter(|size| size.is_finite())
+        .unwrap_or(p.default_size)
+        .min(p.max_size.unwrap_or(f64::INFINITY));
+    let need = (target_size - sizes[index]).max(0.0);
     let donor = if index + 1 < sizes.len() { Some(index + 1) }
         else if index > 0 { Some(index - 1) }
         else { None };
@@ -714,14 +730,17 @@ impl<'a> Api<'a> {
         let (left, right) = (handle_index, handle_index + 1);
         let sizes = self.ctx.sizes.get();
         let total: f64 = sizes.iter().sum::<f64>().max(1.0);
-        let to_pct = |v: f64| if self.ctx.size_unit == SizeUnit::Percent { v } else { v / total * 100.0 };
+        let to_pct = |v: f64| v / total * 100.0;
 
         let value_now = to_pct(sizes[left]);
-        let value_min = if self.ctx.panels[left].collapsible { 0.0 } else { to_pct(self.ctx.panels[left].min_size) };
-        let value_max = to_pct(self.ctx.panels[left].max_size.unwrap_or_else(|| {
-            if self.ctx.size_unit == SizeUnit::Percent { 100.0 - self.ctx.panels[right].min_size }
-            else { total - self.ctx.panels[right].min_size }
-        }));
+        let value_min = to_pct(effective_min(&self.ctx.panels[left]));
+        let fallback_max = total - effective_min(&self.ctx.panels[right]);
+        let value_max = to_pct(
+            self.ctx.panels[left]
+                .max_size
+                .unwrap_or(fallback_max)
+                .min(fallback_max),
+        );
 
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), (value_now.round() as i64).to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), (value_min.round() as i64).to_string());
