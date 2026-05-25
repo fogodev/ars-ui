@@ -221,7 +221,9 @@ pub fn compute_segment(
 /// Computes the fill percentage for the given value within `[min, max]`.
 #[must_use]
 pub fn compute_percent(value: f64, min: f64, max: f64) -> f64 {
-    if min >= max {
+    let (min, max) = normalize_bounds(min, max);
+
+    if !value.is_finite() {
         return 0.0;
     }
 
@@ -307,10 +309,12 @@ impl Api {
     /// Returns the semantic segment for the current value.
     #[must_use]
     pub fn segment(&self) -> Segment {
+        let (min, max) = normalize_bounds(self.props.min, self.props.max);
+
         compute_segment(
-            self.props.value,
-            self.props.min,
-            self.props.max,
+            clamp_value(self.props.value, min, max),
+            min,
+            max,
             self.props.low,
             self.props.high,
             self.props.optimum,
@@ -349,27 +353,20 @@ impl Api {
 
         let segment = self.segment();
         let zone = Zone::from_segment(&segment);
+        let (min, max) = normalize_bounds(self.props.min, self.props.max);
+        let value = clamp_value(self.props.value, min, max);
 
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Role, "meter")
-            .set(
-                HtmlAttr::Aria(AriaAttr::ValueNow),
-                self.props.value.to_string(),
-            )
-            .set(
-                HtmlAttr::Aria(AriaAttr::ValueMin),
-                self.props.min.to_string(),
-            )
-            .set(
-                HtmlAttr::Aria(AriaAttr::ValueMax),
-                self.props.max.to_string(),
-            )
+            .set(HtmlAttr::Aria(AriaAttr::ValueNow), value.to_string())
+            .set(HtmlAttr::Aria(AriaAttr::ValueMin), min.to_string())
+            .set(HtmlAttr::Aria(AriaAttr::ValueMax), max.to_string())
             .set(HtmlAttr::Aria(AriaAttr::ValueText), self.value_text())
-            .set(HtmlAttr::Value, self.props.value.to_string())
-            .set(HtmlAttr::Min, self.props.min.to_string())
-            .set(HtmlAttr::Max, self.props.max.to_string())
+            .set(HtmlAttr::Value, value.to_string())
+            .set(HtmlAttr::Min, min.to_string())
+            .set(HtmlAttr::Max, max.to_string())
             .set(HtmlAttr::Data("ars-segment"), segment.as_str())
             .set(HtmlAttr::Data("ars-zone"), zone.as_str());
 
@@ -444,6 +441,22 @@ fn part_attrs(part: &Part) -> AttrMap {
     attrs
 }
 
+fn normalize_bounds(min: f64, max: f64) -> (f64, f64) {
+    if min.is_finite() && max.is_finite() && min < max {
+        (min, max)
+    } else {
+        (0.0, 100.0)
+    }
+}
+
+const fn clamp_value(value: f64, min: f64, max: f64) -> f64 {
+    if value.is_finite() {
+        value.clamp(min, max)
+    } else {
+        min
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use insta::assert_snapshot;
@@ -496,5 +509,28 @@ mod tests {
             "meter_value_text",
             snapshot_attrs(&api(Props::new().id("meter").value(40.0)).value_text_attrs())
         );
+    }
+
+    #[test]
+    fn meter_sanitizes_non_finite_and_out_of_range_values() {
+        let high = api(Props::new().id("meter").value(150.0).max(100.0));
+        let high_root = high.root_attrs();
+
+        assert_eq!(
+            high_root.get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("100")
+        );
+        assert_eq!(high_root.get(&HtmlAttr::Value), Some("100"));
+        assert_eq!(high.percent(), 100.0);
+
+        let non_finite = api(Props::new().id("meter").value(f64::NAN));
+        let non_finite_root = non_finite.root_attrs();
+
+        assert_eq!(
+            non_finite_root.get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("0")
+        );
+        assert_eq!(non_finite_root.get(&HtmlAttr::Value), Some("0"));
+        assert_eq!(compute_percent(f64::INFINITY, 0.0, 100.0), 0.0);
     }
 }

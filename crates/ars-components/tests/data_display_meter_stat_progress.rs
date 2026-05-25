@@ -100,6 +100,28 @@ fn meter_root_exposes_meter_aria_and_native_attrs() {
 }
 
 #[test]
+fn meter_root_clamps_and_sanitizes_value_attrs() {
+    let high = meter_api(meter::Props::new().id("disk").value(150.0).max(100.0)).root_attrs();
+
+    assert_eq!(high.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("100"));
+    assert_eq!(high.get(&HtmlAttr::Value), Some("100"));
+
+    let non_finite = meter_api(meter::Props::new().id("disk").value(f64::NAN)).root_attrs();
+
+    assert_eq!(
+        non_finite.get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+        Some("0")
+    );
+    assert_eq!(non_finite.get(&HtmlAttr::Value), Some("0"));
+    assert!(
+        meter_api(meter::Props::new().id("disk").value(f64::INFINITY))
+            .range_attrs()
+            .styles()
+            .contains(&(CssProperty::Width, String::from("0%")))
+    );
+}
+
+#[test]
 fn meter_computes_percent_segment_and_zone_attrs() {
     assert_eq!(meter::compute_percent(150.0, 50.0, 250.0), 50.0);
     assert_eq!(meter::compute_percent(0.0, 50.0, 250.0), 0.0);
@@ -361,6 +383,14 @@ fn progress_props_builders_and_percent_math_match_contract() {
         progress::Context::compute_percent(Some(45.0), 10.0, 80.0),
         50.0
     );
+    assert_eq!(
+        progress::Context::compute_percent(Some(f64::NAN), 10.0, 80.0),
+        0.0
+    );
+    assert_eq!(
+        progress::Context::compute_percent(Some(f64::INFINITY), 10.0, 80.0),
+        0.0
+    );
 }
 
 #[test]
@@ -385,6 +415,44 @@ fn progress_root_attrs_reflect_determinate_and_indeterminate_modes() {
 
     assert_eq!(attrs.get(&HtmlAttr::Data("ars-state")), Some("loading"));
     assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::ValueNow)));
+}
+
+#[test]
+fn progress_root_clamps_and_sanitizes_value_now() {
+    let high = progress_service(
+        progress::Props::new()
+            .id("upload")
+            .default_value(150.0)
+            .max(100.0),
+    );
+
+    assert_eq!(
+        high.connect(&|_| {})
+            .root_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+        Some("100")
+    );
+
+    let non_finite = progress_service(
+        progress::Props::new()
+            .id("upload")
+            .default_value(f64::NAN)
+            .min(10.0)
+            .max(80.0),
+    );
+
+    let api = non_finite.connect(&|_| {});
+
+    assert_eq!(api.percent(), 0.0);
+    assert_eq!(
+        api.root_attrs().get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+        Some("10")
+    );
+    assert!(
+        api.range_attrs()
+            .styles()
+            .contains(&(CssProperty::Width, String::from("0%")))
+    );
 }
 
 #[test]
@@ -446,6 +514,44 @@ fn progress_set_props_syncs_controlled_value_bounds_and_orientation() {
     assert_eq!(ctx.max, 90.0);
     assert_eq!(ctx.orientation, progress::Orientation::Vertical);
     assert_eq!(ctx.percent, 50.0);
+}
+
+#[test]
+fn progress_set_props_preserves_value_control_mode_transitions() {
+    let mut becomes_controlled =
+        progress_service(progress::Props::new().id("upload").default_value(20.0));
+
+    assert!(!becomes_controlled.context().value.is_controlled());
+
+    drop(becomes_controlled.set_props(progress::Props::new().id("upload").value(Some(50.0))));
+
+    assert!(becomes_controlled.context().value.is_controlled());
+    assert_eq!(becomes_controlled.context().value.get(), &Some(50.0));
+
+    drop(becomes_controlled.send(progress::Event::Reset));
+
+    assert!(becomes_controlled.context().value.is_controlled());
+
+    let mut becomes_uncontrolled =
+        progress_service(progress::Props::new().id("upload").value(Some(50.0)));
+
+    assert!(becomes_uncontrolled.context().value.is_controlled());
+
+    drop(
+        becomes_uncontrolled.set_props(
+            progress::Props::new()
+                .id("upload")
+                .default_value(15.0)
+                .max(100.0),
+        ),
+    );
+
+    assert!(!becomes_uncontrolled.context().value.is_controlled());
+    assert_eq!(becomes_uncontrolled.context().value.get(), &Some(15.0));
+
+    drop(becomes_uncontrolled.send(progress::Event::SetValue(Some(40.0))));
+
+    assert_eq!(becomes_uncontrolled.context().value.get(), &Some(40.0));
 }
 
 #[test]

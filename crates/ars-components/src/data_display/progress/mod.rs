@@ -202,11 +202,13 @@ impl Context {
     /// Computes the percentage value from the given value and bounds.
     #[must_use]
     pub fn compute_percent(value: Option<f64>, min: f64, max: f64) -> f64 {
-        if min >= max {
-            return 0.0;
-        }
+        let (min, max) = normalize_bounds(min, max);
 
         if let Some(value) = value {
+            if !value.is_finite() {
+                return 0.0;
+            }
+
             ((value - min) / (max - min) * 100.0).clamp(0.0, 100.0)
         } else {
             0.0
@@ -375,10 +377,11 @@ impl ars_core::Machine for Machine {
                 let value = *value;
                 let min = ctx.min;
                 let max = ctx.max;
+                let controlled_prop = props.value;
 
                 Some(TransitionPlan::to(state_for_value(value, max)).apply(
                     move |ctx: &mut Context| {
-                        set_context_value(ctx, value);
+                        set_context_value(ctx, value, controlled_prop);
 
                         ctx.indeterminate = value.is_none();
                         ctx.percent = Context::compute_percent(value, min, max);
@@ -400,33 +403,45 @@ impl ars_core::Machine for Machine {
                 ))
             }
 
-            Event::Complete => Some(TransitionPlan::to(State::Complete).apply(
-                |ctx: &mut Context| {
-                    set_context_value(ctx, Some(ctx.max));
+            Event::Complete => {
+                let controlled_prop = props.value;
 
-                    ctx.indeterminate = false;
-                    ctx.percent = 100.0;
-                },
-            )),
+                Some(
+                    TransitionPlan::to(State::Complete).apply(move |ctx: &mut Context| {
+                        set_context_value(ctx, Some(ctx.max), controlled_prop);
 
-            Event::Reset => Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
-                set_context_value(ctx, None);
+                        ctx.indeterminate = false;
+                        ctx.percent = 100.0;
+                    }),
+                )
+            }
 
-                ctx.indeterminate = true;
-                ctx.percent = 0.0;
-            })),
+            Event::Reset => {
+                let controlled_prop = props.value;
+
+                Some(
+                    TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
+                        set_context_value(ctx, None, controlled_prop);
+
+                        ctx.indeterminate = true;
+                        ctx.percent = 0.0;
+                    }),
+                )
+            }
 
             Event::SyncProps => {
                 let min = props.min;
                 let max = props.max;
                 let orientation = props.orientation;
-                let value = *ctx.value.get();
+                let value = props.value.unwrap_or(props.default_value);
+                let controlled_prop = props.value;
 
                 Some(TransitionPlan::to(state_for_value(value, max)).apply(
                     move |ctx: &mut Context| {
                         ctx.min = min;
                         ctx.max = max;
                         ctx.orientation = orientation;
+                        sync_props_value(ctx, value, controlled_prop);
                         ctx.indeterminate = value.is_none();
                         ctx.percent = Context::compute_percent(value, min, max);
                     },
@@ -532,6 +547,7 @@ impl Api<'_> {
     #[must_use]
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = part_attrs(&Part::Root);
+        let (min, max) = normalize_bounds(self.ctx.min, self.ctx.max);
 
         attrs
             .set(HtmlAttr::Role, "progressbar")
@@ -544,14 +560,17 @@ impl Api<'_> {
                 self.ctx.orientation.as_str(),
             )
             .set(HtmlAttr::Data("ars-state"), state_attr(*self.state))
-            .set(HtmlAttr::Aria(AriaAttr::ValueMin), self.ctx.min.to_string())
-            .set(HtmlAttr::Aria(AriaAttr::ValueMax), self.ctx.max.to_string())
+            .set(HtmlAttr::Aria(AriaAttr::ValueMin), min.to_string())
+            .set(HtmlAttr::Aria(AriaAttr::ValueMax), max.to_string())
             .set(HtmlAttr::Aria(AriaAttr::ValueText), self.value_text());
 
         if !self.ctx.indeterminate
             && let Some(value) = self.ctx.value.get()
         {
-            attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), value.to_string());
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::ValueNow),
+                clamp_value(*value, min, max).to_string(),
+            );
         }
 
         attrs
@@ -660,10 +679,10 @@ fn part_attrs(part: &Part) -> AttrMap {
     attrs
 }
 
-const fn state_for_value(value: Option<f64>, max: f64) -> State {
+fn state_for_value(value: Option<f64>, max: f64) -> State {
     match value {
         None => State::Loading,
-        Some(value) if value >= max => State::Complete,
+        Some(value) if value.is_finite() && max.is_finite() && value >= max => State::Complete,
         Some(_) => State::Idle,
     }
 }
@@ -676,11 +695,37 @@ const fn state_attr(state: State) -> &'static str {
     }
 }
 
-fn set_context_value(ctx: &mut Context, value: Option<f64>) {
-    if ctx.value.is_controlled() {
-        ctx.value.sync_controlled(Some(value));
+fn set_context_value(ctx: &mut Context, value: Option<f64>, controlled_prop: Option<Option<f64>>) {
+    if controlled_prop.is_some() {
+        ctx.value = Bindable::controlled(value);
+    } else if ctx.value.is_controlled() {
+        ctx.value = Bindable::uncontrolled(value);
     } else {
         ctx.value.set(value);
+    }
+}
+
+fn sync_props_value(ctx: &mut Context, value: Option<f64>, controlled_prop: Option<Option<f64>>) {
+    if controlled_prop.is_some() {
+        ctx.value = Bindable::controlled(value);
+    } else if ctx.value.is_controlled() {
+        ctx.value = Bindable::uncontrolled(value);
+    }
+}
+
+fn normalize_bounds(min: f64, max: f64) -> (f64, f64) {
+    if min.is_finite() && max.is_finite() && min < max {
+        (min, max)
+    } else {
+        (0.0, 100.0)
+    }
+}
+
+const fn clamp_value(value: f64, min: f64, max: f64) -> f64 {
+    if value.is_finite() {
+        value.clamp(min, max)
+    } else {
+        min
     }
 }
 
@@ -773,5 +818,65 @@ mod tests {
             "progress_circle_range",
             snapshot_attrs(&api.circle_range_attrs(10.0))
         );
+    }
+
+    #[test]
+    fn progress_sanitizes_non_finite_and_out_of_range_values() {
+        let high = service(Props::new().id("progress").default_value(150.0).max(100.0));
+        let high_api = high.connect(&|_| {});
+
+        assert_eq!(high_api.percent(), 100.0);
+        assert_eq!(
+            high_api
+                .root_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("100")
+        );
+
+        let non_finite = service(
+            Props::new()
+                .id("progress")
+                .default_value(f64::NAN)
+                .min(10.0)
+                .max(80.0),
+        );
+        let non_finite_api = non_finite.connect(&|_| {});
+
+        assert_eq!(non_finite_api.percent(), 0.0);
+        assert_eq!(
+            non_finite_api
+                .root_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("10")
+        );
+        assert_eq!(
+            Context::compute_percent(Some(f64::INFINITY), 10.0, 80.0),
+            0.0
+        );
+    }
+
+    #[test]
+    fn progress_syncs_value_control_mode_changes() {
+        let mut uncontrolled = service(Props::new().id("progress").default_value(20.0));
+
+        assert!(!uncontrolled.context().value.is_controlled());
+
+        drop(uncontrolled.set_props(Props::new().id("progress").value(Some(50.0))));
+
+        assert!(uncontrolled.context().value.is_controlled());
+        assert_eq!(uncontrolled.context().value.get(), &Some(50.0));
+
+        drop(uncontrolled.send(Event::Reset));
+
+        assert!(uncontrolled.context().value.is_controlled());
+
+        let mut controlled = service(Props::new().id("progress").value(Some(50.0)));
+
+        assert!(controlled.context().value.is_controlled());
+
+        drop(controlled.set_props(Props::new().id("progress").default_value(15.0)));
+
+        assert!(!controlled.context().value.is_controlled());
+        assert_eq!(controlled.context().value.get(), &Some(15.0));
     }
 }
