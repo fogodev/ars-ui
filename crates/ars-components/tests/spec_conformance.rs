@@ -29,7 +29,7 @@ mod layout;
 #[path = "spec_conformance/navigation.rs"]
 mod navigation;
 
-#[path = "spec_conformance/overlay.rs"]
+#[path = "spec_conformance/overlay/mod.rs"]
 mod overlay;
 
 #[path = "spec_conformance/selection.rs"]
