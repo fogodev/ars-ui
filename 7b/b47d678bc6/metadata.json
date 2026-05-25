@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "7bb47d678bc6",
+  "strategy": "manual-commit",
+  "branch": "t3code/d7f511fb",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/input/slider/mod.rs",
+    "crates/ars-components/src/input/slider/snapshots/ars_components__input__slider__tests__slider_label.snap",
+    "spec/components/input/slider.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/7b/b47d678bc6/0/metadata.json",
+      "transcript": "/7b/b47d678bc6/0/full.jsonl",
+      "content_hash": "/7b/b47d678bc6/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 76048,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 9643136,
+    "output_tokens": 8816,
+    "api_call_count": 55
+  }
+}
