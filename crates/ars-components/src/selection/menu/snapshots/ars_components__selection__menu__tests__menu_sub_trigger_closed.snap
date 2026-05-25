@@ -1,0 +1,67 @@
+---
+source: crates/ars-components/src/selection/menu/mod.rs
+expression: "snapshot_attrs(&api.sub_trigger_attrs(&key(\"delta\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "sub-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "menu",
+            ),
+        ),
+        (
+            Aria(
+                Expanded,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                HasPopup,
+            ),
+            String(
+                "menu",
+            ),
+        ),
+        (
+            Aria(
+                Controls,
+            ),
+            String(
+                "menu-sub-content-delta",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "menu-item-delta",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "menuitem",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

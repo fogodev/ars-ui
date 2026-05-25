@@ -11,5 +11,8 @@ pub mod combobox;
 /// Listbox component machine.
 pub mod listbox;
 
+/// Menu component machine.
+pub mod menu;
+
 /// Select component machine.
 pub mod select;

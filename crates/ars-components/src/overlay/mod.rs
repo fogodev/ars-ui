@@ -28,5 +28,8 @@ pub mod presence;
 /// coordinator). See `spec/components/overlay/toast.md`.
 pub mod toast;
 
+/// Tour machine.
+pub mod tour;
+
 /// Tooltip machine.
 pub mod tooltip;
