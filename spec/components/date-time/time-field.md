@@ -435,6 +435,10 @@ fn day_period_from_cjk_buffer(
         .filter(|c| !c.is_combining_mark())
         .collect::<String>();
 
+    if normalized.is_empty() {
+        return None;
+    }
+
     // Full or prefix match against AM/PM labels.
     if entry.am_label.starts_with(&normalized) && !entry.pm_label.starts_with(&normalized) {
         return Some(0); // Unique AM match
@@ -478,11 +482,15 @@ fn is_cjk_day_period_prefix(buffer: &str, locale: &Locale) -> bool {
         .filter(|c| !c.is_combining_mark())
         .collect::<String>();
 
+    if normalized.is_empty() {
+        return false;
+    }
+
     entry.am_label.starts_with(&normalized) || entry.pm_label.starts_with(&normalized)
 }
 ```
 
-The `TypeIntoSegment` handler for `DateSegmentKind::DayPeriod` in the TimeField state machine MUST delegate to this logic for CJK locales instead of the current ASCII-only `'a'`/`'p'` check. ASCII/backend day-period shortcuts such as `a` and `p` remain valid in CJK locales and MUST be resolved before scheduling an ambiguous CJK prefix. Non-prefix CJK input MUST be ignored without mutating the buffer or scheduling a commit. When the buffer is ambiguous after the first character, the handler schedules a `TypeBufferCommit` effect (500ms) exactly as numeric segments do. When a later character resolves the day period, the handler cancels the pending `TypeBufferCommit` effect before publishing the resolved value. On `TypeBufferCommit` for a `DayPeriod` segment and when focus leaves an active day-period buffer, call `day_period_from_cjk_buffer` with the resolved hour cycle, current hour segment value, and current day-period segment value to apply the timeout fallback without flipping H11 PM values.
+The `TypeIntoSegment` handler for `DateSegmentKind::DayPeriod` in the TimeField state machine MUST delegate to this logic for CJK locales instead of the current ASCII-only `'a'`/`'p'` check. ASCII/backend day-period shortcuts such as `a` and `p` remain valid in CJK locales and MUST be resolved before scheduling an ambiguous CJK prefix. Non-prefix CJK input, including input that normalizes to an empty buffer after stripping combining marks, MUST be ignored without mutating the buffer or scheduling a commit. When the buffer is ambiguous after the first character, the handler schedules a `TypeBufferCommit` effect (500ms) exactly as numeric segments do. When a later character resolves the day period, the handler cancels the pending `TypeBufferCommit` effect before publishing the resolved value. On `TypeBufferCommit` for a `DayPeriod` segment and when focus leaves an active day-period buffer, call `day_period_from_cjk_buffer` with the resolved hour cycle, current hour segment value, and current day-period segment value to apply the timeout fallback without flipping H11 PM values. Empty day-period buffers MUST be ignored so focus/blur alone never publishes AM/PM.
 
 ### 1.7 Timezone Handling
 
@@ -846,22 +854,29 @@ impl ars_core::Machine for Machine {
                 let k = *kind;
                 Some(TransitionPlan::context_only(move |ctx| {
                     if k == DateSegmentKind::DayPeriod {
-                        let current_hour = ctx.get_seg(DateSegmentKind::Hour)
-                            .and_then(|hour| u8::try_from(hour).ok());
-                        let current_day_period = ctx.get_seg(DateSegmentKind::DayPeriod);
-                        if let Some(v) = day_period_from_cjk_buffer(
-                            &ctx.type_buffer,
-                            &ctx.locale,
-                            ctx.hour_cycle,
-                            current_hour,
-                            current_day_period,
-                        ) {
+                        if !ctx.type_buffer.is_empty() {
+                            let current_hour = ctx.get_seg(DateSegmentKind::Hour)
+                                .and_then(|hour| u8::try_from(hour).ok());
+                            let current_day_period = ctx.get_seg(DateSegmentKind::DayPeriod);
+                            if let Some(v) = day_period_from_cjk_buffer(
+                                &ctx.type_buffer,
+                                &ctx.locale,
+                                ctx.hour_cycle,
+                                current_hour,
+                                current_day_period,
+                            ) {
+                                ctx.set_segment_value(k, v);
+                                Machine::maybe_publish(ctx);
+                            }
+                        }
+                    } else if let Ok(v) = ctx.type_buffer.parse::<i32>() {
+                        if let Some(seg) = ctx.segments.iter().find(|s| s.kind == k)
+                            && v >= seg.min
+                            && v <= seg.max
+                        {
                             ctx.set_segment_value(k, v);
                             Machine::maybe_publish(ctx);
                         }
-                    } else if let Ok(v) = ctx.type_buffer.parse::<i32>() {
-                        ctx.set_segment_value(k, v);
-                        Machine::maybe_publish(ctx);
                     }
                     ctx.type_buffer.clear();
                 }))

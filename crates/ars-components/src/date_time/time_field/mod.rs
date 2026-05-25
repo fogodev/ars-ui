@@ -1447,6 +1447,7 @@ fn type_into_segment(
         };
 
         if let Ok(value) = ctx.type_buffer.parse::<i32>()
+            && value >= segment.min
             && value <= segment.max
         {
             ctx.set_segment_value(kind, value);
@@ -1482,6 +1483,10 @@ fn commit_type_buffer(ctx: &mut Context) {
 
 fn commit_buffer_for_kind(ctx: &mut Context, kind: DateSegmentKind, timeout_fallback: bool) {
     if kind == DateSegmentKind::DayPeriod {
+        if ctx.type_buffer.is_empty() {
+            return;
+        }
+
         let current_hour = timeout_fallback
             .then(|| {
                 ctx.get_segment_value(DateSegmentKind::Hour)
@@ -1509,7 +1514,11 @@ fn commit_buffer_for_kind(ctx: &mut Context, kind: DateSegmentKind, timeout_fall
         return;
     }
 
-    if let Ok(value) = ctx.type_buffer.parse::<i32>() {
+    if let Ok(value) = ctx.type_buffer.parse::<i32>()
+        && let Some(segment) = ctx.segments.iter().find(|segment| segment.kind == kind)
+        && value >= segment.min
+        && value <= segment.max
+    {
         ctx.set_segment_value(kind, value);
 
         maybe_publish(ctx);
@@ -1817,6 +1826,10 @@ fn is_cjk_day_period_prefix(buffer: &str, locale: &Locale) -> bool {
 
     let normalized = strip_combining_marks(buffer);
 
+    if normalized.is_empty() {
+        return false;
+    }
+
     entry.am_label.starts_with(&normalized) || entry.pm_label.starts_with(&normalized)
 }
 
@@ -1830,6 +1843,10 @@ fn day_period_from_cjk_buffer(
     let entry = cjk_day_period_table(locale)?;
 
     let normalized = strip_combining_marks(buffer);
+
+    if normalized.is_empty() {
+        return None;
+    }
 
     let am_matches = entry.am_label.starts_with(&normalized);
     let pm_matches = entry.pm_label.starts_with(&normalized);

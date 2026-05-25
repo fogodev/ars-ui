@@ -384,6 +384,33 @@ fn cjk_day_period_allows_ascii_fallback_and_ignores_invalid_prefixes() {
 }
 
 #[test]
+fn cjk_day_period_ignores_combining_mark_only_prefixes() {
+    let mut service = Service::<Machine>::new(
+        props().hour_cycle(Some(HourCycle::H12)),
+        &env("ja-JP"),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment {
+        kind: DateSegmentKind::DayPeriod,
+    }));
+
+    let result = service.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::DayPeriod,
+        ch: '\u{0301}',
+    });
+
+    assert!(result.pending_effects.is_empty());
+    assert_eq!(service.context().type_buffer, "");
+    assert_eq!(
+        service
+            .context()
+            .get_segment_value(DateSegmentKind::DayPeriod),
+        None
+    );
+}
+
+#[test]
 fn cjk_day_period_resolution_cancels_pending_commit_effect() {
     let mut service = Service::<Machine>::new(
         props().hour_cycle(Some(HourCycle::H12)),
@@ -507,6 +534,43 @@ fn cjk_day_period_blur_uses_timeout_fallback_for_ambiguous_prefix() {
         Some(1)
     );
     assert_eq!(service.context().value.get(), &Some(time(13, 0, 0)));
+}
+
+#[test]
+fn empty_cjk_day_period_buffer_does_not_publish_on_blur() {
+    let mut service = Service::<Machine>::new(
+        props()
+            .granularity(TimeGranularity::Hour)
+            .hour_cycle(Some(HourCycle::H12)),
+        &env("ja-JP"),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment {
+        kind: DateSegmentKind::Hour,
+    }));
+    drop(service.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::Hour,
+        ch: '1',
+    }));
+    drop(service.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::Hour,
+        ch: '2',
+    }));
+
+    assert_eq!(service.state(), &State::Focused(DateSegmentKind::DayPeriod));
+    assert_eq!(service.context().type_buffer, "");
+    assert_eq!(service.context().value.get(), &None);
+
+    drop(service.send(Event::BlurAll));
+
+    assert_eq!(
+        service
+            .context()
+            .get_segment_value(DateSegmentKind::DayPeriod),
+        None
+    );
+    assert_eq!(service.context().value.get(), &None);
 }
 
 #[test]
@@ -1071,6 +1135,45 @@ fn min_and_max_values_clamp_published_time() {
     }));
 
     assert_eq!(service.context().value.get(), &Some(time(17, 0, 0)));
+}
+
+#[test]
+fn below_min_numeric_typeahead_does_not_clamp_or_publish() {
+    let mut service = Service::<Machine>::new(
+        props()
+            .granularity(TimeGranularity::Hour)
+            .hour_cycle(Some(HourCycle::H12))
+            .default_value(Some(time(13, 0, 0))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::ClearSegment {
+        kind: DateSegmentKind::Hour,
+    }));
+    drop(service.send(Event::FocusSegment {
+        kind: DateSegmentKind::Hour,
+    }));
+    drop(service.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::Hour,
+        ch: '0',
+    }));
+
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Hour),
+        None
+    );
+    assert_eq!(service.context().value.get(), &None);
+
+    drop(service.send(Event::TypeBufferCommit {
+        kind: DateSegmentKind::Hour,
+    }));
+
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Hour),
+        None
+    );
+    assert_eq!(service.context().value.get(), &None);
 }
 
 #[test]
