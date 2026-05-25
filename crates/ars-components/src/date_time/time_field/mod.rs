@@ -77,6 +77,18 @@ pub enum Event {
         kind: DateSegmentKind,
     },
 
+    /// Begin IME composition for segment text input.
+    CompositionStart,
+
+    /// End IME composition and process the composed text for a segment.
+    CompositionEnd {
+        /// Segment kind receiving the composed text.
+        kind: DateSegmentKind,
+
+        /// Finalized text produced by the IME.
+        text: String,
+    },
+
     /// Clear the value of one segment.
     ClearSegment {
         /// The segment to clear.
@@ -120,7 +132,11 @@ pub struct Props {
     pub id: String,
 
     /// The externally controlled value of the field.
-    pub value: Option<Time>,
+    ///
+    /// `None` means the field is uncontrolled. `Some(None)` means the parent is
+    /// controlling the field as empty. `Some(Some(time))` means the parent is
+    /// controlling a concrete time.
+    pub value: Option<Option<Time>>,
 
     /// The initial value used when the field is uncontrolled.
     pub default_value: Option<Time>,
@@ -217,7 +233,7 @@ impl Props {
     /// Sets [`value`](Self::value), the externally controlled field value.
     #[must_use]
     pub const fn value(mut self, value: Option<Time>) -> Self {
-        self.value = value;
+        self.value = Some(value);
         self
     }
 
@@ -356,6 +372,9 @@ pub struct Context {
     /// Accumulated typed characters for the focused segment.
     pub type_buffer: String,
 
+    /// Whether an IME composition is currently active.
+    pub is_composing: bool,
+
     /// The resolved locale.
     pub locale: Locale,
 
@@ -397,6 +416,7 @@ impl Debug for Context {
             .field("segments", &self.segments)
             .field("focused_segment", &self.focused_segment)
             .field("type_buffer", &self.type_buffer)
+            .field("is_composing", &self.is_composing)
             .field("locale", &self.locale)
             .field("messages", &self.messages)
             .field("intl_backend", &"<dyn IntlBackend>")
@@ -418,6 +438,7 @@ impl PartialEq for Context {
             && self.segments == other.segments
             && self.focused_segment == other.focused_segment
             && self.type_buffer == other.type_buffer
+            && self.is_composing == other.is_composing
             && self.locale == other.locale
             && self.messages == other.messages
             && self.granularity == other.granularity
@@ -661,7 +682,7 @@ impl ars_core::Machine for Machine {
         messages: &Self::Messages,
     ) -> (Self::State, Self::Context) {
         let value = if let Some(value) = props.value {
-            Bindable::controlled(Some(value))
+            Bindable::controlled(value)
         } else {
             Bindable::uncontrolled(props.default_value)
         };
@@ -671,6 +692,7 @@ impl ars_core::Machine for Machine {
             segments: Vec::new(),
             focused_segment: None,
             type_buffer: String::new(),
+            is_composing: false,
             locale: env.locale.clone(),
             messages: messages.clone(),
             intl_backend: Arc::clone(&env.intl_backend),
@@ -834,7 +856,7 @@ impl ars_core::Machine for Machine {
             }
 
             Event::TypeIntoSegment { kind, ch } => {
-                if ctx.readonly || !matches!(state, State::Focused(_)) {
+                if ctx.readonly || ctx.is_composing || !matches!(state, State::Focused(_)) {
                     return None;
                 }
 
@@ -849,6 +871,24 @@ impl ars_core::Machine for Machine {
                 let kind = *kind;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     commit_buffer_for_kind(ctx, kind, true);
+                }))
+            }
+
+            Event::CompositionStart => Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                ctx.is_composing = true;
+            })),
+
+            Event::CompositionEnd { kind, text } => {
+                let kind = *kind;
+                let text = text.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.is_composing = false;
+
+                    if ctx.readonly || ctx.disabled {
+                        return;
+                    }
+
+                    apply_composed_text(ctx, kind, &text);
                 }))
             }
 
@@ -1258,6 +1298,8 @@ impl<'a> Api<'a> {
         dir: Direction,
     ) {
         if data.is_composing {
+            (self.send)(Event::CompositionStart);
+
             return;
         }
 
@@ -1302,6 +1344,19 @@ impl<'a> Api<'a> {
     /// Handles click on a segment.
     pub fn on_segment_click(&self, kind: DateSegmentKind) {
         (self.send)(Event::FocusSegment { kind });
+    }
+
+    /// Handles composition start on a segment.
+    pub fn on_segment_composition_start(&self) {
+        (self.send)(Event::CompositionStart);
+    }
+
+    /// Handles composition end on a segment.
+    pub fn on_segment_composition_end(&self, kind: DateSegmentKind, text: impl Into<String>) {
+        (self.send)(Event::CompositionEnd {
+            kind,
+            text: text.into(),
+        });
     }
 
     /// Returns the rendered segments.
@@ -1527,6 +1582,37 @@ fn commit_buffer_for_kind(ctx: &mut Context, kind: DateSegmentKind, timeout_fall
     ctx.type_buffer.clear();
 }
 
+fn apply_composed_text(ctx: &mut Context, kind: DateSegmentKind, text: &str) {
+    ctx.type_buffer.clear();
+
+    if kind == DateSegmentKind::DayPeriod {
+        if let Some(value) = text.chars().find_map(|ch| {
+            ctx.intl_backend
+                .day_period_from_char(ch, &ctx.locale)
+                .map(|is_pm| if is_pm { 1 } else { 0 })
+        }) {
+            ctx.set_segment_value(kind, value);
+            maybe_publish(ctx);
+
+            return;
+        }
+
+        ctx.type_buffer.push_str(text);
+        commit_buffer_for_kind(ctx, kind, true);
+
+        return;
+    }
+
+    if matches!(
+        kind,
+        DateSegmentKind::Hour | DateSegmentKind::Minute | DateSegmentKind::Second
+    ) {
+        ctx.type_buffer
+            .extend(text.chars().filter(char::is_ascii_digit));
+        commit_buffer_for_kind(ctx, kind, false);
+    }
+}
+
 fn maybe_publish(ctx: &mut Context) {
     if !ctx.is_complete() {
         return;
@@ -1582,7 +1668,7 @@ fn sync_props(ctx: &mut Context, props: &Props) {
     ctx.force_leading_zeros = props.force_leading_zeros;
 
     if let Some(value) = props.value {
-        apply_controlled_value(ctx, Some(value));
+        apply_controlled_value(ctx, value);
     } else if was_controlled {
         ctx.value.sync_controlled(None);
         ctx.value.set(None);

@@ -46,6 +46,10 @@ pub enum Event {
     TypeIntoSegment { kind: DateSegmentKind, ch: char },
     /// The type-ahead buffer timer fired; commit whatever digits are buffered.
     TypeBufferCommit { kind: DateSegmentKind },
+    /// Begin IME composition for segment text input.
+    CompositionStart,
+    /// End IME composition and process the composed text for a segment.
+    CompositionEnd { kind: DateSegmentKind, text: String },
     /// Clear the value of a segment.
     ClearSegment { kind: DateSegmentKind },
     /// Clear the value of all segments.
@@ -75,6 +79,8 @@ pub struct Context {
     pub focused_segment: Option<DateSegmentKind>,
     /// The type-ahead buffer.
     pub type_buffer: String,
+    /// Whether an IME composition is currently active.
+    pub is_composing: bool,
     /// The locale of the component.
     pub locale: Locale,
     /// Resolved translatable messages.
@@ -291,7 +297,10 @@ pub struct Props {
     /// The ID of the component.
     pub id: String,
     /// The current value of the component.
-    pub value: Option<Time>,
+    ///
+    /// `None` means uncontrolled, `Some(None)` means controlled empty, and
+    /// `Some(Some(time))` means controlled with a concrete time.
+    pub value: Option<Option<Time>>,
     /// The default value of the component.
     pub default_value: Option<Time>,
     /// The granularity of the component.
@@ -594,6 +603,7 @@ impl ars_core::Machine for Machine {
             segments: Vec::new(),
             focused_segment: None,
             type_buffer: String::new(),
+            is_composing: false,
             locale,
             messages,
             intl_backend,
@@ -647,9 +657,11 @@ impl ars_core::Machine for Machine {
                     ctx.ids = ComponentIds::from_id(&props.id);
                     ctx.force_leading_zeros = props.force_leading_zeros;
                     if let Some(value) = props.value {
-                        let clamped = clamp_time(value, ctx.min_value.as_ref(), ctx.max_value.as_ref());
-                        ctx.value.set(Some(clamped));
-                        ctx.value.sync_controlled(Some(Some(clamped)));
+                        let clamped = value.map(|time| {
+                            clamp_time(time, ctx.min_value.as_ref(), ctx.max_value.as_ref())
+                        });
+                        ctx.value.set(clamped);
+                        ctx.value.sync_controlled(Some(clamped));
                     } else if ctx.value.is_controlled() {
                         ctx.value.sync_controlled(None);
                         ctx.value.set(None);
@@ -1127,6 +1139,7 @@ impl<'a> Api<'a> {
         direction: Direction,
     ) {
         if data.is_composing {
+            (self.send)(Event::CompositionStart);
             return;
         }
 
@@ -1170,6 +1183,16 @@ impl<'a> Api<'a> {
     /// Handle focus on a segment.
     pub fn on_segment_focus(&self, kind: DateSegmentKind) {
         (self.send)(Event::FocusSegment { kind });
+    }
+
+    /// Handle composition start on a segment.
+    pub fn on_segment_composition_start(&self) {
+        (self.send)(Event::CompositionStart);
+    }
+
+    /// Handle composition end on a segment.
+    pub fn on_segment_composition_end(&self, kind: DateSegmentKind, text: impl Into<String>) {
+        (self.send)(Event::CompositionEnd { kind, text: text.into() });
     }
 
     /// Handle focus leaving the field group.

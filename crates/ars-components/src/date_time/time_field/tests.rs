@@ -120,7 +120,7 @@ fn props_builder_sets_every_field() {
         .force_leading_zeros(true);
 
     assert_eq!(props.id, "time");
-    assert_eq!(props.value, Some(value));
+    assert_eq!(props.value, Some(Some(value)));
     assert_eq!(props.default_value, Some(default_value));
     assert_eq!(props.granularity, TimeGranularity::Second);
     assert_eq!(props.hour_cycle, Some(HourCycle::H12));
@@ -213,7 +213,7 @@ fn keydown_suppresses_character_input_during_composition() {
 
     api.on_segment_keydown(DateSegmentKind::Hour, &data, false, Direction::Ltr);
 
-    assert!(sent.borrow().is_empty());
+    assert_eq!(sent.borrow().as_slice(), &[Event::CompositionStart]);
 }
 
 #[test]
@@ -440,6 +440,102 @@ fn cjk_day_period_resolution_cancels_pending_commit_effect() {
             .context()
             .get_segment_value(DateSegmentKind::DayPeriod),
         Some(1)
+    );
+}
+
+#[test]
+fn composition_end_commits_composed_numeric_and_day_period_text() {
+    let mut numeric = Service::<Machine>::new(
+        props()
+            .granularity(TimeGranularity::Second)
+            .hour_cycle(Some(HourCycle::H23)),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(numeric.send(Event::FocusSegment {
+        kind: DateSegmentKind::Minute,
+    }));
+    drop(numeric.send(Event::CompositionStart));
+    drop(numeric.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::Minute,
+        ch: '4',
+    }));
+
+    assert!(numeric.context().is_composing);
+    assert_eq!(
+        numeric.context().get_segment_value(DateSegmentKind::Minute),
+        None
+    );
+
+    drop(numeric.send(Event::CompositionEnd {
+        kind: DateSegmentKind::Minute,
+        text: String::from("４5"),
+    }));
+
+    assert!(!numeric.context().is_composing);
+    assert_eq!(
+        numeric.context().get_segment_value(DateSegmentKind::Minute),
+        Some(5)
+    );
+
+    let mut period = Service::<Machine>::new(
+        props().hour_cycle(Some(HourCycle::H12)),
+        &env("ja-JP"),
+        &Messages::default(),
+    );
+
+    drop(period.send(Event::CompositionEnd {
+        kind: DateSegmentKind::DayPeriod,
+        text: String::from("午後"),
+    }));
+
+    assert_eq!(
+        period
+            .context()
+            .get_segment_value(DateSegmentKind::DayPeriod),
+        Some(1)
+    );
+
+    drop(period.send(Event::CompositionEnd {
+        kind: DateSegmentKind::DayPeriod,
+        text: String::from("a"),
+    }));
+
+    assert_eq!(
+        period
+            .context()
+            .get_segment_value(DateSegmentKind::DayPeriod),
+        Some(0)
+    );
+
+    drop(period.send(Event::CompositionEnd {
+        kind: DateSegmentKind::Year,
+        text: String::from("2026"),
+    }));
+
+    assert_eq!(period.context().type_buffer, "");
+}
+
+#[test]
+fn api_dispatches_composition_events() {
+    let service = service();
+    let sent = RefCell::new(Vec::new());
+    let send = |event| sent.borrow_mut().push(event);
+    let api = service.connect(&send);
+
+    api.on_segment_composition_start();
+    api.on_segment_composition_end(DateSegmentKind::DayPeriod, "午前");
+
+    assert_eq!(
+        sent.borrow().as_slice(),
+        &[
+            Event::CompositionStart,
+            Event::CompositionEnd {
+                kind: DateSegmentKind::DayPeriod,
+                text: String::from("午前"),
+            },
+        ]
     );
 }
 
@@ -1111,6 +1207,47 @@ fn controlled_prop_sync_removing_value_clears_without_stale_time_and_becomes_unc
 }
 
 #[test]
+fn controlled_prop_sync_to_empty_stays_controlled_and_blocks_local_mutation() {
+    let mut service = Service::<Machine>::new(
+        props()
+            .hour_cycle(Some(HourCycle::H23))
+            .value(Some(time(14, 30, 0)))
+            .name(Some(String::from("meeting_time"))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(
+        service.set_props(
+            props()
+                .hour_cycle(Some(HourCycle::H23))
+                .value(None)
+                .name(Some(String::from("meeting_time"))),
+        ),
+    );
+
+    assert!(service.context().value.is_controlled());
+    assert_eq!(service.context().value.get(), &None);
+    assert_eq!(
+        attr(
+            &service.connect(&|_| {}).hidden_input_attrs(),
+            HtmlAttr::Value
+        ),
+        Some("")
+    );
+
+    drop(service.send(Event::IncrementSegment {
+        kind: DateSegmentKind::Hour,
+    }));
+
+    assert_eq!(service.context().value.get(), &None);
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Hour),
+        Some(0)
+    );
+}
+
+#[test]
 fn uncontrolled_prop_sync_to_value_enters_controlled_mode() {
     let mut service = Service::<Machine>::new(
         props()
@@ -1359,6 +1496,7 @@ fn context_partial_eq_observes_every_stored_field() {
     assert_different(|ctx| ctx.set_segment_value(DateSegmentKind::Hour, 3));
     assert_different(|ctx| ctx.focused_segment = Some(DateSegmentKind::Hour));
     assert_different(|ctx| ctx.type_buffer = String::from("1"));
+    assert_different(|ctx| ctx.is_composing = true);
     assert_different(|ctx| ctx.locale = Locale::parse("de-DE").expect("locale parses"));
     assert_different(|ctx| {
         ctx.messages = Messages {
@@ -1840,11 +1978,16 @@ fn time_conversion_helpers_cover_hour_cycles_cjk_clamp_and_digits() {
     assert_eq!(display_hour(time(0, 0, 0), HourCycle::H12), 12);
     assert_eq!(display_hour(time(12, 0, 0), HourCycle::H12), 12);
     assert_eq!(display_hour(time(0, 0, 0), HourCycle::H24), 24);
+    assert_eq!(display_hour(time(1, 0, 0), HourCycle::H24), 1);
 
     assert_eq!(display_hour_to_24(0, Some(1), HourCycle::H11), Some(12));
     assert_eq!(display_hour_to_24(11, Some(1), HourCycle::H11), Some(23));
+    assert_eq!(display_hour_to_24(11, Some(0), HourCycle::H11), Some(11));
     assert_eq!(display_hour_to_24(1, Some(1), HourCycle::H12), Some(13));
+    assert_eq!(display_hour_to_24(11, Some(0), HourCycle::H12), Some(11));
     assert_eq!(display_hour_to_24(24, None, HourCycle::H24), Some(0));
+    assert_eq!(display_hour_to_24(1, None, HourCycle::H24), Some(1));
+    assert_eq!(display_hour_range(HourCycle::H24), (1, 24));
 
     let mut ctx = Service::<Machine>::new(
         props()
