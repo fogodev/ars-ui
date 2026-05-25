@@ -1,0 +1,89 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "6ccdc85271d7",
+  "session_id": "019e5d87-db21-77f1-988f-4eeb0f07811c",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-25T18:54:51.310097Z",
+  "branch": "t3code/2ddd4539",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/time_field/tests.rs",
+    "crates/ars-components/src/date_time/time_field/mod.rs",
+    "spec/components/date-time/time-field.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "58129c3ccd62",
+  "checkpoint_transcript_start": 4162,
+  "transcript_lines_at_start": 4162,
+  "token_usage": {
+    "input_tokens": 32015,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 8601216,
+    "output_tokens": 7771,
+    "api_call_count": 43
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Iterate on PR #681 (ars-ui) by addressing Codex review feedback: fix TimeField controlled-value removal semantics and CJK H12 day-period timeout behavior.",
+    "outcome": "Two new regression tests were written (both initially failing), the corresponding bugs were fixed in time_field/mod.rs, an existing test was corrected to match the new intended fallback behavior, and all checks (unit, spec conformance, fmt, clippy, insta snapshots, proptest) passed. The fix was committed and pushed for the next Codex review pass.",
+    "learnings": {
+      "repo": [
+        "PR review loop uses a 'snapshot-reviewed' label that must be re-applied after each new commit push before triggering the next @codex review comment.",
+        "Codex bot signals review state via GitHub reactions (👀) and inline review threads; unresolved thread count is the primary signal for whether a pass is complete.",
+        "CI pipeline order: Formatting → Snapshot → Workspace Check → Clippy → Mutual Exclusion Guard → Unit Tests; earlier checks complete faster.",
+        "The project uses `cargo insta` for snapshot testing and `cargo xtask spec validate` for spec conformance, both are required before pushing.",
+        "Proptest suite for time_field state machine invariants is run with `--ignored` flag: `cargo test -p ars-components --test proptest_state_machines proptest_time_field_event_sequences_preserve_invariants -- --ignored`."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/time_field/mod.rs",
+          "line": 1558,
+          "end_line": 1582,
+          "finding": "Controlled-value removal branch (sync_controlled(Some(None))) was not dropping controlled mode; fix required explicitly transitioning back to uncontrolled state."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/time_field/mod.rs",
+          "line": 1818,
+          "end_line": 1842,
+          "finding": "CJK H12 ambiguous timeout fallback was inferring day-period from display hour instead of preferring the existing day-period segment; fix reads current_day_period segment first before falling back to hour inference."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/time_field/tests.rs",
+          "line": 384,
+          "end_line": 404,
+          "finding": "Existing CJK fallback test left an AM day-period in the segment state, which conflicted with the new 'preserve existing day-period' behavior. Test was corrected to clear the day-period segment when exercising pure hour-only fallback."
+        }
+      ],
+      "workflow": [
+        "Write failing tests first before implementing the fix to confirm the test actually exercises the bug.",
+        "Mutation testing was intentionally skipped for this pass per project policy; focused verification (unit + spec + fmt + clippy + insta + proptest) is the standard gate.",
+        "Polling Codex review state requires two separate API calls: reactions endpoint for emoji state and GraphQL reviewThreads query filtered to unresolved+codex-authored threads.",
+        "Two-minute sleep intervals between CI polls were used; the CI check sequence is predictable enough to estimate remaining wait time."
+      ]
+    },
+    "friction": [
+      "Multiple apply_patch iterations were needed to land the mod.rs changes correctly, requiring intermediate sed reads to verify line ranges before patching.",
+      "An existing test had a latent assumption (leaving AM day-period populated) that only surfaced as a conflict after the new fix changed fallback precedence, causing an unexpected test failure mid-verification.",
+      "Codex review cycle requires manual label re-application and explicit @codex comment after each push, adding ceremony to each iteration."
+    ],
+    "open_items": [
+      "Mutation testing was explicitly deferred for this pass; should be run before final merge.",
+      "Codex may open additional threads on the next review pass — the session ended mid-cycle waiting for Codex's response to the latest commit."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-25T18:54:28.695442Z",
+    "agent_lines": 37,
+    "agent_removed": 10,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 37,
+    "total_lines_changed": 47,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
