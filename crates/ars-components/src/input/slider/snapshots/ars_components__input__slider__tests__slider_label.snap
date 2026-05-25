@@ -26,12 +26,6 @@ AttrMap {
                 "volume-label",
             ),
         ),
-        (
-            For,
-            String(
-                "volume-thumb",
-            ),
-        ),
     ],
     styles: [],
 }

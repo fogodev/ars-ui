@@ -312,6 +312,8 @@ Percentage math uses normalized bounds and the effective bounded value. If
 callers provide reversed or non-finite bounds, the core normalizes them before
 computing thumb position, range fill, and marker in-range state so visual,
 ARIA, and form output remain consistent.
+Markers set `data-ars-in-range` only when their value lies within the normalized
+bounds and within the rendered fill segment for the configured `origin`.
 
 Pointer-to-value conversion uses the same normalized bounds as rendering. It
 returns `None` for non-positive or non-finite adapter-supplied track geometry
@@ -499,13 +501,13 @@ impl ars_core::Machine for Machine {
                 }))
             }
             Event::SetToMin => {
-                let min = ctx.min;
+                let (min, _) = normalized_bounds(ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(min);
                 }))
             }
             Event::SetToMax => {
-                let max = ctx.max;
+                let (_, max) = normalized_bounds(ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(max);
                 }))
@@ -828,12 +830,11 @@ impl<'a> Api<'a> {
 
     /// Attributes for a single marker.
     pub fn marker_attrs(&self, value: f64) -> AttrMap {
-        let current = bounded_value(self.ctx);
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Marker { value }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        if value <= current {
+        if marker_in_range(self.ctx, value) {
             attrs.set_bool(HtmlAttr::Data("ars-in-range"), true);
         }
         attrs
@@ -1048,6 +1049,10 @@ Slider
 | `aria-errormessage`| Thumb             | Points to ErrorMessage id when `invalid=true`                 |
 | `aria-hidden`      | DraggingIndicator | `"true"` — purely decorative visual feedback during drag      |
 | `hidden`           | DraggingIndicator | Present when not dragging (indicator is invisible when idle)  |
+
+The Label part does not set `for` because the Thumb part is a non-labelable
+`div role="slider"`. The Thumb uses `aria-labelledby` when the Label part is
+rendered.
 
 ### 3.2 Keyboard Interaction
 

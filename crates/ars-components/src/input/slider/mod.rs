@@ -534,9 +534,15 @@ impl ars_core::Machine for Machine {
 
             Event::DecrementLarge => Some(step_plan(ctx, large_step(ctx), false)),
 
-            Event::SetToMin => Some(set_value_plan(ctx, ctx.min, None, true, true, false)),
+            Event::SetToMin => {
+                let (min, _) = normalized_bounds(ctx.min, ctx.max);
+                Some(set_value_plan(ctx, min, None, true, true, false))
+            }
 
-            Event::SetToMax => Some(set_value_plan(ctx, ctx.max, None, true, true, false)),
+            Event::SetToMax => {
+                let (_, max) = normalized_bounds(ctx.min, ctx.max);
+                Some(set_value_plan(ctx, max, None, true, true, false))
+            }
 
             Event::SetValue(value) => {
                 if !value.is_finite() {
@@ -907,8 +913,7 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
-            .set(HtmlAttr::Id, self.ctx.ids.part("label"))
-            .set(HtmlAttr::For, self.ctx.ids.part("thumb"));
+            .set(HtmlAttr::Id, self.ctx.ids.part("label"));
 
         attrs
     }
@@ -1078,7 +1083,7 @@ impl Api<'_> {
             .set(part_attr, part_val)
             .set(HtmlAttr::Data("ars-value"), number_string(value));
 
-        if value <= bounded_value(self.ctx) {
+        if marker_in_range(self.ctx, value) {
             attrs.set_bool(HtmlAttr::Data("ars-in-range"), true);
         }
 
@@ -1348,6 +1353,33 @@ fn normalized_bounds(min: f64, max: f64) -> (f64, f64) {
 
 fn bounded_value(ctx: &Context) -> f64 {
     snap_to_step(*ctx.value.get(), ctx.min, ctx.max, ctx.step)
+}
+
+fn marker_in_range(ctx: &Context, value: f64) -> bool {
+    if !value.is_finite() {
+        return false;
+    }
+
+    let (min, max) = normalized_bounds(ctx.min, ctx.max);
+
+    if value < min || value > max {
+        return false;
+    }
+
+    let current = bounded_value(ctx);
+
+    match ctx.origin {
+        Origin::Start => value <= current,
+        Origin::End => value >= current,
+        Origin::Center => {
+            let center = min + (max - min) / 2.0;
+            if current >= center {
+                value >= center && value <= current
+            } else {
+                value >= current && value <= center
+            }
+        }
+    }
 }
 
 fn large_step(ctx: &Context) -> f64 {
@@ -1685,6 +1717,22 @@ mod tests {
         drop(vertical.send(events.borrow_mut().pop().expect("keyboard event")));
 
         assert_eq!(*vertical.context().value.get(), 30.0);
+    }
+
+    #[test]
+    fn home_and_end_use_normalized_bounds() {
+        let mut svc = service(Props {
+            min: 100.0,
+            max: 0.0,
+            default_value: 50.0,
+            ..props()
+        });
+
+        drop(svc.send(Event::SetToMin));
+        assert_eq!(*svc.context().value.get(), 0.0);
+
+        drop(svc.send(Event::SetToMax));
+        assert_eq!(*svc.context().value.get(), 100.0);
     }
 
     #[test]
@@ -2057,6 +2105,15 @@ mod tests {
                 .get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
             Some("volume-label")
         );
+    }
+
+    #[test]
+    fn label_attrs_do_not_point_for_at_non_labelable_thumb() {
+        let svc = service(props());
+        let attrs = svc.connect(&|_| {}).label_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Id), Some("volume-label"));
+        assert!(!attrs.contains(&HtmlAttr::For));
     }
 
     #[test]
@@ -2650,6 +2707,80 @@ mod tests {
         );
         assert!(
             !api.marker_attrs(75.0)
+                .contains(&HtmlAttr::Data("ars-in-range"))
+        );
+    }
+
+    #[test]
+    fn marker_attrs_follow_range_origin() {
+        let start = service(Props {
+            value: Some(40.0),
+            ..props()
+        });
+        let api = start.connect(&|_| {});
+
+        assert!(
+            api.marker_attrs(25.0)
+                .contains(&HtmlAttr::Data("ars-in-range"))
+        );
+        assert!(
+            !api.marker_attrs(75.0)
+                .contains(&HtmlAttr::Data("ars-in-range"))
+        );
+
+        let end = service(Props {
+            value: Some(40.0),
+            origin: Origin::End,
+            ..props()
+        });
+        let api = end.connect(&|_| {});
+
+        assert!(
+            !api.marker_attrs(25.0)
+                .contains(&HtmlAttr::Data("ars-in-range"))
+        );
+        assert!(
+            api.marker_attrs(75.0)
+                .contains(&HtmlAttr::Data("ars-in-range"))
+        );
+
+        let center_low = service(Props {
+            value: Some(25.0),
+            origin: Origin::Center,
+            ..props()
+        });
+        let api = center_low.connect(&|_| {});
+
+        assert!(
+            api.marker_attrs(25.0)
+                .contains(&HtmlAttr::Data("ars-in-range"))
+        );
+        assert!(
+            api.marker_attrs(50.0)
+                .contains(&HtmlAttr::Data("ars-in-range"))
+        );
+        assert!(
+            !api.marker_attrs(75.0)
+                .contains(&HtmlAttr::Data("ars-in-range"))
+        );
+
+        let center_high = service(Props {
+            value: Some(75.0),
+            origin: Origin::Center,
+            ..props()
+        });
+        let api = center_high.connect(&|_| {});
+
+        assert!(
+            !api.marker_attrs(25.0)
+                .contains(&HtmlAttr::Data("ars-in-range"))
+        );
+        assert!(
+            api.marker_attrs(50.0)
+                .contains(&HtmlAttr::Data("ars-in-range"))
+        );
+        assert!(
+            api.marker_attrs(75.0)
                 .contains(&HtmlAttr::Data("ars-in-range"))
         );
     }
