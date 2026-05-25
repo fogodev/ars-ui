@@ -25,7 +25,7 @@ references: {}
 pub struct Props {
     /// The ID of the grid.
     pub id: String,
-    /// Number of equal-width columns. Uses `repeat(N, minmax(0, 1fr))`.
+    /// Positive number of equal-width columns. Uses `repeat(N, minmax(0, 1fr))`.
     pub columns: Option<u32>,
     /// Minimum column width for auto-fill. Uses `repeat(auto-fill, minmax(N, 1fr))`.
     /// Mutually exclusive with `columns`.
@@ -61,7 +61,7 @@ impl Props {
     /// Apply inline styles for this grid to the given attribute map.
     pub fn apply_styles(&self, attrs: &mut AttrMap, resolver: Option<&dyn TokenResolver>) {
         attrs.set_style(CssProperty::Display, "grid");
-        if let Some(cols) = self.columns {
+        if let Some(cols) = self.columns.filter(|cols| *cols > 0) {
             attrs.set_style(
                 CssProperty::GridTemplateColumns,
                 format!("repeat({cols}, minmax(0, 1fr))"),

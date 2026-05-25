@@ -129,6 +129,8 @@ pub struct Context {
     pub size_unit: SizeUnit,
     /// Sizes at drag start (for computing deltas without floating-point error).
     pub drag_start_sizes: Vec<f64>,
+    /// Last expanded sizes remembered for collapsible panels.
+    pub collapsed_restore_sizes: Vec<Option<f64>>,
     /// Pointer coordinate at drag start.
     pub drag_start_pos: f64,
     /// Keyboard resize step size. Defaults to `10.0` (percent) or `20.0` (pixels).
@@ -161,6 +163,7 @@ impl Context {
             dir: props.dir.unwrap_or(Direction::Ltr),
             size_unit: props.size_unit,
             drag_start_sizes: Vec::new(),
+            collapsed_restore_sizes: vec![None; props.panels.len()],
             drag_start_pos: 0.0,
             keyboard_step: keyboard_step_for(props),
             focused_handle: None,
@@ -352,11 +355,13 @@ fn collapse_panel(sizes: &mut Vec<f64>, index: usize, panels: &[Panel]) {
     }
 }
 
-fn expand_panel(sizes: &mut Vec<f64>, index: usize, panels: &[Panel]) {
+fn expand_panel(sizes: &mut Vec<f64>, index: usize, panels: &[Panel], restore_size: Option<f64>) {
     if index >= sizes.len() || index >= panels.len() { return; }
     let p = &panels[index];
+    if !p.collapsible { return; }
     if sizes[index] > p.collapsed_size { return; }
-    let need = p.default_size - sizes[index];
+    let target_size = restore_size.filter(|size| size.is_finite()).unwrap_or(p.default_size);
+    let need = target_size - sizes[index];
     let donor = if index + 1 < sizes.len() { Some(index + 1) }
         else if index > 0 { Some(index - 1) }
         else { None };
@@ -364,6 +369,22 @@ fn expand_panel(sizes: &mut Vec<f64>, index: usize, panels: &[Panel]) {
         let actual = need.min((sizes[d] - effective_min(&panels[d])).max(0.0));
         sizes[index] += actual;
         sizes[d] -= actual;
+    }
+}
+
+fn remember_collapse_size(ctx: &mut Context, index: usize) {
+    if index >= ctx.panels.len() || index >= ctx.sizes.get().len() {
+        return;
+    }
+    if !ctx.panels[index].collapsible {
+        return;
+    }
+    let size = ctx.sizes.get()[index];
+    if size > ctx.panels[index].collapsed_size {
+        if ctx.collapsed_restore_sizes.len() != ctx.panels.len() {
+            ctx.collapsed_restore_sizes.resize(ctx.panels.len(), None);
+        }
+        ctx.collapsed_restore_sizes[index] = Some(size);
     }
 }
 
@@ -415,8 +436,13 @@ fn handle_keyboard(ctx: &mut Context, handle_index: usize, event: &KeyboardEvent
             if p.collapsible {
                 let mut sizes = ctx.sizes.get().to_vec();
                 if sizes[handle_index] <= p.collapsed_size {
-                    expand_panel(&mut sizes, handle_index, &ctx.panels);
+                    let restore_size = ctx.collapsed_restore_sizes.get(handle_index).copied().flatten();
+                    expand_panel(&mut sizes, handle_index, &ctx.panels, restore_size);
+                    if let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(handle_index) {
+                        *restore_size = None;
+                    }
                 } else {
+                    remember_collapse_size(ctx, handle_index);
                     collapse_panel(&mut sizes, handle_index, &ctx.panels);
                 }
                 commit_sizes(ctx, sizes);
@@ -485,6 +511,7 @@ impl ars_core::Machine for Machine {
                 let pi = *panel_index;
                 Some(TransitionPlan::context_only(move |ctx| {
                     let mut sizes = ctx.sizes.get().to_vec();
+                    remember_collapse_size(ctx, pi);
                     collapse_panel(&mut sizes, pi, &ctx.panels);
                     commit_sizes(ctx, sizes);
                 }))
@@ -493,7 +520,11 @@ impl ars_core::Machine for Machine {
                 let pi = *panel_index;
                 Some(TransitionPlan::context_only(move |ctx| {
                     let mut sizes = ctx.sizes.get().to_vec();
-                    expand_panel(&mut sizes, pi, &ctx.panels);
+                    let restore_size = ctx.collapsed_restore_sizes.get(pi).copied().flatten();
+                    expand_panel(&mut sizes, pi, &ctx.panels, restore_size);
+                    if let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(pi) {
+                        *restore_size = None;
+                    }
                     commit_sizes(ctx, sizes);
                 }))
             }
@@ -537,11 +568,7 @@ impl ars_core::Machine for Machine {
             }
             (_, Event::SyncProps { props }) => {
                 let props = props.clone();
-                let exit_dragging = matches!(
-                    state,
-                    State::Dragging { handle_index }
-                        if !valid_handle(*handle_index, props.panels.len(), props.panels.len())
-                );
+                let exit_dragging = matches!(state, State::Dragging { .. });
                 let plan = if exit_dragging {
                     TransitionPlan::to(State::Idle)
                 } else {
@@ -554,6 +581,7 @@ impl ars_core::Machine for Machine {
                     ctx.dir = props.dir.unwrap_or(Direction::Ltr);
                     ctx.size_unit = props.size_unit;
                     ctx.keyboard_step = keyboard_step_for(&props);
+                    ctx.collapsed_restore_sizes.resize(ctx.panels.len(), None);
                     ctx.sizes.sync_controlled(
                         props
                             .sizes

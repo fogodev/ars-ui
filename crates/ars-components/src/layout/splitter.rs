@@ -189,6 +189,9 @@ pub struct Context {
     /// Sizes captured at drag start.
     pub drag_start_sizes: Vec<f64>,
 
+    /// Last expanded sizes remembered for collapsible panels.
+    pub collapsed_restore_sizes: Vec<Option<f64>>,
+
     /// Pointer coordinate captured at drag start.
     pub drag_start_pos: f64,
 
@@ -230,6 +233,7 @@ impl Context {
             dir: props.dir.unwrap_or(Direction::Ltr),
             size_unit: props.size_unit,
             drag_start_sizes: Vec::new(),
+            collapsed_restore_sizes: vec![None; props.panels.len()],
             drag_start_pos: 0.0,
             keyboard_step: keyboard_step_for(props),
             focused_handle: None,
@@ -583,18 +587,26 @@ fn collapse_panel(sizes: &mut [f64], index: usize, panels: &[Panel]) {
     }
 }
 
-fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel]) {
+fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel], restore_size: Option<f64>) {
     if index >= sizes.len() || index >= panels.len() {
         return;
     }
 
     let panel = &panels[index];
 
+    if !panel.collapsible {
+        return;
+    }
+
     if sizes[index] > panel.collapsed_size {
         return;
     }
 
-    let need = (panel.default_size - sizes[index]).max(0.0);
+    let target_size = restore_size
+        .filter(|size| size.is_finite())
+        .unwrap_or(panel.default_size);
+
+    let need = (target_size - sizes[index]).max(0.0);
 
     let donor = if index + 1 < sizes.len() {
         Some(index + 1)
@@ -611,6 +623,26 @@ fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel]) {
 
         sizes[index] += actual;
         sizes[donor] -= actual;
+    }
+}
+
+fn remember_collapse_size(ctx: &mut Context, index: usize) {
+    if index >= ctx.panels.len() || index >= ctx.sizes.get().len() {
+        return;
+    }
+
+    if !ctx.panels[index].collapsible {
+        return;
+    }
+
+    let size = ctx.sizes.get()[index];
+
+    if size > ctx.panels[index].collapsed_size {
+        if ctx.collapsed_restore_sizes.len() != ctx.panels.len() {
+            ctx.collapsed_restore_sizes.resize(ctx.panels.len(), None);
+        }
+
+        ctx.collapsed_restore_sizes[index] = Some(size);
     }
 }
 
@@ -680,8 +712,19 @@ fn handle_keyboard(ctx: &mut Context, handle_index: usize, event: &KeyboardEvent
 
             if panel.collapsible {
                 if sizes[handle_index] <= panel.collapsed_size {
-                    expand_panel(&mut sizes, handle_index, &ctx.panels);
+                    let restore_size = ctx
+                        .collapsed_restore_sizes
+                        .get(handle_index)
+                        .copied()
+                        .flatten();
+
+                    expand_panel(&mut sizes, handle_index, &ctx.panels, restore_size);
+
+                    if let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(handle_index) {
+                        *restore_size = None;
+                    }
                 } else {
+                    remember_collapse_size(ctx, handle_index);
                     collapse_panel(&mut sizes, handle_index, &ctx.panels);
                 }
 
@@ -780,6 +823,7 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     let mut sizes = ctx.sizes.get().clone();
 
+                    remember_collapse_size(ctx, panel_index);
                     collapse_panel(&mut sizes, panel_index, &ctx.panels);
 
                     commit_sizes(ctx, sizes);
@@ -792,8 +836,17 @@ impl ars_core::Machine for Machine {
                 let panel_index = *panel_index;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     let mut sizes = ctx.sizes.get().clone();
+                    let restore_size = ctx
+                        .collapsed_restore_sizes
+                        .get(panel_index)
+                        .copied()
+                        .flatten();
 
-                    expand_panel(&mut sizes, panel_index, &ctx.panels);
+                    expand_panel(&mut sizes, panel_index, &ctx.panels, restore_size);
+
+                    if let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(panel_index) {
+                        *restore_size = None;
+                    }
 
                     commit_sizes(ctx, sizes);
                 }))
@@ -867,11 +920,7 @@ impl ars_core::Machine for Machine {
 
             (_, Event::SyncProps { props }) => {
                 let props = props.clone();
-                let exit_dragging = matches!(
-                    state,
-                    State::Dragging { handle_index }
-                        if !valid_handle(*handle_index, props.panels.len(), props.panels.len())
-                );
+                let exit_dragging = matches!(state, State::Dragging { .. });
                 let plan = if exit_dragging {
                     TransitionPlan::to(State::Idle)
                 } else {
@@ -886,6 +935,7 @@ impl ars_core::Machine for Machine {
                     ctx.dir = props.dir.unwrap_or(Direction::Ltr);
                     ctx.size_unit = props.size_unit;
                     ctx.keyboard_step = keyboard_step_for(&props);
+                    ctx.collapsed_restore_sizes.resize(ctx.panels.len(), None);
 
                     let normalized = clamp_all(ctx.sizes.get(), &ctx.panels, &current);
 
@@ -1854,6 +1904,7 @@ mod tests {
                 collapsible_panel("left", 40.0),
                 collapsible_panel("right", 60.0),
             ],
+            None,
         );
 
         assert_eq!(invalid, vec![0.0]);
@@ -1864,6 +1915,7 @@ mod tests {
             &mut expanded,
             0,
             &[collapsible_panel("left", 40.0), panel("right", 60.0)],
+            None,
         );
 
         assert_eq!(expanded, vec![20.0, 80.0]);
@@ -1883,6 +1935,7 @@ mod tests {
                 },
                 panel("right", 60.0),
             ],
+            None,
         );
 
         assert_eq!(sizes, vec![40.0, 60.0]);
@@ -1896,6 +1949,7 @@ mod tests {
             &mut sizes,
             1,
             &[panel("left", 60.0), collapsible_panel("right", 40.0)],
+            None,
         );
 
         assert_eq!(sizes, vec![60.0, 40.0]);
@@ -1905,7 +1959,7 @@ mod tests {
     fn expand_single_panel_has_no_donor_neighbor() {
         let mut sizes = vec![0.0];
 
-        expand_panel(&mut sizes, 0, &[collapsible_panel("only", 40.0)]);
+        expand_panel(&mut sizes, 0, &[collapsible_panel("only", 40.0)], None);
 
         assert_eq!(sizes, vec![0.0]);
     }
@@ -1918,9 +1972,33 @@ mod tests {
 
         let mut sizes = vec![0.0, 90.0];
 
-        expand_panel(&mut sizes, 0, &[collapsible_panel("left", 40.0), donor]);
+        expand_panel(
+            &mut sizes,
+            0,
+            &[collapsible_panel("left", 40.0), donor],
+            None,
+        );
 
         assert_eq!(sizes, vec![20.0, 70.0]);
+    }
+
+    #[test]
+    fn expand_panel_ignores_non_collapsible_panel() {
+        let mut non_collapsible = panel("left", 0.0);
+
+        non_collapsible.min_size = 0.0;
+        non_collapsible.collapsed_size = 0.0;
+
+        let mut sizes = vec![0.0, 100.0];
+
+        expand_panel(
+            &mut sizes,
+            0,
+            &[non_collapsible, panel("right", 100.0)],
+            None,
+        );
+
+        assert_eq!(sizes, vec![0.0, 100.0]);
     }
 
     #[test]
@@ -2090,6 +2168,34 @@ mod tests {
         }));
 
         assert_eq!(service.context().sizes.get(), &vec![40.0, 60.0]);
+    }
+
+    #[test]
+    fn collapse_expand_restores_pre_collapse_size() {
+        let mut right = panel("right", 30.0);
+
+        right.max_size = None;
+
+        let mut service = service(
+            Props::new()
+                .id("split")
+                .panels(vec![collapsible_panel("left", 40.0), right])
+                .default_sizes(vec![70.0, 30.0]),
+        );
+
+        drop(service.send(Event::KeyDown {
+            handle_index: 0,
+            event: key(KeyboardKey::Enter),
+        }));
+
+        assert_eq!(service.context().sizes.get(), &vec![0.0, 100.0]);
+
+        drop(service.send(Event::KeyDown {
+            handle_index: 0,
+            event: key(KeyboardKey::Space),
+        }));
+
+        assert_eq!(service.context().sizes.get(), &vec![70.0, 30.0]);
     }
 
     #[test]
@@ -2318,6 +2424,24 @@ mod tests {
 
         drop(service.send(Event::SyncProps {
             props: two_panel_props().default_sizes(vec![50.0, 50.0]),
+        }));
+
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().drag_start_sizes.is_empty());
+        assert_eq!(service.context().drag_start_pos, 0.0);
+    }
+
+    #[test]
+    fn sync_props_exits_dragging_when_active_handle_remains_valid() {
+        let mut service = service(two_panel_props().default_sizes(vec![50.0, 50.0]));
+
+        drop(service.send(Event::DragStart {
+            handle_index: 0,
+            pos: 25.0,
+        }));
+
+        drop(service.send(Event::SyncProps {
+            props: two_panel_props().keyboard_step(5.0),
         }));
 
         assert_eq!(service.state(), &State::Idle);

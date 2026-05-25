@@ -123,7 +123,7 @@ impl Props {
     pub fn apply_styles(&self, attrs: &mut AttrMap, resolver: Option<&dyn TokenResolver>) {
         attrs.set_style(CssProperty::Display, "grid");
 
-        if let Some(columns) = self.columns {
+        if let Some(columns) = self.columns.filter(|columns| *columns > 0) {
             attrs.set_style(
                 CssProperty::GridTemplateColumns,
                 format!("repeat({columns}, minmax(0, 1fr))"),
@@ -308,6 +308,18 @@ mod tests {
             CssProperty::GridTemplateColumns,
             "repeat(auto-fill, minmax(14rem, 1fr))".into()
         )));
+    }
+
+    #[test]
+    fn zero_columns_do_not_emit_invalid_grid_template() {
+        let attrs = Api::new(Props::new().columns(Some(0)), None).root_attrs();
+
+        assert!(
+            !attrs
+                .styles()
+                .iter()
+                .any(|(property, _)| *property == CssProperty::GridTemplateColumns)
+        );
     }
 
     #[test]
