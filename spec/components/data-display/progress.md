@@ -306,7 +306,10 @@ impl<'a> Api<'a> {
             &self.ctx.locale,
             self.props.format_options.clone().unwrap_or_default(),
         );
-        format!("{} complete", fmt.format_percent(self.ctx.percent / 100.0, Some(0)))
+        (self.ctx.messages.determinate)(
+            &fmt.format_percent(self.ctx.percent / 100.0, Some(0)),
+            &self.ctx.locale,
+        )
     }
 
     /// Returns the root attributes for the progress.
@@ -434,6 +437,9 @@ impl ConnectApi for Api<'_> {
 }
 
 /// Messages for the Progress component.
+/// Formats a locale-aware percent string into determinate progress value text.
+pub type DeterminateTextFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
+
 #[derive(Clone, Debug)]
 pub struct Messages {
     /// Text announced by screen readers when the progress is loading.
@@ -442,12 +448,18 @@ pub struct Messages {
     /// Text announced by screen readers when the progress is complete.
     /// Default (en): `"Complete"`.
     pub complete: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Formats the determinate progress percentage for screen readers.
+    /// Default (en): `"{percent} complete"`.
+    pub determinate: MessageFn<DeterminateTextFn>,
 }
 impl Default for Messages {
     fn default() -> Self {
         Self {
             loading: MessageFn::static_str("Loading…"),
             complete: MessageFn::static_str("Complete"),
+            determinate: MessageFn::new(alloc::sync::Arc::new(
+                |percent: &str, _locale: &Locale| format!("{percent} complete"),
+            ) as alloc::sync::Arc<DeterminateTextFn>),
         }
     }
 }
@@ -498,7 +510,7 @@ Progress
   percentage formatting (e.g. "47 %" in French, "47%" in English). When locale
   is inherited from `ArsProvider`, adapters should derive the formatter through
   `use_number_formatter(...)`.
-- "Loading…" and "Complete" strings come from `Messages` and should be supplied
+- "Loading…", "Complete", and the determinate value text template come from `Messages` and should be supplied
   by the host application from a message catalog.
 
 > **No Hardcoded English Default Strings.** All default message strings

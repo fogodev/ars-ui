@@ -805,6 +805,24 @@ fn progress_range_value_text_and_circle_attrs_are_derived() {
 }
 
 #[test]
+fn progress_determinate_value_text_comes_from_messages() {
+    let messages = progress::Messages {
+        determinate: ars_core::MessageFn::new(std::sync::Arc::new(
+            |percent: &str, _locale: &ars_i18n::Locale| format!("{percent} uploaded"),
+        )
+            as std::sync::Arc<progress::DeterminateTextFn>),
+        ..progress::Messages::default()
+    };
+    let service = Service::<progress::Machine>::new(
+        progress::Props::new().id("upload").default_value(25.0),
+        &Env::default(),
+        &messages,
+    );
+
+    assert_eq!(service.connect(&|_| {}).value_text(), "25% uploaded");
+}
+
+#[test]
 fn progress_part_attrs_delegates_for_all_parts() {
     let service = progress_service(progress::Props::new().id("upload").default_value(25.0));
 

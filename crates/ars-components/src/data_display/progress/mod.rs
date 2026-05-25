@@ -19,6 +19,9 @@ use ars_core::{
 };
 use ars_i18n::number;
 
+/// Formats a locale-aware percent string into determinate progress value text.
+pub type DeterminateTextFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
+
 /// Layout orientation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Orientation {
@@ -228,6 +231,9 @@ pub struct Messages {
 
     /// Text announced by screen readers when progress is complete.
     pub complete: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+
+    /// Formats the determinate progress percentage for screen readers.
+    pub determinate: MessageFn<DeterminateTextFn>,
 }
 
 impl Default for Messages {
@@ -235,6 +241,9 @@ impl Default for Messages {
         Self {
             loading: MessageFn::static_str("Loading…"),
             complete: MessageFn::static_str("Complete"),
+            determinate: MessageFn::new(alloc::sync::Arc::new(|percent: &str, _locale: &Locale| {
+                alloc::format!("{percent} complete")
+            }) as alloc::sync::Arc<DeterminateTextFn>),
         }
     }
 }
@@ -571,9 +580,9 @@ impl Api<'_> {
             self.props.format_options.clone().unwrap_or_default(),
         );
 
-        alloc::format!(
-            "{} complete",
-            formatter.format_percent(self.ctx.percent / 100.0, Some(0))
+        (self.ctx.messages.determinate)(
+            &formatter.format_percent(self.ctx.percent / 100.0, Some(0)),
+            &self.ctx.locale,
         )
     }
 
