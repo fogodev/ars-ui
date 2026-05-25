@@ -110,6 +110,7 @@ fn arb_toggle_event() -> impl Strategy<Value = toggle::Event> {
 fn arb_drop_zone_accept() -> impl Strategy<Value = Vec<String>> {
     prop_oneof![
         Just(Vec::new()),
+        Just(vec![".png".to_string()]),
         Just(vec!["image/*".to_string()]),
         Just(vec!["image/png".to_string()]),
         Just(vec!["text/plain".to_string()]),
@@ -180,6 +181,7 @@ fn arb_drop_zone_data() -> impl Strategy<Value = drop_zone::DragData> {
                 Just("image/jpg".to_string()),
                 Just("text/plain".to_string()),
                 Just("application/json".to_string()),
+                Just("Files".to_string()),
             ],
             0..=4,
         ),
@@ -1830,6 +1832,10 @@ proptest! {
                 prop_assert!(
                     !service.context().valid_drag,
                     "valid_drag must clear outside DragOver"
+                );
+                prop_assert!(
+                    service.context().drag_types.is_empty(),
+                    "drag_types must clear outside DragOver"
                 );
             }
 

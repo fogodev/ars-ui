@@ -200,6 +200,9 @@ pub struct Context {
     /// Whether the active drag currently satisfies advertised type policy.
     pub valid_drag: bool,
 
+    /// Advertised MIME/type tokens for the active drag operation.
+    pub drag_types: Vec<String>,
+
     /// Whether a drag operation is currently hovering over the drop target.
     pub is_drop_target: bool,
 
@@ -568,6 +571,7 @@ impl ars_core::Machine for Machine {
                 focused: false,
                 focus_visible: false,
                 valid_drag: false,
+                drag_types: Vec::new(),
                 is_drop_target: false,
                 dropped_items: Vec::new(),
                 last_rejection: None,
@@ -629,10 +633,30 @@ impl ars_core::Machine for Machine {
                                 ctx.disabled = disabled;
                                 ctx.read_only = read_only;
                                 ctx.valid_drag = false;
+                                ctx.drag_types.clear();
                                 ctx.is_drop_target = false;
                             })
                             .cancel_effect(Effect::ArmDropActivate),
                     )
+                } else if matches!(state, State::DragOver) {
+                    let valid = validate_drag_types_for(&accept, &ctx.drag_types);
+                    let was_valid = ctx.valid_drag;
+                    let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.accept = accept;
+                        ctx.max_files = max_files;
+                        ctx.max_file_size = max_file_size;
+                        ctx.disabled = disabled;
+                        ctx.read_only = read_only;
+                        ctx.valid_drag = valid;
+                    });
+
+                    if !valid && was_valid {
+                        plan = plan.cancel_effect(Effect::ArmDropActivate);
+                    } else if valid && !was_valid {
+                        plan = plan.with_effect(PendingEffect::named(Effect::ArmDropActivate));
+                    }
+
+                    Some(plan)
                 } else {
                     Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                         ctx.accept = accept;
@@ -647,11 +671,13 @@ impl ars_core::Machine for Machine {
             (State::Idle | State::DropAccepted | State::DropRejected, Event::DragEnter(data)) => {
                 let data = data.clone();
                 let valid = validate_drag_types(ctx, &data.types);
+                let drag_types = data.types.clone();
                 let was_terminal = matches!(state, State::DropAccepted | State::DropRejected);
 
                 let mut plan =
                     TransitionPlan::to(State::DragOver).apply(move |ctx: &mut Context| {
                         ctx.valid_drag = valid;
+                        ctx.drag_types = drag_types;
                         ctx.is_drop_target = true;
                         ctx.last_rejection = None;
                     });
@@ -673,9 +699,11 @@ impl ars_core::Machine for Machine {
                 let data = data.clone();
                 let was_valid = ctx.valid_drag;
                 let valid = validate_drag_types(ctx, &data.types);
+                let drag_types = data.types.clone();
 
                 let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.valid_drag = valid;
+                    ctx.drag_types = drag_types;
                 });
 
                 if valid {
@@ -697,6 +725,7 @@ impl ars_core::Machine for Machine {
             (State::DragOver, Event::DragLeave) => Some({
                 let mut plan = TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
                     ctx.valid_drag = false;
+                    ctx.drag_types.clear();
                     ctx.is_drop_target = false;
                 });
 
@@ -721,6 +750,7 @@ impl ars_core::Machine for Machine {
                                     ctx.dropped_items = items;
                                     ctx.last_rejection = None;
                                     ctx.valid_drag = false;
+                                    ctx.drag_types.clear();
                                     ctx.is_drop_target = false;
                                 }
                             })
@@ -740,6 +770,7 @@ impl ars_core::Machine for Machine {
                                 move |ctx: &mut Context| {
                                     ctx.last_rejection = Some(rejection);
                                     ctx.valid_drag = false;
+                                    ctx.drag_types.clear();
                                     ctx.is_drop_target = false;
                                 }
                             })
@@ -979,6 +1010,7 @@ fn reset_plan() -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Idle)
         .apply(|ctx: &mut Context| {
             ctx.valid_drag = false;
+            ctx.drag_types.clear();
             ctx.is_drop_target = false;
             ctx.dropped_items.clear();
             ctx.last_rejection = None;
@@ -991,6 +1023,7 @@ fn auto_reset_plan() -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Idle)
         .apply(|ctx: &mut Context| {
             ctx.valid_drag = false;
+            ctx.drag_types.clear();
             ctx.is_drop_target = false;
             ctx.last_rejection = None;
         })
@@ -1064,12 +1097,16 @@ fn drop_rejected_effect(rejection: DropRejection) -> PendingEffect<Machine> {
 }
 
 fn validate_drag_types(ctx: &Context, types: &[String]) -> bool {
-    if ctx.accept.is_empty() {
+    validate_drag_types_for(&ctx.accept, types)
+}
+
+fn validate_drag_types_for(accept: &[String], types: &[String]) -> bool {
+    if accept.is_empty() {
         true
     } else {
         types
             .iter()
-            .any(|mime_type| mime_type_accepted(&ctx.accept, mime_type))
+            .any(|mime_type| is_file_drag_type(mime_type) || mime_type_accepted(accept, mime_type))
     }
 }
 
@@ -1111,7 +1148,7 @@ fn validate_drop(ctx: &Context, items: &[DragItem]) -> Vec<DropValidationError> 
             };
 
             let normalized = normalize_mime_type(&mime_type);
-            if !accepted_mime_matches(&ctx.accept, &normalized) {
+            if !item_accepted(&ctx.accept, item, &normalized) {
                 errors.push(DropValidationError::UnsupportedType {
                     mime_type: normalized,
                 });
@@ -1142,11 +1179,29 @@ fn mime_type_accepted(accepted_types: &[String], mime_type: &str) -> bool {
     accepted_mime_matches(accepted_types, &normalize_mime_type(mime_type))
 }
 
+fn item_accepted(accepted_types: &[String], item: &DragItem, normalized_mime_type: &str) -> bool {
+    accepted_types.iter().map(String::as_str).any(|accepted| {
+        let accepted = normalize_accept_specifier(accepted);
+        if mime_type_matches(&accepted, normalized_mime_type) {
+            return true;
+        }
+
+        let Some(extension) = accepted.strip_prefix('.') else {
+            return false;
+        };
+
+        matches!(
+            item,
+            DragItem::File { name, .. } if file_name_has_extension(name, extension)
+        )
+    })
+}
+
 fn accepted_mime_matches(accepted_types: &[String], actual: &str) -> bool {
     accepted_types
         .iter()
         .map(String::as_str)
-        .map(normalize_mime_type)
+        .map(normalize_accept_specifier)
         .any(|accepted| mime_type_matches(&accepted, actual))
 }
 
@@ -1168,6 +1223,22 @@ fn normalize_mime_type(mime_type: &str) -> String {
     } else {
         normalized
     }
+}
+
+fn normalize_accept_specifier(accepted: &str) -> String {
+    normalize_mime_type(accepted)
+}
+
+fn is_file_drag_type(mime_type: &str) -> bool {
+    mime_type.trim().eq_ignore_ascii_case("Files")
+}
+
+fn file_name_has_extension(name: &str, extension: &str) -> bool {
+    let Some(actual_extension) = name.rsplit_once('.').map(|(_, extension)| extension) else {
+        return false;
+    };
+
+    !actual_extension.is_empty() && actual_extension.eq_ignore_ascii_case(extension)
 }
 
 #[cfg(test)]
@@ -1388,6 +1459,52 @@ mod tests {
         let valid_activate = service.send(Event::DropActivate);
 
         assert_eq!(valid_activate.pending_effects[0].name, Effect::DropActivate);
+    }
+
+    #[test]
+    fn drop_zone_files_drag_type_is_valid_file_hover_candidate() {
+        let mut service = service(props().accept(["image/png"]));
+
+        let enter = service.send(Event::DragEnter(drag_data(Vec::new(), &["Files"])));
+
+        assert_eq!(service.state(), &State::DragOver);
+        assert!(service.context().valid_drag);
+        assert_eq!(service.context().drag_types, vec!["Files"]);
+        assert_eq!(enter.pending_effects[0].name, Effect::DropEnter);
+        assert_eq!(enter.pending_effects[1].name, Effect::ArmDropActivate);
+    }
+
+    #[test]
+    fn drop_zone_set_props_recomputes_drag_over_validity() {
+        let mut service = service(props().accept(["image/png"]));
+
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["image/png"]))));
+
+        let tightened = service.set_props(props().accept(["text/plain"]));
+
+        assert_eq!(service.state(), &State::DragOver);
+        assert!(!service.context().valid_drag);
+        assert_eq!(service.context().drag_types, vec!["image/png"]);
+        assert_eq!(tightened.cancel_effects, vec![Effect::ArmDropActivate]);
+
+        let loosened = service.set_props(props().accept(["image/*"]));
+
+        assert!(service.context().valid_drag);
+        assert_eq!(loosened.pending_effects[0].name, Effect::ArmDropActivate);
+    }
+
+    #[test]
+    fn drop_zone_extension_accept_matches_file_names() {
+        let mut service = service(props().accept([" .PNG "]));
+        let items = vec![file("ICON.PNG", "application/octet-stream", 10)];
+
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["Files"]))));
+
+        let result = service.send(Event::Drop(drag_data(items.clone(), &["Files"])));
+
+        assert!(result.state_changed);
+        assert_eq!(service.state(), &State::DropAccepted);
+        assert_eq!(service.context().dropped_items, items);
     }
 
     #[test]

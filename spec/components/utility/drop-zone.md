@@ -97,7 +97,10 @@ Drop validation is aggregate, not fail-fast. A rejected payload records every ap
 failure in `DropRejection::errors`: max item count, every oversized file, and every MIME-bearing
 item outside the accept policy. MIME comparisons trim whitespace, compare case-insensitively,
 normalize `image/jpg` to `image/jpeg`, and support `type/*` wildcards to match the
-`ars-interactions` drag-and-drop policy.
+`ars-interactions` drag-and-drop policy. File drops also support HTML-style extension tokens such
+as `.png` by comparing against `DragItem::File` names. Hover validation treats the browser
+`Files` drag type as a valid file candidate because the concrete file names and MIME types are not
+available until drop time.
 
 ### 1.4 Context
 
@@ -119,6 +122,8 @@ pub struct Context {
     pub focus_visible: bool,
     /// The valid drag state of the drop zone.
     pub valid_drag: bool,
+    /// Advertised MIME/type tokens for the active drag operation.
+    pub drag_types: Vec<String>,
     /// The drop target state of the drop zone.
     /// `true` when a drag operation is hovering over the drop zone (state == DragOver).
     /// Adapters use this to apply visual feedback styles (e.g., highlighted border,
@@ -342,7 +347,7 @@ impl Machine {
         if accept.is_empty() {
             return true;
         }
-        dragged.iter().any(|t| mime_type_accepted(accept, t))
+        dragged.iter().any(|t| t.trim().eq_ignore_ascii_case("Files") || mime_type_accepted(accept, t))
     }
 
     /// Validates a set of drag items against the component constraints and
@@ -386,7 +391,7 @@ impl Machine {
                 };
                 if let Some(m) = mime {
                     let normalized = normalize_mime_type(m);
-                    if !accepted_mime_matches(&ctx.accept, &normalized) {
+                    if !item_accepted(&ctx.accept, item, &normalized) {
                         errors.push(DropValidationError::UnsupportedType {
                             mime_type: normalized,
                         });
@@ -477,8 +482,26 @@ impl ars_core::Machine for Machine {
                         ctx.disabled = disabled;
                         ctx.read_only = read_only;
                         ctx.valid_drag = false;
+                        ctx.drag_types.clear();
                         ctx.is_drop_target = false;
                     }).cancel_effect(Effect::ArmDropActivate))
+                } else if matches!(state, State::DragOver) {
+                    let valid = Self::validate_types(&accept, &ctx.drag_types);
+                    let was_valid = ctx.valid_drag;
+                    let mut plan = TransitionPlan::context_only(move |ctx| {
+                        ctx.accept = accept;
+                        ctx.max_files = max_files;
+                        ctx.max_file_size = max_file_size;
+                        ctx.disabled = disabled;
+                        ctx.read_only = read_only;
+                        ctx.valid_drag = valid;
+                    });
+                    if !valid && was_valid {
+                        plan = plan.cancel_effect(Effect::ArmDropActivate);
+                    } else if valid && !was_valid {
+                        plan = plan.with_effect(PendingEffect::named(Effect::ArmDropActivate));
+                    }
+                    Some(plan)
                 } else {
                     Some(TransitionPlan::context_only(move |ctx| {
                         ctx.accept = accept;
@@ -495,8 +518,10 @@ impl ars_core::Machine for Machine {
             // Adapter invokes `on_drop_enter` and arms activation only for valid drags.
             (State::Idle, Event::DragEnter(data)) => {
                 let valid = Self::validate_types(&ctx.accept, &data.types);
+                let drag_types = data.types.clone();
                 let mut plan = TransitionPlan::to(State::DragOver).apply(move |ctx| {
                     ctx.valid_drag = valid;
+                    ctx.drag_types = drag_types;
                     ctx.is_drop_target = true;
                 });
                 if valid {
@@ -512,9 +537,11 @@ impl ars_core::Machine for Machine {
             // or until a later accepted drop replaces it.
             (State::DropAccepted | State::DropRejected, Event::DragEnter(data)) => {
                 let valid = Self::validate_types(&ctx.accept, &data.types);
+                let drag_types = data.types.clone();
                 let mut plan = TransitionPlan::to(State::DragOver).apply(move |ctx| {
                     ctx.last_rejection = None;
                     ctx.valid_drag = valid;
+                    ctx.drag_types = drag_types;
                     ctx.is_drop_target = true;
                 });
                 if valid {
@@ -528,8 +555,10 @@ impl ars_core::Machine for Machine {
             (State::DragOver, Event::DragOver(data)) => {
                 let was_valid = ctx.valid_drag;
                 let valid = Self::validate_types(&ctx.accept, &data.types);
+                let drag_types = data.types.clone();
                 let mut plan = TransitionPlan::context_only(move |ctx| {
                     ctx.valid_drag = valid;
+                    ctx.drag_types = drag_types;
                 });
                 if valid {
                     plan = plan.with_effect(PendingEffect::named(Effect::DropMove));
