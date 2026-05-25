@@ -47,7 +47,7 @@ The adapter also forwards shared group props from the core contract, including l
 | `Item`                | repeated  | `<div>`                  | adapter-owned wrapper or documented helper output | item attrs from API                  | each item is keyed by value             |
 | `ItemControl`         | repeated  | focusable `<div>`        | adapter-owned                                     | `api.item_control_attrs(value)`      | owns `role="radio"` and roving tabindex |
 | `ItemIndicator`       | repeated  | `<div>`                  | adapter-owned                                     | `api.item_indicator_attrs(value)`    | decorative only                         |
-| `ItemLabel`           | repeated  | `<label>`                | adapter-owned or shared                           | `api.item_label_attrs(value)`        | linked to `ItemControl`                 |
+| `ItemLabel`           | repeated  | `<label>`                | adapter-owned or shared                           | `api.item_label_attrs(value)`        | linked to `ItemHiddenInput`             |
 | `ItemHiddenInput`     | repeated  | `<input type="radio">`   | adapter-owned                                     | `api.item_hidden_input_attrs(value)` | native submission bridge                |
 | `Description`         | optional  | `<div>`                  | adapter-owned                                     | `api.description_attrs()`            | described-by content                    |
 | `ErrorMessage`        | optional  | `<div>`                  | adapter-owned                                     | `api.error_message_attrs()`          | invalid-only content                    |
@@ -64,24 +64,25 @@ The adapter also forwards shared group props from the core contract, including l
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                  | Mode          | Sync trigger                        | Machine event / update path   | Visible effect                                |
-| ----------------------------- | ------------- | ----------------------------------- | ----------------------------- | --------------------------------------------- |
-| `value`                       | controlled    | signal change                       | `SetValue`                    | updates selected item and roving focus target |
-| `disabled` / `readonly`       | controlled    | signal change                       | `SetDisabled` / `SetReadonly` | guards group and item selection               |
-| `required` / `invalid`        | controlled    | signal change                       | `SetRequired` / `SetInvalid`  | updates root-level validation attrs           |
-| item activation or navigation | machine-owned | click, `Space`, `Enter`, arrow keys | `SelectValue` / focus events  | updates selected value and roving tabindex    |
+| Adapter prop                  | Mode          | Sync trigger                        | Machine event / update path  | Visible effect                                |
+| ----------------------------- | ------------- | ----------------------------------- | ---------------------------- | --------------------------------------------- |
+| `value`                       | controlled    | signal change                       | `SetValue`                   | updates selected item and roving focus target |
+| `disabled` / `readonly`       | controlled    | signal change                       | `SetProps`                   | guards group and item selection               |
+| `required` / `invalid`        | controlled    | signal change                       | `SetProps`                   | updates root-level validation attrs           |
+| item activation or navigation | machine-owned | click, hidden-input change, `Space`, `Enter`, arrow keys | `SelectValue` / focus events | updates selected value and roving tabindex |
 
 ## 8. Registration and Cleanup Contract
 
 - Repeated items must register in DOM order or a stable adapter-maintained order consistent with the rendered value list.
+- Re-rendering an existing value updates that item in place; when keyed rendering changes the item order without unmounting every affected value, the adapter must call `api.on_items_changed(items_in_render_order)` to synchronize the core registry order.
 - Removing an item must cleanly remove it from roving focus and hidden-input submission.
 - No global listeners are required.
 
 ## 9. Ref and Node Contract
 
 - `Root` may own a group-level ref for focus-entry logic.
-- Each `ItemControl` owns its own live ref for roving focus.
-- Hidden inputs remain non-focusable and must never become the roving target.
+- Each `ItemControl` owns its own live ref. When the core `Api::focused_item()` changes, the adapter resolves that item key to the current live ref and performs DOM focus outside the core machine.
+- Hidden inputs remain non-focusable and must never become the roving target; their native change event must call `api.on_item_hidden_input_change(value)` for label activation.
 
 ## 10. State Machine Boundary Rules
 
@@ -97,11 +98,11 @@ The adapter also forwards shared group props from the core contract, including l
 
 ## 12. Failure and Degradation Rules
 
-| Condition                                                     | Policy             | Notes                                                   |
-| ------------------------------------------------------------- | ------------------ | ------------------------------------------------------- |
-| controlled and uncontrolled value props are mixed after mount | warn and ignore    | first mode wins                                         |
-| repeated items are missing stable values                      | fail fast          | roving focus and submission depend on stable identity   |
-| platform focus repair is unavailable                          | degrade gracefully | selection still updates even if focus repair is reduced |
+| Condition                                                     | Policy             | Notes                                                 |
+| ------------------------------------------------------------- | ------------------ | ----------------------------------------------------- |
+| controlled and uncontrolled value props are mixed after mount | warn and ignore    | first mode wins                                       |
+| repeated items are missing stable values                      | fail fast          | roving focus and submission depend on stable identity |
+| item ref for the focused key is unavailable                   | degrade gracefully | selection and roving `tabindex` still update by key   |
 
 ## 13. Identity and Key Policy
 
@@ -200,7 +201,7 @@ view! {
 
 ## 27. Accessibility and SSR Notes
 
-- Description-first, error-second ordering is mandatory for group-level `aria-describedby`.
+- Description-first, error-second ordering is mandatory for group-level `aria-describedby` when those optional parts are rendered.
 - Horizontal RTL groups must reverse left or right navigation semantics without changing DOM order.
 - SSR must preserve initial checked item and item ordering.
 

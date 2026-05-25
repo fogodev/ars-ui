@@ -1,0 +1,67 @@
+---
+source: crates/ars-components/src/input/radio_group/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_|\n{}).item_hidden_input_attrs(&key(\"drone\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item-hidden-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "radio-group",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "shipping-item-drone-input",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Disabled,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Form,
+            String(
+                "checkout",
+            ),
+        ),
+        (
+            Name,
+            String(
+                "shipping_method",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "radio",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "drone",
+            ),
+        ),
+    ],
+    styles: [],
+}

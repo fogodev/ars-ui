@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/input/radio_group/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).item_attrs(&key(\"drone\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-disabled",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "radio-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "unchecked",
+            ),
+        ),
+    ],
+    styles: [],
+}

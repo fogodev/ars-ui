@@ -1,0 +1,38 @@
+---
+source: crates/ars-components/src/input/radio_group/mod.rs
+assertion_line: 2329
+expression: "snapshot_attrs(&service.connect(&|_| {}).item_label_attrs(&key(\"standard\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item-label",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "radio-group",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "shipping-item-standard-label",
+            ),
+        ),
+        (
+            For,
+            String(
+                "shipping-item-standard-input",
+            ),
+        ),
+    ],
+    styles: [],
+}

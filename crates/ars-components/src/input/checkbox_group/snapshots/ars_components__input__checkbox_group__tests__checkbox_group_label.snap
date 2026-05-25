@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/input/checkbox_group/mod.rs
+expression: snapshot_attrs(&api.label_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "label",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "checkbox-group",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "features-label",
+            ),
+        ),
+    ],
+    styles: [],
+}

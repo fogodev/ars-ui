@@ -1,0 +1,83 @@
+---
+source: crates/ars-components/src/input/radio_group/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "radio-group",
+            ),
+        ),
+        (
+            Aria(
+                Invalid,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "shipping-label",
+            ),
+        ),
+        (
+            Aria(
+                Orientation,
+            ),
+            String(
+                "horizontal",
+            ),
+        ),
+        (
+            Aria(
+                Required,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                DescribedBy,
+            ),
+            String(
+                "shipping-description shipping-error-message",
+            ),
+        ),
+        (
+            Dir,
+            String(
+                "rtl",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "shipping",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "radiogroup",
+            ),
+        ),
+    ],
+    styles: [],
+}

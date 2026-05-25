@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/input/radio_group/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).item_attrs(&key(\"standard\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-focus-visible",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "radio-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "checked",
+            ),
+        ),
+    ],
+    styles: [],
+}

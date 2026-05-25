@@ -1,0 +1,67 @@
+---
+source: crates/ars-components/src/input/radio_group/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).item_control_attrs(&key(\"express\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item-control",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "radio-group",
+            ),
+        ),
+        (
+            Aria(
+                Checked,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "shipping-item-express-label",
+            ),
+        ),
+        (
+            Aria(
+                Required,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "shipping-item-express",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "radio",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

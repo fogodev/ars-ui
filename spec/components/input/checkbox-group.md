@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: [checkbox]
 references:
-  react-aria: CheckboxGroup
+    react-aria: CheckboxGroup
 ---
 
 # CheckboxGroup
@@ -47,10 +47,18 @@ pub enum Event {
     CheckAll,
     /// Uncheck all checkboxes.
     UncheckAll,
+    /// Restore the checked values to `Props::default_value`.
+    Reset,
     /// Focus received.
     Focus { is_keyboard: bool },
     /// Focus lost.
     Blur,
+    /// Synchronize output-affecting props stored in context.
+    SetProps,
+    /// Track whether a Description part is rendered.
+    SetHasDescription(bool),
+    /// Track whether an ErrorMessage part is rendered.
+    SetHasErrorMessage(bool),
 }
 ```
 
@@ -158,6 +166,8 @@ pub struct Props {
     /// When `Some(n)`, unchecked items become disabled once `n` items are checked.
     /// Client-side constraint only — no hidden input is emitted for this prop.
     pub max_checked: Option<usize>,
+    /// Called when user intent requests a new checked-value set.
+    pub on_change: Option<Callback<dyn Fn(BTreeSet<Key>) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -173,6 +183,7 @@ impl Default for Props {
             orientation: Orientation::Vertical,
             all_values: BTreeSet::new(),
             max_checked: None,
+            on_change: None,
         }
     }
 }
@@ -200,11 +211,17 @@ When a `Checkbox` is rendered inside a `CheckboxGroup`, it reads the `ChildConte
 ```rust
 /// Borrowed view of group context for child Checkbox components.
 pub struct ChildContext<'a> {
+    /// The checked-value set owned by the group.
     pub value: &'a BTreeSet<Key>,
+    /// Shared form field name for all child checkboxes.
     pub name: Option<&'a str>,
+    /// ID of the associated native form element.
     pub form: Option<&'a str>,
+    /// Whether the whole group is disabled.
     pub disabled: bool,
+    /// Whether child checked state is read-only.
     pub readonly: bool,
+    /// Whether the group is invalid.
     pub invalid: bool,
     /// True when `max_checked` is reached. Unchecked child checkboxes should
     /// set `aria-disabled="true"` and reject toggle attempts.
@@ -225,12 +242,20 @@ pub struct Machine;
 pub struct Messages;
 impl ComponentMessages for Messages {}
 
+/// Typed identifier for every named effect intent the CheckboxGroup emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes `Props::on_change` with the requested checked-value set.
+    ValueChange,
+}
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -265,7 +290,7 @@ impl ars_core::Machine for Machine {
         if is_disabled(ctx) || is_readonly(ctx) {
             match event {
                 Event::Toggle(_) | Event::Check(_) | Event::Uncheck(_)
-                | Event::SetValue(_) | Event::CheckAll | Event::UncheckAll => return None,
+                | Event::CheckAll | Event::UncheckAll | Event::Reset => return None,
                 _ => {}
             }
         }
@@ -318,6 +343,10 @@ impl ars_core::Machine for Machine {
             Event::UncheckAll => {
                 Some(TransitionPlan::context_only(|ctx| { ctx.value.set(BTreeSet::new()); }))
             }
+            Event::Reset => {
+                let value = props.default_value.clone();
+                Some(TransitionPlan::context_only(move |ctx| { ctx.value.set(value); }))
+            }
             Event::Focus { is_keyboard } => {
                 let is_kb = *is_keyboard;
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -329,6 +358,38 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(|ctx| {
                     ctx.focused = false;
                     ctx.focus_visible = false;
+                }))
+            }
+            Event::SetProps => {
+                let name = props.name.clone();
+                let disabled = props.disabled;
+                let required = props.required;
+                let readonly = props.readonly;
+                let invalid = props.invalid;
+                let dir = props.dir;
+                let orientation = props.orientation;
+                let max_checked = props.max_checked;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.name = name.clone();
+                    ctx.disabled = disabled;
+                    ctx.required = required;
+                    ctx.readonly = readonly;
+                    ctx.invalid = invalid;
+                    ctx.dir = dir;
+                    ctx.orientation = orientation;
+                    ctx.max_checked = max_checked;
+                }))
+            }
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_description = has_description;
+                }))
+            }
+            Event::SetHasErrorMessage(has_error_message) => {
+                let has_error_message = *has_error_message;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_error_message = has_error_message;
                 }))
             }
         }
@@ -391,7 +452,7 @@ impl<'a> Api<'a> {
         }
         if self.ctx.invalid { attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true"); }
         if self.ctx.disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); }
-        attrs.set(HtmlAttr::Dir, self.ctx.dir.as_str());
+        attrs.set(HtmlAttr::Dir, self.ctx.dir.as_html_attr());
         if self.ctx.focus_visible { attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true); }
         if self.ctx.is_at_max() { attrs.set_bool(HtmlAttr::Data("ars-at-max"), true); }
         attrs
@@ -442,6 +503,52 @@ impl<'a> Api<'a> {
             at_max: self.ctx.is_at_max(),
         }
     }
+
+    /// Hidden native checkbox input configs for native form submission.
+    pub fn hidden_input_configs(&self) -> Vec<HiddenInputConfig> {
+        let Some(name) = &self.ctx.name else {
+            return Vec::new();
+        };
+
+        let mut configs = self.ctx.value.get().iter().map(|value| HiddenInputConfig {
+            name: name.clone(),
+            value: value.to_string(),
+            checked: true,
+            form_id: self.props.form.clone(),
+            disabled: self.ctx.disabled,
+            required: self.ctx.required,
+        }).collect::<Vec<_>>();
+
+        if configs.is_empty() && self.ctx.required {
+            configs.push(HiddenInputConfig {
+                name: name.clone(),
+                value: String::new(),
+                checked: false,
+                form_id: self.props.form.clone(),
+                disabled: self.ctx.disabled,
+                required: true,
+            });
+        }
+
+        configs
+    }
+}
+
+/// Native hidden checkbox input metadata for group form submission or validation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HiddenInputConfig {
+    /// Shared input name.
+    pub name: String,
+    /// Submitted value for this item.
+    pub value: String,
+    /// Whether this native checkbox should be checked.
+    pub checked: bool,
+    /// Associated form element ID.
+    pub form_id: Option<String>,
+    /// Whether the native hidden checkbox should be disabled.
+    pub disabled: bool,
+    /// Whether the native hidden checkbox should carry `required`.
+    pub required: bool,
 }
 
 impl ConnectApi for Api<'_> {
@@ -514,7 +621,8 @@ CheckboxGroup
 
 ## 5. Form Integration
 
-- **Hidden inputs**: The group renders hidden `<input type="checkbox" name="{name}" value="{v}" checked>` for each checked value.
+- **Hidden inputs**: The agnostic API exposes `hidden_input_configs()` with one checked `HiddenInputConfig` for each checked value, sorted by `BTreeSet<Key>` iteration order. Adapters render each config as a hidden native `<input type="checkbox" name="{name}" value="{v}">`, thread `checked`, `form`, `disabled`, and `required` from the config, and omit unchecked configs from submission naturally.
+- **Required empty validation**: When `required == true` and no value is checked, `hidden_input_configs()` returns one unchecked required validation config with the shared name and an empty value so native form validation has a control to validate.
 - **Validation states**: `aria-invalid="true"` on Root when `invalid=true`. The `ErrorMessage` part uses `role="alert"` for screen reader announcement.
 - **Required validation**: At least one checkbox must be checked when `required == true`.
 - **Reset behavior**: On form reset, the adapter restores `value` to `default_value`.
@@ -528,23 +636,23 @@ CheckboxGroup
 
 ### 6.1 Props
 
-| Feature          | ars-ui                         | Ark UI              | React Aria                        | Notes                                 |
-| ---------------- | ------------------------------ | ------------------- | --------------------------------- | ------------------------------------- |
-| Controlled value | `value: Option<BTreeSet<Key>>` | `value: string[]`   | `value: string[]`                 | Full parity                           |
-| Default value    | `default_value: BTreeSet<Key>` | `defaultValue`      | `defaultValue`                    | Full parity                           |
-| Disabled         | `disabled: bool`               | `disabled`          | `isDisabled`                      | Full parity                           |
-| Read-only        | `readonly: bool`               | `readOnly`          | `isReadOnly`                      | Full parity                           |
-| Required         | `required: bool`               | --                  | `isRequired`                      | RA parity                             |
-| Invalid          | `invalid: bool`                | `invalid`           | `isInvalid`                       | Full parity                           |
-| Form name        | `name: Option<String>`         | `name`              | `name`                            | Full parity                           |
-| Form ID          | `form: Option<String>`         | --                  | `form`                            | RA parity                             |
-| Max selected     | `max_checked: Option<usize>`   | `maxSelectedValues` | --                                | Ark parity                            |
-| Orientation      | `orientation: Orientation`     | --                  | `orientation`                     | RA parity                             |
-| All values       | `all_values: BTreeSet<Key>`    | --                  | --                                | ars-ui specific for CheckAll          |
-| Direction        | `dir: Direction`               | --                  | --                                | ars-ui specific for RTL               |
-| Validation       | --                             | --                  | `validate` / `validationBehavior` | Intentional: ars-ui defers to adapter |
+| Feature          | ars-ui                         | Ark UI              | React Aria                        | Notes                                |
+| ---------------- | ------------------------------ | ------------------- | --------------------------------- | ------------------------------------ |
+| Controlled value | `value: Option<BTreeSet<Key>>` | `value: string[]`   | `value: string[]`                 | Full parity                          |
+| Default value    | `default_value: BTreeSet<Key>` | `defaultValue`      | `defaultValue`                    | Full parity                          |
+| Disabled         | `disabled: bool`               | `disabled`          | `isDisabled`                      | Full parity                          |
+| Read-only        | `readonly: bool`               | `readOnly`          | `isReadOnly`                      | Full parity                          |
+| Required         | `required: bool`               | --                  | `isRequired`                      | RA parity                            |
+| Invalid          | `invalid: bool`                | `invalid`           | `isInvalid`                       | Full parity                          |
+| Form name        | `name: Option<String>`         | `name`              | `name`                            | Full parity                          |
+| Form ID          | `form: Option<String>`         | --                  | `form`                            | RA parity                            |
+| Max selected     | `max_checked: Option<usize>`   | `maxSelectedValues` | --                                | Ark parity                           |
+| Orientation      | `orientation: Orientation`     | --                  | `orientation`                     | RA parity                            |
+| All values       | `all_values: BTreeSet<Key>`    | --                  | --                                | ars-ui specific for CheckAll         |
+| Direction        | `dir: Direction`               | --                  | --                                | ars-ui specific for RTL              |
+| Validation       | forms/adapter validation layer | --                  | `validate` / `validationBehavior` | Owned by the forms integration layer |
 
-**Gaps:** None. React Aria's `validate`/`validationBehavior` props are handled at the adapter layer in ars-ui per forms spec.
+**Gaps:** None. React Aria's `validate`/`validationBehavior` props map to ars-ui's forms integration layer rather than the agnostic group state machine.
 
 ### 6.2 Anatomy
 

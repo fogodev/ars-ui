@@ -59,6 +59,22 @@ pub enum Event {
     FocusFirst,
     /// Focus the last item.
     FocusLast,
+    /// Register or update a rendered item.
+    RegisterItem(Radio),
+    /// Replace the registered item list with the current rendered order.
+    SetItems(Vec<Radio>),
+    /// Unregister a rendered item by value.
+    UnregisterItem(Key),
+    /// Restore the selected value to `Props::default_value`.
+    Reset,
+    /// Synchronize the externally controlled value prop.
+    SetValue(Option<Key>),
+    /// Synchronize output-affecting props stored in context.
+    SetProps,
+    /// Track whether a Description part is rendered.
+    SetHasDescription(bool),
+    /// Track whether an ErrorMessage part is rendered.
+    SetHasErrorMessage(bool),
 }
 ```
 
@@ -92,6 +108,8 @@ pub struct Context {
     pub loop_focus: bool,
     /// Whether a Description part is rendered (gates aria-describedby).
     pub has_description: bool,
+    /// Whether an ErrorMessage part is rendered (gates aria-describedby).
+    pub has_error_message: bool,
     /// Ordered list of item values for navigation.
     pub items: Vec<Radio>,
     /// Component IDs for part identification.
@@ -142,6 +160,8 @@ pub struct Props {
     pub form: Option<String>,
     /// Whether the focus should loop.
     pub loop_focus: bool,
+    /// Called when user intent requests a new selected value.
+    pub on_value_change: Option<Callback<dyn Fn(Option<Key>) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -159,6 +179,7 @@ impl Default for Props {
             name: None,
             form: None,
             loop_focus: true,
+            on_value_change: None,
         }
     }
 }
@@ -182,12 +203,20 @@ pub struct Machine;
 pub struct Messages;
 impl ComponentMessages for Messages {}
 
+/// Typed identifier for every named effect intent the RadioGroup emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter invokes `Props::on_value_change` with the requested value.
+    ValueChange,
+}
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -221,9 +250,8 @@ impl ars_core::Machine for Machine {
         _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         if is_disabled(ctx) || is_readonly(ctx) {
-            match event {
-                Event::SelectValue(_) => return None,
-                _ => {}
+            if matches!(event, Event::SelectValue(_)) {
+                return None;
             }
         }
 
@@ -267,14 +295,7 @@ impl ars_core::Machine for Machine {
                     let val_clone = val.clone();
                     Some(TransitionPlan::to(State::Focused { item: val }).apply(move |ctx| {
                         ctx.focused_item = Some(val_clone);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(key) = &ctx.focused_item {
-                            let platform = use_platform_effects();
-                            let item_id = ctx.ids.item("item", key);
-                            platform.focus_element_by_id(&item_id);
-                        }
-                        no_cleanup()
-                    })))
+                    }))
                 } else {
                     None
                 }
@@ -286,14 +307,7 @@ impl ars_core::Machine for Machine {
                     let val_clone = val.clone();
                     Some(TransitionPlan::to(State::Focused { item: val }).apply(move |ctx| {
                         ctx.focused_item = Some(val_clone);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(key) = &ctx.focused_item {
-                            let platform = use_platform_effects();
-                            let item_id = ctx.ids.item("item", &key);
-                            platform.focus_element_by_id(&item_id);
-                        }
-                        no_cleanup()
-                    })))
+                    }))
                 } else {
                     None
                 }
@@ -305,14 +319,7 @@ impl ars_core::Machine for Machine {
                     let val_clone = val.clone();
                     Some(TransitionPlan::to(State::Focused { item: val }).apply(move |ctx| {
                         ctx.focused_item = Some(val_clone);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(first) = ctx.items.iter().find(|i| !i.disabled) {
-                            let platform = use_platform_effects();
-                            let item_id = ctx.ids.item("item", &first.value);
-                            platform.focus_element_by_id(&item_id);
-                        }
-                        no_cleanup()
-                    })))
+                    }))
                 } else {
                     None
                 }
@@ -324,20 +331,102 @@ impl ars_core::Machine for Machine {
                     let val_clone = val.clone();
                     Some(TransitionPlan::to(State::Focused { item: val }).apply(move |ctx| {
                         ctx.focused_item = Some(val_clone);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(last) = ctx.items.iter().rev().find(|i| !i.disabled) {
-                            let platform = use_platform_effects();
-                            let item_id = ctx.ids.item("item", &last.value);
-                            platform.focus_element_by_id(&item_id);
-                        }
-                        no_cleanup()
-                    })))
+                    }))
                 } else {
                     None
                 }
             }
 
-            _ => None,
+            Event::RegisterItem(radio) => {
+                let radio = radio.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    if let Some(existing) = ctx.items.iter_mut().find(|existing| existing.value == radio.value) {
+                        *existing = radio;
+                    } else {
+                        ctx.items.push(radio);
+                    }
+                }))
+            }
+            Event::SetItems(items) => {
+                let items = items.clone();
+                let focused_unavailable = ctx.focused_item.as_ref().is_some_and(|focused| {
+                    !items.iter().any(|item| &item.value == focused && !item.disabled)
+                });
+                let selected_removed = ctx
+                    .value
+                    .get()
+                    .as_ref()
+                    .is_some_and(|selected| !items.iter().any(|item| &item.value == selected));
+                let controlled = ctx.value.is_controlled();
+                let plan = if focused_unavailable && matches!(state, State::Focused { .. }) {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+
+                Some(plan.apply(move |ctx| {
+                    ctx.items = items;
+
+                    if focused_unavailable {
+                        ctx.focused_item = None;
+                        ctx.focus_visible = false;
+                    }
+
+                    if selected_removed && !controlled {
+                        ctx.value.set(None);
+                    }
+                }))
+            }
+            Event::UnregisterItem(value) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    unregister_item(ctx, &value);
+                }))
+            }
+            Event::Reset => {
+                let value = props.default_value.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.value.set(value);
+                }))
+            }
+            Event::SetValue(value) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.value.set(value);
+                }))
+            }
+            Event::SetProps => {
+                let disabled = props.disabled;
+                let readonly = props.readonly;
+                let required = props.required;
+                let invalid = props.invalid;
+                let orientation = props.orientation;
+                let dir = props.dir;
+                let name = props.name.clone();
+                let loop_focus = props.loop_focus;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.disabled = disabled;
+                    ctx.readonly = readonly;
+                    ctx.required = required;
+                    ctx.invalid = invalid;
+                    ctx.orientation = orientation;
+                    ctx.dir = dir;
+                    ctx.name = name.clone();
+                    ctx.loop_focus = loop_focus;
+                }))
+            }
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_description = has_description;
+                }))
+            }
+            Event::SetHasErrorMessage(has_error_message) => {
+                let has_error_message = *has_error_message;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_error_message = has_error_message;
+                }))
+            }
         }
     }
 
@@ -390,13 +479,13 @@ fn navigate_items(
 pub enum Part {
     Root,
     Label,
-    Description,
-    ErrorMessage,
     Item { item_value: Key },
     ItemControl { item_value: Key },
     ItemIndicator { item_value: Key },
     ItemLabel { item_value: Key },
     ItemHiddenInput { item_value: Key },
+    Description,
+    ErrorMessage,
 }
 
 /// API for the RadioGroup component.
@@ -429,15 +518,18 @@ impl<'a> Api<'a> {
         if self.ctx.required { attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true"); }
         if self.ctx.invalid { attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true"); }
         if self.ctx.disabled { attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
+        let mut describedby_parts = Vec::new();
+
         if self.ctx.has_description {
-            let mut describedby_parts = Vec::new();
             describedby_parts.push(self.ctx.ids.part("description"));
-            if self.ctx.invalid {
-                describedby_parts.push(self.ctx.ids.part("error-message"));
-            }
+        }
+
+        if self.ctx.invalid && self.ctx.has_error_message {
+            describedby_parts.push(self.ctx.ids.part("error-message"));
+        }
+
+        if !describedby_parts.is_empty() {
             attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), describedby_parts.join(" "));
-        } else if self.ctx.invalid {
-            attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), self.ctx.ids.part("error-message"));
         }
         attrs
     }
@@ -531,14 +623,14 @@ impl<'a> Api<'a> {
 
     /// Attributes for the radio item label.
     pub fn item_label_attrs(&self, item_value: &Key) -> AttrMap {
-        let item_id = self.ctx.ids.item("item", &item_value);
+        let input_id = self.ctx.ids.item_part("item", item_value, "input");
         let label_id = self.ctx.ids.item_part("item", item_value, "label");
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemLabel { item_value: Key::default() }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, label_id);
-        attrs.set(HtmlAttr::For, item_id);
+        attrs.set(HtmlAttr::For, input_id);
         attrs
     }
 
@@ -550,6 +642,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemHiddenInput { item_value: Key::default() }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.item_part("item", item_value, "input"));
         attrs.set(HtmlAttr::Type, "radio");
         if let Some(ref name) = self.ctx.name {
             attrs.set(HtmlAttr::Name, name);
@@ -562,7 +655,6 @@ impl<'a> Api<'a> {
         if is_disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
         if self.ctx.required { attrs.set_bool(HtmlAttr::Required, true); }
         attrs.set(HtmlAttr::TabIndex, "-1");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs
     }
 
@@ -590,6 +682,14 @@ impl<'a> Api<'a> {
         (self.send)(Event::SelectValue(item_value.clone()));
     }
 
+    pub fn on_item_hidden_input_change(&self, item_value: &Key) {
+        (self.send)(Event::SelectValue(item_value.clone()));
+    }
+
+    pub fn on_items_changed(&self, items: Vec<Radio>) {
+        (self.send)(Event::SetItems(items));
+    }
+
     pub fn on_item_control_focus(&self, item_value: &Key, is_keyboard: bool) {
         (self.send)(Event::FocusItem { item: item_value.clone(), is_keyboard });
     }
@@ -597,8 +697,15 @@ impl<'a> Api<'a> {
     pub fn on_item_control_blur(&self) { (self.send)(Event::Blur); }
 
     pub fn on_item_control_keydown(&self, item_value: &Key, data: &KeyboardEventData) {
-        if data.key == KeyboardKey::Space || data.key == KeyboardKey::Enter {
-            (self.send)(Event::SelectValue(item_value.clone()));
+        match data.key {
+            KeyboardKey::Space | KeyboardKey::Enter => (self.send)(Event::SelectValue(item_value.clone())),
+            KeyboardKey::ArrowRight => (self.send)(Event::FocusNext),
+            KeyboardKey::ArrowLeft => (self.send)(Event::FocusPrev),
+            KeyboardKey::ArrowDown => (self.send)(Event::FocusNext),
+            KeyboardKey::ArrowUp => (self.send)(Event::FocusPrev),
+            KeyboardKey::Home => (self.send)(Event::FocusFirst),
+            KeyboardKey::End => (self.send)(Event::FocusLast),
+            _ => {}
         }
     }
 }
@@ -632,7 +739,7 @@ RadioGroup
 │   ├── ItemControl    <div>    data-ars-part="item-control" (role="radio")
 │   ├── ItemIndicator  <div>    data-ars-part="item-indicator" (aria-hidden)
 │   ├── ItemLabel      <label>  data-ars-part="item-label"
-│   └── ItemHiddenInput <input> data-ars-part="item-hidden-input" (type="radio", aria-hidden)
+│   └── ItemHiddenInput <input> data-ars-part="item-hidden-input" (type="radio", tabindex="-1")
 ├── Description        <div>    data-ars-part="description" (optional)
 └── ErrorMessage       <div>    data-ars-part="error-message" (optional)
 ```
@@ -653,8 +760,8 @@ RadioGroup
 | Item            | `<div>`   | `data-ars-state` ("checked"/"unchecked")               |
 | ItemControl     | `<div>`   | `role="radio"`, `aria-checked`, roving `tabindex`      |
 | ItemIndicator   | `<div>`   | `aria-hidden="true"` — visual radio dot                |
-| ItemLabel       | `<label>` | `for` points to ItemControl                            |
-| ItemHiddenInput | `<input>` | `type="radio"`, `aria-hidden="true"` — form submission |
+| ItemLabel       | `<label>` | `for` points to ItemHiddenInput                        |
+| ItemHiddenInput | `<input>` | stable item input `id`, `type="radio"`, `tabindex="-1"` — form submission |
 
 ## 3. Accessibility
 
@@ -667,7 +774,7 @@ RadioGroup
 | `aria-required`    | Root        | Present when `required=true`               |
 | `aria-invalid`     | Root        | Present when `invalid=true`                |
 | `aria-labelledby`  | Root        | Points to Label id                         |
-| `aria-describedby` | Root        | Points to Description + ErrorMessage ids   |
+| `aria-describedby` | Root        | Points to rendered Description + ErrorMessage ids |
 | `role`             | ItemControl | `radio`                                    |
 | `aria-checked`     | ItemControl | `"true"` or `"false"`                      |
 | `aria-disabled`    | ItemControl | Present when item or group is disabled     |
@@ -690,9 +797,11 @@ The `aria-orientation` attribute informs assistive technology whether navigation
 
 ### 3.3 Focus Management
 
-- Roving tabindex: only the selected item (or first if none selected) has `tabindex="0"`.
+- Roving tabindex: only the focused item, focusable selected item, or first enabled item has `tabindex="0"`.
 - Arrow keys cycle focus through enabled items; wraps when `loop_focus` is enabled.
-- Focus moves programmatically via `platform.focus_element_by_id()` (see `PlatformEffects` trait in `01-architecture.md` section 2.2.7).
+- Core represents focus movement by updating `focused_item: Option<Key>` and roving `tabindex` attributes only. Framework adapters resolve the focused item key to a live `NodeRef`, `MountedData`, or host handle and perform any DOM focus movement.
+- Arrow/Home/End navigation updates both focused item and selected value when the group is not disabled or readonly. In readonly mode, focus may move but selection does not change; disabled items are never focus targets.
+- `RegisterItem` updates an existing registered value in place so normal prop changes do not reorder roving focus. When the rendered keyed order changes, adapters call `Api::on_items_changed(items_in_render_order)` to replace the registry with the authoritative current order and repair stale focus or uncontrolled selection.
 
 ## 4. Internationalization
 
@@ -704,9 +813,9 @@ The `aria-orientation` attribute informs assistive technology whether navigation
 
 ## 5. Form Integration
 
-- **Hidden inputs**: Each radio item renders a hidden `<input type="radio">` via `ItemHiddenInput`. Only the selected item has `checked`. All share the same `name` attribute.
-- **Validation states**: `aria-invalid="true"` on Root when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby`.
-- **Error message association**: `aria-describedby` on Root points to `Description` (when present) and `ErrorMessage` (when invalid).
+- **Hidden inputs**: Each radio item renders a hidden `<input type="radio">` via `ItemHiddenInput`. Only the selected item has `checked`. All share the same `name` attribute. Adapters wire the hidden input's native change event to `Api::on_item_hidden_input_change(value)` so native label activation dispatches the same machine selection event as item-control clicks.
+- **Validation states**: `aria-invalid="true"` on Root when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby` only when the adapter renders it.
+- **Error message association**: `aria-describedby` on Root points to `Description` (when rendered) and `ErrorMessage` (when invalid and rendered).
 - **Required**: `aria-required="true"` on Root and each ItemControl. Hidden inputs carry the `required` attribute.
 - **Reset behavior**: On form reset, the adapter restores `value` to `default_value`.
 - **Disabled/readonly propagation**: When inside a `Field` or `Fieldset`, the adapter merges `disabled`/`readonly` from `FieldCtx` per `07-forms.md` §12.6.
