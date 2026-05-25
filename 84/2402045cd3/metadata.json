@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "842402045cd3",
+  "strategy": "manual-commit",
+  "branch": "t3code/b1539d4b",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/utility/drop_zone/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility.rs",
+    "spec/components/utility/drop-zone.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/84/2402045cd3/0/metadata.json",
+      "transcript": "/84/2402045cd3/0/full.jsonl",
+      "content_hash": "/84/2402045cd3/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 85263,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 3485184,
+    "output_tokens": 10966,
+    "api_call_count": 45
+  }
+}
