@@ -21,6 +21,9 @@ pub mod number_input;
 /// SearchInput machine.
 pub mod search_input;
 
+/// Slider machine.
+pub mod slider;
+
 /// Switch machine.
 pub mod switch;
 

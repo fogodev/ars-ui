@@ -1,0 +1,49 @@
+---
+source: crates/ars-components/src/input/slider/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).hidden_input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "hidden-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "slider",
+            ),
+        ),
+        (
+            Form,
+            String(
+                "settings",
+            ),
+        ),
+        (
+            Name,
+            String(
+                "volume",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "hidden",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "25",
+            ),
+        ),
+    ],
+    styles: [],
+}

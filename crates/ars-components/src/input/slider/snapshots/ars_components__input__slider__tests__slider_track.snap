@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/input/slider/mod.rs
+expression: snapshot_attrs(&api.track_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "track",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "slider",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "volume-track",
+            ),
+        ),
+    ],
+    styles: [],
+}
