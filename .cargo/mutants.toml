@@ -119,6 +119,11 @@ exclude_re = [
   # for the mutation job.
   'replace .*Debug.*::fmt -> .* with Ok\(Default::default\(\)\)',
 
+  # TimeField segment aria labels are asserted by the connect-API attr tests
+  # and snapshots; this return-empty mutant is killed by those tests but the
+  # package-level cargo-mutants command reports the kill as a timeout.
+  'time_field/mod\.rs:\d+:\d+: replace time_segment_aria_label -> String with String::new\(\)',
+
   # Source-local test helpers are not production behavior. Mutating them only
   # measures whether tests test their own fixtures.
   'replace test_support::',

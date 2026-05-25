@@ -416,7 +416,9 @@ fn cjk_day_period_table(locale: &Locale) -> Option<CjkDayPeriodEntry> {
 fn day_period_from_cjk_buffer(
     buffer: &str,
     locale: &Locale,
+    hour_cycle: HourCycle,
     current_hour: Option<u8>,
+    current_day_period: Option<i32>,
 ) -> Option<i32> {
     let entry = match cjk_day_period_table(locale) {
         Some(e) => e,
@@ -449,7 +451,13 @@ fn day_period_from_cjk_buffer(
     }
 
     // Still ambiguous (single shared character). If this is a timeout
-    // fallback, use the current hour as context.
+    // fallback, use the current value as context. H11 display hours are
+    // always 0..=11, so preserving the current day-period value is the only
+    // non-lossy H11 fallback.
+    if hour_cycle == HourCycle::H11 {
+        return current_day_period.map(|value| value.clamp(0, 1));
+    }
+
     if let Some(hour) = current_hour {
         return Some(if hour < 12 { 0 } else { 1 });
     }
@@ -458,7 +466,7 @@ fn day_period_from_cjk_buffer(
 }
 ```
 
-The `TypeIntoSegment` handler for `DateSegmentKind::DayPeriod` in the TimeField state machine MUST delegate to this logic for CJK locales instead of the current ASCII-only `'a'`/`'p'` check. When the buffer is ambiguous after the first character, the handler schedules a `TypeBufferCommit` effect (500ms) exactly as numeric segments do. On `TypeBufferCommit` for a `DayPeriod` segment, call `day_period_from_cjk_buffer` with `current_hour` set to the current hour segment value to apply the timeout fallback.
+The `TypeIntoSegment` handler for `DateSegmentKind::DayPeriod` in the TimeField state machine MUST delegate to this logic for CJK locales instead of the current ASCII-only `'a'`/`'p'` check. When the buffer is ambiguous after the first character, the handler schedules a `TypeBufferCommit` effect (500ms) exactly as numeric segments do. On `TypeBufferCommit` for a `DayPeriod` segment, call `day_period_from_cjk_buffer` with the resolved hour cycle, current hour segment value, and current day-period segment value to apply the timeout fallback without flipping H11 PM values.
 
 ### 1.7 Timezone Handling
 
@@ -609,7 +617,20 @@ impl ars_core::Machine for Machine {
                     ctx.granularity = props.granularity;
                     ctx.hour_cycle = props.hour_cycle.unwrap_or(ctx.hour_cycle);
                     ctx.force_leading_zeros = props.force_leading_zeros;
-                    ctx.value.sync_controlled(props.value);
+                    if let Some(value) = props.value {
+                        let clamped = clamp_time(value, ctx.min_value.as_ref(), ctx.max_value.as_ref());
+                        ctx.value.set(Some(clamped));
+                        ctx.value.sync_controlled(Some(Some(clamped)));
+                    } else if ctx.value.is_controlled() {
+                        ctx.value.set(None);
+                        ctx.value.sync_controlled(Some(None));
+                    } else {
+                        let clamped = ctx.value.get().map(|time| {
+                            clamp_time(time, ctx.min_value.as_ref(), ctx.max_value.as_ref())
+                        });
+                        ctx.value.set(clamped);
+                        ctx.value.sync_controlled(None);
+                    }
                     ctx.rebuild_segments();
                 }))
             }
@@ -715,7 +736,7 @@ impl ars_core::Machine for Machine {
                     DateSegmentKind::DayPeriod => {
                         let mut buffer = ctx.type_buffer.clone();
                         buffer.push(ch);
-                        let cjk = day_period_from_cjk_buffer(&buffer, &ctx.locale, None);
+                        let cjk = day_period_from_cjk_buffer(&buffer, &ctx.locale, ctx.hour_cycle, None, None);
                         if cjk.is_none() && cjk_day_period_table(&ctx.locale).is_some() {
                             return Some(TransitionPlan::to(state.clone())
                                 .apply(move |ctx| { ctx.type_buffer = buffer; })

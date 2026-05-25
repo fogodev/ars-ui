@@ -313,6 +313,25 @@ fn cjk_day_period_timeout_uses_current_hour_as_fallback() {
 }
 
 #[test]
+fn cjk_day_period_timeout_preserves_h11_current_day_period() {
+    let mut ctx = Service::<Machine>::new(
+        props().hour_cycle(Some(HourCycle::H11)),
+        &env("ja-JP"),
+        &Messages::default(),
+    )
+    .context()
+    .clone();
+
+    ctx.set_segment_value(DateSegmentKind::Hour, 11);
+    ctx.set_segment_value(DateSegmentKind::DayPeriod, 1);
+    ctx.type_buffer = String::from("午");
+
+    commit_buffer_for_kind(&mut ctx, DateSegmentKind::DayPeriod, true);
+
+    assert_eq!(ctx.get_segment_value(DateSegmentKind::DayPeriod), Some(1));
+}
+
+#[test]
 fn connect_api_segment_attrs_include_spinbutton_range_and_value_text() {
     let service = Service::<Machine>::new(
         props()
@@ -543,6 +562,74 @@ fn prop_sync_updates_context_backed_contract_without_replacing_ids() {
         !ctx.segments
             .iter()
             .any(|segment| segment.kind == DateSegmentKind::DayPeriod)
+    );
+}
+
+#[test]
+fn controlled_prop_sync_can_clear_value_without_submitting_stale_time() {
+    let mut service = Service::<Machine>::new(
+        props()
+            .value(Some(time(14, 30, 0)))
+            .name(Some(String::from("meeting_time"))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    assert_eq!(service.context().value.get(), &Some(time(14, 30, 0)));
+    assert_eq!(
+        attr(
+            &service.connect(&|_| {}).hidden_input_attrs(),
+            HtmlAttr::Value
+        ),
+        Some("14:30:00")
+    );
+
+    drop(service.set_props(props().name(Some(String::from("meeting_time")))));
+
+    assert!(service.context().value.is_controlled());
+    assert_eq!(service.context().value.get(), &None);
+    assert_eq!(
+        attr(
+            &service.connect(&|_| {}).hidden_input_attrs(),
+            HtmlAttr::Value
+        ),
+        Some("")
+    );
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Hour),
+        None
+    );
+}
+
+#[test]
+fn uncontrolled_prop_sync_clamps_current_value_to_new_bounds() {
+    let mut service = Service::<Machine>::new(
+        props()
+            .hour_cycle(Some(HourCycle::H23))
+            .default_value(Some(time(8, 30, 0)))
+            .name(Some(String::from("meeting_time"))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(
+        service.set_props(
+            props()
+                .hour_cycle(Some(HourCycle::H23))
+                .min_value(Some(time(9, 0, 0)))
+                .max_value(Some(time(17, 0, 0)))
+                .name(Some(String::from("meeting_time"))),
+        ),
+    );
+
+    assert!(!service.context().value.is_controlled());
+    assert_eq!(service.context().value.get(), &Some(time(9, 0, 0)));
+    assert_eq!(
+        attr(
+            &service.connect(&|_| {}).hidden_input_attrs(),
+            HtmlAttr::Value
+        ),
+        Some("09:00:00")
     );
 }
 
@@ -1047,13 +1134,25 @@ fn time_conversion_helpers_cover_hour_cycles_cjk_clamp_and_digits() {
 
     let ko = Locale::parse("ko-KR").expect("ko-KR parses");
 
-    assert_eq!(day_period_from_cjk_buffer("오전", &ko, None), Some(0));
-    assert_eq!(day_period_from_cjk_buffer("오후", &ko, None), Some(1));
+    assert_eq!(
+        day_period_from_cjk_buffer("오전", &ko, HourCycle::H12, None, None),
+        Some(0)
+    );
+    assert_eq!(
+        day_period_from_cjk_buffer("오후", &ko, HourCycle::H12, None, None),
+        Some(1)
+    );
 
     let ja = Locale::parse("ja-JP").expect("ja-JP parses");
 
-    assert_eq!(day_period_from_cjk_buffer("午前", &ja, None), Some(0));
-    assert_eq!(day_period_from_cjk_buffer("午後", &ja, None), Some(1));
+    assert_eq!(
+        day_period_from_cjk_buffer("午前", &ja, HourCycle::H12, None, None),
+        Some(0)
+    );
+    assert_eq!(
+        day_period_from_cjk_buffer("午後", &ja, HourCycle::H12, None, None),
+        Some(1)
+    );
 
     assert_eq!(
         clamp_time(time(8, 0, 0), Some(&time(8, 0, 0)), Some(&time(17, 0, 0))),

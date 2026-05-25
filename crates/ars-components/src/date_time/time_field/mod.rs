@@ -1354,7 +1354,7 @@ fn type_into_segment(
         let has_cjk_table = cjk_day_period_table(&ctx.locale).is_some();
 
         let cjk_value = has_cjk_table
-            .then(|| day_period_from_cjk_buffer(&buffer, &ctx.locale, None))
+            .then(|| day_period_from_cjk_buffer(&buffer, &ctx.locale, ctx.hour_cycle, None, None))
             .flatten();
 
         if has_cjk_table && cjk_value.is_none() {
@@ -1472,9 +1472,17 @@ fn commit_buffer_for_kind(ctx: &mut Context, kind: DateSegmentKind, timeout_fall
                     .and_then(|value| u8::try_from(value).ok())
             })
             .flatten();
+        let current_day_period = timeout_fallback
+            .then(|| ctx.get_segment_value(DateSegmentKind::DayPeriod))
+            .flatten();
 
-        if let Some(value) = day_period_from_cjk_buffer(&ctx.type_buffer, &ctx.locale, current_hour)
-        {
+        if let Some(value) = day_period_from_cjk_buffer(
+            &ctx.type_buffer,
+            &ctx.locale,
+            ctx.hour_cycle,
+            current_hour,
+            current_day_period,
+        ) {
             ctx.set_segment_value(kind, value);
 
             maybe_publish(ctx);
@@ -1524,6 +1532,8 @@ fn apply_value(ctx: &mut Context, value: Option<Time>) {
 }
 
 fn sync_props(ctx: &mut Context, props: &Props) {
+    let was_controlled = ctx.value.is_controlled();
+
     ctx.granularity = props.granularity;
     ctx.hour_cycle = props
         .hour_cycle
@@ -1536,8 +1546,17 @@ fn sync_props(ctx: &mut Context, props: &Props) {
 
     if let Some(value) = props.value {
         apply_value(ctx, Some(value));
+    } else if was_controlled {
+        apply_value(ctx, None);
     } else {
         ctx.value.sync_controlled(None);
+
+        let clamped = ctx
+            .value
+            .get()
+            .map(|time| clamp_time(time, ctx.min_value.as_ref(), ctx.max_value.as_ref()));
+
+        ctx.value.set(clamped);
 
         ctx.rebuild_segments();
     }
@@ -1757,7 +1776,9 @@ fn cjk_day_period_table(locale: &Locale) -> Option<CjkDayPeriodEntry> {
 fn day_period_from_cjk_buffer(
     buffer: &str,
     locale: &Locale,
+    hour_cycle: HourCycle,
     current_hour: Option<u8>,
+    current_day_period: Option<i32>,
 ) -> Option<i32> {
     let entry = cjk_day_period_table(locale)?;
 
@@ -1766,11 +1787,20 @@ fn day_period_from_cjk_buffer(
     let am_matches = entry.am_label.starts_with(&normalized);
     let pm_matches = entry.pm_label.starts_with(&normalized);
 
-    match (am_matches, pm_matches, current_hour) {
-        (true, false, _) => Some(0),
-        (false, true, _) => Some(1),
-        (true, true, Some(hour)) => Some(if hour < 12 { 0 } else { 1 }),
-        (true, true, None) | (false, false, _) => None,
+    match (
+        am_matches,
+        pm_matches,
+        hour_cycle,
+        current_hour,
+        current_day_period,
+    ) {
+        (true, false, ..) => Some(0),
+        (false, true, ..) => Some(1),
+        (true, true, HourCycle::H11, _, Some(day_period)) => Some(day_period.clamp(0, 1)),
+        (true, true, HourCycle::H11, _, None) | (true, true, _, None, _) | (false, false, ..) => {
+            None
+        }
+        (true, true, _, Some(hour), _) => Some(if hour < 12 { 0 } else { 1 }),
     }
 }
 
