@@ -1,0 +1,121 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0bcad8332d02",
+  "session_id": "019e5a74-3fc0-77c0-b631-82e44d1ee65b",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-25T00:44:31.533374Z",
+  "branch": "t3code/b1539d4b",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/utility/drop_zone/mod.rs",
+    "spec/components/utility/drop-zone.md",
+    "crates/ars-components/src/utility/drop_zone/mod.rs",
+    "spec/components/utility/drop-zone.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "4a9cdd34eb00",
+  "token_usage": {
+    "input_tokens": 1611033,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 83403904,
+    "output_tokens": 124106,
+    "api_call_count": 654
+  },
+  "summary": {
+    "intent": "Implement task #218: a framework-agnostic DropZone core component for ars-components, including state machine, MIME validation, callbacks, ConnectApi attributes, snapshots, spec conformance, proptest, and the mandatory post-implementation audit and Codex review loop.",
+    "outcome": "DropZone agnostic core implemented and merged into PR #674 across four Codex review rounds; all review findings fixed with regression tests, mutation testing reached 0 missed mutants, and the spec was updated to match the best-outcome contract including structured rejection details, Duration-based delays, and live-region announcement accessors.",
+    "learnings": {
+      "repo": [
+        "Spec is authoritative over issue text; ARIA and data-attribute naming in old issues may be stale (e.g. aria-dropeffect → aria-description, data-ars-dragging-over → data-ars-drag-over)",
+        "Time-related props must use core::time::Duration, never u32 millisecond suffixed fields",
+        "Localized announcements follow the Tabs pattern: agnostic Api exposes typed accessor methods (e.g. drop_accepted_announcement()), adapters pass values to their LiveRegion — discarded let _x = ... is always wrong",
+        "cargo xci --profile fast is the required pre-push gate; a single transient test failure should be retried in isolation before rerunning the gate",
+        "post-implementation-audit and waiting-for-codex-review are mandatory repo skills; audit must be completed and all findings landed before the PR is opened",
+        "cargo mutants is used as a required mutation gate; missed survivors must be closed with regression tests, not exclusions",
+        "Snapshot files changed in a PR must be labeled snapshot-reviewed before merge",
+        "ars-interactions provides canonical DragItem and DropOperation types; the DropZone machine reuses them directly without wrapping",
+        "Proptest invariants must be updated when new terminal state transitions are added — AutoReset returning to Idle while preserving accepted form_data invalidates state-only invariants"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/drop_zone/mod.rs",
+          "finding": "AutoReset and explicit Reset are separate events: AutoReset returns visual state to Idle while preserving accepted form_data; Reset clears all payload, but only fires a state change when there is actually something to clear (guarded by reset_would_change_context)"
+        },
+        {
+          "path": "crates/ars-components/src/utility/drop_zone/mod.rs",
+          "finding": "SetProps must remember the current advertised hover types in Context so it can recompute valid_drag when accept list changes mid-drag"
+        },
+        {
+          "path": "crates/ars-components/src/utility/drop_zone/mod.rs",
+          "finding": "DropEnter/DropMove/DropExit effects must only emit for valid drag payloads; activation is gated on valid_drag; invalid hover suppresses callbacks"
+        },
+        {
+          "path": "crates/ars-components/src/utility/drop_zone/mod.rs",
+          "finding": "max_files validation must count only DragItem::File entries, not total items in the drag payload"
+        },
+        {
+          "path": "crates/ars-components/src/utility/drop_zone/mod.rs",
+          "finding": "DragEnter from terminal states (DropAccepted/DropRejected) must cancel the pending ResetAfterDrop named effect to prevent stale timer from resetting new drag state"
+        },
+        {
+          "path": "crates/ars-interactions/src/drag_drop.rs",
+          "line": 180,
+          "end_line": 430,
+          "finding": "Browser drag payloads with only a Files entry in dataTransfer.types should be accepted as a potentially valid file hover — Files is not a MIME type but signals file content; reject only at actual drop time"
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/utility.rs",
+          "line": 1780,
+          "end_line": 1865,
+          "finding": "Post-AutoReset Idle state can legitimately expose non-empty form_data(); proptest invariant must track accepted payload presence separately from state"
+        }
+      ],
+      "workflow": [
+        "TDD red-green loop: write the full failing test batch first, compile-fail verifies missing types, then implement against tests",
+        "Mutation testing pass order: run cargo mutants, read missed.txt, add focused regression tests for each survivor category, rerun — never suppress missed mutants",
+        "Codex review loop: push, comment @codex review, poll reactions/threads, fix every thread with a regression test, reply with commit SHA, resolve thread, retrigger — repeat until 👍 with no unresolved threads",
+        "GitHub Actions may not auto-trigger for a pushed commit if it was rebased/merged manually; use gh workflow run CI --ref <branch> to dispatch manually",
+        "git restore --staged --worktree to unstage formatter-only churn files that cargo xci touched outside the PR scope before committing",
+        "llvm-cov focused coverage command (-- utility::drop_zone) gives per-file line/region numbers useful for spotting untested branches before mutation run"
+      ]
+    },
+    "friction": [
+      "Mutation run took 61+ minutes for 124 mutants requiring dozens of polling cycles with write_stdin; no progress indicator between mutant results",
+      "cargo xci fast gate produced a transient ars-e2e fixture-server timeout failure, requiring a full gate rerun to get a clean result",
+      "GitHub Actions did not automatically attach a CI run to the commit after user's manual merge/rebase; required gh workflow run dispatch to get checks on the final head SHA",
+      "gh pr checks reported no checks for the latest head SHA even while check-suites API showed runs queued — tooling inconsistency required falling back to gh api directly",
+      "Formatter (cargo +nightly fmt) staged an unrelated formatting change in crates/ars-dioxus/tests/attr_passthrough.rs during the pre-push gate, requiring manual unstaging",
+      "Working tree was ahead of remote after user's manual merge, requiring git pull --ff-only before continuing the review loop — caused a context gap in mid-session state",
+      "Four Codex review rounds were needed (file drag types, SetProps revalidation, extension tokens, idle reset after AutoReset) — each round required a full fix-commit-push-reply-resolve-retrigger cycle"
+    ],
+    "open_items": [
+      "Leptos adapter implementation for DropZone not included in this task (explicitly deferred per plan assumptions)",
+      "Dioxus adapter implementation for DropZone not included in this task (explicitly deferred per plan assumptions)",
+      "Browser event extraction, DOM listeners, file handles, hit testing, and live element references remain adapter/platform concerns — no agnostic hooks for these yet",
+      "Coverage and release verification CI jobs were still pending at session end for the final merged commit",
+      "Issue #218 remains open pending PR merge with full green CI"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-25T00:43:26.443224Z",
+    "agent_lines": 100,
+    "agent_removed": 34,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 100,
+    "total_lines_changed": 134,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}

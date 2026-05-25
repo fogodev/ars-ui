@@ -1,0 +1,9 @@
+We have merging conflicts with main, let's rebase with the latest main and push a new commit
+
+---
+
+Stop
+
+---
+
+I merged here manually myself, now codex did a new review, so continue with your review loop with @.agents/skills/waiting-for-codex-review
