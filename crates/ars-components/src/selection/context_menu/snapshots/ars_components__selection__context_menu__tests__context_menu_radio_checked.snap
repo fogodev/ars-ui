@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/selection/context_menu/mod.rs
+expression: "snapshot_attrs(&api.radio_item_attrs(&key(\"charlie\"), &key(\"density\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "radio-item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "context-menu",
+            ),
+        ),
+        (
+            Aria(
+                Checked,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "context-menu-item-charlie",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "menuitemradio",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

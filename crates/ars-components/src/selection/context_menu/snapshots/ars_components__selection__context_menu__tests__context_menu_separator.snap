@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/selection/context_menu/mod.rs
+expression: snapshot_attrs(&api.separator_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "separator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "context-menu",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "separator",
+            ),
+        ),
+    ],
+    styles: [],
+}

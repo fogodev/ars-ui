@@ -1,0 +1,37 @@
+---
+source: crates/ars-components/src/selection/context_menu/mod.rs
+expression: "snapshot_attrs(&api.radio_group_attrs(&key(\"density\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "radio-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "context-menu",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "context-menu-radio-group-density",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}

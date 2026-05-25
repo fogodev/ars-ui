@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/selection/context_menu/mod.rs
+expression: "snapshot_attrs(&api.item_indicator_attrs(&key(\"bravo\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item-indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "context-menu",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "context-menu-item-bravo-indicator",
+            ),
+        ),
+    ],
+    styles: [],
+}

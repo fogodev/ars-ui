@@ -10,7 +10,7 @@ source_foundation: foundation/08-adapter-leptos.md
 
 ## 1. Purpose and Adapter Scope
 
-This spec maps the core [`ContextMenu`](../../components/selection/context-menu.md) contract onto Leptos 0.8.x. The adapter must preserve pointer-anchored command menu opened from a target region while making target-region ownership, pointer-positioned popup behavior, focus return to the target, and menu action semantics without submenu support explicit at the framework boundary.
+This spec maps the core [`ContextMenu`](../../components/selection/context-menu.md) contract onto Leptos 0.8.x. The adapter must preserve pointer-anchored command menu opened from a target region while making target-region ownership, pointer-positioned popup behavior, focus return to the target, and menu action and submenu intent semantics explicit at the framework boundary.
 
 ## 2. Public Adapter API
 
@@ -32,7 +32,7 @@ Compound helpers typically include `Target`, `Positioner`, `Content`, `Item`, `C
 
 - Props parity: full parity with disabled-key behavior, close-on-action policy, open-state observation, and action callbacks.
 - Part parity: full parity for target region, point-positioned popup, and keyed action items.
-- Traceability note: this spec promotes pointer-coordinate anchoring, keyboard-open fallback positioning, focus return to the target, and the intentional omission of submenus from the agnostic contract.
+- Traceability note: this spec promotes pointer-coordinate anchoring, keyboard-open fallback positioning, focus return to the target, and submenu intent support with adapter-owned live positioning and focus.
 
 ## 4. Part Mapping
 
@@ -42,13 +42,13 @@ Compound helpers typically include `Target`, `Positioner`, `Content`, `Item`, `C
 | Target                | required  | consumer or adapter-owned target region | shared        | api.target_attrs()     | Owns the `contextmenu` interaction entry point.                     |
 | Positioner            | required  | point-positioned wrapper                | adapter-owned | api.positioner_attrs() | Anchored to pointer coordinates or keyboard-open fallback geometry. |
 | Content               | required  | menu host                               | adapter-owned | api.content_attrs()    | Owns command semantics and roving focus.                            |
-| Item                  | repeated  | menuitem host                           | adapter-owned | api.item_attrs(key)    | Action, checkbox, or radio item.                                    |
+| Item                  | repeated  | menuitem host                           | adapter-owned | api.item_attrs(key)    | Action, checkbox, radio, or submenu trigger item.                   |
 
 ## 5. Attr Merge and Ownership Rules
 
 - Core attrs win for menu semantics, target-region accessibility state, and checked-item attrs.
 - The adapter owns point-positioning output, target-region event normalization, and focus return to the target after close.
-- Consumers may decorate target content, but they must not replace the structural target interaction boundary or assume submenu parts exist.
+- Consumers may decorate target content, but they must not replace the structural target interaction boundary. Submenu parts must use core attrs and adapter-owned mounted handles.
 
 ## 6. Composition / Context Contract
 
@@ -56,12 +56,12 @@ The root publishes required context to target, content, and item parts. The adap
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop / event | Mode                                    | Sync trigger                                                                     | Machine event / update path                 | Notes                                                                |
-| -------------------- | --------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------- |
-| open state           | machine-owned with callback observation | native `contextmenu`, keyboard fallback, outside interaction, or item activation | `ContextOpen` / `Close`                     | Callbacks observe committed open-state changes.                      |
-| target interaction   | adapter event                           | pointer coordinates or Shift+F10 / Context Menu key                              | open transition plus anchor-point update    | Pointer and keyboard paths normalize into one anchor-point contract. |
-| item activation      | adapter event                           | click, Enter, or Space                                                           | command or checkbox/radio transitions       | Submenus are intentionally unsupported.                              |
-| typeahead            | adapter event                           | printable key plus timestamp                                                     | typeahead transition and timeout scheduling | Uses the shared menu timeout policy.                                 |
+| Adapter prop / event | Mode                                    | Sync trigger                                                                     | Machine event / update path                     | Notes                                                                |
+| -------------------- | --------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------- |
+| open state           | machine-owned with callback observation | native `contextmenu`, keyboard fallback, outside interaction, or item activation | `ContextOpen` / `Close`                         | Callbacks observe committed open-state changes.                      |
+| target interaction   | adapter event                           | pointer coordinates or Shift+F10 / Context Menu key                              | open transition plus anchor-point update        | Pointer and keyboard paths normalize into one anchor-point contract. |
+| item activation      | adapter event                           | click, Enter, or Space                                                           | command, checkbox/radio, or submenu transitions | Submenu positioning and live focus are adapter-owned.                |
+| typeahead            | adapter event                           | printable key plus timestamp                                                     | typeahead transition and timeout scheduling     | Uses the shared menu timeout policy.                                 |
 
 ## 8. Registration and Cleanup Contract
 
@@ -93,11 +93,11 @@ The root publishes required context to target, content, and item parts. The adap
 
 ## 12. Failure and Degradation Rules
 
-| Condition                            | Policy             | Notes                                                                                   |
-| ------------------------------------ | ------------------ | --------------------------------------------------------------------------------------- |
-| missing target part                  | fail fast          | ContextMenu requires a target region to anchor focus return and keyboard-open behavior. |
-| point-positioning helper unavailable | degrade gracefully | Render content near the target bounds with documented fallback placement.               |
-| submenu part requested               | warn and ignore    | ContextMenu intentionally does not support submenus.                                    |
+| Condition                            | Policy                    | Notes                                                                                   |
+| ------------------------------------ | ------------------------- | --------------------------------------------------------------------------------------- |
+| missing target part                  | fail fast                 | ContextMenu requires a target region to anchor focus return and keyboard-open behavior. |
+| point-positioning helper unavailable | degrade gracefully        | Render content near the target bounds with documented fallback placement.               |
+| submenu part requested               | render through core attrs | Adapter owns live submenu positioning and focus movement.                               |
 
 ## 13. Identity and Key Policy
 
@@ -197,12 +197,12 @@ Keep one machine, one target-event normalization path, one point-positioning han
 
 - Keyboard-open behavior must position the menu relative to the target in a predictable way for non-pointer users.
 - Focus return to the target is explicit and should not depend on browser defaults.
-- Because submenus are unsupported, aria relationships should never imply nested menu ownership.
+- Submenu ARIA relationships come from core attrs; adapters own live nested menu positioning and focus movement.
 
 ## 28. Parity Summary and Intentional Deviations
 
 - Parity status: full parity with explicit adapter ownership of point positioning, target event normalization, and focus return.
-- Intentional deviations: submenus remain intentionally unsupported, matching the core spec.
+- Intentional deviations: target ownership and point-positioning remain adapter-owned while submenu intent stays in the core machine.
 
 ## 29. Test Scenarios
 
@@ -215,7 +215,7 @@ Keep one machine, one target-event normalization path, one point-positioning han
 
 - Preferred oracle for positioning: `DOM attrs` plus rendered positioner structure after pointer and keyboard-open paths.
 - Preferred oracle for focus return: DOM focus checks and `callback order` after closing the menu.
-- Preferred oracle for intentional submenu omission: `rendered structure` and diagnostics behavior when submenu parts are attempted.
+- Preferred oracle for submenu support: rendered `SubTrigger`/`SubContent` ARIA relationships plus adapter-owned positioning behavior.
 
 ## 31. Implementation Checklist
 

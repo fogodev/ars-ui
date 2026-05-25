@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/selection/context_menu/mod.rs
+expression: "snapshot_attrs(&api.checkbox_item_attrs(&key(\"bravo\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "checkbox-item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "context-menu",
+            ),
+        ),
+        (
+            Aria(
+                Checked,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "context-menu-item-bravo",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "menuitemcheckbox",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

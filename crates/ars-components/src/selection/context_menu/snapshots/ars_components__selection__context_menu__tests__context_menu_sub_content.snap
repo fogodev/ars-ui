@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/selection/context_menu/mod.rs
+expression: "snapshot_attrs(&api.sub_content_attrs(&key(\"delta\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "sub-content",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "context-menu",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "context-menu-item-delta",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "context-menu-sub-content-delta",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "menu",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

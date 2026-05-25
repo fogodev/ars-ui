@@ -11,7 +11,9 @@ use ars_forms::{
     form::Mode,
     validation::{BoxedAsyncValidator, Error},
 };
-use ars_i18n::{Locale, Orientation};
+#[cfg(feature = "i18n")]
+use ars_i18n::Locale;
+use ars_i18n::Orientation;
 use ars_interactions::{DragItem, FileHandle};
 use proptest::prelude::*;
 
@@ -32,6 +34,7 @@ mod form;
 mod form_submit;
 mod group;
 mod heading;
+#[cfg(feature = "i18n")]
 mod highlight;
 mod keyboard;
 mod landmark;

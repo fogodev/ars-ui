@@ -124,6 +124,11 @@ exclude_re = [
   'replace test_support::',
   'replace tests_i18n::',
 
+  # The no_std fallback is intentionally outside the default std-enabled
+  # mutation profile used by `cargo mutants -p ars-components`; the std path
+  # is covered by context menu typeahead timestamp tests.
+  'context_menu/mod\.rs:\d+:\d+: replace current_time_ms -> Option<u64> with Some\([01]\)',
+
   # Flat collection wrappers have no child hierarchy, and their default empty
   # slices are equivalent to another empty slice allocation.
   'AsyncCollection<T>>::children_of.*iter::empty\(\)',

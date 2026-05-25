@@ -8,11 +8,17 @@
 /// Combobox component machine.
 pub mod combobox;
 
+/// Context menu component machine.
+pub mod context_menu;
+
 /// Listbox component machine.
 pub mod listbox;
 
 /// Menu component machine.
 pub mod menu;
+
+/// Menu bar component machine.
+pub mod menu_bar;
 
 /// Select component machine.
 pub mod select;

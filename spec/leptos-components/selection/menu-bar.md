@@ -25,7 +25,7 @@ pub fn MenuBar(
 ) -> impl IntoView
 ```
 
-Compound helpers typically include `Item`, `MenuPositioner`, `MenuContent`, `MenuItem`, `MenuCheckboxItem`, `MenuRadioItem`, and `Shortcut` parts.
+Compound helpers typically include `Menu`, `MenuTrigger`, `MenuPositioner`, and `MenuContent`; nested item parts come from the nested `Menu` component.
 
 ## 3. Mapping to Core Component Contract
 
@@ -35,13 +35,13 @@ Compound helpers typically include `Item`, `MenuPositioner`, `MenuContent`, `Men
 
 ## 4. Part Mapping
 
-| Core part / structure | Required?                      | Adapter rendering target | Ownership     | Attr source                    | Notes                                         |
-| --------------------- | ------------------------------ | ------------------------ | ------------- | ------------------------------ | --------------------------------------------- |
-| Root                  | required                       | menubar host             | adapter-owned | api.root_attrs()               | Owns the top-level roving focus scope.        |
-| Item                  | repeated                       | top-level menuitem host  | adapter-owned | api.item_attrs(key)            | One per top-level menu trigger.               |
-| MenuPositioner        | required when a menu is active | positioned wrapper       | adapter-owned | api.menu_positioner_attrs(key) | Hosts the active nested menu.                 |
-| MenuContent           | required when a menu is active | nested menu host         | adapter-owned | api.menu_content_attrs(key)    | Rendered for the active top-level menu only.  |
-| Shortcut              | optional repeated              | decorative text node     | adapter-owned | api.shortcut_attrs(key)        | Purely visual shortcut hint for nested items. |
+| Core part / structure | Required?                      | Adapter rendering target | Ownership     | Attr source                    | Notes                                        |
+| --------------------- | ------------------------------ | ------------------------ | ------------- | ------------------------------ | -------------------------------------------- |
+| Root                  | required                       | menubar host             | adapter-owned | api.root_attrs()               | Owns the top-level roving focus scope.       |
+| Menu                  | repeated                       | top-level menu wrapper   | adapter-owned | api.menu_attrs(key)            | One per top-level menu.                      |
+| MenuTrigger           | repeated                       | top-level menuitem host  | adapter-owned | api.menu_trigger_attrs(key)    | One per top-level menu trigger.              |
+| MenuPositioner        | required when a menu is active | positioned wrapper       | adapter-owned | api.menu_positioner_attrs(key) | Hosts the active nested menu.                |
+| MenuContent           | required when a menu is active | nested menu host         | adapter-owned | api.menu_content_attrs(key)    | Rendered for the active top-level menu only. |
 
 ## 5. Attr Merge and Ownership Rules
 
@@ -55,12 +55,11 @@ The root publishes required menubar context to top-level items and active nested
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop / event  | Mode                     | Sync trigger                                            | Machine event / update path                                        | Notes                                                                         |
-| --------------------- | ------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| top-level active menu | machine-owned            | arrow keys, Enter, click, or pointer activation         | `ActivateMenu`, `MoveToNextMenu`, `MoveToPrevMenu`, or `CloseMenu` | The adapter owns top-level directional key normalization.                     |
-| nested menu action    | adapter event            | click, Enter, Escape, or outside interaction            | nested menu transitions                                            | Nested menu behavior follows the shared menu contract inside the active menu. |
-| shortcut labels       | adapter-owned decoration | locale or platform change                               | no machine mutation                                                | Shortcut text remains purely visual.                                          |
-| typeahead             | adapter event            | printable key plus timestamp inside active menu content | shared menu-typeahead path                                         | Top-level strip does not duplicate nested-menu typeahead logic.               |
+| Adapter prop / event  | Mode          | Sync trigger                                            | Machine event / update path                                    | Notes                                                                         |
+| --------------------- | ------------- | ------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| top-level active menu | machine-owned | arrow keys, Enter, click, or pointer activation         | `ActivateMenu`, `MoveToNextMenu`, `MoveToPrevMenu`, or `Close` | The adapter owns top-level directional key normalization.                     |
+| nested menu action    | adapter event | click, Enter, Escape, or outside interaction            | nested menu transitions                                        | Nested menu behavior follows the shared menu contract inside the active menu. |
+| typeahead             | adapter event | printable key plus timestamp inside active menu content | shared menu-typeahead path                                     | Top-level strip does not duplicate nested-menu typeahead logic.               |
 
 ## 8. Registration and Cleanup Contract
 
@@ -113,7 +112,6 @@ The root publishes required menubar context to top-level items and active nested
 
 - Switching the active menu should reuse top-level registration instead of rebuilding the menubar tree.
 - Only one nested menu scope should be positioned and observed at a time.
-- Shortcut-label decoration should be memoized or derived from stable locale or platform inputs only.
 
 ## 16. Implementation Dependencies
 
@@ -189,7 +187,6 @@ Keep one machine, one top-level registration helper, one active nested-menu scop
 
 - Top-level roving focus and active-menu identity remain machine-owned.
 - Only one nested menu scope is active and positioned at a time.
-- Shortcut text remains decorative and separate from behavior ownership.
 
 ## 27. Accessibility and SSR Notes
 
@@ -206,7 +203,7 @@ Keep one machine, one top-level registration helper, one active nested-menu scop
 
 1. Arrow keys move focus across top-level items and open the correct active menu.
 2. Switching between top-level menus tears down the previous nested-menu scope before opening the next one.
-3. Shortcut text stays decorative while nested action-item behavior follows the shared menu contract.
+3. Nested action-item behavior follows the shared menu contract.
 4. Closing the active menu returns focus to the correct top-level item.
 
 ## 30. Test Oracle Notes
