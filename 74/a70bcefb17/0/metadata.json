@@ -1,0 +1,203 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "74a70bcefb17",
+  "session_id": "019e5cc3-1303-7290-94e3-3e939c77d1e8",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-25T03:05:03.22961Z",
+  "branch": "t3code/3b330983",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/action_group.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/ars_provider.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/as_child.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/button.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/client_only.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/dismissable.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/download_trigger.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/drop_zone.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/error_boundary.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/field.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/fieldset.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/focus_ring.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/focus_scope.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/form.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/form_submit.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/group.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/heading.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/highlight.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/keyboard.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/landmark.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/live_region.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/separator.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/swap.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/toggle.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/toggle_button.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/toggle_group.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/visually_hidden.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/z_index_allocator.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/utility.rs",
+    "crates/ars-components/tests/spec_conformance/utility/action_group.rs",
+    "crates/ars-components/tests/spec_conformance/utility/ars_provider.rs",
+    "crates/ars-components/tests/spec_conformance/utility/as_child.rs",
+    "crates/ars-components/tests/spec_conformance/utility/button.rs",
+    "crates/ars-components/tests/spec_conformance/utility/client_only.rs",
+    "crates/ars-components/tests/spec_conformance/utility/dismissable.rs",
+    "crates/ars-components/tests/spec_conformance/utility/download_trigger.rs",
+    "crates/ars-components/tests/spec_conformance/utility/drop_zone.rs",
+    "crates/ars-components/tests/spec_conformance/utility/error_boundary.rs",
+    "crates/ars-components/tests/spec_conformance/utility/field.rs",
+    "crates/ars-components/tests/spec_conformance/utility/fieldset.rs",
+    "crates/ars-components/tests/spec_conformance/utility/focus_ring.rs",
+    "crates/ars-components/tests/spec_conformance/utility/focus_scope.rs",
+    "crates/ars-components/tests/spec_conformance/utility/form.rs",
+    "crates/ars-components/tests/spec_conformance/utility/form_submit.rs",
+    "crates/ars-components/tests/spec_conformance/utility/group.rs",
+    "crates/ars-components/tests/spec_conformance/utility/heading.rs",
+    "crates/ars-components/tests/spec_conformance/utility/highlight.rs",
+    "crates/ars-components/tests/spec_conformance/utility/keyboard.rs",
+    "crates/ars-components/tests/spec_conformance/utility/landmark.rs",
+    "crates/ars-components/tests/spec_conformance/utility/live_region.rs",
+    "crates/ars-components/tests/spec_conformance/utility/mod.rs",
+    "crates/ars-components/tests/spec_conformance/utility/separator.rs",
+    "crates/ars-components/tests/spec_conformance/utility/swap.rs",
+    "crates/ars-components/tests/spec_conformance/utility/toggle.rs",
+    "crates/ars-components/tests/spec_conformance/utility/toggle_button.rs",
+    "crates/ars-components/tests/spec_conformance/utility/toggle_group.rs",
+    "crates/ars-components/tests/spec_conformance/utility/visually_hidden.rs",
+    "crates/ars-components/tests/spec_conformance/utility/z_index_allocator.rs",
+    "crates/ars-dioxus/tests/attr_passthrough.rs",
+    "docs/implementation/utility-category-audit.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "4b93005b7858",
+  "token_usage": {
+    "input_tokens": 743497,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 24258048,
+    "output_tokens": 43359,
+    "api_call_count": 169
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Audit all utility category components after epic #10 to verify correct implementation, spec compliance, and test coverage, while also splitting the bloated per-category test files into per-component submodules.",
+    "outcome": "Both utility test mega-files were split into directory-backed modules with 28 per-component submodules each; missing spec-conformance coverage was added (35 total tests) and proptest coverage expanded (44 ignored nightly tests); an audit disposition document was added; all 10 xci-fast gates passed before committing.",
+    "learnings": {
+      "repo": [
+        "Utility test coverage was organized as two category-level mega-files rather than per-component modules: `proptest_state_machines/utility.rs` (2001 lines) and `spec_conformance/utility.rs` (258 lines).",
+        "ArsProvider is intentionally adapter/core-owned — its implementations live in `ars-core`, `ars-leptos`, and `ars-dioxus`, not in `ars-components::utility`. Do not create an `ars-components::utility::ars_provider` module unless the spec explicitly requires a shared agnostic type.",
+        "The `highlight` utility module is feature-gated behind `#[cfg(feature = \"i18n\")]` and tests must carry that gate locally in the component file.",
+        "New test modules use directory-backed `mod.rs` layout to match repo convention, not single flat files.",
+        "Proptest invariant tests are marked `#[ignore = \"proptest — nightly extended-proptest job\"]` and run with `-- --ignored` to separate them from the default test lane.",
+        "`cargo xci-fast` is the final local gate and runs 10 sequential steps: fmt, check, clippy, unit, integration, adapter, spec snippets, error variant coverage, mutual exclusion, snapshot count.",
+        "`dx fmt -c` is required by the fast fmt gate for Dioxus files and will reformat files outside the immediate change scope — those hunks must be included in the commit.",
+        "Shared proptest strategies reused by multiple utility components belong in `proptest_state_machines/utility/common.rs`; strategies used by only one component belong in that component's file."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/utility.rs",
+          "line": 1,
+          "end_line": 2001,
+          "finding": "Former 2001-line mega-file mixing proptest helpers and tests for all utility components; now replaced by utility/mod.rs + 28 component subfiles."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/utility.rs",
+          "line": 1,
+          "end_line": 258,
+          "finding": "Former 258-line mega-file covering only a subset of utility components; now replaced by utility/mod.rs + 28 component subfiles."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/utility/toggle_button.rs",
+          "line": 1,
+          "end_line": 60,
+          "finding": "`SetPressed(true)` syncs the pressed value without entering the transient interaction-pressed state, so invariant assertions must check `ctx.pressed.get()` independently from `State::Pressed` — the state enum reflects interaction state, not the logical pressed value."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/utility/error_boundary.rs",
+          "line": 1,
+          "end_line": 10,
+          "finding": "Python-based file splitting left an extra closing brace at the end of `error_boundary.rs` and `highlight.rs` because the original proptest blocks were moved whole; the parent mod retained delimiter remnants."
+        },
+        {
+          "path": "docs/implementation/utility-category-audit.md",
+          "line": 1,
+          "end_line": 40,
+          "finding": "Audit disposition document was added here to record an explicit per-entry outcome for all 28 utility spec entries, including ArsProvider's adapter/core-only status."
+        }
+      ],
+      "workflow": [
+        "When splitting large test files mechanically, use Python scripts that extract sections by exact 1-based line ranges from the git HEAD version of the original file — patching an already-broken intermediate state causes compounding errors.",
+        "When submodule names match imported crate module names (e.g., `mod action_group` vs `use ars_components::utility::action_group`), introduce a crate-level alias (`use ars_components::utility as utility_core`) and rewrite all references to the alias before the split compiles.",
+        "Sort substitution targets by descending name length when doing token-level `mod::` rewrites to prevent `action_group` being partially rewritten by a shorter `group` rule.",
+        "Run baseline tests before any structural change so you have a known-good reference to validate the mechanical split against.",
+        "Proptest failures during property test development often indicate incorrect test assumptions rather than production bugs — tighten invariant assertions to match actual machine semantics before concluding there is a bug."
+      ]
+    },
+    "friction": [
+      "First mechanical split attempt left `proptest!` block delimiters behind in `mod.rs` and produced a naive `action_group::` → `utility_core::action_group::` rewrite that incorrectly touched unrelated identifiers.",
+      "The initial Python script patched the already-broken intermediate file state rather than operating on the clean HEAD version, requiring a full regeneration pass.",
+      "`error_boundary.rs` and `highlight.rs` each ended with an extra `}` from the proptest block extraction, causing compile failures that required manual trimming.",
+      "The `dx fmt` step during `xci-fast` rewrote `crates/ars-dioxus/tests/attr_passthrough.rs` (unrelated to the utility audit); reverting it caused the fmt gate to fail on re-run, so it had to be re-included as incidental formatter churn.",
+      "Three separate iteration rounds were needed before the split compiled cleanly, consuming significant wall time on repeated `cargo test` compile cycles.",
+      "The ToggleButton proptest surfaced a wrong test assumption about `State::Pressed` vs logical pressed value that required an invariant rewrite."
+    ],
+    "open_items": [
+      "Mutation testing against touched state-machine source files was skipped because no agnostic component source was modified in this diff; it should run if future work changes `action_group`, `button`, `drop_zone`, `focus_scope`, `live_region`, `toggle_group`, or `toggle_button` source.",
+      "Several per-component proptest files contain only placeholder comments (`ars_provider`, `group`, `heading`, `keyboard`, `landmark`, etc.) where the audit did not identify clear invariants — these should be revisited as those components evolve.",
+      "ArsProvider spec-conformance test in `spec_conformance/utility/ars_provider.rs` tests `ArsContext` defaults but does not cover the full provider contract (portal container, root node, disabled/read-only propagation to children) — those are deferred pending adapter-level test infrastructure.",
+      "The `spec_conformance/utility/common.rs` helper file was listed as optional in the plan and was not created; if anatomy test helpers are needed by more than two components, it should be introduced then.",
+      "No follow-up issue was filed for utility audit findings because all actionable items were addressed in the same PR — if spec drift is found later during adapter work, it should be tracked against the utility category, not reopened as a new epic."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-25T03:04:03.642981Z",
+    "agent_lines": 2847,
+    "agent_removed": 2230,
+    "human_added": 34,
+    "human_modified": 66,
+    "human_removed": 0,
+    "total_committed": 2914,
+    "total_lines_changed": 5177,
+    "agent_percentage": 98.06837937029167,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 50,
+      "user_lines_removed": 33,
+      "agent_lines_added": 2930,
+      "agent_lines_removed": 2263,
+      "user_added_per_file": {
+        "crates/ars-components/tests/proptest_state_machines/utility/client_only.rs": 4,
+        "crates/ars-components/tests/proptest_state_machines/utility/drop_zone.rs": 2,
+        "crates/ars-components/tests/proptest_state_machines/utility/group.rs": 2,
+        "crates/ars-components/tests/proptest_state_machines/utility/heading.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/utility/highlight.rs": 2,
+        "crates/ars-components/tests/proptest_state_machines/utility/keyboard.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/utility/landmark.rs": 3,
+        "crates/ars-components/tests/proptest_state_machines/utility/z_index_allocator.rs": 2,
+        "crates/ars-components/tests/spec_conformance/utility/as_child.rs": 2,
+        "crates/ars-components/tests/spec_conformance/utility/z_index_allocator.rs": 1,
+        "docs/implementation/utility-category-audit.md": 30
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/tests/proptest_state_machines/utility/client_only.rs": 3,
+        "docs/implementation/utility-category-audit.md": 30
+      }
+    }
+  ]
+}
