@@ -148,6 +148,8 @@ impl Props {
 
         if let Some(align) = self.align {
             attrs.set_style(CssProperty::AlignItems, align.css_value());
+        } else if self.stretch {
+            attrs.set_style(CssProperty::AlignItems, FlexAlign::Stretch.css_value());
         }
     }
 }
@@ -319,6 +321,31 @@ mod tests {
                 .iter()
                 .any(|(property, _)| *property == CssProperty::ColumnGap)
         );
+    }
+
+    #[test]
+    fn stretch_sets_align_items_when_align_is_unset() {
+        let attrs = Api::new(Props::new().stretch(true), None).root_attrs();
+
+        assert!(attrs.styles().contains(&(
+            CssProperty::AlignItems,
+            FlexAlign::Stretch.css_value().into()
+        )));
+    }
+
+    #[test]
+    fn explicit_align_overrides_stretch() {
+        let attrs =
+            Api::new(Props::new().stretch(true).align(FlexAlign::Center), None).root_attrs();
+
+        assert!(attrs.styles().contains(&(
+            CssProperty::AlignItems,
+            FlexAlign::Center.css_value().into()
+        )));
+        assert!(!attrs.styles().contains(&(
+            CssProperty::AlignItems,
+            FlexAlign::Stretch.css_value().into()
+        )));
     }
 
     #[test]

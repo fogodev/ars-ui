@@ -84,6 +84,8 @@ impl Props {
         }
         if let Some(a) = self.align {
             attrs.set_style(CssProperty::AlignItems, a.css_value());
+        } else if self.stretch {
+            attrs.set_style(CssProperty::AlignItems, FlexAlign::Stretch.css_value());
         }
     }
 }

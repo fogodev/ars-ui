@@ -219,10 +219,12 @@ impl Context {
         let normalized_sizes = normalize_sizes(&sizes, &props.panels, &sizes);
 
         Self {
-            sizes: props
-                .sizes
-                .clone()
-                .unwrap_or_else(|| Bindable::uncontrolled(normalized_sizes)),
+            sizes: props.sizes.as_ref().map_or_else(
+                || Bindable::uncontrolled(normalized_sizes.clone()),
+                |sizes| {
+                    Bindable::controlled(clamp_all(sizes.get(), &props.panels, &normalized_sizes))
+                },
+            ),
             panels: props.panels.clone(),
             orientation: props.orientation,
             dir: props.dir.unwrap_or(Direction::Ltr),
@@ -475,7 +477,11 @@ fn finite_positive(value: f64, fallback: f64) -> f64 {
 }
 
 const fn valid_handle(handle_index: usize, sizes_len: usize, panels_len: usize) -> bool {
-    handle_index + 1 < sizes_len && handle_index + 1 < panels_len
+    if let Some(next) = handle_index.checked_add(1) {
+        next < sizes_len && next < panels_len
+    } else {
+        false
+    }
 }
 
 const fn effective_min(panel: &Panel) -> f64 {
@@ -553,12 +559,27 @@ fn collapse_panel(sizes: &mut [f64], index: usize, panels: &[Panel]) {
 
     let freed = (sizes[index] - collapsed_size).max(0.0);
 
-    sizes[index] = collapsed_size;
-
-    if index + 1 < sizes.len() {
-        sizes[index + 1] += freed;
+    let recipient = if index + 1 < sizes.len() {
+        Some(index + 1)
     } else if index > 0 {
-        sizes[index - 1] += freed;
+        Some(index - 1)
+    } else {
+        None
+    };
+
+    let transferable = recipient.map_or(freed, |recipient| {
+        panels
+            .get(recipient)
+            .and_then(|panel| panel.max_size)
+            .map_or(freed, |max_size| {
+                (max_size - sizes[recipient]).max(0.0).min(freed)
+            })
+    });
+
+    sizes[index] -= transferable;
+
+    if let Some(recipient) = recipient {
+        sizes[recipient] += transferable;
     }
 }
 
@@ -847,13 +868,13 @@ impl ars_core::Machine for Machine {
                     ctx.size_unit = props.size_unit;
                     ctx.keyboard_step = keyboard_step_for(&props);
 
-                    let normalized = normalize_sizes(ctx.sizes.get(), &ctx.panels, &current);
+                    let normalized = clamp_all(ctx.sizes.get(), &ctx.panels, &current);
 
                     ctx.sizes.sync_controlled(
                         props
                             .sizes
                             .clone()
-                            .map(|sizes| normalize_sizes(sizes.get(), &ctx.panels, &normalized)),
+                            .map(|sizes| clamp_all(sizes.get(), &ctx.panels, &normalized)),
                     );
 
                     if !ctx.sizes.is_controlled() {
@@ -989,7 +1010,9 @@ impl Api<'_> {
 
         let collapsed = panel.collapsible && size <= panel.collapsed_size;
 
-        attrs.set(HtmlAttr::Data("ars-panel-id"), panel.id.as_str());
+        attrs
+            .set(HtmlAttr::Id, self.ctx.ids.item("panel", &index))
+            .set(HtmlAttr::Data("ars-panel-id"), panel.id.as_str());
 
         if collapsed {
             attrs.set_bool(HtmlAttr::Data("ars-collapsed"), true);
@@ -1068,18 +1091,19 @@ impl Api<'_> {
 
         let value_now = to_percent(sizes[left]);
 
-        let value_min = if self.ctx.panels[left].collapsible {
-            0.0
-        } else {
-            to_percent(self.ctx.panels[left].min_size)
-        };
+        let value_min = to_percent(effective_min(&self.ctx.panels[left]));
 
         let fallback_max = match self.ctx.size_unit {
-            SizeUnit::Percent => 100.0 - self.ctx.panels[right].min_size,
-            SizeUnit::Pixels => total - self.ctx.panels[right].min_size,
+            SizeUnit::Percent => 100.0 - effective_min(&self.ctx.panels[right]),
+            SizeUnit::Pixels => total - effective_min(&self.ctx.panels[right]),
         };
 
-        let value_max = to_percent(self.ctx.panels[left].max_size.unwrap_or(fallback_max));
+        let value_max = to_percent(
+            self.ctx.panels[left]
+                .max_size
+                .unwrap_or(fallback_max)
+                .min(fallback_max),
+        );
 
         let collapsed = self.ctx.panels[left].collapsible
             && sizes[left] <= self.ctx.panels[left].collapsed_size;
@@ -1359,6 +1383,14 @@ mod tests {
     }
 
     #[test]
+    fn initializes_controlled_sizes_with_normalized_constraints() {
+        let service = service(two_panel_props().sizes(Bindable::controlled(vec![f64::NAN, 150.0])));
+
+        assert_eq!(service.context().sizes.get(), &vec![50.0, 90.0]);
+        assert!(service.context().sizes.is_controlled());
+    }
+
+    #[test]
     fn drag_resize_handle_resizes_adjacent_panels() {
         let mut service = service(two_panel_props().default_sizes(vec![50.0, 50.0]));
 
@@ -1631,10 +1663,14 @@ mod tests {
 
     #[test]
     fn collapse_and_expand_panel_move_size_to_neighbor() {
+        let mut right = panel("right", 60.0);
+
+        right.max_size = None;
+
         let mut service = service(
             Props::new()
                 .id("split")
-                .panels(vec![collapsible_panel("left", 40.0), panel("right", 60.0)])
+                .panels(vec![collapsible_panel("left", 40.0), right])
                 .default_sizes(vec![40.0, 60.0]),
         );
 
@@ -1645,6 +1681,24 @@ mod tests {
         drop(service.send(Event::ExpandPanel { panel_index: 0 }));
 
         assert_eq!(service.context().sizes.get(), &vec![40.0, 60.0]);
+    }
+
+    #[test]
+    fn collapse_panel_respects_neighbor_max_size() {
+        let mut right = panel("right", 60.0);
+
+        right.max_size = Some(65.0);
+
+        let mut service = service(
+            Props::new()
+                .id("split")
+                .panels(vec![collapsible_panel("left", 40.0), right])
+                .default_sizes(vec![40.0, 60.0]),
+        );
+
+        drop(service.send(Event::CollapsePanel { panel_index: 0 }));
+
+        assert_eq!(service.context().sizes.get(), &vec![35.0, 65.0]);
     }
 
     #[test]
@@ -1682,6 +1736,10 @@ mod tests {
 
     #[test]
     fn collapse_panel_transfers_only_freed_size() {
+        let mut right = panel("right", 60.0);
+
+        right.max_size = None;
+
         let mut service = service(
             Props::new()
                 .id("split")
@@ -1690,7 +1748,7 @@ mod tests {
                         collapsed_size: 5.0,
                         ..collapsible_panel("left", 40.0)
                     },
-                    panel("right", 60.0),
+                    right,
                 ])
                 .default_sizes(vec![40.0, 60.0]),
         );
@@ -1702,10 +1760,14 @@ mod tests {
 
     #[test]
     fn collapse_last_panel_transfers_freed_size_to_previous_neighbor() {
+        let mut left = panel("left", 60.0);
+
+        left.max_size = None;
+
         let mut service = service(
             Props::new()
                 .id("split")
-                .panels(vec![panel("left", 60.0), collapsible_panel("right", 40.0)])
+                .panels(vec![left, collapsible_panel("right", 40.0)])
                 .default_sizes(vec![60.0, 40.0]),
         );
 
@@ -1946,10 +2008,14 @@ mod tests {
 
     #[test]
     fn enter_and_space_toggle_collapsible_panel() {
+        let mut right = panel("right", 60.0);
+
+        right.max_size = None;
+
         let mut service = service(
             Props::new()
                 .id("split")
-                .panels(vec![collapsible_panel("left", 40.0), panel("right", 60.0)])
+                .panels(vec![collapsible_panel("left", 40.0), right])
                 .default_sizes(vec![40.0, 60.0]),
         );
 
@@ -2111,6 +2177,23 @@ mod tests {
     }
 
     #[test]
+    fn sync_props_clamps_uncontrolled_sizes_to_new_panel_constraints() {
+        let mut service = service(two_panel_props().default_sizes(vec![80.0, 20.0]));
+
+        let mut left = panel("left", 80.0);
+
+        left.min_size = 90.0;
+
+        let next_props = Props::new()
+            .id("split")
+            .panels(vec![left, panel("right", 20.0)]);
+
+        drop(service.send(Event::SyncProps { props: next_props }));
+
+        assert_eq!(service.context().sizes.get(), &vec![90.0, 20.0]);
+    }
+
+    #[test]
     fn on_props_changed_emits_sync_props_for_context_changes() {
         let old = two_panel_props();
         let new = two_panel_props().orientation(Orientation::Vertical);
@@ -2138,6 +2221,14 @@ mod tests {
             !service
                 .send(Event::KeyDown {
                     handle_index: 7,
+                    event: key(KeyboardKey::ArrowRight)
+                })
+                .context_changed
+        );
+        assert!(
+            !service
+                .send(Event::KeyDown {
+                    handle_index: usize::MAX,
                     event: key(KeyboardKey::ArrowRight)
                 })
                 .context_changed
@@ -2280,6 +2371,7 @@ mod tests {
 
         let panel = api.panel_attrs(0);
 
+        assert_eq!(panel.get(&HtmlAttr::Id), Some("split-panel-0"));
         assert_eq!(panel.get(&HtmlAttr::Data("ars-panel-id")), Some("left"));
         assert!(panel.styles().contains(&(CssProperty::Width, "50%".into())));
 
@@ -2342,6 +2434,30 @@ mod tests {
     }
 
     #[test]
+    fn handle_aria_max_uses_collapsible_neighbor_collapsed_size() {
+        let mut left = panel("left", 100.0);
+
+        left.max_size = None;
+
+        let mut right = collapsible_panel("right", 0.0);
+
+        right.min_size = 20.0;
+        right.collapsed_size = 0.0;
+
+        let service = service(
+            Props::new()
+                .id("split")
+                .panels(vec![left, right])
+                .default_sizes(vec![100.0, 0.0]),
+        );
+
+        let attrs = service.connect(&|_| {}).handle_attrs(0);
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("100"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("100"));
+    }
+
+    #[test]
     fn pixel_handle_attrs_convert_values_to_percent() {
         let mut left = panel("left", 200.0);
 
@@ -2383,6 +2499,25 @@ mod tests {
             attrs.get(&HtmlAttr::Aria(AriaAttr::ValueText)),
             Some("Collapsed")
         );
+    }
+
+    #[test]
+    fn collapsible_handle_aria_min_uses_nonzero_collapsed_size() {
+        let mut left = collapsible_panel("left", 5.0);
+
+        left.min_size = 20.0;
+        left.collapsed_size = 5.0;
+
+        let service = service(
+            Props::new()
+                .id("split")
+                .panels(vec![left, panel("right", 95.0)])
+                .default_sizes(vec![5.0, 95.0]),
+        );
+
+        let attrs = service.connect(&|_| {}).handle_attrs(0);
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("5"));
     }
 
     #[test]
@@ -2493,10 +2628,14 @@ mod tests {
 
     #[test]
     fn splitter_panel_collapsed_snapshot() {
+        let mut right = panel("right", 60.0);
+
+        right.max_size = None;
+
         let mut service = service(
             Props::new()
                 .id("split")
-                .panels(vec![collapsible_panel("left", 40.0), panel("right", 60.0)])
+                .panels(vec![collapsible_panel("left", 40.0), right])
                 .default_sizes(vec![40.0, 60.0]),
         );
 

@@ -36,6 +36,12 @@ AttrMap {
                 "splitter",
             ),
         ),
+        (
+            Id,
+            String(
+                "split-panel-0",
+            ),
+        ),
     ],
     styles: [
         (
