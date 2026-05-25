@@ -1,0 +1,87 @@
+---
+source: crates/ars-components/src/data_display/progress/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-orientation",
+            ),
+            String(
+                "vertical",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "progress",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Aria(
+                Orientation,
+            ),
+            String(
+                "vertical",
+            ),
+        ),
+        (
+            Aria(
+                ValueMax,
+            ),
+            String(
+                "100",
+            ),
+        ),
+        (
+            Aria(
+                ValueMin,
+            ),
+            String(
+                "0",
+            ),
+        ),
+        (
+            Aria(
+                ValueNow,
+            ),
+            String(
+                "25",
+            ),
+        ),
+        (
+            Aria(
+                ValueText,
+            ),
+            String(
+                "25% complete",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "progressbar",
+            ),
+        ),
+    ],
+    styles: [],
+}

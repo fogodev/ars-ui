@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/data_display/stat.rs
+expression: "snapshot_attrs(&api(Props::new().id(\"stat\").label(\"Total Revenue\").value(\"$45,231\").loading(true)).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-loading",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "stat",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Total Revenue: $45,231",
+            ),
+        ),
+        (
+            Aria(
+                Busy,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,38 @@
+---
+source: crates/ars-components/src/data_display/progress/mod.rs
+expression: snapshot_attrs(&api.range_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-indeterminate",
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "range",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "progress",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Width,
+            "25%",
+        ),
+    ],
+}

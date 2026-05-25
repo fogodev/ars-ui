@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/data_display/progress/mod.rs
+expression: snapshot_attrs(&api.label_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "label",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "progress",
+            ),
+        ),
+    ],
+    styles: [],
+}

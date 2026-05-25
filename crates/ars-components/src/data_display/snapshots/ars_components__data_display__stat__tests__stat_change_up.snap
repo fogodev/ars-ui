@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/data_display/stat.rs
+expression: "snapshot_attrs(&api(Props::new().id(\"stat\").change(12.5)).change_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "change",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "stat",
+            ),
+        ),
+        (
+            Data(
+                "ars-trend",
+            ),
+            String(
+                "up",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "12.5% increase",
+            ),
+        ),
+    ],
+    styles: [],
+}

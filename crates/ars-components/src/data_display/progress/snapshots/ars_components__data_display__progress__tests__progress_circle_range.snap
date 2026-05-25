@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/data_display/progress/mod.rs
+expression: snapshot_attrs(&api.circle_range_attrs(10.0))
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "circle-range",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "progress",
+            ),
+        ),
+        (
+            Data(
+                "stroke-dasharray",
+            ),
+            String(
+                "62.83185307179586",
+            ),
+        ),
+        (
+            Data(
+                "stroke-dashoffset",
+            ),
+            String(
+                "47.12388980384689",
+            ),
+        ),
+    ],
+    styles: [],
+}

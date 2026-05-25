@@ -1,0 +1,30 @@
+---
+source: crates/ars-components/src/data_display/meter.rs
+expression: "snapshot_attrs(&api(Props::new().id(\"meter\").value(40.0)).range_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "range",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "meter",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Width,
+            "40%",
+        ),
+    ],
+}

@@ -28,12 +28,13 @@ and indeterminate (unknown duration) modes.
 
 ### 1.2 Events
 
-| Event      | Payload       | Description                           |
-| ---------- | ------------- | ------------------------------------- |
-| `SetValue` | `Option<f64>` | Update value; `None` = indeterminate. |
-| `SetMax`   | `f64`         | Update the maximum bound.             |
-| `Complete` | —             | Jump to complete state.               |
-| `Reset`    | —             | Return to initial/idle state.         |
+| Event       | Payload       | Description                                               |
+| ----------- | ------------- | --------------------------------------------------------- |
+| `SetValue`  | `Option<f64>` | Update value; `None` = indeterminate.                     |
+| `SetMax`    | `f64`         | Update the maximum bound.                                 |
+| `Complete`  | —             | Jump to complete state.                                   |
+| `Reset`     | —             | Return to initial/idle state.                             |
+| `SyncProps` | —             | Synchronize min, max, and orientation after prop changes. |
 
 ### 1.3 Context
 
@@ -113,6 +114,10 @@ impl Default for Props {
 impl Context {
     /// Computes the percent value from the given value, min, and max.
     pub fn compute_percent(value: Option<f64>, min: f64, max: f64) -> f64 {
+        if min >= max {
+            return 0.0;
+        }
+
         match value {
             None    => 0.0, // indeterminate; percent is meaningless
             Some(v) => ((v - min) / (max - min) * 100.0).clamp(0.0, 100.0),
@@ -148,6 +153,8 @@ pub enum Event {
     Complete,
     /// Return to initial/idle state.
     Reset,
+    /// Synchronize non-value props from adapter-owned prop changes.
+    SyncProps,
 }
 
 /// Machine for the Progress component.
@@ -229,6 +236,15 @@ impl ars_core::Machine for Machine {
                     ctx.percent = 0.0;
                 }))
             }
+            Event::SyncProps => {
+                Some(TransitionPlan::to(state_for_value(*ctx.value.get(), props.max)).apply(|ctx| {
+                    ctx.min = props.min;
+                    ctx.max = props.max;
+                    ctx.orientation = props.orientation;
+                    ctx.indeterminate = ctx.value.get().is_none();
+                    ctx.percent = Context::compute_percent(*ctx.value.get(), props.min, props.max);
+                }))
+            }
         }
     }
 
@@ -290,7 +306,7 @@ impl<'a> Api<'a> {
             &self.ctx.locale,
             self.props.format_options.clone().unwrap_or_default(),
         );
-        format!("{}% complete", fmt.format_percent(self.ctx.percent / 100.0))
+        format!("{} complete", fmt.format_percent(self.ctx.percent / 100.0, Some(0)))
     }
 
     /// Returns the root attributes for the progress.
@@ -452,7 +468,6 @@ Progress
 ├── Range       (filled portion; width = percent%)
 ├── ValueText   (formatted percentage/value display)
 └── [Circular variant]
-    ├── Circle       (<svg> wrapper)
     ├── CircleTrack  (<circle> background)
     └── CircleRange  (<circle> filled arc via stroke-dashoffset)
 ```
@@ -464,7 +479,6 @@ Progress
 | `Track`       | `<div>`              | Visual background                                                                                                                                       |
 | `Range`       | `<div>`              | `style="width: N%"`, `data-ars-indeterminate`                                                                                                           |
 | `ValueText`   | `<span>`             | Human-readable percentage                                                                                                                               |
-| `Circle`      | `<svg>`              | SVG wrapper for circular variant                                                                                                                        |
 | `CircleTrack` | `<circle>`           | Background arc                                                                                                                                          |
 | `CircleRange` | `<circle>`           | Foreground arc; `stroke-dashoffset` drives fill                                                                                                         |
 
@@ -532,14 +546,14 @@ Progress
 
 ### 5.2 Anatomy
 
-| Part              | ars-ui                       | Ark UI                                 | Radix UI    | React Aria    | Notes                                  |
-| ----------------- | ---------------------------- | -------------------------------------- | ----------- | ------------- | -------------------------------------- |
-| Root              | `Root`                       | `Root`                                 | `Root`      | `ProgressBar` | --                                     |
-| Label             | `Label`                      | `Label`                                | --          | `Label`       | Radix has no explicit label part       |
-| Track             | `Track`                      | `Track`                                | --          | --            | ars-ui and Ark UI match                |
-| Range / Indicator | `Range`                      | `Range`                                | `Indicator` | --            | Same concept, different names          |
-| ValueText         | `ValueText`                  | `ValueText`                            | --          | --            | ars-ui and Ark UI match                |
-| Circle\*          | `CircleTrack`, `CircleRange` | `Circle`, `CircleTrack`, `CircleRange` | --          | --            | ars-ui matches Ark UI circular variant |
+| Part              | ars-ui                       | Ark UI                                 | Radix UI    | React Aria    | Notes                                                           |
+| ----------------- | ---------------------------- | -------------------------------------- | ----------- | ------------- | --------------------------------------------------------------- |
+| Root              | `Root`                       | `Root`                                 | `Root`      | `ProgressBar` | --                                                              |
+| Label             | `Label`                      | `Label`                                | --          | `Label`       | Radix has no explicit label part                                |
+| Track             | `Track`                      | `Track`                                | --          | --            | ars-ui and Ark UI match                                         |
+| Range / Indicator | `Range`                      | `Range`                                | `Indicator` | --            | Same concept, different names                                   |
+| ValueText         | `ValueText`                  | `ValueText`                            | --          | --            | ars-ui and Ark UI match                                         |
+| Circle\*          | `CircleTrack`, `CircleRange` | `Circle`, `CircleTrack`, `CircleRange` | --          | --            | ars-ui exposes circular arc parts; adapters own the SVG wrapper |
 
 **Gaps:** None.
 

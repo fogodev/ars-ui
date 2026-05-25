@@ -103,6 +103,10 @@ pub fn compute_segment(
 
 /// Computes the fill percentage for the given value within [min, max].
 pub fn compute_percent(value: f64, min: f64, max: f64) -> f64 {
+    if min >= max {
+        return 0.0;
+    }
+
     ((value - min) / (max - min) * 100.0).clamp(0.0, 100.0)
 }
 ```
@@ -185,6 +189,7 @@ impl<'a> Api<'a> {
             Segment::SubOptimal    => "sub-optimal",
             Segment::SubSubOptimal => "sub-sub-optimal",
         });
+        attrs.set(HtmlAttr::Data("ars-zone"), Zone::from_segment(&segment).as_str());
         attrs
     }
 
@@ -253,13 +258,13 @@ Meter
 └── ValueText   (visible formatted value)
 ```
 
-| Part        | Element              | Key Attributes                                                                                          |
-| ----------- | -------------------- | ------------------------------------------------------------------------------------------------------- |
-| `Root`      | `<meter>` or `<div>` | `role="meter"`, `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, `aria-valuetext`, `data-ars-segment` |
-| `Label`     | `<label>`            | Associated via `for` or `aria-labelledby`                                                               |
-| `Track`     | `<div>`              | Background                                                                                              |
-| `Range`     | `<div>`              | `style="width: N%"`                                                                                     |
-| `ValueText` | `<span>`             | `aria-hidden="true"`                                                                                    |
+| Part        | Element              | Key Attributes                                                                                                           |
+| ----------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `Root`      | `<meter>` or `<div>` | `role="meter"`, `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, `aria-valuetext`, `data-ars-segment`, `data-ars-zone` |
+| `Label`     | `<label>`            | Associated via `for` or `aria-labelledby`                                                                                |
+| `Track`     | `<div>`              | Background                                                                                                               |
+| `Range`     | `<div>`              | `style="width: N%"`                                                                                                      |
+| `ValueText` | `<span>`             | `aria-hidden="true"`                                                                                                     |
 
 ## 3. Accessibility
 
@@ -290,14 +295,18 @@ When the meter value crosses a zone boundary (e.g., from optimal to sub-optimal)
 #[derive(Clone, Debug)]
 pub struct Messages {
     /// Formats the meter value for display and screen readers.
-    /// Receives (value, min, max, locale).
-    pub value_text: MessageFn<dyn Fn(f64, f64, f64, &Locale) -> String + Send + Sync>,
+    /// Receives (value, min, max, locale, format_options).
+    pub value_text: MessageFn<dyn Fn(f64, f64, f64, &Locale, &number::FormatOptions) -> String + Send + Sync>,
 }
 impl Default for Messages {
     fn default() -> Self {
         Self {
-            value_text: MessageFn::new(|value, _min, _max, _locale| {
-                format!("{:.0}%", value * 100.0)
+            value_text: MessageFn::new(|value, min, max, locale, options| {
+                let formatter = number::Formatter::new(locale, options.clone());
+                formatter.format_percent(
+                    compute_percent(value, min, max) / 100.0,
+                    Some(options.max_fraction_digits),
+                )
             }),
         }
     }
@@ -330,6 +339,14 @@ impl Zone {
             Segment::Optimal       => Zone::Optimal,
             Segment::SubOptimal    => Zone::SubOptimal,
             Segment::SubSubOptimal => Zone::Critical,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Zone::Optimal    => "optimal",
+            Zone::SubOptimal => "sub-optimal",
+            Zone::Critical   => "critical",
         }
     }
 }
