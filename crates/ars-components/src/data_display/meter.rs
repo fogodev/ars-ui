@@ -191,9 +191,9 @@ pub fn compute_segment(
     high: Option<f64>,
     optimum: Option<f64>,
 ) -> Segment {
-    let low = low.unwrap_or(min);
-    let high = high.unwrap_or(max);
-    let optimum = optimum.unwrap_or((min + max) / 2.0);
+    let (min, max) = normalize_bounds(min, max);
+    let value = clamp_value(value, min, max);
+    let (low, high, optimum) = normalize_thresholds(min, max, low, high, optimum);
 
     if optimum < low {
         if value < low {
@@ -340,10 +340,13 @@ impl Api {
     /// Returns the locale-aware value text.
     #[must_use]
     pub fn value_text(&self) -> String {
+        let (min, max) = normalize_bounds(self.props.min, self.props.max);
+        let value = clamp_value(self.props.value, min, max);
+
         (self.messages.value_text)(
-            self.props.value,
-            self.props.min,
-            self.props.max,
+            value,
+            min,
+            max,
             &self.locale,
             &self.props.format_options.clone().unwrap_or_default(),
         )
@@ -465,6 +468,20 @@ const fn clamp_value(value: f64, min: f64, max: f64) -> f64 {
     }
 }
 
+fn normalize_thresholds(
+    min: f64,
+    max: f64,
+    low: Option<f64>,
+    high: Option<f64>,
+    optimum: Option<f64>,
+) -> (f64, f64, f64) {
+    let low = low.map_or(min, |low| clamp_value(low, min, max));
+    let high = high.map_or(max, |high| clamp_value(high, min, max).max(low));
+    let optimum = optimum.map_or((min + max) / 2.0, |optimum| clamp_value(optimum, min, max));
+
+    (low, high, optimum)
+}
+
 #[cfg(test)]
 mod tests {
     use insta::assert_snapshot;
@@ -541,5 +558,23 @@ mod tests {
         assert_eq!(non_finite_root.get(&HtmlAttr::Value), Some("0"));
         assert_eq!(compute_percent(f64::INFINITY, 0.0, 100.0), 0.0);
         assert_eq!(compute_percent(50.0, 100.0, 100.0), 0.0);
+
+        let invalid_bounds = api(Props::new().id("meter").value(50.0).min(100.0).max(0.0));
+
+        assert_eq!(invalid_bounds.value_text(), "50%");
+        assert_eq!(
+            invalid_bounds
+                .root_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueText)),
+            Some("50%")
+        );
+    }
+
+    #[test]
+    fn meter_normalizes_thresholds_for_segment_classification() {
+        assert_eq!(
+            compute_segment(50.0, 0.0, 100.0, Some(90.0), Some(10.0), Some(95.0)),
+            Segment::SubSubOptimal
+        );
     }
 }

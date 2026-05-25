@@ -459,8 +459,8 @@ impl ars_core::Machine for Machine {
                 let min = props.min;
                 let max = props.max;
                 let orientation = props.orientation;
-                let value = props.value.unwrap_or(props.default_value);
                 let controlled_prop = props.value;
+                let value = sync_props_effective_value(ctx, props);
 
                 Some(TransitionPlan::to(state_for_value(value, min, max)).apply(
                     move |ctx: &mut Context| {
@@ -595,7 +595,7 @@ impl Api<'_> {
         {
             attrs.set(
                 HtmlAttr::Aria(AriaAttr::ValueNow),
-                clamp_value(*value, min, max).to_string(),
+                display_value_now(*value, self.ctx.min, self.ctx.max).to_string(),
             );
         }
 
@@ -741,6 +741,16 @@ fn sync_props_value(ctx: &mut Context, value: Option<f64>, controlled_prop: Opti
     }
 }
 
+fn sync_props_effective_value(ctx: &Context, props: &Props) -> Option<f64> {
+    if let Some(value) = props.value {
+        value
+    } else if ctx.value.is_controlled() {
+        props.default_value
+    } else {
+        *ctx.value.get()
+    }
+}
+
 const fn normalize_bounds(min: f64, max: f64) -> (f64, f64) {
     if valid_bounds(min, max) {
         (min, max)
@@ -756,6 +766,16 @@ const fn valid_bounds(min: f64, max: f64) -> bool {
 const fn clamp_value(value: f64, min: f64, max: f64) -> f64 {
     if value.is_finite() {
         value.clamp(min, max)
+    } else {
+        min
+    }
+}
+
+const fn display_value_now(value: f64, raw_min: f64, raw_max: f64) -> f64 {
+    let (min, max) = normalize_bounds(raw_min, raw_max);
+
+    if valid_bounds(raw_min, raw_max) {
+        clamp_value(value, min, max)
     } else {
         min
     }
@@ -906,7 +926,15 @@ mod tests {
         );
 
         assert_eq!(invalid_bounds.state(), &State::Idle);
-        assert_eq!(invalid_bounds.connect(&|_| {}).value_text(), "0% complete");
+        let invalid_bounds_api = invalid_bounds.connect(&|_| {});
+
+        assert_eq!(invalid_bounds_api.value_text(), "0% complete");
+        assert_eq!(
+            invalid_bounds_api
+                .root_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("0")
+        );
     }
 
     #[test]
@@ -934,5 +962,12 @@ mod tests {
 
         assert!(!controlled.context().value.is_controlled());
         assert_eq!(controlled.context().value.get(), &Some(15.0));
+
+        drop(controlled.send(Event::SetValue(Some(40.0))));
+        drop(controlled.set_props(Props::new().id("progress").default_value(15.0).max(200.0)));
+
+        assert!(!controlled.context().value.is_controlled());
+        assert_eq!(controlled.context().value.get(), &Some(40.0));
+        assert_eq!(controlled.context().percent, 20.0);
     }
 }

@@ -74,6 +74,25 @@ fn meter_value_text_uses_format_options() {
 }
 
 #[test]
+fn meter_value_text_uses_sanitized_display_bounds() {
+    let api = meter_api(
+        meter::Props::new()
+            .id("meter")
+            .value(50.0)
+            .min(100.0)
+            .max(0.0),
+    );
+
+    let root = api.root_attrs();
+
+    assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0"));
+    assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("100"));
+    assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("50"));
+    assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::ValueText)), Some("50%"));
+    assert_eq!(api.value_text(), "50%");
+}
+
+#[test]
 fn meter_root_exposes_meter_aria_and_native_attrs() {
     let attrs = meter_api(
         meter::Props::new()
@@ -178,6 +197,11 @@ fn meter_computes_percent_segment_and_zone_attrs() {
         meter::compute_segment(10.0, 10.0, 30.0, Some(18.0), Some(22.0), None),
         meter::Segment::SubOptimal,
         "default optimum is the midpoint"
+    );
+    assert_eq!(
+        meter::compute_segment(50.0, 0.0, 100.0, Some(90.0), Some(10.0), Some(95.0)),
+        meter::Segment::SubSubOptimal,
+        "thresholds are normalized before segment classification"
     );
     assert_eq!(
         meter::compute_percent(50.0, 100.0, 100.0),
@@ -479,6 +503,14 @@ fn progress_invalid_bounds_do_not_mark_complete() {
     assert_eq!(service.state(), &progress::State::Idle);
     assert_eq!(api.value_text(), "0% complete");
     assert_eq!(
+        api.root_attrs().get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+        Some("0")
+    );
+    assert_eq!(
+        api.root_attrs().get(&HtmlAttr::Aria(AriaAttr::ValueText)),
+        Some("0% complete")
+    );
+    assert_eq!(
         api.root_attrs().get(&HtmlAttr::Data("ars-state")),
         Some("idle")
     );
@@ -583,6 +615,19 @@ fn progress_set_props_preserves_value_control_mode_transitions() {
     drop(becomes_uncontrolled.send(progress::Event::SetValue(Some(40.0))));
 
     assert_eq!(becomes_uncontrolled.context().value.get(), &Some(40.0));
+
+    drop(
+        becomes_uncontrolled.set_props(
+            progress::Props::new()
+                .id("upload")
+                .default_value(15.0)
+                .max(200.0),
+        ),
+    );
+
+    assert!(!becomes_uncontrolled.context().value.is_controlled());
+    assert_eq!(becomes_uncontrolled.context().value.get(), &Some(40.0));
+    assert_eq!(becomes_uncontrolled.context().percent, 20.0);
 }
 
 #[test]
