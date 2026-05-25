@@ -377,6 +377,10 @@ impl Api {
             .set(part_attr, part_val)
             .set(HtmlAttr::Id, self.props.id.clone())
             .set(HtmlAttr::Role, "meter")
+            .set(
+                HtmlAttr::Aria(AriaAttr::LabelledBy),
+                label_id(&self.props.id),
+            )
             .set(HtmlAttr::Aria(AriaAttr::ValueNow), value.to_string())
             .set(HtmlAttr::Aria(AriaAttr::ValueMin), min.to_string())
             .set(HtmlAttr::Aria(AriaAttr::ValueMax), max.to_string())
@@ -405,7 +409,13 @@ impl Api {
     /// Returns label attributes for the meter.
     #[must_use]
     pub fn label_attrs(&self) -> AttrMap {
-        part_attrs(&Part::Label)
+        let mut attrs = part_attrs(&Part::Label);
+
+        attrs
+            .set(HtmlAttr::Id, label_id(&self.props.id))
+            .set(HtmlAttr::For, self.props.id.clone());
+
+        attrs
     }
 
     /// Returns track attributes for the meter.
@@ -456,6 +466,10 @@ fn part_attrs(part: &Part) -> AttrMap {
     attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
     attrs
+}
+
+fn label_id(id: &str) -> String {
+    format!("{id}-label")
 }
 
 const fn normalize_bounds(min: f64, max: f64) -> (f64, f64) {

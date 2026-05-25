@@ -579,6 +579,10 @@ impl Api<'_> {
             .set(HtmlAttr::Id, self.props.id.clone())
             .set(HtmlAttr::Role, "progressbar")
             .set(
+                HtmlAttr::Aria(AriaAttr::LabelledBy),
+                label_id(&self.props.id),
+            )
+            .set(
                 HtmlAttr::Aria(AriaAttr::Orientation),
                 self.ctx.orientation.as_str(),
             )
@@ -608,7 +612,11 @@ impl Api<'_> {
     /// Returns label attributes for the progress.
     #[must_use]
     pub fn label_attrs(&self) -> AttrMap {
-        part_attrs(&Part::Label)
+        let mut attrs = part_attrs(&Part::Label);
+
+        attrs.set(HtmlAttr::Id, label_id(&self.props.id));
+
+        attrs
     }
 
     /// Returns track attributes for the progress.
@@ -713,6 +721,10 @@ fn part_attrs(part: &Part) -> AttrMap {
     attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
     attrs
+}
+
+fn label_id(id: &str) -> String {
+    alloc::format!("{id}-label")
 }
 
 fn state_for_value(value: Option<f64>, min: f64, max: f64) -> State {

@@ -20,6 +20,12 @@ AttrMap {
                 "progress",
             ),
         ),
+        (
+            Id,
+            String(
+                "progress-label",
+            ),
+        ),
     ],
     styles: [],
 }

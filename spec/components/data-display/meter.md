@@ -166,6 +166,7 @@ impl<'a> Api<'a> {
         // Prefer native <meter> element semantics. If rendered as <div>, add ARIA.
         // The adapter chooses the element; we emit all attributes for both cases.
         attrs.set(HtmlAttr::Role, "meter");
+        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), format!("{}-label", self.props.id));
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), self.props.value.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), self.props.min.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), self.props.max.to_string());
@@ -199,6 +200,8 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Label.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, format!("{}-label", self.props.id));
+        attrs.set(HtmlAttr::For, self.props.id.clone());
         attrs
     }
 

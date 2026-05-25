@@ -38,6 +38,14 @@ AttrMap {
         ),
         (
             Aria(
+                LabelledBy,
+            ),
+            String(
+                "meter-label",
+            ),
+        ),
+        (
+            Aria(
                 ValueMax,
             ),
             String(

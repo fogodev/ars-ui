@@ -319,6 +319,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "progressbar");
+        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), format!("{}-label", self.props.id));
         attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), match self.ctx.orientation {
             Orientation::Horizontal => "horizontal",
             Orientation::Vertical   => "vertical",
@@ -355,6 +356,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Label.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, format!("{}-label", self.props.id));
         attrs
     }
 

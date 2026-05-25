@@ -113,6 +113,10 @@ fn meter_root_exposes_meter_aria_and_native_attrs() {
 
     assert_eq!(attrs.get(&HtmlAttr::Role), Some("meter"));
     assert_eq!(attrs.get(&HtmlAttr::Id), Some("disk"));
+    assert_eq!(
+        attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+        Some("disk-label")
+    );
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("72"));
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0"));
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("256"));
@@ -122,6 +126,11 @@ fn meter_root_exposes_meter_aria_and_native_attrs() {
     assert_eq!(attrs.get(&HtmlAttr::Low), Some("64"));
     assert_eq!(attrs.get(&HtmlAttr::High), Some("192"));
     assert_eq!(attrs.get(&HtmlAttr::Optimum), Some("32"));
+
+    let label = meter_api(meter::Props::new().id("disk")).label_attrs();
+
+    assert_eq!(label.get(&HtmlAttr::Id), Some("disk-label"));
+    assert_eq!(label.get(&HtmlAttr::For), Some("disk"));
 }
 
 #[test]
@@ -457,6 +466,10 @@ fn progress_root_attrs_reflect_determinate_and_indeterminate_modes() {
 
     assert_eq!(attrs.get(&HtmlAttr::Role), Some("progressbar"));
     assert_eq!(attrs.get(&HtmlAttr::Id), Some("upload"));
+    assert_eq!(
+        attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+        Some("upload-label")
+    );
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0"));
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("100"));
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("25"));
@@ -470,6 +483,10 @@ fn progress_root_attrs_reflect_determinate_and_indeterminate_modes() {
 
     assert_eq!(attrs.get(&HtmlAttr::Data("ars-state")), Some("loading"));
     assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::ValueNow)));
+
+    let label = indeterminate.connect(&|_| {}).label_attrs();
+
+    assert_eq!(label.get(&HtmlAttr::Id), Some("upload-label"));
 }
 
 #[test]
