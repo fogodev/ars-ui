@@ -1,0 +1,93 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c9e57514c317",
+  "session_id": "019e5d87-db21-77f1-988f-4eeb0f07811c",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-25T17:04:36.099094Z",
+  "branch": "t3code/2ddd4539",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/time_field/tests.rs",
+    "crates/ars-components/src/date_time/time_field/mod.rs",
+    "spec/components/date-time/time-field.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "7ab18cc48179",
+  "checkpoint_transcript_start": 2730,
+  "transcript_lines_at_start": 2730,
+  "token_usage": {
+    "input_tokens": 161757,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 11229952,
+    "output_tokens": 11903,
+    "api_call_count": 83
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Fix two Codex review findings on PR #681 (ars-ui): controlled handoff in SyncProps and cancellation of stale day-period commit on CJK input resolution, then re-pass the Codex review.",
+    "outcome": "Both fixes were implemented with TDD (red→green), passed full verification (unit, spec conformance, format, clippy, coverage at 92.13%, proptest, mutation with 0 missed mutants), committed with co-author trailer, and pushed. A second Codex review pass was triggered.",
+    "learnings": {
+      "repo": [
+        "The service result layer exposes cancelled effects directly, enabling deterministic assertion of cancellation behavior without timing hacks.",
+        "cargo-mutants is run per-file on changed source (crates/ars-components/src/date_time/time_field/mod.rs) as part of the PR fix verification gate.",
+        "The project uses cargo xtask spec validate and a spec_corpus_compile_snippets test to verify spec conformance alongside unit tests.",
+        "Codex review state is tracked via GitHub issue reactions (👀 = reviewing, 👍 = done) polled with the GraphQL reviewThreads API.",
+        "CI checks run in this order: Snapshot Change Check → Formatting → Clippy → Workspace Check → Mutual Exclusion → Unit Tests."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/time_field/mod.rs",
+          "line": 1320,
+          "end_line": 1585,
+          "finding": "SyncProps handler was not marking prop-synced values as controlled; fixed to transition bindable into controlled mode on SyncProps(Some(value))."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/time_field/mod.rs",
+          "finding": "CJK day-period disambiguation path was not cancelling the pending TypeBufferCommit effect; fixed to emit a cancel effect once the day-period input resolves."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/time_field/tests.rs",
+          "finding": "Two regression tests added: cjk_day_period_resolution_cancels_pending_commit_effect and uncontrolled_prop_sync_to_value_enters_controlled_mode."
+        },
+        {
+          "path": "spec/components/date-time/time-field.md",
+          "line": 615,
+          "end_line": 635,
+          "finding": "Spec updated to document the cancellation rule for pending day-period commits on CJK disambiguation."
+        }
+      ],
+      "workflow": [
+        "cargo test with two positional test name filters fails; each filter must be run as a separate cargo test invocation.",
+        "cargo-mutants runs a silent per-mutant phase after a noisy baseline phase; interrupting mid-run loses all progress.",
+        "The review loop is reaction-driven (👀/👍), not thread-count-driven; resolved threads alone do not signal Codex is done.",
+        "Heavy parallel checks (e.g. mutation + proptest simultaneously) are avoided to prevent distorting mutation timeout behavior."
+      ]
+    },
+    "friction": [
+      "cargo test rejected two positional test name filters in a single invocation, requiring separate runs to confirm red state.",
+      "Codex review polling required many 2-minute sleep cycles (~30+ minutes total) before the second pass completed.",
+      "cargo-mutants ran silently for an extended period (10+ minutes) with no incremental output, making it hard to judge progress.",
+      "The mutation run processed 103 mutants sequentially, blocking the commit/push gate for the entire duration."
+    ],
+    "open_items": [
+      "No missed mutants were found, but 6 mutants were marked unviable — worth reviewing whether those represent untestable code paths.",
+      "The second Codex review pass was still in progress (👀) at the end of the transcript; its final verdict is unknown.",
+      "CI Unit Tests were still running at the last observed poll; final CI green state not confirmed in transcript."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-25T17:04:11.644392Z",
+    "agent_lines": 95,
+    "agent_removed": 12,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 95,
+    "total_lines_changed": 107,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
