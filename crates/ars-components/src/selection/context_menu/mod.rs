@@ -1673,6 +1673,14 @@ mod tests {
         drop(menu.send(Event::HighlightItem(Some(separator))));
 
         assert_eq!(menu.context().highlighted_key, None);
+
+        drop(menu.send(Event::HighlightItem(Some(key("missing")))));
+
+        assert_eq!(menu.context().highlighted_key, None);
+
+        drop(menu.send(Event::TypeaheadSearch('z', 0)));
+
+        assert_eq!(menu.context().highlighted_key, None);
     }
 
     #[test]
@@ -2023,6 +2031,7 @@ mod tests {
         );
 
         drop(enabled.send(Event::ContextOpen { x: 0.0, y: 0.0 }));
+        drop(enabled.send(Event::ToggleCheckboxItem(key("alpha"))));
         drop(enabled.send(Event::SelectItem(key("alpha"))));
 
         assert_eq!(
@@ -2234,6 +2243,14 @@ mod tests {
         drop(menu.send(Event::UpdateItems(collection())));
 
         assert_eq!(menu.context().submenu_open, Some(key("delta")));
+
+        let api = menu.connect(&|_| {});
+
+        assert_eq!(
+            api.sub_trigger_attrs(&key("delta"))
+                .get(&HtmlAttr::Aria(AriaAttr::Expanded)),
+            Some("true")
+        );
 
         drop(menu.send(Event::HighlightItem(Some(key("alpha")))));
 
