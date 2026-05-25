@@ -1250,9 +1250,12 @@ mod tests {
         let mut menu_bar = service(Props::new().id("menu-bar").disabled(true));
 
         drop(menu_bar.send(Event::ActivateMenu(key("file"))));
+        drop(menu_bar.send(Event::Blur));
 
         assert_eq!(menu_bar.state(), &State::Inactive);
         assert_eq!(menu_bar.context().active_menu, None);
+        assert_eq!(menu_bar.context().focused_item, None);
+        assert!(!menu_bar.context().focus_visible);
     }
 
     #[test]
