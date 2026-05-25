@@ -1253,6 +1253,18 @@ mod tests {
 
         assert_eq!(menu_bar.state(), &State::Inactive);
         assert_eq!(menu_bar.context().active_menu, None);
+
+        let api = menu_bar.connect(&|_| {});
+
+        assert_eq!(
+            api.root_attrs().get(&HtmlAttr::Data("ars-disabled")),
+            Some("true")
+        );
+        assert_eq!(
+            api.menu_trigger_attrs(&key("file"))
+                .get(&HtmlAttr::Aria(AriaAttr::Disabled)),
+            Some("true")
+        );
     }
 
     #[test]

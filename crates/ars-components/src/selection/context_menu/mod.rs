@@ -2022,13 +2022,15 @@ mod tests {
         drop(menu.send(Event::ContextOpen { x: 3.0, y: 4.0 }));
         drop(menu.send(Event::Close));
         drop(menu.send(Event::Close));
+        drop(menu.send(Event::ContextOpen { x: 5.0, y: 6.0 }));
+        drop(menu.send(Event::SelectItem(key("alpha"))));
 
         assert_eq!(
             open_changes
                 .lock()
                 .expect("open-change capture poisoned")
                 .as_slice(),
-            &[true, false]
+            &[true, false, true, false]
         );
     }
 
