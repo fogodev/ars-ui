@@ -216,7 +216,7 @@ impl Context {
     #[must_use]
     pub fn from_props(props: &Props, env: &Env, messages: &Messages) -> Self {
         let sizes = initial_sizes(props);
-        let normalized_sizes = normalize_sizes(&sizes, &props.panels, &sizes);
+        let normalized_sizes = clamp_all(&sizes, &props.panels, &sizes);
 
         Self {
             sizes: props.sizes.as_ref().map_or_else(
@@ -616,7 +616,11 @@ fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel]) {
 
 fn commit_sizes(ctx: &mut Context, sizes: Vec<f64>) {
     if sizes.iter().all(|size| size.is_finite()) && sizes.len() == ctx.panels.len() {
-        ctx.sizes.set(sizes);
+        ctx.sizes.set(sizes.clone());
+
+        if ctx.sizes.is_controlled() {
+            ctx.sizes.sync_controlled(Some(sizes));
+        }
     }
 }
 
@@ -1389,7 +1393,21 @@ mod tests {
 
     #[test]
     fn initializes_pixel_sizes_from_initial_total_px() {
-        let service = service(props().size_unit(SizeUnit::Pixels).initial_total_px(900.0));
+        let mut left = panel("left", 300.0);
+        let mut middle = panel("middle", 300.0);
+        let mut right = panel("right", 300.0);
+
+        left.max_size = None;
+        middle.max_size = None;
+        right.max_size = None;
+
+        let service = service(
+            Props::new()
+                .id("split")
+                .panels(vec![left, middle, right])
+                .size_unit(SizeUnit::Pixels)
+                .initial_total_px(900.0),
+        );
 
         assert_eq!(service.context().sizes.get(), &vec![300.0, 300.0, 300.0]);
         assert_eq!(service.context().keyboard_step, 20.0);
@@ -1400,6 +1418,13 @@ mod tests {
         let service = service(props().default_sizes(vec![20.0, 30.0, 50.0]));
 
         assert_eq!(service.context().sizes.get(), &vec![20.0, 30.0, 50.0]);
+    }
+
+    #[test]
+    fn uncontrolled_initial_sizes_are_clamped_to_panel_constraints() {
+        let service = service(two_panel_props().default_sizes(vec![5.0, 150.0]));
+
+        assert_eq!(service.context().sizes.get(), &vec![10.0, 90.0]);
     }
 
     #[test]
@@ -1461,6 +1486,19 @@ mod tests {
         drop(service.send(Event::DragMove { pos: 20.0 }));
 
         assert_eq!(service.context().sizes.get(), &vec![60.0, 40.0]);
+    }
+
+    #[test]
+    fn controlled_sizes_commit_to_observable_bindable_value() {
+        let mut service = service(two_panel_props().sizes(Bindable::controlled(vec![50.0, 50.0])));
+
+        drop(service.send(Event::KeyDown {
+            handle_index: 0,
+            event: key(KeyboardKey::ArrowRight),
+        }));
+
+        assert_eq!(service.context().sizes.get(), &vec![60.0, 40.0]);
+        assert!(service.context().sizes.is_controlled());
     }
 
     #[test]
@@ -2560,6 +2598,7 @@ mod tests {
         let mut right = panel("right", 300.0);
 
         right.min_size = 100.0;
+        right.max_size = None;
 
         let service = service(
             Props::new()

@@ -148,10 +148,14 @@ pub struct Context {
 impl Context {
     pub fn from_props(props: &Props, env: &Env, messages: &Messages) -> Self {
         let sizes = initial_sizes(props);
+        let normalized_sizes = clamp_all(&sizes, &props.panels);
         let locale = env.locale.clone();
         let messages = messages.clone();
         Context {
-            sizes: props.sizes.clone().unwrap_or_else(|| Bindable::uncontrolled(sizes)),
+            sizes: props.sizes.as_ref().map_or_else(
+                || Bindable::uncontrolled(normalized_sizes.clone()),
+                |sizes| Bindable::controlled(clamp_all(sizes.get(), &props.panels)),
+            ),
             panels: props.panels.clone(),
             orientation: props.orientation,
             dir: props.dir.unwrap_or(Direction::Ltr),
@@ -309,7 +313,11 @@ fn initial_sizes(props: &Props) -> Vec<f64> {
 }
 
 fn valid_handle(handle_index: usize, sizes_len: usize, panels_len: usize) -> bool {
-    handle_index + 1 < sizes_len && handle_index + 1 < panels_len
+    if let Some(next) = handle_index.checked_add(1) {
+        next < sizes_len && next < panels_len
+    } else {
+        false
+    }
 }
 
 fn keyboard_step_for(props: &Props) -> f64 {
@@ -327,10 +335,21 @@ fn finite_positive(value: f64, fallback: f64) -> f64 {
 fn collapse_panel(sizes: &mut Vec<f64>, index: usize, panels: &[Panel]) {
     if index >= sizes.len() || index >= panels.len() { return; }
     if !panels[index].collapsible { return; }
-    let freed = sizes[index] - panels[index].collapsed_size;
-    sizes[index] = panels[index].collapsed_size;
-    if index + 1 < sizes.len() { sizes[index + 1] += freed; }
-    else if index > 0 { sizes[index - 1] += freed; }
+    let collapsed_size = panels[index].collapsed_size;
+    let freed = (sizes[index] - collapsed_size).max(0.0);
+    let recipient = if index + 1 < sizes.len() { Some(index + 1) }
+        else if index > 0 { Some(index - 1) }
+        else { None };
+    let transferable = recipient.map_or(freed, |recipient| {
+        panels
+            .get(recipient)
+            .and_then(|panel| panel.max_size)
+            .map_or(freed, |max_size| (max_size - sizes[recipient]).max(0.0).min(freed))
+    });
+    sizes[index] = collapsed_size;
+    if let Some(recipient) = recipient {
+        sizes[recipient] += transferable;
+    }
 }
 
 fn expand_panel(sizes: &mut Vec<f64>, index: usize, panels: &[Panel]) {
@@ -352,7 +371,10 @@ fn commit_sizes(ctx: &mut Context, sizes: Vec<f64>) {
     if sizes.len() != ctx.panels.len() || !sizes.iter().all(|s| s.is_finite()) {
         return;
     }
-    ctx.sizes.set(sizes);
+    ctx.sizes.set(sizes.clone());
+    if ctx.sizes.is_controlled() {
+        ctx.sizes.sync_controlled(Some(sizes));
+    }
 }
 
 fn handle_keyboard(ctx: &mut Context, handle_index: usize, event: &KeyboardEvent) {
@@ -504,7 +526,9 @@ impl ars_core::Machine for Machine {
                         }))
                     }
                     KeyboardKey::ArrowLeft | KeyboardKey::ArrowRight
-                    | KeyboardKey::ArrowUp | KeyboardKey::ArrowDown => {
+                    | KeyboardKey::ArrowUp | KeyboardKey::ArrowDown
+                    | KeyboardKey::Home | KeyboardKey::End
+                    | KeyboardKey::Enter | KeyboardKey::Space => {
                         let ev = event.clone();
                         Some(TransitionPlan::context_only(move |ctx| { handle_keyboard(ctx, hi, &ev); }))
                     }
@@ -513,7 +537,17 @@ impl ars_core::Machine for Machine {
             }
             (_, Event::SyncProps { props }) => {
                 let props = props.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
+                let exit_dragging = matches!(
+                    state,
+                    State::Dragging { handle_index }
+                        if !valid_handle(*handle_index, props.panels.len(), props.panels.len())
+                );
+                let plan = if exit_dragging {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+                Some(plan.apply(move |ctx| {
                     let current = ctx.sizes.get().to_vec();
                     ctx.panels = props.panels.clone();
                     ctx.orientation = props.orientation;
@@ -524,7 +558,7 @@ impl ars_core::Machine for Machine {
                         props
                             .sizes
                             .clone()
-                            .map(|sizes| normalize_sizes(sizes.get(), &ctx.panels, &current)),
+                            .map(|sizes| clamp_all_with_current(sizes.get(), &ctx.panels, &current)),
                     );
                     if !ctx.sizes.is_controlled() {
                         commit_sizes(ctx, clamp_all_with_current(&current, &ctx.panels, &current));
@@ -533,6 +567,10 @@ impl ars_core::Machine for Machine {
                         && !valid_handle(focused, ctx.sizes.get().len(), ctx.panels.len())
                     {
                         ctx.focused_handle = None;
+                    }
+                    if exit_dragging {
+                        ctx.drag_start_sizes.clear();
+                        ctx.drag_start_pos = 0.0;
                     }
                 }))
             }
