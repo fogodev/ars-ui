@@ -16,6 +16,7 @@ use ars_core::{
     ConnectApi, CssProperty, Direction, Env, HtmlAttr, KeyboardKey, Locale, MessageFn, Orientation,
     PendingEffect, Rect, TransitionPlan, no_cleanup,
 };
+use ars_i18n::number::{FormatOptions, Formatter};
 
 /// The state of the `Slider` component.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -925,6 +926,7 @@ impl Api<'_> {
 
         let (position_prop, position) = thumb_style(self.ctx);
 
+        let (min, max) = normalized_bounds(self.ctx.min, self.ctx.max);
         let value = bounded_value(self.ctx);
 
         attrs
@@ -932,14 +934,8 @@ impl Api<'_> {
             .set(part_attr, part_val)
             .set(HtmlAttr::Id, self.ctx.ids.part("thumb"))
             .set(HtmlAttr::Role, "slider")
-            .set(
-                HtmlAttr::Aria(AriaAttr::ValueMin),
-                number_string(self.ctx.min),
-            )
-            .set(
-                HtmlAttr::Aria(AriaAttr::ValueMax),
-                number_string(self.ctx.max),
-            )
+            .set(HtmlAttr::Aria(AriaAttr::ValueMin), number_string(min))
+            .set(HtmlAttr::Aria(AriaAttr::ValueMax), number_string(max))
             .set(HtmlAttr::Aria(AriaAttr::ValueNow), number_string(value))
             .set(
                 HtmlAttr::Aria(AriaAttr::ValueText),
@@ -1047,7 +1043,7 @@ impl Api<'_> {
             .set(part_attr, part_val)
             .set(HtmlAttr::Data("ars-value"), number_string(value));
 
-        if value <= *self.ctx.value.get() {
+        if value <= bounded_value(self.ctx) {
             attrs.set_bool(HtmlAttr::Data("ars-in-range"), true);
         }
 
@@ -1068,7 +1064,7 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Type, "hidden")
-            .set(HtmlAttr::Value, number_string(*self.ctx.value.get()));
+            .set(HtmlAttr::Value, number_string(bounded_value(self.ctx)));
 
         if let Some(name) = &self.ctx.name {
             attrs.set(HtmlAttr::Name, name.as_str());
@@ -1076,6 +1072,10 @@ impl Api<'_> {
 
         if let Some(form) = &self.ctx.form {
             attrs.set(HtmlAttr::Form, form.as_str());
+        }
+
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
         attrs
@@ -1291,11 +1291,13 @@ fn large_step(ctx: &Context) -> f64 {
 }
 
 fn value_percent(ctx: &Context) -> f64 {
-    if (ctx.max - ctx.min).abs() <= f64::EPSILON {
+    let (min, max) = normalized_bounds(ctx.min, ctx.max);
+
+    if (max - min).abs() <= f64::EPSILON {
         return 0.0;
     }
 
-    ((*ctx.value.get() - ctx.min) / (ctx.max - ctx.min)).clamp(0.0, 1.0) * 100.0
+    ((bounded_value(ctx) - min) / (max - min)).clamp(0.0, 1.0) * 100.0
 }
 
 fn range_style(ctx: &Context) -> (CssProperty, String, CssProperty, String) {
@@ -1353,7 +1355,7 @@ fn thumb_style(ctx: &Context) -> (CssProperty, String) {
 }
 
 fn value_text(ctx: &Context, props: &Props) -> String {
-    let value = *ctx.value.get();
+    let value = bounded_value(ctx);
 
     if let Some(formatter) = &props.format_value_text {
         return formatter(value);
@@ -1366,7 +1368,7 @@ fn value_text(ctx: &Context, props: &Props) -> String {
             return label;
         }
 
-        return number_string(value);
+        return localized_number_string(value, &ctx.locale);
     }
 
     if let Some(formatter) = &props.format_value {
@@ -1378,6 +1380,10 @@ fn value_text(ctx: &Context, props: &Props) -> String {
     }
 
     number_string(value)
+}
+
+fn localized_number_string(value: f64, locale: &Locale) -> String {
+    Formatter::new(locale, FormatOptions::default()).format(value)
 }
 
 fn discrete_label(ctx: &Context, labels: &[String]) -> Option<String> {
@@ -1817,6 +1823,69 @@ mod tests {
     }
 
     #[test]
+    fn thumb_attrs_normalize_reversed_aria_bounds() {
+        let svc = service(Props {
+            min: 100.0,
+            max: 0.0,
+            value: Some(75.0),
+            ..props()
+        });
+
+        let attrs = svc.connect(&|_| {}).thumb_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("100"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("75"));
+    }
+
+    #[test]
+    fn thumb_attrs_clamp_aria_value_text_to_current_bounds() {
+        let mut svc = service(Props {
+            value: Some(75.0),
+            format_value_text: Some(callback(|value: f64| format!("{value:.0} dB"))),
+            ..props()
+        });
+
+        drop(svc.set_props(Props {
+            value: Some(75.0),
+            max: 50.0,
+            format_value_text: Some(callback(|value: f64| format!("{value:.0} dB"))),
+            ..props()
+        }));
+
+        let attrs = svc.connect(&|_| {}).thumb_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("50"));
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::ValueText)),
+            Some("50 dB")
+        );
+    }
+
+    #[test]
+    fn discrete_value_text_fallback_uses_locale_decimal_formatting() {
+        let svc = Service::<Machine>::new(
+            Props {
+                discrete: true,
+                min: 0.0,
+                max: 1.0,
+                step: 0.1,
+                value: Some(0.5),
+                ..props()
+            },
+            &Env {
+                locale: Locale::parse("de-DE").expect("valid locale"),
+                ..Env::default()
+            },
+            &Messages::default(),
+        );
+
+        let attrs = svc.connect(&|_| {}).thumb_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueText)), Some("0,5"));
+    }
+
+    #[test]
     fn thumb_attrs_only_reference_label_when_label_part_is_rendered() {
         let mut svc = service(props());
 
@@ -1871,6 +1940,29 @@ mod tests {
         assert_eq!(attrs.get(&HtmlAttr::Form), Some("settings"));
         assert_eq!(attrs.get(&HtmlAttr::Value), Some("35"));
         assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Hidden)));
+    }
+
+    #[test]
+    fn hidden_input_is_disabled_and_uses_bounded_value() {
+        let mut svc = service(Props {
+            disabled: true,
+            name: Some("volume".into()),
+            value: Some(75.0),
+            ..props()
+        });
+
+        drop(svc.set_props(Props {
+            disabled: true,
+            name: Some("volume".into()),
+            value: Some(75.0),
+            max: 50.0,
+            ..props()
+        }));
+
+        let attrs = svc.connect(&|_| {}).hidden_input_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Disabled), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Value), Some("50"));
     }
 
     #[test]
@@ -1997,6 +2089,31 @@ mod tests {
         });
 
         assert_eq!(value_percent(signed.context()), 50.0);
+    }
+
+    #[test]
+    fn value_percent_uses_normalized_bounds_and_bounded_value() {
+        let reversed = service(Props {
+            min: 100.0,
+            max: 0.0,
+            value: Some(25.0),
+            ..props()
+        });
+
+        assert_eq!(value_percent(reversed.context()), 25.0);
+
+        let mut clamped = service(Props {
+            value: Some(75.0),
+            ..props()
+        });
+
+        drop(clamped.set_props(Props {
+            value: Some(75.0),
+            max: 50.0,
+            ..props()
+        }));
+
+        assert_eq!(value_percent(clamped.context()), 100.0);
     }
 
     #[test]
@@ -2261,6 +2378,31 @@ mod tests {
         assert_eq!(
             api.part_attrs(Part::Marker { value: 25.0 }),
             api.marker_attrs(25.0)
+        );
+    }
+
+    #[test]
+    fn marker_attrs_compare_against_effective_bounded_value() {
+        let mut svc = service(Props {
+            value: Some(75.0),
+            ..props()
+        });
+
+        drop(svc.set_props(Props {
+            value: Some(75.0),
+            max: 50.0,
+            ..props()
+        }));
+
+        let api = svc.connect(&|_| {});
+
+        assert!(
+            api.marker_attrs(50.0)
+                .contains(&HtmlAttr::Data("ars-in-range"))
+        );
+        assert!(
+            !api.marker_attrs(75.0)
+                .contains(&HtmlAttr::Data("ars-in-range"))
         );
     }
 

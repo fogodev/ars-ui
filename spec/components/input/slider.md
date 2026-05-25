@@ -304,6 +304,11 @@ The track fill percentage calculation in `connect()` adjusts based on origin:
 - `Center`: fill from `50%` to `value%` (both directions)
 - `End`: fill = `(max - value) / (max - min)`
 
+Percentage math uses normalized bounds and the effective bounded value. If
+callers provide reversed or non-finite bounds, the core normalizes them before
+computing thumb position, range fill, and marker in-range state so visual,
+ARIA, and form output remain consistent.
+
 ### 1.6 RTL Direction Handling
 
 When the `Slider`'s containing element has `dir="rtl"`, the following behaviors MUST be reversed for horizontal sliders:
@@ -796,7 +801,7 @@ impl<'a> Api<'a> {
 
     /// Attributes for a single marker.
     pub fn marker_attrs(&self, value: f64) -> AttrMap {
-        let current = *self.ctx.value.get();
+        let current = bounded_value(self.ctx);
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Marker { value }.data_attrs();
         attrs.set(scope_attr, scope_val);
@@ -820,7 +825,10 @@ impl<'a> Api<'a> {
         if let Some(ref form) = self.props.form {
             attrs.set(HtmlAttr::Form, form);
         }
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_string());
+        attrs.set(HtmlAttr::Value, bounded_value(self.ctx).to_string());
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         attrs
     }
 
@@ -1005,10 +1013,10 @@ Slider
 | Property           | Element           | Value                                                         |
 | ------------------ | ----------------- | ------------------------------------------------------------- |
 | `role`             | Thumb             | `slider`                                                      |
-| `aria-valuenow`    | Thumb             | Current value                                                 |
-| `aria-valuemin`    | Thumb             | Minimum value                                                 |
-| `aria-valuemax`    | Thumb             | Maximum value                                                 |
-| `aria-valuetext`   | Thumb             | Formatted value text (via `format_value` or locale formatter) |
+| `aria-valuenow`    | Thumb             | Effective current value clamped to normalized bounds          |
+| `aria-valuemin`    | Thumb             | Normalized minimum value                                      |
+| `aria-valuemax`    | Thumb             | Normalized maximum value                                      |
+| `aria-valuetext`   | Thumb             | Formatted effective value text                                |
 | `aria-orientation` | Thumb             | `"horizontal"` or `"vertical"`                                |
 | `aria-disabled`    | Thumb             | Present when `disabled=true`                                  |
 | `aria-readonly`    | Thumb             | Present when `readonly=true`                                  |
@@ -1061,17 +1069,20 @@ pub value_labels: Option<Vec<String>>,
 - **Continuous with `format_value` or `value_format`**: the formatter output is used.
 - **Continuous without a formatter**: `aria-valuetext` uses the raw numeric value string.
 
-When `discrete` is true and `value_labels` is `None`, the slider uses the numeric value
-formatted per locale as `aria-valuetext`.
+All `aria-valuetext` formatting receives the effective value after non-finite input
+guards, bound normalization, clamping, and step snapping. When `discrete` is true
+and `value_labels` is `None`, the slider uses the numeric value formatted per
+locale as `aria-valuetext`.
 
 ### 4.2 `aria-valuetext` Localization
 
 1. Slider accepts an optional `format_value_text: Callback<dyn Fn(f64) -> String + Send + Sync>` prop for
    custom labels (e.g., `'Low'`, `'Medium'`, `'High'`).
-2. This function receives the current value and must return a localized string.
+2. This function receives the effective bounded value and must return a localized string.
 3. When provided, the core connect API sets `aria-valuetext` to the function's output.
 4. When not provided, the connect API falls back to discrete labels, then `format_value`,
-   then `value_format`, then the raw numeric value string.
+   then `value_format`, then the locale-formatted numeric value for discrete sliders
+   or raw numeric value string for continuous sliders.
 5. For RangeSlider, each thumb has its own format function.
 
 ### 4.3 Keyboard Modifiers (Slider / RangeSlider)
@@ -1084,7 +1095,7 @@ formatted per locale as `aria-valuetext`.
 
 ## 5. Form Integration
 
-- **Hidden input**: A hidden `<input type="hidden">` is rendered via the `HiddenInput` part. It carries the `name` attribute from context and the current numeric value.
+- **Hidden input**: A hidden `<input type="hidden">` is rendered via the `HiddenInput` part. It carries the `name` attribute from context and the effective bounded numeric value. When `disabled=true`, the hidden input carries the native `disabled` attribute and does not participate in form submission.
 - **Validation states**: The Thumb carries `aria-disabled` and `aria-readonly` from context.
 - **Reset behavior**: On form reset, the adapter restores `value` to `default_value`.
 - **Disabled/readonly propagation**: When inside a `Field` or `Fieldset`, the adapter merges `disabled`/`readonly` from `FieldCtx` per `07-forms.md` §12.6.
