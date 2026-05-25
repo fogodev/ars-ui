@@ -20,6 +20,9 @@ mod helper;
 #[path = "spec_conformance/data_display.rs"]
 mod data_display;
 
+#[path = "spec_conformance/date_time.rs"]
+mod date_time;
+
 #[path = "spec_conformance/input.rs"]
 mod input;
 

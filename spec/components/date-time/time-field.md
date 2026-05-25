@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, i18n, interactions, forms]
 shared_deps: [date-time-types]
 related: [date-field, date-time-picker]
 references:
-  react-aria: TimeField
+    react-aria: TimeField
 ---
 
 # TimeField
@@ -46,12 +46,18 @@ pub enum Event {
     TypeIntoSegment { kind: DateSegmentKind, ch: char },
     /// The type-ahead buffer timer fired; commit whatever digits are buffered.
     TypeBufferCommit { kind: DateSegmentKind },
+    /// Begin IME composition for segment text input.
+    CompositionStart,
+    /// End IME composition and process the composed text for a segment.
+    CompositionEnd { kind: DateSegmentKind, text: String },
     /// Clear the value of a segment.
     ClearSegment { kind: DateSegmentKind },
     /// Clear the value of all segments.
     ClearAll,
     /// Set the value of the component.
     SetValue(Option<Time>),
+    /// Synchronize context-backed props after `Service::set_props()`.
+    SyncProps(Box<Props>),
     /// Focus the next segment.
     FocusNextSegment,
     /// Focus the previous segment.
@@ -63,7 +69,7 @@ pub enum Event {
 
 ```rust
 /// Context for the TimeField component.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct Context {
     /// The current value of the component.
     pub value: Bindable<Option<Time>>,
@@ -73,6 +79,8 @@ pub struct Context {
     pub focused_segment: Option<DateSegmentKind>,
     /// The type-ahead buffer.
     pub type_buffer: String,
+    /// Whether an IME composition is currently active.
+    pub is_composing: bool,
     /// The locale of the component.
     pub locale: Locale,
     /// Resolved translatable messages.
@@ -93,17 +101,21 @@ pub struct Context {
     pub max_value: Option<Time>,
     /// Component IDs.
     pub ids: ComponentIds,
-    /// When true, all numeric segments display with leading zeros (e.g., "03"
-    /// instead of "3"). Defaults to false, which uses locale-aware formatting.
+    /// When true, all numeric segments display with localized leading zeros
+    /// (e.g., "03" instead of "3"). Defaults to false, which uses
+    /// locale-aware formatting without forced width.
     pub force_leading_zeros: bool,
 }
+
+// `Debug` and `PartialEq` are implemented manually because `intl_backend`
+// stores a trait object.
 
 impl Context {
     /// Build segments from hour_cycle, granularity, and current value.
     ///
     /// When `self.force_leading_zeros` is true, numeric segments (hour,
-    /// minute, second) are always zero-padded to 2 digits. When false,
-    /// formatting uses locale-aware defaults.
+    /// minute, second) are always formatted with at least 2 localized digits.
+    /// When false, formatting uses locale-aware defaults without forced width.
     pub fn rebuild_segments(&mut self) {
         let cycle   = self.hour_cycle;
         let value   = self.value.get().clone();
@@ -124,16 +136,16 @@ impl Context {
         }
         segs.push(hour_seg);
 
-        // ── Colon literal ─────────────────────────────────────────────────────
-        segs.push(DateSegment::new_literal(":"));
-
-        // ── Minute ───────────────────────────────────────────────────────────
-        let mut min_seg = DateSegment::new_numeric(DateSegmentKind::Minute, 0, 59, "mm");
-        if let Some(t) = &value {
-            min_seg.value = Some(t.minute as i32);
-            min_seg.text  = if pad { format!("{:02}", t.minute) } else { format!("{}", t.minute) };
+        // ── Minute (optional) ────────────────────────────────────────────────
+        if self.granularity >= TimeGranularity::Minute {
+            segs.push(DateSegment::new_literal(":"));
+            let mut min_seg = DateSegment::new_numeric(DateSegmentKind::Minute, 0, 59, "mm");
+            if let Some(t) = &value {
+                min_seg.value = Some(t.minute as i32);
+                min_seg.text  = if pad { format!("{:02}", t.minute) } else { format!("{}", t.minute) };
+            }
+            segs.push(min_seg);
         }
-        segs.push(min_seg);
 
         // ── Second (optional) ────────────────────────────────────────────────
         if self.granularity >= TimeGranularity::Second {
@@ -167,11 +179,6 @@ impl Context {
             segs.push(period_seg);
         }
 
-        // When hide_time_zone is true, filter out TimeZoneName segments.
-        // This is checked via the Props (accessed through the machine's init).
-        // The adapter passes hide_time_zone into Context at init time.
-        // if hide_time_zone { segs.retain(|s| s.kind != DateSegmentKind::TimeZoneName); }
-
         self.segments = segs;
     }
 
@@ -196,7 +203,7 @@ impl Context {
             raw_hour
         };
 
-        Some(Time::new(hour, minute, second))
+        Some(Time::new(hour, minute, second, 0).ok()?)
     }
 
     /// Get the value of a segment.
@@ -212,16 +219,19 @@ impl Context {
     /// Set the value of a segment.
     ///
     /// When `self.force_leading_zeros` is true, numeric segments are always
-    /// zero-padded to 2 digits (hour, minute, second). When false, formatting
-    /// uses locale-aware defaults.
+    /// formatted with at least 2 localized digits (hour, minute, second). When
+    /// false, formatting uses locale-aware defaults without forced width.
     pub fn set_segment_value(&mut self, kind: DateSegmentKind, raw: i32) {
         if let Some(seg) = self.segment_mut(kind) {
             let v = raw.clamp(seg.min, seg.max);
             seg.value = Some(v);
             seg.text  = match kind {
                 DateSegmentKind::DayPeriod => day_period_label(&*self.intl_backend, v == 1, &self.locale),
-                _ if self.force_leading_zeros => format!("{:02}", v),
-                _ => format!("{}", v),
+                _ => self.intl_backend.format_segment_digits(
+                    u32::try_from(v).unwrap_or_default(),
+                    NonZeroU8::new(if self.force_leading_zeros { 2 } else { 1 }).unwrap(),
+                    &self.locale,
+                ),
             };
         }
     }
@@ -287,7 +297,10 @@ pub struct Props {
     /// The ID of the component.
     pub id: String,
     /// The current value of the component.
-    pub value: Option<Time>,
+    ///
+    /// `None` means uncontrolled, `Some(None)` means controlled empty, and
+    /// `Some(Some(time))` means controlled with a concrete time.
+    pub value: Option<Option<Time>>,
     /// The default value of the component.
     pub default_value: Option<Time>,
     /// The granularity of the component.
@@ -416,7 +429,9 @@ fn cjk_day_period_table(locale: &Locale) -> Option<CjkDayPeriodEntry> {
 fn day_period_from_cjk_buffer(
     buffer: &str,
     locale: &Locale,
+    hour_cycle: HourCycle,
     current_hour: Option<u8>,
+    current_day_period: Option<i32>,
 ) -> Option<i32> {
     let entry = match cjk_day_period_table(locale) {
         Some(e) => e,
@@ -428,6 +443,10 @@ fn day_period_from_cjk_buffer(
         .nfd()
         .filter(|c| !c.is_combining_mark())
         .collect::<String>();
+
+    if normalized.is_empty() {
+        return None;
+    }
 
     // Full or prefix match against AM/PM labels.
     if entry.am_label.starts_with(&normalized) && !entry.pm_label.starts_with(&normalized) {
@@ -449,16 +468,38 @@ fn day_period_from_cjk_buffer(
     }
 
     // Still ambiguous (single shared character). If this is a timeout
-    // fallback, use the current hour as context.
+    // fallback, preserve the current day-period segment first. H11 and H12
+    // display hours are not enough to distinguish existing PM values from AM.
+    if let Some(value) = current_day_period {
+        return Some(value.clamp(0, 1));
+    }
+
     if let Some(hour) = current_hour {
         return Some(if hour < 12 { 0 } else { 1 });
     }
 
     None // Need more input
 }
+
+fn is_cjk_day_period_prefix(buffer: &str, locale: &Locale) -> bool {
+    let Some(entry) = cjk_day_period_table(locale) else {
+        return false;
+    };
+
+    let normalized = buffer
+        .nfd()
+        .filter(|c| !c.is_combining_mark())
+        .collect::<String>();
+
+    if normalized.is_empty() {
+        return false;
+    }
+
+    entry.am_label.starts_with(&normalized) || entry.pm_label.starts_with(&normalized)
+}
 ```
 
-The `TypeIntoSegment` handler for `DateSegmentKind::DayPeriod` in the TimeField state machine MUST delegate to this logic for CJK locales instead of the current ASCII-only `'a'`/`'p'` check. When the buffer is ambiguous after the first character, the handler schedules a `TypeBufferCommit` effect (500ms) exactly as numeric segments do. On `TypeBufferCommit` for a `DayPeriod` segment, call `day_period_from_cjk_buffer` with `current_hour` set to the current hour segment value to apply the timeout fallback.
+The `TypeIntoSegment` handler for `DateSegmentKind::DayPeriod` in the TimeField state machine MUST delegate to this logic for CJK locales instead of the current ASCII-only `'a'`/`'p'` check. ASCII/backend day-period shortcuts such as `a` and `p` remain valid in CJK locales and MUST be resolved before scheduling an ambiguous CJK prefix. Non-prefix CJK input, including input that normalizes to an empty buffer after stripping combining marks, MUST be ignored without mutating the buffer or scheduling a commit. When the buffer is ambiguous after the first character, the handler schedules a `TypeBufferCommit` effect (500ms) exactly as numeric segments do. When a later character resolves the day period, the handler cancels the pending `TypeBufferCommit` effect before publishing the resolved value. On `TypeBufferCommit` for a `DayPeriod` segment and when focus leaves an active day-period buffer, call `day_period_from_cjk_buffer` with the resolved hour cycle, current hour segment value, and current day-period segment value to apply the timeout fallback without flipping H11 PM values. Empty day-period buffers MUST be ignored so focus/blur alone never publishes AM/PM.
 
 ### 1.7 Timezone Handling
 
@@ -549,11 +590,11 @@ impl ars_core::Machine for Machine {
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let locale = env.locale.clone();
         let messages = messages.clone();
-        let provider = env.intl_backend.clone();
+        let intl_backend = env.intl_backend.clone();
 
         let resolved_cycle = props
             .hour_cycle
-            .unwrap_or_else(|| locale.hour_cycle(&*provider));
+            .unwrap_or_else(|| locale.hour_cycle(intl_backend.as_ref()));
         let mut ctx = Context {
             value: match &props.value {
                 Some(v) => Bindable::controlled(*v),
@@ -562,9 +603,10 @@ impl ars_core::Machine for Machine {
             segments: Vec::new(),
             focused_segment: None,
             type_buffer: String::new(),
+            is_composing: false,
             locale,
             messages,
-            provider,
+            intl_backend,
             granularity: props.granularity,
             hour_cycle: resolved_cycle,
             disabled: props.disabled,
@@ -575,11 +617,17 @@ impl ars_core::Machine for Machine {
             force_leading_zeros: props.force_leading_zeros,
         };
         ctx.rebuild_segments();
-        // When hide_time_zone is true, remove any TimeZoneName segments.
-        if props.hide_time_zone {
-            ctx.segments.retain(|s| s.kind != DateSegmentKind::TimeZoneName);
-        }
+        // `hide_time_zone` is preserved on Props for parity with date-time
+        // field APIs. TimeField does not generate a TimeZoneName segment.
         (State::Idle, ctx)
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        if old == new {
+            Vec::new()
+        } else {
+            vec![Event::SyncProps(Box::new(new.clone()))]
+        }
     }
 
     fn transition(
@@ -588,9 +636,56 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled { return None; }
+        if ctx.disabled && !matches!(event, Event::SetValue(_) | Event::SyncProps(_)) {
+            return None;
+        }
 
         match event {
+            Event::SyncProps(props) => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    let previous_granularity = ctx.granularity;
+                    let previous_hour_cycle = ctx.hour_cycle;
+                    let previous_force_leading_zeros = ctx.force_leading_zeros;
+
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.min_value = props.min_value;
+                    ctx.max_value = props.max_value;
+                    ctx.granularity = props.granularity;
+                    ctx.hour_cycle = props.hour_cycle.unwrap_or(ctx.hour_cycle);
+                    ctx.ids = ComponentIds::from_id(&props.id);
+                    ctx.force_leading_zeros = props.force_leading_zeros;
+                    if let Some(value) = props.value {
+                        let clamped = value.map(|time| {
+                            clamp_time(time, ctx.min_value.as_ref(), ctx.max_value.as_ref())
+                        });
+                        ctx.value.set(clamped);
+                        ctx.value.sync_controlled(Some(clamped));
+                    } else if ctx.value.is_controlled() {
+                        ctx.value.sync_controlled(None);
+                        ctx.value.set(None);
+                        ctx.rebuild_segments();
+                    } else {
+                        let clamped = ctx.value.get().map(|time| {
+                            clamp_time(time, ctx.min_value.as_ref(), ctx.max_value.as_ref())
+                        });
+                        let value_changed = clamped != *ctx.value.get();
+                        let must_rebuild = previous_granularity != ctx.granularity
+                            || previous_hour_cycle != ctx.hour_cycle
+                            || previous_force_leading_zeros != ctx.force_leading_zeros
+                            || value_changed;
+
+                        ctx.value.set(clamped);
+                        ctx.value.sync_controlled(None);
+
+                        if must_rebuild {
+                            ctx.rebuild_segments();
+                        }
+                    }
+                }))
+            }
+
             Event::FocusSegment { kind } => {
                 if !kind.is_editable() { return None; }
                 let k = *kind;
@@ -690,16 +785,30 @@ impl ars_core::Machine for Machine {
                 let k = *kind;
                 match k {
                     DateSegmentKind::DayPeriod => {
-                        let lower = ch.to_ascii_lowercase();
-                        if lower != 'a' && lower != 'p' { return None; }
+                        let mut buffer = ctx.type_buffer.clone();
+                        buffer.push(ch);
+                        let cjk = day_period_from_cjk_buffer(&buffer, &ctx.locale, ctx.hour_cycle, None, None);
+                        let backend = ctx.intl_backend
+                            .day_period_from_char(ch, &ctx.locale)
+                            .map(|is_pm| if is_pm { 1 } else { 0 });
+                        if cjk.is_none()
+                            && backend.is_none()
+                            && cjk_day_period_table(&ctx.locale).is_some()
+                            && is_cjk_day_period_prefix(&buffer, &ctx.locale)
+                        {
+                            return Some(TransitionPlan::to(state.clone())
+                                .apply(move |ctx| { ctx.type_buffer = buffer; })
+                                .cancel_effect(Effect::TypeBufferCommit)
+                                .with_effect(PendingEffect::named(Effect::TypeBufferCommit)));
+                        }
+
+                        let value = cjk.or(backend)?;
+
                         Some(TransitionPlan::context_only(move |ctx| {
-                            match lower {
-                                'a' => ctx.set_segment_value(DateSegmentKind::DayPeriod, 0),
-                                'p' => ctx.set_segment_value(DateSegmentKind::DayPeriod, 1),
-                                _ => {}
-                            }
+                            ctx.set_segment_value(DateSegmentKind::DayPeriod, value);
+                            ctx.type_buffer.clear();
                             Machine::maybe_publish(ctx);
-                        }))
+                        }).cancel_effect(Effect::TypeBufferCommit))
                     }
                     k2 if k2.is_numeric() => {
                         if !ch.is_ascii_digit() { return None; }
@@ -741,18 +850,10 @@ impl ars_core::Machine for Machine {
                             });
 
                         // Schedule a delayed commit effect when the buffer is not
-                        // immediately consumed. Replaces the old TimerId-based timer
-                        // with a PendingEffect that the adapter converts into a
-                        // setTimeout / spawn_local timer.
+                        // immediately consumed.
                         if !should_advance {
-                            plan = plan.with_effect(PendingEffect::new(
-                                "type-buffer-commit",
-                                move |_ctx, _props, send| {
-                                    let send = send.clone();
-                                    Box::new(move || {
-                                        send(Event::TypeBufferCommit { kind: k2 });
-                                    })
-                                },
+                            plan = plan.with_effect(PendingEffect::named(
+                                Effect::TypeBufferCommit,
                             ));
                         }
                         Some(plan)
@@ -764,9 +865,30 @@ impl ars_core::Machine for Machine {
             Event::TypeBufferCommit { kind } => {
                 let k = *kind;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    if let Ok(v) = ctx.type_buffer.parse::<i32>() {
-                        ctx.set_segment_value(k, v);
-                        Machine::maybe_publish(ctx);
+                    if k == DateSegmentKind::DayPeriod {
+                        if !ctx.type_buffer.is_empty() {
+                            let current_hour = ctx.get_seg(DateSegmentKind::Hour)
+                                .and_then(|hour| u8::try_from(hour).ok());
+                            let current_day_period = ctx.get_seg(DateSegmentKind::DayPeriod);
+                            if let Some(v) = day_period_from_cjk_buffer(
+                                &ctx.type_buffer,
+                                &ctx.locale,
+                                ctx.hour_cycle,
+                                current_hour,
+                                current_day_period,
+                            ) {
+                                ctx.set_segment_value(k, v);
+                                Machine::maybe_publish(ctx);
+                            }
+                        }
+                    } else if let Ok(v) = ctx.type_buffer.parse::<i32>() {
+                        if let Some(seg) = ctx.segments.iter().find(|s| s.kind == k)
+                            && v >= seg.min
+                            && v <= seg.max
+                        {
+                            ctx.set_segment_value(k, v);
+                            Machine::maybe_publish(ctx);
+                        }
                     }
                     ctx.type_buffer.clear();
                 }))
@@ -798,10 +920,14 @@ impl ars_core::Machine for Machine {
 
             Event::SetValue(v) => {
                 let v = v.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.value.set(v);
-                    ctx.rebuild_segments();
-                }))
+                Some(
+                    TransitionPlan::context_only(move |ctx| {
+                        ctx.value.set(v);
+                        ctx.type_buffer.clear();
+                        ctx.rebuild_segments();
+                    })
+                    .cancel_effect(Effect::TypeBufferCommit),
+                )
             }
         }
     }
@@ -869,7 +995,6 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("label"));
-        attrs.set(HtmlAttr::For, self.ctx.ids.part("field-group"));
         attrs
     }
 
@@ -904,6 +1029,12 @@ impl<'a> Api<'a> {
 
     /// Attributes for a segment element.
     pub fn segment_attrs(&self, kind: &DateSegmentKind) -> AttrMap {
+        if let Some((index, seg)) = self.ctx.segments.iter().enumerate().find(|(_, s)| s.kind == *kind) {
+            if !seg.is_editable {
+                return self.literal_attrs(index);
+            }
+        }
+
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] =
             Part::Segment { kind: kind.clone() }.data_attrs();
@@ -988,26 +1119,62 @@ impl<'a> Api<'a> {
         if let Some(name) = &self.props.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        if let Some(value) = &self.ctx.value.get() {
-            attrs.set(HtmlAttr::Value, value.to_iso8601());
-        }
+        let value = self
+            .ctx
+            .value
+            .get()
+            .map_or_else(String::new, Time::to_iso8601);
+        attrs.set(HtmlAttr::Value, value);
         attrs
     }
 
     // ── Event handlers ───────────────────────────────────────────────
 
     /// Handle keydown on a segment.
-    pub fn on_segment_keydown(&self, kind: DateSegmentKind, key: KeyboardKey) {
-        match key {
+    pub fn on_segment_keydown(
+        &self,
+        kind: DateSegmentKind,
+        data: &KeyboardEventData,
+        shift: bool,
+        direction: Direction,
+    ) {
+        if data.is_composing {
+            (self.send)(Event::CompositionStart);
+            return;
+        }
+
+        match data.key {
             KeyboardKey::ArrowUp => (self.send)(Event::IncrementSegment { kind }),
             KeyboardKey::ArrowDown => (self.send)(Event::DecrementSegment { kind }),
-            KeyboardKey::ArrowLeft => (self.send)(Event::FocusPrevSegment),
-            KeyboardKey::ArrowRight => (self.send)(Event::FocusNextSegment),
+            KeyboardKey::ArrowLeft => {
+                if direction == Direction::Rtl {
+                    (self.send)(Event::FocusNextSegment);
+                } else {
+                    (self.send)(Event::FocusPrevSegment);
+                }
+            }
+            KeyboardKey::ArrowRight => {
+                if direction == Direction::Rtl {
+                    (self.send)(Event::FocusPrevSegment);
+                } else {
+                    (self.send)(Event::FocusNextSegment);
+                }
+            }
+            KeyboardKey::Tab => {
+                if shift {
+                    (self.send)(Event::FocusPrevSegment);
+                } else {
+                    (self.send)(Event::FocusNextSegment);
+                }
+            }
             KeyboardKey::Backspace | KeyboardKey::Delete => {
                 (self.send)(Event::ClearSegment { kind })
             }
-            KeyboardKey::Char(ch) => {
-                (self.send)(Event::TypeIntoSegment { kind, ch })
+            KeyboardKey::Escape => (self.send)(Event::ClearAll),
+            _ if data.character.is_some() => {
+                if let Some(ch) = data.character {
+                    (self.send)(Event::TypeIntoSegment { kind, ch });
+                }
             }
             _ => {}
         }
@@ -1018,9 +1185,21 @@ impl<'a> Api<'a> {
         (self.send)(Event::FocusSegment { kind });
     }
 
+    /// Handle composition start on a segment.
+    pub fn on_segment_composition_start(&self) {
+        (self.send)(Event::CompositionStart);
+    }
+
+    /// Handle composition end on a segment.
+    pub fn on_segment_composition_end(&self, kind: DateSegmentKind, text: impl Into<String>) {
+        (self.send)(Event::CompositionEnd { kind, text: text.into() });
+    }
+
     /// Handle focus leaving the field group.
-    pub fn on_field_group_focusout(&self) {
-        (self.send)(Event::BlurAll);
+    pub fn on_field_group_focusout(&self, focus_leaving_group: bool) {
+        if focus_leaving_group {
+            (self.send)(Event::BlurAll);
+        }
     }
 }
 

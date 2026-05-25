@@ -1,0 +1,69 @@
+---
+source: crates/ars-components/src/date_time/time_field/tests.rs
+expression: snapshot_attrs(&api.field_group_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "field-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "time-field",
+            ),
+        ),
+        (
+            Aria(
+                Invalid,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "meeting-time-label",
+            ),
+        ),
+        (
+            Aria(
+                Required,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                DescribedBy,
+            ),
+            String(
+                "meeting-time-description meeting-time-error-message",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "meeting-time-field-group",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}

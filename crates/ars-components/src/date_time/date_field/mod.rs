@@ -3,7 +3,7 @@
 //! This module implements the framework-agnostic segmented date input defined
 //! in `spec/components/date-time/date-field.md`.
 
-mod segment;
+pub mod segment;
 
 #[cfg(test)]
 mod tests;
