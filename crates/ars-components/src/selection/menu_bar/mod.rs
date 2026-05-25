@@ -542,12 +542,12 @@ impl Api<'_> {
     /// Dispatches trigger keydown events.
     pub fn on_trigger_keydown(&self, key: &Key, data: &KeyboardEventData) {
         match (self.props.orientation, data.key) {
-            (_, KeyboardKey::Enter | KeyboardKey::Space) => {
+            (_, KeyboardKey::Enter | KeyboardKey::Space)
+            | (Orientation::Horizontal, KeyboardKey::ArrowDown) => {
                 (self.send)(Event::ActivateMenu(key.clone()));
             }
 
-            (Orientation::Horizontal, KeyboardKey::ArrowDown)
-            | (Orientation::Vertical, KeyboardKey::ArrowRight)
+            (Orientation::Vertical, KeyboardKey::ArrowRight)
                 if self.props.dir == Direction::Ltr =>
             {
                 (self.send)(Event::ActivateMenu(key.clone()));
@@ -900,9 +900,15 @@ mod tests {
     #[test]
     fn vertical_activation_keys_open_menu() {
         let menu_bar = service(Props::new().id("menu-bar"));
+        let rtl_menu_bar = service(Props::new().id("menu-bar").dir(Direction::Rtl));
 
         assert_eq!(
             captured_events(&menu_bar, |api| api
+                .on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowDown))),
+            vec![Event::ActivateMenu(key("file"))]
+        );
+        assert_eq!(
+            captured_events(&rtl_menu_bar, |api| api
                 .on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowDown))),
             vec![Event::ActivateMenu(key("file"))]
         );
