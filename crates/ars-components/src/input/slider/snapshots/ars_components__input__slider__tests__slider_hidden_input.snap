@@ -21,14 +21,6 @@ AttrMap {
             ),
         ),
         (
-            Aria(
-                Hidden,
-            ),
-            String(
-                "true",
-            ),
-        ),
-        (
             Form,
             String(
                 "settings",

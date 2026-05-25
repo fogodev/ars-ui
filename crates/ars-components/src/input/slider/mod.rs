@@ -466,15 +466,25 @@ impl ars_core::Machine for Machine {
                 ctx.dragging = false;
             })),
 
-            Event::PointerDown { value } => Some(
-                set_value_plan(ctx, *value, Some(State::Dragging), true, false).apply(
-                    |ctx: &mut Context| {
-                        ctx.dragging = true;
-                    },
-                ),
-            ),
+            Event::PointerDown { value } => {
+                if !value.is_finite() {
+                    return None;
+                }
+
+                Some(
+                    set_value_plan(ctx, *value, Some(State::Dragging), true, false).apply(
+                        |ctx: &mut Context| {
+                            ctx.dragging = true;
+                        },
+                    ),
+                )
+            }
 
             Event::PointerMove { value } if ctx.dragging => {
+                if !value.is_finite() {
+                    return None;
+                }
+
                 Some(set_value_plan(ctx, *value, None, true, false))
             }
 
@@ -514,19 +524,29 @@ impl ars_core::Machine for Machine {
 
             Event::SetToMax => Some(set_value_plan(ctx, ctx.max, None, true, true)),
 
-            Event::SetValue(value) => Some(set_value_plan(ctx, *value, None, true, false)),
+            Event::SetValue(value) => {
+                if !value.is_finite() {
+                    return None;
+                }
 
-            Event::SyncValue(value) => {
-                let value = value.map(|value| snap_to_step(value, ctx.min, ctx.max, ctx.step));
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    if let Some(value) = value {
+                Some(set_value_plan(ctx, *value, None, true, false))
+            }
+
+            Event::SyncValue(value) => match value {
+                Some(value) if value.is_finite() => {
+                    let value = snap_to_step(*value, ctx.min, ctx.max, ctx.step);
+                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                         ctx.value.set(value);
                         ctx.value.sync_controlled(Some(value));
-                    } else {
-                        ctx.value.sync_controlled(None);
-                    }
-                }))
-            }
+                    }))
+                }
+
+                Some(_) => None,
+
+                None => Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.value.sync_controlled(None);
+                })),
+            },
 
             Event::SetProps => {
                 let props = props.clone();
@@ -905,7 +925,7 @@ impl Api<'_> {
 
         let (position_prop, position) = thumb_style(self.ctx);
 
-        let value = *self.ctx.value.get();
+        let value = bounded_value(self.ctx);
 
         attrs
             .set(scope_attr, scope_val)
@@ -990,11 +1010,14 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::For, self.ctx.ids.part("thumb"))
-            .set(HtmlAttr::Aria(AriaAttr::Live), "off")
-            .set(
+            .set(HtmlAttr::Aria(AriaAttr::Live), "off");
+
+        if self.ctx.has_label {
+            attrs.set(
                 HtmlAttr::Aria(AriaAttr::LabelledBy),
                 self.ctx.ids.part("label"),
             );
+        }
 
         attrs
     }
@@ -1045,8 +1068,7 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Type, "hidden")
-            .set(HtmlAttr::Value, number_string(*self.ctx.value.get()))
-            .set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+            .set(HtmlAttr::Value, number_string(*self.ctx.value.get()));
 
         if let Some(name) = &self.ctx.name {
             attrs.set(HtmlAttr::Name, name.as_str());
@@ -1233,6 +1255,12 @@ fn value_change_end_effect(value: f64) -> PendingEffect<Machine> {
 }
 
 fn snap_to_step(value: f64, min: f64, max: f64, step: f64) -> f64 {
+    let (min, max) = normalized_bounds(min, max);
+
+    if !value.is_finite() {
+        return min;
+    }
+
     let clamped = value.clamp(min, max);
 
     if step <= 0.0 || !step.is_finite() {
@@ -1242,6 +1270,20 @@ fn snap_to_step(value: f64, min: f64, max: f64, step: f64) -> f64 {
     let steps_from_min = ((clamped - min) / step).round();
 
     (min + steps_from_min * step).clamp(min, max)
+}
+
+fn normalized_bounds(min: f64, max: f64) -> (f64, f64) {
+    match (min.is_finite(), max.is_finite()) {
+        (true, true) if min <= max => (min, max),
+        (true, true) => (max, min),
+        (true, false) => (min, min),
+        (false, true) => (max, max),
+        (false, false) => (0.0, 0.0),
+    }
+}
+
+fn bounded_value(ctx: &Context) -> f64 {
+    snap_to_step(*ctx.value.get(), ctx.min, ctx.max, ctx.step)
 }
 
 fn large_step(ctx: &Context) -> f64 {
@@ -1261,21 +1303,22 @@ fn range_style(ctx: &Context) -> (CssProperty, String, CssProperty, String) {
 
     let is_horizontal = ctx.orientation == Orientation::Horizontal;
 
-    let visual_percent = if is_horizontal && ctx.dir == Direction::Rtl {
-        100.0 - percent
-    } else {
-        percent
-    };
+    let is_rtl = is_horizontal && ctx.dir == Direction::Rtl;
+    let visual_percent = if is_rtl { 100.0 - percent } else { percent };
 
     let (start, size) = match ctx.origin {
-        Origin::Start => (0.0, visual_percent),
+        Origin::Start if is_rtl => (100.0 - percent, percent),
+
+        Origin::Start => (0.0, percent),
 
         Origin::Center => {
             let start = visual_percent.min(50.0);
             (start, (visual_percent - 50.0).abs())
         }
 
-        Origin::End => (visual_percent, 100.0 - visual_percent),
+        Origin::End if is_rtl => (0.0, 100.0 - percent),
+
+        Origin::End => (percent, 100.0 - percent),
     };
 
     if is_horizontal {
@@ -1474,6 +1517,26 @@ mod tests {
 
         assert_eq!(svc.state(), &State::Idle);
         assert_eq!(*svc.context().value.get(), 25.0);
+    }
+
+    #[test]
+    fn non_finite_value_events_do_not_mutate_state() {
+        let mut svc = service(props());
+
+        for event in [
+            Event::SetValue(f64::NAN),
+            Event::SetValue(f64::INFINITY),
+            Event::PointerDown {
+                value: f64::NEG_INFINITY,
+            },
+        ] {
+            let result = svc.send(event);
+
+            assert!(result.pending_effects.is_empty());
+            assert!(result.cancel_effects.is_empty());
+            assert_eq!(svc.state(), &State::Idle);
+            assert_eq!(*svc.context().value.get(), 25.0);
+        }
     }
 
     #[test]
@@ -1735,6 +1798,25 @@ mod tests {
     }
 
     #[test]
+    fn thumb_attrs_clamp_aria_value_now_to_current_bounds() {
+        let mut svc = service(Props {
+            value: Some(75.0),
+            ..props()
+        });
+
+        drop(svc.set_props(Props {
+            value: Some(75.0),
+            max: 50.0,
+            ..props()
+        }));
+
+        let attrs = svc.connect(&|_| {}).thumb_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("50"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("50"));
+    }
+
+    #[test]
     fn thumb_attrs_only_reference_label_when_label_part_is_rendered() {
         let mut svc = service(props());
 
@@ -1754,6 +1836,26 @@ mod tests {
     }
 
     #[test]
+    fn output_attrs_only_reference_label_when_label_part_is_rendered() {
+        let mut svc = service(props());
+
+        assert!(
+            !svc.connect(&|_| {})
+                .output_attrs()
+                .contains(&HtmlAttr::Aria(AriaAttr::LabelledBy))
+        );
+
+        drop(svc.send(Event::SetHasLabel(true)));
+
+        assert_eq!(
+            svc.connect(&|_| {})
+                .output_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+            Some("volume-label")
+        );
+    }
+
+    #[test]
     fn hidden_input_uses_form_metadata_and_current_value() {
         let svc = service(Props {
             name: Some("volume".into()),
@@ -1768,6 +1870,7 @@ mod tests {
         assert_eq!(attrs.get(&HtmlAttr::Name), Some("volume"));
         assert_eq!(attrs.get(&HtmlAttr::Form), Some("settings"));
         assert_eq!(attrs.get(&HtmlAttr::Value), Some("35"));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Hidden)));
     }
 
     #[test]
@@ -1851,6 +1954,13 @@ mod tests {
     }
 
     #[test]
+    fn snap_to_step_normalizes_invalid_bounds_without_panicking() {
+        assert_eq!(snap_to_step(75.0, 100.0, 0.0, 5.0), 75.0);
+        assert_eq!(snap_to_step(75.0, f64::NAN, 100.0, 5.0), 100.0);
+        assert_eq!(snap_to_step(75.0, f64::NAN, f64::NAN, 5.0), 0.0);
+    }
+
+    #[test]
     fn large_step_defaults_to_ten_steps() {
         let mut svc = service(props());
 
@@ -1887,6 +1997,42 @@ mod tests {
         });
 
         assert_eq!(value_percent(signed.context()), 50.0);
+    }
+
+    #[test]
+    fn range_style_mirrors_horizontal_rtl_start_and_end_origins() {
+        let start = service(Props {
+            dir: Direction::Rtl,
+            value: Some(25.0),
+            ..props()
+        });
+
+        assert_eq!(
+            range_style(start.context()),
+            (
+                CssProperty::Left,
+                "75%".into(),
+                CssProperty::Width,
+                "25%".into()
+            )
+        );
+
+        let end = service(Props {
+            dir: Direction::Rtl,
+            origin: Origin::End,
+            value: Some(25.0),
+            ..props()
+        });
+
+        assert_eq!(
+            range_style(end.context()),
+            (
+                CssProperty::Left,
+                "0%".into(),
+                CssProperty::Width,
+                "75%".into()
+            )
+        );
     }
 
     #[test]

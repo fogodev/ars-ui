@@ -417,6 +417,7 @@ impl ars_core::Machine for Machine {
                 }))
             }
             Event::PointerDown { value } => {
+                if !value.is_finite() { return None; }
                 let snapped = snap_to_step(*value, ctx.min, ctx.max, ctx.step);
                 Some(TransitionPlan::to(State::Dragging).apply(move |ctx| {
                     ctx.value.set(snapped);
@@ -425,6 +426,7 @@ impl ars_core::Machine for Machine {
             }
             Event::PointerMove { value } => {
                 if !ctx.dragging { return None; }
+                if !value.is_finite() { return None; }
                 let snapped = snap_to_step(*value, ctx.min, ctx.max, ctx.step);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(snapped);
@@ -493,21 +495,24 @@ impl ars_core::Machine for Machine {
                 }))
             }
             Event::SetValue(val) => {
+                if !val.is_finite() { return None; }
                 let snapped = snap_to_step(*val, ctx.min, ctx.max, ctx.step);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(snapped);
                 }))
             }
-            Event::SyncValue(value) => {
-                let value = value.map(|value| snap_to_step(value, ctx.min, ctx.max, ctx.step));
-                Some(TransitionPlan::context_only(move |ctx| {
-                    if let Some(value) = value {
+            Event::SyncValue(value) => match value {
+                Some(value) if value.is_finite() => {
+                    let value = snap_to_step(*value, ctx.min, ctx.max, ctx.step);
+                    Some(TransitionPlan::context_only(move |ctx| {
                         ctx.value.set(value);
                         ctx.value.sync_controlled(Some(value));
-                    } else {
-                        ctx.value.sync_controlled(None);
-                    }
-                }))
+                    }))
+                }
+                Some(_) => None,
+                None => Some(TransitionPlan::context_only(|ctx| {
+                    ctx.value.sync_controlled(None);
+                })),
             }
             Event::SetProps => {
                 let props = props.clone();
@@ -609,9 +614,22 @@ impl<'a> Api<'a> {
 
 /// Snap a value to the nearest step.
 fn snap_to_step(value: f64, min: f64, max: f64, step: f64) -> f64 {
+    let (min, max) = normalized_bounds(min, max);
+    if !value.is_finite() { return min; }
     let clamped = value.clamp(min, max);
+    if step <= 0.0 || !step.is_finite() { return clamped; }
     let steps_from_min = ((clamped - min) / step).round();
     (min + steps_from_min * step).clamp(min, max)
+}
+
+fn normalized_bounds(min: f64, max: f64) -> (f64, f64) {
+    match (min.is_finite(), max.is_finite()) {
+        (true, true) if min <= max => (min, max),
+        (true, true) => (max, min),
+        (true, false) => (min, min),
+        (false, true) => (max, max),
+        (false, false) => (0.0, 0.0),
+    }
 }
 ```
 
@@ -677,14 +695,18 @@ impl<'a> Api<'a> {
     pub fn range_attrs(&self) -> AttrMap {
         let percent = ((self.ctx.value.get() - self.ctx.min) / (self.ctx.max - self.ctx.min) * 100.0).clamp(0.0, 100.0);
         let is_horizontal = self.ctx.orientation == Orientation::Horizontal;
-        let is_rtl = self.ctx.dir == Direction::Rtl;
+        let is_rtl = is_horizontal && self.ctx.dir == Direction::Rtl;
 
-        let range_start = if is_horizontal && is_rtl {
-            format!("{}%", 100.0 - percent)
-        } else {
-            "0%".to_string()
+        let (range_start, range_size) = match self.ctx.origin {
+            Origin::Start if is_rtl => (format!("{}%", 100.0 - percent), format!("{}%", percent)),
+            Origin::Start => ("0%".to_string(), format!("{}%", percent)),
+            Origin::Center => {
+                let visual = if is_rtl { 100.0 - percent } else { percent };
+                (format!("{}%", visual.min(50.0)), format!("{}%", (visual - 50.0).abs()))
+            }
+            Origin::End if is_rtl => ("0%".to_string(), format!("{}%", 100.0 - percent)),
+            Origin::End => (format!("{}%", percent), format!("{}%", 100.0 - percent)),
         };
-        let range_size = format!("{}%", percent);
 
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Range.data_attrs();
@@ -714,7 +736,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "slider");
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), self.ctx.value.get().to_string());
+        attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), snap_to_step(*self.ctx.value.get(), self.ctx.min, self.ctx.max, self.ctx.step).to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), self.ctx.min.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), self.ctx.max.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), value_text);
@@ -756,7 +778,9 @@ impl<'a> Api<'a> {
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::For, self.ctx.ids.part("thumb"));
         attrs.set(HtmlAttr::Aria(AriaAttr::Live), "off");
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
+        if self.ctx.has_label {
+            attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
+        }
         attrs
     }
 
@@ -797,7 +821,6 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Form, form);
         }
         attrs.set(HtmlAttr::Value, self.ctx.value.get().to_string());
-        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs
     }
 
