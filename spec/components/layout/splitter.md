@@ -281,6 +281,40 @@ fn clamp_all_with_current(sizes: &[f64], panels: &[Panel], current: &[f64]) -> V
     }).collect()
 }
 
+fn rebalance_to_total(mut sizes: Vec<f64>, panels: &[Panel], total: f64) -> Vec<f64> {
+    if !total.is_finite() || total <= 0.0 {
+        return sizes;
+    }
+    let current_total = sizes.iter().sum::<f64>();
+    let mut delta = current_total - total;
+    if delta > 0.0 {
+        for index in (0..sizes.len()).rev() {
+            let floor = panels.get(index).map_or(0.0, effective_min);
+            let reduction = (sizes[index] - floor).max(0.0).min(delta);
+            sizes[index] -= reduction;
+            delta -= reduction;
+            if delta <= f64::EPSILON {
+                break;
+            }
+        }
+    } else if delta < 0.0 {
+        let mut remaining = -delta;
+        for index in (0..sizes.len()).rev() {
+            let ceiling = panels
+                .get(index)
+                .and_then(|panel| panel.max_size)
+                .unwrap_or(f64::INFINITY);
+            let increase = (ceiling - sizes[index]).max(0.0).min(remaining);
+            sizes[index] += increase;
+            remaining -= increase;
+            if remaining <= f64::EPSILON {
+                break;
+            }
+        }
+    }
+    sizes
+}
+
 fn normalize_sizes(sizes: &[f64], panels: &[Panel], current: &[f64]) -> Vec<f64> {
     panels.iter().enumerate().map(|(index, panel)| {
         let candidate = sizes
@@ -368,11 +402,11 @@ fn collapse_panel(sizes: &mut [f64], index: usize, panels: &[Panel]) {
     sizes[index] = collapsed_size + remaining;
 }
 
-fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel], restore_size: Option<f64>) {
-    if index >= sizes.len() || index >= panels.len() { return; }
+fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel], restore_size: Option<f64>) -> bool {
+    if index >= sizes.len() || index >= panels.len() { return false; }
     let p = &panels[index];
-    if !p.collapsible { return; }
-    if sizes[index] > p.collapsed_size { return; }
+    if !p.collapsible { return false; }
+    if sizes[index] > p.collapsed_size { return false; }
     let target_size = restore_size
         .filter(|size| size.is_finite())
         .unwrap_or(p.default_size)
@@ -385,7 +419,9 @@ fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel], restore_size:
         let actual = need.min((sizes[d] - effective_min(&panels[d])).max(0.0));
         sizes[index] += actual;
         sizes[d] -= actual;
+        return actual > 0.0;
     }
+    false
 }
 
 fn remember_collapse_size(ctx: &mut Context, index: usize) {
@@ -453,9 +489,11 @@ fn handle_keyboard(ctx: &mut Context, handle_index: usize, event: &KeyboardEvent
                 let mut sizes = ctx.sizes.get().to_vec();
                 if sizes[handle_index] <= p.collapsed_size {
                     let restore_size = ctx.collapsed_restore_sizes.get(handle_index).copied().flatten();
-                    expand_panel(&mut sizes, handle_index, &ctx.panels, restore_size);
-                    if let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(handle_index) {
-                        *restore_size = None;
+                    let expanded = expand_panel(&mut sizes, handle_index, &ctx.panels, restore_size);
+                    if expanded {
+                        if let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(handle_index) {
+                            *restore_size = None;
+                        }
                     }
                 } else {
                     remember_collapse_size(ctx, handle_index);
@@ -537,16 +575,29 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx| {
                     let mut sizes = ctx.sizes.get().to_vec();
                     let restore_size = ctx.collapsed_restore_sizes.get(pi).copied().flatten();
-                    expand_panel(&mut sizes, pi, &ctx.panels, restore_size);
-                    if let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(pi) {
-                        *restore_size = None;
+                    let expanded = expand_panel(&mut sizes, pi, &ctx.panels, restore_size);
+                    if expanded {
+                        if let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(pi) {
+                            *restore_size = None;
+                        }
                     }
                     commit_sizes(ctx, sizes);
                 }))
             }
             (State::Idle, Event::SetSizes { sizes }) => {
-                let (panels, s) = (ctx.panels.clone(), sizes.clone());
-                Some(TransitionPlan::context_only(move |ctx| { commit_sizes(ctx, clamp_all(&s, &panels)); }))
+                let (panels, s, unit, total) = (
+                    ctx.panels.clone(),
+                    sizes.clone(),
+                    ctx.size_unit,
+                    ctx.sizes.get().iter().sum::<f64>(),
+                );
+                Some(TransitionPlan::context_only(move |ctx| {
+                    let mut next = clamp_all(&s, &panels);
+                    if unit == SizeUnit::Percent {
+                        next = rebalance_to_total(next, &panels, total);
+                    }
+                    commit_sizes(ctx, next);
+                }))
             }
             (State::Dragging { handle_index }, Event::DragMove { pos }) => {
                 let (hi, p) = (*handle_index, *pos);
@@ -592,12 +643,17 @@ impl ars_core::Machine for Machine {
                 };
                 Some(plan.apply(move |ctx| {
                     let current = ctx.sizes.get().to_vec();
+                    let panels_changed = ctx.panels != props.panels;
                     ctx.panels = props.panels.clone();
                     ctx.orientation = props.orientation;
                     ctx.dir = props.dir.unwrap_or(Direction::Ltr);
                     ctx.size_unit = props.size_unit;
                     ctx.keyboard_step = keyboard_step_for(&props);
-                    ctx.collapsed_restore_sizes.resize(ctx.panels.len(), None);
+                    if panels_changed {
+                        ctx.collapsed_restore_sizes = vec![None; ctx.panels.len()];
+                    } else {
+                        ctx.collapsed_restore_sizes.resize(ctx.panels.len(), None);
+                    }
                     ctx.sizes.sync_controlled(
                         props
                             .sizes

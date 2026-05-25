@@ -530,6 +530,48 @@ fn clamp_all(sizes: &[f64], panels: &[Panel], current: &[f64]) -> Vec<f64> {
         .collect()
 }
 
+fn rebalance_to_total(mut sizes: Vec<f64>, panels: &[Panel], total: f64) -> Vec<f64> {
+    if !total.is_finite() || total <= 0.0 {
+        return sizes;
+    }
+
+    let current_total = sizes.iter().sum::<f64>();
+    let mut delta = current_total - total;
+
+    if delta > 0.0 {
+        for index in (0..sizes.len()).rev() {
+            let floor = panels.get(index).map_or(0.0, effective_min);
+            let reduction = (sizes[index] - floor).max(0.0).min(delta);
+
+            sizes[index] -= reduction;
+            delta -= reduction;
+
+            if delta <= f64::EPSILON {
+                break;
+            }
+        }
+    } else if delta < 0.0 {
+        let mut remaining = -delta;
+
+        for index in (0..sizes.len()).rev() {
+            let ceiling = panels
+                .get(index)
+                .and_then(|panel| panel.max_size)
+                .unwrap_or(f64::INFINITY);
+            let increase = (ceiling - sizes[index]).max(0.0).min(remaining);
+
+            sizes[index] += increase;
+            remaining -= increase;
+
+            if remaining <= f64::EPSILON {
+                break;
+            }
+        }
+    }
+
+    sizes
+}
+
 fn normalize_sizes(sizes: &[f64], panels: &[Panel], current: &[f64]) -> Vec<f64> {
     panels
         .iter()
@@ -589,19 +631,24 @@ fn collapse_panel(sizes: &mut [f64], index: usize, panels: &[Panel]) {
     sizes[index] = collapsed_size + remaining;
 }
 
-fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel], restore_size: Option<f64>) {
+fn expand_panel(
+    sizes: &mut [f64],
+    index: usize,
+    panels: &[Panel],
+    restore_size: Option<f64>,
+) -> bool {
     if index >= sizes.len() || index >= panels.len() {
-        return;
+        return false;
     }
 
     let panel = &panels[index];
 
     if !panel.collapsible {
-        return;
+        return false;
     }
 
     if sizes[index] > panel.collapsed_size {
-        return;
+        return false;
     }
 
     let target_size = restore_size
@@ -626,7 +673,11 @@ fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel], restore_size:
 
         sizes[index] += actual;
         sizes[donor] -= actual;
+
+        return actual > 0.0;
     }
+
+    false
 }
 
 fn remember_collapse_size(ctx: &mut Context, index: usize) {
@@ -721,10 +772,15 @@ fn handle_keyboard(ctx: &mut Context, handle_index: usize, event: &KeyboardEvent
                         .copied()
                         .flatten();
 
-                    expand_panel(&mut sizes, handle_index, &ctx.panels, restore_size);
+                    let expanded =
+                        expand_panel(&mut sizes, handle_index, &ctx.panels, restore_size);
 
-                    if let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(handle_index) {
-                        *restore_size = None;
+                    if expanded {
+                        if let Some(restore_size) =
+                            ctx.collapsed_restore_sizes.get_mut(handle_index)
+                        {
+                            *restore_size = None;
+                        }
                     }
                 } else {
                     remember_collapse_size(ctx, handle_index);
@@ -845,10 +901,13 @@ impl ars_core::Machine for Machine {
                         .copied()
                         .flatten();
 
-                    expand_panel(&mut sizes, panel_index, &ctx.panels, restore_size);
+                    let expanded = expand_panel(&mut sizes, panel_index, &ctx.panels, restore_size);
 
-                    if let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(panel_index) {
-                        *restore_size = None;
+                    if expanded {
+                        if let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(panel_index)
+                        {
+                            *restore_size = None;
+                        }
                     }
 
                     commit_sizes(ctx, sizes);
@@ -860,7 +919,13 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Idle, Event::SetSizes { sizes }) => {
-                let sizes = clamp_all(sizes, &ctx.panels, ctx.sizes.get());
+                let mut sizes = clamp_all(sizes, &ctx.panels, ctx.sizes.get());
+
+                if ctx.size_unit == SizeUnit::Percent {
+                    let total = ctx.sizes.get().iter().sum::<f64>();
+                    sizes = rebalance_to_total(sizes, &ctx.panels, total);
+                }
+
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     commit_sizes(ctx, sizes);
                 }))
@@ -933,12 +998,19 @@ impl ars_core::Machine for Machine {
                 Some(plan.apply(move |ctx: &mut Context| {
                     let current = ctx.sizes.get().clone();
 
+                    let panels_changed = ctx.panels != props.panels;
+
                     ctx.panels = props.panels.clone();
                     ctx.orientation = props.orientation;
                     ctx.dir = props.dir.unwrap_or(Direction::Ltr);
                     ctx.size_unit = props.size_unit;
                     ctx.keyboard_step = keyboard_step_for(&props);
-                    ctx.collapsed_restore_sizes.resize(ctx.panels.len(), None);
+
+                    if panels_changed {
+                        ctx.collapsed_restore_sizes = vec![None; ctx.panels.len()];
+                    } else {
+                        ctx.collapsed_restore_sizes.resize(ctx.panels.len(), None);
+                    }
 
                     let normalized = clamp_all(ctx.sizes.get(), &ctx.panels, &current);
 
@@ -1994,6 +2066,31 @@ mod tests {
     }
 
     #[test]
+    fn expand_panel_keeps_restore_size_when_no_space_moves() {
+        let mut service = service(
+            Props::new()
+                .id("split")
+                .panels(vec![collapsible_panel("left", 50.0), panel("right", 50.0)]),
+        );
+
+        service.context_mut().sizes.set(vec![0.0, 100.0]);
+        service.context_mut().panels[1].min_size = 100.0;
+        service.context_mut().collapsed_restore_sizes[0] = Some(50.0);
+
+        drop(service.send(Event::ExpandPanel { panel_index: 0 }));
+
+        assert_eq!(service.context().sizes.get(), &vec![0.0, 100.0]);
+        assert_eq!(service.context().collapsed_restore_sizes[0], Some(50.0));
+
+        service.context_mut().panels[1].min_size = 10.0;
+
+        drop(service.send(Event::ExpandPanel { panel_index: 0 }));
+
+        assert_eq!(service.context().sizes.get(), &vec![50.0, 50.0]);
+        assert_eq!(service.context().collapsed_restore_sizes[0], None);
+    }
+
+    #[test]
     fn expand_panel_ignores_non_collapsible_panel() {
         let mut non_collapsible = panel("left", 0.0);
 
@@ -2363,6 +2460,17 @@ mod tests {
     }
 
     #[test]
+    fn set_sizes_percent_rebalances_to_current_total() {
+        let mut service = service(two_panel_props().default_sizes(vec![50.0, 50.0]));
+
+        drop(service.send(Event::SetSizes {
+            sizes: vec![90.0, 50.0],
+        }));
+
+        assert_eq!(service.context().sizes.get(), &vec![90.0, 10.0]);
+    }
+
+    #[test]
     fn sync_props_updates_context_backed_fields() {
         let mut service = service(two_panel_props().default_sizes(vec![50.0, 50.0]));
 
@@ -2388,6 +2496,21 @@ mod tests {
         assert_eq!(service.context().size_unit, SizeUnit::Pixels);
         assert_eq!(service.context().keyboard_step, 8.0);
         assert_eq!(service.context().focused_handle, Some(0));
+    }
+
+    #[test]
+    fn sync_props_clears_restore_sizes_when_panels_change() {
+        let mut service = service(two_panel_props().default_sizes(vec![50.0, 50.0]));
+
+        service.context_mut().collapsed_restore_sizes = vec![Some(75.0), None];
+
+        let next_props = Props::new()
+            .id("split")
+            .panels(vec![panel("replacement-left", 50.0), panel("right", 50.0)]);
+
+        drop(service.send(Event::SyncProps { props: next_props }));
+
+        assert_eq!(service.context().collapsed_restore_sizes, vec![None, None]);
     }
 
     #[test]
