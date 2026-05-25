@@ -614,6 +614,10 @@ impl ars_core::Machine for Machine {
             Event::SyncProps(props) => {
                 let props = props.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
+                    let previous_granularity = ctx.granularity;
+                    let previous_hour_cycle = ctx.hour_cycle;
+                    let previous_force_leading_zeros = ctx.force_leading_zeros;
+
                     ctx.disabled = props.disabled;
                     ctx.readonly = props.readonly;
                     ctx.min_value = props.min_value;
@@ -633,10 +637,19 @@ impl ars_core::Machine for Machine {
                         let clamped = ctx.value.get().map(|time| {
                             clamp_time(time, ctx.min_value.as_ref(), ctx.max_value.as_ref())
                         });
+                        let value_changed = clamped != *ctx.value.get();
+                        let must_rebuild = previous_granularity != ctx.granularity
+                            || previous_hour_cycle != ctx.hour_cycle
+                            || previous_force_leading_zeros != ctx.force_leading_zeros
+                            || value_changed;
+
                         ctx.value.set(clamped);
                         ctx.value.sync_controlled(None);
+
+                        if must_rebuild {
+                            ctx.rebuild_segments();
+                        }
                     }
-                    ctx.rebuild_segments();
                 }))
             }
 

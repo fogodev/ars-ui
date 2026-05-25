@@ -21,6 +21,14 @@ AttrMap {
             ),
         ),
         (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
             Id,
             String(
                 "meeting-time-error-message",

@@ -682,6 +682,89 @@ fn set_value_clears_buffer_and_cancels_pending_commit() {
 }
 
 #[test]
+fn unrelated_prop_sync_preserves_active_typeahead_buffer_and_segment() {
+    let mut service = Service::<Machine>::new(
+        props().hour_cycle(Some(HourCycle::H23)),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment {
+        kind: DateSegmentKind::Hour,
+    }));
+    drop(service.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::Hour,
+        ch: '1',
+    }));
+
+    assert_eq!(service.context().type_buffer, "1");
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Hour),
+        Some(1)
+    );
+
+    drop(service.set_props(props().hour_cycle(Some(HourCycle::H23)).invalid(true)));
+
+    assert_eq!(service.context().type_buffer, "1");
+    assert_eq!(
+        service.context().get_segment_value(DateSegmentKind::Hour),
+        Some(1)
+    );
+    assert_eq!(service.state(), &State::Focused(DateSegmentKind::Hour));
+}
+
+#[test]
+fn prop_sync_rebuilds_segments_for_structural_or_clamped_value_changes() {
+    let mut force = Service::<Machine>::new(
+        props()
+            .hour_cycle(Some(HourCycle::H23))
+            .default_value(Some(time(8, 30, 0))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(
+        force.set_props(
+            props()
+                .hour_cycle(Some(HourCycle::H23))
+                .force_leading_zeros(true),
+        ),
+    );
+
+    assert_eq!(
+        force
+            .context()
+            .segments
+            .iter()
+            .find(|segment| segment.kind == DateSegmentKind::Hour)
+            .map(|segment| segment.text.as_str()),
+        Some("08")
+    );
+
+    let mut clamped = Service::<Machine>::new(
+        props()
+            .hour_cycle(Some(HourCycle::H23))
+            .default_value(Some(time(8, 30, 0))),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(
+        clamped.set_props(
+            props()
+                .hour_cycle(Some(HourCycle::H23))
+                .min_value(Some(time(9, 0, 0))),
+        ),
+    );
+
+    assert_eq!(clamped.context().value.get(), &Some(time(9, 0, 0)));
+    assert_eq!(
+        clamped.context().get_segment_value(DateSegmentKind::Hour),
+        Some(9)
+    );
+}
+
+#[test]
 fn prop_sync_updates_context_backed_contract_without_replacing_ids() {
     let mut service = Service::<Machine>::new(props(), &Env::default(), &Messages::default());
 
@@ -1375,6 +1458,15 @@ fn time_conversion_helpers_cover_hour_cycles_cjk_clamp_and_digits() {
     assert_eq!(digits_needed(10), 2);
     assert_eq!(digits_needed(100), 3);
     assert_eq!(digits_needed(1_000), 4);
+}
+
+#[test]
+fn error_message_attrs_use_polite_live_region() {
+    let service = service();
+    let attrs = service.connect(&|_| {}).error_message_attrs();
+
+    assert_eq!(attr(&attrs, HtmlAttr::Role), Some("alert"));
+    assert_eq!(attr(&attrs, HtmlAttr::Aria(AriaAttr::Live)), Some("polite"));
 }
 
 #[test]

@@ -717,11 +717,15 @@ impl ars_core::Machine for Machine {
                 sync_props(&mut next_ctx, &props);
 
                 let next_state = reconcile_state_after_sync(state, &next_ctx);
+                let should_apply_focus = next_state != *state;
 
                 Some(
                     TransitionPlan::to(next_state.clone()).apply(move |ctx: &mut Context| {
                         sync_props(ctx, &props);
-                        apply_state_focus(ctx, &next_state);
+
+                        if should_apply_focus {
+                            apply_state_focus(ctx, &next_state);
+                        }
                     }),
                 )
             }
@@ -1205,6 +1209,7 @@ impl<'a> Api<'a> {
         attrs
             .set(HtmlAttr::Id, self.ctx.ids.part("error-message"))
             .set(HtmlAttr::Role, "alert")
+            .set(HtmlAttr::Aria(AriaAttr::Live), "polite")
             .set(scope_attr, scope_val)
             .set(part_attr, part_val);
 
@@ -1547,6 +1552,9 @@ fn apply_controlled_value(ctx: &mut Context, value: Option<Time>) {
 
 fn sync_props(ctx: &mut Context, props: &Props) {
     let was_controlled = ctx.value.is_controlled();
+    let previous_granularity = ctx.granularity;
+    let previous_hour_cycle = ctx.hour_cycle;
+    let previous_force_leading_zeros = ctx.force_leading_zeros;
 
     ctx.granularity = props.granularity;
     ctx.hour_cycle = props
@@ -1570,10 +1578,17 @@ fn sync_props(ctx: &mut Context, props: &Props) {
             .value
             .get()
             .map(|time| clamp_time(time, ctx.min_value.as_ref(), ctx.max_value.as_ref()));
+        let value_changed = clamped != *ctx.value.get();
+        let must_rebuild = previous_granularity != ctx.granularity
+            || previous_hour_cycle != ctx.hour_cycle
+            || previous_force_leading_zeros != ctx.force_leading_zeros
+            || value_changed;
 
         ctx.value.set(clamped);
 
-        ctx.rebuild_segments();
+        if must_rebuild {
+            ctx.rebuild_segments();
+        }
     }
 }
 
