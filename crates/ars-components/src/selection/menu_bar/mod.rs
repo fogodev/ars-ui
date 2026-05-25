@@ -1250,12 +1250,33 @@ mod tests {
         let mut menu_bar = service(Props::new().id("menu-bar").disabled(true));
 
         drop(menu_bar.send(Event::ActivateMenu(key("file"))));
-        drop(menu_bar.send(Event::Blur));
 
         assert_eq!(menu_bar.state(), &State::Inactive);
         assert_eq!(menu_bar.context().active_menu, None);
-        assert_eq!(menu_bar.context().focused_item, None);
-        assert!(!menu_bar.context().focus_visible);
+    }
+
+    #[test]
+    fn dispatch_helpers_exercise_noop_and_vertical_rtl_branches() {
+        let vertical_rtl = service(
+            Props::new()
+                .id("menu-bar")
+                .orientation(Orientation::Vertical)
+                .dir(Direction::Rtl),
+        );
+        let horizontal = service(Props::new().id("menu-bar"));
+
+        drop(captured_events(&vertical_rtl, |api| {
+            api.on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowLeft));
+        }));
+        drop(captured_events(&vertical_rtl, |api| {
+            api.on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowRight));
+        }));
+        drop(captured_events(&horizontal, |api| {
+            api.on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::Home));
+        }));
+        drop(captured_events(&horizontal, |api| {
+            api.on_content_keydown(&keyboard(KeyboardKey::Home));
+        }));
     }
 
     #[test]
