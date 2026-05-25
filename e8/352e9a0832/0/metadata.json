@@ -1,0 +1,85 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "e8352e9a0832",
+  "session_id": "019e5d7f-a558-7063-8337-1cefa62f884e",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-25T15:51:22.719389Z",
+  "branch": "t3code/39110ddb",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "8af9b5a60e2f",
+  "token_usage": {
+    "input_tokens": 1425300,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 64323712,
+    "output_tokens": 106927,
+    "api_call_count": 490
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Implement GitHub issues #245 (ContextMenu) and #249 (MenuBar) as framework-agnostic core state machines in the ars-ui repo, delivered as a single combined PR with full TDD, coverage, mutation, and audit gates.",
+    "outcome": "Both agnostic cores were implemented with inline tests, per-part snapshots, proptest invariants, and spec updates. PR #679 was opened, passed pre-push CI, received and addressed 7 Codex review findings, and had a follow-up commit pushed. PR is awaiting final Codex approval and CI green.",
+    "learnings": {
+      "repo": [
+        "Snapshot fixtures follow a per-part/per-branch pattern (one `.snap` file per named part or output-affecting branch), not one aggregate snapshot per component — matching the existing `selection/menu` style.",
+        "The required workflow sequence is: TDD red→green → `post-implementation-audit` skill (2+ 'anything else missing?' rounds) → `cargo llvm-cov` coverage → `cargo mutants` mutation → `cargo xci-fast` pre-push gate → commit with co-author → non-draft PR → `waiting-for-codex-review` loop until 👍.",
+        "GitHub Project #2 ('ars-ui implementation roadmap') tracks issue status; items must be moved to 'In Progress' before implementation begins.",
+        "Agnostic core machines use `NoEffect` as the effect type — no live DOM operations; adapters translate intent into mounted-handle work.",
+        "PropTest invariants are added as `#[ignore]`d tests and run explicitly with `-- --ignored <test_name>`.",
+        "The `i18n` feature flag is required for most ars-components tests and must be passed explicitly: `--features i18n`.",
+        "`.cargo/mutants.toml` is used for narrow mutation exclusions; only the non-`std` fallback timestamp path was excluded, justified by the std-enabled mutation profile being unable to observe it.",
+        "`cargo xtask spec validate`, `spec toc`, and `spec compile-snippets` are all required spec gates after any spec changes.",
+        "The `snapshot-reviewed` label (`gh pr edit <pr> --add-label snapshot-reviewed`) must be applied when `.snap` fixtures change.",
+        "Stale `context_menu`/`menu_bar` language in Leptos and Dioxus adapter specs must be updated alongside the component specs in the same PR."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/utility/mod.rs",
+          "line": 780,
+          "end_line": 865,
+          "finding": "The highlight proptest utility module was loaded without the `i18n` feature gate even though all its helpers and the component under test are i18n-gated, causing baseline compile failures for `cargo mutants` (which runs without `--features i18n`). Fixed by adding a matching cfg gate on the module."
+        },
+        {
+          "path": "crates/ars-components/src/selection/menu_bar/mod.rs",
+          "finding": "The `adjacent_key` helper had a type mismatch: collection neighbor lookups return borrowed keys while the empty-focus branch returned owned keys. Fixed by normalizing the match arms to return owned keys."
+        },
+        {
+          "path": "crates/ars-components/src/selection/context_menu/mod.rs",
+          "finding": "Codex review finding: `on_target_keydown` must accept adapter-resolved anchor coordinates (x, y) for both `Shift+F10` and the Context Menu key, not hardcode `(0.0, 0.0)`. The dispatch helper signature was updated to take an optional anchor parameter."
+        },
+        {
+          "path": "crates/ars-components/src/selection/menu_bar/mod.rs",
+          "finding": "Codex review finding: `SyncProps` disabling an open/active MenuBar must transition to `State::Inactive` and fire close callbacks; `UpdateMenus` removing the active menu must also produce `State::Inactive`. Both transitions were missing and added."
+        },
+        {
+          "path": "crates/ars-components/src/selection/menu_bar/mod.rs",
+          "finding": "Codex review finding: vertical-orientation MenuBar must route ArrowUp/ArrowDown for trigger traversal (not ArrowLeft/ArrowRight). The content keydown dispatch was using the wrong key variants for vertical layout."
+        }
+      ],
+      "workflow": [
+        "Using `cargo insta --unreferenced=delete` with a test filter deletes unrelated snapshots from the entire package. Always restore with `git restore --staged :/` and accept only the intended new fixtures manually.",
+        "Running two `cargo llvm-cov` commands concurrently causes `llvm-profdata` merge collisions; run coverage runs sequentially with `--output-path` flags pointing to distinct files.",
+        "`cargo mutants` can get stuck in its final `cargo test --no-run` compile phase under high concurrent cargo load on the machine; monitor artifact count and be prepared to kill and rely on other verification signals.",
+        "When GraphQL queries are embedded in shell heredocs, unbalanced braces in the query string cause silent parse errors — test queries standalone with `gh api graphql` before embedding in polling loops.",
+        "Mutation test exclusions should be justified narrowly (e.g. non-`std` fallback paths the profile cannot observe) rather than used to paper over real test gaps."
+      ]
+    },
+    "friction": [
+      "`cargo mutants` got stuck in the post-review rerun during a final `cargo test --no-run` compile phase, requiring a `kill -9` after several minutes; the post-review MenuBar mutation rerun was abandoned.",
+      "Concurrent cargo activity across worktrees on the same machine significantly slowed both mutation runs beyond normal estimates.",
+      "`cargo insta --unreferenced=delete` with a module filter deleted unrelated snapshot fixtures; required `git restore --staged :/` to recover before selectively accepting the new per-part snapshots.",
+      "Concurrent `cargo llvm-cov` invocations collided on `llvm-profdata` output, requiring sequential reruns with explicit `--output-path` separation.",
+      "The initial GraphQL thread-query had a malformed closing brace, causing silent failures; required debugging the query syntax before the Codex review poll loop worked correctly."
+    ],
+    "open_items": [
+      "PR #679 is awaiting final Codex 👍 and CI green before merge; issues #245 and #249 will auto-close via PR keywords on merge.",
+      "Post-review MenuBar mutation rerun was not completed (process killed due to stall); mutation evidence for the review-fix commit relies on focused tests, proptests, and coverage rather than a completed mutation run.",
+      "Leptos and Dioxus adapter components for ContextMenu and MenuBar are explicitly out of scope and deferred to future issues.",
+      "Focused line coverage for context_menu is ~94% and menu_bar is ~93%; the remaining uncovered regions (primarily non-`std` fallback paths) are not excluded but are not exercised by the default feature profile."
+    ]
+  }
+}

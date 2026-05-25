@@ -1,0 +1,262 @@
+Implement tasks #245 and #249
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# ContextMenu and MenuBar Agnostic Core Implementation Plan
+
+**Summary**
+
+Implement issues `#245` and `#249` together in one combined PR targeting `main`. Both tasks are unblocked because dependency `#237` is closed and the `Menu` agnostic core already exists in `crates/ars-components/src/selection/menu/mod.rs`.
+
+The implementation will stay framework-agnostic: core machines own state, keys, highlight/open intent, typeahead, ARIA/data attrs, and event dispatch helpers. Live DOM focus, mounted handles, outside containment, long-press timers, and real positioning stay adapter-owned.
+
+**Public API / Interface Changes**
+
+Add two new modules and exports:
+
+- `crates/ars-components/src/selection/context_menu/mod.rs`
+- `crates/ars-components/src/selection/menu_bar/mod.rs`
+- Update `crates/ars-components/src/selection/mod.rs` with documented public modules:
+  - `pub mod context_menu;`
+  - `pub mod menu_bar;`
+
+`context_menu` public surface will match `spec/components/selection/context-menu.md`:
+
+- `State::{Closed, Open}`
+- `Event::{ContextOpen, Close, HighlightItem, HighlightFirst, HighlightLast, HighlightNext, HighlightPrev, SelectItem, ToggleCheckboxItem, SelectRadioItem, ClickOutside, TypeaheadSearch, UpdateItems, SyncProps}`
+- `Context` with `items: StaticCollection<menu::Item>`, `open`, `highlighted_key`, `focus_visible`, `checked_items`, `radio_groups`, `typeahead`, `loop_focus`, `ids`, `position`
+- `Props` with builder methods mirroring `menu::Props` where applicable
+- `Part` scope `context-menu`, including `Root`, `Target`, `Positioner`, `Arrow`, `Content`, item/group/checkbox/radio parts
+- `Api` attr helpers and dispatch helpers including `on_target_contextmenu`, `on_target_keydown`, `on_content_keydown`, `on_item_click`, pointer highlight helpers
+
+`menu_bar` public surface will match `spec/components/selection/menu-bar.md`:
+
+- `Menu { label: String }`
+- `State::{Inactive, Active { menu: Key }}`
+- `Event::{FocusItem, ActivateMenu, DeactivateMenu, MoveToNextMenu, MoveToPrevMenu, Close, Focus, Blur, UpdateMenus, SyncProps}`
+- `Context` with `locale`, `menus`, `active_menu`, `focused_item`, `focus_visible`, `ids`, `messages`
+- `Props` with `id`, `disabled`, `orientation`, `dir`, `loop_focus` plus builder methods
+- `Part` scope `menu-bar`, including `Root`, `Menu`, `MenuTrigger`, `MenuPositioner`, `MenuContent`
+- `Api` attr helpers and trigger/content event dispatch helpers
+
+**Implementation Tasks**
+
+1. Move roadmap items to `In Progress`.
+
+   Use the GitHub Project `ars-ui implementation roadmap` project `2` and update issues `#245` and `#249` from `Todo` to `In Progress`.
+
+2. Add failing ContextMenu spec-conformance coverage.
+
+   Modify `crates/ars-components/tests/spec_conformance/selection.rs` to import `context_menu` and add `context_menu_anatomy_matches_spec()` covering every `Part` variant from the spec, including `Target`.
+
+3. Add failing MenuBar spec-conformance coverage.
+
+   In the same file, import `menu_bar` and add `menu_bar_anatomy_matches_spec()` covering `Root`, `Menu`, `MenuTrigger`, `MenuPositioner`, and `MenuContent`.
+
+4. Add `context_menu` module skeleton.
+
+   Create `crates/ars-components/src/selection/context_menu/mod.rs` with crate-style docs and fully documented public items. Reuse `menu::Item`, `menu::ItemType`, `DisabledBehavior`, `StaticCollection`, `typeahead::State`, `ComponentIds`, `ComponentPart`, and `ConnectApi`. Use `NoEffect`; do not implement platform side effects in the core machine.
+
+5. Implement ContextMenu state transitions.
+
+   Use `menu` helper behavior as the local model:
+   - `ContextOpen { x, y }` opens unless disabled, stores `position`, sets `open = true`, highlights first enabled item.
+   - Reopening while open updates `position` and resets highlight to first enabled item.
+   - `Close` and `ClickOutside` close, clear highlight, clear position, reset typeahead.
+   - Highlight events only affect focusable collection items.
+   - Action, checkbox, and radio events validate item type and disabled state before mutating.
+   - `UpdateItems` invalidates stale highlighted/checked/radio keys.
+   - `SyncProps` updates `loop_focus` and `ids`.
+
+6. Implement ContextMenu API attrs and dispatch helpers.
+
+   Required attrs:
+   - `target_attrs()` sets id, `aria-haspopup="menu"`, `aria-expanded`, `aria-controls`, disabled attrs.
+   - `content_attrs()` sets role `menu`, `tabindex="-1"`, `aria-labelledby`.
+   - item attrs mirror `menu` semantics for roles, roving `tabindex`, `data-ars-highlighted`, disabled attrs, `aria-keyshortcuts`.
+   - checkbox/radio attrs set `aria-checked`.
+
+   Required dispatch:
+   - `on_target_contextmenu(x, y)` sends `ContextOpen`.
+   - `on_target_keydown` sends `ContextOpen { x: 0.0, y: 0.0 }` for `Shift+F10`.
+   - `on_content_keydown` handles arrows, Home/End, Escape, Enter/Space, and printable typeahead.
+   - `on_item_click` dispatches based on `menu::ItemType`, including submenu open for nested submenu support.
+
+7. Add ContextMenu unit and snapshot tests first, then make them pass.
+
+   Add inline tests in `context_menu/mod.rs` for:
+   - right-click opens at pointer position.
+   - keyboard `Shift+F10` opens.
+   - disabled target does not open.
+   - content emits `role="menu"`.
+   - item, checkbox, radio attrs emit correct roles.
+   - Escape closes.
+   - ClickOutside closes.
+   - keyboard navigation inherits Menu-style first/next/prev/last behavior.
+   - nested submenu item dispatch opens submenu intent.
+   - snapshots for every anatomy part and output-affecting branch.
+
+8. Add ContextMenu proptest coverage.
+
+   Modify `crates/ars-components/tests/proptest_state_machines/selection.rs`:
+   - Add `context_menu_collection()`.
+   - Add `arb_context_menu_event()`.
+   - Add invariant: open state matches `State::Open`, highlight keys are focusable, checked keys reference checkbox items, radio values reference matching radio items, stale collection references are removed.
+   - Add ignored proptest `context_menu_preserves_open_highlight_and_selection_invariants`.
+
+9. Add `menu_bar` module skeleton.
+
+   Create `crates/ars-components/src/selection/menu_bar/mod.rs` with documented public items from the spec. Reuse `StaticCollection<Menu>`, `Direction`, `Orientation`, `Locale`, `ComponentIds`, `ComponentPart`, and `ConnectApi`.
+
+10. Implement MenuBar transitions.
+
+   Behavior:
+   - `Focus { is_keyboard }` sets focus-visible and focuses first menu if none focused.
+   - `FocusItem(key)` focuses a valid menu; if active, switches `active_menu`.
+   - `ActivateMenu(key)` opens that menu and sets focused item.
+   - `DeactivateMenu`/`Close` clear active menu but keep focused trigger unless blur occurs.
+   - `Blur` clears active/focused/focus-visible.
+   - `MoveToNextMenu` and `MoveToPrevMenu` use collection order, `loop_focus`, `dir`, and current focus. In active state they switch active menu; inactive state only moves trigger focus.
+   - `UpdateMenus` invalidates stale focused/active keys.
+   - `SyncProps` updates ids and clears focus if disabled.
+
+11. Implement MenuBar API attrs and dispatch helpers.
+
+   Required attrs:
+   - `root_attrs()` emits `role="menubar"` and `aria-orientation` based on props.
+   - `menu_trigger_attrs(key)` emits `role="menuitem"`, `aria-haspopup="menu"`, `aria-expanded`, `aria-controls`, roving `tabindex`, disabled attrs, active/focus data attrs.
+   - `menu_content_attrs(key)` emits `role="menu"`, `tabindex="-1"`, `aria-labelledby`.
+   - Positioner/menu wrapper attrs include stable ids and data attrs.
+
+   Required dispatch:
+   - trigger click toggles active menu.
+   - trigger keydown opens on Down/Enter/Space and moves horizontally with RTL-aware Left/Right.
+   - pointer enter switches menus only when a menu is already open.
+   - content keydown switches top-level menus on Left/Right and closes on Escape.
+
+12. Add MenuBar unit and snapshot tests first, then make them pass.
+
+   Add inline tests in `menu_bar/mod.rs` for:
+   - root emits `role="menubar"`.
+   - top-level triggers emit `role="menuitem"`.
+   - submenu panels emit `role="menu"`.
+   - horizontal arrows move focused trigger.
+   - RTL reverses Left/Right behavior.
+   - vertical arrows/Enter/Space open menu.
+   - pointer hover switches open menu only when active.
+   - Escape closes active menu.
+   - disabled MenuBar suppresses activation.
+   - snapshots for every anatomy part and output-affecting branch.
+
+13. Add MenuBar proptest coverage.
+
+   Extend `selection.rs` proptests with:
+   - `menu_bar_collection()`
+   - `arb_menu_bar_event()`
+   - invariant: `active_menu` and `focused_item` always reference existing menu keys, active state matches `active_menu`, disabled state cannot become active, at most one trigger has `tabindex="0"`.
+
+14. Run focused tests during implementation.
+
+   Commands:
+   - `cargo test -p ars-components selection::context_menu --features i18n`
+   - `cargo test -p ars-components selection::menu_bar --features i18n`
+   - `cargo test -p ars-components --test spec_conformance selection --features i18n`
+   - `cargo test -p ars-components --test proptest_state_machines selection --features i18n -- --ignored context_menu`
+   - `cargo test -p ars-components --test proptest_state_machines selection --features i18n -- --ignored menu_bar`
+   - `cargo insta test --unreferenced=reject -p ars-components --features i18n --lib`
+
+15. Run spec validation.
+
+   Commands:
+   - `cargo xtask spec validate`
+   - `cargo xtask spec toc spec/components/selection/context-menu.md`
+   - `cargo xtask spec toc spec/components/selection/menu-bar.md`
+
+16. Run required post-implementation audit.
+
+   Invoke `.agents/skills/post-implementation-audit/SKILL.md` after named tests pass. Land all findings in the same PR:
+   - spec/implementation drift for both components.
+   - at least two “anything else missing?” rounds.
+   - coverage audit across unit, snapshot, proptest, mutation, spec-conformance, llvm-cov, doc coverage.
+
+17. Run coverage and mutation gates.
+
+   Commands:
+   - `cargo llvm-cov test -p ars-components --features i18n --lib --no-fail-fast --text -- selection::context_menu`
+   - `cargo llvm-cov test -p ars-components --features i18n --lib --no-fail-fast --text -- selection::menu_bar`
+   - `cargo mutants -p ars-components -f crates/ars-components/src/selection/context_menu/mod.rs`
+   - `cargo mutants -p ars-components -f crates/ars-components/src/selection/menu_bar/mod.rs`
+
+   Triage every missed mutant in the same PR by adding tests or justified `.cargo/mutants.toml` exclusions only for true equivalent mutations.
+
+18. Present the final diff for user review before commit.
+
+   Include:
+   - changed files.
+   - focused test results.
+   - audit findings and dispositions.
+   - coverage/mutation summary.
+   - any spec changes, if the audit requires them.
+
+19. After explicit user approval, run pre-push gate.
+
+   Command:
+   - `cargo xci-fast`
+
+   Fix all failures locally before any push.
+
+20. Commit and open one combined PR.
+
+   Commit message:
+   - `feat(selection): add context menu and menu bar core`
+
+   PR body must include:
+   - `Closes #245`
+   - `Closes #249`
+   - focused verification commands and results.
+   - audit summary.
+   - note that adapter components are out of scope.
+   - note if `.snap` fixtures changed.
+
+   If snapshots changed, add label:
+   - `gh pr edit <pr> --add-label "snapshot-reviewed"`
+
+21. Invoke waiting-for-codex-review loop after first push.
+
+   Use `.agents/skills/waiting-for-codex-review/SKILL.md`:
+   - post `@codex review`.
+   - poll reactions and unresolved review threads.
+   - address every Codex thread with TDD and no coverage regression.
+   - reply inline and resolve threads.
+   - re-trigger `@codex review` after each push.
+   - loop until Codex leaves 👍.
+
+22. Final completion criteria.
+
+   The work is done only when:
+   - PR CI is green.
+   - Codex has left 👍.
+   - all review threads are resolved.
+   - PR is merged.
+   - issues `#245` and `#249` close via the PR auto-close keywords.
+
+**Explicit Assumptions**
+
+- Deliver `#245` and `#249` in one combined PR, per user selection.
+- No new dependency crates are needed.
+- No Leptos/Dioxus adapter components are in scope.
+- Existing specs are authoritative unless the post-implementation audit finds drift requiring same-PR spec updates.
+- Core code must not perform live DOM operations; adapters will translate intent into mounted-handle work.
+
+---
+
+Any reason to only have 1 snapshot per component?
+
+---
+
+Follow the stablished pattern that we have in place in the codebase then
+
+---
+
+I reviewed here, let's commit and push a PR to github. Don't forget to include yourself as co-author and don't use a Draft PR
