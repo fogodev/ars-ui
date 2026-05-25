@@ -45,6 +45,12 @@ AttrMap {
             ),
         ),
         (
+            Id,
+            String(
+                "stat",
+            ),
+        ),
+        (
             Role,
             String(
                 "group",

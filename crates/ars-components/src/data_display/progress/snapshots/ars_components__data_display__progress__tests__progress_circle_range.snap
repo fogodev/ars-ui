@@ -21,17 +21,13 @@ AttrMap {
             ),
         ),
         (
-            Data(
-                "stroke-dasharray",
-            ),
+            StrokeDasharray,
             String(
                 "62.83185307179586",
             ),
         ),
         (
-            Data(
-                "stroke-dashoffset",
-            ),
+            StrokeDashoffset,
             String(
                 "47.12388980384689",
             ),

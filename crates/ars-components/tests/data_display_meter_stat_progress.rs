@@ -90,6 +90,11 @@ fn meter_value_text_uses_sanitized_display_bounds() {
     assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("50"));
     assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::ValueText)), Some("50%"));
     assert_eq!(api.value_text(), "50%");
+    assert!(
+        api.range_attrs()
+            .styles()
+            .contains(&(CssProperty::Width, String::from("50%")))
+    );
 }
 
 #[test]
@@ -107,6 +112,7 @@ fn meter_root_exposes_meter_aria_and_native_attrs() {
     .root_attrs();
 
     assert_eq!(attrs.get(&HtmlAttr::Role), Some("meter"));
+    assert_eq!(attrs.get(&HtmlAttr::Id), Some("disk"));
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("72"));
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0"));
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("256"));
@@ -231,6 +237,20 @@ fn meter_computes_percent_segment_and_zone_attrs() {
             .styles()
             .contains(&(CssProperty::Width, String::from("90%")))
     );
+
+    let normalized_thresholds = meter_api(
+        meter::Props::new()
+            .id("normalized")
+            .value(50.0)
+            .low(90.0)
+            .high(10.0)
+            .optimum(95.0),
+    )
+    .root_attrs();
+
+    assert_eq!(normalized_thresholds.get(&HtmlAttr::Low), Some("90"));
+    assert_eq!(normalized_thresholds.get(&HtmlAttr::High), Some("90"));
+    assert_eq!(normalized_thresholds.get(&HtmlAttr::Optimum), Some("95"));
 }
 
 #[test]
@@ -297,6 +317,7 @@ fn stat_root_and_structural_parts_match_contract() {
     let root = api.root_attrs();
 
     assert_eq!(root.get(&HtmlAttr::Role), Some("group"));
+    assert_eq!(root.get(&HtmlAttr::Id), Some("revenue"));
     assert_eq!(
         root.get(&HtmlAttr::Aria(AriaAttr::Label)),
         Some("Total Revenue: $45,231")
@@ -435,6 +456,7 @@ fn progress_root_attrs_reflect_determinate_and_indeterminate_modes() {
     let attrs = determinate.connect(&|_| {}).root_attrs();
 
     assert_eq!(attrs.get(&HtmlAttr::Role), Some("progressbar"));
+    assert_eq!(attrs.get(&HtmlAttr::Id), Some("upload"));
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0"));
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("100"));
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("25"));
@@ -631,6 +653,64 @@ fn progress_set_props_preserves_value_control_mode_transitions() {
 }
 
 #[test]
+fn progress_complete_event_sets_public_completion_consistently() {
+    let mut controlled = progress_service(progress::Props::new().id("upload").value(Some(50.0)));
+
+    drop(controlled.send(progress::Event::Complete));
+
+    let controlled_api = controlled.connect(&|_| {});
+
+    assert_eq!(controlled.state(), &progress::State::Complete);
+    assert_eq!(controlled.context().value.get(), &Some(100.0));
+    assert_eq!(controlled_api.percent(), 100.0);
+    assert_eq!(controlled_api.value_text(), "Complete");
+    assert_eq!(
+        controlled_api
+            .root_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+        Some("100")
+    );
+
+    let mut controlled_indeterminate =
+        progress_service(progress::Props::new().id("upload").value(None));
+
+    drop(controlled_indeterminate.send(progress::Event::Complete));
+
+    let controlled_indeterminate_api = controlled_indeterminate.connect(&|_| {});
+
+    assert_eq!(controlled_indeterminate.state(), &progress::State::Complete);
+    assert!(!controlled_indeterminate_api.is_indeterminate());
+    assert_eq!(
+        controlled_indeterminate_api
+            .root_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+        Some("100")
+    );
+
+    let mut invalid_bounds = progress_service(
+        progress::Props::new()
+            .id("upload")
+            .default_value(50.0)
+            .min(100.0)
+            .max(0.0),
+    );
+
+    drop(invalid_bounds.send(progress::Event::Complete));
+
+    let invalid_api = invalid_bounds.connect(&|_| {});
+
+    assert_eq!(invalid_bounds.state(), &progress::State::Idle);
+    assert_eq!(invalid_api.percent(), 0.0);
+    assert_eq!(invalid_api.value_text(), "0% complete");
+    assert_eq!(
+        invalid_api
+            .root_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+        Some("0")
+    );
+}
+
+#[test]
 fn progress_part_equality_and_hash_include_circle_radius() {
     assert_ne!(progress::Part::Root, progress::Part::Label);
     assert_ne!(
@@ -720,8 +800,8 @@ fn progress_range_value_text_and_circle_attrs_are_derived() {
 
     let circle = api.circle_range_attrs(10.0);
 
-    assert!(circle.get(&HtmlAttr::Data("stroke-dasharray")).is_some());
-    assert!(circle.get(&HtmlAttr::Data("stroke-dashoffset")).is_some());
+    assert!(circle.get(&HtmlAttr::StrokeDasharray).is_some());
+    assert!(circle.get(&HtmlAttr::StrokeDashoffset).is_some());
 }
 
 #[test]

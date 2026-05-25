@@ -414,23 +414,31 @@ impl ars_core::Machine for Machine {
 
             Event::Complete => {
                 let controlled_prop = props.value;
-                let value = effective_event_value(Some(ctx.max), controlled_prop);
+                let value = if valid_bounds(ctx.min, ctx.max) {
+                    Some(ctx.max)
+                } else {
+                    effective_event_value(Some(ctx.max), controlled_prop)
+                };
+                let target_state = if valid_bounds(ctx.min, ctx.max) {
+                    State::Complete
+                } else {
+                    state_for_value(value, ctx.min, ctx.max)
+                };
 
                 Some(
-                    TransitionPlan::to(state_for_value(value, ctx.min, ctx.max)).apply(
-                        move |ctx: &mut Context| {
-                            set_context_value(ctx, Some(ctx.max), controlled_prop);
+                    TransitionPlan::to(target_state).apply(move |ctx: &mut Context| {
+                        complete_context_value(ctx, controlled_prop);
 
-                            let value = *ctx.value.get();
+                        let value = *ctx.value.get();
 
+                        ctx.percent = if valid_bounds(ctx.min, ctx.max) {
+                            ctx.indeterminate = false;
+                            100.0
+                        } else {
                             ctx.indeterminate = value.is_none();
-                            ctx.percent = if controlled_prop.is_some() {
-                                Context::compute_percent(value, ctx.min, ctx.max)
-                            } else {
-                                100.0
-                            };
-                        },
-                    ),
+                            Context::compute_percent(value, ctx.min, ctx.max)
+                        };
+                    }),
                 )
             }
 
@@ -576,6 +584,7 @@ impl Api<'_> {
         let (min, max) = normalize_bounds(self.ctx.min, self.ctx.max);
 
         attrs
+            .set(HtmlAttr::Id, self.props.id.clone())
             .set(HtmlAttr::Role, "progressbar")
             .set(
                 HtmlAttr::Aria(AriaAttr::Orientation),
@@ -590,12 +599,14 @@ impl Api<'_> {
             .set(HtmlAttr::Aria(AriaAttr::ValueMax), max.to_string())
             .set(HtmlAttr::Aria(AriaAttr::ValueText), self.value_text());
 
-        if !self.ctx.indeterminate
+        if self.is_complete() && valid_bounds(self.ctx.min, self.ctx.max) {
+            attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), self.ctx.max.to_string());
+        } else if !self.ctx.indeterminate
             && let Some(value) = self.ctx.value.get()
         {
             attrs.set(
                 HtmlAttr::Aria(AriaAttr::ValueNow),
-                display_value_now(*value, self.ctx.min, self.ctx.max).to_string(),
+                self.display_value_now(*value).to_string(),
             );
         }
 
@@ -670,13 +681,18 @@ impl Api<'_> {
         let offset = self.circle_stroke_dashoffset(radius);
 
         attrs
-            .set(
-                HtmlAttr::Data("stroke-dasharray"),
-                circumference.to_string(),
-            )
-            .set(HtmlAttr::Data("stroke-dashoffset"), offset.to_string());
+            .set(HtmlAttr::StrokeDasharray, circumference.to_string())
+            .set(HtmlAttr::StrokeDashoffset, offset.to_string());
 
         attrs
+    }
+
+    fn display_value_now(&self, value: f64) -> f64 {
+        if self.is_complete() && valid_bounds(self.ctx.min, self.ctx.max) {
+            self.ctx.max
+        } else {
+            display_value_now(value, self.ctx.min, self.ctx.max)
+        }
     }
 }
 
@@ -738,6 +754,16 @@ fn sync_props_value(ctx: &mut Context, value: Option<f64>, controlled_prop: Opti
         ctx.value = Bindable::controlled(value);
     } else if ctx.value.is_controlled() {
         ctx.value = Bindable::uncontrolled(value);
+    }
+}
+
+fn complete_context_value(ctx: &mut Context, controlled_prop: Option<Option<f64>>) {
+    if controlled_prop.is_some() {
+        ctx.value = Bindable::controlled(Some(ctx.max));
+    } else if ctx.value.is_controlled() {
+        ctx.value = Bindable::uncontrolled(Some(ctx.max));
+    } else {
+        ctx.value.set(Some(ctx.max));
     }
 }
 
@@ -935,6 +961,19 @@ mod tests {
                 .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
             Some("0")
         );
+
+        let mut invalid_complete = service(
+            Props::new()
+                .id("progress")
+                .default_value(50.0)
+                .min(100.0)
+                .max(0.0),
+        );
+
+        drop(invalid_complete.send(Event::Complete));
+
+        assert_eq!(invalid_complete.state(), &State::Idle);
+        assert_eq!(invalid_complete.context().percent, 0.0);
     }
 
     #[test]
@@ -969,5 +1008,40 @@ mod tests {
         assert!(!controlled.context().value.is_controlled());
         assert_eq!(controlled.context().value.get(), &Some(40.0));
         assert_eq!(controlled.context().percent, 20.0);
+    }
+
+    #[test]
+    fn progress_complete_event_sets_public_completion_consistently() {
+        let mut controlled = service(Props::new().id("progress").value(Some(50.0)));
+
+        drop(controlled.send(Event::Complete));
+
+        let controlled_api = controlled.connect(&|_| {});
+
+        assert_eq!(controlled.state(), &State::Complete);
+        assert_eq!(controlled.context().value.get(), &Some(100.0));
+        assert_eq!(controlled_api.percent(), 100.0);
+        assert_eq!(controlled_api.value_text(), "Complete");
+        assert_eq!(
+            controlled_api
+                .root_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("100")
+        );
+
+        let mut controlled_indeterminate = service(Props::new().id("progress").value(None));
+
+        drop(controlled_indeterminate.send(Event::Complete));
+
+        let controlled_indeterminate_api = controlled_indeterminate.connect(&|_| {});
+
+        assert_eq!(controlled_indeterminate.state(), &State::Complete);
+        assert!(!controlled_indeterminate_api.is_indeterminate());
+        assert_eq!(
+            controlled_indeterminate_api
+                .root_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("100")
+        );
     }
 }

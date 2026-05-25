@@ -411,8 +411,8 @@ impl<'a> Api<'a> {
         attrs.set(part_attr, part_val);
         let offset = self.circle_stroke_dashoffset(radius);
         let circumference = 2.0 * std::f64::consts::PI * radius;
-        attrs.set(HtmlAttr::Data("stroke-dasharray"), circumference.to_string());
-        attrs.set(HtmlAttr::Data("stroke-dashoffset"), offset.to_string());
+        attrs.set(HtmlAttr::StrokeDasharray, circumference.to_string());
+        attrs.set(HtmlAttr::StrokeDashoffset, offset.to_string());
         attrs
     }
 }

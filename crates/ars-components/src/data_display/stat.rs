@@ -276,10 +276,13 @@ impl Api {
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = part_attrs(&Part::Root);
 
-        attrs.set(HtmlAttr::Role, "group").set(
-            HtmlAttr::Aria(AriaAttr::Label),
-            format!("{}: {}", self.props.label, self.props.value),
-        );
+        attrs
+            .set(HtmlAttr::Id, self.props.id.clone())
+            .set(HtmlAttr::Role, "group")
+            .set(
+                HtmlAttr::Aria(AriaAttr::Label),
+                format!("{}: {}", self.props.label, self.props.value),
+            );
 
         if self.props.loading {
             attrs

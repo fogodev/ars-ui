@@ -334,7 +334,9 @@ impl Api {
     /// Returns the fill percentage for the current value.
     #[must_use]
     pub fn percent(&self) -> f64 {
-        compute_percent(self.props.value, self.props.min, self.props.max)
+        let (min, max) = normalize_bounds(self.props.min, self.props.max);
+
+        compute_percent(clamp_value(self.props.value, min, max), min, max)
     }
 
     /// Returns the locale-aware value text.
@@ -362,10 +364,18 @@ impl Api {
         let zone = Zone::from_segment(&segment);
         let (min, max) = normalize_bounds(self.props.min, self.props.max);
         let value = clamp_value(self.props.value, min, max);
+        let (low, high, optimum) = normalize_thresholds(
+            min,
+            max,
+            self.props.low,
+            self.props.high,
+            self.props.optimum,
+        );
 
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
+            .set(HtmlAttr::Id, self.props.id.clone())
             .set(HtmlAttr::Role, "meter")
             .set(HtmlAttr::Aria(AriaAttr::ValueNow), value.to_string())
             .set(HtmlAttr::Aria(AriaAttr::ValueMin), min.to_string())
@@ -377,15 +387,15 @@ impl Api {
             .set(HtmlAttr::Data("ars-segment"), segment.as_str())
             .set(HtmlAttr::Data("ars-zone"), zone.as_str());
 
-        if let Some(low) = self.props.low {
+        if self.props.low.is_some() {
             attrs.set(HtmlAttr::Low, low.to_string());
         }
 
-        if let Some(high) = self.props.high {
+        if self.props.high.is_some() {
             attrs.set(HtmlAttr::High, high.to_string());
         }
 
-        if let Some(optimum) = self.props.optimum {
+        if self.props.optimum.is_some() {
             attrs.set(HtmlAttr::Optimum, optimum.to_string());
         }
 
@@ -567,6 +577,12 @@ mod tests {
                 .root_attrs()
                 .get(&HtmlAttr::Aria(AriaAttr::ValueText)),
             Some("50%")
+        );
+        assert!(
+            invalid_bounds
+                .range_attrs()
+                .styles()
+                .contains(&(CssProperty::Width, String::from("50%")))
         );
     }
 

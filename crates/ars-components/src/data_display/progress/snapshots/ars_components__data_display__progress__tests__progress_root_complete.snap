@@ -77,6 +77,12 @@ AttrMap {
             ),
         ),
         (
+            Id,
+            String(
+                "progress",
+            ),
+        ),
+        (
             Role,
             String(
                 "progressbar",

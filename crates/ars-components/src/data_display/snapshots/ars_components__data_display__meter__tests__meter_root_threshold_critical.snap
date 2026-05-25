@@ -69,6 +69,12 @@ AttrMap {
             ),
         ),
         (
+            Id,
+            String(
+                "meter",
+            ),
+        ),
+        (
             Role,
             String(
                 "meter",
