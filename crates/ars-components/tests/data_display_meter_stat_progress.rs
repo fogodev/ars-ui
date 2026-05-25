@@ -660,16 +660,21 @@ fn progress_complete_event_sets_public_completion_consistently() {
 
     let controlled_api = controlled.connect(&|_| {});
 
-    assert_eq!(controlled.state(), &progress::State::Complete);
-    assert_eq!(controlled.context().value.get(), &Some(100.0));
-    assert_eq!(controlled_api.percent(), 100.0);
-    assert_eq!(controlled_api.value_text(), "Complete");
+    assert_eq!(controlled.state(), &progress::State::Idle);
+    assert_eq!(controlled.context().value.get(), &Some(50.0));
+    assert_eq!(controlled_api.percent(), 50.0);
+    assert_eq!(controlled_api.value_text(), "50% complete");
     assert_eq!(
         controlled_api
             .root_attrs()
             .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
-        Some("100")
+        Some("50")
     );
+
+    drop(controlled.set_props(progress::Props::new().id("upload").value(Some(50.0))));
+
+    assert_eq!(controlled.state(), &progress::State::Idle);
+    assert_eq!(controlled.context().value.get(), &Some(50.0));
 
     let mut controlled_indeterminate =
         progress_service(progress::Props::new().id("upload").value(None));
@@ -678,13 +683,13 @@ fn progress_complete_event_sets_public_completion_consistently() {
 
     let controlled_indeterminate_api = controlled_indeterminate.connect(&|_| {});
 
-    assert_eq!(controlled_indeterminate.state(), &progress::State::Complete);
-    assert!(!controlled_indeterminate_api.is_indeterminate());
+    assert_eq!(controlled_indeterminate.state(), &progress::State::Loading);
+    assert!(controlled_indeterminate_api.is_indeterminate());
     assert_eq!(
         controlled_indeterminate_api
             .root_attrs()
             .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
-        Some("100")
+        None
     );
 
     let mut invalid_bounds = progress_service(

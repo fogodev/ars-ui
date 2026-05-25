@@ -423,16 +423,8 @@ impl ars_core::Machine for Machine {
 
             Event::Complete => {
                 let controlled_prop = props.value;
-                let value = if valid_bounds(ctx.min, ctx.max) {
-                    Some(ctx.max)
-                } else {
-                    effective_event_value(Some(ctx.max), controlled_prop)
-                };
-                let target_state = if valid_bounds(ctx.min, ctx.max) {
-                    State::Complete
-                } else {
-                    state_for_value(value, ctx.min, ctx.max)
-                };
+                let value = effective_event_value(Some(ctx.max), controlled_prop);
+                let target_state = state_for_value(value, ctx.min, ctx.max);
 
                 Some(
                     TransitionPlan::to(target_state).apply(move |ctx: &mut Context| {
@@ -440,13 +432,8 @@ impl ars_core::Machine for Machine {
 
                         let value = *ctx.value.get();
 
-                        ctx.percent = if valid_bounds(ctx.min, ctx.max) {
-                            ctx.indeterminate = false;
-                            100.0
-                        } else {
-                            ctx.indeterminate = value.is_none();
-                            Context::compute_percent(value, ctx.min, ctx.max)
-                        };
+                        ctx.indeterminate = value.is_none();
+                        ctx.percent = Context::compute_percent(value, ctx.min, ctx.max);
                     }),
                 )
             }
@@ -767,8 +754,8 @@ fn sync_props_value(ctx: &mut Context, value: Option<f64>, controlled_prop: Opti
 }
 
 fn complete_context_value(ctx: &mut Context, controlled_prop: Option<Option<f64>>) {
-    if controlled_prop.is_some() {
-        ctx.value = Bindable::controlled(Some(ctx.max));
+    if let Some(value) = controlled_prop {
+        ctx.value = Bindable::controlled(value);
     } else if ctx.value.is_controlled() {
         ctx.value = Bindable::uncontrolled(Some(ctx.max));
     } else {
@@ -1027,15 +1014,15 @@ mod tests {
 
         let controlled_api = controlled.connect(&|_| {});
 
-        assert_eq!(controlled.state(), &State::Complete);
-        assert_eq!(controlled.context().value.get(), &Some(100.0));
-        assert_eq!(controlled_api.percent(), 100.0);
-        assert_eq!(controlled_api.value_text(), "Complete");
+        assert_eq!(controlled.state(), &State::Idle);
+        assert_eq!(controlled.context().value.get(), &Some(50.0));
+        assert_eq!(controlled_api.percent(), 50.0);
+        assert_eq!(controlled_api.value_text(), "50% complete");
         assert_eq!(
             controlled_api
                 .root_attrs()
                 .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
-            Some("100")
+            Some("50")
         );
 
         let mut controlled_indeterminate = service(Props::new().id("progress").value(None));
@@ -1044,13 +1031,13 @@ mod tests {
 
         let controlled_indeterminate_api = controlled_indeterminate.connect(&|_| {});
 
-        assert_eq!(controlled_indeterminate.state(), &State::Complete);
-        assert!(!controlled_indeterminate_api.is_indeterminate());
+        assert_eq!(controlled_indeterminate.state(), &State::Loading);
+        assert!(controlled_indeterminate_api.is_indeterminate());
         assert_eq!(
             controlled_indeterminate_api
                 .root_attrs()
                 .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
-            Some("100")
+            None
         );
     }
 }
