@@ -338,7 +338,11 @@ impl ars_core::Machine for Machine {
             Event::RegisterItem(radio) => {
                 let radio = radio.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    register_item(&mut ctx.items, radio);
+                    if let Some(existing) = ctx.items.iter_mut().find(|existing| existing.value == radio.value) {
+                        *existing = radio;
+                    } else {
+                        ctx.items.push(radio);
+                    }
                 }))
             }
             Event::UnregisterItem(value) => {
@@ -647,6 +651,10 @@ impl<'a> Api<'a> {
         (self.send)(Event::SelectValue(item_value.clone()));
     }
 
+    pub fn on_item_hidden_input_change(&self, item_value: &Key) {
+        (self.send)(Event::SelectValue(item_value.clone()));
+    }
+
     pub fn on_item_control_focus(&self, item_value: &Key, is_keyboard: bool) {
         (self.send)(Event::FocusItem { item: item_value.clone(), is_keyboard });
     }
@@ -654,8 +662,15 @@ impl<'a> Api<'a> {
     pub fn on_item_control_blur(&self) { (self.send)(Event::Blur); }
 
     pub fn on_item_control_keydown(&self, item_value: &Key, data: &KeyboardEventData) {
-        if data.key == KeyboardKey::Space || data.key == KeyboardKey::Enter {
-            (self.send)(Event::SelectValue(item_value.clone()));
+        match data.key {
+            KeyboardKey::Space | KeyboardKey::Enter => (self.send)(Event::SelectValue(item_value.clone())),
+            KeyboardKey::ArrowRight => (self.send)(Event::FocusNext),
+            KeyboardKey::ArrowLeft => (self.send)(Event::FocusPrev),
+            KeyboardKey::ArrowDown => (self.send)(Event::FocusNext),
+            KeyboardKey::ArrowUp => (self.send)(Event::FocusPrev),
+            KeyboardKey::Home => (self.send)(Event::FocusFirst),
+            KeyboardKey::End => (self.send)(Event::FocusLast),
+            _ => {}
         }
     }
 }
@@ -762,7 +777,7 @@ The `aria-orientation` attribute informs assistive technology whether navigation
 
 ## 5. Form Integration
 
-- **Hidden inputs**: Each radio item renders a hidden `<input type="radio">` via `ItemHiddenInput`. Only the selected item has `checked`. All share the same `name` attribute.
+- **Hidden inputs**: Each radio item renders a hidden `<input type="radio">` via `ItemHiddenInput`. Only the selected item has `checked`. All share the same `name` attribute. Adapters wire the hidden input's native change event to `Api::on_item_hidden_input_change(value)` so native label activation dispatches the same machine selection event as item-control clicks.
 - **Validation states**: `aria-invalid="true"` on Root when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby` only when the adapter renders it.
 - **Error message association**: `aria-describedby` on Root points to `Description` (when rendered) and `ErrorMessage` (when invalid and rendered).
 - **Required**: `aria-required="true"` on Root and each ItemControl. Hidden inputs carry the `required` attribute.

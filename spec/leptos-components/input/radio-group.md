@@ -69,7 +69,7 @@ The adapter also forwards shared group props from the core contract, including l
 | `value`                       | controlled    | signal change                       | `SetValue`                   | updates selected item and roving focus target |
 | `disabled` / `readonly`       | controlled    | signal change                       | `SetProps`                   | guards group and item selection               |
 | `required` / `invalid`        | controlled    | signal change                       | `SetProps`                   | updates root-level validation attrs           |
-| item activation or navigation | machine-owned | click, `Space`, `Enter`, arrow keys | `SelectValue` / focus events | updates selected value and roving tabindex    |
+| item activation or navigation | machine-owned | click, hidden-input change, `Space`, `Enter`, arrow keys | `SelectValue` / focus events | updates selected value and roving tabindex |
 
 ## 8. Registration and Cleanup Contract
 
@@ -81,7 +81,7 @@ The adapter also forwards shared group props from the core contract, including l
 
 - `Root` may own a group-level ref for focus-entry logic.
 - Each `ItemControl` owns its own live ref. When the core `Api::focused_item()` changes, the adapter resolves that item key to the current live ref and performs DOM focus outside the core machine.
-- Hidden inputs remain non-focusable and must never become the roving target.
+- Hidden inputs remain non-focusable and must never become the roving target; their native change event must call `api.on_item_hidden_input_change(value)` for label activation.
 
 ## 10. State Machine Boundary Rules
 

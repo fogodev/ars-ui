@@ -493,15 +493,15 @@ impl ars_core::Machine for Machine {
                 };
 
                 Some(plan.apply(move |ctx: &mut Context| {
-                    if let Some(index) = ctx
+                    if let Some(existing) = ctx
                         .items
-                        .iter()
-                        .position(|existing| existing.value == item.value)
+                        .iter_mut()
+                        .find(|existing| existing.value == item.value)
                     {
-                        ctx.items.remove(index);
+                        *existing = item;
+                    } else {
+                        ctx.items.push(item);
                     }
-
-                    ctx.items.push(item);
 
                     if clears_focus {
                         ctx.focused_item = None;
@@ -1023,6 +1023,13 @@ impl Api<'_> {
         }
     }
 
+    /// Dispatches a native hidden-input change for an item.
+    pub fn on_item_hidden_input_change(&self, item_value: &Key) {
+        if !self.is_item_disabled(item_value) {
+            (self.send)(Event::SelectValue(item_value.clone()));
+        }
+    }
+
     /// Dispatches keyboard activation or roving-focus navigation.
     pub fn on_item_control_keydown(&self, item_value: &Key, data: &KeyboardEventData) {
         match data.key {
@@ -1032,27 +1039,29 @@ impl Api<'_> {
                 (self.send)(Event::SelectValue(item_value.clone()));
             }
 
-            KeyboardKey::ArrowRight if self.ctx.orientation == Orientation::Horizontal => {
-                if self.ctx.dir == Direction::Rtl {
+            KeyboardKey::ArrowRight => {
+                if self.ctx.orientation == Orientation::Horizontal && self.ctx.dir == Direction::Rtl
+                {
                     (self.send)(Event::FocusPrev);
                 } else {
                     (self.send)(Event::FocusNext);
                 }
             }
 
-            KeyboardKey::ArrowLeft if self.ctx.orientation == Orientation::Horizontal => {
-                if self.ctx.dir == Direction::Rtl {
+            KeyboardKey::ArrowLeft => {
+                if self.ctx.orientation == Orientation::Horizontal && self.ctx.dir == Direction::Rtl
+                {
                     (self.send)(Event::FocusNext);
                 } else {
                     (self.send)(Event::FocusPrev);
                 }
             }
 
-            KeyboardKey::ArrowDown if self.ctx.orientation == Orientation::Vertical => {
+            KeyboardKey::ArrowDown => {
                 (self.send)(Event::FocusNext);
             }
 
-            KeyboardKey::ArrowUp if self.ctx.orientation == Orientation::Vertical => {
+            KeyboardKey::ArrowUp => {
                 (self.send)(Event::FocusPrev);
             }
 
@@ -1800,7 +1809,7 @@ mod tests {
     }
 
     #[test]
-    fn radio_group_register_existing_item_moves_to_latest_logical_order() {
+    fn radio_group_register_existing_item_preserves_logical_order() {
         let mut service = service(props());
 
         drop(service.send(Event::RegisterItem(Radio::new(key("standard")))));
@@ -1812,7 +1821,7 @@ mod tests {
             .map(|item| item.value.clone())
             .collect::<Vec<_>>();
 
-        assert_eq!(values, vec![key("express"), key("drone"), key("standard")]);
+        assert_eq!(values, vec![key("standard"), key("express"), key("drone")]);
     }
 
     #[test]
@@ -2167,6 +2176,7 @@ mod tests {
         let api = service.connect(&send);
 
         api.on_item_control_click(&key("standard"));
+        api.on_item_hidden_input_change(&key("standard"));
         api.on_item_control_keydown(&key("standard"), &keyboard(KeyboardKey::Space));
         api.on_item_control_keydown(&key("standard"), &repeated_keyboard(KeyboardKey::Space));
         api.on_item_control_keydown(&key("standard"), &keyboard(KeyboardKey::ArrowRight));
@@ -2180,6 +2190,7 @@ mod tests {
         assert_eq!(
             events.borrow().as_slice(),
             &[
+                Event::SelectValue(key("standard")),
                 Event::SelectValue(key("standard")),
                 Event::SelectValue(key("standard")),
                 Event::FocusPrev,
@@ -2222,6 +2233,8 @@ mod tests {
             &[
                 Event::FocusNext,
                 Event::FocusPrev,
+                Event::FocusNext,
+                Event::FocusPrev,
                 Event::FocusFirst,
                 Event::FocusLast,
             ]
@@ -2243,7 +2256,12 @@ mod tests {
 
         assert_eq!(
             vertical_events.borrow().as_slice(),
-            &[Event::FocusNext, Event::FocusPrev]
+            &[
+                Event::FocusNext,
+                Event::FocusPrev,
+                Event::FocusNext,
+                Event::FocusPrev,
+            ]
         );
     }
 
