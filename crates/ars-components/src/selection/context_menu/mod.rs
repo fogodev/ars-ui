@@ -509,7 +509,7 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            (_, Event::SyncProps) => Some(sync_props_plan(props)),
+            (_, Event::SyncProps) => Some(sync_props_plan(ctx, props)),
 
             _ => None,
         }
@@ -874,10 +874,13 @@ impl Api<'_> {
         }
     }
 
-    /// Dispatches keyboard context-menu intent on the target.
-    pub fn on_target_keydown(&self, data: &KeyboardEventData) {
-        if data.key == KeyboardKey::F10 && data.shift_key && !self.props.disabled {
-            (self.send)(Event::ContextOpen { x: 0.0, y: 0.0 });
+    /// Dispatches keyboard context-menu intent on the target at adapter-provided coordinates.
+    pub fn on_target_keydown(&self, data: &KeyboardEventData, x: f64, y: f64) {
+        let opens = data.key == KeyboardKey::ContextMenu
+            || (data.key == KeyboardKey::F10 && data.shift_key);
+
+        if opens && !self.props.disabled {
+            (self.send)(Event::ContextOpen { x, y });
         }
     }
 
@@ -1096,10 +1099,18 @@ fn close_plan(props: &Props) -> TransitionPlan<Machine> {
     })
 }
 
-fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
+fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
     let props = props.clone();
+    let on_open_change = props.on_open_change.clone();
+    let mut plan = if props.disabled && ctx.open {
+        TransitionPlan::to(State::Closed)
+    } else {
+        TransitionPlan::new()
+    };
 
-    TransitionPlan::context_only(move |ctx: &mut Context| {
+    plan = plan.apply(move |ctx: &mut Context| {
+        let was_open = ctx.open;
+
         ctx.loop_focus = props.loop_focus;
         ctx.ids = ComponentIds::from_id(&props.id);
 
@@ -1116,8 +1127,14 @@ fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
             ctx.highlighted_key = None;
             ctx.submenu_open = None;
             ctx.position = None;
+
+            if was_open && let Some(callback) = &on_open_change {
+                callback(false);
+            }
         }
-    })
+    });
+
+    plan
 }
 
 fn select_item_plan(ctx: &Context, props: &Props, key: Key) -> Option<TransitionPlan<Machine>> {
@@ -1499,7 +1516,7 @@ mod tests {
     }
 
     #[test]
-    fn target_keyboard_shift_f10_dispatches_context_open() {
+    fn target_keyboard_shortcuts_dispatch_context_open_at_anchor_position() {
         let menu = service(Props::new().id("context-menu"));
 
         let mut event = keyboard(KeyboardKey::F10, None);
@@ -1507,8 +1524,17 @@ mod tests {
         event.shift_key = true;
 
         assert_eq!(
-            captured_events(&menu, |api| api.on_target_keydown(&event)),
-            vec![Event::ContextOpen { x: 0.0, y: 0.0 }]
+            captured_events(&menu, |api| api.on_target_keydown(&event, 42.0, 24.0)),
+            vec![Event::ContextOpen { x: 42.0, y: 24.0 }]
+        );
+
+        assert_eq!(
+            captured_events(&menu, |api| api.on_target_keydown(
+                &keyboard(KeyboardKey::ContextMenu, None),
+                8.0,
+                16.0
+            )),
+            vec![Event::ContextOpen { x: 8.0, y: 16.0 }]
         );
     }
 
@@ -1646,12 +1672,32 @@ mod tests {
         shifted_enter.shift_key = true;
         plain_f10.shift_key = false;
 
-        assert!(captured_events(&enabled, |api| api.on_target_keydown(&plain_f10)).is_empty());
-        assert!(captured_events(&enabled, |api| api.on_target_keydown(&shifted_enter)).is_empty());
+        assert!(
+            captured_events(&enabled, |api| api.on_target_keydown(&plain_f10, 1.0, 2.0)).is_empty()
+        );
+        assert!(
+            captured_events(&enabled, |api| api.on_target_keydown(
+                &shifted_enter,
+                1.0,
+                2.0
+            ))
+            .is_empty()
+        );
 
         plain_f10.shift_key = true;
 
-        assert!(captured_events(&disabled, |api| api.on_target_keydown(&plain_f10)).is_empty());
+        assert!(
+            captured_events(&disabled, |api| api.on_target_keydown(&plain_f10, 1.0, 2.0))
+                .is_empty()
+        );
+        assert!(
+            captured_events(&disabled, |api| api.on_target_keydown(
+                &keyboard(KeyboardKey::ContextMenu, None),
+                1.0,
+                2.0
+            ))
+            .is_empty()
+        );
     }
 
     #[test]
@@ -1961,6 +2007,42 @@ mod tests {
         drop(menu.send(Event::Close));
         drop(menu.send(Event::Close));
 
+        assert_eq!(
+            open_changes
+                .lock()
+                .expect("open-change capture poisoned")
+                .as_slice(),
+            &[true, false]
+        );
+    }
+
+    #[test]
+    fn disabling_open_menu_closes_state_and_fires_open_change() {
+        let open_changes = Arc::new(Mutex::new(Vec::new()));
+        let old_props = Props::new()
+            .id("context-menu")
+            .on_open_change(Callback::new({
+                let open_changes = Arc::clone(&open_changes);
+                move |open| {
+                    open_changes
+                        .lock()
+                        .expect("open-change capture poisoned")
+                        .push(open);
+                }
+            }));
+        let new_props = old_props.clone().disabled(true);
+
+        let mut menu = service(old_props);
+
+        drop(menu.send(Event::ContextOpen { x: 1.0, y: 2.0 }));
+        drop(menu.send(Event::OpenSubmenu(key("delta"))));
+        drop(menu.set_props(new_props));
+
+        assert_eq!(menu.state(), &State::Closed);
+        assert!(!menu.context().open);
+        assert_eq!(menu.context().highlighted_key, None);
+        assert_eq!(menu.context().submenu_open, None);
+        assert_eq!(menu.context().position, None);
         assert_eq!(
             open_changes
                 .lock()

@@ -150,8 +150,10 @@ Transition requirements:
 - `Blur` returns to inactive state and clears active/focused/focus-visible state.
 - `MoveToNextMenu` and `MoveToPrevMenu` use collection order and `loop_focus`; in active
   state they switch the active menu, and in inactive state they only move focused trigger.
-- `UpdateMenus` replaces the top-level collection and invalidates stale active/focused keys.
-- `SyncProps` updates ids and clears interactive state when the menubar becomes disabled.
+- `UpdateMenus` replaces the top-level collection and invalidates stale active/focused keys;
+  if the active menu key is removed, the machine transitions to `Inactive`.
+- `SyncProps` updates ids; when the menubar becomes disabled, it transitions to `Inactive`
+  and clears active/focused/focus-visible state.
 
 ```rust
 pub struct Machine;
@@ -185,11 +187,12 @@ Required public pieces:
 - `menu_positioner_attrs(key)` and `menu_content_attrs(key)` emit stable ids; content emits
   `role="menu"`, `tabindex="-1"`, and `aria-labelledby` pointing to the trigger.
 - `on_trigger_click(key)` toggles the active menu.
-- `on_trigger_keydown(key, data)` opens on ArrowDown/Enter/Space and moves horizontally
-  with RTL-aware ArrowLeft/ArrowRight.
+- `on_trigger_keydown(key, data)` opens on Enter/Space, opens with the orientation-specific
+  submenu arrow, and moves with orientation-specific top-level traversal arrows
+  (Left/Right for horizontal, Up/Down for vertical, with horizontal RTL inversion).
 - `on_trigger_pointer_enter(key)` switches menus only while a menu is already active.
-- `on_content_keydown(data)` switches top-level menus on horizontal arrows and closes on
-  Escape.
+- `on_content_keydown(data)` switches top-level menus on orientation-specific traversal
+  arrows and closes on Escape.
 - `on_root_focus(is_keyboard)` and `on_root_blur()` dispatch focus/blur state events.
 
 ## 2. Anatomy
@@ -221,13 +224,15 @@ Nested item-type parts (`Item`, `CheckboxItem`, `RadioItem`, `Separator`, `SubTr
 
 ### 3.2 Keyboard Interaction
 
-| Key             | Inactive Mode               | Active Mode                       |
-| --------------- | --------------------------- | --------------------------------- |
-| ArrowLeft/Right | Move focus between triggers | Close current, open adjacent menu |
-| ArrowDown       | Open current menu           | Navigate within menu              |
-| Enter / Space   | Open current menu           | Activate menu item                |
-| Escape          | ---                         | Close menu -> Inactive            |
-| Tab             | Leave menubar               | Close menu, leave menubar         |
+| Key                                    | Inactive Mode               | Active Mode                       |
+| -------------------------------------- | --------------------------- | --------------------------------- |
+| Horizontal ArrowLeft/Right             | Move focus between triggers | Close current, open adjacent menu |
+| Vertical ArrowUp/Down                  | Move focus between triggers | Close current, open adjacent menu |
+| Horizontal ArrowDown                   | Open current menu           | Navigate within menu              |
+| Vertical ArrowRight (LTR) / Left (RTL) | Open current menu           | Navigate within menu              |
+| Enter / Space                          | Open current menu           | Activate menu item                |
+| Escape                                 | ---                         | Close menu -> Inactive            |
+| Tab                                    | Leave menubar               | Close menu, leave menubar         |
 
 ## 4. Internationalization
 

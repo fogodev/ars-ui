@@ -342,14 +342,25 @@ impl ars_core::Machine for Machine {
 
             (_, Event::UpdateMenus(menus)) => {
                 let menus = menus.clone();
+                let active_removed = ctx
+                    .active_menu
+                    .as_ref()
+                    .is_some_and(|key| !menus.contains_key(key));
+                let mut plan = if active_removed {
+                    TransitionPlan::to(State::Inactive)
+                } else {
+                    TransitionPlan::new()
+                };
 
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                plan = plan.apply(move |ctx: &mut Context| {
                     ctx.menus = menus;
                     invalidate_menu_references(ctx);
-                }))
+                });
+
+                Some(plan)
             }
 
-            (_, Event::SyncProps) => Some(sync_props_plan(props)),
+            (_, Event::SyncProps) => Some(sync_props_plan(ctx, props)),
 
             _ => None,
         }
@@ -530,12 +541,23 @@ impl Api<'_> {
 
     /// Dispatches trigger keydown events.
     pub fn on_trigger_keydown(&self, key: &Key, data: &KeyboardEventData) {
-        match data.key {
-            KeyboardKey::ArrowDown | KeyboardKey::Enter | KeyboardKey::Space => {
+        match (self.props.orientation, data.key) {
+            (_, KeyboardKey::Enter | KeyboardKey::Space) => {
                 (self.send)(Event::ActivateMenu(key.clone()));
             }
 
-            KeyboardKey::ArrowRight => {
+            (Orientation::Horizontal, KeyboardKey::ArrowDown)
+            | (Orientation::Vertical, KeyboardKey::ArrowRight)
+                if self.props.dir == Direction::Ltr =>
+            {
+                (self.send)(Event::ActivateMenu(key.clone()));
+            }
+
+            (Orientation::Vertical, KeyboardKey::ArrowLeft) if self.props.dir == Direction::Rtl => {
+                (self.send)(Event::ActivateMenu(key.clone()));
+            }
+
+            (Orientation::Horizontal, KeyboardKey::ArrowRight) => {
                 if self.props.dir == Direction::Rtl {
                     (self.send)(Event::MoveToPrevMenu);
                 } else {
@@ -543,12 +565,20 @@ impl Api<'_> {
                 }
             }
 
-            KeyboardKey::ArrowLeft => {
+            (Orientation::Horizontal, KeyboardKey::ArrowLeft) => {
                 if self.props.dir == Direction::Rtl {
                     (self.send)(Event::MoveToNextMenu);
                 } else {
                     (self.send)(Event::MoveToPrevMenu);
                 }
+            }
+
+            (Orientation::Vertical, KeyboardKey::ArrowDown) => {
+                (self.send)(Event::MoveToNextMenu);
+            }
+
+            (Orientation::Vertical, KeyboardKey::ArrowUp) => {
+                (self.send)(Event::MoveToPrevMenu);
             }
 
             _ => {}
@@ -564,8 +594,8 @@ impl Api<'_> {
 
     /// Dispatches content keydown events handled by the menu bar shell.
     pub fn on_content_keydown(&self, data: &KeyboardEventData) {
-        match data.key {
-            KeyboardKey::ArrowRight => {
+        match (self.props.orientation, data.key) {
+            (Orientation::Horizontal, KeyboardKey::ArrowRight) => {
                 if self.props.dir == Direction::Rtl {
                     (self.send)(Event::MoveToPrevMenu);
                 } else {
@@ -573,7 +603,7 @@ impl Api<'_> {
                 }
             }
 
-            KeyboardKey::ArrowLeft => {
+            (Orientation::Horizontal, KeyboardKey::ArrowLeft) => {
                 if self.props.dir == Direction::Rtl {
                     (self.send)(Event::MoveToNextMenu);
                 } else {
@@ -581,7 +611,15 @@ impl Api<'_> {
                 }
             }
 
-            KeyboardKey::Escape => (self.send)(Event::Close),
+            (Orientation::Vertical, KeyboardKey::ArrowDown) => {
+                (self.send)(Event::MoveToNextMenu);
+            }
+
+            (Orientation::Vertical, KeyboardKey::ArrowUp) => {
+                (self.send)(Event::MoveToPrevMenu);
+            }
+
+            (_, KeyboardKey::Escape) => (self.send)(Event::Close),
 
             _ => {}
         }
@@ -683,10 +721,15 @@ fn adjacent_key(ctx: &Context, props: &Props, direction: DirectionIntent) -> Opt
     })
 }
 
-fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
+fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
     let props = props.clone();
+    let mut plan = if props.disabled && ctx.active_menu.is_some() {
+        TransitionPlan::to(State::Inactive)
+    } else {
+        TransitionPlan::new()
+    };
 
-    TransitionPlan::context_only(move |ctx: &mut Context| {
+    plan = plan.apply(move |ctx: &mut Context| {
         ctx.ids = ComponentIds::from_id(&props.id);
 
         if props.disabled {
@@ -694,7 +737,9 @@ fn sync_props_plan(props: &Props) -> TransitionPlan<Machine> {
             ctx.focused_item = None;
             ctx.focus_visible = false;
         }
-    })
+    });
+
+    plan
 }
 
 fn invalidate_menu_references(ctx: &mut Context) {
@@ -874,6 +919,50 @@ mod tests {
     }
 
     #[test]
+    fn vertical_arrows_move_focused_trigger_and_open_with_right_arrow() {
+        let vertical = service(
+            Props::new()
+                .id("menu-bar")
+                .orientation(Orientation::Vertical),
+        );
+
+        assert_eq!(
+            captured_events(&vertical, |api| api
+                .on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowDown))),
+            vec![Event::MoveToNextMenu]
+        );
+        assert_eq!(
+            captured_events(&vertical, |api| api
+                .on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowUp))),
+            vec![Event::MoveToPrevMenu]
+        );
+        assert_eq!(
+            captured_events(&vertical, |api| api
+                .on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowRight))),
+            vec![Event::ActivateMenu(key("file"))]
+        );
+
+        let mut active_vertical = service(
+            Props::new()
+                .id("menu-bar")
+                .orientation(Orientation::Vertical),
+        );
+
+        drop(active_vertical.send(Event::ActivateMenu(key("file"))));
+
+        assert_eq!(
+            captured_events(&active_vertical, |api| api
+                .on_content_keydown(&keyboard(KeyboardKey::ArrowDown))),
+            vec![Event::MoveToNextMenu]
+        );
+        assert_eq!(
+            captured_events(&active_vertical, |api| api
+                .on_content_keydown(&keyboard(KeyboardKey::ArrowUp))),
+            vec![Event::MoveToPrevMenu]
+        );
+    }
+
+    #[test]
     fn pointer_hover_switches_only_when_active() {
         let mut menu_bar = service(Props::new().id("menu-bar"));
 
@@ -991,6 +1080,7 @@ mod tests {
         drop(menu_bar.send(Event::ActivateMenu(key("file"))));
         drop(menu_bar.set_props(new_props));
 
+        assert_eq!(menu_bar.state(), &State::Inactive);
         assert_eq!(
             menu_bar.context().ids,
             ars_core::ComponentIds::from_id("new")
@@ -1072,6 +1162,7 @@ mod tests {
 
         drop(menu_bar.send(Event::UpdateMenus(replacement)));
 
+        assert_eq!(menu_bar.state(), &State::Inactive);
         assert_eq!(menu_bar.context().active_menu, None);
         assert_eq!(menu_bar.context().focused_item, None);
     }

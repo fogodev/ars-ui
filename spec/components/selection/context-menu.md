@@ -197,8 +197,8 @@ Transition requirements:
 - `TypeaheadSearch` delegates to `typeahead::State::process_char_with_locale`.
 - `UpdateItems` replaces the collection and invalidates stale highlight, submenu, checked,
   and radio references.
-- `SyncProps` updates `loop_focus` and `ids`, and clears interactive state if the component
-  becomes disabled.
+- `SyncProps` updates `loop_focus` and `ids`; if the component becomes disabled while open,
+  it transitions to `Closed`, clears interactive state, and emits `on_open_change(false)`.
 
 ```rust
 pub struct Machine;
@@ -234,8 +234,8 @@ Required public pieces:
 - Checkbox/radio attrs emit `aria-checked`; submenu attrs emit `aria-haspopup`,
   `aria-expanded`, `aria-controls`, and submenu content labeling.
 - `on_target_contextmenu(x, y)` dispatches `ContextOpen { x, y }` when enabled.
-- `on_target_keydown(data)` dispatches keyboard context-menu open for `Shift+F10` when
-  enabled.
+- `on_target_keydown(data, x, y)` dispatches keyboard context-menu open for `Shift+F10` or
+  the Context Menu key when enabled, using adapter-resolved target anchor coordinates.
 - `on_content_keydown(_at)` handles vertical navigation, Home/End, Escape, submenu
   open/close keys, Enter/Space activation, and printable typeahead with adapter-provided
   timestamps when available.
