@@ -148,6 +148,11 @@ exclude_re = [
   # semantics as the fallback `step_segment_value` path. Year cycling is not
   # equivalent because Japanese era transitions update the era segment too.
   'delete match arm DateSegmentKind::(Month|Day) in Context::(increment_segment|decrement_segment)',
+  # TimeField clamp equality is observationally equivalent: returning the min
+  # or max bound when `time == bound` returns the same `Time` value as falling
+  # through to the original `time`.
+  'time_field/mod\.rs:\d+:\d+: replace < with <= in clamp_time',
+  'time_field/mod\.rs:\d+:\d+: replace > with >= in clamp_time',
   # With `data.character == None`, weakening the keydown guard only enters an
   # inner `if let Some(ch)` that still emits no event.
   "replace match guard data.character.is_some\\(\\) with true in Api<'a>::on_segment_keydown",

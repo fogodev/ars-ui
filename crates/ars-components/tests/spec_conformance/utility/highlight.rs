@@ -1,3 +1,4 @@
+#[cfg(feature = "i18n")]
 use super::*;
 
 #[cfg(feature = "i18n")]
