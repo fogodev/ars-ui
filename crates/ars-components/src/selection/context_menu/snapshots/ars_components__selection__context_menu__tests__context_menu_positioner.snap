@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/selection/context_menu/mod.rs
+expression: snapshot_attrs(&api.positioner_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "positioner",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "context-menu",
+            ),
+        ),
+    ],
+    styles: [],
+}

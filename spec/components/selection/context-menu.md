@@ -21,6 +21,9 @@ Items are stored as a `StaticCollection<menu::Item>` (from `06-collections.md`).
 are structural `NodeType::Separator` nodes. Groups are `NodeType::Section` + `NodeType::Header`
 nodes. Navigation uses `Collection` trait methods with `next_enabled_key` / `prev_enabled_key`.
 Typeahead uses `typeahead::State`.
+Submenu items use the same submenu intent surface as `Menu`: the core records
+which submenu trigger is open and emits submenu parts/ARIA, while adapters own
+live submenu positioning and focus movement.
 
 ## 1. State Machine
 
@@ -70,12 +73,18 @@ pub enum Event {
         /// The key of the radio item.
         value: Key,
     },
+    /// Open a submenu for the given trigger item.
+    OpenSubmenu(Key),
+    /// Close the currently open submenu.
+    CloseSubmenu,
     /// Click outside the menu.
     ClickOutside,
     /// Typeahead search with character and timestamp (ms).
     TypeaheadSearch(char, u64),
     /// Update the item collection dynamically.
     UpdateItems(StaticCollection<menu::Item>),
+    /// Synchronize context values derived from updated props.
+    SyncProps,
 }
 ```
 
@@ -85,6 +94,8 @@ pub enum Event {
 /// The context of the ContextMenu state machine.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
+    /// Locale used for typeahead matching.
+    pub locale: Locale,
     /// The items of the context menu.
     pub items: StaticCollection<menu::Item>,
     /// Whether the context menu is open.
@@ -97,6 +108,8 @@ pub struct Context {
     pub checked_items: BTreeMap<Key, bool>,
     /// The radio groups of the context menu.
     pub radio_groups: BTreeMap<String, Key>,
+    /// Key of the currently open submenu trigger.
+    pub submenu_open: Option<Key>,
     /// The typeahead state of the context menu.
     pub typeahead: typeahead::State,
     /// Whether the focus loops around from the last item back to the first (and vice versa).
@@ -137,11 +150,11 @@ pub struct Props {
     pub disabled_keys: BTreeSet<Key>,
     /// Callback invoked when the context menu open state changes.
     /// Fires after the transition completes with the new open state value.
-    pub on_open_change: Option<Callback<bool>>,
+    pub on_open_change: Option<Callback<menu::OpenChangeCallback>>,
     /// Callback invoked when a menu item is activated (Enter/click on action items).
     /// Distinct from selection-change callbacks — `on_action` fires for command execution,
     /// not for checkbox/radio state toggling.
-    pub on_action: Option<Callback<Key>>,
+    pub on_action: Option<Callback<menu::ActionCallback>>,
 }
 
 impl Default for Props {
@@ -162,17 +175,35 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
-The key difference from Menu: `ContextOpen { x, y }` sets position and transitions to Open.
-There is no Trigger-based open — only the `contextmenu` event (right-click) or `Shift+F10`
-opens the menu. On close, focus returns to the Target element rather than a trigger button.
+The agnostic implementation mirrors `Menu` navigation and selection semantics while replacing
+button-triggered open with `ContextOpen { x, y }`. The core machine uses `NoEffect`: it stores
+pointer position, open/highlight/submenu intent, checked/radio state, typeahead state, and stable
+ids. Framework adapters consume that state to place the floating content, move live focus, return
+focus to the target, attach dismissal listeners, and manage timers.
+
+Transition requirements:
+
+- `ContextOpen { x, y }` is ignored when disabled. Otherwise it opens the menu, stores
+  `position = Some((x, y))`, and highlights the first enabled item. Re-opening while already
+  open updates the stored position, recomputes the first enabled highlight, and clears
+  transient submenu and typeahead state.
+- `Close` and `ClickOutside` close the menu and clear `highlighted_key`, `submenu_open`,
+  `typeahead`, and `position`.
+- `Highlight*` events only target focusable collection items, honoring `disabled_keys` and
+  `disabled_behavior`.
+- `SelectItem`, `ToggleCheckboxItem`, and `SelectRadioItem` validate the collection node,
+  item type, and disabled state before mutating state or firing callbacks.
+- `OpenSubmenu` only succeeds for selectable `menu::ItemType::Submenu` items and records
+  `submenu_open`; `CloseSubmenu` clears it and restores highlight to the trigger.
+- `TypeaheadSearch` delegates to `typeahead::State::process_char_with_locale`.
+- `UpdateItems` replaces the collection and invalidates stale highlight, submenu, checked,
+  and radio references.
+- `SyncProps` updates `loop_focus` and `ids`; if the component becomes disabled while open,
+  it transitions to `Closed`, clears interactive state including the typeahead buffer, and
+  emits `on_open_change(false)`.
 
 ```rust
 pub struct Machine;
-
-/// This component has no translatable strings.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Messages;
-impl ComponentMessages for Messages {}
 
 impl ars_core::Machine for Machine {
     type State = State;
@@ -180,592 +211,38 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = NoEffect;
     type Api<'a> = Api<'a>;
-
-    fn init(props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
-        let ctx = Context {
-            items: StaticCollection::default(),
-            open: false,
-            highlighted_key: None,
-            focus_visible: false,
-            checked_items: BTreeMap::new(),
-            radio_groups: BTreeMap::new(),
-            typeahead: typeahead::State::new(),
-            loop_focus: props.loop_focus,
-            ids: ComponentIds::from_id(&props.id),
-            position: None,
-        };
-        (State::Closed, ctx)
-    }
-
-    fn transition(
-        state: &Self::State,
-        event: &Self::Event,
-        ctx: &Self::Context,
-        props: &Self::Props,
-    ) -> Option<TransitionPlan<Self>> {
-        match (state, event) {
-            // ContextOpen: open at pointer position, highlight first item
-            (State::Closed, Event::ContextOpen { x, y }) => {
-                let pos = (*x, *y);
-                let first = first_enabled_key(
-                    &ctx.items, &props.disabled_keys, props.disabled_behavior,
-                );
-
-                Some(TransitionPlan::to(State::Open).apply(move |ctx| {
-                    ctx.position = Some(pos);
-                    ctx.open = true;
-                    ctx.highlighted_key = first;
-                }).with_effect(PendingEffect::new("position_at_point", |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    if let Some((x, y)) = ctx.position {
-                        let content_id = ctx.ids.part("content");
-                        platform.position_element_at(&content_id, x, y);
-                        platform.focus_element_by_id(&content_id);
-                    }
-                    no_cleanup()
-                })))
-            }
-
-            // Re-open at new position if already open (e.g., right-click while open)
-            (State::Open, Event::ContextOpen { x, y }) => {
-                let pos = (*x, *y);
-                let first = first_enabled_key(
-                    &ctx.items, &props.disabled_keys, props.disabled_behavior,
-                );
-
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.position = Some(pos);
-                    ctx.highlighted_key = first;
-                }).with_effect(PendingEffect::new("reposition_at_point", |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    if let Some((x, y)) = ctx.position {
-                        let content_id = ctx.ids.part("content");
-                        platform.position_element_at(&content_id, x, y);
-                        platform.focus_element_by_id(&content_id);
-                    }
-                    no_cleanup()
-                })))
-            }
-
-            // Close / ClickOutside: close menu, return focus to target
-            (State::Open, Event::Close) | (State::Open, Event::ClickOutside) => {
-                Some(TransitionPlan::to(State::Closed).apply(|ctx| {
-                    ctx.open = false;
-                    ctx.highlighted_key = None;
-                    ctx.position = None;
-                }).with_effect(PendingEffect::new("focus_target", |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    let target_id = ctx.ids.part("target");
-                    platform.focus_element_by_id(&target_id);
-                    no_cleanup()
-                })))
-            }
-
-            // HighlightNext / HighlightPrev: navigate enabled items (only when open)
-            (State::Open, Event::HighlightNext) => {
-                let next = match &ctx.highlighted_key {
-                    Some(k) => next_enabled_key(
-                        &ctx.items, k, &props.disabled_keys,
-                        props.disabled_behavior, ctx.loop_focus,
-                    ),
-                    None => first_enabled_key(
-                        &ctx.items, &props.disabled_keys, props.disabled_behavior,
-                    ),
-                };
-
-                next.map(|k| TransitionPlan::context_only(move |ctx| {
-                    ctx.highlighted_key = Some(k);
-                }))
-            }
-
-            (State::Open, Event::HighlightPrev) => {
-                let prev = match &ctx.highlighted_key {
-                    Some(k) => prev_enabled_key(
-                        &ctx.items, k, &props.disabled_keys,
-                        props.disabled_behavior, ctx.loop_focus,
-                    ),
-                    None => last_enabled_key(
-                        &ctx.items, &props.disabled_keys, props.disabled_behavior,
-                    ),
-                };
-
-                prev.map(|k| TransitionPlan::context_only(move |ctx| {
-                    ctx.highlighted_key = Some(k);
-                }))
-            }
-
-            (_, Event::HighlightFirst) => {
-                let first = first_enabled_key(
-                    &ctx.items, &props.disabled_keys, props.disabled_behavior,
-                );
-
-                first.map(|k| TransitionPlan::context_only(move |ctx| {
-                    ctx.highlighted_key = Some(k);
-                }))
-            }
-
-            (_, Event::HighlightLast) => {
-                let last = last_enabled_key(
-                    &ctx.items, &props.disabled_keys, props.disabled_behavior,
-                );
-
-                last.map(|k| TransitionPlan::context_only(move |ctx| {
-                    ctx.highlighted_key = Some(k);
-                }))
-            }
-
-            (_, Event::HighlightItem(key)) => {
-                // Guard: ignore highlight requests for keys not present in the collection.
-                if let Some(ref k) = key {
-                    if !ctx.items.contains_key(k) { return None; }
-                }
-                let key = key.clone();
-
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.highlighted_key = key;
-                }))
-            }
-
-            // SelectItem: fire action, optionally close menu
-            (State::Open, Event::SelectItem(key)) => {
-                if ctx.items.get(key).map_or(true, |n|
-                    n.node_type != NodeType::Item) { return None; }
-
-                let should_close = ctx.items.get(key)
-                    .and_then(|n| n.payload.close_on_action)
-                    .unwrap_or(props.close_on_action);
-
-                if should_close {
-                    Some(TransitionPlan::to(State::Closed).apply(|ctx| {
-                        ctx.open = false;
-                        ctx.highlighted_key = None;
-                        ctx.position = None;
-                    }).with_effect(PendingEffect::new("focus_target", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let target_id = ctx.ids.part("target");
-                        platform.focus_element_by_id(&target_id);
-                        no_cleanup()
-                    })))
-                } else {
-                    Some(TransitionPlan::context_only(|_ctx| {}))
-                }
-            }
-
-            // ToggleCheckboxItem: toggle checked state
-            (State::Open, Event::ToggleCheckboxItem(key)) => {
-                let key = key.clone();
-                let current = ctx.checked_items.get(&key).copied().unwrap_or(false);
-
-                let should_close = ctx.items.get(&key)
-                    .and_then(|n| n.payload.close_on_action)
-                    .unwrap_or(props.close_on_action);
-
-                if should_close {
-                    Some(TransitionPlan::to(State::Closed).apply(move |ctx| {
-                        ctx.checked_items.insert(key, !current);
-                        ctx.open = false;
-                        ctx.highlighted_key = None;
-                        ctx.position = None;
-                    }).with_effect(PendingEffect::new("focus_target", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let target_id = ctx.ids.part("target");
-                        platform.focus_element_by_id(&target_id);
-                        no_cleanup()
-                    })))
-                } else {
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.checked_items.insert(key, !current);
-                    }))
-                }
-            }
-
-            // SelectRadioItem: set radio group value
-            (State::Open, Event::SelectRadioItem { group, value }) => {
-                let group = group.clone();
-                let value = value.clone();
-
-                let should_close = ctx.items.get(&value)
-                    .and_then(|n| n.payload.close_on_action)
-                    .unwrap_or(props.close_on_action);
-
-                if should_close {
-                    Some(TransitionPlan::to(State::Closed).apply(move |ctx| {
-                        ctx.radio_groups.insert(group, value);
-                        ctx.open = false;
-                        ctx.highlighted_key = None;
-                        ctx.position = None;
-                    }).with_effect(PendingEffect::new("focus_target", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let target_id = ctx.ids.part("target");
-                        platform.focus_element_by_id(&target_id);
-                        no_cleanup()
-                    })))
-                } else {
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.radio_groups.insert(group, value);
-                    }))
-                }
-            }
-
-            // TypeaheadSearch: use typeahead::State for accumulated search
-            (State::Open, Event::TypeaheadSearch(ch, now_ms)) => {
-                let (new_ta, found) = ctx.typeahead.process_char(
-                    *ch, *now_ms, ctx.highlighted_key.as_ref(), &ctx.items,
-                );
-
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.typeahead = new_ta;
-                    if let Some(k) = found { ctx.highlighted_key = Some(k); }
-                }).with_effect(PendingEffect::new("typeahead_timeout", |ctx, _props, send| {
-                    let platform = use_platform_effects();
-                    let send = send.clone();
-                    let handle = platform.set_timeout(TYPEAHEAD_TIMEOUT_MS, Box::new(move || {
-                        // Typeahead buffer reset handled by typeahead::State internally
-                    }));
-                    let pc = platform.clone();
-                    Box::new(move || { pc.clear_timeout(handle); })
-                })))
-            }
-
-            // UpdateItems: dynamically replace the item collection
-            (_, Event::UpdateItems(new_items)) => {
-                let new_items = new_items.clone();
-
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.items = new_items;
-                }))
-            }
-
-            _ => None,
-        }
-    }
-
-    fn connect<'a>(
-        state: &'a Self::State,
-        ctx: &'a Self::Context,
-        props: &'a Self::Props,
-        send: &'a dyn Fn(Self::Event),
-    ) -> Self::Api<'a> {
-        Api { state, ctx, props, send }
-    }
 }
 ```
 
 ### 1.6 Connect / API
 
-```rust
-#[derive(ComponentPart)]
-#[scope = "context-menu"]
-pub enum Part {
-    Root,
-    Target,
-    Positioner,
-    Arrow,
-    Content,
-    ItemGroup { key: Key },
-    ItemGroupLabel { key: Key },
-    Item { key: Key },
-    ItemText { key: Key },
-    ItemIndicator { key: Key },
-    Separator,
-    CheckboxItem { key: Key },
-    RadioGroup { group: Key },
-    RadioItem { key: Key },
-}
+The connect API derives DOM-facing attrs and event dispatch helpers from machine state.
 
-/// API for the ContextMenu component.
-pub struct Api<'a> {
-    state: &'a State,
-    ctx: &'a Context,
-    props: &'a Props,
-    send: &'a dyn Fn(Event),
-}
+Required public pieces:
 
-impl<'a> Api<'a> {
-    /// Attributes for the root container.
-    pub fn root_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        if self.props.disabled { attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
-        attrs
-    }
-
-    /// Attributes for the target element (receives the contextmenu event).
-    pub fn target_attrs(&self) -> AttrMap {
-        let target_id = self.ctx.ids.part("target");
-        let content_id = self.ctx.ids.part("content");
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Target.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, target_id);
-        attrs.set(HtmlAttr::Aria(AriaAttr::HasPopup), "menu");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if self.ctx.open { "true" } else { "false" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), content_id);
-        if self.props.disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); }
-        attrs
-    }
-
-    /// Attributes for the positioner wrapper (anchored to pointer coordinates).
-    pub fn positioner_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Positioner.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs
-    }
-
-    /// Attributes for the floating arrow.
-    pub fn arrow_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Arrow.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
-        attrs
-    }
-
-    /// Attributes for the menu content panel.
-    pub fn content_attrs(&self) -> AttrMap {
-        let content_id = self.ctx.ids.part("content");
-        let target_id = self.ctx.ids.part("target");
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Content.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, content_id);
-        attrs.set(HtmlAttr::Role, "menu");
-        attrs.set(HtmlAttr::TabIndex, "-1");
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), target_id);
-        attrs
-    }
-
-    /// Attributes for an item group container.
-    pub fn item_group_attrs(&self, key: &Key) -> AttrMap {
-        let label_id = self.ctx.ids.item("item-group-label", &key);
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemGroup { key: Key::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Role, "group");
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), label_id);
-        attrs
-    }
-
-    /// Attributes for an item group label.
-    pub fn item_group_label_attrs(&self, key: &Key) -> AttrMap {
-        let label_id = self.ctx.ids.item("item-group-label", &key);
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemGroupLabel { key: Key::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, label_id);
-        attrs
-    }
-
-    /// Attributes for an action menu item.
-    pub fn item_attrs(&self, key: &Key) -> AttrMap {
-        let item_id = self.ctx.ids.item("item", &key);
-        let is_highlighted = self.ctx.highlighted_key.as_ref() == Some(key);
-        let is_disabled = self.props.disabled_keys.contains(key);
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Item { key: Key::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, item_id);
-        attrs.set(HtmlAttr::Role, "menuitem");
-        attrs.set(HtmlAttr::TabIndex, if is_highlighted { "0" } else { "-1" });
-        if is_highlighted { attrs.set_bool(HtmlAttr::Data("ars-highlighted"), true); }
-        if is_disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); }
-        if let Some(node) = self.ctx.items.get(key) {
-            if let Some(ref aks) = node.payload.aria_keyshortcuts {
-                attrs.set(HtmlAttr::Aria(AriaAttr::KeyShortcuts), aks);
-            }
-        }
-        attrs
-    }
-
-    /// Attributes for an item's text label.
-    pub fn item_text_attrs(&self, key: &Key) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemText { key: Key::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.item_part("item", &key, "text"));
-        attrs
-    }
-
-    /// Attributes for an item's check/radio indicator.
-    pub fn item_indicator_attrs(&self, key: &Key) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemIndicator { key: Key::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.item_part("item", &key, "indicator"));
-        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
-        attrs
-    }
-
-    /// Attributes for a separator.
-    pub fn separator_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Separator.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Role, "separator");
-        attrs
-    }
-
-    /// Attributes for a checkbox menu item.
-    pub fn checkbox_item_attrs(&self, key: &Key) -> AttrMap {
-        let item_id = self.ctx.ids.item("item", &key);
-        let is_highlighted = self.ctx.highlighted_key.as_ref() == Some(key);
-        let is_disabled = self.props.disabled_keys.contains(key);
-        let is_checked = self.ctx.checked_items.get(key).copied().unwrap_or(false);
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::CheckboxItem { key: Key::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, item_id);
-        attrs.set(HtmlAttr::Role, "menuitemcheckbox");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Checked), if is_checked { "true" } else { "false" });
-        attrs.set(HtmlAttr::TabIndex, if is_highlighted { "0" } else { "-1" });
-        if is_highlighted { attrs.set_bool(HtmlAttr::Data("ars-highlighted"), true); }
-        if is_disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); }
-        attrs
-    }
-
-    /// Attributes for a radio group container.
-    pub fn radio_group_attrs(&self, group: &Key) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::RadioGroup { group: Key::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Role, "group");
-        attrs
-    }
-
-    /// Attributes for a radio menu item.
-    pub fn radio_item_attrs(&self, key: &Key, group: &Key) -> AttrMap {
-        let item_id = self.ctx.ids.item("item", &key);
-        let is_highlighted = self.ctx.highlighted_key.as_ref() == Some(key);
-        let is_disabled = self.props.disabled_keys.contains(key);
-        let is_checked = self.ctx.radio_groups.get(group).map_or(false, |v| v == key);
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::RadioItem { key: Key::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, item_id);
-        attrs.set(HtmlAttr::Role, "menuitemradio");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Checked), if is_checked { "true" } else { "false" });
-        attrs.set(HtmlAttr::TabIndex, if is_highlighted { "0" } else { "-1" });
-        if is_highlighted { attrs.set_bool(HtmlAttr::Data("ars-highlighted"), true); }
-        if is_disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); }
-        attrs
-    }
-
-    /// Handle contextmenu event on the target element.
-    pub fn on_target_contextmenu(&self, x: f64, y: f64) {
-        if !self.props.disabled {
-            (self.send)(Event::ContextOpen { x, y });
-        }
-    }
-
-    /// Handle keydown on the target element (Shift+F10 to open).
-    pub fn on_target_keydown(&self, data: &KeyboardEventData) {
-        if data.key == KeyboardKey::F10 && data.shift {
-            if !self.props.disabled {
-                // Use target element center as position when opened via keyboard
-                // Adapter resolves actual coordinates from the target's bounding rect.
-                (self.send)(Event::ContextOpen { x: 0.0, y: 0.0 });
-            }
-        }
-    }
-
-    /// Handle keydown on the menu content.
-    pub fn on_content_keydown(&self, data: &KeyboardEventData) {
-        match data.key {
-            KeyboardKey::ArrowDown => (self.send)(Event::HighlightNext),
-            KeyboardKey::ArrowUp => (self.send)(Event::HighlightPrev),
-            KeyboardKey::Home => (self.send)(Event::HighlightFirst),
-            KeyboardKey::End => (self.send)(Event::HighlightLast),
-            KeyboardKey::Escape => (self.send)(Event::Close),
-            KeyboardKey::Enter | KeyboardKey::Space => {
-                if let Some(ref key) = self.ctx.highlighted_key {
-                    if let Some(node) = self.ctx.items.get(key) {
-                        match &node.payload.item_type {
-                            menu::ItemType::Normal => (self.send)(Event::SelectItem(key.clone())),
-                            menu::ItemType::Checkbox => (self.send)(Event::ToggleCheckboxItem(key.clone())),
-                            menu::ItemType::Radio { group } => (self.send)(Event::SelectRadioItem {
-                                group: group.clone(),
-                                value: key.clone(),
-                            }),
-                            menu::ItemType::Submenu => {} // ContextMenu does not support submenus
-                        }
-                    }
-                }
-            }
-            _ => {
-                if let Some(ch) = data.key.as_printable_char() {
-                    (self.send)(Event::TypeaheadSearch(ch, data.timestamp_ms));
-                }
-            }
-        }
-    }
-
-    /// Handle click on a menu item.
-    pub fn on_item_click(&self, key: &str) {
-        let key = Key::from(key);
-        if let Some(node) = self.ctx.items.get(&key) {
-            match &node.payload.item_type {
-                menu::ItemType::Normal => (self.send)(Event::SelectItem(key)),
-                menu::ItemType::Checkbox => (self.send)(Event::ToggleCheckboxItem(key)),
-                menu::ItemType::Radio { group } => (self.send)(Event::SelectRadioItem {
-                    group: group.clone(),
-                    value: key,
-                }),
-                menu::ItemType::Submenu => {} // ContextMenu does not support submenus
-            }
-        }
-    }
-
-    /// Handle pointer enter on a menu item (for highlight tracking).
-    pub fn on_item_pointer_enter(&self, key: &str) {
-        (self.send)(Event::HighlightItem(Some(Key::from(key))));
-    }
-
-    /// Handle pointer leave on the menu content (clear highlight).
-    pub fn on_content_pointer_leave(&self) {
-        (self.send)(Event::HighlightItem(None));
-    }
-}
-
-impl ConnectApi for Api<'_> {
-    type Part = Part;
-
-    fn part_attrs(&self, part: Part) -> AttrMap {
-        match part {
-            Part::Root => self.root_attrs(),
-            Part::Target => self.target_attrs(),
-            Part::Positioner => self.positioner_attrs(),
-            Part::Arrow => self.arrow_attrs(),
-            Part::Content => self.content_attrs(),
-            Part::ItemGroup { ref key } => self.item_group_attrs(key),
-            Part::ItemGroupLabel { ref key } => self.item_group_label_attrs(key),
-            Part::Item { ref key } => self.item_attrs(key),
-            Part::ItemText { ref key } => self.item_text_attrs(key),
-            Part::ItemIndicator { ref key } => self.item_indicator_attrs(key),
-            Part::Separator => self.separator_attrs(),
-            Part::CheckboxItem { ref key } => self.checkbox_item_attrs(key),
-            Part::RadioGroup { ref group } => self.radio_group_attrs(group),
-            Part::RadioItem { ref key } => self.radio_item_attrs(key, &Key::default()),
-        }
-    }
-}
-```
+- `Part` uses scope `context-menu` and declares `Root`, `Target`, `Positioner`, `Arrow`,
+  `Content`, `ItemGroup`, `ItemGroupLabel`, `Item`, `ItemText`, `ItemIndicator`, `Separator`,
+  `CheckboxItem`, `RadioGroup`, `RadioItem`, `SubTrigger`, `SubPositioner`, `SubContent`,
+  and `Shortcut`.
+- `root_attrs()` emits scope/part data attrs and disabled data state.
+- `target_attrs()` emits stable id, `aria-haspopup="menu"`, `aria-expanded`,
+  `aria-controls`, and disabled attrs.
+- `content_attrs()` emits stable id, `role="menu"`, `tabindex="-1"`, and
+  `aria-labelledby` pointing to the target.
+- Item attrs emit role, roving tabindex, highlighted/disabled data attrs, and
+  `aria-keyshortcuts` when present on `menu::Item`.
+- Checkbox/radio attrs emit `aria-checked`; submenu attrs emit `aria-haspopup`,
+  `aria-expanded`, `aria-controls`, and submenu content labeling.
+- `on_target_contextmenu(x, y)` dispatches `ContextOpen { x, y }` when enabled.
+- `on_target_keydown(data, x, y)` dispatches keyboard context-menu open for `Shift+F10` or
+  the Context Menu key when enabled, using adapter-resolved target anchor coordinates.
+- `on_content_keydown(_at)` handles vertical navigation, Home/End, Escape, submenu
+  open/close keys, Enter/Space activation, and printable typeahead with adapter-provided
+  timestamps when available.
+- `on_item_click`, `on_item_pointer_enter`, and `on_content_pointer_leave` dispatch typed
+  highlight/activation events.
 
 ## 2. Anatomy
 
@@ -788,6 +265,11 @@ ContextMenu
 │       │   └── RadioItem (×N)  role="menuitemradio"
 │       │       ├── ItemText
 │       │       └── ItemIndicator
+│       ├── SubTrigger    (×N)  role="menuitem" aria-haspopup="menu"
+│       │   ├── ItemText
+│       │   └── Shortcut   (optional)
+│       ├── SubPositioner (×N)
+│       │   └── SubContent (×N) role="menu"
 │       └── Separator
 ```
 
@@ -806,6 +288,10 @@ ContextMenu
 | `CheckboxItem`   | `[data-ars-scope="context-menu"][data-ars-part="checkbox-item"]`    | `<div>`  | `role="menuitemcheckbox"`                             |
 | `RadioGroup`     | `[data-ars-scope="context-menu"][data-ars-part="radio-group"]`      | `<div>`  | `role="group"`                                        |
 | `RadioItem`      | `[data-ars-scope="context-menu"][data-ars-part="radio-item"]`       | `<div>`  | `role="menuitemradio"`                                |
+| `SubTrigger`     | `[data-ars-scope="context-menu"][data-ars-part="sub-trigger"]`      | `<div>`  | Submenu trigger (`role="menuitem"`)                   |
+| `SubPositioner`  | `[data-ars-scope="context-menu"][data-ars-part="sub-positioner"]`   | `<div>`  | Adapter-positioned submenu wrapper                    |
+| `SubContent`     | `[data-ars-scope="context-menu"][data-ars-part="sub-content"]`      | `<div>`  | Submenu panel (`role="menu"`)                         |
+| `Shortcut`       | `[data-ars-scope="context-menu"][data-ars-part="shortcut"]`         | `<span>` | Visual keyboard shortcut hint                         |
 | `Separator`      | `[data-ars-scope="context-menu"][data-ars-part="separator"]`        | `<hr>`   | `role="separator"`                                    |
 
 ## 3. Accessibility
@@ -835,16 +321,24 @@ which does not support `aria-activedescendant`.
 | `role`            | `Separator`     | `"separator"`                                                       |
 | `role`            | `ItemGroup`     | `"group"`                                                           |
 | `aria-labelledby` | `ItemGroup`     | ItemGroupLabel element id                                           |
+| `role`            | `SubTrigger`    | `"menuitem"`                                                        |
+| `aria-haspopup`   | `SubTrigger`    | `"menu"`                                                            |
+| `aria-expanded`   | `SubTrigger`    | `"true"` when that submenu is open, `"false"` otherwise             |
+| `aria-controls`   | `SubTrigger`    | SubContent element id                                               |
+| `role`            | `SubContent`    | `"menu"`                                                            |
+| `aria-labelledby` | `SubContent`    | SubTrigger item element id                                          |
 | `aria-hidden`     | `Arrow`         | `"true"`                                                            |
 | `aria-hidden`     | `ItemIndicator` | `"true"`                                                            |
+| `aria-hidden`     | `Shortcut`      | `"true"`                                                            |
 
 **Menu Item Types** (same as Menu):
 
 1. Action items: `role="menuitem"`.
 2. Checkbox items: `role="menuitemcheckbox"` with `aria-checked`.
 3. Radio items: `role="menuitemradio"` with `aria-checked`.
-4. Item type is an explicit prop on `menu::Item`, not inferred.
-5. Mixed types in the same context menu are valid and follow WAI-ARIA Menu pattern.
+4. Submenu trigger items: `role="menuitem"` with `aria-haspopup="menu"`.
+5. Item type is an explicit prop on `menu::Item`, not inferred.
+6. Mixed types in the same context menu are valid and follow WAI-ARIA Menu pattern.
 
 ### 3.2 Keyboard Interaction
 
@@ -870,12 +364,11 @@ already open, it repositions to the new coordinates.
 
 ### 3.3 Focus Management
 
-- **On open**: Focus moves to the Content element, then immediately to the first enabled
-  item via the `position_at_point` effect. The positioner anchors at the `(x, y)` coordinates
-  from the pointer event.
-- **On close**: Focus returns to the Target element via the `focus_target` effect. This
-  applies to all close triggers: Escape, clicking outside, and selecting an action item
-  (when `close_on_action` is true).
+- **On open**: The machine stores the pointer `(x, y)` coordinates and highlights the
+  first enabled item. The adapter uses that position and highlight intent to place the
+  menu and move live focus.
+- **On close**: The machine clears open state, highlight, submenu state, typeahead state,
+  and pointer position. The adapter returns focus to the Target element.
 - **Shift+F10 open**: When opened via keyboard (`Shift+F10`), the adapter resolves the
   target element's bounding rectangle center as the `(x, y)` position. The menu appears
   near the focused target rather than at arbitrary coordinates.
@@ -885,8 +378,8 @@ already open, it repositions to the new coordinates.
 
 ## 4. Internationalization
 
-- **RTL**: No arrow key direction reversal needed — ContextMenu does not have submenu
-  navigation. ArrowDown/ArrowUp always mean next/previous regardless of text direction.
+- **RTL**: Vertical ArrowDown/ArrowUp navigation is stable. Submenu open/close direction
+  follows the same locale-aware ArrowRight/ArrowLeft convention as Menu.
 - **Typeahead**: Locale-aware via `Collator` for character matching.
 - **Separator**: Decorative — no localization needed.
 
@@ -915,25 +408,25 @@ are consumer-provided via `menu::Item.label`.
 
 ### 5.2 Anatomy
 
-| Part           | ars-ui           | Ark UI                   | Radix UI                            | Notes                                                        |
-| -------------- | ---------------- | ------------------------ | ----------------------------------- | ------------------------------------------------------------ |
-| Root           | `Root`           | `Root`                   | `Root`                              | --                                                           |
-| Target         | `Target`         | `ContextTrigger`         | `Trigger`                           | ars-ui names it `Target` to distinguish from button triggers |
-| Positioner     | `Positioner`     | `Positioner`             | `Portal`                            | --                                                           |
-| Arrow          | `Arrow`          | `Arrow` + `ArrowTip`     | `Arrow`                             | --                                                           |
-| Content        | `Content`        | `Content`                | `Content`                           | --                                                           |
-| Item           | `Item`           | `Item`                   | `Item`                              | --                                                           |
-| ItemText       | `ItemText`       | `ItemText`               | --                                  | --                                                           |
-| ItemIndicator  | `ItemIndicator`  | `ItemIndicator`          | `ItemIndicator`                     | --                                                           |
-| ItemGroup      | `ItemGroup`      | `ItemGroup`              | `Group`                             | --                                                           |
-| ItemGroupLabel | `ItemGroupLabel` | `ItemGroupLabel`         | `Label`                             | --                                                           |
-| CheckboxItem   | `CheckboxItem`   | `CheckboxItem`           | `CheckboxItem`                      | --                                                           |
-| RadioGroup     | `RadioGroup`     | `RadioItemGroup`         | `RadioGroup`                        | --                                                           |
-| RadioItem      | `RadioItem`      | `RadioItem`              | `RadioItem`                         | --                                                           |
-| Separator      | `Separator`      | `Separator`              | `Separator`                         | --                                                           |
-| Sub (submenu)  | --               | Yes (nested `Menu.Root`) | `Sub` + `SubTrigger` + `SubContent` | ars-ui ContextMenu does not support submenus                 |
+| Part           | ars-ui                      | Ark UI                   | Radix UI                            | Notes                                                        |
+| -------------- | --------------------------- | ------------------------ | ----------------------------------- | ------------------------------------------------------------ |
+| Root           | `Root`                      | `Root`                   | `Root`                              | --                                                           |
+| Target         | `Target`                    | `ContextTrigger`         | `Trigger`                           | ars-ui names it `Target` to distinguish from button triggers |
+| Positioner     | `Positioner`                | `Positioner`             | `Portal`                            | --                                                           |
+| Arrow          | `Arrow`                     | `Arrow` + `ArrowTip`     | `Arrow`                             | --                                                           |
+| Content        | `Content`                   | `Content`                | `Content`                           | --                                                           |
+| Item           | `Item`                      | `Item`                   | `Item`                              | --                                                           |
+| ItemText       | `ItemText`                  | `ItemText`               | --                                  | --                                                           |
+| ItemIndicator  | `ItemIndicator`             | `ItemIndicator`          | `ItemIndicator`                     | --                                                           |
+| ItemGroup      | `ItemGroup`                 | `ItemGroup`              | `Group`                             | --                                                           |
+| ItemGroupLabel | `ItemGroupLabel`            | `ItemGroupLabel`         | `Label`                             | --                                                           |
+| CheckboxItem   | `CheckboxItem`              | `CheckboxItem`           | `CheckboxItem`                      | --                                                           |
+| RadioGroup     | `RadioGroup`                | `RadioItemGroup`         | `RadioGroup`                        | --                                                           |
+| RadioItem      | `RadioItem`                 | `RadioItem`              | `RadioItem`                         | --                                                           |
+| Separator      | `Separator`                 | `Separator`              | `Separator`                         | --                                                           |
+| Sub (submenu)  | `SubTrigger` + `SubContent` | Yes (nested `Menu.Root`) | `Sub` + `SubTrigger` + `SubContent` | Adapter owns live submenu positioning                        |
 
-**Gaps:** None. Submenus are intentionally omitted from ContextMenu -- context menus should be shallow. Use the `Menu` component for submenu-capable menus.
+**Gaps:** None.
 
 ### 5.3 Events
 
@@ -959,12 +452,12 @@ are consumer-provided via `menu::Item.label`.
 | Pointer-positioned      | Yes    | Yes                     | Yes                      |
 | Disabled items          | Yes    | Yes                     | Yes                      |
 | Separator               | Yes    | Yes                     | Yes                      |
-| Submenus                | No     | Yes (via nested `Menu`) | Yes (`Sub`/`SubContent`) |
+| Submenus                | Yes    | Yes (via nested `Menu`) | Yes (`Sub`/`SubContent`) |
 
-**Gaps:** None. Submenu omission is an intentional design decision -- context menus should be flat.
+**Gaps:** None.
 
 ### 5.5 Summary
 
 - **Overall:** Full parity -- no gaps identified.
-- **Divergences:** (1) ars-ui uses a separate `ContextMenu` component; Ark UI uses the same `Menu` component with a `ContextTrigger` part; (2) ars-ui names the trigger area `Target` (not `Trigger`) to distinguish from button-click triggers; (3) Submenus are intentionally not supported in ContextMenu -- use `Menu` for submenu-capable menus.
+- **Divergences:** (1) ars-ui uses a separate `ContextMenu` component; Ark UI uses the same `Menu` component with a `ContextTrigger` part; (2) ars-ui names the trigger area `Target` (not `Trigger`) to distinguish from button-click triggers.
 - **Recommended additions:** None.

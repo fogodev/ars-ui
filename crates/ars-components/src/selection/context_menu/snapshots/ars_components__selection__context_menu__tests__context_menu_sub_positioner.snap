@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/selection/context_menu/mod.rs
+expression: "snapshot_attrs(&api.sub_positioner_attrs(&key(\"delta\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "sub-positioner",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "context-menu",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "context-menu-sub-delta-positioner",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -34,6 +34,7 @@ mod form;
 mod form_submit;
 mod group;
 mod heading;
+#[cfg(feature = "i18n")]
 mod highlight;
 mod keyboard;
 mod landmark;

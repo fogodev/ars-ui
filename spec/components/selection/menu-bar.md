@@ -69,6 +69,10 @@ pub enum Event {
     },
     /// Blur the menu bar.
     Blur,
+    /// Update the top-level menu collection dynamically.
+    UpdateMenus(StaticCollection<Menu>),
+    /// Synchronize context values derived from updated props.
+    SyncProps,
 }
 ```
 
@@ -129,6 +133,33 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
+The agnostic implementation owns top-level menu collection state, active-menu intent, focused
+trigger intent, focus-visible state, ids, orientation, direction, and loop-focus behavior. It uses
+`NoEffect`: adapters consume state transitions to move live focus, position menu content, and
+attach dismissal resources.
+
+Transition requirements:
+
+- `ActivateMenu(key)` validates that `key` exists, enters `State::Active { menu: key }`, and
+  stores both `active_menu` and `focused_item`.
+- `DeactivateMenu` and `Close` clear `active_menu` while preserving the focused trigger.
+- `FocusItem(key)` validates that `key` exists. In inactive state it only moves trigger focus;
+  in active state it also switches the active menu to that trigger.
+- `Focus { is_keyboard }` updates focus-visible state and initializes focus to the first menu
+  if no trigger is focused.
+- `Blur` returns to inactive state, clears active/focus-visible state, and preserves or
+  restores a focused trigger so one enabled menu trigger remains tabbable.
+- `MoveToNextMenu` and `MoveToPrevMenu` use collection order and `loop_focus`; in active
+  state they switch the active menu, and in inactive state they only move focused trigger.
+- `UpdateMenus` replaces the top-level collection and invalidates stale active/focused keys;
+  if the active menu key is removed, the machine transitions to `Inactive`; when enabled,
+  it restores focus to the first menu if no focused trigger remains.
+- `SyncProps` updates ids; when the menubar becomes disabled, it transitions to `Inactive`
+  and clears active/focused/focus-visible state; when it becomes enabled again, it restores
+  focus to the first menu if no focused trigger remains.
+- Keyboard dispatch helpers resolve `Direction::Auto` through `Context::locale` before
+  applying Left/Right semantics.
+
 ```rust
 pub struct Machine;
 
@@ -137,410 +168,37 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
-    type Api<'a> = Api<'a>;
     type Messages = Messages;
-
-    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let locale = env.locale.clone();
-        let messages = messages.clone();
-        let ctx = Context {
-            locale,
-            menus: StaticCollection::default(),
-            active_menu: None,
-            focused_item: None,
-            focus_visible: false,
-            ids: ComponentIds::from_id(&props.id),
-            messages,
-        };
-        (State::Inactive, ctx)
-    }
-
-    fn transition(
-        state: &Self::State,
-        event: &Self::Event,
-        ctx: &Self::Context,
-        _props: &Self::Props,
-    ) -> Option<TransitionPlan<Self>> {
-        match (state, event) {
-            // ActivateMenu: open the menu, enter Active state
-            (_, Event::ActivateMenu(key)) => {
-                let key = key.clone();
-                Some(TransitionPlan::to(State::Active { menu: key.clone() }).apply(move |ctx| {
-                    ctx.active_menu = Some(key.clone());
-                    ctx.focused_item = Some(key);
-                }).with_effect(PendingEffect::new("focus_menu_content", |ctx, _props, _send| {
-                    if let Some(ref menu_key) = ctx.active_menu {
-                        let platform = use_platform_effects();
-                        let content_id = ctx.ids.item("menu-content", &menu_key);
-                        platform.focus_element_by_id(&content_id);
-                    }
-                    no_cleanup()
-                })))
-            }
-
-            // MoveToNextMenu: in Active state, close current, open next
-            (State::Active { .. }, Event::MoveToNextMenu) => {
-                let next = match &ctx.focused_item {
-                    Some(k) => ctx.menus.key_after(k),
-                    None => ctx.menus.first_key().cloned(),
-                };
-                // Wrap around
-                let next = next.or_else(|| ctx.menus.first_key().cloned());
-                if let Some(next_key) = next {
-                    let nk = next_key.clone();
-                    Some(TransitionPlan::to(State::Active { menu: next_key }).apply(move |ctx| {
-                        ctx.active_menu = Some(nk.clone());
-                        ctx.focused_item = Some(nk);
-                    }).with_effect(PendingEffect::new("focus_menu_content", |ctx, _props, _send| {
-                        if let Some(ref menu_key) = ctx.active_menu {
-                            let platform = use_platform_effects();
-                            let content_id = ctx.ids.item("menu-content", &menu_key);
-                            platform.focus_element_by_id(&content_id);
-                        }
-                        no_cleanup()
-                    })))
-                } else {
-                    None
-                }
-            }
-
-            // Deactivate or Close — return to Inactive
-            (State::Active { .. }, Event::DeactivateMenu) |
-            (State::Active { .. }, Event::Close) => {
-                Some(TransitionPlan::to(State::Inactive).apply(|ctx| {
-                    ctx.active_menu = None;
-                }))
-            }
-
-            // MoveToPrevMenu — mirror of MoveToNextMenu with reverse direction
-            (State::Active { .. }, Event::MoveToPrevMenu) => {
-                let prev = match &ctx.focused_item {
-                    Some(k) => ctx.menus.key_before(k),
-                    None => ctx.menus.last_key().cloned(),
-                };
-
-                let prev = prev.or_else(|| ctx.menus.last_key().cloned());
-
-                if let Some(prev_key) = prev {
-                    let pk = prev_key.clone();
-
-                    Some(TransitionPlan::to(State::Active { menu: prev_key }).apply(move |ctx| {
-                        ctx.active_menu = Some(pk.clone());
-                        ctx.focused_item = Some(pk);
-                    }).with_effect(PendingEffect::new("focus_menu_content", |ctx, _props, _send| {
-                        if let Some(ref menu_key) = ctx.active_menu {
-                            let platform = use_platform_effects();
-                            let content_id = ctx.ids.item("menu-content", &menu_key);
-                            platform.focus_element_by_id(&content_id);
-                        }
-                        no_cleanup()
-                    })))
-                } else {
-                    None
-                }
-            }
-
-            // FocusItem — focus a specific top-level trigger by Key (Inactive)
-            (State::Inactive, Event::FocusItem(key)) => {
-                let key = key.clone();
-
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.focused_item = Some(key);
-                }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                    if let Some(ref item_key) = ctx.focused_item {
-                        let platform = use_platform_effects();
-                        let trigger_id = ctx.ids.item("trigger", &item_key);
-                        platform.focus_element_by_id(&trigger_id);
-                    }
-                    no_cleanup()
-                })))
-            }
-
-            // FocusItem — in Active state, focusing a different trigger switches the open menu
-            (State::Active { .. }, Event::FocusItem(key)) => {
-                let key = key.clone();
-
-                Some(TransitionPlan::to(State::Active { menu: key.clone() }).apply(move |ctx| {
-                    ctx.active_menu = Some(key.clone());
-                    ctx.focused_item = Some(key);
-                }).with_effect(PendingEffect::new("focus_menu_content", |ctx, _props, _send| {
-                    if let Some(ref menu_key) = ctx.active_menu {
-                        let platform = use_platform_effects();
-                        let content_id = ctx.ids.item("menu-content", &menu_key);
-                        platform.focus_element_by_id(&content_id);
-                    }
-                    no_cleanup()
-                })))
-            }
-
-            // Focus — keyboard/pointer focus on the menubar root
-            (State::Inactive, Event::Focus { is_keyboard }) => {
-                let is_kb = *is_keyboard;
-                let first = ctx.menus.first_key().cloned();
-
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.focus_visible = is_kb;
-                    if ctx.focused_item.is_none() {
-                        ctx.focused_item = first;
-                    }
-                }))
-            }
-
-            // Blur — return to Inactive from any state
-            (_, Event::Blur) => {
-                Some(TransitionPlan::to(State::Inactive).apply(|ctx| {
-                    ctx.active_menu = None;
-                    ctx.focused_item = None;
-                    ctx.focus_visible = false;
-                }))
-            }
-
-            // In Inactive state, MoveToNextMenu moves focus between triggers without opening
-            (State::Inactive, Event::MoveToNextMenu) => {
-                let next = match &ctx.focused_item {
-                    Some(k) => ctx.menus.key_after(k),
-                    None => ctx.menus.first_key().cloned(),
-                };
-
-                let next = next.or_else(|| ctx.menus.first_key().cloned());
-
-                if let Some(next_key) = next {
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.focused_item = Some(next_key);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(ref item_key) = ctx.focused_item {
-                            let platform = use_platform_effects();
-                            let trigger_id = ctx.ids.item("trigger", &item_key);
-                            platform.focus_element_by_id(&trigger_id);
-                        }
-                        no_cleanup()
-                    })))
-                } else {
-                    None
-                }
-            }
-
-            // In Inactive state, MoveToPrevMenu moves focus between triggers without opening
-            (State::Inactive, Event::MoveToPrevMenu) => {
-                let prev = match &ctx.focused_item {
-                    Some(k) => ctx.menus.key_before(k),
-                    None => ctx.menus.last_key().cloned(),
-                };
-
-                let prev = prev.or_else(|| ctx.menus.last_key().cloned());
-
-                if let Some(prev_key) = prev {
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.focused_item = Some(prev_key);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(ref item_key) = ctx.focused_item {
-                            let platform = use_platform_effects();
-                            let trigger_id = ctx.ids.item("trigger", &item_key);
-                            platform.focus_element_by_id(&trigger_id);
-                        }
-                        no_cleanup()
-                    })))
-                } else {
-                    None
-                }
-            }
-
-            _ => None,
-        }
-    }
-
-    fn connect<'a>(
-        state: &'a Self::State,
-        ctx: &'a Self::Context,
-        props: &'a Self::Props,
-        send: &'a dyn Fn(Self::Event),
-    ) -> Self::Api<'a> {
-        Api { state, ctx, props, send }
-    }
+    type Effect = NoEffect;
+    type Api<'a> = Api<'a>;
 }
 ```
 
 ### 1.6 Connect / API
 
-```rust
-#[derive(ComponentPart)]
-#[scope = "menu-bar"]
-pub enum Part {
-    Root,
-    Menu { key: Key },
-    MenuTrigger { key: Key },
-    MenuPositioner { key: Key },
-    MenuContent { key: Key },
-}
+The connect API derives DOM-facing attrs and event dispatch helpers for the top-level menu
+strip. Nested menu content uses the separate `Menu` component contract.
 
-/// API for the MenuBar component.
-pub struct Api<'a> {
-    state: &'a State,
-    ctx: &'a Context,
-    props: &'a Props,
-    send: &'a dyn Fn(Event),
-}
+Required public pieces:
 
-impl<'a> Api<'a> {
-    /// Attributes for the root menubar container.
-    pub fn root_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Role, "menubar");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), "horizontal");
-        if self.props.disabled { attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
-        attrs
-    }
-
-    /// Attributes for a top-level menu wrapper.
-    pub fn menu_attrs(&self, key: &Key) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Menu { key: Key::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.item("menu", key));
-        attrs
-    }
-
-    /// Attributes for a top-level menu trigger button.
-    pub fn menu_trigger_attrs(&self, key: &Key) -> AttrMap {
-        let trigger_id = self.ctx.ids.item("trigger", key);
-        let content_id = self.ctx.ids.item("menu-content", key);
-        let is_active = self.ctx.active_menu.as_ref() == Some(key);
-        let is_focused = self.ctx.focused_item.as_ref() == Some(key);
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::MenuTrigger { key: Key::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, trigger_id);
-        attrs.set(HtmlAttr::Role, "menuitem");
-        attrs.set(HtmlAttr::Aria(AriaAttr::HasPopup), "menu");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if is_active { "true" } else { "false" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), content_id);
-        attrs.set(HtmlAttr::TabIndex, if is_focused { "0" } else { "-1" });
-        if is_active { attrs.set_bool(HtmlAttr::Data("ars-active"), true); }
-        if self.props.disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); }
-        attrs
-    }
-
-    /// Attributes for a menu positioner wrapper.
-    pub fn menu_positioner_attrs(&self, key: &Key) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::MenuPositioner { key: Key::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.item_part("menu", key, "positioner"));
-        attrs
-    }
-
-    /// Attributes for a menu content panel.
-    pub fn menu_content_attrs(&self, key: &Key) -> AttrMap {
-        let content_id = self.ctx.ids.item("menu-content", key);
-        let trigger_id = self.ctx.ids.item("trigger", key);
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::MenuContent { key: Key::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, content_id);
-        attrs.set(HtmlAttr::Role, "menu");
-        attrs.set(HtmlAttr::TabIndex, "-1");
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), trigger_id);
-        attrs
-    }
-
-    /// Handle click on a menu trigger.
-    pub fn on_trigger_click(&self, key: &Key) {
-        if self.ctx.active_menu.as_ref() == Some(key) {
-            (self.send)(Event::DeactivateMenu);
-        } else {
-            (self.send)(Event::ActivateMenu(key.clone()));
-        }
-    }
-
-    /// Handle keydown on a menu trigger.
-    pub fn on_trigger_keydown(&self, key: &Key, data: &KeyboardEventData) {
-        let menu_key = key.clone();
-        match data.key {
-            KeyboardKey::ArrowDown | KeyboardKey::Enter | KeyboardKey::Space => {
-                (self.send)(Event::ActivateMenu(menu_key));
-            }
-            KeyboardKey::ArrowRight => {
-                if self.props.dir == Direction::Rtl {
-                    (self.send)(Event::MoveToPrevMenu);
-                } else {
-                    (self.send)(Event::MoveToNextMenu);
-                }
-            }
-            KeyboardKey::ArrowLeft => {
-                if self.props.dir == Direction::Rtl {
-                    (self.send)(Event::MoveToNextMenu);
-                } else {
-                    (self.send)(Event::MoveToPrevMenu);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Handle pointer enter on a menu trigger (switches open menu in Active state).
-    pub fn on_trigger_pointer_enter(&self, key: &Key) {
-        if self.ctx.active_menu.is_some() {
-            (self.send)(Event::FocusItem(key.clone()));
-        }
-    }
-
-    /// Handle keydown on menu content (delegates to inner Menu for item navigation;
-    /// handles ArrowLeft/Right to switch between top-level menus).
-    pub fn on_content_keydown(&self, data: &KeyboardEventData) {
-        match data.key {
-            KeyboardKey::ArrowRight => {
-                if self.props.dir == Direction::Rtl {
-                    (self.send)(Event::MoveToPrevMenu);
-                } else {
-                    (self.send)(Event::MoveToNextMenu);
-                }
-            }
-            KeyboardKey::ArrowLeft => {
-                if self.props.dir == Direction::Rtl {
-                    (self.send)(Event::MoveToNextMenu);
-                } else {
-                    (self.send)(Event::MoveToPrevMenu);
-                }
-            }
-            KeyboardKey::Escape => {
-                (self.send)(Event::Close);
-            }
-            _ => {}
-        }
-    }
-
-    /// Handle focus on the menu bar root.
-    pub fn on_root_focus(&self, data: &FocusEventData) {
-        (self.send)(Event::Focus { is_keyboard: data.is_keyboard });
-    }
-
-    /// Handle blur on the menu bar root.
-    pub fn on_root_blur(&self) {
-        (self.send)(Event::Blur);
-    }
-}
-
-impl ConnectApi for Api<'_> {
-    type Part = Part;
-
-    fn part_attrs(&self, part: Part) -> AttrMap {
-        match part {
-            Part::Root => self.root_attrs(),
-            Part::Menu { ref key } => self.menu_attrs(key),
-            Part::MenuTrigger { ref key } => self.menu_trigger_attrs(key),
-            Part::MenuPositioner { ref key } => self.menu_positioner_attrs(key),
-            Part::MenuContent { ref key } => self.menu_content_attrs(key),
-        }
-    }
-}
-```
+- `Part` uses scope `menu-bar` and declares `Root`, `Menu`, `MenuTrigger`,
+  `MenuPositioner`, and `MenuContent`.
+- `root_attrs()` emits scope/part data attrs, `role="menubar"`, and
+  `aria-orientation` from `Props::orientation`.
+- `menu_attrs(key)` emits the top-level menu wrapper id.
+- `menu_trigger_attrs(key)` emits stable id, `role="menuitem"`, `aria-haspopup="menu"`,
+  `aria-expanded`, `aria-controls`, roving `tabindex`, active/focused data attrs, and
+  disabled attrs.
+- `menu_positioner_attrs(key)` and `menu_content_attrs(key)` emit stable ids; content emits
+  `role="menu"`, `tabindex="-1"`, and `aria-labelledby` pointing to the trigger.
+- `on_trigger_click(key)` toggles the active menu.
+- `on_trigger_keydown(key, data)` opens on Enter/Space, opens with the orientation-specific
+  submenu arrow, and moves with orientation-specific top-level traversal arrows
+  (Left/Right for horizontal, Up/Down for vertical, with horizontal RTL inversion).
+- `on_trigger_pointer_enter(key)` switches menus only while a menu is already active.
+- `on_content_keydown(data)` switches top-level menus on orientation-specific traversal
+  arrows and closes on Escape.
+- `on_root_focus(is_keyboard)` and `on_root_blur()` dispatch focus/blur state events.
 
 ## 2. Anatomy
 
@@ -551,9 +209,10 @@ impl ConnectApi for Api<'_> {
 | `MenuTrigger`    | `[data-ars-scope="menu-bar"][data-ars-part="menu-trigger"]`    | `<button>` |
 | `MenuPositioner` | `[data-ars-scope="menu-bar"][data-ars-part="menu-positioner"]` | `<div>`    |
 | `MenuContent`    | `[data-ars-scope="menu-bar"][data-ars-part="menu-content"]`    | `<div>`    |
-| `MenuItem`       | `[data-ars-scope="menu-bar"][data-ars-part="menu-item"]`       | `<div>`    |
 
-Plus all Menu item-type parts (`CheckboxItem`, `RadioItem`, `Separator`, `SubTrigger`, `SubContent`).
+Nested item-type parts (`Item`, `CheckboxItem`, `RadioItem`, `Separator`, `SubTrigger`,
+`SubContent`, and related parts) are delegated to the nested `Menu` component rendered inside
+`MenuContent`.
 
 ## 3. Accessibility
 
@@ -562,21 +221,23 @@ Plus all Menu item-type parts (`CheckboxItem`, `RadioItem`, `Separator`, `SubTri
 | Property           | Element       | Value                                        |
 | ------------------ | ------------- | -------------------------------------------- |
 | `role`             | `Root`        | `menubar`                                    |
-| `aria-orientation` | `Root`        | `horizontal`                                 |
+| `aria-orientation` | `Root`        | `"horizontal"` or `"vertical"` from props    |
 | `role`             | `MenuTrigger` | `menuitem`                                   |
 | `aria-haspopup`    | `MenuTrigger` | `menu`                                       |
 | `aria-expanded`    | `MenuTrigger` | `true` when menu is open                     |
-| `tabindex`         | `MenuTrigger` | Roving: active trigger gets `0`, others `-1` |
+| `tabindex`         | `MenuTrigger` | Roving: focused trigger gets `0`, others `-1`; when enabled and menus exist, exactly one trigger is tabbable |
 
 ### 3.2 Keyboard Interaction
 
-| Key             | Inactive Mode               | Active Mode                       |
-| --------------- | --------------------------- | --------------------------------- |
-| ArrowLeft/Right | Move focus between triggers | Close current, open adjacent menu |
-| ArrowDown       | Open current menu           | Navigate within menu              |
-| Enter / Space   | Open current menu           | Activate menu item                |
-| Escape          | ---                         | Close menu -> Inactive            |
-| Tab             | Leave menubar               | Close menu, leave menubar         |
+| Key                                    | Inactive Mode               | Active Mode                       |
+| -------------------------------------- | --------------------------- | --------------------------------- |
+| Horizontal ArrowLeft/Right             | Move focus between triggers | Close current, open adjacent menu |
+| Vertical ArrowUp/Down                  | Move focus between triggers | Close current, open adjacent menu |
+| Horizontal ArrowDown                   | Open current menu           | Navigate within menu              |
+| Vertical ArrowRight (LTR) / Left (RTL) | Open current menu           | Navigate within menu              |
+| Enter / Space                          | Open current menu           | Activate menu item                |
+| Escape                                 | ---                         | Close menu -> Inactive            |
+| Tab                                    | Leave menubar               | Close menu, leave menubar         |
 
 ## 4. Internationalization
 
@@ -587,7 +248,7 @@ Plus all Menu item-type parts (`CheckboxItem`, `RadioItem`, `Separator`, `SubTri
 #[derive(Clone, Debug)]
 pub struct Messages {
     // No component-generated text — all labels are consumer-provided.
-    // Struct exists for pattern conformance and future extension.
+    // Struct exists for pattern conformance with other component machines.
 }
 
 impl Default for Messages {

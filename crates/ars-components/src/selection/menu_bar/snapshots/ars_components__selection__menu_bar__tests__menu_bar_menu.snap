@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/selection/menu_bar/mod.rs
+expression: "snapshot_attrs(&api.menu_attrs(&key(\"file\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "menu",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "menu-bar",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "menu-bar-menu-file",
+            ),
+        ),
+    ],
+    styles: [],
+}
