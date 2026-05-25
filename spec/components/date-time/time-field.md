@@ -95,8 +95,9 @@ pub struct Context {
     pub max_value: Option<Time>,
     /// Component IDs.
     pub ids: ComponentIds,
-    /// When true, all numeric segments display with leading zeros (e.g., "03"
-    /// instead of "3"). Defaults to false, which uses locale-aware formatting.
+    /// When true, all numeric segments display with localized leading zeros
+    /// (e.g., "03" instead of "3"). Defaults to false, which uses
+    /// locale-aware formatting without forced width.
     pub force_leading_zeros: bool,
 }
 
@@ -107,8 +108,8 @@ impl Context {
     /// Build segments from hour_cycle, granularity, and current value.
     ///
     /// When `self.force_leading_zeros` is true, numeric segments (hour,
-    /// minute, second) are always zero-padded to 2 digits. When false,
-    /// formatting uses locale-aware defaults.
+    /// minute, second) are always formatted with at least 2 localized digits.
+    /// When false, formatting uses locale-aware defaults without forced width.
     pub fn rebuild_segments(&mut self) {
         let cycle   = self.hour_cycle;
         let value   = self.value.get().clone();
@@ -212,16 +213,19 @@ impl Context {
     /// Set the value of a segment.
     ///
     /// When `self.force_leading_zeros` is true, numeric segments are always
-    /// zero-padded to 2 digits (hour, minute, second). When false, formatting
-    /// uses locale-aware defaults.
+    /// formatted with at least 2 localized digits (hour, minute, second). When
+    /// false, formatting uses locale-aware defaults without forced width.
     pub fn set_segment_value(&mut self, kind: DateSegmentKind, raw: i32) {
         if let Some(seg) = self.segment_mut(kind) {
             let v = raw.clamp(seg.min, seg.max);
             seg.value = Some(v);
             seg.text  = match kind {
                 DateSegmentKind::DayPeriod => day_period_label(&*self.intl_backend, v == 1, &self.locale),
-                _ if self.force_leading_zeros => format!("{:02}", v),
-                _ => format!("{}", v),
+                _ => self.intl_backend.format_segment_digits(
+                    u32::try_from(v).unwrap_or_default(),
+                    NonZeroU8::new(if self.force_leading_zeros { 2 } else { 1 }).unwrap(),
+                    &self.locale,
+                ),
             };
         }
     }
@@ -616,6 +620,7 @@ impl ars_core::Machine for Machine {
                     ctx.max_value = props.max_value;
                     ctx.granularity = props.granularity;
                     ctx.hour_cycle = props.hour_cycle.unwrap_or(ctx.hour_cycle);
+                    ctx.ids = ComponentIds::from_id(&props.id);
                     ctx.force_leading_zeros = props.force_leading_zeros;
                     if let Some(value) = props.value {
                         let clamped = clamp_time(value, ctx.min_value.as_ref(), ctx.max_value.as_ref());
@@ -856,10 +861,14 @@ impl ars_core::Machine for Machine {
 
             Event::SetValue(v) => {
                 let v = v.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.value.set(v);
-                    ctx.rebuild_segments();
-                }))
+                Some(
+                    TransitionPlan::context_only(move |ctx| {
+                        ctx.value.set(v);
+                        ctx.type_buffer.clear();
+                        ctx.rebuild_segments();
+                    })
+                    .cancel_effect(Effect::TypeBufferCommit),
+                )
             }
         }
     }
@@ -1065,6 +1074,10 @@ impl<'a> Api<'a> {
         shift: bool,
         direction: Direction,
     ) {
+        if data.is_composing {
+            return;
+        }
+
         match data.key {
             KeyboardKey::ArrowUp => (self.send)(Event::IncrementSegment { kind }),
             KeyboardKey::ArrowDown => (self.send)(Event::DecrementSegment { kind }),

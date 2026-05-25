@@ -1,10 +1,10 @@
 use alloc::{string::String, sync::Arc};
-use core::cell::RefCell;
+use core::{cell::RefCell, num::NonZeroU8};
 
 use ars_core::{
     AriaAttr, AttrMap, ConnectApi, Direction, Env, HtmlAttr, KeyboardKey, Service, StubIntlBackend,
 };
-use ars_i18n::{HourCycle, Locale, Time};
+use ars_i18n::{HourCycle, IntlBackend, Locale, Time, WeekInfo, Weekday};
 use ars_interactions::KeyboardEventData;
 use insta::assert_snapshot;
 
@@ -28,6 +28,44 @@ fn env(locale: &str) -> Env {
         Locale::parse(locale).expect("test locale should parse"),
         Arc::new(StubIntlBackend),
     )
+}
+
+struct LocalizedDigitsBackend;
+
+impl IntlBackend for LocalizedDigitsBackend {
+    fn weekday_short_label(&self, weekday: Weekday, locale: &Locale) -> String {
+        StubIntlBackend.weekday_short_label(weekday, locale)
+    }
+
+    fn weekday_long_label(&self, weekday: Weekday, locale: &Locale) -> String {
+        StubIntlBackend.weekday_long_label(weekday, locale)
+    }
+
+    fn month_long_name(&self, month: u8, locale: &Locale) -> String {
+        StubIntlBackend.month_long_name(month, locale)
+    }
+
+    fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
+        StubIntlBackend.day_period_label(is_pm, locale)
+    }
+
+    fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
+        StubIntlBackend.day_period_from_char(ch, locale)
+    }
+
+    fn format_segment_digits(&self, value: u32, min_digits: NonZeroU8, _locale: &Locale) -> String {
+        let width = usize::from(min_digits.get());
+
+        format!("loc-{value:0>width$}")
+    }
+
+    fn hour_cycle(&self, locale: &Locale) -> HourCycle {
+        StubIntlBackend.hour_cycle(locale)
+    }
+
+    fn week_info(&self, locale: &Locale) -> WeekInfo {
+        StubIntlBackend.week_info(locale)
+    }
 }
 
 fn snapshot_attrs(attrs: &AttrMap) -> String {
@@ -158,6 +196,23 @@ fn keydown_respects_ltr_and_rtl_arrow_direction() {
 
     assert_eq!(sent.borrow()[0], Event::FocusNextSegment);
     assert_eq!(sent.borrow()[1], Event::FocusPrevSegment);
+}
+
+#[test]
+fn keydown_suppresses_character_input_during_composition() {
+    let service = service();
+
+    let sent = RefCell::new(Vec::new());
+    let send = |event| sent.borrow_mut().push(event);
+
+    let api = service.connect(&send);
+    let mut data = key_data(KeyboardKey::Unidentified, Some('5'));
+
+    data.is_composing = true;
+
+    api.on_segment_keydown(DateSegmentKind::Hour, &data, false, Direction::Ltr);
+
+    assert!(sent.borrow().is_empty());
 }
 
 #[test]
@@ -526,6 +581,40 @@ fn hidden_input_renders_iso_time_and_name() {
 }
 
 #[test]
+fn forced_leading_zeros_keep_backend_localized_digits() {
+    let service = Service::<Machine>::new(
+        props()
+            .default_value(Some(time(3, 5, 0)))
+            .hour_cycle(Some(HourCycle::H23))
+            .force_leading_zeros(true),
+        &Env::new(
+            Locale::parse("ar").expect("test locale should parse"),
+            Arc::new(LocalizedDigitsBackend),
+        ),
+        &Messages::default(),
+    );
+
+    assert_eq!(
+        service
+            .context()
+            .segments
+            .iter()
+            .find(|segment| segment.kind == DateSegmentKind::Hour)
+            .map(|segment| segment.text.as_str()),
+        Some("loc-03")
+    );
+    assert_eq!(
+        service
+            .context()
+            .segments
+            .iter()
+            .find(|segment| segment.kind == DateSegmentKind::Minute)
+            .map(|segment| segment.text.as_str()),
+        Some("loc-05")
+    );
+}
+
+#[test]
 fn readonly_blocks_editing_and_disabled_blocks_user_focus() {
     let mut readonly = Service::<Machine>::new(
         props().readonly(true),
@@ -566,6 +655,33 @@ fn readonly_blocks_editing_and_disabled_blocks_user_focus() {
 }
 
 #[test]
+fn set_value_clears_buffer_and_cancels_pending_commit() {
+    let mut service = Service::<Machine>::new(
+        props().hour_cycle(Some(HourCycle::H23)),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment {
+        kind: DateSegmentKind::Hour,
+    }));
+
+    let typing = service.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::Hour,
+        ch: '1',
+    });
+
+    assert_eq!(service.context().type_buffer, "1");
+    assert_eq!(typing.pending_effects.len(), 1);
+
+    let result = service.send(Event::SetValue(Some(time(10, 15, 0))));
+
+    assert_eq!(result.cancel_effects, vec![Effect::TypeBufferCommit]);
+    assert_eq!(service.context().type_buffer, "");
+    assert_eq!(service.context().value.get(), &Some(time(10, 15, 0)));
+}
+
+#[test]
 fn prop_sync_updates_context_backed_contract_without_replacing_ids() {
     let mut service = Service::<Machine>::new(props(), &Env::default(), &Messages::default());
 
@@ -594,6 +710,19 @@ fn prop_sync_updates_context_backed_contract_without_replacing_ids() {
         !ctx.segments
             .iter()
             .any(|segment| segment.kind == DateSegmentKind::DayPeriod)
+    );
+}
+
+#[test]
+fn prop_sync_updates_ids_without_panicking_when_id_changes() {
+    let mut service = Service::<Machine>::new(props(), &Env::default(), &Messages::default());
+
+    drop(service.set_props(props().id("rescheduled-time")));
+
+    assert_eq!(service.context().ids.id(), "rescheduled-time");
+    assert_eq!(
+        attr(&service.connect(&|_| {}).root_attrs(), HtmlAttr::Id),
+        Some("rescheduled-time")
     );
 }
 

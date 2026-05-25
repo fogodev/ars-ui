@@ -8,7 +8,6 @@ mod tests;
 
 use alloc::{
     boxed::Box,
-    format,
     string::{String, ToString},
     sync::Arc,
     vec,
@@ -693,11 +692,6 @@ impl ars_core::Machine for Machine {
     }
 
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
-        assert_eq!(
-            old.id, new.id,
-            "time_field::Props.id must remain stable after init"
-        );
-
         if old == new {
             Vec::new()
         } else {
@@ -899,9 +893,13 @@ impl ars_core::Machine for Machine {
 
             Event::SetValue(value) => {
                 let value = *value;
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    apply_value(ctx, value);
-                }))
+                Some(
+                    TransitionPlan::context_only(move |ctx: &mut Context| {
+                        apply_value(ctx, value);
+                        ctx.type_buffer.clear();
+                    })
+                    .cancel_effect(Effect::TypeBufferCommit),
+                )
             }
         }
     }
@@ -1254,6 +1252,10 @@ impl<'a> Api<'a> {
         shift: bool,
         dir: Direction,
     ) {
+        if data.is_composing {
+            return;
+        }
+
         let is_rtl = dir.is_rtl();
 
         match data.key {
@@ -1554,6 +1556,7 @@ fn sync_props(ctx: &mut Context, props: &Props) {
     ctx.readonly = props.readonly;
     ctx.min_value = props.min_value;
     ctx.max_value = props.max_value;
+    ctx.ids = ComponentIds::from_id(&props.id);
     ctx.force_leading_zeros = props.force_leading_zeros;
 
     if let Some(value) = props.value {
@@ -1843,13 +1846,17 @@ fn format_time_segment(
         return backend.day_period_label(value == 1, locale);
     }
 
-    if force_leading_zeros {
-        return format!("{value:02}");
-    }
+    let min_digits = if force_leading_zeros { 2 } else { 1 };
 
     u32::try_from(value).map_or_else(
         |_| value.to_string(),
-        |value| backend.format_segment_digits(value, NonZeroU8::new(1).expect("non-zero"), locale),
+        |value| {
+            backend.format_segment_digits(
+                value,
+                NonZeroU8::new(min_digits).expect("segment width is non-zero"),
+                locale,
+            )
+        },
     )
 }
 
