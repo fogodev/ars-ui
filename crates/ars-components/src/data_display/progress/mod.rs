@@ -202,6 +202,10 @@ impl Context {
     /// Computes the percentage value from the given value and bounds.
     #[must_use]
     pub fn compute_percent(value: Option<f64>, min: f64, max: f64) -> f64 {
+        if !valid_bounds(min, max) {
+            return 0.0;
+        }
+
         let (min, max) = normalize_bounds(min, max);
 
         if let Some(value) = value {
@@ -346,7 +350,7 @@ impl ars_core::Machine for Machine {
     ) -> (Self::State, Self::Context) {
         let value = props.value.unwrap_or(props.default_value);
         let percent = Context::compute_percent(value, props.min, props.max);
-        let state = state_for_value(value, props.max);
+        let state = state_for_value(value, props.min, props.max);
 
         (
             state,
@@ -378,15 +382,20 @@ impl ars_core::Machine for Machine {
                 let min = ctx.min;
                 let max = ctx.max;
                 let controlled_prop = props.value;
+                let effective_value = effective_event_value(value, controlled_prop);
 
-                Some(TransitionPlan::to(state_for_value(value, max)).apply(
-                    move |ctx: &mut Context| {
-                        set_context_value(ctx, value, controlled_prop);
+                Some(
+                    TransitionPlan::to(state_for_value(effective_value, min, max)).apply(
+                        move |ctx: &mut Context| {
+                            set_context_value(ctx, value, controlled_prop);
 
-                        ctx.indeterminate = value.is_none();
-                        ctx.percent = Context::compute_percent(value, min, max);
-                    },
-                ))
+                            let value = *ctx.value.get();
+
+                            ctx.indeterminate = value.is_none();
+                            ctx.percent = Context::compute_percent(value, min, max);
+                        },
+                    ),
+                )
             }
 
             Event::SetMax(max) => {
@@ -394,7 +403,7 @@ impl ars_core::Machine for Machine {
                 let value = *ctx.value.get();
                 let min = ctx.min;
 
-                Some(TransitionPlan::to(state_for_value(value, max)).apply(
+                Some(TransitionPlan::to(state_for_value(value, min, max)).apply(
                     move |ctx: &mut Context| {
                         ctx.max = max;
                         ctx.indeterminate = value.is_none();
@@ -405,26 +414,43 @@ impl ars_core::Machine for Machine {
 
             Event::Complete => {
                 let controlled_prop = props.value;
+                let value = effective_event_value(Some(ctx.max), controlled_prop);
 
                 Some(
-                    TransitionPlan::to(State::Complete).apply(move |ctx: &mut Context| {
-                        set_context_value(ctx, Some(ctx.max), controlled_prop);
+                    TransitionPlan::to(state_for_value(value, ctx.min, ctx.max)).apply(
+                        move |ctx: &mut Context| {
+                            set_context_value(ctx, Some(ctx.max), controlled_prop);
 
-                        ctx.indeterminate = false;
-                        ctx.percent = 100.0;
-                    }),
+                            let value = *ctx.value.get();
+
+                            ctx.indeterminate = value.is_none();
+                            ctx.percent = if controlled_prop.is_some() {
+                                Context::compute_percent(value, ctx.min, ctx.max)
+                            } else {
+                                100.0
+                            };
+                        },
+                    ),
                 )
             }
 
             Event::Reset => {
                 let controlled_prop = props.value;
+                let value = effective_event_value(None, controlled_prop);
+                let next_state = if controlled_prop.is_some() {
+                    state_for_value(value, ctx.min, ctx.max)
+                } else {
+                    State::Idle
+                };
 
                 Some(
-                    TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
+                    TransitionPlan::to(next_state).apply(move |ctx: &mut Context| {
                         set_context_value(ctx, None, controlled_prop);
 
-                        ctx.indeterminate = true;
-                        ctx.percent = 0.0;
+                        let value = *ctx.value.get();
+
+                        ctx.indeterminate = value.is_none();
+                        ctx.percent = Context::compute_percent(value, ctx.min, ctx.max);
                     }),
                 )
             }
@@ -436,7 +462,7 @@ impl ars_core::Machine for Machine {
                 let value = props.value.unwrap_or(props.default_value);
                 let controlled_prop = props.value;
 
-                Some(TransitionPlan::to(state_for_value(value, max)).apply(
+                Some(TransitionPlan::to(state_for_value(value, min, max)).apply(
                     move |ctx: &mut Context| {
                         ctx.min = min;
                         ctx.max = max;
@@ -679,10 +705,12 @@ fn part_attrs(part: &Part) -> AttrMap {
     attrs
 }
 
-fn state_for_value(value: Option<f64>, max: f64) -> State {
+fn state_for_value(value: Option<f64>, min: f64, max: f64) -> State {
     match value {
         None => State::Loading,
-        Some(value) if value.is_finite() && max.is_finite() && value >= max => State::Complete,
+        Some(value) if valid_bounds(min, max) && value.is_finite() && value >= max => {
+            State::Complete
+        }
         Some(_) => State::Idle,
     }
 }
@@ -696,7 +724,7 @@ const fn state_attr(state: State) -> &'static str {
 }
 
 fn set_context_value(ctx: &mut Context, value: Option<f64>, controlled_prop: Option<Option<f64>>) {
-    if controlled_prop.is_some() {
+    if let Some(value) = controlled_prop {
         ctx.value = Bindable::controlled(value);
     } else if ctx.value.is_controlled() {
         ctx.value = Bindable::uncontrolled(value);
@@ -706,19 +734,23 @@ fn set_context_value(ctx: &mut Context, value: Option<f64>, controlled_prop: Opt
 }
 
 fn sync_props_value(ctx: &mut Context, value: Option<f64>, controlled_prop: Option<Option<f64>>) {
-    if controlled_prop.is_some() {
+    if let Some(value) = controlled_prop {
         ctx.value = Bindable::controlled(value);
     } else if ctx.value.is_controlled() {
         ctx.value = Bindable::uncontrolled(value);
     }
 }
 
-fn normalize_bounds(min: f64, max: f64) -> (f64, f64) {
-    if min.is_finite() && max.is_finite() && min < max {
+const fn normalize_bounds(min: f64, max: f64) -> (f64, f64) {
+    if valid_bounds(min, max) {
         (min, max)
     } else {
         (0.0, 100.0)
     }
+}
+
+const fn valid_bounds(min: f64, max: f64) -> bool {
+    min.is_finite() && max.is_finite() && min < max
 }
 
 const fn clamp_value(value: f64, min: f64, max: f64) -> f64 {
@@ -726,6 +758,16 @@ const fn clamp_value(value: f64, min: f64, max: f64) -> f64 {
         value.clamp(min, max)
     } else {
         min
+    }
+}
+
+const fn effective_event_value(
+    event_value: Option<f64>,
+    controlled_prop: Option<Option<f64>>,
+) -> Option<f64> {
+    match controlled_prop {
+        Some(value) => value,
+        None => event_value,
     }
 }
 
@@ -853,6 +895,18 @@ mod tests {
             Context::compute_percent(Some(f64::INFINITY), 10.0, 80.0),
             0.0
         );
+        assert_eq!(Context::compute_percent(Some(50.0), 100.0, 100.0), 0.0);
+
+        let invalid_bounds = service(
+            Props::new()
+                .id("progress")
+                .default_value(50.0)
+                .min(100.0)
+                .max(0.0),
+        );
+
+        assert_eq!(invalid_bounds.state(), &State::Idle);
+        assert_eq!(invalid_bounds.connect(&|_| {}).value_text(), "0% complete");
     }
 
     #[test]
@@ -869,6 +923,8 @@ mod tests {
         drop(uncontrolled.send(Event::Reset));
 
         assert!(uncontrolled.context().value.is_controlled());
+        assert_eq!(uncontrolled.context().value.get(), &Some(50.0));
+        assert!(!uncontrolled.context().indeterminate);
 
         let mut controlled = service(Props::new().id("progress").value(Some(50.0)));
 

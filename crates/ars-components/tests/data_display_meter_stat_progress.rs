@@ -179,6 +179,11 @@ fn meter_computes_percent_segment_and_zone_attrs() {
         meter::Segment::SubOptimal,
         "default optimum is the midpoint"
     );
+    assert_eq!(
+        meter::compute_percent(50.0, 100.0, 100.0),
+        0.0,
+        "invalid bounds resolve to zero percent"
+    );
 
     let api = meter_api(
         meter::Props::new()
@@ -391,6 +396,10 @@ fn progress_props_builders_and_percent_math_match_contract() {
         progress::Context::compute_percent(Some(f64::INFINITY), 10.0, 80.0),
         0.0
     );
+    assert_eq!(
+        progress::Context::compute_percent(Some(50.0), 100.0, 100.0),
+        0.0
+    );
 }
 
 #[test]
@@ -452,6 +461,26 @@ fn progress_root_clamps_and_sanitizes_value_now() {
         api.range_attrs()
             .styles()
             .contains(&(CssProperty::Width, String::from("0%")))
+    );
+}
+
+#[test]
+fn progress_invalid_bounds_do_not_mark_complete() {
+    let service = progress_service(
+        progress::Props::new()
+            .id("upload")
+            .default_value(50.0)
+            .min(100.0)
+            .max(0.0),
+    );
+
+    let api = service.connect(&|_| {});
+
+    assert_eq!(service.state(), &progress::State::Idle);
+    assert_eq!(api.value_text(), "0% complete");
+    assert_eq!(
+        api.root_attrs().get(&HtmlAttr::Data("ars-state")),
+        Some("idle")
     );
 }
 
@@ -531,6 +560,8 @@ fn progress_set_props_preserves_value_control_mode_transitions() {
     drop(becomes_controlled.send(progress::Event::Reset));
 
     assert!(becomes_controlled.context().value.is_controlled());
+    assert_eq!(becomes_controlled.context().value.get(), &Some(50.0));
+    assert!(!becomes_controlled.context().indeterminate);
 
     let mut becomes_uncontrolled =
         progress_service(progress::Props::new().id("upload").value(Some(50.0)));

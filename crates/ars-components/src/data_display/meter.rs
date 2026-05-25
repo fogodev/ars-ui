@@ -221,6 +221,10 @@ pub fn compute_segment(
 /// Computes the fill percentage for the given value within `[min, max]`.
 #[must_use]
 pub fn compute_percent(value: f64, min: f64, max: f64) -> f64 {
+    if !valid_bounds(min, max) {
+        return 0.0;
+    }
+
     let (min, max) = normalize_bounds(min, max);
 
     if !value.is_finite() {
@@ -441,12 +445,16 @@ fn part_attrs(part: &Part) -> AttrMap {
     attrs
 }
 
-fn normalize_bounds(min: f64, max: f64) -> (f64, f64) {
-    if min.is_finite() && max.is_finite() && min < max {
+const fn normalize_bounds(min: f64, max: f64) -> (f64, f64) {
+    if valid_bounds(min, max) {
         (min, max)
     } else {
         (0.0, 100.0)
     }
+}
+
+const fn valid_bounds(min: f64, max: f64) -> bool {
+    min.is_finite() && max.is_finite() && min < max
 }
 
 const fn clamp_value(value: f64, min: f64, max: f64) -> f64 {
@@ -532,5 +540,6 @@ mod tests {
         );
         assert_eq!(non_finite_root.get(&HtmlAttr::Value), Some("0"));
         assert_eq!(compute_percent(f64::INFINITY, 0.0, 100.0), 0.0);
+        assert_eq!(compute_percent(50.0, 100.0, 100.0), 0.0);
     }
 }
