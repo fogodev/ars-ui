@@ -525,7 +525,13 @@ impl ars_core::Machine for Machine {
                         ctx.value.sync_controlled(Some(value));
                     }))
                 }
-                Some(_) => None,
+                Some(_) => {
+                    let value = bounded_value(ctx);
+                    Some(TransitionPlan::context_only(move |ctx| {
+                        ctx.value.set(value);
+                        ctx.value.sync_controlled(Some(value));
+                    }))
+                }
                 None => Some(TransitionPlan::context_only(|ctx| {
                     ctx.value.sync_controlled(None);
                 })),
@@ -551,6 +557,16 @@ impl ars_core::Machine for Machine {
                     ctx.value_labels = props.value_labels.clone();
                     let snapped = snap_to_step(*ctx.value.get(), ctx.min, ctx.max, ctx.step);
                     ctx.value.set(snapped);
+                    if ctx.dragging {
+                        let drag_value = snap_to_step(
+                            ctx.drag_value.unwrap_or(snapped),
+                            ctx.min,
+                            ctx.max,
+                            ctx.step,
+                        );
+                        ctx.drag_changed |= (drag_value - snapped).abs() > f64::EPSILON;
+                        ctx.drag_value = Some(drag_value);
+                    }
                 }))
             }
             Event::SetHasLabel(has_label) => {
@@ -1088,6 +1104,10 @@ Value change callbacks are emitted only when the effective snapped value changes
 clamp/snap back to the current value. During controlled pointer drags, the core
 tracks the pending internal drag value and emits that final pending value on
 `PointerUp`, even if the parent has not yet synchronized the controlled prop.
+If props change during an active drag, the pending drag value is re-snapped to
+the new bounds and step before commit. If a controlled value prop becomes
+non-finite, the core preserves controlled mode while keeping the current
+effective numeric value.
 
 `SetProps` diffing must treat finite-to-`NaN`, `NaN`-to-finite, and distinct
 `NaN` payload changes for `min`, `max`, and `step` as output-affecting so the

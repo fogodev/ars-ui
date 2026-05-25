@@ -555,7 +555,13 @@ impl ars_core::Machine for Machine {
                     }))
                 }
 
-                Some(_) => None,
+                Some(_) => {
+                    let value = bounded_value(ctx);
+                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.value.set(value);
+                        ctx.value.sync_controlled(Some(value));
+                    }))
+                }
 
                 None => Some(TransitionPlan::context_only(|ctx: &mut Context| {
                     ctx.value.sync_controlled(None);
@@ -585,6 +591,18 @@ impl ars_core::Machine for Machine {
                     let value = snap_to_step(*ctx.value.get(), ctx.min, ctx.max, ctx.step);
 
                     ctx.value.set(value);
+
+                    if ctx.dragging {
+                        let drag_value = snap_to_step(
+                            ctx.drag_value.unwrap_or(value),
+                            ctx.min,
+                            ctx.max,
+                            ctx.step,
+                        );
+
+                        ctx.drag_changed |= (drag_value - value).abs() > f64::EPSILON;
+                        ctx.drag_value = Some(drag_value);
+                    }
                 }))
             }
 
@@ -2137,11 +2155,12 @@ mod tests {
     fn pointer_up_emits_pending_drag_value_for_controlled_slider() {
         let ends = Arc::new(Mutex::new(Vec::new()));
         let captured_ends = Arc::clone(&ends);
+        let on_value_change_end = callback(move |value: f64| {
+            captured_ends.lock().unwrap().push(value);
+        });
         let mut svc = service(Props {
             value: Some(10.0),
-            on_value_change_end: Some(callback(move |value: f64| {
-                captured_ends.lock().unwrap().push(value);
-            })),
+            on_value_change_end: Some(on_value_change_end.clone()),
             ..props()
         });
 
@@ -2156,6 +2175,50 @@ mod tests {
         }
 
         assert_eq!(ends.lock().unwrap().as_slice(), &[90.0]);
+    }
+
+    #[test]
+    fn non_finite_controlled_value_preserves_controlled_mode() {
+        let mut svc = service(props());
+
+        drop(svc.set_props(Props {
+            value: Some(f64::NAN),
+            ..props()
+        }));
+
+        assert!(svc.context().value.is_controlled());
+        assert_eq!(*svc.context().value.get(), 25.0);
+    }
+
+    #[test]
+    fn active_drag_commit_value_is_resnapped_after_props_change() {
+        let ends = Arc::new(Mutex::new(Vec::new()));
+        let captured_ends = Arc::clone(&ends);
+        let on_value_change_end = callback(move |value: f64| {
+            captured_ends.lock().unwrap().push(value);
+        });
+        let mut svc = service(Props {
+            value: Some(10.0),
+            on_value_change_end: Some(on_value_change_end.clone()),
+            ..props()
+        });
+
+        drop(svc.send(Event::PointerDown { value: 90.0 }));
+        drop(svc.set_props(Props {
+            value: Some(10.0),
+            max: 50.0,
+            on_value_change_end: Some(on_value_change_end),
+            ..props()
+        }));
+
+        let mut end = svc.send(Event::PointerUp);
+        let send: StrongSend<Event> = Arc::new(|_| {});
+
+        for effect in end.pending_effects.drain(..) {
+            drop(effect.run(svc.context(), svc.props(), Arc::clone(&send)));
+        }
+
+        assert_eq!(ends.lock().unwrap().as_slice(), &[50.0]);
     }
 
     #[test]
