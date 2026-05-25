@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "794fed42928b",
+  "strategy": "manual-commit",
+  "branch": "t3code/e55599d7",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/layout/splitter.rs",
+    "spec/components/layout/splitter.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/79/4fed42928b/0/metadata.json",
+      "transcript": "/79/4fed42928b/0/full.jsonl",
+      "content_hash": "/79/4fed42928b/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 27501,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 4155648,
+    "output_tokens": 4399,
+    "api_call_count": 34
+  }
+}
