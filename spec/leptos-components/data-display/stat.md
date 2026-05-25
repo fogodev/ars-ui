@@ -162,11 +162,11 @@ Leptos 0.8.x can render the optional trend subtree conditionally with `Either` w
 #[component]
 pub fn Stat(label: String, value: String, change: Option<f64>) -> impl IntoView {
     let api = Memo::new(move |_| stat::Api::new(stat::Props {
-        label: Some(label.clone()),
-        value: Some(value.clone()),
+        label: label.clone(),
+        value: value.clone(),
         change,
         ..Default::default()
-    }));
+    }, &Env::default(), &stat::Messages::default()));
 
     view! {
         <div {..attr_map_to_leptos(api.get().root_attrs(), &use_style_strategy(), None).attrs}>

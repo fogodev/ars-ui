@@ -653,6 +653,12 @@ pub enum HtmlAttr {
 
     /// `webkitdirectory`
     WebkitDirectory,
+
+    /// `stroke-dasharray`
+    StrokeDasharray,
+
+    /// `stroke-dashoffset`
+    StrokeDashoffset,
 }
 
 impl HtmlAttr {
@@ -804,6 +810,8 @@ impl HtmlAttr {
             Self::Start => Some("start"),
             Self::Summary => Some("summary"),
             Self::WebkitDirectory => Some("webkitdirectory"),
+            Self::StrokeDasharray => Some("stroke-dasharray"),
+            Self::StrokeDashoffset => Some("stroke-dashoffset"),
         }
     }
 }

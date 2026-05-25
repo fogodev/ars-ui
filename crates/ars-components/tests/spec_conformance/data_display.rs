@@ -3,7 +3,7 @@
 //! Asserts the impl's `Part` enum matches the spec's declared anatomy.
 
 use ars_collections::Key;
-use ars_components::data_display::table;
+use ars_components::data_display::{meter, progress, stat, table};
 
 use super::helper::assert_anatomy;
 
@@ -70,6 +70,51 @@ fn table_anatomy_matches_spec() {
                 },
                 "column-resize-handle",
             ),
+        ],
+    );
+}
+
+#[test]
+fn meter_anatomy_matches_spec() {
+    assert_anatomy(
+        "meter",
+        &[
+            (meter::Part::Root, "root"),
+            (meter::Part::Label, "label"),
+            (meter::Part::Track, "track"),
+            (meter::Part::Range, "range"),
+            (meter::Part::ValueText, "value-text"),
+        ],
+    );
+}
+
+#[test]
+fn stat_anatomy_matches_spec() {
+    assert_anatomy(
+        "stat",
+        &[
+            (stat::Part::Root, "root"),
+            (stat::Part::Label, "label"),
+            (stat::Part::Value, "value"),
+            (stat::Part::Change, "change"),
+            (stat::Part::TrendIndicator, "trend-indicator"),
+            (stat::Part::HelpText, "help-text"),
+        ],
+    );
+}
+
+#[test]
+fn progress_anatomy_matches_spec() {
+    assert_anatomy(
+        "progress",
+        &[
+            (progress::Part::Root, "root"),
+            (progress::Part::Label, "label"),
+            (progress::Part::Track, "track"),
+            (progress::Part::Range, "range"),
+            (progress::Part::ValueText, "value-text"),
+            (progress::Part::CircleTrack, "circle-track"),
+            (progress::Part::CircleRange { radius: 10.0 }, "circle-range"),
         ],
     );
 }

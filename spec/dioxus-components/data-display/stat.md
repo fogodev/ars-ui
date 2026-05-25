@@ -180,11 +180,11 @@ pub struct StatSketchProps {
 #[component]
 pub fn Stat(props: StatSketchProps) -> Element {
     let api = use_memo(move || stat::Api::new(stat::Props {
-        label: Some(props.label.clone()),
-        value: Some(props.value.clone()),
+        label: props.label.clone(),
+        value: props.value.clone(),
         change: props.change,
         ..Default::default()
-    }));
+    }, &Env::default(), &stat::Messages::default()));
     let strategy = use_style_strategy();
 
     rsx! {

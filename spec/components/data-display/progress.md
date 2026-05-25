@@ -28,12 +28,13 @@ and indeterminate (unknown duration) modes.
 
 ### 1.2 Events
 
-| Event      | Payload       | Description                           |
-| ---------- | ------------- | ------------------------------------- |
-| `SetValue` | `Option<f64>` | Update value; `None` = indeterminate. |
-| `SetMax`   | `f64`         | Update the maximum bound.             |
-| `Complete` | —             | Jump to complete state.               |
-| `Reset`    | —             | Return to initial/idle state.         |
+| Event       | Payload       | Description                                               |
+| ----------- | ------------- | --------------------------------------------------------- |
+| `SetValue`  | `Option<f64>` | Update value; `None` = indeterminate.                     |
+| `SetMax`    | `f64`         | Update the maximum bound.                                 |
+| `Complete`  | —             | Jump to complete state.                                   |
+| `Reset`     | —             | Return to the indeterminate loading state.                |
+| `SyncProps` | —             | Synchronize min, max, and orientation after prop changes. |
 
 ### 1.3 Context
 
@@ -113,6 +114,10 @@ impl Default for Props {
 impl Context {
     /// Computes the percent value from the given value, min, and max.
     pub fn compute_percent(value: Option<f64>, min: f64, max: f64) -> f64 {
+        if min >= max {
+            return 0.0;
+        }
+
         match value {
             None    => 0.0, // indeterminate; percent is meaningless
             Some(v) => ((v - min) / (max - min) * 100.0).clamp(0.0, 100.0),
@@ -148,6 +153,8 @@ pub enum Event {
     Complete,
     /// Return to initial/idle state.
     Reset,
+    /// Synchronize non-value props from adapter-owned prop changes.
+    SyncProps,
 }
 
 /// Machine for the Progress component.
@@ -223,10 +230,19 @@ impl ars_core::Machine for Machine {
                 }))
             }
             Event::Reset => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                Some(TransitionPlan::to(State::Loading).apply(|ctx| {
                     ctx.value.set(None);
                     ctx.indeterminate = true;
                     ctx.percent = 0.0;
+                }))
+            }
+            Event::SyncProps => {
+                Some(TransitionPlan::to(state_for_value(*ctx.value.get(), props.max)).apply(|ctx| {
+                    ctx.min = props.min;
+                    ctx.max = props.max;
+                    ctx.orientation = props.orientation;
+                    ctx.indeterminate = ctx.value.get().is_none();
+                    ctx.percent = Context::compute_percent(*ctx.value.get(), props.min, props.max);
                 }))
             }
         }
@@ -290,7 +306,10 @@ impl<'a> Api<'a> {
             &self.ctx.locale,
             self.props.format_options.clone().unwrap_or_default(),
         );
-        format!("{}% complete", fmt.format_percent(self.ctx.percent / 100.0))
+        (self.ctx.messages.determinate)(
+            &fmt.format_percent(self.ctx.percent / 100.0, Some(0)),
+            &self.ctx.locale,
+        )
     }
 
     /// Returns the root attributes for the progress.
@@ -300,6 +319,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "progressbar");
+        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), format!("{}-label", self.props.id));
         attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), match self.ctx.orientation {
             Orientation::Horizontal => "horizontal",
             Orientation::Vertical   => "vertical",
@@ -336,6 +356,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Label.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, format!("{}-label", self.props.id));
         attrs
     }
 
@@ -373,6 +394,7 @@ impl<'a> Api<'a> {
 
     /// Stroke-dashoffset for an SVG circle with the given radius.
     pub fn circle_stroke_dashoffset(&self, radius: f64) -> f64 {
+        let radius = sanitize_radius(radius);
         let circumference = 2.0 * std::f64::consts::PI * radius;
         let pct = if self.ctx.indeterminate { 0.0 } else { self.ctx.percent / 100.0 };
         circumference * (1.0 - pct)
@@ -393,11 +415,20 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::CircleRange.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        let radius = sanitize_radius(radius);
         let offset = self.circle_stroke_dashoffset(radius);
         let circumference = 2.0 * std::f64::consts::PI * radius;
-        attrs.set(HtmlAttr::Data("stroke-dasharray"), circumference.to_string());
-        attrs.set(HtmlAttr::Data("stroke-dashoffset"), offset.to_string());
+        attrs.set(HtmlAttr::StrokeDasharray, circumference.to_string());
+        attrs.set(HtmlAttr::StrokeDashoffset, offset.to_string());
         attrs
+    }
+
+    fn sanitize_radius(radius: f64) -> f64 {
+        if radius.is_finite() && radius >= 0.0 {
+            radius
+        } else {
+            0.0
+        }
     }
 }
 
@@ -418,6 +449,9 @@ impl ConnectApi for Api<'_> {
 }
 
 /// Messages for the Progress component.
+/// Formats a locale-aware percent string into determinate progress value text.
+pub type DeterminateTextFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
+
 #[derive(Clone, Debug)]
 pub struct Messages {
     /// Text announced by screen readers when the progress is loading.
@@ -426,12 +460,18 @@ pub struct Messages {
     /// Text announced by screen readers when the progress is complete.
     /// Default (en): `"Complete"`.
     pub complete: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Formats the determinate progress percentage for screen readers.
+    /// Default (en): `"{percent} complete"`.
+    pub determinate: MessageFn<DeterminateTextFn>,
 }
 impl Default for Messages {
     fn default() -> Self {
         Self {
             loading: MessageFn::static_str("Loading…"),
             complete: MessageFn::static_str("Complete"),
+            determinate: MessageFn::new(alloc::sync::Arc::new(
+                |percent: &str, _locale: &Locale| format!("{percent} complete"),
+            ) as alloc::sync::Arc<DeterminateTextFn>),
         }
     }
 }
@@ -452,7 +492,6 @@ Progress
 ├── Range       (filled portion; width = percent%)
 ├── ValueText   (formatted percentage/value display)
 └── [Circular variant]
-    ├── Circle       (<svg> wrapper)
     ├── CircleTrack  (<circle> background)
     └── CircleRange  (<circle> filled arc via stroke-dashoffset)
 ```
@@ -464,7 +503,6 @@ Progress
 | `Track`       | `<div>`              | Visual background                                                                                                                                       |
 | `Range`       | `<div>`              | `style="width: N%"`, `data-ars-indeterminate`                                                                                                           |
 | `ValueText`   | `<span>`             | Human-readable percentage                                                                                                                               |
-| `Circle`      | `<svg>`              | SVG wrapper for circular variant                                                                                                                        |
 | `CircleTrack` | `<circle>`           | Background arc                                                                                                                                          |
 | `CircleRange` | `<circle>`           | Foreground arc; `stroke-dashoffset` drives fill                                                                                                         |
 
@@ -484,7 +522,7 @@ Progress
   percentage formatting (e.g. "47 %" in French, "47%" in English). When locale
   is inherited from `ArsProvider`, adapters should derive the formatter through
   `use_number_formatter(...)`.
-- "Loading…" and "Complete" strings come from `Messages` and should be supplied
+- "Loading…", "Complete", and the determinate value text template come from `Messages` and should be supplied
   by the host application from a message catalog.
 
 > **No Hardcoded English Default Strings.** All default message strings
@@ -532,14 +570,14 @@ Progress
 
 ### 5.2 Anatomy
 
-| Part              | ars-ui                       | Ark UI                                 | Radix UI    | React Aria    | Notes                                  |
-| ----------------- | ---------------------------- | -------------------------------------- | ----------- | ------------- | -------------------------------------- |
-| Root              | `Root`                       | `Root`                                 | `Root`      | `ProgressBar` | --                                     |
-| Label             | `Label`                      | `Label`                                | --          | `Label`       | Radix has no explicit label part       |
-| Track             | `Track`                      | `Track`                                | --          | --            | ars-ui and Ark UI match                |
-| Range / Indicator | `Range`                      | `Range`                                | `Indicator` | --            | Same concept, different names          |
-| ValueText         | `ValueText`                  | `ValueText`                            | --          | --            | ars-ui and Ark UI match                |
-| Circle\*          | `CircleTrack`, `CircleRange` | `Circle`, `CircleTrack`, `CircleRange` | --          | --            | ars-ui matches Ark UI circular variant |
+| Part              | ars-ui                       | Ark UI                                 | Radix UI    | React Aria    | Notes                                                           |
+| ----------------- | ---------------------------- | -------------------------------------- | ----------- | ------------- | --------------------------------------------------------------- |
+| Root              | `Root`                       | `Root`                                 | `Root`      | `ProgressBar` | --                                                              |
+| Label             | `Label`                      | `Label`                                | --          | `Label`       | Radix has no explicit label part                                |
+| Track             | `Track`                      | `Track`                                | --          | --            | ars-ui and Ark UI match                                         |
+| Range / Indicator | `Range`                      | `Range`                                | `Indicator` | --            | Same concept, different names                                   |
+| ValueText         | `ValueText`                  | `ValueText`                            | --          | --            | ars-ui and Ark UI match                                         |
+| Circle\*          | `CircleTrack`, `CircleRange` | `Circle`, `CircleTrack`, `CircleRange` | --          | --            | ars-ui exposes circular arc parts; adapters own the SVG wrapper |
 
 **Gaps:** None.
 

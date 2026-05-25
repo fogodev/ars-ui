@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/data_display/progress/mod.rs
+expression: snapshot_attrs(&api.circle_track_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "circle-track",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "progress",
+            ),
+        ),
+    ],
+    styles: [],
+}

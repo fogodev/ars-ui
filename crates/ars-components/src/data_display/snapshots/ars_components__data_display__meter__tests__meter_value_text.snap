@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/data_display/meter.rs
+expression: "snapshot_attrs(&api(Props::new().id(\"meter\").value(40.0)).value_text_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "value-text",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "meter",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

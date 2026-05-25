@@ -118,7 +118,7 @@ impl<'a> Api<'a> {
             locale,
             self.props.format_options.clone().unwrap_or_default(),
         );
-        let pct = fmt.format_percent(change.abs() / 100.0, None);
+        let pct = fmt.format_percent(change.abs() / 100.0, Some(1));
         let msgs = &self.messages;
         let label = match self.resolved_trend() {
             Some(Trend::Up)      => format!("{} {}", (msgs.increase_prefix)(locale), pct),
@@ -379,17 +379,10 @@ use ICU MessageFormat-style interpolation for locale-aware string building.
 
 `number::Formatter` with `number::Style::Currency` handles locale-aware currency symbol placement. To streamline currency display in Stat, Progress, and Meter components:
 
-**Stat `currency` Prop:**
-
-```rust
-pub struct Props {
-    // ... existing fields ...
-    /// Optional ISO 4217 currency code (e.g., "USD", "EUR", "JPY").
-    /// When set, the `value` field is interpreted as a raw numeric value
-    /// and formatted using `number::Formatter::format_currency()`.
-    pub currency: Option<CurrencyCode>,
-}
-```
+**Stat**: The `value` prop is already formatted display text. Applications that
+need currency output MUST format the value before passing it to Stat, using
+`number::Formatter::format_currency()` with the active locale and currency code.
+Stat does not expose a separate currency prop.
 
 **Symbol Placement Rules** (determined entirely by locale ICU data):
 
@@ -397,7 +390,10 @@ pub struct Props {
 - Spacing between symbol and value is locale-dependent (e.g., `€1.00` in `en-IE` vs `1,00 €` in `de-DE`).
 - Narrow symbol variants (e.g., `$` vs `US$`) are selected automatically when the currency is unambiguous in the locale context.
 
-**Progress/Meter**: These components do not directly format currency values. When used to display monetary progress (e.g., fundraising), the application MUST pre-format `value_label` using `number::Formatter` and pass it as a string prop.
+**Progress/Meter**: These components do not directly format currency values.
+When used to display monetary progress (e.g., fundraising), applications MUST
+provide the currency semantics through their surrounding label/value text and
+use each component's percent formatting only for range completion.
 
 ## 5. Library Parity
 

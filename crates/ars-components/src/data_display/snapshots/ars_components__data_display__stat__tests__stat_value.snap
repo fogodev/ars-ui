@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/data_display/stat.rs
+expression: snapshot_attrs(&api.value_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "value",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "stat",
+            ),
+        ),
+    ],
+    styles: [],
+}

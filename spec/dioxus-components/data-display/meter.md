@@ -64,7 +64,7 @@ The adapter exposes the core meter inputs directly. `value_text` is an adapter o
 
 ## 5. Attr Merge and Ownership Rules
 
-- Core attrs come from the API, including `role`, numeric bounds, native meter attrs, and `data-ars-segment`.
+- Core attrs come from the API, including `role`, numeric bounds, native meter attrs, `data-ars-segment`, and `data-ars-zone`.
 - The adapter owns fallback semantics when `<meter>` is not used, including `role="meter"` or documented fallback `role="progressbar"` when required for broader support.
 - Consumer classes and styles may decorate the host but must not drop `aria-valuenow`, `aria-valuetext`, `value`, `min`, `max`, `low`, `high`, or `optimum`.
 - For custom fallback rendering, adapter-owned track and range wrappers must remain explicit.
@@ -184,7 +184,13 @@ pub struct MeterSketchProps {
 
 #[component]
 pub fn Meter(props: MeterSketchProps) -> Element {
-    let api = use_memo(move || meter::Api::new(meter::Props { value: props.value, min: props.min, max: props.max, ..Default::default() }));
+    let api = use_memo(move || {
+        meter::Api::new(
+            meter::Props { value: props.value, min: props.min, max: props.max, ..Default::default() },
+            &Env::default(),
+            &meter::Messages::default(),
+        )
+    });
     let strategy = use_style_strategy();
 
     rsx! {
