@@ -1,0 +1,317 @@
+Implement task #272
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Implement Task #272: TimeField Agnostic Core
+
+## Summary
+
+Implement the framework-agnostic `TimeField` core in `crates/ars-components`, tightly scoped to GitHub issue `#272`. The work excludes Leptos/Dioxus adapter components, but will add the core state machine, connect API, unit tests, snapshots, spec-conformance coverage, proptest invariants, mutation validation, and required post-implementation audit.
+
+The issue dependency `#54` is already closed, so execution is unblocked. In execution mode, the first GitHub-side action is to move issue `#272` to `In Progress`; no issue closure happens until a merged PR with green CI and Codex approval.
+
+## Public API / Interfaces
+
+Add a new module:
+
+- `crates/ars-components/src/date_time/time_field/mod.rs`
+- Export it from `crates/ars-components/src/date_time/mod.rs` as `pub mod time_field;`
+
+Expose these public items under `ars_components::date_time::time_field`:
+
+- `State`
+  - `Idle`
+  - `Focused(DateSegmentKind)`
+
+- `Event`
+  - `FocusSegment { kind: DateSegmentKind }`
+  - `BlurAll`
+  - `IncrementSegment { kind: DateSegmentKind }`
+  - `DecrementSegment { kind: DateSegmentKind }`
+  - `TypeIntoSegment { kind: DateSegmentKind, ch: char }`
+  - `TypeBufferCommit { kind: DateSegmentKind }`
+  - `ClearSegment { kind: DateSegmentKind }`
+  - `ClearAll`
+  - `SetValue(Option<Time>)`
+  - `FocusNextSegment`
+  - `FocusPrevSegment`
+
+- `TimeGranularity`
+  - `Hour`
+  - `Minute` default
+  - `Second`
+  - Derive ordering so visibility logic can use `>=`.
+
+- `Props`
+  - `id: String`
+  - `value: Option<Time>`
+  - `default_value: Option<Time>`
+  - `granularity: TimeGranularity`
+  - `hour_cycle: Option<HourCycle>`
+  - `hide_time_zone: bool`
+  - `disabled: bool`
+  - `readonly: bool`
+  - `required: bool`
+  - `min_value: Option<Time>`
+  - `max_value: Option<Time>`
+  - `label: String`
+  - `aria_label: Option<String>`
+  - `aria_describedby: Option<String>`
+  - `description: Option<String>`
+  - `error_message: Option<String>`
+  - `invalid: bool`
+  - `name: Option<String>`
+  - `force_leading_zeros: bool`
+  - Builder methods mirroring the DateField style.
+
+- `Context`
+  - Match the spec surface, including `Bindable<Option<Time>>`, `segments`, `focused_segment`, `type_buffer`, `locale`, `messages`, `intl_backend`, `granularity`, `hour_cycle`, disabled/readonly/min/max/ids/force-leading-zero state.
+  - Implement custom `Debug` and `PartialEq` if deriving cannot compile because of `Arc<dyn IntlBackend>`.
+
+- `Messages`
+  - `hour_label`
+  - `minute_label`
+  - `second_label`
+  - `day_period_label`
+  - Implement `Default` and `ComponentMessages`.
+
+- `Effect`
+  - `TypeBufferCommit`, using `PendingEffect::named(...)` like DateField.
+
+- `Machine`
+  - Implements `ars_core::Machine`.
+
+- `Part`
+  - `Root`
+  - `Label`
+  - `FieldGroup`
+  - `Segment { kind: DateSegmentKind }`
+  - `Literal { index: usize }`
+  - `Description`
+  - `ErrorMessage`
+  - `HiddenInput`
+  - Derive `ComponentPart` with `#[scope = "time-field"]`.
+
+- `Api<'a>`
+  - `root_attrs`
+  - `label_attrs`
+  - `field_group_attrs`
+  - `segment_attrs`
+  - `literal_attrs`
+  - `description_attrs`
+  - `error_message_attrs`
+  - `hidden_input_attrs`
+  - `on_field_group_focusout(focus_leaving_group: bool)`
+  - `on_segment_keydown(kind, &KeyboardEventData, shift, Direction)`
+  - `on_segment_focus(kind)`
+  - `on_segment_click(kind)`
+  - `segments()`
+  - `value()`
+  - `is_focused()`
+  - Implement `ConnectApi`.
+
+## Implementation Details
+
+1. Reuse `date_field::segment::{DateSegment, DateSegmentKind}` by changing `mod segment;` in `date_field` to `pub mod segment;` or by re-exporting enough surface for sibling module use. Keep existing `pub use segment::{DateSegment, DateSegmentKind};`.
+
+2. Use `ars_i18n::{HourCycle, Time}` and `Locale::hour_cycle(env.intl_backend.as_ref())` for locale-derived hour cycle.
+
+3. Add private helpers:
+   - `display_hour_range(HourCycle) -> (i32, i32)`
+   - `has_day_period(HourCycle) -> bool`
+   - `display_hour(Time, HourCycle) -> i32`
+   - `display_hour_to_24(raw_hour, day_period, HourCycle) -> Option<u8>`
+   - `is_pm(Time) -> bool`
+   - `format_time_segment(...) -> String`
+   - `clamp_time(time, min, max) -> Time`
+   - `digits_needed(...)`, copied or shared consistently with DateField.
+
+4. Segment construction:
+   - Always include `Hour`.
+   - Include `Minute` when granularity is `Minute` or `Second`.
+   - Include `Second` when granularity is `Second`.
+   - Include `DayPeriod` only for `H11` / `H12`.
+   - Insert `":"` literals between numeric time segments and `"\u{00A0}"` before `DayPeriod`.
+   - `hide_time_zone` remains part of props per spec; no `TimeZoneName` segment is generated for this time-of-day core.
+
+5. Value behavior:
+   - Controlled when `props.value` is `Some(time)`.
+   - Uncontrolled with `props.default_value`.
+   - `SetValue` updates the bindable and rebuilds segments.
+   - Publishing only occurs when required visible/editable segments are complete.
+   - Published value is clamped to `min_value` / `max_value`.
+   - Hidden input always renders ISO `HH:MM:SS` via `Time::to_iso8601()`, or empty when no value.
+
+6. Keyboard behavior:
+   - Left/Right/Tab move focus using LTR/RTL rules aligned with DateField.
+   - Up/Down increment/decrement the focused segment, wrapping within valid bounds.
+   - Numeric typing buffers and auto-advances using segment max digit width.
+   - `a` / `p` set `DayPeriod` AM/PM through `intl_backend.day_period_from_char(...)`.
+   - Backspace/Delete clear a segment.
+   - Escape clears all segments.
+   - Readonly blocks editing but preserves focus behavior.
+   - Disabled blocks all user events except programmatic value/prop sync if needed.
+
+7. ARIA / data attributes:
+   - Root has `id`, `data-ars-scope="time-field"`, `data-ars-part="root"`, `data-ars-state`, and disabled/readonly/invalid data flags.
+   - FieldGroup has `role="group"`, label wiring, required/invalid/disabled/readonly state, and described-by wiring.
+   - Segment attrs include `role="spinbutton"`, `aria-label`, `aria-valuemin`, `aria-valuemax`, `aria-valuenow` when set, `aria-valuetext`, `data-ars-segment`, and roving `tabindex`.
+   - Literal attrs include `aria-hidden="true"` and `tabindex="-1"`.
+   - ErrorMessage uses `role="alert"`.
+
+## Tests To Add First
+
+Add `crates/ars-components/src/date_time/time_field/tests.rs` and write failing tests before implementation for:
+
+- Props builder sets every public prop.
+- Per-segment navigation: Left/Right/Tab moves hour, minute, second, AM/PM in both LTR and RTL where applicable.
+- Locale hour cycle:
+  - `en-US` defaults to `H12` with `DayPeriod`.
+  - `de-DE` defaults to `H23` without `DayPeriod`.
+  - Explicit `hour_cycle` overrides locale.
+- AM/PM segment:
+  - Up/Down toggles.
+  - Typing `a` / `p` sets AM/PM.
+  - 12 AM maps to hour `0`; 12 PM maps to hour `12`.
+- Connect API segment attrs:
+  - `role="spinbutton"`
+  - `aria-valuemin`
+  - `aria-valuemax`
+  - `aria-valuenow`
+  - `aria-valuetext`
+- Bounds enforcement:
+  - H23 hours clamp/wrap `0..=23`.
+  - H12 hours clamp/wrap `1..=12`.
+  - H11 hours clamp/wrap `0..=11`.
+  - Minute/second clamp/wrap `0..=59`.
+- Granularity:
+  - `Hour` shows hour plus day period only for 12-hour cycles.
+  - `Minute` shows hour/minute plus day period for 12-hour cycles.
+  - `Second` shows hour/minute/second plus day period for 12-hour cycles.
+- Hidden input:
+  - Filled value renders ISO `HH:MM:SS`.
+  - Empty value renders empty string.
+  - `name` is included when provided.
+- Readonly and disabled behavior.
+- `min_value` / `max_value` clamping.
+- `ConnectApi::part_attrs` dispatch for every `Part`.
+
+## Snapshot Tests
+
+Add insta snapshots under:
+
+- `crates/ars-components/src/date_time/time_field/snapshots/`
+
+Cover:
+
+- `root_attrs` idle
+- `root_attrs` disabled/readonly/invalid
+- `label_attrs`
+- `field_group_attrs` default
+- `field_group_attrs` required/invalid/describedby
+- `segment_attrs` hour H12 placeholder
+- `segment_attrs` hour H23 set
+- `segment_attrs` minute set
+- `segment_attrs` second set
+- `segment_attrs` day-period AM
+- `segment_attrs` day-period PM
+- `literal_attrs`
+- `description_attrs`
+- `error_message_attrs`
+- `hidden_input_attrs` empty
+- `hidden_input_attrs` filled
+
+Because this modifies `.snap` files, the eventual PR must receive or refresh the `snapshot-reviewed` label after every push touching snapshots.
+
+## Spec-Conformance / Property Tests
+
+Add `date_time` coverage to `crates/ars-components/tests/spec_conformance.rs`:
+
+- Create `crates/ars-components/tests/spec_conformance/date_time.rs`.
+- Assert `time_field::Part` anatomy matches spec §2 in exact order and names.
+
+Extend `crates/ars-components/tests/proptest_state_machines/date_time.rs`:
+
+- Add `TimeFieldAction`.
+- Generate valid `Time` values using `Time::new(hour, minute, second, 0)`.
+- Generate editable kinds: Hour, Minute, Second, DayPeriod.
+- Assert invariants after random event/prop sequences:
+  - focused state matches `context.focused_segment`;
+  - every segment value stays inside `min..=max`;
+  - no day-period segment for H23/H24;
+  - hidden/current value, when complete and not controlled, remains a valid `Time`;
+  - `ids.id()` stays stable.
+
+## Verification Plan
+
+Run focused checks during implementation:
+
+```bash
+cargo test -p ars-components date_time::time_field
+cargo test -p ars-components --test spec_conformance time_field
+cargo test -p ars-components --test proptest_state_machines date_field_event_sequences -- --ignored
+cargo insta test -p ars-components --unreferenced=reject time_field
+cargo +nightly fmt --all --check
+cargo clippy -p ars-components --all-targets --all-features -- -D warnings
+cargo doc -p ars-components --no-deps --all-features
+```
+
+Run required mutation testing for the new agnostic component:
+
+```bash
+cargo mutants -p ars-components -f crates/ars-components/src/date_time/time_field/mod.rs
+```
+
+Triage every `MISSED` mutant in the same change:
+- add tests for real gaps;
+- add justified `.cargo/mutants.toml` skips only for true equivalent mutations;
+- delete unreachable defensive code where that is cleaner.
+
+Run coverage audit for the native crate:
+
+```bash
+cargo llvm-cov test -p ars-components --lib --no-fail-fast --text -- date_time::time_field
+```
+
+After named tests pass, invoke `.agents/skills/post-implementation-audit/SKILL.md` and land all findings in the same PR.
+
+Before presenting the final result for user review, run:
+
+```bash
+cargo test -p ars-components --all-targets
+cargo xtask spec validate
+cargo test -p xtask --test spec_corpus_compile_snippets
+cargo insta test --workspace --unreferenced=reject
+```
+
+After user approval, run the repository pre-push gate:
+
+```bash
+cargo xci-fast
+```
+
+## GitHub / Delivery Plan
+
+1. Move issue `#272` to `In Progress` on the GitHub Project board.
+2. Implement tests first, then core.
+3. Run focused verification and post-implementation audit.
+4. Present final diff and verification evidence to the user before any commit.
+5. Only after explicit approval:
+   - commit changes;
+   - push a branch;
+   - open a PR targeting `main`;
+   - include `Closes #272` in the PR body;
+   - apply `snapshot-reviewed` if snapshots are touched.
+6. Immediately invoke `.agents/skills/waiting-for-codex-review/SKILL.md`.
+7. Address Codex review threads in the same PR until Codex leaves 👍.
+8. Keep CI, Codex review, PR status, and project board status aligned.
+9. Do not close issue `#272` manually unless the PR is merged, CI is green, and Codex has approved.
+
+## Assumptions / Defaults
+
+- No new dependency crate will be added.
+- No Leptos/Dioxus adapter code will be implemented in this task.
+- No spec change is expected; if implementation reveals an unavoidable spec mismatch, update the relevant spec in the same task and call it out.
+- The spec uses `Time::new(hour, minute, second)` in examples, but the current codebase exposes `Time::new(hour, minute, second, millisecond)`. Implementation and tests will use the actual four-argument API.
+- The spec’s `Context` derive list may not compile literally because it contains `Arc<dyn IntlBackend>`. The implementation will preserve the public behavior and provide custom `Debug` / `PartialEq` if needed.

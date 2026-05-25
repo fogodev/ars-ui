@@ -1,0 +1,165 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "a1e8dd55a4f8",
+  "session_id": "019e5d87-db21-77f1-988f-4eeb0f07811c",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-25T15:34:24.634402Z",
+  "branch": "t3code/2ddd4539",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".cargo/mutants.toml",
+    "crates/ars-components/src/date_time/date_field/mod.rs",
+    "crates/ars-components/src/date_time/mod.rs",
+    "crates/ars-components/src/date_time/time_field/mod.rs",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__description.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__error_message.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__field_group_default.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__field_group_required_invalid.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__hidden_input_empty.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__hidden_input_filled.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__label.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__literal.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__root_disabled_readonly_invalid.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__root_idle.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__segment_day_period_am.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__segment_day_period_pm.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__segment_hour_h12_placeholder.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__segment_hour_h12_set.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__segment_hour_h23_set.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__segment_minute_set.snap",
+    "crates/ars-components/src/date_time/time_field/snapshots/ars_components__date_time__time_field__tests__segment_second_set.snap",
+    "crates/ars-components/src/date_time/time_field/tests.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/highlight.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/mod.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/utility/highlight.rs",
+    "spec/components/date-time/time-field.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "7ab18cc48179",
+  "token_usage": {
+    "input_tokens": 1020221,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 66170368,
+    "output_tokens": 84874,
+    "api_call_count": 466
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #272: the framework-agnostic TimeField core component in crates/ars-components, including state machine, connect API, unit/snapshot/spec-conformance/proptest tests, mutation triage, and post-implementation audit.",
+    "outcome": "TimeField agnostic core was fully implemented, all verification gates passed (unit tests, clippy, fmt, mutation testing with 0 survivors, 91.73% line coverage, workspace-wide insta and CI gate), and the work was committed. A PR to main was initiated but the transcript ends at the commit step.",
+    "learnings": {
+      "repo": [
+        "DateField is the canonical template for new datetime agnostic components — segment types, machine shape, connect API patterns, effect naming, and test structure should all mirror it.",
+        "cargo xci-fast is the mandatory pre-push gate; it runs fmt, check, clippy, unit, i18n-feature unit, adapter, spec snippet, error variant, and mutual exclusion stages.",
+        "cargo mutants --iterate skips previously caught/unviable mutants, making reruns after targeted test additions much faster (~53 candidates vs 290 full).",
+        "cargo insta test --unreferenced=reject with a test filter falsely flags all other package snapshots as unreferenced; the workspace-unfiltered form must be used for the real orphan check.",
+        "Snapshot files touching any component require the snapshot-reviewed GitHub label to be applied or refreshed after every PR push.",
+        "ComponentPart::all() macro uses the field type's Default value for parametric variants (e.g. DateSegmentKind::Year), so spec-conformance anatomy tests must match that default, not a semantically meaningful value.",
+        "default_value is init-only (not a runtime-updatable prop); runtime controlled state changes go through the value prop and SetValue event — this mirrors DateField and must not be confused in tests.",
+        "The proptest binary failed to compile due to a pre-existing missing proptest! macro import in an unrelated utility/highlight.rs file; that file had to be fixed before TimeField proptests could run.",
+        "cargo llvm-cov requires a separate --lcov report step after the test run; line coverage for a specific file is parsed from the LCOV SF/LF/LH records, not from the text output directly."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/date_field/mod.rs",
+          "finding": "Changed `mod segment;` to `pub mod segment;` so the sibling time_field module can reuse DateSegment and DateSegmentKind without re-exporting them from a common location."
+        },
+        {
+          "path": "crates/ars-i18n/src/calendar/date.rs",
+          "line": 620,
+          "end_line": 638,
+          "finding": "Time struct is defined here; its constructor is Time::new(hour, minute, second, millisecond) — four arguments, not three as shown in the spec examples."
+        },
+        {
+          "path": "crates/ars-core/src/lib.rs",
+          "line": 470,
+          "end_line": 545,
+          "finding": "Bindable<T> is defined here; Arc<dyn IntlBackend> inside Context prevents deriving Debug/PartialEq automatically, requiring custom impls."
+        },
+        {
+          "path": "crates/ars-core/src/connect.rs",
+          "line": 2123,
+          "end_line": 2188,
+          "finding": "AttrMap and ConnectApi patterns live here; segment attrs follow a spinbutton role with aria-valuemin/max/now/text and roving tabindex."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/utility/highlight.rs",
+          "line": 1,
+          "finding": "Pre-existing bug: proptest! macro used without import, blocking the entire proptest_state_machines binary from compiling. Fixed by adding the use statement."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/time_field/mod.rs",
+          "finding": "digits_needed should be const fn; H12 display hour detection should use is_multiple_of(12) — both caught by clippy after initial implementation."
+        },
+        {
+          "path": ".cargo/mutants.toml",
+          "finding": "Two clamp-equality mutations (replacing <= with < at exact min/max boundaries) are true equivalent mutations and were added as justified skips here rather than adding untestable redundant assertions."
+        }
+      ],
+      "workflow": [
+        "TDD cycle was strictly followed: write failing tests first, confirm RED, implement to GREEN, then audit — not the other way around.",
+        "cargo mutants full run (290 mutants) takes significant wall time for a single module; plan for multiple --iterate passes targeting survivor clusters rather than one monolithic rerun.",
+        "Post-implementation audit should compare spec markdown line-by-line against implementation for API shape drift before mutation testing, not after — spec drift fixes can change the mutant set.",
+        "Proptest invariant failures surface real state-machine bugs (disabled prop sync leaving machine in Focused state) that unit tests alone would not catch.",
+        "Coverage with llvm-cov after mutation triage is more meaningful than before: mutation survivors point to the exact uncovered branches, making the coverage delta actionable rather than just a metric."
+      ]
+    },
+    "friction": [
+      "cargo insta --unreferenced=reject with a test filter falsely marks all other package snapshots as unreferenced, making it unusable for scoped snapshot validation; workaround is to drop the filter and accept the noise.",
+      "The proptest_state_machines binary had a pre-existing compile error in an unrelated highlight.rs file, which blocked all TimeField proptest work until that upstream issue was fixed.",
+      "cargo mutants full run (290 mutants) with no parallelism cap took very long wall time; the --iterate flag significantly reduced subsequent rerun cost but the initial baseline pass cannot be skipped.",
+      "The spec's code sketches had several drifted signatures (three-arg Time::new, old keydown signature, minute always rendered, missing hidden-input empty behavior) that required spec edits in the same PR rather than just implementation.",
+      "CJK day-period full-label equality branches were unreachable dead code after the prefix-check path resolved first; mutation testing caught this and required either a test demonstrating the path is reachable or simplifying the implementation."
+    ],
+    "open_items": [
+      "Leptos adapter component for TimeField (issue #272 scope explicitly excluded adapter work; a follow-up issue/task will be needed).",
+      "Dioxus adapter component for TimeField (same exclusion as Leptos).",
+      "Existing unrelated rustdoc broken-link warnings outside TimeField were observed but not fixed; they predate this task.",
+      "PR was not opened and xci-fast gate result was not confirmed at the time of transcript end — delivery steps (push, PR creation, snapshot-reviewed label, waiting-for-codex-review) remain to be completed.",
+      "Korean CJK day-period arm had a mutation timeout in the initial run; a direct Korean-locale disambiguation test was added but the timeout arm should be verified on a rerun if mutation testing is repeated."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-25T15:33:26.67948Z",
+    "agent_lines": 4104,
+    "agent_removed": 55,
+    "human_added": 338,
+    "human_modified": 6,
+    "human_removed": 0,
+    "total_committed": 4445,
+    "total_lines_changed": 4503,
+    "agent_percentage": 92.3606484565845,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 172,
+      "user_lines_removed": 3,
+      "agent_lines_added": 4279,
+      "agent_lines_removed": 58,
+      "user_added_per_file": {
+        "crates/ars-components/src/date_time/time_field/mod.rs": 58,
+        "crates/ars-components/src/date_time/time_field/tests.rs": 113,
+        "spec/components/date-time/time-field.md": 1
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/date_time/time_field/mod.rs": 2,
+        "spec/components/date-time/time-field.md": 1
+      }
+    }
+  ]
+}
