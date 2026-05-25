@@ -212,7 +212,7 @@ rsx! {
 
 ## 27. Accessibility and SSR Notes
 
-- Description-first, error-second ordering is mandatory for group-level `aria-describedby`.
+- Description-first, error-second ordering is mandatory for group-level `aria-describedby` when those optional parts are rendered.
 - Horizontal RTL groups must reverse left or right navigation semantics without changing DOM order.
 - SSR must preserve initial checked item and item ordering.
 

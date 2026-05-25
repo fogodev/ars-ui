@@ -71,6 +71,8 @@ pub enum Event {
     SetProps,
     /// Track whether a Description part is rendered.
     SetHasDescription(bool),
+    /// Track whether an ErrorMessage part is rendered.
+    SetHasErrorMessage(bool),
 }
 ```
 
@@ -104,6 +106,8 @@ pub struct Context {
     pub loop_focus: bool,
     /// Whether a Description part is rendered (gates aria-describedby).
     pub has_description: bool,
+    /// Whether an ErrorMessage part is rendered (gates aria-describedby).
+    pub has_error_message: bool,
     /// Ordered list of item values for navigation.
     pub items: Vec<Radio>,
     /// Component IDs for part identification.
@@ -381,6 +385,12 @@ impl ars_core::Machine for Machine {
                     ctx.has_description = has_description;
                 }))
             }
+            Event::SetHasErrorMessage(has_error_message) => {
+                let has_error_message = *has_error_message;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_error_message = has_error_message;
+                }))
+            }
         }
     }
 
@@ -472,15 +482,18 @@ impl<'a> Api<'a> {
         if self.ctx.required { attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true"); }
         if self.ctx.invalid { attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true"); }
         if self.ctx.disabled { attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
+        let mut describedby_parts = Vec::new();
+
         if self.ctx.has_description {
-            let mut describedby_parts = Vec::new();
             describedby_parts.push(self.ctx.ids.part("description"));
-            if self.ctx.invalid {
-                describedby_parts.push(self.ctx.ids.part("error-message"));
-            }
+        }
+
+        if self.ctx.invalid && self.ctx.has_error_message {
+            describedby_parts.push(self.ctx.ids.part("error-message"));
+        }
+
+        if !describedby_parts.is_empty() {
             attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), describedby_parts.join(" "));
-        } else if self.ctx.invalid {
-            attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), self.ctx.ids.part("error-message"));
         }
         attrs
     }
@@ -710,7 +723,7 @@ RadioGroup
 | `aria-required`    | Root        | Present when `required=true`               |
 | `aria-invalid`     | Root        | Present when `invalid=true`                |
 | `aria-labelledby`  | Root        | Points to Label id                         |
-| `aria-describedby` | Root        | Points to Description + ErrorMessage ids   |
+| `aria-describedby` | Root        | Points to rendered Description + ErrorMessage ids |
 | `role`             | ItemControl | `radio`                                    |
 | `aria-checked`     | ItemControl | `"true"` or `"false"`                      |
 | `aria-disabled`    | ItemControl | Present when item or group is disabled     |
@@ -733,7 +746,7 @@ The `aria-orientation` attribute informs assistive technology whether navigation
 
 ### 3.3 Focus Management
 
-- Roving tabindex: only the selected item (or first if none selected) has `tabindex="0"`.
+- Roving tabindex: only the focused item, focusable selected item, or first enabled item has `tabindex="0"`.
 - Arrow keys cycle focus through enabled items; wraps when `loop_focus` is enabled.
 - Core represents focus movement by updating `focused_item: Option<Key>` and roving `tabindex` attributes only. Framework adapters resolve the focused item key to a live `NodeRef`, `MountedData`, or host handle and perform any DOM focus movement.
 - Arrow/Home/End navigation updates both focused item and selected value when the group is not disabled or readonly. In readonly mode, focus may move but selection does not change; disabled items are never focus targets.
@@ -749,8 +762,8 @@ The `aria-orientation` attribute informs assistive technology whether navigation
 ## 5. Form Integration
 
 - **Hidden inputs**: Each radio item renders a hidden `<input type="radio">` via `ItemHiddenInput`. Only the selected item has `checked`. All share the same `name` attribute.
-- **Validation states**: `aria-invalid="true"` on Root when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby`.
-- **Error message association**: `aria-describedby` on Root points to `Description` (when present) and `ErrorMessage` (when invalid).
+- **Validation states**: `aria-invalid="true"` on Root when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby` only when the adapter renders it.
+- **Error message association**: `aria-describedby` on Root points to `Description` (when rendered) and `ErrorMessage` (when invalid and rendered).
 - **Required**: `aria-required="true"` on Root and each ItemControl. Hidden inputs carry the `required` attribute.
 - **Reset behavior**: On form reset, the adapter restores `value` to `default_value`.
 - **Disabled/readonly propagation**: When inside a `Field` or `Fieldset`, the adapter merges `disabled`/`readonly` from `FieldCtx` per `07-forms.md` §12.6.

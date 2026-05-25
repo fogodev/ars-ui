@@ -80,6 +80,9 @@ pub enum Event {
 
     /// Track whether a description part is rendered.
     SetHasDescription(bool),
+
+    /// Track whether an error message part is rendered.
+    SetHasErrorMessage(bool),
 }
 
 /// Context for the `RadioGroup` component.
@@ -120,6 +123,9 @@ pub struct Context {
 
     /// Whether a description part is rendered and should be referenced.
     pub has_description: bool,
+
+    /// Whether an error message part is rendered and should be referenced.
+    pub has_error_message: bool,
 
     /// Ordered radio item registry used for roving focus.
     pub items: Vec<Radio>,
@@ -406,6 +412,7 @@ impl ars_core::Machine for Machine {
                 name: props.name.clone(),
                 loop_focus: props.loop_focus,
                 has_description: false,
+                has_error_message: false,
                 items: Vec::new(),
                 ids: ComponentIds::from_id(&props.id),
             },
@@ -522,7 +529,7 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            Event::Reset => select_value_plan(ctx, props.default_value.clone()),
+            Event::Reset => Some(reset_value_plan(ctx, props.default_value.clone())),
 
             Event::SetValue(value) => {
                 let value = value.clone();
@@ -544,7 +551,18 @@ impl ars_core::Machine for Machine {
                 let name = props.name.clone();
                 let loop_focus = props.loop_focus;
 
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                let clears_focus = ctx
+                    .focused_item
+                    .as_ref()
+                    .is_some_and(|focused| disabled || is_registered_item_disabled(ctx, focused));
+
+                let plan = if clears_focus && matches!(state, State::Focused { .. }) {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+
+                Some(plan.apply(move |ctx: &mut Context| {
                     ctx.disabled = disabled;
                     ctx.readonly = readonly;
                     ctx.required = required;
@@ -569,6 +587,13 @@ impl ars_core::Machine for Machine {
                 let has_description = *has_description;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.has_description = has_description;
+                }))
+            }
+
+            Event::SetHasErrorMessage(has_error_message) => {
+                let has_error_message = *has_error_message;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.has_error_message = has_error_message;
                 }))
             }
         }
@@ -762,7 +787,7 @@ impl Api<'_> {
             described_by.push(self.ctx.ids.part("description"));
         }
 
-        if self.ctx.invalid {
+        if self.ctx.invalid && self.ctx.has_error_message {
             described_by.push(self.ctx.ids.part("error-message"));
         }
 
@@ -1067,12 +1092,15 @@ impl Api<'_> {
             State::Focused { item } => item == item_value,
 
             State::Idle => {
-                if self.selected_value() == Some(item_value) {
-                    return true;
+                if let Some(selected) = self.selected_value() {
+                    return if can_focus_item(self.ctx, selected) {
+                        selected == item_value
+                    } else {
+                        first_enabled(self.ctx).as_ref() == Some(item_value)
+                    };
                 }
 
-                self.selected_value().is_none()
-                    && first_enabled(self.ctx).as_ref() == Some(item_value)
+                first_enabled(self.ctx).as_ref() == Some(item_value)
             }
         }
     }
@@ -1082,6 +1110,10 @@ impl Api<'_> {
 enum FocusStep {
     Next,
     Prev,
+}
+
+fn reset_value_plan(ctx: &Context, next: Option<Key>) -> TransitionPlan<Machine> {
+    value_change_plan(ctx, next)
 }
 
 fn select_value_plan(ctx: &Context, next: Option<Key>) -> Option<TransitionPlan<Machine>> {
@@ -1157,15 +1189,17 @@ fn value_change_effect(next: Option<Key>) -> PendingEffect<Machine> {
 }
 
 fn can_focus_item(ctx: &Context, item: &Key) -> bool {
-    !is_item_disabled(ctx, item)
+    ctx.items.iter().any(|registered| &registered.value == item) && !is_item_disabled(ctx, item)
 }
 
 fn is_item_disabled(ctx: &Context, item: &Key) -> bool {
-    ctx.disabled
-        || ctx
-            .items
-            .iter()
-            .any(|registered| &registered.value == item && registered.disabled)
+    ctx.disabled || is_registered_item_disabled(ctx, item)
+}
+
+fn is_registered_item_disabled(ctx: &Context, item: &Key) -> bool {
+    ctx.items
+        .iter()
+        .any(|registered| &registered.value == item && registered.disabled)
 }
 
 fn enabled_items(ctx: &Context) -> Vec<&Radio> {
@@ -1409,6 +1443,34 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(readonly.context().value.get(), &None);
+    }
+
+    #[test]
+    fn radio_group_reset_restores_default_when_disabled_readonly_or_item_disabled() {
+        let mut disabled = service(props().default_value(key("standard")).disabled(true));
+        let mut readonly = service(props().default_value(key("standard")).readonly(true));
+        let mut item_disabled = service(props().default_value(key("drone")));
+
+        disabled.context_mut().value.set(Some(key("express")));
+        readonly.context_mut().value.set(Some(key("express")));
+        item_disabled.context_mut().value.set(Some(key("express")));
+
+        drop(disabled.send(Event::Reset));
+        drop(readonly.send(Event::Reset));
+        drop(item_disabled.send(Event::Reset));
+
+        assert_eq!(
+            disabled.context().value.get().as_ref(),
+            Some(&key("standard"))
+        );
+        assert_eq!(
+            readonly.context().value.get().as_ref(),
+            Some(&key("standard"))
+        );
+        assert_eq!(
+            item_disabled.context().value.get().as_ref(),
+            Some(&key("drone"))
+        );
     }
 
     #[test]
@@ -1750,6 +1812,36 @@ mod tests {
     }
 
     #[test]
+    fn radio_group_set_props_clears_focused_state_when_focus_becomes_unavailable() {
+        let mut service = service(props().disabled(false));
+
+        drop(service.send(Event::FocusItem {
+            item: key("standard"),
+            is_keyboard: true,
+        }));
+
+        drop(service.send(Event::SetProps));
+        assert_eq!(
+            service.context().focused_item.as_ref(),
+            Some(&key("standard"))
+        );
+
+        let plan = <Machine as ars_core::Machine>::transition(
+            service.state(),
+            &Event::SetProps,
+            service.context(),
+            &props().disabled(true),
+        )
+        .expect("disabled props should clear focus");
+
+        assert_eq!(
+            plan.target.as_ref(),
+            Some(&State::Idle),
+            "SetProps must leave state and context aligned when focus is cleared"
+        );
+    }
+
+    #[test]
     fn radio_group_on_props_changed_syncs_value_and_context_props() {
         let old = props();
         let new = props()
@@ -1815,6 +1907,25 @@ mod tests {
     }
 
     #[test]
+    fn radio_group_root_describedby_requires_rendered_error_message() {
+        let mut service = service(props().invalid(true));
+
+        let attrs = service.connect(&|_| {}).root_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("true"));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::DescribedBy)));
+
+        drop(service.send(Event::SetHasErrorMessage(true)));
+
+        let attrs = service.connect(&|_| {}).root_attrs();
+
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("shipping-error-message")
+        );
+    }
+
+    #[test]
     fn radio_group_item_control_uses_roving_tabindex() {
         let mut service = service(props().default_value(key("express")));
 
@@ -1875,6 +1986,34 @@ mod tests {
                 .get(&HtmlAttr::TabIndex),
             Some("-1")
         );
+    }
+
+    #[test]
+    fn radio_group_idle_roving_tabindex_falls_back_when_selected_key_is_unfocusable() {
+        let mut stale = service(props().value(key("missing")));
+        let disabled = service(props().value(key("drone")));
+
+        assert_eq!(
+            stale
+                .connect(&|_| {})
+                .item_control_attrs(&key("standard"))
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
+        assert_eq!(
+            disabled
+                .connect(&|_| {})
+                .item_control_attrs(&key("standard"))
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
+
+        drop(stale.send(Event::FocusItem {
+            item: key("missing"),
+            is_keyboard: true,
+        }));
+
+        assert_eq!(stale.state(), &State::Idle);
     }
 
     #[test]
@@ -2067,6 +2206,7 @@ mod tests {
         );
 
         drop(service.send(Event::SetHasDescription(true)));
+        drop(service.send(Event::SetHasErrorMessage(true)));
 
         assert_snapshot!(
             "radio_group_root_invalid_description",

@@ -502,7 +502,6 @@ impl ars_core::Machine for Machine {
                     | Event::Uncheck(_)
                     | Event::CheckAll
                     | Event::UncheckAll
-                    | Event::Reset
             )
         {
             return None;
@@ -1125,6 +1124,26 @@ mod tests {
 
         assert_eq!(disabled.context().value.get(), &set(&["alpha"]));
         assert_eq!(readonly.context().value.get(), &set(&["beta"]));
+    }
+
+    #[test]
+    fn checkbox_group_reset_restores_defaults_when_disabled_or_readonly() {
+        let mut disabled = service(
+            props()
+                .default_value(set(&["beta"]))
+                .disabled(true)
+                .max_checked(1),
+        );
+        let mut readonly = service(props().default_value(set(&["gamma"])).readonly(true));
+
+        disabled.context_mut().value.set(set(&["alpha"]));
+        readonly.context_mut().value.set(set(&["alpha"]));
+
+        drop(disabled.send(Event::Reset));
+        drop(readonly.send(Event::Reset));
+
+        assert_eq!(disabled.context().value.get(), &set(&["beta"]));
+        assert_eq!(readonly.context().value.get(), &set(&["gamma"]));
     }
 
     #[test]
