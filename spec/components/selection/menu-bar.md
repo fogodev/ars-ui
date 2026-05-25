@@ -155,7 +155,8 @@ Transition requirements:
   if the active menu key is removed, the machine transitions to `Inactive`; when enabled,
   it restores focus to the first menu if no focused trigger remains.
 - `SyncProps` updates ids; when the menubar becomes disabled, it transitions to `Inactive`
-  and clears active/focused/focus-visible state.
+  and clears active/focused/focus-visible state; when it becomes enabled again, it restores
+  focus to the first menu if no focused trigger remains.
 - Keyboard dispatch helpers resolve `Direction::Auto` through `Context::locale` before
   applying Left/Right semantics.
 

@@ -756,6 +756,8 @@ fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
             ctx.active_menu = None;
             ctx.focused_item = None;
             ctx.focus_visible = false;
+        } else {
+            ensure_focused_entry(ctx, false);
         }
     });
 
@@ -1160,6 +1162,10 @@ mod tests {
         assert_eq!(menu_bar.context().active_menu, None);
         assert_eq!(menu_bar.context().focused_item, None);
         assert!(!menu_bar.context().focus_visible);
+
+        drop(menu_bar.set_props(old_props));
+
+        assert_eq!(menu_bar.context().focused_item, Some(key("file")));
     }
 
     #[test]
