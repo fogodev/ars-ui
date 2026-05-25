@@ -1,0 +1,62 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "dd9fc121aae6",
+  "strategy": "manual-commit",
+  "branch": "t3code/39110ddb",
+  "checkpoints_count": 3,
+  "files_touched": [
+    ".cargo/mutants.toml",
+    "crates/ars-components/src/selection/context_menu/mod.rs",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_arrow.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_checkbox_checked.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_content.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_item_default.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_item_group.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_item_group_label.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_item_indicator.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_item_text.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_positioner.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_radio_checked.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_radio_group.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_root_default.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_root_disabled.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_separator.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_shortcut.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_sub_content.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_sub_positioner.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_sub_trigger_open.snap",
+    "crates/ars-components/src/selection/context_menu/snapshots/ars_components__selection__context_menu__tests__context_menu_target_open.snap",
+    "crates/ars-components/src/selection/menu_bar/mod.rs",
+    "crates/ars-components/src/selection/menu_bar/snapshots/ars_components__selection__menu_bar__tests__menu_bar_content.snap",
+    "crates/ars-components/src/selection/menu_bar/snapshots/ars_components__selection__menu_bar__tests__menu_bar_menu.snap",
+    "crates/ars-components/src/selection/menu_bar/snapshots/ars_components__selection__menu_bar__tests__menu_bar_positioner.snap",
+    "crates/ars-components/src/selection/menu_bar/snapshots/ars_components__selection__menu_bar__tests__menu_bar_root_default.snap",
+    "crates/ars-components/src/selection/menu_bar/snapshots/ars_components__selection__menu_bar__tests__menu_bar_root_vertical.snap",
+    "crates/ars-components/src/selection/menu_bar/snapshots/ars_components__selection__menu_bar__tests__menu_bar_trigger_active.snap",
+    "crates/ars-components/src/selection/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/mod.rs",
+    "crates/ars-components/tests/spec_conformance/selection.rs",
+    "spec/components/selection/context-menu.md",
+    "spec/components/selection/menu-bar.md",
+    "spec/dioxus-components/selection/context-menu.md",
+    "spec/dioxus-components/selection/menu-bar.md",
+    "spec/leptos-components/selection/context-menu.md",
+    "spec/leptos-components/selection/menu-bar.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/dd/9fc121aae6/0/metadata.json",
+      "transcript": "/dd/9fc121aae6/0/full.jsonl",
+      "content_hash": "/dd/9fc121aae6/0/content_hash.txt",
+      "prompt": "/dd/9fc121aae6/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1169261,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 47466624,
+    "output_tokens": 83274,
+    "api_call_count": 341
+  }
+}
