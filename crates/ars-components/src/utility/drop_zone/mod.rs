@@ -781,9 +781,9 @@ impl ars_core::Machine for Machine {
                 }
             }
 
-            (State::DragOver | State::DropAccepted | State::DropRejected, Event::Reset) => {
-                Some(reset_plan())
-            }
+            (State::Idle, Event::Reset) if !reset_would_change_context(ctx) => None,
+
+            (_, Event::Reset) => Some(reset_plan()),
 
             (State::DropAccepted | State::DropRejected, Event::AutoReset) => {
                 Some(auto_reset_plan())
@@ -1028,6 +1028,14 @@ fn auto_reset_plan() -> TransitionPlan<Machine> {
             ctx.last_rejection = None;
         })
         .cancel_effect(Effect::ResetAfterDrop)
+}
+
+const fn reset_would_change_context(ctx: &Context) -> bool {
+    ctx.valid_drag
+        || !ctx.drag_types.is_empty()
+        || ctx.is_drop_target
+        || !ctx.dropped_items.is_empty()
+        || ctx.last_rejection.is_some()
 }
 
 fn drop_enter_effect(data: DragData) -> PendingEffect<Machine> {
@@ -1611,6 +1619,26 @@ mod tests {
         let result = service.send(Event::Reset);
 
         assert!(result.state_changed);
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().dropped_items.is_empty());
+        assert!(service.connect(&|_| {}).form_data().is_empty());
+    }
+
+    #[test]
+    fn drop_zone_reset_from_idle_clears_auto_reset_preserved_payload() {
+        let mut service = service(props().name("files"));
+        let items = vec![file("icon.png", "image/png", 10)];
+
+        drop(service.send(Event::DragEnter(drag_data(Vec::new(), &["image/png"]))));
+        drop(service.send(Event::Drop(drag_data(items, &["image/png"]))));
+        drop(service.send(Event::AutoReset));
+
+        assert_eq!(service.state(), &State::Idle);
+        assert!(!service.connect(&|_| {}).form_data().is_empty());
+
+        let result = service.send(Event::Reset);
+
+        assert!(result.context_changed);
         assert_eq!(service.state(), &State::Idle);
         assert!(service.context().dropped_items.is_empty());
         assert!(service.connect(&|_| {}).form_data().is_empty());

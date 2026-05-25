@@ -615,9 +615,14 @@ impl ars_core::Machine for Machine {
                 }
             }
 
-            // ── Reset from terminal states ─────────────────────────────────
-            (State::DropAccepted | State::DropRejected, Event::Reset) => {
+            // ── Reset clears active or preserved drop state ────────────────
+            (State::Idle, Event::Reset) if !reset_would_change_context(ctx) => None,
+
+            (_, Event::Reset) => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                    ctx.valid_drag = false;
+                    ctx.drag_types.clear();
+                    ctx.is_drop_target = false;
                     ctx.dropped_items.clear();
                     ctx.last_rejection = None;
                 }).cancel_effect(Effect::ArmDropActivate)
@@ -628,19 +633,10 @@ impl ars_core::Machine for Machine {
             (State::DropAccepted | State::DropRejected, Event::AutoReset) => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
                     ctx.valid_drag = false;
+                    ctx.drag_types.clear();
                     ctx.is_drop_target = false;
                     ctx.last_rejection = None;
                 }).cancel_effect(Effect::ResetAfterDrop))
-            }
-
-            // ── Reset from DragOver (cancel in-progress drag) ──────────────
-            (State::DragOver, Event::Reset) => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    ctx.valid_drag = false;
-                    ctx.is_drop_target = false;
-                    ctx.dropped_items.clear();
-                    ctx.last_rejection = None;
-                }).cancel_effect(Effect::ArmDropActivate))
             }
 
             // ── Focus / Blur (keyboard fallback support) ────────────────────
@@ -670,6 +666,14 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+fn reset_would_change_context(ctx: &Context) -> bool {
+    ctx.valid_drag
+        || !ctx.drag_types.is_empty()
+        || ctx.is_drop_target
+        || !ctx.dropped_items.is_empty()
+        || ctx.last_rejection.is_some()
 }
 ```
 
@@ -927,8 +931,9 @@ When `read_only` is true, `form_data()` still returns the current items for incl
 ### 5.4 Form Reset
 
 When the parent form dispatches a reset event, the adapter MUST send `Event::Reset` to clear all
-dropped items and return to Idle state. Unlike other form components, there is no "initial value"
-to restore — reset always clears.
+dropped items and return to Idle state, including after `Event::AutoReset` has already returned the
+visual state to `Idle` while preserving accepted form data. Unlike other form components, there is
+no "initial value" to restore — reset always clears.
 
 The delayed terminal-state timer MUST send `Event::AutoReset`, not `Event::Reset`, so successful
 drops keep accepted form data available through `Api::form_data()` after the visual success state
