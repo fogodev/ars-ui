@@ -775,12 +775,11 @@ fn handle_keyboard(ctx: &mut Context, handle_index: usize, event: &KeyboardEvent
                     let expanded =
                         expand_panel(&mut sizes, handle_index, &ctx.panels, restore_size);
 
-                    if expanded {
-                        if let Some(restore_size) =
+                    if expanded
+                        && let Some(restore_size) =
                             ctx.collapsed_restore_sizes.get_mut(handle_index)
-                        {
-                            *restore_size = None;
-                        }
+                    {
+                        *restore_size = None;
                     }
                 } else {
                     remember_collapse_size(ctx, handle_index);
@@ -903,11 +902,10 @@ impl ars_core::Machine for Machine {
 
                     let expanded = expand_panel(&mut sizes, panel_index, &ctx.panels, restore_size);
 
-                    if expanded {
-                        if let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(panel_index)
-                        {
-                            *restore_size = None;
-                        }
+                    if expanded
+                        && let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(panel_index)
+                    {
+                        *restore_size = None;
                     }
 
                     commit_sizes(ctx, sizes);
