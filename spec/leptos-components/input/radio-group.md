@@ -74,6 +74,7 @@ The adapter also forwards shared group props from the core contract, including l
 ## 8. Registration and Cleanup Contract
 
 - Repeated items must register in DOM order or a stable adapter-maintained order consistent with the rendered value list.
+- Re-rendering an existing value updates that item in place; when keyed rendering changes the item order without unmounting every affected value, the adapter must call `api.on_items_changed(items_in_render_order)` to synchronize the core registry order.
 - Removing an item must cleanly remove it from roving focus and hidden-input submission.
 - No global listeners are required.
 

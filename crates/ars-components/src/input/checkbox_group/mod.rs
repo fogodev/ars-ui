@@ -413,14 +413,17 @@ impl ChildContext<'_> {
     }
 }
 
-/// Native hidden checkbox input metadata for one checked group value.
+/// Native hidden checkbox input metadata for group form submission or validation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HiddenInputConfig {
     /// Shared input name.
     pub name: String,
 
-    /// Submitted value for this checked item.
+    /// Submitted value for this item.
     pub value: String,
+
+    /// Whether this native checkbox should be checked.
+    pub checked: bool,
 
     /// Associated form element ID.
     pub form_id: Option<String>,
@@ -849,25 +852,40 @@ impl Api<'_> {
         }
     }
 
-    /// Returns hidden checkbox input configs for every checked value.
+    /// Returns hidden checkbox input configs for checked values and required validation.
     #[must_use]
     pub fn hidden_input_configs(&self) -> Vec<HiddenInputConfig> {
         let Some(name) = &self.ctx.name else {
             return Vec::new();
         };
 
-        self.ctx
+        let mut configs = self
+            .ctx
             .value
             .get()
             .iter()
             .map(|value| HiddenInputConfig {
                 name: name.clone(),
                 value: value.to_string(),
+                checked: true,
                 form_id: self.props.form.clone(),
                 disabled: self.ctx.disabled,
                 required: self.ctx.required,
             })
-            .collect()
+            .collect::<Vec<_>>();
+
+        if configs.is_empty() && self.ctx.required {
+            configs.push(HiddenInputConfig {
+                name: name.clone(),
+                value: String::new(),
+                checked: false,
+                form_id: self.props.form.clone(),
+                disabled: self.ctx.disabled,
+                required: true,
+            });
+        }
+
+        configs
     }
 
     /// Dispatches a value toggle for a child checkbox.
@@ -1108,6 +1126,7 @@ mod tests {
             vec![HiddenInputConfig {
                 name: "features".to_string(),
                 value: "alpha".to_string(),
+                checked: true,
                 form_id: Some("settings".to_string()),
                 disabled: false,
                 required: false,
@@ -1255,6 +1274,7 @@ mod tests {
                 HiddenInputConfig {
                     name: "features".to_string(),
                     value: "alpha".to_string(),
+                    checked: true,
                     form_id: Some("settings".to_string()),
                     disabled: false,
                     required: true,
@@ -1262,11 +1282,29 @@ mod tests {
                 HiddenInputConfig {
                     name: "features".to_string(),
                     value: "gamma".to_string(),
+                    checked: true,
                     form_id: Some("settings".to_string()),
                     disabled: false,
                     required: true,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn checkbox_group_required_empty_value_emits_unchecked_validation_config() {
+        let service = service(props().required(true));
+
+        assert_eq!(
+            service.connect(&|_| {}).hidden_input_configs(),
+            vec![HiddenInputConfig {
+                name: "features".to_string(),
+                value: String::new(),
+                checked: false,
+                form_id: Some("settings".to_string()),
+                disabled: false,
+                required: true,
+            }]
         );
     }
 
@@ -1379,6 +1417,7 @@ mod tests {
             vec![HiddenInputConfig {
                 name: "features".to_string(),
                 value: "alpha".to_string(),
+                checked: true,
                 form_id: Some("settings".to_string()),
                 disabled: false,
                 required: false,

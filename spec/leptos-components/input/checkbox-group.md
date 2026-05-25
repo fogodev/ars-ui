@@ -84,7 +84,7 @@ Child checkboxes must not maintain an independent checked source of truth when g
 
 - The machine owns the selected set and selection-limit enforcement.
 - Child checkboxes inside the group must delegate toggles to the group machine rather than mutating their own standalone state.
-- Form submission semantics for grouped checkboxes are derived from the machine-owned selected set via `Api::hidden_input_configs()`, one hidden checkbox config per checked value.
+- Form submission and native required validation semantics are derived from `Api::hidden_input_configs()`: checked configs submit selected values, and an unchecked required config is emitted only for an empty required group.
 
 ## 11. Callback Payload Contract
 

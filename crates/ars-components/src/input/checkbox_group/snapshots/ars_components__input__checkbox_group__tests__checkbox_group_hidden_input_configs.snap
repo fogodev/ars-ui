@@ -6,6 +6,7 @@ expression: "snapshot_configs(&service.connect(&|_| {}).hidden_input_configs())"
     HiddenInputConfig {
         name: "features",
         value: "alpha",
+        checked: true,
         form_id: Some(
             "settings",
         ),
@@ -15,6 +16,7 @@ expression: "snapshot_configs(&service.connect(&|_| {}).hidden_input_configs())"
     HiddenInputConfig {
         name: "features",
         value: "gamma",
+        checked: true,
         form_id: Some(
             "settings",
         ),

@@ -510,23 +510,39 @@ impl<'a> Api<'a> {
             return Vec::new();
         };
 
-        self.ctx.value.get().iter().map(|value| HiddenInputConfig {
+        let mut configs = self.ctx.value.get().iter().map(|value| HiddenInputConfig {
             name: name.clone(),
             value: value.to_string(),
+            checked: true,
             form_id: self.props.form.clone(),
             disabled: self.ctx.disabled,
             required: self.ctx.required,
-        }).collect()
+        }).collect::<Vec<_>>();
+
+        if configs.is_empty() && self.ctx.required {
+            configs.push(HiddenInputConfig {
+                name: name.clone(),
+                value: String::new(),
+                checked: false,
+                form_id: self.props.form.clone(),
+                disabled: self.ctx.disabled,
+                required: true,
+            });
+        }
+
+        configs
     }
 }
 
-/// Native hidden checkbox input metadata for one checked group value.
+/// Native hidden checkbox input metadata for group form submission or validation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HiddenInputConfig {
     /// Shared input name.
     pub name: String,
-    /// Submitted value for this checked item.
+    /// Submitted value for this item.
     pub value: String,
+    /// Whether this native checkbox should be checked.
+    pub checked: bool,
     /// Associated form element ID.
     pub form_id: Option<String>,
     /// Whether the native hidden checkbox should be disabled.
@@ -605,7 +621,8 @@ CheckboxGroup
 
 ## 5. Form Integration
 
-- **Hidden inputs**: The agnostic API exposes `hidden_input_configs()` with one `HiddenInputConfig` for each checked value, sorted by `BTreeSet<Key>` iteration order. Adapters render each config as a hidden native `<input type="checkbox" name="{name}" value="{v}" checked>` and thread `form`, `disabled`, and `required` from the config.
+- **Hidden inputs**: The agnostic API exposes `hidden_input_configs()` with one checked `HiddenInputConfig` for each checked value, sorted by `BTreeSet<Key>` iteration order. Adapters render each config as a hidden native `<input type="checkbox" name="{name}" value="{v}">`, thread `checked`, `form`, `disabled`, and `required` from the config, and omit unchecked configs from submission naturally.
+- **Required empty validation**: When `required == true` and no value is checked, `hidden_input_configs()` returns one unchecked required validation config with the shared name and an empty value so native form validation has a control to validate.
 - **Validation states**: `aria-invalid="true"` on Root when `invalid=true`. The `ErrorMessage` part uses `role="alert"` for screen reader announcement.
 - **Required validation**: At least one checkbox must be checked when `required == true`.
 - **Reset behavior**: On form reset, the adapter restores `value` to `default_value`.

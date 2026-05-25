@@ -21,14 +21,6 @@ AttrMap {
             ),
         ),
         (
-            Aria(
-                Hidden,
-            ),
-            String(
-                "true",
-            ),
-        ),
-        (
             Id,
             String(
                 "shipping-item-drone-input",

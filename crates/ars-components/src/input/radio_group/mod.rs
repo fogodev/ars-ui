@@ -63,8 +63,11 @@ pub enum Event {
     /// Move focus to the last enabled item.
     FocusLast,
 
-    /// Register a rendered item in logical DOM order.
+    /// Register or update a rendered item.
     RegisterItem(Radio),
+
+    /// Replace the rendered item registry with the current logical order.
+    SetItems(Vec<Radio>),
 
     /// Unregister a rendered item by value.
     UnregisterItem(Key),
@@ -506,6 +509,39 @@ impl ars_core::Machine for Machine {
                     if clears_focus {
                         ctx.focused_item = None;
                         ctx.focus_visible = false;
+                    }
+                }))
+            }
+
+            Event::SetItems(items) => {
+                let items = items.clone();
+                let focused_unavailable = ctx.focused_item.as_ref().is_some_and(|focused| {
+                    !items
+                        .iter()
+                        .any(|item| &item.value == focused && !item.disabled)
+                });
+                let selected_removed = ctx
+                    .value
+                    .get()
+                    .as_ref()
+                    .is_some_and(|selected| !items.iter().any(|item| &item.value == selected));
+                let controlled = ctx.value.is_controlled();
+                let plan = if focused_unavailable && matches!(state, State::Focused { .. }) {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+
+                Some(plan.apply(move |ctx: &mut Context| {
+                    ctx.items = items;
+
+                    if focused_unavailable {
+                        ctx.focused_item = None;
+                        ctx.focus_visible = false;
+                    }
+
+                    if selected_removed && !controlled {
+                        ctx.value.set(None);
                     }
                 }))
             }
@@ -990,7 +1026,6 @@ impl Api<'_> {
             )
             .set(HtmlAttr::Type, "radio")
             .set(HtmlAttr::TabIndex, "-1")
-            .set(HtmlAttr::Aria(AriaAttr::Hidden), "true")
             .set(HtmlAttr::Value, item_value.to_string());
 
         if let Some(name) = &self.ctx.name {
@@ -1091,6 +1126,11 @@ impl Api<'_> {
     /// Dispatches an item mount registration event.
     pub fn on_item_mount(&self, item: Radio) {
         (self.send)(Event::RegisterItem(item));
+    }
+
+    /// Dispatches a full rendered item-order synchronization event.
+    pub fn on_items_changed(&self, items: Vec<Radio>) {
+        (self.send)(Event::SetItems(items));
     }
 
     /// Dispatches an item unmount registration event.
@@ -1825,6 +1865,40 @@ mod tests {
     }
 
     #[test]
+    fn radio_group_set_items_replaces_registry_order_and_repairs_unavailable_state() {
+        let mut service = service(props().default_value(key("standard")));
+
+        drop(service.send(Event::FocusItem {
+            item: key("standard"),
+            is_keyboard: true,
+        }));
+        drop(service.send(Event::SetItems(vec![
+            Radio::new(key("drone")).disabled(true),
+            Radio::new(key("express")),
+        ])));
+
+        let values = service
+            .context()
+            .items
+            .iter()
+            .map(|item| item.value.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(values, vec![key("drone"), key("express")]);
+        assert_eq!(service.state(), &State::Idle);
+        assert_eq!(service.context().focused_item, None);
+        assert!(!service.context().focus_visible);
+        assert_eq!(service.context().value.get(), &None);
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .item_control_attrs(&key("express"))
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
+    }
+
+    #[test]
     fn radio_group_unregister_preserves_controlled_selected_value() {
         let mut service = service(props().value(key("express")));
 
@@ -2102,7 +2176,7 @@ mod tests {
         assert_eq!(attrs.get(&HtmlAttr::Value), Some("express"));
         assert!(attrs.contains(&HtmlAttr::Checked));
         assert!(attrs.contains(&HtmlAttr::Required));
-        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Hidden)), Some("true"));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Hidden)));
     }
 
     #[test]
@@ -2184,6 +2258,7 @@ mod tests {
         api.on_item_control_focus(&key("standard"), true);
         api.on_item_control_blur();
         api.on_item_mount(Radio::new(key("overnight")));
+        api.on_items_changed(vec![Radio::new(key("standard"))]);
         api.on_item_unmount(&key("overnight"));
         api.on_form_reset();
 
@@ -2201,6 +2276,7 @@ mod tests {
                 },
                 Event::Blur,
                 Event::RegisterItem(Radio::new(key("overnight"))),
+                Event::SetItems(vec![Radio::new(key("standard"))]),
                 Event::UnregisterItem(key("overnight")),
                 Event::Reset,
             ]

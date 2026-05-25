@@ -59,8 +59,10 @@ pub enum Event {
     FocusFirst,
     /// Focus the last item.
     FocusLast,
-    /// Register a rendered item in logical DOM order.
+    /// Register or update a rendered item.
     RegisterItem(Radio),
+    /// Replace the registered item list with the current rendered order.
+    SetItems(Vec<Radio>),
     /// Unregister a rendered item by value.
     UnregisterItem(Key),
     /// Restore the selected value to `Props::default_value`.
@@ -345,6 +347,36 @@ impl ars_core::Machine for Machine {
                     }
                 }))
             }
+            Event::SetItems(items) => {
+                let items = items.clone();
+                let focused_unavailable = ctx.focused_item.as_ref().is_some_and(|focused| {
+                    !items.iter().any(|item| &item.value == focused && !item.disabled)
+                });
+                let selected_removed = ctx
+                    .value
+                    .get()
+                    .as_ref()
+                    .is_some_and(|selected| !items.iter().any(|item| &item.value == selected));
+                let controlled = ctx.value.is_controlled();
+                let plan = if focused_unavailable && matches!(state, State::Focused { .. }) {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+
+                Some(plan.apply(move |ctx| {
+                    ctx.items = items;
+
+                    if focused_unavailable {
+                        ctx.focused_item = None;
+                        ctx.focus_visible = false;
+                    }
+
+                    if selected_removed && !controlled {
+                        ctx.value.set(None);
+                    }
+                }))
+            }
             Event::UnregisterItem(value) => {
                 let value = value.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -623,7 +655,6 @@ impl<'a> Api<'a> {
         if is_disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
         if self.ctx.required { attrs.set_bool(HtmlAttr::Required, true); }
         attrs.set(HtmlAttr::TabIndex, "-1");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs
     }
 
@@ -653,6 +684,10 @@ impl<'a> Api<'a> {
 
     pub fn on_item_hidden_input_change(&self, item_value: &Key) {
         (self.send)(Event::SelectValue(item_value.clone()));
+    }
+
+    pub fn on_items_changed(&self, items: Vec<Radio>) {
+        (self.send)(Event::SetItems(items));
     }
 
     pub fn on_item_control_focus(&self, item_value: &Key, is_keyboard: bool) {
@@ -704,7 +739,7 @@ RadioGroup
 │   ├── ItemControl    <div>    data-ars-part="item-control" (role="radio")
 │   ├── ItemIndicator  <div>    data-ars-part="item-indicator" (aria-hidden)
 │   ├── ItemLabel      <label>  data-ars-part="item-label"
-│   └── ItemHiddenInput <input> data-ars-part="item-hidden-input" (type="radio", aria-hidden)
+│   └── ItemHiddenInput <input> data-ars-part="item-hidden-input" (type="radio", tabindex="-1")
 ├── Description        <div>    data-ars-part="description" (optional)
 └── ErrorMessage       <div>    data-ars-part="error-message" (optional)
 ```
@@ -726,7 +761,7 @@ RadioGroup
 | ItemControl     | `<div>`   | `role="radio"`, `aria-checked`, roving `tabindex`      |
 | ItemIndicator   | `<div>`   | `aria-hidden="true"` — visual radio dot                |
 | ItemLabel       | `<label>` | `for` points to ItemHiddenInput                        |
-| ItemHiddenInput | `<input>` | stable item input `id`, `type="radio"`, `aria-hidden="true"` — form submission |
+| ItemHiddenInput | `<input>` | stable item input `id`, `type="radio"`, `tabindex="-1"` — form submission |
 
 ## 3. Accessibility
 
@@ -766,6 +801,7 @@ The `aria-orientation` attribute informs assistive technology whether navigation
 - Arrow keys cycle focus through enabled items; wraps when `loop_focus` is enabled.
 - Core represents focus movement by updating `focused_item: Option<Key>` and roving `tabindex` attributes only. Framework adapters resolve the focused item key to a live `NodeRef`, `MountedData`, or host handle and perform any DOM focus movement.
 - Arrow/Home/End navigation updates both focused item and selected value when the group is not disabled or readonly. In readonly mode, focus may move but selection does not change; disabled items are never focus targets.
+- `RegisterItem` updates an existing registered value in place so normal prop changes do not reorder roving focus. When the rendered keyed order changes, adapters call `Api::on_items_changed(items_in_render_order)` to replace the registry with the authoritative current order and repair stale focus or uncontrolled selection.
 
 ## 4. Internationalization
 
