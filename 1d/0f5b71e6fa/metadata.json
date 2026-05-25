@@ -1,0 +1,51 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "1d0f5b71e6fa",
+  "strategy": "manual-commit",
+  "branch": "t3code/6d170779",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/alert_dialog.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/dialog.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/drawer.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/floating_panel.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/hover_card.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/popover.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/presence.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/toast_manager.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/toast_single.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/tooltip.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/tour.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/overlay.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/alert_dialog.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/dialog.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/drawer.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/floating_panel.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/hover_card.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/mod.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/popover.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/presence.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/toast.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/tooltip.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/tour.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/1d/0f5b71e6fa/0/metadata.json",
+      "transcript": "/1d/0f5b71e6fa/0/full.jsonl",
+      "content_hash": "/1d/0f5b71e6fa/0/content_hash.txt",
+      "prompt": "/1d/0f5b71e6fa/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 825036,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 33355904,
+    "output_tokens": 50468,
+    "api_call_count": 246
+  }
+}

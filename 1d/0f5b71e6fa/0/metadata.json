@@ -1,0 +1,168 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "1d0f5b71e6fa",
+  "session_id": "019e5c92-a540-7010-a2f2-c5d941a4ae69",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-25T03:25:20.218892Z",
+  "branch": "t3code/6d170779",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/alert_dialog.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/dialog.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/drawer.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/floating_panel.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/hover_card.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/popover.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/presence.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/toast_manager.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/toast_single.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/tooltip.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/tour.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/overlay.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/alert_dialog.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/dialog.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/drawer.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/floating_panel.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/hover_card.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/mod.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/popover.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/presence.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/toast.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/tooltip.rs",
+    "crates/ars-components/tests/spec_conformance/overlay/tour.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "80b87cb0a0fb",
+  "token_usage": {
+    "input_tokens": 825036,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 33355904,
+    "output_tokens": 50468,
+    "api_call_count": 246
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Audit the completed overlay agnostic epic (#222) for spec/implementation compliance, then split the two bloated overlay test aggregators (spec_conformance/overlay.rs and proptest_state_machines/overlay.rs) into per-component directory-backed submodules.",
+    "outcome": "Both test aggregators were split into per-component modules under directory-backed mod.rs trees, missing spec-conformance coverage was added for dialog/popover/presence/tooltip, two dead variable suppressions introduced by the split were cleaned up post-review, all overlay tests passed at 1000 proptest cases, and the change was committed with a co-author trailer.",
+    "learnings": {
+      "repo": [
+        "cargo xtest is stage-oriented (unit/integration/adapter), not a focused-test wrapper; raw cargo test is still needed for filtered overlay or ignored proptest invocations with PROPTEST_CASES",
+        "Directory-backed modules use mod.rs convention; the test harnesses wire submodules via #[path = ...] attributes in spec_conformance.rs and proptest_state_machines.rs",
+        "Toast is split into two sub-modules: toast::single and toast::manager, each with their own Part enum and proptest module",
+        "cargo xtask provides spec validate, spec compile-snippets, spec info <component>, spec digest <component>, and lint snapshot-count as first-class audit commands",
+        "cargo insta test -p ars-components --unreferenced=reject is used for snapshot hygiene but has pre-existing failures on utility/highlight snapshots unrelated to overlay",
+        "cargo mutants requires -j N for parallel execution; serial runs are too slow for files with 90+ mutants",
+        "The project uses cargo xci-fast as a local CI gate (fmt, check, clippy, nextest unit, adapter stages) and cargo xci for the full suite"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/overlay/mod.rs",
+          "line": 1,
+          "end_line": 30,
+          "finding": "After splitting, submodule names (dialog, popover, etc.) shadowed the ars_components::overlay::* imports. Required aliasing component imports with core_ prefix (e.g., core_dialog, core_popover) in the shared mod.rs to disambiguate type paths across all child modules."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/overlay/popover.rs",
+          "finding": "Mechanical split left a dead let _ = before_context; — the parameter was cloned, passed into the assertion helper, and immediately ignored with no test value. Removed the parameter and call-site argument."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/overlay/dialog.rs",
+          "finding": "Same pattern as popover: let _ = before_state; was a split artifact with no behavioral value. Removed parameter and call-site capture."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/overlay/tooltip.rs",
+          "finding": "Tooltip hidden-description ID uses a content-description token, not a plain hidden-description token; conformance check must account for the registered ID form rather than asserting a bare string match."
+        },
+        {
+          "path": "crates/ars-dioxus/tests/attr_passthrough.rs",
+          "finding": "cargo xci-fast applied formatter changes to this file as a side effect of running cargo fmt --workspace; must be staged explicitly or the gate produces a dirty-tree diff unrelated to the target change."
+        }
+      ],
+      "workflow": [
+        "Run focused baseline tests before any file movement to establish a clean pass/fail baseline that separates pre-existing failures from refactor regressions",
+        "Python one-shot extraction scripts are fast for mechanical splits but imprecise on brace boundaries; expect 2-3 patch rounds to fix closure/bracket mismatches after the initial extraction",
+        "target/debug/deps and target/tests/trybuild can accumulate read-only .rmeta files from prior tool runs; chmod -R u+w target/debug/deps target/tests/trybuild is a recurring fix needed before cargo xci-fast or nextest will pass",
+        "cargo mutants --list is fast and useful for sizing mutation work before committing to a long run; floating_panel has 481 mutants and dialog/tour are similarly large",
+        "For mutation testing on large files, -j 6 reduces wall time significantly but the full 11-file overlay suite is still multi-hour and needs a separate dedicated session or CI job"
+      ]
+    },
+    "friction": [
+      "Worktree was behind origin/main by 2 commits (menu #672, tour #673) during the planning phase; user had to manually rebase before implementation could start",
+      "Serial cargo mutants run for alert_dialog (92 mutants) took 10+ minutes; had to kill and restart with -j 6, losing intermediate results",
+      "target/debug/deps and target/tests/trybuild had read-only .rmeta permissions from prior runs, causing clippy and trybuild test failures that required chmod -R u+w to unblock",
+      "Python extraction script for the 2603-line proptest aggregator produced imprecise brace boundaries, requiring 4-5 manual apply_patch rounds to fix unclosed proptest! blocks and misplaced closing braces",
+      "Module name shadowing after split (test module names colliding with component imports) was a non-obvious failure mode that produced confusing type resolution errors before the core_ aliasing fix",
+      "cargo fmt -p ars-components --test spec_conformance --test proptest_state_machines was called with invalid flags initially; correct invocation is just cargo fmt -p ars-components",
+      "cargo insta test -p ars-components --unreferenced=reject fails on pre-existing utility/highlight snapshots, blocking use of that gate as a clean pass/fail signal for overlay-only changes"
+    ],
+    "open_items": [
+      "Mutation testing for 10 remaining overlay components (dialog, drawer, floating_panel, hover_card, popover, presence, toast/single, toast/manager, tooltip, tour) was only sized with --list; full runs with -j 6 are needed to identify and kill surviving mutants",
+      "floating_panel has 481 mutants — the largest overlay target by far — and will need dedicated mutation session time or a CI job rather than an interactive run",
+      "Pre-existing cargo insta test --unreferenced=reject failure on utility/highlight snapshots needs a separate cleanup pass before that gate can be used reliably in CI",
+      "Spec/implementation drift audit (Plan Step 5) was partially covered by the Part enum comparison script but deeper surface checks (ARIA, focus, z-index, positioning, toast semantics, tour step semantics) were not fully exercised due to time constraints from mutation testing",
+      "cargo llvm-cov coverage report was generated but branch-level uncovered overlay paths were not acted on; a coverage triage pass could surface test gaps not caught by mutation testing"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-25T03:24:21.169921Z",
+    "agent_lines": 3054,
+    "agent_removed": 2479,
+    "human_added": 21,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 3075,
+    "total_lines_changed": 5556,
+    "agent_percentage": 99.58603311735061,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 9,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3071,
+      "agent_lines_removed": 2800,
+      "user_added_per_file": {
+        "crates/ars-components/tests/proptest_state_machines/overlay/popover.rs": 2,
+        "crates/ars-components/tests/proptest_state_machines/overlay/toast_manager.rs": 2,
+        "crates/ars-components/tests/proptest_state_machines/overlay/toast_single.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/overlay/tooltip.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/overlay/tour.rs": 1,
+        "crates/ars-components/tests/spec_conformance/overlay/dialog.rs": 1,
+        "crates/ars-components/tests/spec_conformance/overlay/floating_panel.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3075,
+      "agent_lines_removed": 2800
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 3,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3066,
+      "agent_lines_removed": 2800,
+      "user_added_per_file": {
+        "crates/ars-components/tests/proptest_state_machines/overlay/alert_dialog.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/overlay/popover.rs": 2
+      }
+    }
+  ]
+}
