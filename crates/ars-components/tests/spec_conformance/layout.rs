@@ -3,7 +3,7 @@
 //! Each test pulls the expected anatomy from the corresponding component
 //! spec's §2 anatomy table and asserts the impl's `Part` enum matches.
 
-use ars_components::layout::{aspect_ratio, frame};
+use ars_components::layout::{aspect_ratio, center, frame, grid, splitter, stack};
 
 use super::helper::assert_anatomy;
 
@@ -17,5 +17,32 @@ fn frame_anatomy_matches_spec() {
     assert_anatomy(
         "frame",
         &[(frame::Part::Root, "root"), (frame::Part::Iframe, "iframe")],
+    );
+}
+
+#[test]
+fn stack_anatomy_matches_spec() {
+    assert_anatomy("stack", &[(stack::Part::Root, "root")]);
+}
+
+#[test]
+fn center_anatomy_matches_spec() {
+    assert_anatomy("center", &[(center::Part::Root, "root")]);
+}
+
+#[test]
+fn grid_anatomy_matches_spec() {
+    assert_anatomy("grid", &[(grid::Part::Root, "root")]);
+}
+
+#[test]
+fn splitter_anatomy_matches_spec() {
+    assert_anatomy(
+        "splitter",
+        &[
+            (splitter::Part::Root, "root"),
+            (splitter::Part::Panel { index: 0 }, "panel"),
+            (splitter::Part::Handle { index: 0 }, "handle"),
+        ],
     );
 }

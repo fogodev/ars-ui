@@ -1,0 +1,34 @@
+---
+source: crates/ars-components/src/layout/grid.rs
+expression: "snapshot_attrs(&Api::new(Props::new().columns(None).auto_columns(Some(Spacing::Css(\"16rem\".into()))),\nNone,).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "grid",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Display,
+            "grid",
+        ),
+        (
+            GridTemplateColumns,
+            "repeat(auto-fill, minmax(16rem, 1fr))",
+        ),
+    ],
+}

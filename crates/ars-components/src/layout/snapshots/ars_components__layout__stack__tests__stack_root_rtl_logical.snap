@@ -1,0 +1,46 @@
+---
+source: crates/ars-components/src/layout/stack.rs
+expression: "snapshot_attrs(&Api::new(Props::new().direction(StackDirection::RowLogical).spacing(Spacing::Css(\"0.5rem\".into())),\ntrue, None,).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "stack",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Display,
+            "flex",
+        ),
+        (
+            FlexDirection,
+            "row-reverse",
+        ),
+        (
+            AlignItems,
+            "stretch",
+        ),
+        (
+            JustifyContent,
+            "flex-start",
+        ),
+        (
+            Gap,
+            "0.5rem",
+        ),
+    ],
+}

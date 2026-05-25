@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/layout/center.rs
+expression: "snapshot_attrs(&Api::new(Props::new(), false, None).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "center",
+            ),
+        ),
+    ],
+    styles: [],
+}

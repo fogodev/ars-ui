@@ -55,6 +55,8 @@ pub enum Event {
     ExpandPanel { panel_index: usize },
     /// Programmatically set all sizes.
     SetSizes { sizes: Vec<f64> },
+    /// Synchronize context-backed props after a runtime prop change.
+    SyncProps { props: Props },
 }
 
 /// Keyboard event mirror (only the fields needed by the splitter).
@@ -127,6 +129,8 @@ pub struct Context {
     pub size_unit: SizeUnit,
     /// Sizes at drag start (for computing deltas without floating-point error).
     pub drag_start_sizes: Vec<f64>,
+    /// Last expanded sizes remembered for collapsible panels.
+    pub collapsed_restore_sizes: Vec<Option<f64>>,
     /// Pointer coordinate at drag start.
     pub drag_start_pos: f64,
     /// Keyboard resize step size. Defaults to `10.0` (percent) or `20.0` (pixels).
@@ -145,30 +149,23 @@ pub struct Context {
 
 impl Context {
     pub fn from_props(props: &Props, env: &Env, messages: &Messages) -> Self {
-        let sizes = if let Some(ref initial) = props.default_sizes {
-            initial.clone()
-        } else {
-            let n = props.panels.len() as f64;
-            let share = match props.size_unit {
-                SizeUnit::Percent => 100.0 / n,
-                SizeUnit::Pixels => props.initial_total_px.unwrap_or(600.0) / n,
-            };
-            vec![share; props.panels.len()]
-        };
+        let sizes = initial_sizes(props);
+        let normalized_sizes = clamp_all(&sizes, &props.panels);
         let locale = env.locale.clone();
         let messages = messages.clone();
         Context {
-            sizes: props.sizes.clone().unwrap_or_else(|| Bindable::uncontrolled(sizes)),
+            sizes: props.sizes.as_ref().map_or_else(
+                || Bindable::uncontrolled(normalized_sizes.clone()),
+                |sizes| Bindable::controlled(clamp_all(sizes.get(), &props.panels)),
+            ),
             panels: props.panels.clone(),
             orientation: props.orientation,
             dir: props.dir.unwrap_or(Direction::Ltr),
             size_unit: props.size_unit,
             drag_start_sizes: Vec::new(),
+            collapsed_restore_sizes: vec![None; props.panels.len()],
             drag_start_pos: 0.0,
-            keyboard_step: props.keyboard_step.unwrap_or(match props.size_unit {
-                SizeUnit::Percent => 10.0,
-                SizeUnit::Pixels => 20.0,
-            }),
+            keyboard_step: keyboard_step_for(props),
             focused_handle: None,
             locale,
             messages,
@@ -231,7 +228,10 @@ impl Default for Props {
 pub fn compute_resize(
     sizes: &[f64], handle_index: usize, delta: f64, panels: &[Panel],
 ) -> Vec<f64> {
-    assert!(handle_index + 1 < sizes.len());
+    if !valid_handle(handle_index, sizes.len(), panels.len()) || !delta.is_finite() {
+        return sizes.to_vec();
+    }
+
     let mut new_sizes = sizes.to_vec();
     let (left, right) = (handle_index, handle_index + 1);
 
@@ -271,23 +271,147 @@ fn snap_if_collapsible(sizes: &mut Vec<f64>, index: usize, panels: &[Panel], mov
 }
 
 fn clamp_all(sizes: &[f64], panels: &[Panel]) -> Vec<f64> {
-    sizes.iter().zip(panels.iter()).map(|(&s, p)| {
+    clamp_all_with_current(sizes, panels, sizes)
+}
+
+fn clamp_all_with_current(sizes: &[f64], panels: &[Panel], current: &[f64]) -> Vec<f64> {
+    let normalized = normalize_sizes(sizes, panels, current);
+    normalized.iter().zip(panels.iter()).map(|(&s, p)| {
         s.max(effective_min(p)).min(p.max_size.unwrap_or(f64::INFINITY))
     }).collect()
 }
 
-fn collapse_panel(sizes: &mut Vec<f64>, index: usize, panels: &[Panel]) {
-    if !panels[index].collapsible { return; }
-    let freed = sizes[index] - panels[index].collapsed_size;
-    sizes[index] = panels[index].collapsed_size;
-    if index + 1 < sizes.len() { sizes[index + 1] += freed; }
-    else if index > 0 { sizes[index - 1] += freed; }
+fn rebalance_to_total(mut sizes: Vec<f64>, panels: &[Panel], total: f64) -> Vec<f64> {
+    if !total.is_finite() || total <= 0.0 {
+        return sizes;
+    }
+    let current_total = sizes.iter().sum::<f64>();
+    let mut delta = current_total - total;
+    if delta > 0.0 {
+        for index in (0..sizes.len()).rev() {
+            let floor = panels.get(index).map_or(0.0, effective_min);
+            let reduction = (sizes[index] - floor).max(0.0).min(delta);
+            sizes[index] -= reduction;
+            delta -= reduction;
+            if delta <= f64::EPSILON {
+                break;
+            }
+        }
+    } else if delta < 0.0 {
+        let mut remaining = -delta;
+        for index in (0..sizes.len()).rev() {
+            let ceiling = panels
+                .get(index)
+                .and_then(|panel| panel.max_size)
+                .unwrap_or(f64::INFINITY);
+            let increase = (ceiling - sizes[index]).max(0.0).min(remaining);
+            sizes[index] += increase;
+            remaining -= increase;
+            if remaining <= f64::EPSILON {
+                break;
+            }
+        }
+    }
+    sizes
 }
 
-fn expand_panel(sizes: &mut Vec<f64>, index: usize, panels: &[Panel]) {
+fn normalize_sizes(sizes: &[f64], panels: &[Panel], current: &[f64]) -> Vec<f64> {
+    panels.iter().enumerate().map(|(index, panel)| {
+        let candidate = sizes
+            .get(index)
+            .copied()
+            .or_else(|| current.get(index).copied())
+            .unwrap_or(panel.default_size);
+        if candidate.is_finite() {
+            candidate
+        } else {
+            current
+                .get(index)
+                .copied()
+                .filter(|size| size.is_finite())
+                .unwrap_or(panel.default_size)
+        }
+    }).collect()
+}
+
+fn initial_sizes(props: &Props) -> Vec<f64> {
+    if let Some(default_sizes) = &props.default_sizes {
+        return default_sizes.clone();
+    }
+    let len = props.panels.len();
+    if len == 0 {
+        return Vec::new();
+    }
+    let share = match props.size_unit {
+        SizeUnit::Percent => 100.0 / len as f64,
+        SizeUnit::Pixels => props.initial_total_px.unwrap_or(600.0) / len as f64,
+    };
+    vec![share; len]
+}
+
+fn valid_handle(handle_index: usize, sizes_len: usize, panels_len: usize) -> bool {
+    if let Some(next) = handle_index.checked_add(1) {
+        next < sizes_len && next < panels_len
+    } else {
+        false
+    }
+}
+
+fn keyboard_step_for(props: &Props) -> f64 {
+    let default = match props.size_unit {
+        SizeUnit::Percent => 10.0,
+        SizeUnit::Pixels => 20.0,
+    };
+    finite_positive(props.keyboard_step.unwrap_or(default), default)
+}
+
+fn finite_positive(value: f64, fallback: f64) -> f64 {
+    if value.is_finite() && value > 0.0 { value } else { fallback }
+}
+
+fn collapse_panel(sizes: &mut [f64], index: usize, panels: &[Panel]) {
+    if index >= sizes.len() || index >= panels.len() || !panels[index].collapsible {
+        return;
+    }
+    let collapsed_size = panels[index].collapsed_size;
+    let freed = (sizes[index] - collapsed_size).max(0.0);
+
+    if sizes.len() == 1 {
+        sizes[index] = collapsed_size;
+        return;
+    }
+
+    let mut remaining = freed;
+
+    for recipient in (index + 1..sizes.len()).chain((0..index).rev()) {
+        let capacity = panels
+            .get(recipient)
+            .and_then(|panel| panel.max_size)
+            .map_or(remaining, |max_size| {
+                (max_size - sizes[recipient]).max(0.0).min(remaining)
+            });
+
+        sizes[recipient] += capacity;
+        remaining -= capacity;
+
+        if remaining <= 0.0 {
+            break;
+        }
+    }
+
+    sizes[index] = collapsed_size + remaining;
+}
+
+fn expand_panel(sizes: &mut [f64], index: usize, panels: &[Panel], restore_size: Option<f64>) -> bool {
+    if index >= sizes.len() || index >= panels.len() { return false; }
     let p = &panels[index];
-    if sizes[index] > p.collapsed_size { return; }
-    let need = p.default_size - sizes[index];
+    if !p.collapsible { return false; }
+    if sizes[index] > p.collapsed_size { return false; }
+    let target_size = restore_size
+        .filter(|size| size.is_finite())
+        .unwrap_or(p.default_size)
+        .min(p.max_size.unwrap_or(f64::INFINITY));
+    let need = (target_size - sizes[index]).max(0.0);
     let donor = if index + 1 < sizes.len() { Some(index + 1) }
         else if index > 0 { Some(index - 1) }
         else { None };
@@ -295,15 +419,41 @@ fn expand_panel(sizes: &mut Vec<f64>, index: usize, panels: &[Panel]) {
         let actual = need.min((sizes[d] - effective_min(&panels[d])).max(0.0));
         sizes[index] += actual;
         sizes[d] -= actual;
+        return actual > 0.0;
+    }
+    false
+}
+
+fn remember_collapse_size(ctx: &mut Context, index: usize) {
+    if index >= ctx.panels.len() || index >= ctx.sizes.get().len() {
+        return;
+    }
+    if !ctx.panels[index].collapsible {
+        return;
+    }
+    let size = ctx.sizes.get()[index];
+    if size > ctx.panels[index].collapsed_size {
+        if ctx.collapsed_restore_sizes.len() != ctx.panels.len() {
+            ctx.collapsed_restore_sizes.resize(ctx.panels.len(), None);
+        }
+        ctx.collapsed_restore_sizes[index] = Some(size);
     }
 }
 
 fn commit_sizes(ctx: &mut Context, sizes: Vec<f64>) {
-    debug_assert!(sizes.iter().all(|s| s.is_finite()), "Panel sizes must be finite");
-    ctx.sizes.set(sizes);
+    if sizes.len() != ctx.panels.len() || !sizes.iter().all(|s| s.is_finite()) {
+        return;
+    }
+    ctx.sizes.set(sizes.clone());
+    if ctx.sizes.is_controlled() {
+        ctx.sizes.sync_controlled(Some(sizes));
+    }
 }
 
 fn handle_keyboard(ctx: &mut Context, handle_index: usize, event: &KeyboardEvent) {
+    if !valid_handle(handle_index, ctx.sizes.get().len(), ctx.panels.len()) {
+        return;
+    }
     let step = if event.shift { ctx.keyboard_step * 5.0 } else { ctx.keyboard_step };
     let is_rtl = ctx.dir == Direction::Rtl;
     match (&event.key, &ctx.orientation) {
@@ -338,8 +488,15 @@ fn handle_keyboard(ctx: &mut Context, handle_index: usize, event: &KeyboardEvent
             if p.collapsible {
                 let mut sizes = ctx.sizes.get().to_vec();
                 if sizes[handle_index] <= p.collapsed_size {
-                    expand_panel(&mut sizes, handle_index, &ctx.panels);
+                    let restore_size = ctx.collapsed_restore_sizes.get(handle_index).copied().flatten();
+                    let expanded = expand_panel(&mut sizes, handle_index, &ctx.panels, restore_size);
+                    if expanded
+                        && let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(handle_index)
+                    {
+                        *restore_size = None;
+                    }
                 } else {
+                    remember_collapse_size(ctx, handle_index);
                     collapse_panel(&mut sizes, handle_index, &ctx.panels);
                 }
                 commit_sizes(ctx, sizes);
@@ -365,6 +522,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = NoEffect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -378,20 +536,27 @@ impl ars_core::Machine for Machine {
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
-            (State::Idle, Event::DragStart { handle_index, pos }) => {
+            (State::Idle, Event::DragStart { handle_index, pos })
+                if pos.is_finite() && valid_handle(*handle_index, ctx.sizes.get().len(), ctx.panels.len()) =>
+            {
                 let (hi, p) = (*handle_index, *pos);
                 Some(TransitionPlan::to(State::Dragging { handle_index: hi }).apply(move |ctx| {
                     ctx.drag_start_sizes = ctx.sizes.get().to_vec();
                     ctx.drag_start_pos = p;
                 }))
             }
+            (State::Idle, Event::DragStart { .. }) => None,
             (State::Idle, Event::KeyDown { handle_index, event }) => {
                 let (hi, ev) = (*handle_index, event.clone());
                 Some(TransitionPlan::context_only(move |ctx| { handle_keyboard(ctx, hi, &ev); }))
             }
             (State::Idle, Event::HandleFocus { handle_index }) => {
                 let hi = *handle_index;
-                Some(TransitionPlan::context_only(move |ctx| { ctx.focused_handle = Some(hi); }))
+                if valid_handle(hi, ctx.sizes.get().len(), ctx.panels.len()) {
+                    Some(TransitionPlan::context_only(move |ctx| { ctx.focused_handle = Some(hi); }))
+                } else {
+                    Some(TransitionPlan::new())
+                }
             }
             (State::Idle, Event::HandleBlur) => {
                 Some(TransitionPlan::context_only(|ctx| { ctx.focused_handle = None; }))
@@ -400,6 +565,7 @@ impl ars_core::Machine for Machine {
                 let pi = *panel_index;
                 Some(TransitionPlan::context_only(move |ctx| {
                     let mut sizes = ctx.sizes.get().to_vec();
+                    remember_collapse_size(ctx, pi);
                     collapse_panel(&mut sizes, pi, &ctx.panels);
                     commit_sizes(ctx, sizes);
                 }))
@@ -408,20 +574,37 @@ impl ars_core::Machine for Machine {
                 let pi = *panel_index;
                 Some(TransitionPlan::context_only(move |ctx| {
                     let mut sizes = ctx.sizes.get().to_vec();
-                    expand_panel(&mut sizes, pi, &ctx.panels);
+                    let restore_size = ctx.collapsed_restore_sizes.get(pi).copied().flatten();
+                    let expanded = expand_panel(&mut sizes, pi, &ctx.panels, restore_size);
+                    if expanded
+                        && let Some(restore_size) = ctx.collapsed_restore_sizes.get_mut(pi)
+                    {
+                        *restore_size = None;
+                    }
                     commit_sizes(ctx, sizes);
                 }))
             }
             (State::Idle, Event::SetSizes { sizes }) => {
-                let (panels, s) = (ctx.panels.clone(), sizes.clone());
-                Some(TransitionPlan::context_only(move |ctx| { commit_sizes(ctx, clamp_all(&s, &panels)); }))
+                let (panels, s, unit, total) = (
+                    ctx.panels.clone(),
+                    sizes.clone(),
+                    ctx.size_unit,
+                    ctx.sizes.get().iter().sum::<f64>(),
+                );
+                Some(TransitionPlan::context_only(move |ctx| {
+                    let mut next = clamp_all(&s, &panels);
+                    if unit == SizeUnit::Percent {
+                        next = rebalance_to_total(next, &panels, total);
+                    }
+                    commit_sizes(ctx, next);
+                }))
             }
             (State::Dragging { handle_index }, Event::DragMove { pos }) => {
                 let (hi, p) = (*handle_index, *pos);
                 let (start_pos, start_sizes, panels, scale) =
                     (ctx.drag_start_pos, ctx.drag_start_sizes.clone(), ctx.panels.clone(), ctx.drag_scale_factor);
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let delta = (p - start_pos) / scale;
+                    let delta = (p - start_pos) / finite_positive(scale, 1.0);
                     commit_sizes(ctx, compute_resize(&start_sizes, hi, delta, &panels));
                 }))
             }
@@ -441,12 +624,55 @@ impl ars_core::Machine for Machine {
                         }))
                     }
                     KeyboardKey::ArrowLeft | KeyboardKey::ArrowRight
-                    | KeyboardKey::ArrowUp | KeyboardKey::ArrowDown => {
+                    | KeyboardKey::ArrowUp | KeyboardKey::ArrowDown
+                    | KeyboardKey::Home | KeyboardKey::End
+                    | KeyboardKey::Enter | KeyboardKey::Space => {
                         let ev = event.clone();
                         Some(TransitionPlan::context_only(move |ctx| { handle_keyboard(ctx, hi, &ev); }))
                     }
                     _ => None,
                 }
+            }
+            (_, Event::SyncProps { props }) => {
+                let props = props.clone();
+                let exit_dragging = matches!(state, State::Dragging { .. });
+                let plan = if exit_dragging {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+                Some(plan.apply(move |ctx| {
+                    let current = ctx.sizes.get().to_vec();
+                    let panels_changed = ctx.panels != props.panels;
+                    ctx.panels = props.panels.clone();
+                    ctx.orientation = props.orientation;
+                    ctx.dir = props.dir.unwrap_or(Direction::Ltr);
+                    ctx.size_unit = props.size_unit;
+                    ctx.keyboard_step = keyboard_step_for(&props);
+                    if panels_changed {
+                        ctx.collapsed_restore_sizes = vec![None; ctx.panels.len()];
+                    } else {
+                        ctx.collapsed_restore_sizes.resize(ctx.panels.len(), None);
+                    }
+                    ctx.sizes.sync_controlled(
+                        props
+                            .sizes
+                            .clone()
+                            .map(|sizes| clamp_all_with_current(sizes.get(), &ctx.panels, &current)),
+                    );
+                    if !ctx.sizes.is_controlled() {
+                        commit_sizes(ctx, clamp_all_with_current(&current, &ctx.panels, &current));
+                    }
+                    if let Some(focused) = ctx.focused_handle
+                        && !valid_handle(focused, ctx.sizes.get().len(), ctx.panels.len())
+                    {
+                        ctx.focused_handle = None;
+                    }
+                    if exit_dragging {
+                        ctx.drag_start_sizes.clear();
+                        ctx.drag_start_pos = 0.0;
+                    }
+                }))
             }
             _ => None,
         }
@@ -459,6 +685,16 @@ impl ars_core::Machine for Machine {
         send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(old.id, new.id, "Splitter id cannot change after initialization");
+
+        if old == new {
+            Vec::new()
+        } else {
+            vec![Event::SyncProps { props: new.clone() }]
+        }
     }
 }
 ```
@@ -504,11 +740,17 @@ impl<'a> Api<'a> {
             Part::Panel { index }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Data("ars-panel-id"), &self.ctx.panels[index].id);
-        let sizes = self.ctx.sizes.get();
-        let collapsed = sizes[index] <= self.ctx.panels[index].collapsed_size;
+
+        let Some(panel) = self.ctx.panels.get(index) else {
+            return attrs;
+        };
+        let Some(size) = self.ctx.sizes.get().get(index).copied() else {
+            return attrs;
+        };
+
+        attrs.set(HtmlAttr::Data("ars-panel-id"), &panel.id);
+        let collapsed = panel.collapsible && size <= panel.collapsed_size;
         if collapsed { attrs.set_bool(HtmlAttr::Data("ars-collapsed"), true); }
-        let size = sizes[index];
         let unit = match self.ctx.size_unit {
             SizeUnit::Percent => "%",
             SizeUnit::Pixels => "px",
@@ -527,6 +769,9 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Data("ars-handle-index"), handle_index.to_string());
+        if !valid_handle(handle_index, self.ctx.sizes.get().len(), self.ctx.panels.len()) {
+            return attrs;
+        }
         let is_focused = self.ctx.focused_handle == Some(handle_index);
         let is_dragging = matches!(self.state, State::Dragging { handle_index: hi } if *hi == handle_index);
         attrs.set(HtmlAttr::Data("ars-state"), if is_dragging { "dragging" } else if is_focused { "focus" } else { "idle" });
@@ -540,15 +785,18 @@ impl<'a> Api<'a> {
 
         let (left, right) = (handle_index, handle_index + 1);
         let sizes = self.ctx.sizes.get();
-        let total: f64 = sizes.iter().sum();
-        let to_pct = |v: f64| if self.ctx.size_unit == SizeUnit::Percent { v } else { v / total * 100.0 };
+        let total: f64 = sizes.iter().sum::<f64>().max(1.0);
+        let to_pct = |v: f64| v / total * 100.0;
 
         let value_now = to_pct(sizes[left]);
-        let value_min = if self.ctx.panels[left].collapsible { 0.0 } else { to_pct(self.ctx.panels[left].min_size) };
-        let value_max = to_pct(self.ctx.panels[left].max_size.unwrap_or_else(|| {
-            if self.ctx.size_unit == SizeUnit::Percent { 100.0 - self.ctx.panels[right].min_size }
-            else { total - self.ctx.panels[right].min_size }
-        }));
+        let value_min = to_pct(effective_min(&self.ctx.panels[left]));
+        let fallback_max = total - effective_min(&self.ctx.panels[right]);
+        let value_max = to_pct(
+            self.ctx.panels[left]
+                .max_size
+                .unwrap_or(fallback_max)
+                .min(fallback_max),
+        );
 
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), (value_now.round() as i64).to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), (value_min.round() as i64).to_string());
@@ -561,7 +809,7 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), (self.ctx.messages.panel_size_text)(value_now, &self.ctx.locale));
         }
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.resize_handle_label)(handle_index, &self.ctx.locale));
-        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.item("panel", &left.to_string()));
+        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.item("panel", &left));
         attrs.set(HtmlAttr::TabIndex, "0");
         attrs
     }

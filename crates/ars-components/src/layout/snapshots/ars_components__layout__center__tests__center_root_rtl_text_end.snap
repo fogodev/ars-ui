@@ -1,0 +1,30 @@
+---
+source: crates/ars-components/src/layout/center.rs
+expression: "snapshot_attrs(&Api::new(Props::new().text_align(TextAlign::End), true,\nNone).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "center",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            TextAlign,
+            "left",
+        ),
+    ],
+}

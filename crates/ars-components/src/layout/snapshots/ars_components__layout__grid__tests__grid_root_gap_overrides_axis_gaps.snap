@@ -1,0 +1,38 @@
+---
+source: crates/ars-components/src/layout/grid.rs
+expression: "snapshot_attrs(&Api::new(Props::new().row_gap(Spacing::Px(4.0)).column_gap(Spacing::Px(8.0)).gap(Spacing::Css(\"2rem\".into())),\nNone,).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "grid",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Display,
+            "grid",
+        ),
+        (
+            Gap,
+            "2rem",
+        ),
+        (
+            GridTemplateColumns,
+            "repeat(1, minmax(0, 1fr))",
+        ),
+    ],
+}
