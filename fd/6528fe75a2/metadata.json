@@ -1,0 +1,60 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "fd6528fe75a2",
+  "strategy": "manual-commit",
+  "branch": "t3code/f1fdd791",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/data_display/meter.rs",
+    "crates/ars-components/src/data_display/mod.rs",
+    "crates/ars-components/src/data_display/progress/mod.rs",
+    "crates/ars-components/src/data_display/progress/snapshots/ars_components__data_display__progress__tests__progress_circle_range.snap",
+    "crates/ars-components/src/data_display/progress/snapshots/ars_components__data_display__progress__tests__progress_circle_track.snap",
+    "crates/ars-components/src/data_display/progress/snapshots/ars_components__data_display__progress__tests__progress_label.snap",
+    "crates/ars-components/src/data_display/progress/snapshots/ars_components__data_display__progress__tests__progress_range.snap",
+    "crates/ars-components/src/data_display/progress/snapshots/ars_components__data_display__progress__tests__progress_root_complete.snap",
+    "crates/ars-components/src/data_display/progress/snapshots/ars_components__data_display__progress__tests__progress_root_determinate.snap",
+    "crates/ars-components/src/data_display/progress/snapshots/ars_components__data_display__progress__tests__progress_root_indeterminate.snap",
+    "crates/ars-components/src/data_display/progress/snapshots/ars_components__data_display__progress__tests__progress_root_vertical.snap",
+    "crates/ars-components/src/data_display/progress/snapshots/ars_components__data_display__progress__tests__progress_track.snap",
+    "crates/ars-components/src/data_display/progress/snapshots/ars_components__data_display__progress__tests__progress_value_text.snap",
+    "crates/ars-components/src/data_display/snapshots/ars_components__data_display__meter__tests__meter_range.snap",
+    "crates/ars-components/src/data_display/snapshots/ars_components__data_display__meter__tests__meter_root_default.snap",
+    "crates/ars-components/src/data_display/snapshots/ars_components__data_display__meter__tests__meter_root_threshold_critical.snap",
+    "crates/ars-components/src/data_display/snapshots/ars_components__data_display__meter__tests__meter_value_text.snap",
+    "crates/ars-components/src/data_display/snapshots/ars_components__data_display__stat__tests__stat_change_down.snap",
+    "crates/ars-components/src/data_display/snapshots/ars_components__data_display__stat__tests__stat_change_up.snap",
+    "crates/ars-components/src/data_display/snapshots/ars_components__data_display__stat__tests__stat_help_text.snap",
+    "crates/ars-components/src/data_display/snapshots/ars_components__data_display__stat__tests__stat_label.snap",
+    "crates/ars-components/src/data_display/snapshots/ars_components__data_display__stat__tests__stat_root_default.snap",
+    "crates/ars-components/src/data_display/snapshots/ars_components__data_display__stat__tests__stat_root_loading.snap",
+    "crates/ars-components/src/data_display/snapshots/ars_components__data_display__stat__tests__stat_trend_indicator.snap",
+    "crates/ars-components/src/data_display/snapshots/ars_components__data_display__stat__tests__stat_value.snap",
+    "crates/ars-components/src/data_display/stat.rs",
+    "crates/ars-components/tests/data_display_meter_stat_progress.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+    "crates/ars-components/tests/spec_conformance/data_display.rs",
+    "spec/components/data-display/meter.md",
+    "spec/components/data-display/progress.md",
+    "spec/components/data-display/stat.md",
+    "spec/dioxus-components/data-display/meter.md",
+    "spec/dioxus-components/data-display/stat.md",
+    "spec/leptos-components/data-display/meter.md",
+    "spec/leptos-components/data-display/stat.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/fd/6528fe75a2/0/metadata.json",
+      "transcript": "/fd/6528fe75a2/0/full.jsonl",
+      "content_hash": "/fd/6528fe75a2/0/content_hash.txt",
+      "prompt": "/fd/6528fe75a2/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1138698,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 48436864,
+    "output_tokens": 67126,
+    "api_call_count": 385
+  }
+}
