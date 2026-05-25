@@ -189,6 +189,12 @@ pub struct Context {
     /// Whether a pointer drag is active.
     pub dragging: bool,
 
+    /// Pending drag value used for controlled commit callbacks.
+    pub drag_value: Option<f64>,
+
+    /// Whether the active drag changed the effective value.
+    pub drag_changed: bool,
+
     /// Fill origin for the range part.
     pub origin: Origin,
 
@@ -413,6 +419,8 @@ impl ars_core::Machine for Machine {
                 focused: false,
                 focus_visible: false,
                 dragging: false,
+                drag_value: None,
+                drag_changed: false,
                 origin: props.origin,
                 thumb_alignment: props.thumb_alignment,
                 name: props.name.clone(),
@@ -465,6 +473,8 @@ impl ars_core::Machine for Machine {
                 ctx.focused = false;
                 ctx.focus_visible = false;
                 ctx.dragging = false;
+                ctx.drag_value = None;
+                ctx.drag_changed = false;
             })),
 
             Event::PointerDown { value } => {
@@ -473,7 +483,7 @@ impl ars_core::Machine for Machine {
                 }
 
                 Some(
-                    set_value_plan(ctx, *value, Some(State::Dragging), true, false).apply(
+                    set_value_plan(ctx, *value, Some(State::Dragging), true, false, true).apply(
                         |ctx: &mut Context| {
                             ctx.dragging = true;
                         },
@@ -486,7 +496,7 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                Some(set_value_plan(ctx, *value, None, true, false))
+                Some(set_value_plan(ctx, *value, None, true, false, true))
             }
 
             Event::PointerMove { .. } => None,
@@ -502,15 +512,18 @@ impl ars_core::Machine for Machine {
                     State::Idle
                 };
 
-                let value = *ctx.value.get();
+                let value = ctx.drag_value.unwrap_or_else(|| bounded_value(ctx));
+                let mut plan = TransitionPlan::to(target).apply(|ctx: &mut Context| {
+                    ctx.dragging = false;
+                    ctx.drag_value = None;
+                    ctx.drag_changed = false;
+                });
 
-                Some(
-                    TransitionPlan::to(target)
-                        .apply(|ctx: &mut Context| {
-                            ctx.dragging = false;
-                        })
-                        .with_effect(value_change_end_effect(value)),
-                )
+                if ctx.drag_changed {
+                    plan = plan.with_effect(value_change_end_effect(value));
+                }
+
+                Some(plan)
             }
 
             Event::Increment => Some(step_plan(ctx, ctx.step, true)),
@@ -521,16 +534,16 @@ impl ars_core::Machine for Machine {
 
             Event::DecrementLarge => Some(step_plan(ctx, large_step(ctx), false)),
 
-            Event::SetToMin => Some(set_value_plan(ctx, ctx.min, None, true, true)),
+            Event::SetToMin => Some(set_value_plan(ctx, ctx.min, None, true, true, false)),
 
-            Event::SetToMax => Some(set_value_plan(ctx, ctx.max, None, true, true)),
+            Event::SetToMax => Some(set_value_plan(ctx, ctx.max, None, true, true, false)),
 
             Event::SetValue(value) => {
                 if !value.is_finite() {
                     return None;
                 }
 
-                Some(set_value_plan(ctx, *value, None, true, false))
+                Some(set_value_plan(ctx, *value, None, true, false, false))
             }
 
             Event::SyncValue(value) => match value {
@@ -973,6 +986,10 @@ impl Api<'_> {
 
         if self.ctx.invalid {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::ErrorMessage),
+                self.ctx.ids.part("error-message"),
+            );
         }
 
         if self.ctx.has_label {
@@ -1142,7 +1159,11 @@ impl Api<'_> {
 pub fn value_from_pointer(pointer: SliderPointer, track: Rect, ctx: &Context) -> Option<f64> {
     let percent = match ctx.orientation {
         Orientation::Horizontal => {
-            if track.width <= 0.0 {
+            if !pointer.x.is_finite()
+                || !track.x.is_finite()
+                || !track.width.is_finite()
+                || track.width <= 0.0
+            {
                 return None;
             }
 
@@ -1156,7 +1177,11 @@ pub fn value_from_pointer(pointer: SliderPointer, track: Rect, ctx: &Context) ->
         }
 
         Orientation::Vertical => {
-            if track.height <= 0.0 {
+            if !pointer.y.is_finite()
+                || !track.y.is_finite()
+                || !track.height.is_finite()
+                || track.height <= 0.0
+            {
                 return None;
             }
 
@@ -1164,18 +1189,20 @@ pub fn value_from_pointer(pointer: SliderPointer, track: Rect, ctx: &Context) ->
         }
     };
 
+    let (min, max) = normalized_bounds(ctx.min, ctx.max);
+
     Some(snap_to_step(
-        ctx.min + percent * (ctx.max - ctx.min),
-        ctx.min,
-        ctx.max,
+        min + percent * (max - min),
+        min,
+        max,
         ctx.step,
     ))
 }
 
 fn props_output_changed(old: &Props, new: &Props) -> bool {
-    (old.min - new.min).abs() > f64::EPSILON
-        || (old.max - new.max).abs() > f64::EPSILON
-        || (old.step - new.step).abs() > f64::EPSILON
+    float_output_changed(old.min, new.min)
+        || float_output_changed(old.max, new.max)
+        || float_output_changed(old.step, new.step)
         || old.large_step != new.large_step
         || old.disabled != new.disabled
         || old.readonly != new.readonly
@@ -1191,14 +1218,29 @@ fn props_output_changed(old: &Props, new: &Props) -> bool {
         || old.thumb_alignment != new.thumb_alignment
 }
 
+fn float_output_changed(old: f64, new: f64) -> bool {
+    if old.is_nan() || new.is_nan() {
+        return old.to_bits() != new.to_bits();
+    }
+
+    (old - new).abs() > f64::EPSILON
+}
+
 fn set_value_plan(
     ctx: &Context,
     value: f64,
     target: Option<State>,
     value_change: bool,
     value_change_end: bool,
+    track_drag: bool,
 ) -> TransitionPlan<Machine> {
     let next = snap_to_step(value, ctx.min, ctx.max, ctx.step);
+    let previous = if track_drag {
+        ctx.drag_value.unwrap_or_else(|| bounded_value(ctx))
+    } else {
+        bounded_value(ctx)
+    };
+    let changed = (next - previous).abs() > f64::EPSILON;
 
     let mut plan = if let Some(target) = target {
         TransitionPlan::to(target)
@@ -1207,13 +1249,17 @@ fn set_value_plan(
     }
     .apply(move |ctx: &mut Context| {
         ctx.value.set(next);
+        if track_drag {
+            ctx.drag_value = Some(next);
+            ctx.drag_changed |= changed;
+        }
     });
 
-    if value_change && (next - *ctx.value.get()).abs() > f64::EPSILON {
+    if value_change && changed {
         plan = plan.with_effect(value_change_effect(next));
     }
 
-    if value_change_end {
+    if value_change_end && changed {
         plan = plan.with_effect(value_change_end_effect(next));
     }
 
@@ -1225,7 +1271,7 @@ fn step_plan(ctx: &Context, step: f64, up: bool) -> TransitionPlan<Machine> {
 
     let raw = if up { current + step } else { current - step };
 
-    set_value_plan(ctx, raw, None, true, true)
+    set_value_plan(ctx, raw, None, true, true, false)
 }
 
 fn value_change_effect(value: f64) -> PendingEffect<Machine> {
@@ -1783,6 +1829,61 @@ mod tests {
     }
 
     #[test]
+    fn pointer_geometry_uses_normalized_bounds_and_rejects_non_finite_geometry() {
+        let track = Rect {
+            x: 10.0,
+            y: 20.0,
+            width: 100.0,
+            height: 200.0,
+        };
+        let reversed = service(Props {
+            min: 100.0,
+            max: 0.0,
+            value: Some(50.0),
+            ..props()
+        });
+
+        assert_eq!(
+            value_from_pointer(
+                SliderPointer { x: 10.0, y: 20.0 },
+                track,
+                reversed.context()
+            ),
+            Some(0.0)
+        );
+        assert_eq!(
+            value_from_pointer(
+                SliderPointer { x: 110.0, y: 20.0 },
+                track,
+                reversed.context()
+            ),
+            Some(100.0)
+        );
+        assert_eq!(
+            value_from_pointer(
+                SliderPointer { x: 50.0, y: 20.0 },
+                Rect {
+                    width: f64::NAN,
+                    ..track
+                },
+                reversed.context()
+            ),
+            None
+        );
+        assert_eq!(
+            value_from_pointer(
+                SliderPointer {
+                    x: f64::INFINITY,
+                    y: 20.0
+                },
+                track,
+                reversed.context()
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn thumb_attrs_expose_slider_aria_and_discrete_value_text() {
         let svc = service(Props {
             discrete: true,
@@ -1820,6 +1921,22 @@ mod tests {
 
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("50"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("50"));
+    }
+
+    #[test]
+    fn thumb_attrs_reference_error_message_when_invalid() {
+        let svc = service(Props {
+            invalid: true,
+            ..props()
+        });
+
+        let attrs = svc.connect(&|_| {}).thumb_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("true"));
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::ErrorMessage)),
+            Some("volume-error-message")
+        );
     }
 
     #[test]
@@ -2017,6 +2134,31 @@ mod tests {
     }
 
     #[test]
+    fn pointer_up_emits_pending_drag_value_for_controlled_slider() {
+        let ends = Arc::new(Mutex::new(Vec::new()));
+        let captured_ends = Arc::clone(&ends);
+        let mut svc = service(Props {
+            value: Some(10.0),
+            on_value_change_end: Some(callback(move |value: f64| {
+                captured_ends.lock().unwrap().push(value);
+            })),
+            ..props()
+        });
+
+        drop(svc.send(Event::PointerDown { value: 70.0 }));
+        drop(svc.send(Event::PointerMove { value: 90.0 }));
+
+        let mut end = svc.send(Event::PointerUp);
+        let send: StrongSend<Event> = Arc::new(|_| {});
+
+        for effect in end.pending_effects.drain(..) {
+            drop(effect.run(svc.context(), svc.props(), Arc::clone(&send)));
+        }
+
+        assert_eq!(ends.lock().unwrap().as_slice(), &[90.0]);
+    }
+
+    #[test]
     fn no_op_value_changes_do_not_emit_value_change_callbacks() {
         let mut svc = service(props());
 
@@ -2035,6 +2177,19 @@ mod tests {
 
         assert!(epsilon_step.pending_effects.is_empty());
         assert_eq!(*epsilon.context().value.get(), f64::EPSILON);
+    }
+
+    #[test]
+    fn no_op_commit_events_do_not_emit_value_change_end_callbacks() {
+        let mut svc = service(Props {
+            value: Some(100.0),
+            on_value_change_end: Some(callback(|_value: f64| {})),
+            ..props()
+        });
+
+        let increment = svc.send(Event::Increment);
+
+        assert!(increment.pending_effects.is_empty());
     }
 
     #[test]
@@ -2232,11 +2387,31 @@ mod tests {
         changed.min = 1.0;
 
         assert!(props_output_changed(&base, &changed));
+        assert!(props_output_changed(
+            &Props {
+                min: f64::NAN,
+                ..base.clone()
+            },
+            &Props {
+                min: 0.0,
+                ..base.clone()
+            }
+        ));
 
         changed = base.clone();
         changed.max = 99.0;
 
         assert!(props_output_changed(&base, &changed));
+        assert!(props_output_changed(
+            &Props {
+                max: f64::NAN,
+                ..base.clone()
+            },
+            &Props {
+                max: 100.0,
+                ..base.clone()
+            }
+        ));
         assert!(!props_output_changed(
             &Props {
                 max: 0.0,
@@ -2264,6 +2439,16 @@ mod tests {
         changed.step = 10.0;
 
         assert!(props_output_changed(&base, &changed));
+        assert!(props_output_changed(
+            &Props {
+                step: f64::NAN,
+                ..base.clone()
+            },
+            &Props {
+                step: 5.0,
+                ..base.clone()
+            }
+        ));
         assert!(!props_output_changed(
             &Props {
                 step: 0.0,

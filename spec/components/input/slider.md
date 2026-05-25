@@ -118,6 +118,10 @@ pub struct Context {
     pub focus_visible: bool,
     /// Whether the slider is being dragged.
     pub dragging: bool,
+    /// Pending drag value used for controlled commit callbacks.
+    pub drag_value: Option<f64>,
+    /// Whether the active drag changed the effective value.
+    pub drag_changed: bool,
     /// The origin of the slider range fill.
     pub origin: Origin,
     /// How the thumb aligns with the track boundaries.
@@ -309,6 +313,10 @@ callers provide reversed or non-finite bounds, the core normalizes them before
 computing thumb position, range fill, and marker in-range state so visual,
 ARIA, and form output remain consistent.
 
+Pointer-to-value conversion uses the same normalized bounds as rendering. It
+returns `None` for non-positive or non-finite adapter-supplied track geometry
+and for non-finite pointer coordinates on the measured axis.
+
 ### 1.6 RTL Direction Handling
 
 When the `Slider`'s containing element has `dir="rtl"`, the following behaviors MUST be reversed for horizontal sliders:
@@ -370,6 +378,7 @@ impl ars_core::Machine for Machine {
             orientation: props.orientation,
             dir: props.dir,
             focused: false, focus_visible: false, dragging: false,
+            drag_value: None, drag_changed: false,
             origin: props.origin,
             thumb_alignment: props.thumb_alignment,
             name: props.name.clone(),
@@ -441,13 +450,15 @@ impl ars_core::Machine for Machine {
                 // Guard: ignore orphaned PointerUp without a preceding PointerDown.
                 if !ctx.dragging { return None; }
                 let is_focused = ctx.focused;
-                let final_value = *ctx.value.get();
+                let final_value = ctx.drag_value.unwrap_or_else(|| bounded_value(ctx));
                 Some(TransitionPlan::to(if is_focused {
                         State::Focused
                     } else {
                         State::Idle
                     }).apply(|ctx| {
                         ctx.dragging = false;
+                        ctx.drag_value = None;
+                        ctx.drag_changed = false;
                     }).with_effect(PendingEffect::new("value-change-end", move |_ctx, props, _send| {
                         // Fire on_value_change_end with the final value after drag completes.
                         if let Some(ref cb) = props.on_value_change_end {
@@ -907,11 +918,11 @@ pub struct SliderPointer {
 /// logical value into pointer events or call this helper.
 fn value_from_pointer(pointer: SliderPointer, track: Rect, ctx: &Context) -> Option<f64> {
     let percent = if ctx.orientation == Orientation::Horizontal {
-        if track.width <= 0.0 { return None; }
+        if !pointer.x.is_finite() || !track.x.is_finite() || !track.width.is_finite() || track.width <= 0.0 { return None; }
         let offset = pointer.x - track.x;
         (offset / track.width).clamp(0.0, 1.0)
     } else {
-        if track.height <= 0.0 { return None; }
+        if !pointer.y.is_finite() || !track.y.is_finite() || !track.height.is_finite() || track.height <= 0.0 { return None; }
         let offset = (track.y + track.height) - pointer.y;
         (offset / track.height).clamp(0.0, 1.0)
     };
@@ -922,12 +933,9 @@ fn value_from_pointer(pointer: SliderPointer, track: Rect, ctx: &Context) -> Opt
         percent
     };
 
-    Some(snap_to_step(
-        ctx.min + percent * (ctx.max - ctx.min),
-        ctx.min,
-        ctx.max,
-        ctx.step,
-    ))
+    let (min, max) = normalized_bounds(ctx.min, ctx.max);
+
+    Some(snap_to_step(min + percent * (max - min), min, max, ctx.step))
 }
 
 /// The messages for the Slider component.
@@ -1021,6 +1029,7 @@ Slider
 | `aria-disabled`    | Thumb             | Present when `disabled=true`                                  |
 | `aria-readonly`    | Thumb             | Present when `readonly=true`                                  |
 | `aria-labelledby`  | Thumb             | Points to Label id when the Label part is rendered            |
+| `aria-errormessage`| Thumb             | Points to ErrorMessage id when `invalid=true`                 |
 | `aria-hidden`      | DraggingIndicator | `"true"` — purely decorative visual feedback during drag      |
 | `hidden`           | DraggingIndicator | Present when not dragging (indicator is invisible when idle)  |
 
@@ -1073,6 +1082,16 @@ All `aria-valuetext` formatting receives the effective value after non-finite in
 guards, bound normalization, clamping, and step snapping. When `discrete` is true
 and `value_labels` is `None`, the slider uses the numeric value formatted per
 locale as `aria-valuetext`.
+
+Value change callbacks are emitted only when the effective snapped value changes.
+`on_value_change_end` is suppressed for keyboard or programmatic commits that
+clamp/snap back to the current value. During controlled pointer drags, the core
+tracks the pending internal drag value and emits that final pending value on
+`PointerUp`, even if the parent has not yet synchronized the controlled prop.
+
+`SetProps` diffing must treat finite-to-`NaN`, `NaN`-to-finite, and distinct
+`NaN` payload changes for `min`, `max`, and `step` as output-affecting so the
+context stays synchronized with invalid runtime prop updates.
 
 ### 4.2 `aria-valuetext` Localization
 

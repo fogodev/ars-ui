@@ -46,6 +46,14 @@ AttrMap {
         ),
         (
             Aria(
+                ErrorMessage,
+            ),
+            String(
+                "volume-error-message",
+            ),
+        ),
+        (
+            Aria(
                 Invalid,
             ),
             String(
