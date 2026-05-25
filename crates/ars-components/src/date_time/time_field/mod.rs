@@ -1570,7 +1570,9 @@ fn sync_props(ctx: &mut Context, props: &Props) {
     if let Some(value) = props.value {
         apply_controlled_value(ctx, Some(value));
     } else if was_controlled {
-        apply_controlled_value(ctx, None);
+        ctx.value.sync_controlled(None);
+        ctx.value.set(None);
+        ctx.rebuild_segments();
     } else {
         ctx.value.sync_controlled(None);
 
@@ -1826,7 +1828,7 @@ fn day_period_from_cjk_buffer(
     ) {
         (true, false, ..) => Some(0),
         (false, true, ..) => Some(1),
-        (true, true, HourCycle::H11, _, Some(day_period)) => Some(day_period.clamp(0, 1)),
+        (true, true, _, _, Some(day_period)) => Some(day_period.clamp(0, 1)),
         (true, true, HourCycle::H11, _, None) | (true, true, _, None, _) | (false, false, ..) => {
             None
         }

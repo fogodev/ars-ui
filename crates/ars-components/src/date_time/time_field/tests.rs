@@ -392,6 +392,7 @@ fn cjk_day_period_timeout_uses_current_hour_as_fallback() {
     assert_eq!(ctx.get_segment_value(DateSegmentKind::DayPeriod), Some(0));
 
     ctx.set_segment_value(DateSegmentKind::Hour, 12);
+    ctx.clear_segment_value(DateSegmentKind::DayPeriod);
     ctx.type_buffer = String::from("午");
 
     commit_buffer_for_kind(&mut ctx, DateSegmentKind::DayPeriod, true);
@@ -416,6 +417,26 @@ fn cjk_day_period_timeout_preserves_h11_current_day_period() {
     commit_buffer_for_kind(&mut ctx, DateSegmentKind::DayPeriod, true);
 
     assert_eq!(ctx.get_segment_value(DateSegmentKind::DayPeriod), Some(1));
+}
+
+#[test]
+fn cjk_day_period_timeout_preserves_h12_current_day_period() {
+    let mut ctx = Service::<Machine>::new(
+        props()
+            .hour_cycle(Some(HourCycle::H12))
+            .default_value(Some(time(13, 0, 0))),
+        &env("ja-JP"),
+        &Messages::default(),
+    )
+    .context()
+    .clone();
+
+    ctx.type_buffer = String::from("午");
+
+    commit_buffer_for_kind(&mut ctx, DateSegmentKind::DayPeriod, true);
+
+    assert_eq!(ctx.get_segment_value(DateSegmentKind::DayPeriod), Some(1));
+    assert_eq!(ctx.assemble_time(), Some(time(13, 0, 0)));
 }
 
 #[test]
@@ -810,7 +831,7 @@ fn prop_sync_updates_ids_without_panicking_when_id_changes() {
 }
 
 #[test]
-fn controlled_prop_sync_can_clear_value_without_submitting_stale_time() {
+fn controlled_prop_sync_removing_value_clears_without_stale_time_and_becomes_uncontrolled() {
     let mut service = Service::<Machine>::new(
         props()
             .value(Some(time(14, 30, 0)))
@@ -830,7 +851,7 @@ fn controlled_prop_sync_can_clear_value_without_submitting_stale_time() {
 
     drop(service.set_props(props().name(Some(String::from("meeting_time")))));
 
-    assert!(service.context().value.is_controlled());
+    assert!(!service.context().value.is_controlled());
     assert_eq!(service.context().value.get(), &None);
     assert_eq!(
         attr(
@@ -843,6 +864,10 @@ fn controlled_prop_sync_can_clear_value_without_submitting_stale_time() {
         service.context().get_segment_value(DateSegmentKind::Hour),
         None
     );
+
+    drop(service.send(Event::SetValue(Some(time(9, 45, 0)))));
+
+    assert_eq!(service.context().value.get(), &Some(time(9, 45, 0)));
 }
 
 #[test]

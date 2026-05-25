@@ -455,11 +455,10 @@ fn day_period_from_cjk_buffer(
     }
 
     // Still ambiguous (single shared character). If this is a timeout
-    // fallback, use the current value as context. H11 display hours are
-    // always 0..=11, so preserving the current day-period value is the only
-    // non-lossy H11 fallback.
-    if hour_cycle == HourCycle::H11 {
-        return current_day_period.map(|value| value.clamp(0, 1));
+    // fallback, preserve the current day-period segment first. H11 and H12
+    // display hours are not enough to distinguish existing PM values from AM.
+    if let Some(value) = current_day_period {
+        return Some(value.clamp(0, 1));
     }
 
     if let Some(hour) = current_hour {
@@ -631,8 +630,9 @@ impl ars_core::Machine for Machine {
                         ctx.value.set(Some(clamped));
                         ctx.value.sync_controlled(Some(Some(clamped)));
                     } else if ctx.value.is_controlled() {
+                        ctx.value.sync_controlled(None);
                         ctx.value.set(None);
-                        ctx.value.sync_controlled(Some(None));
+                        ctx.rebuild_segments();
                     } else {
                         let clamped = ctx.value.get().map(|time| {
                             clamp_time(time, ctx.min_value.as_ref(), ctx.max_value.as_ref())
