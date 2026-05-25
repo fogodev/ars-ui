@@ -594,6 +594,9 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     if let Some(value) = &controlled {
                         ctx.value.set(clamp_to_max(value.clone(), max_checked));
+                    } else {
+                        ctx.value
+                            .set(clamp_to_max(ctx.value.get().clone(), max_checked));
                     }
 
                     ctx.value.sync_controlled(controlled);
@@ -1306,6 +1309,22 @@ mod tests {
             <Machine as ars_core::Machine>::on_props_changed(&old, &new),
             vec![Event::SetValue(set(&["alpha"])), Event::SetProps]
         );
+    }
+
+    #[test]
+    fn checkbox_group_set_props_clamps_uncontrolled_value_when_max_checked_shrinks() {
+        let mut service = service(props().default_value(set(&["alpha", "beta", "gamma"])));
+
+        drop(service.send(Event::SetProps));
+
+        assert_eq!(
+            service.context().value.get(),
+            &set(&["alpha", "beta", "gamma"])
+        );
+
+        drop(service.set_props(props().max_checked(1)));
+
+        assert_eq!(service.context().value.get(), &set(&["alpha"]));
     }
 
     #[test]

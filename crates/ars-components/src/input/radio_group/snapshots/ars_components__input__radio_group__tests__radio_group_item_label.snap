@@ -1,5 +1,6 @@
 ---
 source: crates/ars-components/src/input/radio_group/mod.rs
+assertion_line: 2329
 expression: "snapshot_attrs(&service.connect(&|_| {}).item_label_attrs(&key(\"standard\")))"
 ---
 AttrMap {
@@ -29,7 +30,7 @@ AttrMap {
         (
             For,
             String(
-                "shipping-item-standard",
+                "shipping-item-standard-input",
             ),
         ),
     ],

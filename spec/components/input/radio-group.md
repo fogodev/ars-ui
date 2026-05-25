@@ -587,14 +587,14 @@ impl<'a> Api<'a> {
 
     /// Attributes for the radio item label.
     pub fn item_label_attrs(&self, item_value: &Key) -> AttrMap {
-        let item_id = self.ctx.ids.item("item", &item_value);
+        let input_id = self.ctx.ids.item_part("item", item_value, "input");
         let label_id = self.ctx.ids.item_part("item", item_value, "label");
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemLabel { item_value: Key::default() }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, label_id);
-        attrs.set(HtmlAttr::For, item_id);
+        attrs.set(HtmlAttr::For, input_id);
         attrs
     }
 
@@ -709,7 +709,7 @@ RadioGroup
 | Item            | `<div>`   | `data-ars-state` ("checked"/"unchecked")               |
 | ItemControl     | `<div>`   | `role="radio"`, `aria-checked`, roving `tabindex`      |
 | ItemIndicator   | `<div>`   | `aria-hidden="true"` — visual radio dot                |
-| ItemLabel       | `<label>` | `for` points to ItemControl                            |
+| ItemLabel       | `<label>` | `for` points to ItemHiddenInput                        |
 | ItemHiddenInput | `<input>` | `type="radio"`, `aria-hidden="true"` — form submission |
 
 ## 3. Accessibility

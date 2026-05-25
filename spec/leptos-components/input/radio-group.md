@@ -47,7 +47,7 @@ The adapter also forwards shared group props from the core contract, including l
 | `Item`                | repeated  | `<div>`                  | adapter-owned wrapper or documented helper output | item attrs from API                  | each item is keyed by value             |
 | `ItemControl`         | repeated  | focusable `<div>`        | adapter-owned                                     | `api.item_control_attrs(value)`      | owns `role="radio"` and roving tabindex |
 | `ItemIndicator`       | repeated  | `<div>`                  | adapter-owned                                     | `api.item_indicator_attrs(value)`    | decorative only                         |
-| `ItemLabel`           | repeated  | `<label>`                | adapter-owned or shared                           | `api.item_label_attrs(value)`        | linked to `ItemControl`                 |
+| `ItemLabel`           | repeated  | `<label>`                | adapter-owned or shared                           | `api.item_label_attrs(value)`        | linked to `ItemHiddenInput`             |
 | `ItemHiddenInput`     | repeated  | `<input type="radio">`   | adapter-owned                                     | `api.item_hidden_input_attrs(value)` | native submission bridge                |
 | `Description`         | optional  | `<div>`                  | adapter-owned                                     | `api.description_attrs()`            | described-by content                    |
 | `ErrorMessage`        | optional  | `<div>`                  | adapter-owned                                     | `api.error_message_attrs()`          | invalid-only content                    |

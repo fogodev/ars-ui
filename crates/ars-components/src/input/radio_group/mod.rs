@@ -485,7 +485,14 @@ impl ars_core::Machine for Machine {
 
             Event::RegisterItem(item) => {
                 let item = item.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                let clears_focus = item.disabled && ctx.focused_item.as_ref() == Some(&item.value);
+                let plan = if clears_focus && matches!(state, State::Focused { .. }) {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+
+                Some(plan.apply(move |ctx: &mut Context| {
                     if let Some(existing) = ctx
                         .items
                         .iter_mut()
@@ -494,6 +501,11 @@ impl ars_core::Machine for Machine {
                         *existing = item;
                     } else {
                         ctx.items.push(item);
+                    }
+
+                    if clears_focus {
+                        ctx.focused_item = None;
+                        ctx.focus_visible = false;
                     }
                 }))
             }
@@ -952,7 +964,10 @@ impl Api<'_> {
                 HtmlAttr::Id,
                 self.ctx.ids.item_part("item", item_value, "label"),
             )
-            .set(HtmlAttr::For, self.ctx.ids.item("item", item_value));
+            .set(
+                HtmlAttr::For,
+                self.ctx.ids.item_part("item", item_value, "input"),
+            );
 
         attrs
     }
@@ -1754,6 +1769,30 @@ mod tests {
 
         assert!(result.is_noop());
         assert_eq!(service.context().items.len(), 3);
+    }
+
+    #[test]
+    fn radio_group_register_disabling_focused_item_clears_focused_state() {
+        let mut service = service(props());
+
+        drop(service.send(Event::FocusItem {
+            item: key("standard"),
+            is_keyboard: true,
+        }));
+        drop(service.send(Event::RegisterItem(
+            Radio::new(key("standard")).disabled(true),
+        )));
+
+        assert_eq!(service.state(), &State::Idle);
+        assert_eq!(service.context().focused_item, None);
+        assert!(!service.context().focus_visible);
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .item_control_attrs(&key("express"))
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
     }
 
     #[test]
