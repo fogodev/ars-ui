@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "713839bb74a8",
+  "strategy": "manual-commit",
+  "branch": "t3code/f1fdd791",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/data_display/progress/mod.rs",
+    "crates/ars-components/tests/data_display_meter_stat_progress.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+    "spec/components/data-display/progress.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/71/3839bb74a8/0/metadata.json",
+      "transcript": "/71/3839bb74a8/0/full.jsonl",
+      "content_hash": "/71/3839bb74a8/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 81296,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 11961856,
+    "output_tokens": 12159,
+    "api_call_count": 140
+  }
+}
