@@ -72,6 +72,12 @@ pub enum Event {
     SetToMax,
     /// The component received a set value event.
     SetValue(f64),
+    /// Synchronize the externally controlled value prop.
+    SyncValue(Option<f64>),
+    /// Synchronize output-affecting props stored in context.
+    SetProps,
+    /// Track whether a Description part is rendered.
+    SetHasDescription(bool),
 }
 ```
 
@@ -110,10 +116,20 @@ pub struct Context {
     pub focus_visible: bool,
     /// Whether the slider is being dragged.
     pub dragging: bool,
+    /// The origin of the slider range fill.
+    pub origin: Origin,
     /// How the thumb aligns with the track boundaries.
     pub thumb_alignment: ThumbAlignment,
     /// The name of the slider.
     pub name: Option<String>,
+    /// The ID of the form element the input is associated with.
+    pub form: Option<String>,
+    /// The marks of the slider.
+    pub marks: Vec<Mark>,
+    /// Whether the slider reports discrete value-label semantics.
+    pub discrete: bool,
+    /// Optional labels for discrete value positions.
+    pub value_labels: Option<Vec<String>>,
     /// Whether a Description part is rendered (gates aria-describedby).
     pub has_description: bool,
     /// Resolved locale for i18n.
@@ -180,17 +196,29 @@ pub struct Props {
     /// When set, tick mark labels use this formatter instead of raw numeric values.
     pub tick_format: Option<Callback<dyn Fn(f64) -> String + Send + Sync>>,
     /// Formatter for the current value display and `aria-valuetext`.
-    /// When `None`, the raw numeric value is used as a string.
+    /// When `None`, the next formatter in the `aria-valuetext` precedence
+    /// chain is used.
     /// Example: `Some(Callback::new(|v| format!("{:.0}%", v)))` renders "50%" instead of "50".
-    pub value_format: Option<Callback<f64, String>>,
+    pub value_format: Option<Callback<dyn Fn(f64) -> String + Send + Sync>>,
     /// Formatter for the current value used specifically for `aria-valuetext` on the thumb element.
     /// When `Some`, the returned string is set as `aria-valuetext`, enabling screen readers to
     /// announce a human-readable representation (e.g., "$50" or "50 percent") instead of a raw number.
     /// Integrates with `number::Formatter` for locale-aware display: pass the value through
     /// `number::Formatter::format()` inside the callback to get locale-appropriate grouping and
     /// decimal separators (e.g., "1.234,56" in de-DE).
-    /// When `None`, falls back to `value_format` if set, otherwise uses the raw numeric value.
-    pub format_value: Option<Callback<f64, String>>,
+    /// When `None`, falls back through the documented `aria-valuetext` precedence chain.
+    pub format_value: Option<Callback<dyn Fn(f64) -> String + Send + Sync>>,
+    /// Formatter used specifically for `aria-valuetext`.
+    /// Precedence: `format_value_text` → discrete value label → `format_value` →
+    /// `value_format` → raw numeric value.
+    pub format_value_text: Option<Callback<dyn Fn(f64) -> String + Send + Sync>>,
+    /// Whether the slider reports discrete value-label semantics.
+    pub discrete: bool,
+    /// Optional labels for discrete value positions.
+    ///
+    /// Labels are mapped evenly across the slider range. When present and
+    /// `discrete=true`, `aria-valuetext` is `"{index} of {total} ({label})"`.
+    pub value_labels: Option<Vec<String>>,
     /// How the thumb aligns with the track ends. `Center` means the thumb center
     /// aligns with the track min/max; `Contain` means the thumb edge stays within
     /// the track bounds. Default: `ThumbAlignment::Contain`.
@@ -198,8 +226,10 @@ pub struct Props {
     /// Callback fired when the user finishes a drag interaction (pointerup) or
     /// keyboard adjustment, as opposed to `on_value_change` which fires continuously.
     /// Use this for expensive operations like network requests.
-    pub on_value_change_end: Option<Callback<f64>>,
-    // Change callbacks provided by the adapter layer
+    pub on_value_change: Option<Callback<dyn Fn(f64) + Send + Sync>>,
+    /// Callback fired when the user finishes a drag interaction (pointerup) or
+    /// keyboard adjustment.
+    pub on_value_change_end: Option<Callback<dyn Fn(f64) + Send + Sync>>,
 }
 
 /// How the thumb aligns with the track boundaries.
@@ -242,7 +272,11 @@ impl Default for Props {
             tick_format: None,
             value_format: None,
             format_value: None,
+            format_value_text: None,
+            discrete: false,
+            value_labels: None,
             thumb_alignment: ThumbAlignment::Contain,
+            on_value_change: None,
             on_value_change_end: None,
         }
     }
@@ -283,7 +317,9 @@ When the `Slider`'s containing element has `dir="rtl"`, the following behaviors 
 - Thumb position uses `right: {percent}%` instead of `left: {percent}%`
 - Min label appears on the right; max label appears on the left
 
-> **Text Rendering Constraint**: Components that measure element widths (spinner buttons, slider thumbs) must round `getBoundingClientRect()` values to the nearest integer pixel.
+> **Adapter Measurement Constraint**: Adapters that measure slider track/thumb geometry must round
+> `getBoundingClientRect()` values to the nearest integer pixel before passing logical `Rect`
+> data into the agnostic core.
 
 **RangeSlider in RTL**:
 
@@ -325,8 +361,13 @@ impl ars_core::Machine for Machine {
             orientation: props.orientation,
             dir: props.dir,
             focused: false, focus_visible: false, dragging: false,
+            origin: props.origin,
             thumb_alignment: props.thumb_alignment,
             name: props.name.clone(),
+            form: props.form.clone(),
+            marks: props.marks.clone(),
+            discrete: props.discrete,
+            value_labels: props.value_labels.clone(),
             has_description: false,
             locale,
             messages,
@@ -396,7 +437,7 @@ impl ars_core::Machine for Machine {
                         State::Idle
                     }).apply(|ctx| {
                         ctx.dragging = false;
-                    })with_effect(PendingEffect::new("value-change-end", move |_ctx, props, _send| {
+                    }).with_effect(PendingEffect::new("value-change-end", move |_ctx, props, _send| {
                         // Fire on_value_change_end with the final value after drag completes.
                         if let Some(ref cb) = props.on_value_change_end {
                             cb.call(final_value);
@@ -451,6 +492,46 @@ impl ars_core::Machine for Machine {
                 let snapped = snap_to_step(*val, ctx.min, ctx.max, ctx.step);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(snapped);
+                }))
+            }
+            Event::SyncValue(value) => {
+                let value = value.map(|value| snap_to_step(value, ctx.min, ctx.max, ctx.step));
+                Some(TransitionPlan::context_only(move |ctx| {
+                    if let Some(value) = value {
+                        ctx.value.set(value);
+                        ctx.value.sync_controlled(Some(value));
+                    } else {
+                        ctx.value.sync_controlled(None);
+                    }
+                }))
+            }
+            Event::SetProps => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.min = props.min;
+                    ctx.max = props.max;
+                    ctx.step = props.step;
+                    ctx.large_step = props.large_step;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.invalid = props.invalid;
+                    ctx.orientation = props.orientation;
+                    ctx.dir = props.dir;
+                    ctx.origin = props.origin;
+                    ctx.thumb_alignment = props.thumb_alignment;
+                    ctx.name = props.name.clone();
+                    ctx.form = props.form.clone();
+                    ctx.marks = props.marks.clone();
+                    ctx.discrete = props.discrete;
+                    ctx.value_labels = props.value_labels.clone();
+                    let snapped = snap_to_step(*ctx.value.get(), ctx.min, ctx.max, ctx.step);
+                    ctx.value.set(snapped);
+                }))
+            }
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_description = has_description;
                 }))
             }
         }
@@ -616,10 +697,7 @@ impl<'a> Api<'a> {
         let is_horizontal = self.ctx.orientation == Orientation::Horizontal;
         let is_rtl = self.ctx.dir == Direction::Rtl;
 
-        let value_text = self.props.format_value.as_ref()
-            .map(|f| f(*self.ctx.value.get()))
-            .or_else(|| self.props.value_format.as_ref().map(|f| f(*self.ctx.value.get())))
-            .unwrap_or_else(|| format!("{}", self.ctx.value.get()));
+        let value_text = self.value_text();
 
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Thumb.data_attrs();
@@ -769,14 +847,29 @@ impl ConnectApi for Api<'_> {
     }
 }
 
-/// Compute slider value from a pointer event's position relative to the track.
-/// `track` is a platform-agnostic `Rect` (see `01-architecture.md` §2.2.7).
-fn compute_value_from_pointer(event: &PointerEvent, track: &Rect, ctx: &Context) -> f64 {
+/// Adapter-normalized pointer coordinates used by slider geometry helpers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SliderPointer {
+    /// Pointer x-coordinate in viewport coordinates.
+    pub x: f64,
+    /// Pointer y-coordinate in viewport coordinates.
+    pub y: f64,
+}
+
+/// Compute slider value from adapter-supplied pointer coordinates and track geometry.
+///
+/// The agnostic core never calls `getBoundingClientRect`, queries element IDs, or
+/// inspects live track/thumb nodes. Framework adapters own DOM geometry reads,
+/// normalize host pointer events into `SliderPointer` plus `Rect`, then pass the
+/// logical value into pointer events or call this helper.
+fn value_from_pointer(pointer: SliderPointer, track: Rect, ctx: &Context) -> Option<f64> {
     let percent = if ctx.orientation == Orientation::Horizontal {
-        let offset = event.client_x() as f64 - track.x;
+        if track.width <= 0.0 { return None; }
+        let offset = pointer.x - track.x;
         (offset / track.width).clamp(0.0, 1.0)
     } else {
-        let offset = (track.y + track.height) - event.client_y() as f64;
+        if track.height <= 0.0 { return None; }
+        let offset = (track.y + track.height) - pointer.y;
         (offset / track.height).clamp(0.0, 1.0)
     };
 
@@ -786,7 +879,12 @@ fn compute_value_from_pointer(event: &PointerEvent, track: &Rect, ctx: &Context)
         percent
     };
 
-    ctx.min + percent * (ctx.max - ctx.min)
+    Some(snap_to_step(
+        ctx.min + percent * (ctx.max - ctx.min),
+        ctx.min,
+        ctx.max,
+        ctx.step,
+    ))
 }
 
 /// The messages for the Slider component.
@@ -912,32 +1010,33 @@ Sliders operate in one of two modes, controlled by the `discrete` prop:
 ```rust,no_check
 /// When true, the slider snaps to defined steps and reports discrete labels.
 pub discrete: bool,  // default: false
-/// Optional labels for each discrete step. Length must match the number of steps.
+/// Optional labels mapped evenly across the slider range.
 /// When provided, `aria-valuetext` uses these labels instead of raw numbers.
 pub value_labels: Option<Vec<String>>,
 ```
 
 **`aria-valuetext` generation:**
 
+- **Custom `format_value_text`**: highest precedence. The returned localized string is
+  used directly.
 - **Discrete with `value_labels`**: `aria-valuetext` is set to `"{label}"` with positional
   context — e.g., `"3 of 5 (Medium)"` where 3 is the current step index, 5 is total steps,
   and "Medium" is the label. Format: `"{index} of {total} ({label})"`.
-- **Continuous with unit**: `aria-valuetext` is set to the formatted value with unit suffix —
-  e.g., `"72 dB"`. The unit is provided via `Messages.unit: Option<String>`.
-- **Continuous without unit**: `aria-valuetext` is omitted; `aria-valuenow` alone is
-  sufficient for screen readers.
+- **Discrete without labels**: `aria-valuetext` uses the numeric value formatted per locale.
+- **Continuous with `format_value` or `value_format`**: the formatter output is used.
+- **Continuous without a formatter**: `aria-valuetext` uses the raw numeric value string.
 
 When `discrete` is true and `value_labels` is `None`, the slider uses the numeric value
 formatted per locale as `aria-valuetext`.
 
 ### 4.2 `aria-valuetext` Localization
 
-1. Slider accepts an optional `format_value_text: Box<dyn Fn(f64) -> String>` prop for
+1. Slider accepts an optional `format_value_text: Callback<dyn Fn(f64) -> String + Send + Sync>` prop for
    custom labels (e.g., `'Low'`, `'Medium'`, `'High'`).
 2. This function receives the current value and must return a localized string.
-3. When provided, the adapter sets `aria-valuetext` to the function's output.
-4. When not provided, `aria-valuetext` is omitted and screen readers use the raw numeric
-   `aria-valuenow`.
+3. When provided, the core connect API sets `aria-valuetext` to the function's output.
+4. When not provided, the connect API falls back to discrete labels, then `format_value`,
+   then `value_format`, then the raw numeric value string.
 5. For RangeSlider, each thumb has its own format function.
 
 ### 4.3 Keyboard Modifiers (Slider / RangeSlider)

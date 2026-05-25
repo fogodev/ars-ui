@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/input/slider/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).marker_attrs(90.0))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "marker",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "slider",
+            ),
+        ),
+        (
+            Data(
+                "ars-value",
+            ),
+            String(
+                "90",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "90%",
+            ),
+        ),
+    ],
+    styles: [],
+}

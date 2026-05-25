@@ -5,7 +5,7 @@
 
 use ars_components::input::{
     checkbox, checkbox_group, number_input, password_input, pin_input, radio_group, search_input,
-    switch, text_field, textarea,
+    slider, switch, text_field, textarea,
 };
 
 use super::helper::assert_anatomy;
@@ -174,6 +174,27 @@ fn number_input_anatomy_matches_spec() {
             (number_input::Part::DecrementTrigger, "decrement-trigger"),
             (number_input::Part::Description, "description"),
             (number_input::Part::ErrorMessage, "error-message"),
+        ],
+    );
+}
+
+#[test]
+fn slider_anatomy_matches_spec() {
+    assert_anatomy(
+        "slider",
+        &[
+            (slider::Part::Root, "root"),
+            (slider::Part::Label, "label"),
+            (slider::Part::Track, "track"),
+            (slider::Part::Range, "range"),
+            (slider::Part::Thumb, "thumb"),
+            (slider::Part::Output, "output"),
+            (slider::Part::MarkerGroup, "marker-group"),
+            (slider::Part::Marker { value: 0.0 }, "marker"),
+            (slider::Part::HiddenInput, "hidden-input"),
+            (slider::Part::DraggingIndicator, "dragging-indicator"),
+            (slider::Part::Description, "description"),
+            (slider::Part::ErrorMessage, "error-message"),
         ],
     );
 }

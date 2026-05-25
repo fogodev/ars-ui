@@ -1,0 +1,34 @@
+---
+source: crates/ars-components/src/input/slider/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).range_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "range",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "slider",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Width,
+            "25%",
+        ),
+        (
+            Left,
+            "0%",
+        ),
+    ],
+}
