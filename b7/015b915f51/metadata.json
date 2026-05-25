@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "b7015b915f51",
+  "strategy": "manual-commit",
+  "branch": "t3code/d7f511fb",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/input/slider/mod.rs",
+    "spec/components/input/slider.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b7/015b915f51/0/metadata.json",
+      "transcript": "/b7/015b915f51/0/full.jsonl",
+      "content_hash": "/b7/015b915f51/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 199062,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 7222528,
+    "output_tokens": 15066,
+    "api_call_count": 98
+  }
+}
