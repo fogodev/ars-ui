@@ -1035,7 +1035,6 @@ impl<'a> Api<'a> {
 
         attrs
             .set(HtmlAttr::Id, self.ctx.ids.part("label"))
-            .set(HtmlAttr::For, self.ctx.ids.part("field-group"))
             .set(scope_attr, scope_val)
             .set(part_attr, part_val);
 
@@ -1106,17 +1105,18 @@ impl<'a> Api<'a> {
     /// Returns attributes for an editable segment or a literal fallback.
     #[must_use]
     pub fn segment_attrs(&self, kind: &DateSegmentKind) -> AttrMap {
-        let Some(segment) = self
+        let Some((index, segment)) = self
             .ctx
             .segments
             .iter()
-            .find(|segment| segment.kind == *kind)
+            .enumerate()
+            .find(|(_, segment)| segment.kind == *kind)
         else {
             return AttrMap::new();
         };
 
         if !segment.is_editable {
-            return self.literal_attrs(0);
+            return self.literal_attrs(index);
         }
 
         let mut attrs = AttrMap::new();
@@ -1364,7 +1364,16 @@ fn type_into_segment(
             .then(|| day_period_from_cjk_buffer(&buffer, &ctx.locale, ctx.hour_cycle, None, None))
             .flatten();
 
-        if has_cjk_table && cjk_value.is_none() {
+        let backend_value = ctx
+            .intl_backend
+            .day_period_from_char(ch, &ctx.locale)
+            .map(|is_pm| if is_pm { 1 } else { 0 });
+
+        if has_cjk_table
+            && cjk_value.is_none()
+            && backend_value.is_none()
+            && is_cjk_day_period_prefix(&buffer, &ctx.locale)
+        {
             return Some(
                 TransitionPlan::to(state.clone())
                     .apply(move |ctx: &mut Context| {
@@ -1375,11 +1384,7 @@ fn type_into_segment(
             );
         }
 
-        let value = cjk_value.or_else(|| {
-            ctx.intl_backend
-                .day_period_from_char(ch, &ctx.locale)
-                .map(|is_pm| if is_pm { 1 } else { 0 })
-        })?;
+        let value = cjk_value.or(backend_value)?;
 
         let next = ctx.next_editable_after(kind);
 
@@ -1471,7 +1476,7 @@ fn type_into_segment(
 
 fn commit_type_buffer(ctx: &mut Context) {
     if let Some(kind) = ctx.focused_segment {
-        commit_buffer_for_kind(ctx, kind, false);
+        commit_buffer_for_kind(ctx, kind, kind == DateSegmentKind::DayPeriod);
     }
 }
 
@@ -1803,6 +1808,16 @@ fn cjk_day_period_table(locale: &Locale) -> Option<CjkDayPeriodEntry> {
 
         _ => None,
     }
+}
+
+fn is_cjk_day_period_prefix(buffer: &str, locale: &Locale) -> bool {
+    let Some(entry) = cjk_day_period_table(locale) else {
+        return false;
+    };
+
+    let normalized = strip_combining_marks(buffer);
+
+    entry.am_label.starts_with(&normalized) || entry.pm_label.starts_with(&normalized)
 }
 
 fn day_period_from_cjk_buffer(

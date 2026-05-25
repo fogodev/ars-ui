@@ -343,6 +343,47 @@ fn cjk_day_period_input_buffers_ambiguous_prefix_and_commits_disambiguation() {
 }
 
 #[test]
+fn cjk_day_period_allows_ascii_fallback_and_ignores_invalid_prefixes() {
+    let mut service = Service::<Machine>::new(
+        props().hour_cycle(Some(HourCycle::H12)),
+        &env("ja-JP"),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment {
+        kind: DateSegmentKind::DayPeriod,
+    }));
+    drop(service.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::DayPeriod,
+        ch: 'p',
+    }));
+
+    assert_eq!(service.context().type_buffer, "");
+    assert_eq!(
+        service
+            .context()
+            .get_segment_value(DateSegmentKind::DayPeriod),
+        Some(1)
+    );
+
+    drop(service.send(Event::ClearSegment {
+        kind: DateSegmentKind::DayPeriod,
+    }));
+    drop(service.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::DayPeriod,
+        ch: 'x',
+    }));
+
+    assert_eq!(service.context().type_buffer, "");
+    assert_eq!(
+        service
+            .context()
+            .get_segment_value(DateSegmentKind::DayPeriod),
+        None
+    );
+}
+
+#[test]
 fn cjk_day_period_resolution_cancels_pending_commit_effect() {
     let mut service = Service::<Machine>::new(
         props().hour_cycle(Some(HourCycle::H12)),
@@ -437,6 +478,35 @@ fn cjk_day_period_timeout_preserves_h12_current_day_period() {
 
     assert_eq!(ctx.get_segment_value(DateSegmentKind::DayPeriod), Some(1));
     assert_eq!(ctx.assemble_time(), Some(time(13, 0, 0)));
+}
+
+#[test]
+fn cjk_day_period_blur_uses_timeout_fallback_for_ambiguous_prefix() {
+    let mut service = Service::<Machine>::new(
+        props()
+            .hour_cycle(Some(HourCycle::H12))
+            .default_value(Some(time(13, 0, 0))),
+        &env("ja-JP"),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FocusSegment {
+        kind: DateSegmentKind::DayPeriod,
+    }));
+    drop(service.send(Event::TypeIntoSegment {
+        kind: DateSegmentKind::DayPeriod,
+        ch: '午',
+    }));
+    drop(service.send(Event::BlurAll));
+
+    assert_eq!(service.context().type_buffer, "");
+    assert_eq!(
+        service
+            .context()
+            .get_segment_value(DateSegmentKind::DayPeriod),
+        Some(1)
+    );
+    assert_eq!(service.context().value.get(), &Some(time(13, 0, 0)));
 }
 
 #[test]
@@ -599,6 +669,34 @@ fn hidden_input_renders_iso_time_and_name() {
 
     assert_eq!(attr(&attrs, HtmlAttr::Value), Some("14:30:45"));
     assert_eq!(attr(&attrs, HtmlAttr::Name), Some("starts_at"));
+}
+
+#[test]
+fn label_attrs_do_not_target_non_labelable_field_group() {
+    let service = service();
+    let attrs = service.connect(&|_| {}).label_attrs();
+
+    assert_eq!(attr(&attrs, HtmlAttr::For), None);
+}
+
+#[test]
+fn segment_attrs_literal_fallback_uses_actual_literal_index() {
+    let service = Service::<Machine>::new(
+        props()
+            .granularity(TimeGranularity::Second)
+            .hour_cycle(Some(HourCycle::H12)),
+        &Env::default(),
+        &Messages::default(),
+    );
+    let api = service.connect(&|_| {});
+
+    assert_eq!(
+        attr(
+            &api.segment_attrs(&DateSegmentKind::Literal),
+            HtmlAttr::Data("ars-index")
+        ),
+        Some("1")
+    );
 }
 
 #[test]

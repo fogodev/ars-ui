@@ -467,9 +467,22 @@ fn day_period_from_cjk_buffer(
 
     None // Need more input
 }
+
+fn is_cjk_day_period_prefix(buffer: &str, locale: &Locale) -> bool {
+    let Some(entry) = cjk_day_period_table(locale) else {
+        return false;
+    };
+
+    let normalized = buffer
+        .nfd()
+        .filter(|c| !c.is_combining_mark())
+        .collect::<String>();
+
+    entry.am_label.starts_with(&normalized) || entry.pm_label.starts_with(&normalized)
+}
 ```
 
-The `TypeIntoSegment` handler for `DateSegmentKind::DayPeriod` in the TimeField state machine MUST delegate to this logic for CJK locales instead of the current ASCII-only `'a'`/`'p'` check. When the buffer is ambiguous after the first character, the handler schedules a `TypeBufferCommit` effect (500ms) exactly as numeric segments do. When a later character resolves the day period, the handler cancels the pending `TypeBufferCommit` effect before publishing the resolved value. On `TypeBufferCommit` for a `DayPeriod` segment, call `day_period_from_cjk_buffer` with the resolved hour cycle, current hour segment value, and current day-period segment value to apply the timeout fallback without flipping H11 PM values.
+The `TypeIntoSegment` handler for `DateSegmentKind::DayPeriod` in the TimeField state machine MUST delegate to this logic for CJK locales instead of the current ASCII-only `'a'`/`'p'` check. ASCII/backend day-period shortcuts such as `a` and `p` remain valid in CJK locales and MUST be resolved before scheduling an ambiguous CJK prefix. Non-prefix CJK input MUST be ignored without mutating the buffer or scheduling a commit. When the buffer is ambiguous after the first character, the handler schedules a `TypeBufferCommit` effect (500ms) exactly as numeric segments do. When a later character resolves the day period, the handler cancels the pending `TypeBufferCommit` effect before publishing the resolved value. On `TypeBufferCommit` for a `DayPeriod` segment and when focus leaves an active day-period buffer, call `day_period_from_cjk_buffer` with the resolved hour cycle, current hour segment value, and current day-period segment value to apply the timeout fallback without flipping H11 PM values.
 
 ### 1.7 Timezone Handling
 
@@ -755,18 +768,21 @@ impl ars_core::Machine for Machine {
                         let mut buffer = ctx.type_buffer.clone();
                         buffer.push(ch);
                         let cjk = day_period_from_cjk_buffer(&buffer, &ctx.locale, ctx.hour_cycle, None, None);
-                        if cjk.is_none() && cjk_day_period_table(&ctx.locale).is_some() {
+                        let backend = ctx.intl_backend
+                            .day_period_from_char(ch, &ctx.locale)
+                            .map(|is_pm| if is_pm { 1 } else { 0 });
+                        if cjk.is_none()
+                            && backend.is_none()
+                            && cjk_day_period_table(&ctx.locale).is_some()
+                            && is_cjk_day_period_prefix(&buffer, &ctx.locale)
+                        {
                             return Some(TransitionPlan::to(state.clone())
                                 .apply(move |ctx| { ctx.type_buffer = buffer; })
                                 .cancel_effect(Effect::TypeBufferCommit)
                                 .with_effect(PendingEffect::named(Effect::TypeBufferCommit)));
                         }
 
-                        let value = cjk.or_else(|| {
-                            ctx.intl_backend
-                                .day_period_from_char(ch, &ctx.locale)
-                                .map(|is_pm| if is_pm { 1 } else { 0 })
-                        })?;
+                        let value = cjk.or(backend)?;
 
                         Some(TransitionPlan::context_only(move |ctx| {
                             ctx.set_segment_value(DateSegmentKind::DayPeriod, value);
@@ -832,10 +848,13 @@ impl ars_core::Machine for Machine {
                     if k == DateSegmentKind::DayPeriod {
                         let current_hour = ctx.get_seg(DateSegmentKind::Hour)
                             .and_then(|hour| u8::try_from(hour).ok());
+                        let current_day_period = ctx.get_seg(DateSegmentKind::DayPeriod);
                         if let Some(v) = day_period_from_cjk_buffer(
                             &ctx.type_buffer,
                             &ctx.locale,
+                            ctx.hour_cycle,
                             current_hour,
+                            current_day_period,
                         ) {
                             ctx.set_segment_value(k, v);
                             Machine::maybe_publish(ctx);
@@ -949,7 +968,6 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("label"));
-        attrs.set(HtmlAttr::For, self.ctx.ids.part("field-group"));
         attrs
     }
 
@@ -984,6 +1002,12 @@ impl<'a> Api<'a> {
 
     /// Attributes for a segment element.
     pub fn segment_attrs(&self, kind: &DateSegmentKind) -> AttrMap {
+        if let Some((index, seg)) = self.ctx.segments.iter().enumerate().find(|(_, s)| s.kind == *kind) {
+            if !seg.is_editable {
+                return self.literal_attrs(index);
+            }
+        }
+
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] =
             Part::Segment { kind: kind.clone() }.data_attrs();
