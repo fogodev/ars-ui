@@ -18,6 +18,9 @@ pub mod dismissable;
 /// `DownloadTrigger` component (stateless `<a download>` attribute mapper).
 pub mod download_trigger;
 
+/// `DropZone` component machine.
+pub mod drop_zone;
+
 /// Error boundary fallback structure and shared message bundle. Owns the
 /// framework-agnostic side of the error-boundary component: the localizable
 /// `Messages` bundle, the `Part` taxonomy, and the attribute helpers

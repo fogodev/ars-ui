@@ -1,0 +1,67 @@
+---
+source: crates/ars-components/src/utility/drop_zone/mod.rs
+expression: "snapshot_attrs(&rejected.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "drop-zone",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "drop-rejected",
+            ),
+        ),
+        (
+            Aria(
+                Invalid,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Upload files",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "uploads",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "button",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,67 @@
+---
+source: crates/ars-components/src/utility/drop_zone/mod.rs
+expression: "snapshot_attrs(&service(props().read_only(true)).connect(&|_|\n{}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-readonly",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "drop-zone",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Upload files",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "uploads",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "button",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

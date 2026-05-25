@@ -8,8 +8,9 @@ use ars_collections::{Key, selection};
 #[cfg(feature = "i18n")]
 use ars_components::utility::highlight;
 use ars_components::utility::{
-    action_group, button, download_trigger, error_boundary, field, fieldset, focus_scope, form,
-    form_submit, live_region, separator, swap, toggle, toggle_group, visually_hidden,
+    action_group, button, download_trigger, drop_zone, error_boundary, field, fieldset,
+    focus_scope, form, form_submit, live_region, separator, swap, toggle, toggle_group,
+    visually_hidden,
 };
 use ars_core::{ConnectApi, Env, HtmlAttr, Service, WeakSend, callback};
 use ars_forms::{
@@ -19,6 +20,7 @@ use ars_forms::{
 #[cfg(feature = "i18n")]
 use ars_i18n::Locale;
 use ars_i18n::Orientation;
+use ars_interactions::{DragItem, FileHandle};
 use proptest::prelude::*;
 
 fn arb_direction() -> impl Strategy<Value = Option<ars_core::Direction>> {
@@ -102,6 +104,103 @@ fn arb_toggle_event() -> impl Strategy<Value = toggle::Event> {
         Just(toggle::Event::Blur),
         any::<bool>().prop_map(toggle::Event::SetDisabled),
         prop::option::of(any::<bool>()).prop_map(toggle::Event::SetValue),
+    ]
+}
+
+fn arb_drop_zone_accept() -> impl Strategy<Value = Vec<String>> {
+    prop_oneof![
+        Just(Vec::new()),
+        Just(vec![".png".to_string()]),
+        Just(vec!["image/*".to_string()]),
+        Just(vec!["image/png".to_string()]),
+        Just(vec!["text/plain".to_string()]),
+    ]
+}
+
+fn arb_drop_zone_props() -> impl Strategy<Value = drop_zone::Props> {
+    (
+        arb_drop_zone_accept(),
+        prop::option::of(0usize..=4),
+        prop::option::of(0u64..=2_048),
+        any::<bool>(),
+        any::<bool>(),
+        any::<bool>(),
+    )
+        .prop_map(
+            |(accept, max_files, max_file_size, disabled, read_only, invalid)| drop_zone::Props {
+                id: "drop-zone".to_string(),
+                accept,
+                max_files,
+                max_file_size,
+                disabled,
+                label: "Upload files".to_string(),
+                allowed_operations: vec![ars_interactions::DropOperation::Move],
+                name: Some("files".to_string()),
+                required: false,
+                invalid,
+                read_only,
+                activate_delay: Duration::from_millis(500),
+                reset_delay: Duration::from_millis(1_500),
+                get_drop_operation: None,
+                on_drop: None,
+                on_drop_rejected: None,
+                on_drop_enter: None,
+                on_drop_exit: None,
+                on_drop_move: None,
+                on_hover_start: None,
+                on_drop_activate: None,
+                on_hover_end: None,
+            },
+        )
+}
+
+fn arb_drop_zone_item() -> impl Strategy<Value = DragItem> {
+    prop_oneof![
+        "[a-z]{0,16}".prop_map(DragItem::Text),
+        ("[a-z]{1,8}", 0u64..=4_096).prop_map(|(name, size)| DragItem::File {
+            name: format!("{name}.png"),
+            mime_type: "image/png".to_string(),
+            size,
+            handle: FileHandle::opaque(),
+        }),
+        ("[a-z]{1,8}", 0u64..=4_096).prop_map(|(name, size)| DragItem::File {
+            name: format!("{name}.txt"),
+            mime_type: "text/plain".to_string(),
+            size,
+            handle: FileHandle::opaque(),
+        }),
+    ]
+}
+
+fn arb_drop_zone_data() -> impl Strategy<Value = drop_zone::DragData> {
+    (
+        prop::collection::vec(arb_drop_zone_item(), 0..=4),
+        prop::collection::vec(
+            prop_oneof![
+                Just("image/png".to_string()),
+                Just("image/jpg".to_string()),
+                Just("text/plain".to_string()),
+                Just("application/json".to_string()),
+                Just("Files".to_string()),
+            ],
+            0..=4,
+        ),
+    )
+        .prop_map(|(items, types)| drop_zone::DragData { items, types })
+}
+
+fn arb_drop_zone_event() -> impl Strategy<Value = drop_zone::Event> {
+    prop_oneof![
+        arb_drop_zone_data().prop_map(drop_zone::Event::DragEnter),
+        arb_drop_zone_data().prop_map(drop_zone::Event::DragOver),
+        Just(drop_zone::Event::DragLeave),
+        arb_drop_zone_data().prop_map(drop_zone::Event::Drop),
+        Just(drop_zone::Event::Reset),
+        Just(drop_zone::Event::AutoReset),
+        Just(drop_zone::Event::SetProps),
+        Just(drop_zone::Event::DropActivate),
+        any::<bool>().prop_map(|is_keyboard| drop_zone::Event::Focus { is_keyboard }),
+        Just(drop_zone::Event::Blur),
     ]
 }
 
@@ -1692,6 +1791,82 @@ proptest! {
 
 proptest! {
     #![proptest_config(super::common::proptest_config())]
+
+    /// Arbitrary DropZone event sequences must keep the public state and
+    /// connect API internally consistent: drag-over state owns the drop-target
+    /// marker, named enabled instances expose stored accepted form data, and
+    /// disabled/read-only instances never enter drag/drop states.
+    #[test]
+    #[ignore = "proptest — nightly extended-proptest job"]
+    fn proptest_drop_zone_event_sequences_preserve_invariants(
+        props in arb_drop_zone_props(),
+        events in prop::collection::vec(arb_drop_zone_event(), 0..128),
+    ) {
+        let initially_disabled_or_readonly = props.disabled || props.read_only;
+
+        let mut service = Service::<drop_zone::Machine>::new(
+            props,
+            &Env::default(),
+            &drop_zone::Messages::default(),
+        );
+
+        for event in events {
+            drop(service.send(event));
+
+            let attrs = service.connect(&|_| {}).root_attrs();
+
+            let drag_over_attr = attrs.get(&HtmlAttr::Data("ars-drag-over"));
+
+            prop_assert_eq!(
+                matches!(service.state(), drop_zone::State::DragOver),
+                service.context().is_drop_target,
+                "DragOver state and is_drop_target must agree"
+            );
+            prop_assert_eq!(
+                matches!(service.state(), drop_zone::State::DragOver),
+                drag_over_attr == Some("true"),
+                "root data-ars-drag-over must track DragOver state"
+            );
+
+            if service.state() != &drop_zone::State::DragOver {
+                prop_assert!(
+                    !service.context().valid_drag,
+                    "valid_drag must clear outside DragOver"
+                );
+                prop_assert!(
+                    service.context().drag_types.is_empty(),
+                    "drag_types must clear outside DragOver"
+                );
+            }
+
+            if service.props().name.is_none() || service.context().disabled {
+                let form_data = service.connect(&|_| {}).form_data().to_vec();
+                prop_assert!(
+                    form_data.is_empty(),
+                    "form_data must be empty for unnamed or disabled instances"
+                );
+            } else {
+                let form_data = service.connect(&|_| {}).form_data().to_vec();
+                prop_assert_eq!(
+                    form_data.as_slice(),
+                    service.context().dropped_items.as_slice(),
+                    "form_data must expose stored accepted items for named enabled instances"
+                );
+            }
+
+            if initially_disabled_or_readonly {
+                prop_assert!(
+                    !matches!(
+                        service.state(),
+                        drop_zone::State::DragOver
+                            | drop_zone::State::DropAccepted
+                            | drop_zone::State::DropRejected
+                    ),
+                    "disabled/read-only DropZone must ignore drag/drop transitions"
+                );
+            }
+        }
+    }
 
     /// `Activate → Deactivate { restore_focus: false }` always lands at
     /// `State::Inactive` with `saved_focus = None`, regardless of any

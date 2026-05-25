@@ -19,26 +19,27 @@ a drop. It can be reused internally by the FileUpload component. Maps to React A
 
 ### 1.1 States
 
-| State          | Description                                                                                |
-| -------------- | ------------------------------------------------------------------------------------------ |
-| `Idle`         | Default resting state. No active drag interaction.                                         |
-| `DragOver`     | A drag operation is hovering over the drop zone.                                           |
-| `DropAccepted` | A drop was successfully accepted. Remains until explicitly reset.                          |
-| `DropRejected` | A drop was rejected (invalid types, too many files, etc.). Remains until explicitly reset. |
+| State          | Description                                                                        |
+| -------------- | ---------------------------------------------------------------------------------- |
+| `Idle`         | Default resting state. No active drag interaction.                                 |
+| `DragOver`     | A drag operation is hovering over the drop zone.                                   |
+| `DropAccepted` | A drop was successfully accepted. Adapters visually reset it to `Idle` after `reset_delay` without clearing accepted form data. |
+| `DropRejected` | A drop was rejected. Adapters visually reset it to `Idle` after `reset_delay`.                                      |
 
 ### 1.2 Events
 
-| Event          | Payload             | Description                                                       |
-| -------------- | ------------------- | ----------------------------------------------------------------- |
-| `DragEnter`    | `DragData`          | A drag operation entered the drop zone. Types are validated.      |
-| `DragOver`     | `DragData`          | A drag operation is hovering. Used for continuous feedback.       |
-| `DragLeave`    | ---                 | The drag operation left the drop zone.                            |
-| `Drop`         | `DragData`          | Items were dropped. Validated against constraints.                |
-| `Reset`        | ---                 | Clear the drop state and return to idle.                          |
-| `SetProps`     | ---                 | Sync context fields from updated props.                           |
-| `DropActivate` | ---                 | Fired after `activate_delay_ms` while hovering in DragOver state. |
-| `Focus`        | `is_keyboard: bool` | The drop zone received focus.                                     |
-| `Blur`         | ---                 | The drop zone lost focus.                                         |
+| Event          | Payload             | Description                                                    |
+| -------------- | ------------------- | -------------------------------------------------------------- |
+| `DragEnter`    | `DragData`          | A drag operation entered the drop zone. Types are validated.   |
+| `DragOver`     | `DragData`          | A drag operation is hovering. Used for continuous feedback.    |
+| `DragLeave`    | ---                 | The drag operation left the drop zone.                         |
+| `Drop`         | `DragData`          | Items were dropped. Validated against constraints.             |
+| `Reset`        | ---                 | Clear the drop state, accepted payload, and return to idle.     |
+| `AutoReset`    | ---                 | Return terminal visual state to idle without clearing accepted payload. |
+| `SetProps`     | ---                 | Sync context fields from updated props.                        |
+| `DropActivate` | ---                 | Fired after `activate_delay` while hovering in DragOver state. |
+| `Focus`        | `is_keyboard: bool` | The drop zone received focus.                                  |
+| `Blur`         | ---                 | The drop zone lost focus.                                      |
 
 ### 1.3 Domain Types
 
@@ -53,9 +54,53 @@ pub struct DragData {
     pub types: Vec<String>,
 }
 
+/// Validation failures collected while evaluating a drop.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DropValidationError {
+    /// A payload MIME type is outside `Props::accept`.
+    UnsupportedType {
+        /// The rejected MIME type after `DropZone` normalization.
+        mime_type: String,
+    },
+    /// The payload contains more items than `Props::max_files` allows.
+    TooManyFiles {
+        /// Number of dropped items.
+        actual: usize,
+        /// Maximum allowed item count.
+        max: usize,
+    },
+    /// A dropped file exceeds `Props::max_file_size`.
+    FileTooLarge {
+        /// Display name of the oversized file.
+        name: String,
+        /// Actual file size in bytes.
+        size: u64,
+        /// Maximum allowed file size in bytes.
+        max: u64,
+    },
+}
+
+/// Structured details passed to rejected-drop callbacks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DropRejection {
+    /// The rejected drag payload.
+    pub data: DragData,
+    /// Every validation failure found for the payload.
+    pub errors: Vec<DropValidationError>,
+}
+
 // `DragItem` — defined in `05-interactions.md`
 // `DropOperation` — defined in `05-interactions.md`
 ```
+
+Drop validation is aggregate, not fail-fast. A rejected payload records every applicable
+failure in `DropRejection::errors`: max item count, every oversized file, and every MIME-bearing
+item outside the accept policy. MIME comparisons trim whitespace, compare case-insensitively,
+normalize `image/jpg` to `image/jpeg`, and support `type/*` wildcards to match the
+`ars-interactions` drag-and-drop policy. File drops also support HTML-style extension tokens such
+as `.png` by comparing against `DragItem::File` names. Hover validation treats the browser
+`Files` drag type as a valid file candidate because the concrete file names and MIME types are not
+available until drop time.
 
 ### 1.4 Context
 
@@ -77,6 +122,8 @@ pub struct Context {
     pub focus_visible: bool,
     /// The valid drag state of the drop zone.
     pub valid_drag: bool,
+    /// Advertised MIME/type tokens for the active drag operation.
+    pub drag_types: Vec<String>,
     /// The drop target state of the drop zone.
     /// `true` when a drag operation is hovering over the drop zone (state == DragOver).
     /// Adapters use this to apply visual feedback styles (e.g., highlighted border,
@@ -84,6 +131,8 @@ pub struct Context {
     pub is_drop_target: bool,
     /// The dropped items of the drop zone.
     pub dropped_items: Vec<DragItem>,
+    /// Last rejected payload and validation errors.
+    pub last_rejection: Option<DropRejection>,
     /// The component IDs.
     pub ids: ComponentIds,
     /// The resolved locale for this component instance.
@@ -102,6 +151,20 @@ On `dragenter`, the adapter sets `event.dataTransfer.effectAllowed` based on the
 ### 1.6 Props
 
 ```rust
+use core::time::Duration;
+
+/// Callback shape for resolving a drop operation from payload data and allowed operations.
+pub type DropOperationFn =
+    dyn Fn((DragData, Vec<DropOperation>)) -> DropOperation + Send + Sync;
+/// Callback shape for drag payload notifications.
+pub type DragDataFn = dyn Fn(DragData) + Send + Sync;
+/// Callback shape for accepted drop items.
+pub type DragItemsFn = dyn Fn(Vec<DragItem>) + Send + Sync;
+/// Callback shape for rejected drop details.
+pub type DropRejectionFn = dyn Fn(DropRejection) + Send + Sync;
+/// Callback shape for zero-argument DropZone notifications.
+pub type VoidFn = dyn Fn() + Send + Sync;
+
 /// Props for the `DropZone` component.
 #[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
@@ -134,31 +197,37 @@ pub struct Props {
     /// Read-only DropZone displays previously dropped files but prevents new drops.
     /// The `form_data()` method still returns items for form submission.
     pub read_only: bool,
-    /// Delay in milliseconds before firing `on_drop_activate` while hovering.
-    /// Default: 500.
-    pub activate_delay_ms: u32,
+    /// Delay before firing `on_drop_activate` while hovering.
+    /// Default: `Duration::from_millis(500)`.
+    pub activate_delay: Duration,
+    /// Delay before adapters reset `DropAccepted` / `DropRejected` back to `Idle`.
+    /// Default: `Duration::from_millis(1500)`.
+    pub reset_delay: Duration,
     /// Optional callback to determine the drop operation for a given drag.
     /// Receives the current `DragData` and the list of `allowed_operations`.
     /// Returns the `DropOperation` to use. When `None`, falls back to static
     /// `allowed_operations` matching.
-    pub get_drop_operation: Option<Callback<(DragData, Vec<DropOperation>), DropOperation>>,
+    pub get_drop_operation: Option<Callback<DropOperationFn>>,
     /// Callback fired when a valid drop is accepted. Receives the accepted items.
-    pub on_drop: Option<Callback<Vec<DragItem>>>,
-    /// Fired when a drag operation enters the drop zone (drag hover starts).
+    pub on_drop: Option<Callback<DragItemsFn>>,
+    /// Callback fired when a drop is rejected. Receives the rejected payload and
+    /// every validation failure.
+    pub on_drop_rejected: Option<Callback<DropRejectionFn>>,
+    /// Fired when a valid drag operation enters the drop zone (drag hover starts).
     /// Receives the `DragData` associated with the entering drag.
     /// Maps to the `DragEnter` machine event.
-    pub on_drop_enter: Option<Callback<DragData>>,
-    /// Fired when a drag operation leaves the drop zone (drag hover ends without dropping).
+    pub on_drop_enter: Option<Callback<DragDataFn>>,
+    /// Fired when a valid drag operation leaves the drop zone (drag hover ends without dropping).
     /// Maps to the `DragLeave` machine event.
-    pub on_drop_exit: Option<Callback<dyn Fn() + Send + Sync>>,
-    /// Fired continuously as the pointer moves over the drop zone during a drag.
-    pub on_drop_move: Option<Callback<dyn Fn(DragMoveData) + Send + Sync>>,
+    pub on_drop_exit: Option<Callback<VoidFn>>,
+    /// Fired continuously as the pointer moves over the drop zone during a valid drag.
+    pub on_drop_move: Option<Callback<DragDataFn>>,
     /// Fired when the pointer enters the drop zone (non-drag hover).
-    pub on_hover_start: Option<Callback<dyn Fn() + Send + Sync>>,
-    /// Fired after `activate_delay_ms` elapses while a drag hovers over the zone.
-    pub on_drop_activate: Option<Callback<dyn Fn() + Send + Sync>>,
+    pub on_hover_start: Option<Callback<VoidFn>>,
+    /// Fired after `activate_delay` elapses while a drag hovers over the zone.
+    pub on_drop_activate: Option<Callback<VoidFn>>,
     /// Fired when the pointer leaves the drop zone (non-drag hover).
-    pub on_hover_end: Option<Callback<dyn Fn() + Send + Sync>>,
+    pub on_hover_end: Option<Callback<VoidFn>>,
     // Change callbacks provided by the adapter layer
 }
 
@@ -176,9 +245,11 @@ impl Default for Props {
             required: false,
             invalid: false,
             read_only: false,
-            activate_delay_ms: 500,
+            activate_delay: Duration::from_millis(500),
+            reset_delay: Duration::from_millis(1500),
             get_drop_operation: None,
             on_drop: None,
+            on_drop_rejected: None,
             on_drop_enter: None,
             on_drop_exit: None,
             on_drop_move: None,
@@ -204,9 +275,9 @@ pub enum State {
     Idle,
     /// A drag operation is hovering over the drop zone.
     DragOver,
-    /// A drop was successfully accepted. Remains until explicitly reset.
+    /// A drop was successfully accepted. Adapters reset to idle after `reset_delay`.
     DropAccepted,
-    /// A drop was rejected (invalid types, too many files, etc.). Remains until explicitly reset.
+    /// A drop was rejected. Adapters reset to idle after `reset_delay`.
     DropRejected,
 }
 
@@ -223,11 +294,15 @@ pub enum Event {
     DragLeave,
     /// Items were dropped. Validated against constraints.
     Drop(DragData),
-    /// Clear the drop state and return to idle.
+    /// Clear the drop state, accepted payload, and return to idle.
     Reset,
+    /// Return terminal visual state to idle after the drop affordance delay.
+    ///
+    /// Unlike `Reset`, this preserves accepted form data.
+    AutoReset,
     /// Sync context fields from updated props.
     SetProps,
-    /// Fired after `activate_delay_ms` while in DragOver state.
+    /// Fired after `activate_delay` while in DragOver state.
     /// Adapter fires `on_drop_activate` callback.
     DropActivate,
     /// The drop zone received focus.
@@ -237,6 +312,27 @@ pub enum Event {
     },
     /// The drop zone lost focus.
     Blur,
+}
+
+/// Named effect intents emitted by the `DropZone` component.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// A drag operation entered the drop target.
+    DropEnter,
+    /// A drag operation left the drop target.
+    DropExit,
+    /// A drag operation moved while hovering the drop target.
+    DropMove,
+    /// Adapter should start the delayed drop-activation timer.
+    ArmDropActivate,
+    /// The delayed drop-activation timer fired.
+    DropActivate,
+    /// A drop was accepted.
+    DropAccepted,
+    /// A drop was rejected.
+    DropRejected,
+    /// Adapter should dispatch `Event::AutoReset` after `Props::reset_delay`.
+    ResetAfterDrop,
 }
 
 // ── Machine ──────────────────────────────────────────────────────────────────
@@ -251,28 +347,38 @@ impl Machine {
         if accept.is_empty() {
             return true;
         }
-        dragged.iter().any(|t| accept.contains(t))
+        dragged.iter().any(|t| t.trim().eq_ignore_ascii_case("Files") || mime_type_accepted(accept, t))
     }
 
-    /// Validates a set of drag items against the component constraints.
-    fn validate_drop(ctx: &Context, items: &[DragItem]) -> bool {
-        // Check file count.
+    /// Validates a set of drag items against the component constraints and
+    /// returns every failure. Empty means accepted.
+    fn validate_drop(ctx: &Context, items: &[DragItem]) -> Vec<DropValidationError> {
+        let mut errors = Vec::new();
+
+        let file_count = items.iter().filter(|item| matches!(item, DragItem::File { .. })).count();
         if let Some(max) = ctx.max_files {
-            if items.len() > max {
-                return false;
+            if file_count > max {
+                errors.push(DropValidationError::TooManyFiles {
+                    actual: file_count,
+                    max,
+                });
             }
         }
-        // Check individual file sizes.
+
         if let Some(max_size) = ctx.max_file_size {
             for item in items {
-                if let DragItem::File { size, .. } = item {
+                if let DragItem::File { name, size, .. } = item {
                     if *size > max_size {
-                        return false;
+                        errors.push(DropValidationError::FileTooLarge {
+                            name: name.clone(),
+                            size: *size,
+                            max: max_size,
+                        });
                     }
                 }
             }
         }
-        // Check MIME types.
+
         if !ctx.accept.is_empty() {
             for item in items {
                 let mime = match item {
@@ -284,13 +390,17 @@ impl Machine {
                     DragItem::Directory { .. } => None,
                 };
                 if let Some(m) = mime {
-                    if !ctx.accept.contains(m) {
-                        return false;
+                    let normalized = normalize_mime_type(m);
+                    if !item_accepted(&ctx.accept, item, &normalized) {
+                        errors.push(DropValidationError::UnsupportedType {
+                            mime_type: normalized,
+                        });
                     }
                 }
             }
         }
-        true
+
+        errors
     }
 }
 
@@ -301,6 +411,7 @@ impl ars_core::Machine for Machine {
     type Props = Props;
     type Api<'a> = Api<'a>;
     type Messages = Messages;
+    type Effect = Effect;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(props.id());
@@ -316,6 +427,7 @@ impl ars_core::Machine for Machine {
             valid_drag: false,
             is_drop_target: false,
             dropped_items: Vec::new(),
+            last_rejection: None,
             ids,
             locale,
             messages,
@@ -344,8 +456,8 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // Disabled guard: allow Focus/Blur so AT can still discover the element.
-        if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetProps) {
+        // Disabled guard: allow Focus/Blur so AT can still discover the element, and allow reset paths to clean state.
+        if ctx.disabled && !matches!(event, Event::Focus { .. } | Event::Blur | Event::SetProps | Event::Reset | Event::AutoReset) {
             return None;
         }
 
@@ -362,120 +474,169 @@ impl ars_core::Machine for Machine {
                 let max_file_size = props.max_file_size;
                 let disabled = props.disabled;
                 let read_only = props.read_only;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.accept = accept;
-                    ctx.max_files = max_files;
-                    ctx.max_file_size = max_file_size;
-                    ctx.disabled = disabled;
-                    ctx.read_only = read_only;
-                }))
+                if matches!(state, State::DragOver) && (disabled || read_only) {
+                    Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
+                        ctx.accept = accept;
+                        ctx.max_files = max_files;
+                        ctx.max_file_size = max_file_size;
+                        ctx.disabled = disabled;
+                        ctx.read_only = read_only;
+                        ctx.valid_drag = false;
+                        ctx.drag_types.clear();
+                        ctx.is_drop_target = false;
+                    }).cancel_effect(Effect::ArmDropActivate))
+                } else if matches!(state, State::DragOver) {
+                    let valid = Self::validate_types(&accept, &ctx.drag_types);
+                    let was_valid = ctx.valid_drag;
+                    let mut plan = TransitionPlan::context_only(move |ctx| {
+                        ctx.accept = accept;
+                        ctx.max_files = max_files;
+                        ctx.max_file_size = max_file_size;
+                        ctx.disabled = disabled;
+                        ctx.read_only = read_only;
+                        ctx.valid_drag = valid;
+                    });
+                    if !valid && was_valid {
+                        plan = plan.cancel_effect(Effect::ArmDropActivate);
+                    } else if valid && !was_valid {
+                        plan = plan.with_effect(PendingEffect::named(Effect::ArmDropActivate));
+                    }
+                    Some(plan)
+                } else {
+                    Some(TransitionPlan::context_only(move |ctx| {
+                        ctx.accept = accept;
+                        ctx.max_files = max_files;
+                        ctx.max_file_size = max_file_size;
+                        ctx.disabled = disabled;
+                        ctx.read_only = read_only;
+                    }))
+                }
             }
             // ── Drag enter ──────────────────────────────────────────────────
             // If `get_drop_operation` is set, call it to determine the operation;
             // otherwise fall back to static `allowed_operations` matching.
-            // Adapter invokes `on_drop_enter` callback with the DragData.
+            // Adapter invokes `on_drop_enter` and arms activation only for valid drags.
             (State::Idle, Event::DragEnter(data)) => {
                 let valid = Self::validate_types(&ctx.accept, &data.types);
-                Some(TransitionPlan::to(State::DragOver).apply(move |ctx| {
+                let drag_types = data.types.clone();
+                let mut plan = TransitionPlan::to(State::DragOver).apply(move |ctx| {
                     ctx.valid_drag = valid;
+                    ctx.drag_types = drag_types;
                     ctx.is_drop_target = true;
-                }).with_named_effect("drop_activate", |_ctx, props, send| {
-                    let platform = use_platform_effects();
-                    let delay = Duration::from_millis(props.activate_delay_ms as u64);
-                    let handle = platform.set_timeout(delay, Box::new(move || {
-                        send.call_if_alive(Event::DropActivate);
-                    }));
-                    let pc = platform.clone();
-                    Box::new(move || pc.clear_timeout(handle))
-                }))
+                });
+                if valid {
+                    plan = plan.with_effect(PendingEffect::named(Effect::DropEnter))
+                               .with_effect(PendingEffect::named(Effect::ArmDropActivate));
+                }
+                Some(plan)
             }
 
             // ── Drag enter from terminal states (auto-reset) ────────────────
-            // Adapter invokes `on_drop_enter` callback with the DragData.
+            // Adapter invokes `on_drop_enter` and arms activation only for valid drags.
+            // Existing accepted payload remains available until explicit reset
+            // or until a later accepted drop replaces it.
             (State::DropAccepted | State::DropRejected, Event::DragEnter(data)) => {
                 let valid = Self::validate_types(&ctx.accept, &data.types);
-                Some(TransitionPlan::to(State::DragOver).apply(move |ctx| {
-                    ctx.dropped_items.clear();
+                let drag_types = data.types.clone();
+                let mut plan = TransitionPlan::to(State::DragOver).apply(move |ctx| {
+                    ctx.last_rejection = None;
                     ctx.valid_drag = valid;
+                    ctx.drag_types = drag_types;
                     ctx.is_drop_target = true;
-                }).with_named_effect("drop_activate", |_ctx, props, send| {
-                    let platform = use_platform_effects();
-                    let delay = Duration::from_millis(props.activate_delay_ms as u64);
-                    let handle = platform.set_timeout(delay, Box::new(move || {
-                        send.call_if_alive(Event::DropActivate);
-                    }));
-                    let pc = platform.clone();
-                    Box::new(move || pc.clear_timeout(handle))
-                }))
+                });
+                if valid {
+                    plan = plan.with_effect(PendingEffect::named(Effect::DropEnter))
+                               .with_effect(PendingEffect::named(Effect::ArmDropActivate));
+                }
+                Some(plan.cancel_effect(Effect::ResetAfterDrop))
             }
 
             // ── Drag over (continuous feedback) ─────────────────────────────
-            (State::DragOver, Event::DragOver(_)) => {
-                // Stay in DragOver — no state or context change needed.
-                // The adapter handles `preventDefault()` to allow the drop.
-                // The drop_activate timer continues running from DragEnter.
-                None
+            (State::DragOver, Event::DragOver(data)) => {
+                let was_valid = ctx.valid_drag;
+                let valid = Self::validate_types(&ctx.accept, &data.types);
+                let drag_types = data.types.clone();
+                let mut plan = TransitionPlan::context_only(move |ctx| {
+                    ctx.valid_drag = valid;
+                    ctx.drag_types = drag_types;
+                });
+                if valid {
+                    plan = plan.with_effect(PendingEffect::named(Effect::DropMove));
+                    if !was_valid {
+                        plan = plan.with_effect(PendingEffect::named(Effect::ArmDropActivate));
+                    }
+                } else if was_valid {
+                    plan = plan.cancel_effect(Effect::ArmDropActivate);
+                }
+                Some(plan)
             }
 
             // ── DropActivate (timer expired while hovering) ─────────────────
             (State::DragOver, Event::DropActivate) => {
-                // Adapter fires `on_drop_activate` callback. No state change.
-                Some(TransitionPlan::context_only(|_ctx| {
-                    // Adapter invokes on_drop_activate callback here.
-                }))
+                ctx.valid_drag.then(|| TransitionPlan::new().with_effect(PendingEffect::named(Effect::DropActivate)))
             }
 
             // ── Drag leave ──────────────────────────────────────────────────
             // Adapter invokes `on_drop_exit` callback.
             (State::DragOver, Event::DragLeave) => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                let mut plan = TransitionPlan::to(State::Idle).apply(|ctx| {
                     ctx.valid_drag = false;
                     ctx.is_drop_target = false;
-                }).cancel_effect("drop_activate"))
+                });
+                if ctx.valid_drag {
+                    plan = plan.with_effect(PendingEffect::named(Effect::DropExit))
+                               .cancel_effect(Effect::ArmDropActivate);
+                }
+                Some(plan)
             }
 
             // ── Drop ────────────────────────────────────────────────────────
             (State::DragOver, Event::Drop(data)) => {
                 let items = data.items.clone();
-                let valid = Self::validate_drop(ctx, &items);
-                if valid {
+                let errors = Self::validate_drop(ctx, &items);
+                if errors.is_empty() {
                     Some(TransitionPlan::to(State::DropAccepted).apply(move |ctx| {
                         ctx.dropped_items = items;
+                        ctx.last_rejection = None;
                         ctx.valid_drag = false;
                         ctx.is_drop_target = false;
-                        // Adapter invokes on_drop callback with items here.
-                    }).with_named_effect("announce", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        platform.announce(&(ctx.messages.drop_accepted_announcement)(&ctx.locale));
-                        no_cleanup()
-                    }).cancel_effect("drop_activate"))
+                    }).with_effect(PendingEffect::named(Effect::DropAccepted))
+                      .with_effect(PendingEffect::named(Effect::ResetAfterDrop))
+                      .cancel_effect(Effect::ArmDropActivate))
                 } else {
-                    // Invalid drop — transition to DropRejected.
-                    Some(TransitionPlan::to(State::DropRejected).apply(|ctx| {
+                    let rejection = DropRejection { data: data.clone(), errors };
+                    Some(TransitionPlan::to(State::DropRejected).apply(move |ctx| {
+                        ctx.last_rejection = Some(rejection);
                         ctx.valid_drag = false;
                         ctx.is_drop_target = false;
-                    }).with_named_effect("announce", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        platform.announce(&(ctx.messages.drop_rejected_announcement)(&ctx.locale));
-                        no_cleanup()
-                    }).cancel_effect("drop_activate"))
+                    }).with_effect(PendingEffect::named(Effect::DropRejected))
+                      .with_effect(PendingEffect::named(Effect::ResetAfterDrop))
+                      .cancel_effect(Effect::ArmDropActivate))
                 }
             }
 
-            // ── Reset from terminal states ─────────────────────────────────
-            (State::DropAccepted | State::DropRejected, Event::Reset) => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    ctx.dropped_items.clear();
-                }).cancel_effect("drop_activate"))
-            }
+            // ── Reset clears active or preserved drop state ────────────────
+            (State::Idle, Event::Reset) if !reset_would_change_context(ctx) => None,
 
-            // ── Reset from DragOver (cancel in-progress drag) ──────────────
-            (State::DragOver, Event::Reset) => {
+            (_, Event::Reset) => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
                     ctx.valid_drag = false;
+                    ctx.drag_types.clear();
                     ctx.is_drop_target = false;
                     ctx.dropped_items.clear();
-                }).cancel_effect("drop_activate"))
+                    ctx.last_rejection = None;
+                }).cancel_effect(Effect::ArmDropActivate)
+                  .cancel_effect(Effect::ResetAfterDrop))
+            }
+
+            // ── Auto-reset from terminal states ─────────────────────────────
+            (State::DropAccepted | State::DropRejected, Event::AutoReset) => {
+                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                    ctx.valid_drag = false;
+                    ctx.drag_types.clear();
+                    ctx.is_drop_target = false;
+                    ctx.last_rejection = None;
+                }).cancel_effect(Effect::ResetAfterDrop))
             }
 
             // ── Focus / Blur (keyboard fallback support) ────────────────────
@@ -505,6 +666,14 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+fn reset_would_change_context(ctx: &Context) -> bool {
+    ctx.valid_drag
+        || !ctx.drag_types.is_empty()
+        || ctx.is_drop_target
+        || !ctx.dropped_items.is_empty()
+        || ctx.last_rejection.is_some()
 }
 ```
 
@@ -652,8 +821,8 @@ drop-zone
   that opens a file picker when activated via Enter or Space.
 - Screen readers announce the label and the current drop effect status.
 - **Live region announcements:** When transitioning to `DropAccepted`, the adapter announces
-  `Messages::drop_accepted_announcement` (default: "Files accepted") via a `LiveRegion`. When
-  transitioning to `DropRejected`, the adapter announces `Messages::drop_rejected_announcement`
+  `Api::drop_accepted_announcement()` (default: "Files accepted") via a `LiveRegion`. When
+  transitioning to `DropRejected`, the adapter announces `Api::drop_rejected_announcement()`
   (default: "Files rejected") via a `LiveRegion`. This ensures screen reader users receive
   immediate feedback about the drop result without needing to inspect the element.
 - `aria-invalid="true"` is set on the root element when in the `DropRejected` state or when
@@ -713,7 +882,8 @@ impl ComponentMessages for Messages {}
   via the `label` prop or by providing a custom `Messages` struct through the locale context.
 - Callback-provided strings (file names, error messages) are the responsibility of the consumer.
 - Drop result announcements (`drop_accepted_announcement`, `drop_rejected_announcement`) are
-  localizable via the `Messages` struct.
+  localizable via the `Messages` struct and exposed to adapters through
+  `Api::drop_accepted_announcement()` and `Api::drop_rejected_announcement()`.
 
 ## 5. Form Integration
 
@@ -761,8 +931,13 @@ When `read_only` is true, `form_data()` still returns the current items for incl
 ### 5.4 Form Reset
 
 When the parent form dispatches a reset event, the adapter MUST send `Event::Reset` to clear all
-dropped items and return to Idle state. Unlike other form components, there is no "initial value"
-to restore — reset always clears.
+dropped items and return to Idle state, including after `Event::AutoReset` has already returned the
+visual state to `Idle` while preserving accepted form data. Unlike other form components, there is
+no "initial value" to restore — reset always clears.
+
+The delayed terminal-state timer MUST send `Event::AutoReset`, not `Event::Reset`, so successful
+drops keep accepted form data available through `Api::form_data()` after the visual success state
+returns to `Idle`.
 
 ### 5.5 Platform Note
 
@@ -784,7 +959,8 @@ to restore — reset always clears.
 | Read-only           | `read_only`                   | --                 | ars-ui addition                                               |
 | Label               | `label`                       | --                 | ars-ui addition for accessible name                           |
 | Form integration    | `name`, `required`, `invalid` | --                 | ars-ui addition                                               |
-| Activate delay      | `activate_delay_ms`           | --                 | ars-ui addition                                               |
+| Activate delay      | `activate_delay`              | --                 | ars-ui addition                                               |
+| Reset delay         | `reset_delay`                 | --                 | ars-ui addition                                               |
 
 **Gaps:** None. ars-ui is a superset.
 
