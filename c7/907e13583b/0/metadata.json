@@ -1,0 +1,186 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c7907e13583b",
+  "session_id": "019e5ca4-a4df-7501-a32c-782ee8a2cc0e",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-25T14:25:04.792169Z",
+  "branch": "t3code/e55599d7",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".cargo/mutants.toml",
+    "crates/ars-components/src/layout/mod.rs",
+    "crates/ars-components/src/layout/splitter.rs",
+    "crates/ars-components/src/layout/stack.rs",
+    "crates/ars-components/tests/proptest_state_machines/layout.rs",
+    "crates/ars-components/tests/spec_conformance/layout.rs",
+    "spec/components/layout/splitter.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "21dc18c6facc",
+  "token_usage": {
+    "input_tokens": 1677465,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 79562624,
+    "output_tokens": 110292,
+    "api_call_count": 556
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "summary": {
+    "intent": "Implement layout core components for issues #271 (stateless Stack/Center/Grid) and #281 (stateful Splitter) as a single combined PR against the ars-components crate, following TDD with mutation coverage gating.",
+    "outcome": "All four layout modules implemented, full validation passed (unit, snapshot, proptest, mutation, llvm-cov, xci-fast), rebased onto main, committed with co-author trailer, and pushed as a non-draft PR closing both issues.",
+    "learnings": {
+      "repo": [
+        "cargo-mutants serializes on a shared mutants.out lock — running multiple -f targets in parallel causes output directory races; they must be run sequentially",
+        "cargo xci-fast is the required pre-push gate and runs 10 sequential gates: fmt, check, clippy -D warnings, unit tests (with i18n), integration, adapter tests",
+        "Issues are tracked on GitHub Projects via field IDs and item IDs; gh project item-edit with --single-select-option-id is the correct mutation path",
+        "cargo xtask spec validate and cargo xtask spec context <component> --include-testing are the authoritative spec contract sources",
+        "TokenResolver must carry target-specific wasm/native bounds — the original implementation missed the native Send+Sync requirement",
+        "Context::from_props normalizes missing default sizes, so mismatched sizes/panels bounds cannot be constructed via the normal service API — Machine::transition must be called with a crafted context to exercise those guards",
+        "Snapshot tests use INSTA_UPDATE=always for first-pass fixture generation; cargo insta test --unreferenced=reject is the required final gate",
+        "The proptest_state_machines splitter tests are #[ignore] and require PROPTEST_CASES=256 and -- --ignored to run"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/splitter.rs",
+          "line": 398,
+          "end_line": 455,
+          "finding": "compute_resize had the most mutation survivors: finite-input guard, adjacent-panel delta direction, zero-delta collapsible snap path, and left/right min/max clamp paths all needed separate targeted tests"
+        },
+        {
+          "path": "crates/ars-components/src/layout/splitter.rs",
+          "line": 488,
+          "end_line": 575,
+          "finding": "Collapsible snap threshold math and collapse bookkeeping (weighted threshold, exact threshold equality, freed-size transfer, last-panel neighbor) each required individual regression tests to be caught by mutation"
+        },
+        {
+          "path": "crates/ars-components/src/layout/splitter.rs",
+          "line": 795,
+          "end_line": 815,
+          "finding": "SyncProps uncontrolled-size path: when panels grow, sizes must be extended; mutation survivor only observable via a transition that checks the size vector length after SyncProps"
+        },
+        {
+          "path": "crates/ars-components/src/layout/splitter.rs",
+          "line": 998,
+          "end_line": 1076,
+          "finding": "Handle attrs: pixel-to-percent aria-valuenow conversion, collapsed handle aria-valuetext, non-collapsible zero-size handle must not get data-ars-collapsed, and second handle aria-controls must index right-neighbor panel — each needed a separate test"
+        },
+        {
+          "path": "crates/ars-components/src/layout/splitter.rs",
+          "line": 1988,
+          "end_line": 2032,
+          "finding": "Invalid transitions (out-of-bounds panel/handle index) intentionally return an explicit no-op TransitionPlan, not None — test must assert plan summary is 'none', not that the call panics"
+        },
+        {
+          "path": "crates/ars-components/src/layout/stack.rs",
+          "line": 180,
+          "end_line": 220,
+          "finding": "TokenResolver trait requires cfg-gated bounds: #[cfg(target_arch=wasm32)] removes Send+Sync, native targets require both — original draft was missing the native constraint"
+        },
+        {
+          "path": ".cargo/mutants.toml",
+          "line": 1,
+          "end_line": 30,
+          "finding": "Equivalent mutation skips added only for top-level zero-delta branch selection (delta > 0.0 vs >= 0.0) and two value-preserving snap equality assignments — all other survivors were treated as real test gaps"
+        }
+      ],
+      "workflow": [
+        "TDD red-green-refactor loop: write failing tests for the full intended API surface first, then implement the minimal spec-matching code to pass them",
+        "Mutation triage is iterative: stop run on survivors, add targeted tests, restart — do not batch survivors across multiple stop/restart cycles or test intent becomes unclear",
+        "Kill mutation runs with SIGINT first, fall back to SIGKILL; sampling mutants.out/missed.txt and caught.txt via wc -l gives progress without waiting for the terminal summary",
+        "Git stash -u + fetch + rebase + stash pop is the clean pattern for pulling in latest main changes without disturbing uncommitted worktree files",
+        "cargo llvm-cov report --include-filename-regex is not supported; use --json + jq to filter coverage by file pattern",
+        "When a proptest fixture fails on the first run, the threshold or fixture setup is almost always the bug, not the implementation — inspect test setup before changing source code"
+      ]
+    },
+    "friction": [
+      "cargo-mutants for splitter.rs required 10+ stop/restart cycles due to successive mutation survivors — the pass only completed cleanly after targeting every guard, snap, collapse, expand, keyboard, transition-arm, sync, and attribute conversion path individually",
+      "Shared mutants.out lock caused silent data corruption when four mutation jobs were launched in parallel; only discovered after inspecting the output directory structure",
+      "Context::from_props silently normalizes mismatched sizes, making it impossible to construct invalid-state contexts through normal Props builders — required calling Machine::transition directly with crafted context structs",
+      "cargo llvm-cov report --include-filename-regex flag not available in the installed version; required a JSON round-trip through jq to get per-file coverage metrics",
+      "cargo xci-fast post-rebase triggered a full workspace recompilation across Leptos and Dioxus adapter crates, making the pre-commit gate take significantly longer than focused component tests",
+      "Mutation runner kills via SIGINT sometimes left zombie cargo test processes that held the package lock; required SIGKILL fallback"
+    ],
+    "open_items": [
+      "Framework adapter components (Leptos, Dioxus) for Stack, Center, Grid, and Splitter are explicitly out of scope — adapter specs exist at spec/leptos-components/layout and spec/dioxus-components/layout but are unimplemented",
+      "storage_key is included in Splitter Props per spec but no persistence side effect is wired in agnostic core — requires a future adapter-level or effect-system task",
+      "PR needs snapshot-reviewed label applied after opening if any .snap files are included (noted in plan but execution not shown in transcript)",
+      "Codex review loop (.agents/skills/waiting-for-codex-review/SKILL.md) needs to be invoked and iterated until Codex leaves a thumbs-up before the PR is merge-ready",
+      "llvm-cov line coverage for the new files is 94-97% — the uncovered lines were not triaged; they may correspond to unreachable error paths or adapter-boundary code"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-25T14:23:50.379534Z",
+    "agent_lines": 314,
+    "agent_removed": 12,
+    "human_added": 345,
+    "human_modified": 35,
+    "human_removed": 0,
+    "total_committed": 680,
+    "total_lines_changed": 706,
+    "agent_percentage": 46.1756373937677,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 4431,
+      "user_lines_removed": 3,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".cargo/mutants.toml": 11,
+        "crates/ars-components/src/layout/center.rs": 301,
+        "crates/ars-components/src/layout/grid.rs": 369,
+        "crates/ars-components/src/layout/mod.rs": 12,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__center__tests__center_root_default.snap": 25,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__center__tests__center_root_max_width_vertical.snap": 46,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__center__tests__center_root_rtl_text_end.snap": 30,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__grid__tests__grid_root_auto_columns.snap": 34,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__grid__tests__grid_root_default.snap": 34,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__grid__tests__grid_root_gap_overrides_axis_gaps.snap": 38,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__splitter__tests__splitter_handle_dragging.snap": 109,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__splitter__tests__splitter_handle_focused.snap": 109,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__splitter__tests__splitter_handle_idle.snap": 109,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__splitter__tests__splitter_panel_collapsed.snap": 46,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__splitter__tests__splitter_panel_percent.snap": 38,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__splitter__tests__splitter_root_dragging.snap": 41,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__splitter__tests__splitter_root_idle.snap": 41,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__splitter__tests__splitter_vertical_handle.snap": 109,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__stack__tests__stack_root_default.snap": 42,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__stack__tests__stack_root_full_size.snap": 50,
+        "crates/ars-components/src/layout/snapshots/ars_components__layout__stack__tests__stack_root_rtl_logical.snap": 46,
+        "crates/ars-components/src/layout/splitter.rs": 2029,
+        "crates/ars-components/src/layout/stack.rs": 589,
+        "crates/ars-components/tests/proptest_state_machines/layout.rs": 145,
+        "crates/ars-components/tests/spec_conformance/layout.rs": 28
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/tests/proptest_state_machines/layout.rs": 2,
+        "crates/ars-components/tests/spec_conformance/layout.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 194,
+      "user_lines_removed": 18,
+      "agent_lines_added": 4952,
+      "agent_lines_removed": 29,
+      "user_added_per_file": {
+        "crates/ars-components/src/layout/center.rs": 4,
+        "crates/ars-components/src/layout/grid.rs": 4,
+        "crates/ars-components/src/layout/splitter.rs": 173,
+        "crates/ars-components/src/layout/stack.rs": 10,
+        "crates/ars-components/tests/proptest_state_machines/layout.rs": 3
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/layout/center.rs": 2,
+        "crates/ars-components/src/layout/grid.rs": 2,
+        "crates/ars-components/src/layout/splitter.rs": 12,
+        "crates/ars-components/src/layout/stack.rs": 2
+      }
+    }
+  ]
+}

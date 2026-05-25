@@ -1,0 +1,187 @@
+Implements tasks #271 and #281
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Combined Layout Core Implementation Plan
+
+## Summary
+
+Implement one combined PR for `#271` and `#281`, targeting `main`, with PR body auto-closing both issues: `Closes #271` and `Closes #281`.
+
+Scope is framework-agnostic `ars-components` core only:
+- Add stateless `Stack`, `Center`, and `Grid`.
+- Add stateful `Splitter`.
+- Add/keep tests first, implement only the spec-backed surface, run the required audit and validation loop.
+- Do not add dependencies.
+- Do not commit or push until user approval after implementation review.
+
+## Public API Additions
+
+Modify `crates/ars-components/src/layout/mod.rs` to export:
+
+```rust
+pub mod center;
+pub mod grid;
+pub mod splitter;
+pub mod stack;
+```
+
+Add these component modules:
+
+- `crates/ars-components/src/layout/stack.rs`
+  - `Props`
+  - `StackDirection`
+  - `FlexAlign`
+  - `FlexJustify`
+  - `Spacing`
+  - `TokenResolver`
+  - `Part`
+  - `Api`
+
+- `crates/ars-components/src/layout/center.rs`
+  - `Props`
+  - reuse `Spacing`, `TextAlign`, `TokenResolver`
+  - `Part`
+  - `Api`
+
+- `crates/ars-components/src/layout/grid.rs`
+  - `Props`
+  - reuse `Spacing`, `FlexAlign`, `TokenResolver`
+  - `Part`
+  - `Api`
+
+- `crates/ars-components/src/layout/splitter.rs`
+  - `State`
+  - `Event`
+  - `KeyboardEvent`
+  - `Panel`
+  - `SizeUnit`
+  - `Context`
+  - `Props`
+  - `Messages`
+  - `Machine`
+  - `Part`
+  - `Api<'a>`
+  - public helpers only where the spec shows them: `compute_resize`
+
+All public items get `///` docs. Shared primitive types should live in `stack.rs` initially and be re-exported/used by `center.rs` and `grid.rs` via `super::stack::{...}` to avoid adding a new shared module unless implementation pressure proves it necessary.
+
+## Implementation Steps
+
+1. Move GitHub issues `#271` and `#281` to `In Progress` on the project board.
+
+2. Read the live contracts again before editing:
+   - `gh issue view 271`
+   - `gh issue view 281`
+   - `cargo xtask spec context stack --include-testing`
+   - `cargo xtask spec context center --include-testing`
+   - `cargo xtask spec context grid --include-testing`
+   - `cargo xtask spec context splitter --include-testing`
+
+3. Add failing tests first.
+
+   Unit/snapshot tests go inside each new module:
+   - Stack tests: default props, builder setters, `RowLogical` LTR/RTL resolution, spacing token/CSS/px output, gap, wrap, full width/height, `part_attrs`.
+   - Center tests: max width, horizontal centering, vertical flex centering, RTL text alignment, `part_attrs`.
+   - Grid tests: default one-column template, explicit columns, auto columns when `columns = None`, gap overriding row/column gaps, align output, `part_attrs`.
+   - Splitter tests: default context sizing, pixel default sizing, drag start/move/end, min/max clamp, collapsible snap, programmatic collapse/expand, keyboard arrows, Shift+arrow, Home/End, Enter/Space collapse toggle, Escape restores pre-drag sizes, horizontal RTL inversion, vertical no RTL inversion, multiple panels, invalid handle/index no-op or ignored transition, connect attrs for root/panel/handle.
+
+   Update:
+   - `crates/ars-components/tests/spec_conformance/layout.rs`
+     - Add anatomy checks for `stack`, `center`, `grid`, and `splitter`.
+   - `crates/ars-components/tests/proptest_state_machines/layout.rs`
+     - Add ignored Splitter proptest sequence covering drag, keyboard, collapse/expand, set sizes, and invariants.
+
+4. Implement `Stack`, `Center`, and `Grid`.
+
+   Follow the spec examples exactly:
+   - `Api::new(props, is_rtl, resolver)` for Stack/Center.
+   - `Api::new(props, resolver)` for Grid.
+   - emit `data-ars-scope` and `data-ars-part` on `Root`.
+   - emit only CSS styles, no ARIA roles.
+
+5. Implement `Splitter`.
+
+   Follow `spec/components/layout/splitter.md`:
+   - `State::Idle` and `State::Dragging { handle_index }`.
+   - events from spec, plus only internal sync events if needed for `on_props_changed`.
+   - `NoEffect`.
+   - `Context::from_props` derives sizes, direction, locale, messages, ids, keyboard step, and drag defaults.
+   - guard invalid panel/handle indexes so public event handlers cannot panic.
+   - `commit_sizes` must reject non-finite values before they reach ARIA/style output.
+   - `on_props_changed` must assert stable `id` and sync context-backed props: panels, orientation, dir, size unit, controlled sizes, keyboard step, and messages-sensitive data where relevant.
+
+6. Add snapshots.
+
+   Snapshot these outputs:
+   - `stack_root_default`, `stack_root_rtl_logical`, `stack_root_full_size`
+   - `center_root_default`, `center_root_max_width_vertical`, `center_root_rtl_text_end`
+   - `grid_root_default`, `grid_root_auto_columns`, `grid_root_gap_overrides_axis_gaps`
+   - `splitter_root_idle`, `splitter_root_dragging`, `splitter_panel_percent`, `splitter_panel_collapsed`, `splitter_handle_idle`, `splitter_handle_focused`, `splitter_handle_dragging`, `splitter_vertical_handle`
+
+7. Run focused validation while developing:
+   - `cargo test -p ars-components layout::stack --features i18n`
+   - `cargo test -p ars-components layout::center --features i18n`
+   - `cargo test -p ars-components layout::grid --features i18n`
+   - `cargo test -p ars-components layout::splitter --features i18n`
+   - `cargo test -p ars-components --test spec_conformance layout --features i18n`
+   - `PROPTEST_CASES=256 cargo test -p ars-components --test proptest_state_machines proptest_splitter --features i18n -- --ignored`
+   - `cargo insta test --unreferenced=reject -p ars-components --features i18n --lib`
+
+8. Run required mutation coverage for new agnostic components:
+   - `cargo mutants -p ars-components -f crates/ars-components/src/layout/stack.rs`
+   - `cargo mutants -p ars-components -f crates/ars-components/src/layout/center.rs`
+   - `cargo mutants -p ars-components -f crates/ars-components/src/layout/grid.rs`
+   - `cargo mutants -p ars-components -f crates/ars-components/src/layout/splitter.rs`
+
+   Triage every `MISSED` mutant in this PR: add tests for real gaps, or add justified line-agnostic skips only for equivalent mutations.
+
+9. Invoke `.agents/skills/post-implementation-audit/SKILL.md`.
+
+   Apply every finding in this same PR:
+   - spec/code drift audit
+   - at least two “anything else missing?” rounds
+   - test coverage audit across unit, snapshot, proptest, mutation, doc/spec-conformance, and llvm-cov-relevant coverage
+
+10. Final pre-review validation before presenting to user:
+   - `cargo test -p ars-components --all-targets --features i18n`
+   - `cargo xtask spec validate`
+   - focused `cargo llvm-cov test -p ars-components --text -- layout`
+   - `cargo +nightly fmt --all --check`
+
+11. Present final result for user review before any commit.
+
+12. After user approval only:
+   - run `cargo xci-fast`
+   - commit
+   - push branch
+   - open PR targeting `main`
+   - include `Closes #271` and `Closes #281`
+   - add `snapshot-reviewed` label if `.snap` files changed
+   - invoke `.agents/skills/waiting-for-codex-review/SKILL.md`
+   - address Codex threads, re-run focused tests, push, re-invoke review loop until Codex leaves `👍`
+   - wait for CI green before considering merge readiness
+
+## Acceptance Criteria
+
+- `#271` tests named in issue body pass.
+- `#281` tests named in issue body pass.
+- All public items documented.
+- No warnings.
+- No new dependencies.
+- Snapshot fixtures are intentional and labeled after PR creation.
+- Splitter ARIA handle output includes `role="separator"`, `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, `aria-orientation`, `aria-valuetext`, `aria-label`, `aria-controls`, and `tabindex="0"`.
+- Splitter owns sizes/constraints/keyboard/drag intent only; adapters remain responsible for live DOM handles, pointer capture, measurements, and resize observers.
+- Final PR closes both issues and does not close either issue manually before merge, CI green, and Codex `👍`.
+
+## Assumptions
+
+- One combined PR is the chosen delivery shape.
+- `storage_key` is implemented as part of `Props` because the spec exposes it, but no persistence effect is added in agnostic core unless the audit finds a spec-required behavior not shown in the machine implementation.
+- Framework adapter components are out of scope.
+- Spec changes are out of scope unless implementation uncovers an impossible or contradictory spec contract.
+
+---
+
+Continue from where you were
