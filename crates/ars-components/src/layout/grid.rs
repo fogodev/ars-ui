@@ -77,6 +77,9 @@ impl Props {
     /// Sets the auto-fill minimum column size.
     #[must_use]
     pub fn auto_columns(mut self, auto_columns: Option<Spacing>) -> Self {
+        if auto_columns.is_some() {
+            self.columns = None;
+        }
         self.auto_columns = auto_columns;
         self
     }
@@ -242,8 +245,8 @@ mod tests {
     fn props_builder_chain_applies_each_setter() {
         let props = Props::new()
             .id("grid")
-            .columns(Some(3))
             .auto_columns(Some(Spacing::Css("12rem".into())))
+            .columns(Some(3))
             .row_gap(Spacing::Px(8.0))
             .column_gap(Spacing::Px(16.0))
             .gap(Spacing::Token("gap".into()))
@@ -283,6 +286,20 @@ mod tests {
             Props::new()
                 .columns(None)
                 .auto_columns(Some(Spacing::Css("14rem".into()))),
+            None,
+        )
+        .root_attrs();
+
+        assert!(attrs.styles().contains(&(
+            CssProperty::GridTemplateColumns,
+            "repeat(auto-fill, minmax(14rem, 1fr))".into()
+        )));
+    }
+
+    #[test]
+    fn auto_columns_builder_clears_default_fixed_columns() {
+        let attrs = Api::new(
+            Props::new().auto_columns(Some(Spacing::Css("14rem".into()))),
             None,
         )
         .root_attrs();

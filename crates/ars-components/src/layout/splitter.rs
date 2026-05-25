@@ -576,7 +576,7 @@ fn collapse_panel(sizes: &mut [f64], index: usize, panels: &[Panel]) {
             })
     });
 
-    sizes[index] -= transferable;
+    sizes[index] = collapsed_size;
 
     if let Some(recipient) = recipient {
         sizes[recipient] += transferable;
@@ -846,7 +846,11 @@ impl ars_core::Machine for Machine {
                     KeyboardKey::ArrowLeft
                     | KeyboardKey::ArrowRight
                     | KeyboardKey::ArrowUp
-                    | KeyboardKey::ArrowDown => {
+                    | KeyboardKey::ArrowDown
+                    | KeyboardKey::Home
+                    | KeyboardKey::End
+                    | KeyboardKey::Enter
+                    | KeyboardKey::Space => {
                         let event = event.clone();
                         Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                             handle_keyboard(ctx, handle_index, &event);
@@ -859,7 +863,18 @@ impl ars_core::Machine for Machine {
 
             (_, Event::SyncProps { props }) => {
                 let props = props.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                let exit_dragging = matches!(
+                    state,
+                    State::Dragging { handle_index }
+                        if !valid_handle(*handle_index, props.panels.len(), props.panels.len())
+                );
+                let plan = if exit_dragging {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+
+                Some(plan.apply(move |ctx: &mut Context| {
                     let current = ctx.sizes.get().clone();
 
                     ctx.panels = props.panels.clone();
@@ -885,6 +900,11 @@ impl ars_core::Machine for Machine {
                         && !valid_handle(focused, ctx.sizes.get().len(), ctx.panels.len())
                     {
                         ctx.focused_handle = None;
+                    }
+
+                    if exit_dragging {
+                        ctx.drag_start_sizes.clear();
+                        ctx.drag_start_pos = 0.0;
                     }
                 }))
             }
@@ -1698,7 +1718,7 @@ mod tests {
 
         drop(service.send(Event::CollapsePanel { panel_index: 0 }));
 
-        assert_eq!(service.context().sizes.get(), &vec![35.0, 65.0]);
+        assert_eq!(service.context().sizes.get(), &vec![0.0, 65.0]);
     }
 
     #[test]
@@ -2090,6 +2110,60 @@ mod tests {
     }
 
     #[test]
+    fn full_keymap_resizes_and_toggles_while_dragging() {
+        let mut resize = service(two_panel_props().default_sizes(vec![50.0, 50.0]));
+
+        drop(resize.send(Event::DragStart {
+            handle_index: 0,
+            pos: 0.0,
+        }));
+        drop(resize.send(Event::KeyDown {
+            handle_index: 0,
+            event: key(KeyboardKey::End),
+        }));
+
+        assert_eq!(resize.state(), &State::Dragging { handle_index: 0 });
+        assert_eq!(resize.context().sizes.get(), &vec![90.0, 10.0]);
+
+        drop(resize.send(Event::KeyDown {
+            handle_index: 0,
+            event: key(KeyboardKey::Home),
+        }));
+
+        assert_eq!(resize.context().sizes.get(), &vec![10.0, 90.0]);
+
+        let mut right = panel("right", 60.0);
+
+        right.max_size = None;
+
+        let mut toggle = service(
+            Props::new()
+                .id("split")
+                .panels(vec![collapsible_panel("left", 40.0), right])
+                .default_sizes(vec![40.0, 60.0]),
+        );
+
+        drop(toggle.send(Event::DragStart {
+            handle_index: 0,
+            pos: 0.0,
+        }));
+        drop(toggle.send(Event::KeyDown {
+            handle_index: 0,
+            event: key(KeyboardKey::Enter),
+        }));
+
+        assert_eq!(toggle.state(), &State::Dragging { handle_index: 0 });
+        assert_eq!(toggle.context().sizes.get(), &vec![0.0, 100.0]);
+
+        drop(toggle.send(Event::KeyDown {
+            handle_index: 0,
+            event: key(KeyboardKey::Space),
+        }));
+
+        assert_eq!(toggle.context().sizes.get(), &vec![40.0, 60.0]);
+    }
+
+    #[test]
     fn horizontal_rtl_inverts_arrow_delta() {
         let mut service = service(
             two_panel_props()
@@ -2191,6 +2265,26 @@ mod tests {
         drop(service.send(Event::SyncProps { props: next_props }));
 
         assert_eq!(service.context().sizes.get(), &vec![90.0, 20.0]);
+    }
+
+    #[test]
+    fn sync_props_exits_dragging_when_active_handle_becomes_invalid() {
+        let mut service = service(props().default_sizes(vec![40.0, 30.0, 30.0]));
+
+        drop(service.send(Event::DragStart {
+            handle_index: 1,
+            pos: 0.0,
+        }));
+
+        assert_eq!(service.state(), &State::Dragging { handle_index: 1 });
+
+        drop(service.send(Event::SyncProps {
+            props: two_panel_props().default_sizes(vec![50.0, 50.0]),
+        }));
+
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().drag_start_sizes.is_empty());
+        assert_eq!(service.context().drag_start_pos, 0.0);
     }
 
     #[test]
