@@ -1413,7 +1413,7 @@ mod tests {
     use std::sync::Mutex;
 
     use ars_collections::{Collection, CollectionBuilder, Key};
-    use ars_core::{AriaAttr, Callback, ConnectApi, Env, HtmlAttr, KeyboardKey, Service};
+    use ars_core::{AriaAttr, Callback, ConnectApi, Env, HtmlAttr, KeyboardKey, Locale, Service};
     use ars_interactions::KeyboardEventData;
 
     use super::{Event, Machine, Messages, Part, Props, State};
@@ -1468,6 +1468,18 @@ mod tests {
 
     fn service(props: Props) -> Service<Machine> {
         let mut service = Service::<Machine>::new(props, &Env::default(), &Messages);
+
+        drop(service.send(Event::UpdateItems(collection())));
+
+        service
+    }
+
+    fn service_with_locale(props: Props, locale: &str) -> Service<Machine> {
+        let env = Env {
+            locale: Locale::parse(locale).expect("locale should parse"),
+            ..Env::default()
+        };
+        let mut service = Service::<Machine>::new(props, &env, &Messages);
 
         drop(service.send(Event::UpdateItems(collection())));
 
@@ -1792,9 +1804,12 @@ mod tests {
     #[test]
     fn submenu_keyboard_dispatch_is_directional_and_stateful() {
         let mut menu = service(Props::new().id("context-menu"));
+        let mut rtl_menu = service_with_locale(Props::new().id("context-menu"), "ar");
 
         drop(menu.send(Event::ContextOpen { x: 0.0, y: 0.0 }));
         drop(menu.send(Event::HighlightItem(Some(key("delta")))));
+        drop(rtl_menu.send(Event::ContextOpen { x: 0.0, y: 0.0 }));
+        drop(rtl_menu.send(Event::HighlightItem(Some(key("delta")))));
 
         assert_eq!(
             captured_events(&menu, |api| api.on_content_keydown(
@@ -1814,11 +1829,37 @@ mod tests {
             .is_empty()
         );
 
+        assert_eq!(
+            captured_events(&rtl_menu, |api| api.on_content_keydown(
+                &keyboard(KeyboardKey::ArrowLeft, None),
+                false,
+                false
+            )),
+            vec![Event::OpenSubmenu(key("delta"))]
+        );
+        assert!(
+            captured_events(&rtl_menu, |api| api.on_content_keydown(
+                &keyboard(KeyboardKey::ArrowRight, None),
+                false,
+                false
+            ))
+            .is_empty()
+        );
+
         drop(menu.send(Event::OpenSubmenu(key("delta"))));
+        drop(rtl_menu.send(Event::OpenSubmenu(key("delta"))));
 
         assert_eq!(
             captured_events(&menu, |api| api.on_content_keydown(
                 &keyboard(KeyboardKey::ArrowLeft, None),
+                false,
+                false
+            )),
+            vec![Event::CloseSubmenu]
+        );
+        assert_eq!(
+            captured_events(&rtl_menu, |api| api.on_content_keydown(
+                &keyboard(KeyboardKey::ArrowRight, None),
                 false,
                 false
             )),

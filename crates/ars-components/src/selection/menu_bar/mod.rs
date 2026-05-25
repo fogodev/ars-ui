@@ -936,6 +936,14 @@ mod tests {
         drop(menu_bar.send(Event::MoveToPrevMenu));
 
         assert_eq!(menu_bar.context().focused_item, Some(key("file")));
+
+        drop(menu_bar.send(Event::MoveToPrevMenu));
+
+        assert_eq!(menu_bar.context().focused_item, Some(key("view")));
+
+        drop(menu_bar.send(Event::MoveToNextMenu));
+
+        assert_eq!(menu_bar.context().focused_item, Some(key("file")));
     }
 
     #[test]
@@ -1015,6 +1023,11 @@ mod tests {
                 .on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowRight))),
             vec![Event::ActivateMenu(key("file"))]
         );
+        assert!(
+            captured_events(&vertical, |api| api
+                .on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowLeft)))
+            .is_empty()
+        );
 
         let mut active_vertical = service(
             Props::new()
@@ -1093,6 +1106,11 @@ mod tests {
     fn transition_events_cover_focus_close_blur_and_active_movement() {
         let mut menu_bar = service(Props::new().id("menu-bar"));
 
+        drop(menu_bar.send(Event::ActivateMenu(key("missing"))));
+
+        assert_eq!(menu_bar.state(), &State::Inactive);
+        assert_eq!(menu_bar.context().active_menu, None);
+
         drop(menu_bar.send(Event::Focus { is_keyboard: true }));
 
         assert_eq!(menu_bar.context().focused_item, Some(key("file")));
@@ -1102,6 +1120,18 @@ mod tests {
 
         assert_eq!(menu_bar.context().focused_item, Some(key("edit")));
         assert_eq!(menu_bar.state(), &State::Inactive);
+
+        drop(menu_bar.send(Event::ActivateMenu(key("edit"))));
+        drop(menu_bar.send(Event::FocusItem(key("file"))));
+
+        assert_eq!(menu_bar.state(), &State::Active { menu: key("file") });
+        assert_eq!(menu_bar.context().active_menu, Some(key("file")));
+        assert_eq!(menu_bar.context().focused_item, Some(key("file")));
+
+        drop(menu_bar.send(Event::Focus { is_keyboard: false }));
+
+        assert_eq!(menu_bar.context().focused_item, Some(key("file")));
+        assert!(!menu_bar.context().focus_visible);
 
         drop(menu_bar.send(Event::ActivateMenu(key("edit"))));
         drop(menu_bar.send(Event::MoveToNextMenu));
@@ -1166,6 +1196,13 @@ mod tests {
         drop(menu_bar.set_props(old_props));
 
         assert_eq!(menu_bar.context().focused_item, Some(key("file")));
+
+        let mut inactive_menu_bar = service(Props::new().id("inactive"));
+
+        drop(inactive_menu_bar.set_props(Props::new().id("inactive-disabled").disabled(true)));
+
+        assert_eq!(inactive_menu_bar.state(), &State::Inactive);
+        assert_eq!(inactive_menu_bar.context().active_menu, None);
     }
 
     #[test]
@@ -1250,9 +1287,11 @@ mod tests {
         let mut menu_bar = service(Props::new().id("menu-bar").disabled(true));
 
         drop(menu_bar.send(Event::ActivateMenu(key("file"))));
+        drop(menu_bar.send(Event::Blur));
 
         assert_eq!(menu_bar.state(), &State::Inactive);
         assert_eq!(menu_bar.context().active_menu, None);
+        assert_eq!(menu_bar.context().focused_item, None);
 
         let api = menu_bar.connect(&|_| {});
 
@@ -1282,6 +1321,12 @@ mod tests {
         }));
         drop(captured_events(&vertical_rtl, |api| {
             api.on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowRight));
+        }));
+        drop(captured_events(&horizontal, |api| {
+            api.on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowRight));
+        }));
+        drop(captured_events(&horizontal, |api| {
+            api.on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::ArrowLeft));
         }));
         drop(captured_events(&horizontal, |api| {
             api.on_trigger_keydown(&key("file"), &keyboard(KeyboardKey::Home));
