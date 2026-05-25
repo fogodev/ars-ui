@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "534db6af148a",
+  "strategy": "manual-commit",
+  "branch": "t3code/497b39cd",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/input/checkbox_group/mod.rs",
+    "crates/ars-components/src/input/radio_group/mod.rs",
+    "spec/components/input/radio-group.md",
+    "spec/dioxus-components/input/radio-group.md",
+    "spec/leptos-components/input/radio-group.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/53/4db6af148a/0/metadata.json",
+      "transcript": "/53/4db6af148a/0/full.jsonl",
+      "content_hash": "/53/4db6af148a/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 119632,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 13185920,
+    "output_tokens": 16067,
+    "api_call_count": 81
+  }
+}
