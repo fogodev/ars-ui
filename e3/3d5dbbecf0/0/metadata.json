@@ -1,0 +1,106 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "e33d5dbbecf0",
+  "session_id": "019e5d7f-a558-7063-8337-1cefa62f884e",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-25T20:12:10.485971Z",
+  "branch": "t3code/39110ddb",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "21836597e18a",
+  "token_usage": {
+    "input_tokens": 2579285,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 163053184,
+    "output_tokens": 184461,
+    "api_call_count": 1112
+  },
+  "summary": {
+    "intent": "Implement GitHub issues #245 (ContextMenu) and #249 (MenuBar) as framework-agnostic core state machines in the ars-ui repository, delivered in a single combined PR targeting main.",
+    "outcome": "Both core modules were implemented with full test suites (unit, snapshot, spec-conformance, proptest), component and adapter specs were updated, and PR #679 was opened. The session ended with the coverage ratchet still failing CI despite multiple fix attempts; a final commit targeting the merged-LCOV branch gaps was prepared but not yet pushed/verified.",
+    "learnings": {
+      "repo": [
+        "Snapshot tests follow a per-part/per-branch convention — one small .snap file per named part or output-affecting state, not one aggregate fixture per component.",
+        "Agnostic core machines must use NoEffect and own no live DOM operations; adapters translate state into mounted-handle work, focus movement, and positioning.",
+        "cargo xtask spec validate and cargo xtask spec compile-snippets are required gates that must pass before committing spec-adjacent changes.",
+        "The post-implementation audit skill (`.agents/skills/post-implementation-audit/SKILL.md`) is a mandatory step requiring at least two 'anything else missing?' rounds and findings must land in the same PR.",
+        "The waiting-for-codex-review loop requires posting '@codex review' as a PR comment, polling reactions and GraphQL threads, replying inline, resolving each thread, and re-triggering until Codex leaves a thumbs-up.",
+        "cargo-mutants uses the default std-enabled mutation profile; `#[cfg(not(feature = \"std\"))]` fallback paths cannot be observed and require documented exclusions in `.cargo/mutants.toml`.",
+        "The project coverage gate runs on a merged workspace LCOV artifact that has a larger branch denominator than a crate-only local reproduction, so passing `cargo xtask coverage check --file <local.lcov>` does not guarantee the CI gate passes.",
+        "Issues #245 and #249 both depended on #237, which was already closed before implementation started.",
+        "spec/leptos-components and spec/dioxus-components adapter specs must be kept in sync with core component spec changes, including part names and event lists."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/menu/mod.rs",
+          "line": 1,
+          "end_line": 1880,
+          "finding": "Existing full Menu machine with item types, submenus, typeahead, snapshots, and proptest invariants; both ContextMenu and MenuBar reuse its Item, ItemType, DisabledBehavior, StaticCollection, and typeahead::State."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/utility/mod.rs",
+          "line": 780,
+          "end_line": 865,
+          "finding": "The highlight proptest utility module was loaded without the i18n feature gate even though all its helpers are i18n-gated, causing cargo-mutants baseline compile failures. Fixed by adding the cfg(feature) gate consistently."
+        },
+        {
+          "path": "crates/ars-components/src/selection/menu_bar/mod.rs",
+          "line": 530,
+          "end_line": 560,
+          "finding": "Horizontal ArrowDown activation in trigger keydown had a match guard tying it to Direction::Ltr; RTL horizontal menubars would not open with ArrowDown. Fix: make ArrowDown activation unconditional and separate the guarded vertical case."
+        },
+        {
+          "path": "crates/ars-components/src/selection/menu_bar/mod.rs",
+          "line": 730,
+          "end_line": 755,
+          "finding": "SyncProps on disable cleared focus but did not restore a roving tab stop when re-enabling; the first enabled trigger must be set as the focus entry point on re-enable when no focused_item remains."
+        },
+        {
+          "path": "crates/ars-components/src/selection/context_menu/mod.rs",
+          "line": 820,
+          "end_line": 860,
+          "finding": "on_target_keydown initially only handled Shift+F10 and used hardcoded (0.0, 0.0) coordinates; Codex review required adding KeyboardKey::ContextMenu support and adapter-provided anchor coordinates as a parameter."
+        },
+        {
+          "path": "crates/ars-components/src/selection/context_menu/mod.rs",
+          "line": 1060,
+          "end_line": 1100,
+          "finding": "SyncProps disabling an open context menu did not fire on_open_change(false) or clear the typeahead buffer. Both are required by the spec contract."
+        },
+        {
+          "path": "crates/ars-components/src/selection/context_menu/mod.rs",
+          "line": 1450,
+          "end_line": 1490,
+          "finding": "ContextOpen while already open did not reset submenu_open or typeahead transient state; reopening must clear those fields before re-highlighting."
+        }
+      ],
+      "workflow": [
+        "Adding assertion-heavy unit tests to fix branch coverage can lower coverage percentage by adding more instrumented branch sites to the denominator than are covered, making coverage worse with each attempt.",
+        "The correct coverage fix workflow is: download the CI coverage artifact (gh run download --name coverage-diagnostics), inspect uncovered branches from that exact LCOV, add minimal targeted test assertions for those specific product branches, verify locally with the same artifact, then commit.",
+        "cargo-mutants can stall in a final 'cargo test --no-run' compile when other concurrent cargo processes are running in nearby worktrees; killing and rerunning produces a clean baseline.",
+        "Flaky CI unit tests (unrelated to the change) should be re-run with 'gh run rerun --failed' rather than investigated; this allows the coverage gate downstream to execute on the correct commit.",
+        "Local crate coverage (cargo llvm-cov test -p <crate> --lib) and CI merged workspace coverage (cargo llvm-cov nextest with full workspace) can diverge significantly on branch percentage; always verify against the full nextest run or the CI artifact before claiming the gate is fixed.",
+        "The 'ignored' proptest targets must be run explicitly with '-- --ignored <test_name>' and are separate from the normal test suite pass.",
+        "cargo insta test --unreferenced=reject must be run in the exact scope that matches the test binary; running it with a narrow filter can cause it to delete unrelated snapshots."
+      ]
+    },
+    "friction": [
+      "CI merged-LCOV branch denominator is larger than crate-only local reproduction, causing three consecutive coverage commits to fail the ratchet despite local gates passing.",
+      "cargo-mutants stalled mid-run for ~45 minutes due to concurrent cargo activity in neighboring worktrees, requiring manual SIGKILL before proceeding.",
+      "Codex review required five separate round-trips (10 threads total), each needing TDD-first fixes, inline replies, GraphQL thread resolution, and a fresh @codex review trigger.",
+      "Snapshot split operation risked deleting unrelated snapshots when 'cargo insta test --unreferenced=delete' was run with a narrow test filter.",
+      "Thread resolution via GraphQL mutations required knowing the opaque PRRT_ thread IDs, which the gh CLI does not surface directly and required a custom GraphQL query.",
+      "The coverage fix workflow was not understood early enough; three speculative commits were pushed to CI before inspecting the actual CI LCOV artifact.",
+      "cargo llvm-cov concurrent runs collided on llvm-profdata when run in parallel, requiring sequential invocations."
+    ],
+    "open_items": [
+      "The final coverage fix commit ('test(selection): cover merged coverage ratchet branches') was prepared locally and committed but the transcript ends before the push is confirmed and CI validates it.",
+      "Adapter components for ContextMenu and MenuBar (Leptos, Dioxus) are explicitly out of scope for this PR and remain unimplemented.",
+      "The post-review menu_bar mutation gate was not fully re-run after the Codex review fixes; only the focused unit and proptest suites were re-verified.",
+      "The 'not(feature = std)' timestamp fallback in ContextMenu is excluded from mutation coverage by a .cargo/mutants.toml entry; this exclusion should be revisited if a no-std target is ever tested in CI.",
+      "Issues #245 and #249 close automatically via PR keywords only after the PR is merged; they are still open until that happens."
+    ]
+  }
+}
