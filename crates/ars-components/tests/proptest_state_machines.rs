@@ -23,7 +23,7 @@ mod layout;
 #[path = "proptest_state_machines/navigation.rs"]
 mod navigation;
 
-#[path = "proptest_state_machines/overlay.rs"]
+#[path = "proptest_state_machines/overlay/mod.rs"]
 mod overlay;
 
 #[path = "proptest_state_machines/selection.rs"]
