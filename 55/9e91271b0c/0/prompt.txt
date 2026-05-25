@@ -1,0 +1,5 @@
+How are you making the coverage even worse with each new commit?
+
+---
+
+Then proceed with the right fix and keep make sure that the next commit will pass the coverage ratchet
