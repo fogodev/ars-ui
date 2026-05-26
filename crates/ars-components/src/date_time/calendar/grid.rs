@@ -93,22 +93,28 @@ pub(super) fn weeks_for(
         return Vec::new();
     };
 
+    // The contract is "exactly 6 rows of 7 cells" or an empty vec on
+    // boundary failure. Partial vectors would break adapters and tests
+    // that assume the stable 6-row grid, so any arithmetic failure
+    // partway through bails out with an empty result.
     let mut weeks: Vec<[CalendarDate; 7]> = Vec::with_capacity(6);
 
     let mut current = grid_start;
 
-    for _ in 0..6 {
+    for i in 0..6 {
         let Some(row) = build_week(&current) else {
-            return weeks;
+            return Vec::new();
         };
 
         weeks.push(row);
 
-        let Ok(next_week_start) = current.add_days(7) else {
-            return weeks;
-        };
+        if i < 5 {
+            let Ok(next_week_start) = current.add_days(7) else {
+                return Vec::new();
+            };
 
-        current = next_week_start;
+            current = next_week_start;
+        }
     }
 
     weeks

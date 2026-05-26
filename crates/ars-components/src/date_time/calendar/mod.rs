@@ -37,9 +37,11 @@ pub mod grid;
 mod tests;
 
 use alloc::{
+    boxed::Box,
     format,
     string::{String, ToString as _},
     sync::Arc,
+    vec,
     vec::Vec,
 };
 use core::{
@@ -146,6 +148,15 @@ pub enum Event {
         /// Whether the shift modifier was held.
         shift: bool,
     },
+
+    /// Synchronise context from a new props snapshot.
+    ///
+    /// Emitted automatically by [`Machine::on_props_changed`] when the
+    /// adapter pushes new props via `Service::set_props`. Updates the
+    /// `Bindable` controlled values, refreshes the cached `disabled`,
+    /// `readonly`, `min`/`max`, predicate, and layout fields, and
+    /// re-clamps `focused_date` into the (possibly tighter) range.
+    SyncProps(Box<Props>),
 }
 
 /// Typed identifier for every named effect intent the `calendar` machine emits.
@@ -961,7 +972,7 @@ impl ars_core::Machine for Machine {
             Bindable::uncontrolled(props.default_selected_dates.clone())
         };
 
-        let initial_date = match props.selection_mode {
+        let mut initial_date = match props.selection_mode {
             SelectionMode::Single => value.get().clone().unwrap_or_else(|| props.today.clone()),
             SelectionMode::Multiple => selected_dates
                 .get()
@@ -970,6 +981,21 @@ impl ars_core::Machine for Machine {
                 .cloned()
                 .unwrap_or_else(|| props.today.clone()),
         };
+
+        // Clamp the initial focused date into the configured [min, max]
+        // range so the roving-tabindex target on first mount is never on
+        // a disabled cell (which would also be HTML-disabled, removing
+        // any focusable day target from the grid).
+        if let Some(min) = &props.min
+            && initial_date.compare(min) == Ordering::Less
+        {
+            initial_date = min.clone();
+        }
+        if let Some(max) = &props.max
+            && initial_date.compare(max) == Ordering::Greater
+        {
+            initial_date = max.clone();
+        }
 
         let locale = env.locale.clone();
 
@@ -1011,6 +1037,18 @@ impl ars_core::Machine for Machine {
         (State::Idle, ctx)
     }
 
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        debug_assert_eq!(
+            old.id, new.id,
+            "calendar::Props.id must remain stable after init",
+        );
+        if old == new {
+            Vec::new()
+        } else {
+            vec![Event::SyncProps(Box::new(new.clone()))]
+        }
+    }
+
     fn transition(
         _state: &Self::State,
         event: &Self::Event,
@@ -1020,10 +1058,17 @@ impl ars_core::Machine for Machine {
         // `FocusOut` must run even when the calendar is disabled — a
         // calendar that becomes disabled while focused still needs its
         // blur cleanup to land, otherwise it stays stuck in
-        // `State::Focused` with stale `data-ars-state="focused"`. All
-        // other events are gated by the disabled guard below.
+        // `State::Focused` with stale `data-ars-state="focused"`. `SyncProps`
+        // must also flow through so parent-driven changes that *take the
+        // calendar out of* the disabled state can actually land.
         if matches!(event, Event::FocusOut) {
             return Some(TransitionPlan::to(State::Idle));
+        }
+        if let Event::SyncProps(props) = event {
+            let props = props.as_ref().clone();
+            return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                sync_props_into_ctx(ctx, &props);
+            }));
         }
 
         if ctx.disabled {
@@ -1033,11 +1078,10 @@ impl ars_core::Machine for Machine {
         match event {
             Event::FocusIn => Some(TransitionPlan::to(State::Focused)),
 
-            // `FocusOut` is handled above the disabled guard so blur
-            // cleanup still runs when the context becomes disabled while
-            // focused. Control never reaches this arm — it exists purely
+            // `FocusOut` and `SyncProps` are handled above the disabled
+            // guard. Control never reaches these arms — they exist purely
             // to satisfy match exhaustiveness over `Event`.
-            Event::FocusOut => None,
+            Event::FocusOut | Event::SyncProps(_) => None,
             Event::FocusDate { date } => {
                 let clamped = ctx.clamp_date(date.clone());
                 Some(
@@ -1070,7 +1114,18 @@ impl ars_core::Machine for Machine {
 
                 Some(
                     TransitionPlan::context_only(move |ctx: &mut Context| {
+                        // Move both visible_month and focused_date by the
+                        // same month delta so the roving-tabindex target
+                        // still has a rendered cell. The shifted date is
+                        // clamped into [min, max].
+                        let delta = i32::from(month) - i32::from(ctx.visible_month);
                         ctx.visible_month = month;
+                        if let Ok(shifted) = ctx.focused_date.add(ars_i18n::DateDuration {
+                            months: delta,
+                            ..ars_i18n::DateDuration::default()
+                        }) {
+                            ctx.focused_date = ctx.clamp_date(shifted);
+                        }
                     })
                     .with_effect(announce_month_effect()),
                 )
@@ -1080,7 +1135,14 @@ impl ars_core::Machine for Machine {
                 let year = *year;
                 Some(
                     TransitionPlan::context_only(move |ctx: &mut Context| {
+                        let delta_years = year - ctx.visible_year;
                         ctx.visible_year = year;
+                        if let Ok(shifted) = ctx.focused_date.add(ars_i18n::DateDuration {
+                            years: delta_years,
+                            ..ars_i18n::DateDuration::default()
+                        }) {
+                            ctx.focused_date = ctx.clamp_date(shifted);
+                        }
                     })
                     .with_effect(announce_month_effect()),
                 )
@@ -1100,6 +1162,43 @@ impl ars_core::Machine for Machine {
     }
 }
 
+fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
+    // Push controlled values through their `Bindable`s. `sync_controlled`
+    // accepts `Option<T>`: `Some(_)` keeps the calendar in controlled
+    // mode, `None` flips it back to uncontrolled (revealing the internal
+    // value).
+    ctx.value.sync_controlled(props.value.clone());
+    ctx.selected_dates
+        .sync_controlled(props.selected_dates.clone());
+
+    ctx.selection_mode = props.selection_mode;
+    ctx.max_selected = props.max_selected;
+    ctx.min = props.min.clone();
+    ctx.max = props.max.clone();
+    ctx.disabled = props.disabled;
+    ctx.readonly = props.readonly;
+    ctx.is_date_unavailable_fn = props.is_date_unavailable.clone();
+    ctx.show_week_numbers = props.show_week_numbers;
+    ctx.is_rtl = props.is_rtl;
+    ctx.visible_months = props.visible_months.max(1);
+    ctx.page_behavior = props.page_behavior;
+    ctx.today = props.today.clone();
+
+    // `first_day_of_week` is the only field that can come from *either*
+    // props or the locale-derived default in `Env`. If props supplies an
+    // explicit override, honour it; otherwise leave the locale-derived
+    // value as-is (we cannot re-derive it from here because `Env` is not
+    // threaded through props updates).
+    if let Some(fdow) = props.first_day_of_week {
+        ctx.first_day_of_week = fdow;
+    }
+
+    // Re-clamp `focused_date` in case `min`/`max` tightened so the roving
+    // target never points at an out-of-range cell.
+    let clamped = ctx.clamp_date(ctx.focused_date.clone());
+    ctx.focused_date = clamped;
+}
+
 fn step_for_page_behavior(ctx: &Context) -> i32 {
     match ctx.page_behavior {
         PageBehavior::Visible => i32::try_from(ctx.visible_months).unwrap_or(1).max(1),
@@ -1109,19 +1208,19 @@ fn step_for_page_behavior(ctx: &Context) -> i32 {
 
 fn month_step_plan(step: i32) -> TransitionPlan<Machine> {
     TransitionPlan::context_only(move |ctx: &mut Context| {
-        ctx.advance_month(step);
-        // Keep `focused_date` aligned with the newly visible range so the
-        // roving-tabindex target still has a rendered cell. Without this,
-        // paging from Jan 15 → Feb leaves focused_date on Jan 15, which is
-        // not in February's 6-week grid, and no cell gets `tabindex="0"`.
-        // The shifted date is clamped into the configured `[min, max]`
-        // range so out-of-range targets snap back to the boundary.
-        if let Ok(shifted) = ctx.focused_date.add(ars_i18n::DateDuration {
+        // `visible_month/year` and `focused_date` must advance atomically.
+        // If the focused-date shift fails near a representable calendar
+        // boundary, leave both untouched so the roving-tabindex target
+        // can never end up outside the rendered grid. The clamp keeps
+        // out-of-range targets snapped to `[min, max]`.
+        let Ok(shifted) = ctx.focused_date.add(ars_i18n::DateDuration {
             months: step,
             ..ars_i18n::DateDuration::default()
-        }) {
-            ctx.focused_date = ctx.clamp_date(shifted);
-        }
+        }) else {
+            return;
+        };
+        ctx.advance_month(step);
+        ctx.focused_date = ctx.clamp_date(shifted);
     })
     .with_effect(announce_month_effect())
 }
@@ -1781,9 +1880,14 @@ impl<'a> Api<'a> {
         self.ctx.is_outside_visible_month(date)
     }
 
-    /// Whether the prev-trigger should be disabled due to a `min` constraint.
+    /// Whether the prev-trigger should be disabled — either the calendar
+    /// is globally disabled or the visible range is already at `min`.
     #[must_use]
     pub fn is_prev_disabled(&self) -> bool {
+        if self.ctx.disabled {
+            return true;
+        }
+
         let Some(min) = &self.ctx.min else {
             return false;
         };
@@ -1797,11 +1901,16 @@ impl<'a> Api<'a> {
         !matches!(first_of_visible.compare(min), Ordering::Greater)
     }
 
-    /// Whether the next-trigger should be disabled due to a `max` constraint.
+    /// Whether the next-trigger should be disabled — either the calendar
+    /// is globally disabled or the visible range is already at `max`.
     /// Checks against the **last** visible month so multi-month layouts
     /// behave correctly.
     #[must_use]
     pub fn is_next_disabled(&self) -> bool {
+        if self.ctx.disabled {
+            return true;
+        }
+
         let Some(max) = &self.ctx.max else {
             return false;
         };

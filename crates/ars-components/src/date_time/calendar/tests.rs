@@ -1900,3 +1900,179 @@ fn focus_in_still_blocked_when_disabled() {
     drop(svc.send(Event::FocusIn));
     assert_eq!(*svc.state(), State::Idle);
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Codex review regressions, pass 2 (PR #688)
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn initial_focused_date_is_clamped_into_min_max_range() {
+    // Codex N1 (P1): the initial focused_date must respect min/max so the
+    // roving tab target never lands on a disabled cell.
+    let svc = service_with(
+        props()
+            .today(date(2024, 1, 1))
+            .min(Some(date(2024, 1, 10)))
+            .max(Some(date(2024, 1, 25))),
+        en_us(),
+    );
+    assert_eq!(svc.context().focused_date, date(2024, 1, 10));
+
+    // Symmetric: today above max → clamped down to max.
+    let svc = service_with(
+        props()
+            .today(date(2024, 1, 31))
+            .min(Some(date(2024, 1, 10)))
+            .max(Some(date(2024, 1, 25))),
+        en_us(),
+    );
+    assert_eq!(svc.context().focused_date, date(2024, 1, 25));
+}
+
+#[test]
+fn sync_props_propagates_controlled_value_changes() {
+    // Codex N2 (P1): `set_props` must surface parent prop changes —
+    // controlled value, disabled, min/max, etc. — into the live context.
+    let mut svc = service_with(props().value(Some(date(2024, 1, 10))), en_us());
+    assert_eq!(*svc.context().value.get(), Some(date(2024, 1, 10)));
+
+    // Parent flips the controlled value.
+    drop(svc.set_props(props().value(Some(date(2024, 1, 20)))));
+    assert_eq!(
+        *svc.context().value.get(),
+        Some(date(2024, 1, 20)),
+        "controlled value change must flow through set_props",
+    );
+}
+
+#[test]
+fn sync_props_propagates_disabled_and_readonly() {
+    let mut svc = service();
+    assert!(!svc.context().disabled);
+    assert!(!svc.context().readonly);
+
+    drop(svc.set_props(props().disabled(true).readonly(true)));
+
+    assert!(
+        svc.context().disabled,
+        "disabled must propagate via set_props"
+    );
+    assert!(
+        svc.context().readonly,
+        "readonly must propagate via set_props"
+    );
+}
+
+#[test]
+fn sync_props_propagates_min_max() {
+    let mut svc = service();
+    assert!(svc.context().min.is_none());
+
+    drop(
+        svc.set_props(
+            props()
+                .min(Some(date(2024, 1, 10)))
+                .max(Some(date(2024, 1, 25))),
+        ),
+    );
+
+    assert_eq!(svc.context().min, Some(date(2024, 1, 10)));
+    assert_eq!(svc.context().max, Some(date(2024, 1, 25)));
+}
+
+#[test]
+fn set_month_advances_focused_date() {
+    // Codex N3 (P2): SetMonth/SetYear must keep focused_date in range.
+    let mut svc = service();
+    let before = svc.context().focused_date.clone();
+
+    drop(svc.send(Event::SetMonth { month: 6 }));
+
+    assert_eq!(svc.context().visible_month, 6);
+    // Focused date follows the visible month: same day, new month.
+    assert_eq!(svc.context().focused_date.month(), 6);
+    assert_eq!(svc.context().focused_date.day(), before.day());
+}
+
+#[test]
+fn set_year_advances_focused_date() {
+    let mut svc = service();
+    let before_day = svc.context().focused_date.day();
+    let before_month = svc.context().focused_date.month();
+
+    drop(svc.send(Event::SetYear { year: 2030 }));
+
+    assert_eq!(svc.context().visible_year, 2030);
+    assert_eq!(svc.context().focused_date.year(), 2030);
+    assert_eq!(svc.context().focused_date.month(), before_month);
+    assert_eq!(svc.context().focused_date.day(), before_day);
+}
+
+#[test]
+fn prev_next_triggers_disabled_when_calendar_disabled() {
+    // Codex N4 (P2): a globally-disabled calendar must mark its prev/next
+    // triggers as HTML-disabled too, otherwise the buttons appear active
+    // while the machine drops their events.
+    let svc = service_with(props().disabled(true), en_us());
+    let api = svc.connect(&|_| {});
+
+    let prev = api.prev_trigger_attrs();
+    let next = api.next_trigger_attrs();
+
+    assert_eq!(
+        prev.get(&HtmlAttr::Disabled).map(ToString::to_string),
+        Some(String::from("true")),
+        "prev trigger must be HTML-disabled when ctx.disabled is true",
+    );
+    assert_eq!(
+        attr(&prev, HtmlAttr::Aria(AriaAttr::Disabled)).as_deref(),
+        Some("true"),
+    );
+    assert_eq!(
+        next.get(&HtmlAttr::Disabled).map(ToString::to_string),
+        Some(String::from("true")),
+    );
+    assert_eq!(
+        attr(&next, HtmlAttr::Aria(AriaAttr::Disabled)).as_deref(),
+        Some("true"),
+    );
+}
+
+#[test]
+fn weeks_for_returns_six_rows_or_empty_never_partial() {
+    // Codex N5 (P2): the contract is "exactly 6 rows or empty on boundary
+    // failure", never a partially-built vector. Confirm the happy path
+    // produces 6 rows; boundary behaviour is exercised in grid.rs unit
+    // tests where we can drive `add_days` failure deterministically.
+    let svc = service();
+    let weeks = svc.context().weeks();
+    assert!(
+        weeks.is_empty() || weeks.len() == 6,
+        "weeks() must return either 0 or 6 rows, got {}",
+        weeks.len(),
+    );
+    assert_eq!(weeks.len(), 6); // happy path
+}
+
+#[test]
+fn month_step_plan_keeps_visible_and_focused_in_sync_at_boundary() {
+    // Codex N6 (P2): if the focused-date shift fails near a representable
+    // boundary, visible_month must NOT advance either — they move
+    // atomically.
+    //
+    // We can't easily hit the calendar boundary in a portable test (the
+    // overflow point depends on the ICU calendar engine), but we can pin
+    // the happy-path invariant: after paging, focused_date.month() must
+    // equal visible_month (within the same calendar year wrap).
+    let mut svc = service();
+    drop(svc.send(Event::NextMonth));
+    assert_eq!(
+        svc.context().focused_date.month(),
+        svc.context().visible_month,
+        "focused_date.month() must track visible_month after paging",
+    );
+    assert_eq!(
+        svc.context().focused_date.year(),
+        svc.context().visible_year,
+    );
+}
