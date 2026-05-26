@@ -1,0 +1,233 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "9c9be4508fdd",
+  "session_id": "4d98eae2-3053-4a1e-9381-945f939d752b",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-26T15:33:42.432485Z",
+  "branch": "claude/friendly-grothendieck-886c35",
+  "checkpoints_count": 7,
+  "files_touched": [
+    "crates/ars-components/src/date_time/calendar/grid.rs",
+    "crates/ars-components/src/date_time/calendar/mod.rs",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_disabled_by_min.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_outside_month.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_selected.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_trigger_disabled_and_unavailable.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_trigger_focused.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_trigger_selected.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_trigger_today.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_trigger_unfocused.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__grid_group_multi_month.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__grid_multi_select.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__grid_single_select.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__head_cell_monday.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__head_cell_sunday.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__head_row.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__header.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__heading.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__next_trigger_default.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__next_trigger_disabled_by_max.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__next_trigger_multi_month_visible_step.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__prev_trigger_default.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__prev_trigger_disabled_by_min.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__prev_trigger_multi_month_visible_step.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__root_disabled_readonly_rtl.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__root_focused.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__root_idle.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__row.snap",
+    "crates/ars-components/src/date_time/calendar/tests.rs",
+    "crates/ars-components/src/date_time/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "crates/ars-core/src/callback.rs",
+    "spec/components/date-time/calendar.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "ea57dd15c072",
+  "token_usage": {
+    "input_tokens": 10875,
+    "cache_creation_tokens": 1296525,
+    "cache_read_tokens": 126380103,
+    "output_tokens": 219122,
+    "api_call_count": 324
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "summary": {
+    "intent": "Implement task #280: a framework-agnostic Calendar core state machine for the ars-ui Rust component library, covering single- and multi-select, locale-aware grid math, min/max constraints, focus management, and ARIA announcements. Port all implementation-driven spec deviations back into the spec.",
+    "outcome": "Fully implemented Calendar machine across grid.rs, mod.rs, tests.rs (118 unit + snapshot + 3 proptest + 2 spec-conformance tests). All spec deviations reconciled back into calendar.md. Also added Callback::new_ref to ars-core to support higher-ranked closures over reference args. PR created with cargo xci-fast green.",
+    "learnings": {
+      "repo": [
+        "CalendarDate does not implement Ord; use CalendarDate::compare() for ordering. BTreeSet<CalendarDate> is unusable — requires a SelectedDates newtype wrapping a sorted Vec.",
+        "Callback::new requires Args: 'static, blocking use with &T reference arguments. A new Callback::new_ref constructor with HRTB (for<'a> Fn(&'a T) -> Out) was needed and added to ars-core.",
+        "ConnectApi pattern uses svc.connect(...) — not Machine::connect(...). The Service object returned from Machine::init is the entry point.",
+        "Clippy rejects let _ = svc.send(...); the idiomatic pattern used throughout the codebase is drop(svc.send(...)).",
+        "cargo-mutants baseline check fails when pre-existing snapshot mismatches exist in unrelated components (meter/progress); use --baseline=skip to isolate calendar mutation results.",
+        "ComponentIds replaces manual heading_id/grid_id string fields — all part IDs derive from ids.part(\"name\") at connect time.",
+        "The real ars-i18n API uses u8 + Result<_, CalendarError> for date construction and arithmetic, not NonZero<u8> + infallible calls as written in the original spec.",
+        "Spec §1.8 referenced Event::HoverDate/HoverEnd and Context fields is_range/range_start/range_end that were not declared in §1.2 — these were range-calendar drift, not Calendar spec.",
+        "cargo insta review is the required workflow for accepting new snapshots; cargo insta test runs tests and generates pending snapshots."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-core/src/callback.rs",
+          "finding": "Added new_ref constructor: impl<T: ?Sized + 'static, Out: 'static> Callback<dyn for<'a> Fn(&'a T) -> Out + Send + Sync>. This is the first HRTB Callback use in the workspace and required bypassing the existing new() which bounds Args: 'static."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "SelectedDates newtype (sorted Vec<CalendarDate> via compare()) is necessary because CalendarDate lacks Ord. Manual Props::PartialEq was eliminated once IsDateUnavailableFn switched from fn pointer to Callback (which derives PartialEq via Arc::ptr_eq)."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/grid.rs",
+          "finding": "Pure grid math (weeks_for, month_year_at_offset, ordered_weekdays) is isolated in its own file with inline unit tests. CalendarDate arithmetic returns Result — every call needs explicit error handling even when overflow is structurally impossible."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+          "finding": "Calendar proptests appended to the existing date_time proptest file (not a new file). proptest_config() is imported from the common harness."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/date_time.rs",
+          "finding": "Spec conformance anatomy tests live in this shared file per component, not in separate files per component."
+        }
+      ],
+      "workflow": [
+        "Plan mode with AskUserQuestion was used to resolve two scope ambiguities before writing a line of code — this prevented wasted work on hover events and the shift-space anchor design.",
+        "Parallel exploration agents (Explore subagent type) were spawned concurrently to read large spec sections and existing component patterns without burning the main context window.",
+        "TDD order: write named failing tests first (task 3), then implement the state machine (task 5), then accept snapshots — compile errors from absent types provide a useful scaffold.",
+        "Coverage check (cargo xtask coverage) after tests revealed uncovered branches; additional targeted tests lifted mod.rs coverage from ~88% to 95.85% before mutation testing.",
+        "Mutation tests on a crate with pre-existing snapshot failures require --baseline=skip; expect 10-20 minutes runtime on a medium-sized module.",
+        "cargo xci-fast is the mandatory pre-push gate; run it before staging changes and creating the PR.",
+        "Spec edits belong in the same PR as the implementation when the implementation reveals spec errors — don't defer them to a follow-up."
+      ]
+    },
+    "friction": [
+      "cargo-mutants baseline kept failing due to pre-existing meter/progress snapshot mismatches unrelated to calendar — wasted multiple invocations before discovering --baseline=skip.",
+      "Mutation tests ran for 15+ minutes and had to be killed; results were never fully confirmed (two partial runs showed 0 MISSED but full tally was never obtained).",
+      "CalendarDate lacking Ord was not documented in ars-i18n or the spec — discovered only at compile time when BTreeSet<CalendarDate> was rejected.",
+      "Callback::new HRTB limitation was not documented; discovered at compile time when porting IsDateUnavailableFn, requiring a detour to add new_ref to ars-core.",
+      "Bulk-replacing let _ = svc.send(...) with drop(...) required manual sed attempts that produced backup files and needed cleanup — no project-wide sed helper exists.",
+      "Spec §1.8 hover events referenced fields and events not defined in §1.2, causing confusion about whether they were intentional or drift — required user confirmation."
+    ],
+    "open_items": [
+      "Shift+Space range-from-anchor and Ctrl+A select-all multi-select keyboard interactions are not implemented — requires an 'anchor' concept to be defined in a spec follow-up before implementation.",
+      "HoverDate/HoverEnd events and range context fields (is_range, range_start, range_end) are explicitly deferred to the future RangeCalendar component.",
+      "Full cargo mutants run was never completed; partial runs (47 + 112 outcomes) showed 0 MISSED but a clean end-to-end tally was not obtained.",
+      "snapshot-reviewed GitHub label and waiting-for-codex-review skill invocation are listed in the workflow but were not confirmed as done in the transcript after PR creation.",
+      "Callback::new_ref is the first HRTB Callback constructor in the workspace — other components with predicate Props (is_date_unavailable pattern) could migrate from fn pointers to Callback using this new API."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-26T15:32:39.900292Z",
+    "agent_lines": 4982,
+    "agent_removed": 598,
+    "human_added": 872,
+    "human_modified": 60,
+    "human_removed": 0,
+    "total_committed": 5896,
+    "total_lines_changed": 6512,
+    "agent_percentage": 85.68796068796068,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 48,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 48
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 66,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4988,
+      "agent_lines_removed": 3,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 66
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 66,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4988,
+      "agent_lines_removed": 3,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 66
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 66,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5524,
+      "agent_lines_removed": 640,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 66
+      }
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 125,
+      "user_lines_removed": 14,
+      "agent_lines_added": 5524,
+      "agent_lines_removed": 640,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 66,
+        "crates/ars-components/src/date_time/calendar/grid.rs": 26,
+        "crates/ars-components/src/date_time/calendar/mod.rs": 15,
+        "crates/ars-components/tests/proptest_state_machines/date_time.rs": 16,
+        "spec/components/date-time/calendar.md": 2
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/date_time/calendar/mod.rs": 12,
+        "spec/components/date-time/calendar.md": 2
+      }
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 66,
+      "user_lines_removed": 0,
+      "agent_lines_added": 5574,
+      "agent_lines_removed": 640,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 66
+      }
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 137,
+      "user_lines_removed": 10,
+      "agent_lines_added": 5554,
+      "agent_lines_removed": 640,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 66,
+        "crates/ars-components/src/date_time/calendar/mod.rs": 70,
+        "crates/ars-core/src/callback.rs": 1
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/date_time/calendar/mod.rs": 10
+      }
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 467,
+      "user_lines_removed": 18,
+      "agent_lines_added": 5555,
+      "agent_lines_removed": 640,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 66,
+        "crates/ars-components/src/date_time/calendar/mod.rs": 119,
+        "crates/ars-components/src/date_time/calendar/tests.rs": 282
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/date_time/calendar/mod.rs": 18
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "9c9be4508fdd",
+  "strategy": "manual-commit",
+  "branch": "claude/friendly-grothendieck-886c35",
+  "checkpoints_count": 7,
+  "files_touched": [
+    "crates/ars-components/src/date_time/calendar/grid.rs",
+    "crates/ars-components/src/date_time/calendar/mod.rs",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_disabled_by_min.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_outside_month.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_selected.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_trigger_disabled_and_unavailable.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_trigger_focused.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_trigger_selected.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_trigger_today.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__cell_trigger_unfocused.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__grid_group_multi_month.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__grid_multi_select.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__grid_single_select.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__head_cell_monday.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__head_cell_sunday.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__head_row.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__header.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__heading.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__next_trigger_default.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__next_trigger_disabled_by_max.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__next_trigger_multi_month_visible_step.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__prev_trigger_default.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__prev_trigger_disabled_by_min.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__prev_trigger_multi_month_visible_step.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__root_disabled_readonly_rtl.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__root_focused.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__root_idle.snap",
+    "crates/ars-components/src/date_time/calendar/snapshots/ars_components__date_time__calendar__tests__row.snap",
+    "crates/ars-components/src/date_time/calendar/tests.rs",
+    "crates/ars-components/src/date_time/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "crates/ars-core/src/callback.rs",
+    "spec/components/date-time/calendar.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/9c/9be4508fdd/0/metadata.json",
+      "transcript": "/9c/9be4508fdd/0/full.jsonl",
+      "content_hash": "/9c/9be4508fdd/0/content_hash.txt",
+      "prompt": "/9c/9be4508fdd/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 10875,
+    "cache_creation_tokens": 1296525,
+    "cache_read_tokens": 126380103,
+    "output_tokens": 219122,
+    "api_call_count": 324
+  }
+}
