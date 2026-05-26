@@ -1,0 +1,386 @@
+Implement task #293
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #293 Clipboard Agnostic Core Implementation Plan
+
+## Summary
+
+Implement the framework-agnostic `Clipboard` component core for issue `#293`, scoped to `ars-components` only. The implementation will add a new `specialized::clipboard` module with the state machine, typed effect intents, connect API, documented public types, unit tests, snapshots, spec-conformance coverage, and required local validation.
+
+No Leptos/Dioxus adapters, DOM clipboard calls, permission handling, focus restoration, or fallback `execCommand` logic are in scope. The agnostic core will emit effect intents for adapters to perform platform work.
+
+## Public API And Type Changes
+
+Add `crates/ars-components/src/specialized/mod.rs`:
+
+```rust
+//! Specialized component machines.
+
+/// Clipboard component machine.
+pub mod clipboard;
+```
+
+Modify `crates/ars-components/src/lib.rs` to export:
+
+```rust
+/// Specialized component machines.
+pub mod specialized;
+```
+
+Create `crates/ars-components/src/specialized/clipboard/mod.rs` with these public items:
+
+- `CopyFailureReason`
+  - Variants: `PermissionDenied`, `NotSecureContext`, `Timeout`, `ApiUnavailable`, `Unknown(String)`
+  - Derives: `Clone`, `Debug`, `PartialEq`, `Eq`
+  - Attribute: `#[non_exhaustive]`
+
+- `State`
+  - Variants: `Idle`, `Copying`, `Copied`, `Error`
+  - Derives: `Clone`, `Copy`, `Debug`, `PartialEq`, `Eq`
+  - `Display` returns `idle`, `copying`, `copied`, `error`
+
+- `Event`
+  - Variants: `Copy`, `CopySuccess`, `CopyError(CopyFailureReason)`, `ResetTimeout`, `SetValue(Option<String>)`, `SetProps`
+  - `SetValue` and `SetProps` are implementation sync events needed for `Service::set_props`, even though the spec’s primary event table focuses on copy lifecycle events.
+
+- `Context`
+  - Fields matching spec: `value`, `feedback_duration_ms`, `disabled`, `error`, `locale`, `messages`, `ids`
+
+- `Props`
+  - Fields matching spec: `id`, `value`, `default_value`, `feedback_duration_ms`, `disabled`
+  - `Default`: empty id, `value: None`, empty `default_value`, `feedback_duration_ms: 2000`, `disabled: false`
+  - Builder methods: `new`, `id`, `value`, `uncontrolled`, `default_value`, `feedback_duration_ms`, `disabled`
+
+- `Messages`
+  - Fields matching spec:
+    - `trigger_label`
+    - `copying_label`
+    - `copied_label`
+    - `error_label`
+    - `copied_announcement`
+    - `error_announcement`
+  - Defaults exactly as `spec/components/specialized/clipboard.md` §4.1.
+
+- `Effect`
+  - Variants: `WriteText`, `FeedbackTimer`, `AnnounceCopied`, `AnnounceError`
+  - These are marker or callback effects for adapters:
+    - `WriteText` runs `Props::on_copy` if provided, passing the value and send handle.
+    - `FeedbackTimer` tells adapters to send `ResetTimeout` after `ctx.feedback_duration_ms`.
+    - `AnnounceCopied` and `AnnounceError` tell adapters to announce the resolved message.
+
+- `CopyRequestFn`
+  - Type alias for a callback shape that receives the text and a weak send handle:
+    `dyn Fn(&str, ars_core::WeakSend<Event>) + Send + Sync`
+  - Add `Props::on_copy: Option<Callback<CopyRequestFn>>` only if this callback wiring compiles cleanly with existing `ars_core::Callback`; otherwise use the same `PendingEffect::new` pattern but keep the callback field absent and make `WriteText` a marker-only platform intent. The preferred implementation is callback-backed because issue #293 says core should own callback intent.
+
+- `Machine`
+  - Implements `ars_core::Machine`
+  - `type Effect = Effect`
+
+- `Part`
+  - `#[derive(ComponentPart)]`
+  - `#[scope = "clipboard"]`
+  - Variants: `Root`, `Label`, `Trigger`, `Indicator`, `Status`, `ValueText`
+
+- `Api<'a>`
+  - Methods:
+    - `is_copied`
+    - `is_copying`
+    - `is_error`
+    - `error`
+    - `value`
+    - `copy`
+    - `root_attrs`
+    - `label_attrs`
+    - `trigger_attrs`
+    - `indicator_attrs`
+    - `status_attrs`
+    - `value_text_attrs`
+    - `on_trigger_click`
+  - Implements `ConnectApi`.
+
+## State Machine Behavior
+
+Initial state:
+
+- Always starts in `State::Idle`.
+- `Context::value` is controlled when `Props::value` is `Some`, otherwise uncontrolled from `Props::default_value`.
+- `Context::error` starts as `None`.
+- IDs are built with `ComponentIds::from_id(&props.id)`.
+
+Transitions:
+
+- If disabled, ignore user copy intent:
+  - `Copy` returns `None`.
+  - `CopySuccess`, `CopyError`, and `ResetTimeout` are still handled so pending platform completions can settle consistently if disabled changes mid-flight.
+
+- `Idle + Copy`
+  - Target: `Copying`
+  - Clear `ctx.error`
+  - Emit `Effect::WriteText`
+
+- `Copied + Copy` and `Error + Copy`
+  - Target: `Copying`
+  - Clear `ctx.error`
+  - Cancel any active `Effect::FeedbackTimer`
+  - Emit `Effect::WriteText`
+
+- `Copying + CopySuccess`
+  - Target: `Copied`
+  - Clear `ctx.error`
+  - Emit `Effect::AnnounceCopied`
+  - Emit `Effect::FeedbackTimer`
+
+- `Copying + CopyError(reason)`
+  - Target: `Error`
+  - Set `ctx.error = Some(reason.clone())`
+  - Emit `Effect::AnnounceError`
+  - Emit `Effect::FeedbackTimer`
+
+- `Copied + ResetTimeout` and `Error + ResetTimeout`
+  - Target: `Idle`
+  - Clear `ctx.error`
+
+- `Copying + ResetTimeout`
+  - Return `None`; timeout of the write operation itself is adapter/platform work per issue note.
+
+- `SetValue(value)`
+  - Synchronize `ctx.value.sync_controlled(value)` and update internal value if controlled.
+  - Do not emit copy effects.
+
+- `SetProps`
+  - Sync `feedback_duration_ms` and `disabled` from props.
+  - Do not reset current state.
+
+`Machine::on_props_changed`:
+
+- Assert `id` stability.
+- Emit `SetValue(new.value.clone())` when `value` changes.
+- Emit `SetProps` when `feedback_duration_ms` or `disabled` changes.
+
+## Attribute Contract
+
+Use existing `AttrMap`, `HtmlAttr`, `AriaAttr`, `ComponentIds`, and `Part::data_attrs()` patterns.
+
+`root_attrs`:
+
+- `id = ctx.ids.id()`
+- `data-ars-scope="clipboard"`
+- `data-ars-part="root"`
+- `data-ars-state=<state token>`
+- `data-ars-disabled` only when disabled
+
+`label_attrs`:
+
+- `id = ctx.ids.part("label")`
+- scope and part data attrs
+
+`trigger_attrs`:
+
+- `id = ctx.ids.part("trigger")`
+- `type="button"`
+- scope and part data attrs
+- `aria-label` by state:
+  - Idle: `trigger_label`
+  - Copying: `copying_label`
+  - Copied: `copied_label`
+  - Error: `error_label`
+- `aria-labelledby = ctx.ids.part("label")`
+- `data-ars-state=<state token>`
+- Disabled branch:
+  - `aria-disabled="true"`
+  - `data-ars-disabled`
+
+`indicator_attrs`:
+
+- scope and part data attrs
+- `aria-hidden="true"`
+- `data-ars-state=<state token>`
+
+`status_attrs`:
+
+- scope and part data attrs
+- `role="status"`
+- `aria-live="polite"`
+- `aria-atomic="true"`
+
+`value_text_attrs`:
+
+- scope and part data attrs
+
+## Files To Modify Or Create
+
+Create:
+
+- `crates/ars-components/src/specialized/mod.rs`
+- `crates/ars-components/src/specialized/clipboard/mod.rs`
+- `crates/ars-components/src/specialized/clipboard/snapshots/*.snap`
+- `crates/ars-components/tests/spec_conformance/specialized.rs`
+
+Modify:
+
+- `crates/ars-components/src/lib.rs`
+- `crates/ars-components/tests/spec_conformance.rs`
+- `.cargo/mutants.toml` only if mutation testing finds a true equivalent survivor that cannot be killed with a meaningful test.
+
+Do not modify:
+
+- `spec/components/specialized/clipboard.md`, unless the post-implementation audit finds spec drift or an uncompilable spec contract.
+- `crates/ars-leptos/*`
+- `crates/ars-dioxus/*`
+- adapter specs
+
+## TDD Steps
+
+1. Add a failing spec-conformance test for `specialized::clipboard::Part`.
+
+Expected anatomy:
+
+```rust
+assert_anatomy(
+    "clipboard",
+    &[
+        (specialized_core::clipboard::Part::Root, "root"),
+        (specialized_core::clipboard::Part::Label, "label"),
+        (specialized_core::clipboard::Part::Trigger, "trigger"),
+        (specialized_core::clipboard::Part::Indicator, "indicator"),
+        (specialized_core::clipboard::Part::Status, "status"),
+        (specialized_core::clipboard::Part::ValueText, "value-text"),
+    ],
+);
+```
+
+Run:
+
+```bash
+cargo test -p ars-components --test spec_conformance clipboard_anatomy_matches_spec
+```
+
+Expected before implementation: unresolved `specialized` / `clipboard`.
+
+2. Add failing unit tests in `clipboard/mod.rs`.
+
+Required tests:
+
+- `clipboard_props_default_matches_spec`
+- `clipboard_props_builder_sets_expected_fields`
+- `clipboard_initial_state_uses_default_value`
+- `clipboard_initial_state_uses_controlled_value`
+- `clipboard_idle_copy_enters_copying_and_emits_write_effect`
+- `clipboard_copy_success_enters_copied_announces_and_starts_timer`
+- `clipboard_copy_error_enters_error_announces_and_starts_timer`
+- `clipboard_reset_timeout_returns_to_idle_from_copied`
+- `clipboard_reset_timeout_returns_to_idle_from_error`
+- `clipboard_recopy_from_copied_cancels_timer_and_writes_again`
+- `clipboard_disabled_blocks_copy_intent`
+- `clipboard_set_props_syncs_value_feedback_duration_and_disabled`
+- `clipboard_api_copy_sends_copy_event`
+- `clipboard_trigger_click_sends_copy_event`
+- `clipboard_trigger_attrs_use_state_specific_aria_labels`
+- `clipboard_indicator_tracks_data_state`
+- `clipboard_status_attrs_are_live_region`
+- `clipboard_connect_api_dispatch_matches_inherent_attrs`
+- `clipboard_write_effect_invokes_copy_callback_with_current_value`
+- `clipboard_timer_effect_target_state_is_copied_or_error`
+
+Run focused tests:
+
+```bash
+cargo test -p ars-components clipboard::
+```
+
+Expected before implementation: compile failures or failing assertions.
+
+3. Implement `specialized` module export and `clipboard` public types.
+
+4. Implement the machine transitions and effect helpers.
+
+5. Implement `Api` and attributes.
+
+6. Add snapshot assertions for every anatomy part and output-affecting branch.
+
+Snapshot cases:
+
+- root idle
+- root disabled
+- trigger idle
+- trigger copying
+- trigger copied
+- trigger error
+- indicator copying
+- indicator copied
+- indicator error
+- status
+- label
+- value text
+
+Run:
+
+```bash
+cargo insta test -p ars-components clipboard --unreferenced=reject
+```
+
+Review generated `.snap` files before accepting them.
+
+7. Run named issue tests and spec conformance.
+
+```bash
+cargo test -p ars-components clipboard::
+cargo test -p ars-components --test spec_conformance clipboard
+cargo insta test -p ars-components clipboard --unreferenced=reject
+```
+
+8. Run required agnostic-component mutation gate.
+
+```bash
+cargo mutants -p ars-components -f crates/ars-components/src/specialized/clipboard/mod.rs
+```
+
+Triage all `MISSED` entries in this same change:
+
+- Add a unit/snapshot test for real gaps.
+- Add a justified `.cargo/mutants.toml` skip only for true equivalent mutations.
+- Delete unreachable defensive code rather than documenting it when deletion is cleaner.
+
+9. Run the mandatory post-implementation audit.
+
+Use `.agents/skills/post-implementation-audit/SKILL.md` after the named tests pass. Land all findings in the same branch.
+
+10. Final local verification before user review.
+
+Focused:
+
+```bash
+cargo test -p ars-components clipboard::
+cargo test -p ars-components --test spec_conformance clipboard
+cargo insta test -p ars-components clipboard --unreferenced=reject
+cargo xtask spec validate
+cargo +nightly fmt --all --check
+```
+
+Broader pre-push gate after user approval:
+
+```bash
+cargo xci-fast
+```
+
+## GitHub And Workflow Steps
+
+During execution, after implementation starts:
+
+1. Move issue `#293` to `In Progress` on the GitHub Project board.
+2. Do not commit or push until explicit user approval.
+3. If snapshots are created and a PR is later opened, apply the `snapshot-reviewed` label.
+4. PR body must include `Closes #293`.
+5. After first PR push, invoke `.agents/skills/waiting-for-codex-review/SKILL.md` and loop until Codex leaves 👍 and CI is green.
+
+## Assumptions And Defaults
+
+- `ars-components` remains DOM-free; no `ars-dom` or browser API dependency is added.
+- No new dependency crate is required.
+- The agnostic core owns state, semantic attrs, value binding, error state, timer intent, announce intent, and copy callback intent.
+- Actual `navigator.clipboard.writeText`, permission checks, fallback selection/copy behavior, platform timeout scheduling, and focus restoration remain adapter/platform concerns.
+- Spec changes are not planned because issue `#293` says “No spec change required”; only audit-discovered drift should alter specs.
+- Property tests are not added initially because the issue’s test tier is Unit and the state space is small; mutation testing is the quality backstop. Add proptest only if the audit or mutation results show a meaningful invariant gap.

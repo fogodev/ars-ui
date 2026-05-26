@@ -1,0 +1,44 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3860c2d634e6",
+  "strategy": "manual-commit",
+  "branch": "t3code/577ff5df",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/lib.rs",
+    "crates/ars-components/src/specialized/clipboard/mod.rs",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_indicator_copied_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_indicator_copying_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_indicator_error_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_label_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_root_disabled_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_root_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_status_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_trigger_copied_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_trigger_copying_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_trigger_error_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_trigger_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_value_text_snapshot.snap",
+    "crates/ars-components/src/specialized/mod.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/specialized.rs",
+    "spec/components/specialized/clipboard.md",
+    "spec/dioxus-components/specialized/clipboard.md",
+    "spec/leptos-components/specialized/clipboard.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/38/60c2d634e6/0/metadata.json",
+      "transcript": "/38/60c2d634e6/0/full.jsonl",
+      "content_hash": "/38/60c2d634e6/0/content_hash.txt",
+      "prompt": "/38/60c2d634e6/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 640937,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 29073664,
+    "output_tokens": 43190,
+    "api_call_count": 203
+  }
+}

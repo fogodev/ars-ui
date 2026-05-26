@@ -1,0 +1,160 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3860c2d634e6",
+  "session_id": "019e6254-0e61-7be2-9310-fa12e4567a5a",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-26T04:47:58.667231Z",
+  "branch": "t3code/577ff5df",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/lib.rs",
+    "crates/ars-components/src/specialized/clipboard/mod.rs",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_indicator_copied_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_indicator_copying_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_indicator_error_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_label_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_root_disabled_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_root_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_status_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_trigger_copied_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_trigger_copying_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_trigger_error_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_trigger_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/clipboard/snapshots/ars_components__specialized__clipboard__tests__clipboard_value_text_snapshot.snap",
+    "crates/ars-components/src/specialized/mod.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/specialized.rs",
+    "spec/components/specialized/clipboard.md",
+    "spec/dioxus-components/specialized/clipboard.md",
+    "spec/leptos-components/specialized/clipboard.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "37325c680737",
+  "token_usage": {
+    "input_tokens": 640937,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 29073664,
+    "output_tokens": 43190,
+    "api_call_count": 203
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Implement the framework-agnostic Clipboard component core (task #293) for ars-ui, scoped to ars-components only, with a state machine, typed effect intents, connect API, tests, snapshots, and spec-conformance coverage.",
+    "outcome": "Successfully implemented and committed the clipboard agnostic core with 36 passing unit tests, 12 snapshots, 1 spec-conformance test, post-implementation audit fixes to 3 spec files, and opened a non-draft PR on GitHub with 'Closes #293'.",
+    "learnings": {
+      "repo": [
+        "The `Callback` type in ars-core takes a single type parameter, so multi-arg copy callbacks must use a tuple `(&str, WeakSend<Event>)` rather than separate function arguments.",
+        "ars-components is DOM-free by convention; platform effects (clipboard write, timer scheduling, announcements) are emitted as typed effect intents for adapters to execute.",
+        "`cargo xci-fast` is the mandatory pre-push gate and runs 10 steps including a snapshot-count check; must be run and pass before commit/push.",
+        "`cargo mutants -p ars-components -f <file>` baseline fails when any unrelated test in the crate is already broken; constrain with `-- clipboard::` to isolate the gate.",
+        "`cargo insta test --unreferenced=reject -- <filter>` reports pre-existing unreferenced snapshots as failures when used with a test-name filter; use `--unreferenced=ignore` with filters.",
+        "The project board item must be moved to 'In Progress' via `gh project item-edit` with explicit project-id, item-id, field-id, and option-id — no higher-level shortcut command exists.",
+        "Post-implementation audit found adapter specs (Leptos, Dioxus) described direct trigger-handler clipboard writes that conflicted with the new `Effect::WriteText` boundary; both needed updating.",
+        "Existing unrelated failures in `data_display::meter` and `data_display::progress` (missing percent signs in assertions) predate task #293 and block unfiltered mutation baselines.",
+        "`cargo xtask spec validate` checks all 340 spec markdown files and must pass as part of the audit gate.",
+        "Snapshot acceptance with `cargo insta accept --manifest-path crates/ars-components/Cargo.toml` is required after the first insta run generates `.snap.new` fixtures."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/specialized/clipboard/mod.rs",
+          "line": 1,
+          "end_line": 620,
+          "finding": "New clipboard state machine module; State enum Display impl was an initial mutation survivor — the `fmt` method needs an explicit test for each token string (idle/copying/copied/error) to kill trivial string-replacement mutants."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/clipboard/mod.rs",
+          "line": 40,
+          "end_line": 470,
+          "finding": "Mutation triage revealed gaps in API accessor tests (is_copied, is_copying, is_error, error, value) and prop-change event detection — all needed targeted assertions to kill survivors without mutants.toml skips."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/specialized.rs",
+          "line": 1,
+          "end_line": 30,
+          "finding": "Spec-conformance anatomy test uses assert_anatomy helper with Part enum variants mapped to kebab-case strings; must be added to spec_conformance.rs mod declaration and the test file created under tests/spec_conformance/."
+        },
+        {
+          "path": "spec/components/specialized/clipboard.md",
+          "line": 1,
+          "end_line": 540,
+          "finding": "Audit found the agnostic-core spec still described direct platform API calls; updated to reflect typed effect intents (WriteText, FeedbackTimer, AnnounceCopied, AnnounceError) as the correct boundary."
+        },
+        {
+          "path": "crates/ars-components/src/lib.rs",
+          "line": 1,
+          "end_line": 220,
+          "finding": "Adding a new top-level module requires a `pub mod specialized;` export here in addition to creating src/specialized/mod.rs."
+        }
+      ],
+      "workflow": [
+        "TDD gate order: write failing spec-conformance test → write failing unit tests → implement types → implement machine → implement API/attrs → add snapshots → run mutation gate → run post-implementation audit.",
+        "When `cargo insta accept` is needed, pass `--manifest-path` to scope acceptance to the target crate rather than accepting workspace-wide.",
+        "Mutation testing with 60 mutants at several seconds each is slow; plan for it to take several minutes and do not interrupt mid-run.",
+        "Commit must include co-author trailer for Codex; use HEREDOC form for the commit message to avoid shell escaping issues.",
+        "PR must be opened as non-draft and include 'Closes #293' in the body; apply 'snapshot-reviewed' label when snapshots are present.",
+        "Post-implementation audit should be run as a named skill step after named tests pass, and all findings must land in the same branch before user review."
+      ]
+    },
+    "friction": [
+      "`Callback<T>` single-type-parameter constraint forced a tuple workaround for the copy callback signature instead of idiomatic two-arg function.",
+      "`cargo insta test --unreferenced=reject -- clipboard` produced false positives from pre-existing unreferenced snapshots in other modules, making the plan's recommended command unusable as written.",
+      "First `cargo mutants` baseline run aborted due to existing `data_display::meter` and `data_display::progress` test failures unrelated to Clipboard, requiring a re-run with `-- clipboard::` filter.",
+      "Mutation run produced 5 initial survivors (State::fmt display tokens, prop-change detection, API accessors, error/value getters) that required a second full mutation rerun after adding targeted tests.",
+      "Mutation reruns are slow (~60 mutants × several seconds each) with no way to interrupt cleanly once stdin is closed.",
+      "GitHub project board item update required manually discovering project-id, item-id, field-id, and option-id via multiple `gh project` subcommands before the `item-edit` call could succeed.",
+      "`cargo insta accept` scope behavior was ambiguous — the `--snapshot` flag does not filter by test name, requiring `--manifest-path` scoping instead."
+    ],
+    "open_items": [
+      "Existing `data_display::meter` and `data_display::progress` test failures (missing percent signs) predate this task and block unfiltered `cargo mutants` baselines — should be fixed in a separate task.",
+      "Many pre-existing rustdoc warnings in `ars-components` outside the Clipboard scope; no cleanup was done to avoid scope creep.",
+      "Pre-existing unreferenced insta snapshots in `ars-components` mean `--unreferenced=reject` cannot be used safely without running the full unfiltered test suite.",
+      "Property/proptests intentionally deferred: the state space is small and mutation testing was deemed sufficient; revisit if future changes introduce ordering or collection invariants.",
+      "Leptos and Dioxus adapter implementations for Clipboard are out of scope for #293 and must be tracked separately.",
+      "The 'snapshot-reviewed' label should be applied to the PR once it is opened, per repo workflow."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-26T04:46:51.395352Z",
+    "agent_lines": 1924,
+    "agent_removed": 84,
+    "human_added": 74,
+    "human_modified": 8,
+    "human_removed": 0,
+    "total_committed": 2002,
+    "total_lines_changed": 2090,
+    "agent_percentage": 96.07655502392345,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 41,
+      "user_lines_removed": 4,
+      "agent_lines_added": 1969,
+      "agent_lines_removed": 88,
+      "user_added_per_file": {
+        "crates/ars-components/src/specialized/clipboard/mod.rs": 41
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/specialized/clipboard/mod.rs": 4
+      }
+    }
+  ]
+}
