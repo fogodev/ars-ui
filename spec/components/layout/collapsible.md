@@ -258,6 +258,7 @@ impl ars_core::Machine for Machine {
                 let value = *value;
                 let next = if value { State::Open } else { State::Closed };
                 Some(TransitionPlan::to(next).apply(move |ctx| {
+                    ctx.open.set(value);
                     ctx.open.sync_controlled(Some(value));
                 }))
             }
@@ -297,7 +298,7 @@ impl ars_core::Machine for Machine {
 }
 ```
 
-Controlled-mode `Toggle` and `SetOpen` update the pending internal value via `Bindable::set`, but visible state continues to follow the controlled `open` value until the parent rerenders and `SyncControlledOpen` applies the new controlled prop. When `open` changes from `Some(_)` to `None`, `SyncProps` returns the bindable to uncontrolled mode and the visible state follows the pending internal value.
+Controlled-mode `Toggle` and `SetOpen` update the pending internal value via `Bindable::set`, but visible state continues to follow the controlled `open` value until the parent rerenders and `SyncControlledOpen` applies the new controlled prop. `SyncControlledOpen` also updates the bindable's internal fallback to the controlled value so that leaving controlled mode resumes from the latest visible state. When `open` changes from `Some(_)` to `None`, `SyncProps` returns the bindable to uncontrolled mode and the visible state follows that synchronized internal value.
 
 ### 1.6 Connect / API
 
@@ -419,10 +420,15 @@ impl<'a> Api<'a> {
         }
     }
 
-    pub fn on_trigger_keydown(&self, data: &KeyboardEventData) {
+    /// Returns `true` when the key was handled so adapters can prevent the
+    /// native button activation click and avoid dispatching a duplicate toggle.
+    pub fn on_trigger_keydown(&self, data: &KeyboardEventData) -> bool {
         if !self.ctx.disabled && (data.key == KeyboardKey::Enter || data.key == KeyboardKey::Space) {
             (self.send)(Event::Toggle);
+            return true;
         }
+
+        false
     }
 
     pub fn on_trigger_focus(&self, is_keyboard: bool) {

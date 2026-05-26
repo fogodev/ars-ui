@@ -299,11 +299,16 @@ impl ars_core::Machine for Machine {
                 let value = *value;
                 let next = state_from_bool(value);
 
-                if ctx.open.is_controlled() && ctx.open.get() == &value && state == &next {
+                let mut next_open = ctx.open.clone();
+                next_open.set(value);
+                next_open.sync_controlled(Some(value));
+
+                if ctx.open == next_open && state == &next {
                     return None;
                 }
 
                 Some(TransitionPlan::to(next).apply(move |ctx: &mut Context| {
+                    ctx.open.set(value);
                     ctx.open.sync_controlled(Some(value));
                 }))
             }
@@ -516,11 +521,17 @@ impl Api<'_> {
     }
 
     /// Adapter handler: a key was pressed on the trigger.
-    pub fn on_trigger_keydown(&self, data: &KeyboardEventData) {
+    ///
+    /// Returns `true` when the key was handled so adapters can prevent the
+    /// native button activation click and avoid dispatching a duplicate toggle.
+    pub fn on_trigger_keydown(&self, data: &KeyboardEventData) -> bool {
         if !self.ctx.disabled && (data.key == KeyboardKey::Enter || data.key == KeyboardKey::Space)
         {
             (self.send)(Event::Toggle);
+            return true;
         }
+
+        false
     }
 
     /// Adapter handler: the trigger received focus.
@@ -839,6 +850,22 @@ mod tests {
     }
 
     #[test]
+    fn controlled_to_uncontrolled_resumes_from_latest_controlled_value() {
+        let mut service = service(props());
+
+        drop(service.set_props(props().open(true)));
+
+        assert_eq!(service.state(), &State::Open);
+        assert_eq!(service.context().open.get(), &true);
+
+        drop(service.set_props(props().uncontrolled()));
+
+        assert_eq!(service.state(), &State::Open);
+        assert_eq!(service.context().open.get(), &true);
+        assert!(!service.context().open.is_controlled());
+    }
+
+    #[test]
     fn controlled_sync_transition_only_noops_for_matching_controlled_state() {
         let controlled = service(props().open(false));
 
@@ -973,11 +1000,36 @@ mod tests {
 
         let api = service.connect(&send);
 
-        api.on_trigger_keydown(&keyboard(KeyboardKey::Enter));
-        api.on_trigger_keydown(&keyboard(KeyboardKey::Space));
-        api.on_trigger_keydown(&keyboard(KeyboardKey::Escape));
+        assert!(api.on_trigger_keydown(&keyboard(KeyboardKey::Enter)));
+        assert!(api.on_trigger_keydown(&keyboard(KeyboardKey::Space)));
+        assert!(!api.on_trigger_keydown(&keyboard(KeyboardKey::Escape)));
 
         assert_eq!(events.into_inner(), vec![Event::Toggle, Event::Toggle]);
+    }
+
+    #[test]
+    fn trigger_keydown_reports_handled_status_for_adapter_default_prevention() {
+        let events = RefCell::new(Vec::new());
+        let send = |event| events.borrow_mut().push(event);
+
+        let enabled = service(props());
+
+        let api = enabled.connect(&send);
+
+        assert!(api.on_trigger_keydown(&keyboard(KeyboardKey::Enter)));
+        assert!(api.on_trigger_keydown(&keyboard(KeyboardKey::Space)));
+        assert!(!api.on_trigger_keydown(&keyboard(KeyboardKey::Escape)));
+
+        assert_eq!(events.borrow().as_slice(), [Event::Toggle, Event::Toggle]);
+
+        events.borrow_mut().clear();
+
+        let disabled = service(props().disabled(true));
+
+        let disabled_api = disabled.connect(&send);
+
+        assert!(!disabled_api.on_trigger_keydown(&keyboard(KeyboardKey::Enter)));
+        assert!(events.borrow().is_empty());
     }
 
     #[test]

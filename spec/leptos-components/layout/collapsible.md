@@ -83,7 +83,7 @@ pub mod collapsible {
 | UI event                  | Preconditions                    | Machine event / callback path | Ordering notes                                                 | Notes                                  |
 | ------------------------- | -------------------------------- | ----------------------------- | -------------------------------------------------------------- | -------------------------------------- |
 | trigger click             | not disabled                     | `Toggle`                      | adapter toggles before wrapper callbacks observe the new state | primary activation path                |
-| trigger `Enter` / `Space` | trigger focused and not disabled | `Toggle`                      | must not double-fire with native button click                  | keyboard disclosure path               |
+| trigger `Enter` / `Space` | trigger focused and not disabled | `Toggle` via `api.on_trigger_keydown`, then prevent default when it returns `true` | prevents native button activation from dispatching a duplicate click toggle | keyboard disclosure path               |
 | trigger focus             | trigger receives focus           | `Focus { is_keyboard }`       | focus-visible repair runs before attrs are read                | keeps `data-ars-focus-visible` in sync |
 | trigger or content blur   | focus leaves the active region   | `Blur`                        | blur must clear focus-visible bookkeeping before late cleanup  | preserves disclosure focus state       |
 
