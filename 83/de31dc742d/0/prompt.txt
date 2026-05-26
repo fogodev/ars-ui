@@ -1,0 +1,367 @@
+Implement task #251
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Implement RangeSlider Agnostic Core
+
+## Summary
+
+Implement GitHub task #251: add the framework-agnostic `RangeSlider` core in `ars-components`, following the existing `Slider` implementation style while preserving the RangeSlider-specific two-thumb contract. The implementation will be TDD-first, update the spec where the current RangeSlider text is internally inconsistent, add snapshot/spec-conformance/proptest/mutation coverage, and stop before commit/push unless explicitly approved.
+
+The core will not add adapter components, DOM lookup, direct focus calls, or new dependency crates.
+
+## Public API / Contract Changes
+
+Add a new module:
+
+- `crates/ars-components/src/input/range_slider/mod.rs`
+- Re-export from `crates/ars-components/src/input/mod.rs` as `pub mod range_slider;`
+
+Public items to add, all documented:
+
+- `State`
+  - `Idle`
+  - `Focused { thumb: ThumbIndex }`
+  - `Dragging { thumb: ThumbIndex }`
+- `ThumbIndex`
+  - `Start`
+  - `End`
+- `Event`
+  - `Focus { thumb, is_keyboard }`
+  - `Blur { thumb }`
+  - `PointerDown { thumb, value }`
+  - `PointerMove { value }`
+  - `PointerUp`
+  - `Increment { thumb }`
+  - `Decrement { thumb }`
+  - `IncrementLarge { thumb }`
+  - `DecrementLarge { thumb }`
+  - `SetToMin { thumb }`
+  - `SetToMax { thumb }`
+  - `SetValues([f64; 2])`
+  - `SyncValue(Option<[f64; 2]>)`
+  - `SetProps`
+  - `SetHasDescription(bool)`
+  - `SetHasLabel(bool)`
+- `Context`
+- `Props`
+- `Messages`
+- `Effect`
+  - `ValueChange`
+  - `ValueChangeEnd`
+- `Machine`
+- `Part`
+- `Api<'a>`
+- `value_from_pointer(pointer: slider::SliderPointer, track: Rect, ctx: &Context) -> Option<f64>`
+
+`Props` will include the continuous callback chosen during planning:
+
+```rust
+pub on_value_change: Option<Callback<dyn Fn([f64; 2]) + Send + Sync>>,
+pub on_value_change_end: Option<Callback<dyn Fn([f64; 2]) + Send + Sync>>,
+```
+
+`on_value_change` fires for effective user/programmatic value changes. `on_value_change_end` fires for committed keyboard/programmatic changes and at pointer-up only if the drag actually changed the effective value, matching Slider’s callback discipline.
+
+## Spec Updates
+
+Modify `spec/components/input/range-slider.md` in the same change:
+
+- Add `on_value_change` to the Props code sample and default implementation.
+- Replace prose saying `on_change` with `on_value_change`.
+- Update parity tables so `Value change` maps to `on_value_change`.
+- Clarify per-thumb disabled semantics:
+  - Whole-component `disabled` removes thumbs from keyboard interaction and blocks value changes.
+  - Per-thumb disabled sets `aria-disabled="true"` and blocks that thumb’s value-changing pointer/keyboard events.
+  - Per-thumb disabled thumbs remain focusable when adapter focus reaches them, so screen readers can discover their disabled state.
+- Clarify adapter geometry/focus boundary:
+  - Core accepts adapter-supplied values and geometry through events/helpers.
+  - Core never reads DOM, never resolves element IDs to handles, and never performs focus itself.
+- If implementation exposes final helper signatures that differ from the current sketch, update the spec sketch to match the compiled public API.
+
+## Implementation Steps
+
+1. Move issue #251 to `In Progress` on the GitHub Project board before implementation starts.
+
+2. Add failing spec-conformance coverage in `crates/ars-components/tests/spec_conformance/input.rs`:
+   - Import `range_slider`.
+   - Add `range_slider_anatomy_matches_spec`.
+   - Assert parts:
+     - `Root`
+     - `Label`
+     - `Track`
+     - `Range`
+     - `Thumb { thumb: ThumbIndex::Start }`
+     - `Output`
+     - `MarkerGroup`
+     - `Marker { value: 0.0 }`
+     - `HiddenInput { thumb: ThumbIndex::Start }`
+     - `DraggingIndicator`
+     - `Description`
+     - `ErrorMessage`
+   - Run:
+     - `cargo test -p ars-components --test spec_conformance range_slider_anatomy_matches_spec`
+   - Expected first failure: unresolved `range_slider` module.
+
+3. Add `pub mod range_slider;` to `crates/ars-components/src/input/mod.rs`.
+
+4. Create `crates/ars-components/src/input/range_slider/mod.rs` with the minimal public skeleton:
+   - Module docs.
+   - Public types and docs.
+   - Manual `ComponentPart` implementation for `Part`, because `Marker { value: f64 }` requires `to_bits` equality/hash behavior like Slider.
+   - `Machine` impl stub sufficient to compile.
+   - Re-run the spec-conformance test and keep it failing on behavior gaps until anatomy passes.
+
+5. Add failing unit tests inside `range_slider/mod.rs` for initialization:
+   - Uncontrolled default `[25.0, 75.0]` snaps to step and is sorted.
+   - Controlled value uses controlled mode.
+   - Reversed default/control values normalize to `[lower, upper]`.
+   - Non-finite values normalize to bounded safe values.
+   - Run:
+     - `cargo test -p ars-components input::range_slider::tests::initializes_uncontrolled_and_controlled_values`
+
+6. Implement initialization helpers:
+   - `normalized_bounds`
+   - `snap_to_step`
+   - `normalize_values`
+   - `min_gap`
+   - `bounded_values`
+   - `thumb_value`
+   - `other_thumb_value`
+   - Preserve `start <= end`, bounds, and step grid.
+
+7. Add failing transition tests:
+   - Focus/blur tracks `focused_thumb` and `focus_visible`.
+   - PointerDown starts `Dragging { thumb }` and updates only that thumb.
+   - PointerMove is ignored unless dragging.
+   - PointerUp returns to focused thumb or idle.
+   - Disabled/readonly suppress all value changes.
+   - Per-thumb disabled suppresses only that thumb’s value changes.
+   - Non-finite value events do not mutate state.
+
+8. Implement transition behavior:
+   - Whole-component disabled/readonly blocks pointer/value-changing events.
+   - `Focus` and `Blur` remain allowed unless the whole component is disabled.
+   - Per-thumb disabled blocks value-changing events for that thumb.
+   - `SetValues` normalizes, sorts, snaps, clamps, and enforces gap.
+   - Add `SyncValue` and `SetProps` for controlled prop changes, following Slider’s `on_props_changed` pattern.
+
+9. Add failing crossing tests:
+   - Start thumb cannot move above `end - min_gap`.
+   - End thumb cannot move below `start + min_gap`.
+   - `min_steps_between` is enforced for pointer, keyboard, and `SetValues`.
+   - With `allow_thumb_swap: false`, drag past clamps.
+   - With `allow_thumb_swap: true`, dragging past swaps `dragging_thumb` and continues moving the opposite thumb while preserving sorted values.
+
+10. Implement crossing behavior:
+    - Add `allow_thumb_swap` to context.
+    - Track active drag thumb in `dragging_thumb`.
+    - In pointer drag only, if `allow_thumb_swap` is true and the raw snapped value crosses the opposite thumb’s allowed boundary, swap `dragging_thumb` and apply the new value to the opposite thumb.
+    - Do not swap for keyboard or direct `SetValues`.
+
+11. Add failing callback tests:
+    - `on_value_change` receives effective `[start, end]` for changed pointer/keyboard/programmatic updates.
+    - `on_value_change_end` fires for committed keyboard/programmatic changes.
+    - Pointer drag emits continuous changes during down/move and emits one end callback on pointer-up if changed.
+    - Controlled pointer-up emits the pending drag value, not the stale controlled prop.
+    - No-op changes emit no callbacks.
+
+12. Implement effects:
+    - `Effect::ValueChange`
+    - `Effect::ValueChangeEnd`
+    - `value_change_effect([f64; 2])`
+    - `value_change_end_effect([f64; 2])`
+    - Track `drag_value: Option<[f64; 2]>` and `drag_changed: bool`, as Slider does.
+
+13. Add failing `Api` attribute tests:
+    - Root exposes `data-ars-scope="range-slider"`, state, orientation, dir, disabled, readonly, invalid, dragging, focus-visible.
+    - Track/label/description/error-message IDs are stable from `ComponentIds`.
+    - Each thumb has `role="slider"`.
+    - Start thumb `aria-valuemin=min`, `aria-valuemax=end-gap`.
+    - End thumb `aria-valuemin=start+gap`, `aria-valuemax=max`.
+    - Thumb `aria-valuenow`, `aria-valuetext`, `aria-orientation`, `aria-label`, `data-ars-index`, position style, and `ars-touch-none` class are correct.
+    - Per-thumb disabled sets `aria-disabled="true"` while preserving focusability for focused per-thumb-disabled thumbs.
+    - Hidden inputs produce `name[0]` and `name[1]`, value, form, and disabled when whole component disabled.
+    - Marker in-range is true only between start and end.
+    - Dragging indicator is hidden when idle and active when dragging.
+
+14. Implement `Api`:
+    - `root_attrs`
+    - `label_attrs`
+    - `track_attrs`
+    - `range_attrs`
+    - `thumb_attrs`
+    - `output_attrs`
+    - `marker_group_attrs`
+    - `marker_attrs`
+    - `hidden_input_attrs`
+    - `description_attrs`
+    - `error_message_attrs`
+    - `dragging_indicator_attrs`
+    - `on_thumb_focus`
+    - `on_thumb_blur`
+    - `on_thumb_keydown`
+    - `on_track_pointerdown`
+    - `on_track_pointermove`
+    - `on_pointerup`
+    - `part_attrs`
+
+15. Add failing geometry tests:
+    - Horizontal LTR pointer position maps to value.
+    - Horizontal RTL reverses the percentage.
+    - Vertical maps bottom-to-top.
+    - Non-finite pointer/track dimensions and zero track size return `None`.
+    - Reversed bounds still produce normalized values.
+
+16. Implement `value_from_pointer` using adapter-supplied `slider::SliderPointer` and `Rect`, matching Slider’s helper behavior.
+
+17. Add failing snapshot tests in `range_slider/mod.rs` using insta:
+    - Root idle.
+    - Root focused/dragging/disabled/readonly/invalid.
+    - Label.
+    - Track.
+    - Range horizontal LTR.
+    - Range horizontal RTL.
+    - Range vertical.
+    - Start thumb.
+    - End thumb.
+    - Disabled start thumb.
+    - Formatted thumb value text.
+    - Output.
+    - Marker in range.
+    - Marker out of range.
+    - Marker group.
+    - Hidden input start.
+    - Hidden input end.
+    - Dragging indicator idle.
+    - Dragging indicator active.
+    - Description.
+    - Error message.
+   - Run initially:
+     - `cargo test -p ars-components input::range_slider -- --nocapture`
+   - Then review/accept snapshots intentionally with `cargo insta test -p ars-components input::range_slider --review`.
+
+18. Add proptest coverage in `crates/ars-components/tests/proptest_state_machines/input.rs`:
+    - Import/use `range_slider`.
+    - Add `arb_range_slider_props`.
+    - Add `arb_range_slider_event`.
+    - Add ignored nightly-style property:
+      - Values stay finite.
+      - Values stay within normalized min/max.
+      - Values stay sorted.
+      - Values stay on step grid.
+      - Gap is preserved when possible.
+      - Disabled/readonly interactive events do not mutate values.
+      - Thumb ARIA min/max remain coordinated and parseable.
+    - Run focused non-ignored compile/test:
+      - `cargo test -p ars-components --test proptest_state_machines --no-default-features -- --list`
+      - If there is an existing easier crate default, use `cargo test -p ars-components --test proptest_state_machines -- --list`.
+
+19. Run focused tests:
+    - `cargo test -p ars-components input::range_slider`
+    - `cargo test -p ars-components --test spec_conformance range_slider_anatomy_matches_spec`
+    - `cargo test -p ars-components --test proptest_state_machines -- --list`
+    - `cargo insta test -p ars-components --unreferenced=reject range_slider`
+
+20. Update RangeSlider spec as described above, after implementation signatures are stable.
+
+21. Run spec validation:
+    - `cargo xtask spec validate`
+
+22. Run targeted coverage audit command:
+    - `cargo llvm-cov test -p ars-components --lib --no-fail-fast --text -- input::range_slider`
+    - Inspect uncovered lines. Add tests for real gaps. Treat no-op callback closures as expected non-gaps.
+
+23. Run targeted mutation testing:
+    - `cargo mutants -p ars-components -f crates/ars-components/src/input/range_slider/mod.rs`
+    - For each `MISSED`:
+      - Add a focused regression test if it represents observable behavior.
+      - Add a justified `.cargo/mutants.toml` skip only for true equivalent mutations.
+      - Re-run until no untriaged missed mutants remain.
+
+24. Invoke and follow `.agents/skills/post-implementation-audit/SKILL.md`:
+    - Phase 1: spec/implementation drift audit.
+    - Phase 2: at least two “anything else missing?” rounds.
+    - Phase 3: test coverage audit.
+    - Land every finding in the same diff.
+
+25. Final local verification before user review:
+    - `cargo test -p ars-components input::range_slider`
+    - `cargo test -p ars-components --test spec_conformance range_slider_anatomy_matches_spec`
+    - `cargo insta test -p ars-components --unreferenced=reject range_slider`
+    - `cargo xtask spec validate`
+    - Targeted `cargo mutants` command from step 23, unless it was just run cleanly after the final code change.
+    - Do not run `cargo xci-fast`, commit, push, or open a PR until the user explicitly approves.
+
+26. After user approval only:
+    - Run `cargo xci-fast`.
+    - Commit.
+    - Push PR targeting `main` with `Closes #251`.
+    - If snapshots changed, add `snapshot-reviewed` label.
+    - Invoke `.agents/skills/waiting-for-codex-review/SKILL.md`.
+    - Address Codex review threads on the same PR until Codex leaves thumbs-up and CI is green.
+
+## Test Scenarios
+
+Required unit scenarios:
+
+- Two thumb controls with independent state.
+- Start/end sorting and bounds normalization.
+- Step snapping.
+- Non-finite input rejection/normalization.
+- Crossing prevention.
+- `min_steps_between`.
+- Clamp mode drag-past.
+- Swap mode drag-past.
+- Per-thumb disabled.
+- Whole-component disabled.
+- Readonly.
+- Keyboard navigation for both thumbs.
+- RTL horizontal arrow reversal.
+- Vertical orientation.
+- Pointer drag from injected geometry.
+- Controlled `SyncValue`.
+- `SetProps` resnapping.
+- Continuous and commit callbacks.
+- No-op callback suppression.
+- Two hidden inputs for form submission.
+
+Required snapshot scenarios:
+
+- Every anatomy part.
+- Every output-affecting state branch: idle, focused, dragging, disabled, readonly, invalid.
+- Direction/orientation branches.
+- Per-thumb disabled branch.
+- Form/name branch.
+- Marker in/out-of-range branch.
+- Dragging indicator active/idle branch.
+
+Required property scenarios:
+
+- Values always finite.
+- `min <= start <= end <= max`.
+- Step grid preserved.
+- Gap preserved when representable.
+- Disabled/readonly interactive events do not mutate value.
+- ARIA min/max remain coordinated with current values.
+
+Required mutation outcome:
+
+- No untriaged `MISSED` mutants for `crates/ars-components/src/input/range_slider/mod.rs`.
+
+## Assumptions and Defaults
+
+- `RangeSlider` is a new agnostic-core component only. No Leptos/Dioxus adapter implementation is included.
+- No new dependency crates are needed.
+- Public API should follow the existing `Slider` implementation where the RangeSlider spec is silent or internally inconsistent.
+- Continuous value-change callback is included as `on_value_change`, per the planning decision.
+- Per-thumb disabled blocks value changes but remains discoverable via focus when focus reaches that thumb.
+- `allow_thumb_swap` applies only during pointer drag, not keyboard/direct setters.
+- `slider::ThumbAlignment` and `slider::SliderPointer` are reused instead of duplicating equivalent public types.
+- Snapshot files are expected to be added under `crates/ars-components/src/input/range_slider/snapshots/`.
+- The issue and project board should be updated during execution, but no commit/push/PR happens without explicit approval.
+
+---
+
+In the @crates/ars-components/src/input/range_slider/mod.rs at the `Event::PointerUp` match arm, shouldn't we make proper use of `thumb` variable instead of ignoring it with `let _ = thumb;`?

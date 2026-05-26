@@ -1,0 +1,53 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "83de31dc742d",
+  "strategy": "manual-commit",
+  "branch": "t3code/47fb9329",
+  "checkpoints_count": 2,
+  "files_touched": [
+    ".cargo/mutants.toml",
+    "crates/ars-components/src/input/mod.rs",
+    "crates/ars-components/src/input/range_slider/mod.rs",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_description.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_dragging_indicator_active.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_dragging_indicator_idle.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_error_message.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_hidden_input_end.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_hidden_input_start.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_label.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_marker_group.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_marker_in_range.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_marker_out_of_range.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_output.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_range_ltr.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_range_rtl.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_range_vertical.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_root_focused_dragging_disabled_invalid.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_root_idle.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_thumb_end.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_thumb_format_value_text.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_thumb_start.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_thumb_start_disabled_described.snap",
+    "crates/ars-components/src/input/range_slider/snapshots/ars_components__input__range_slider__tests__range_slider_track.snap",
+    "crates/ars-components/tests/proptest_state_machines/input.rs",
+    "crates/ars-components/tests/spec_conformance/input.rs",
+    "spec/components/input/range-slider.md",
+    "spec/dioxus-components/input/range-slider.md",
+    "spec/leptos-components/input/range-slider.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/83/de31dc742d/0/metadata.json",
+      "transcript": "/83/de31dc742d/0/full.jsonl",
+      "content_hash": "/83/de31dc742d/0/content_hash.txt",
+      "prompt": "/83/de31dc742d/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1450613,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 60523904,
+    "output_tokens": 85151,
+    "api_call_count": 410
+  }
+}
