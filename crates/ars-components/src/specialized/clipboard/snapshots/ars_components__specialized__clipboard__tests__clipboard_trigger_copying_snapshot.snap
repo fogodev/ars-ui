@@ -1,0 +1,61 @@
+---
+source: crates/ars-components/src/specialized/clipboard/mod.rs
+expression: "snapshot_attrs(&api_for_state(State::Copying).trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "clipboard",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "copying",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Copying...",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "clip-label",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "clip-trigger",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

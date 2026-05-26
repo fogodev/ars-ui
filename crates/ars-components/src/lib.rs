@@ -26,6 +26,9 @@ pub mod navigation;
 /// Selection component machines.
 pub mod selection;
 
+/// Specialized component machines.
+pub mod specialized;
+
 /// Utility component machines.
 pub mod utility;
 

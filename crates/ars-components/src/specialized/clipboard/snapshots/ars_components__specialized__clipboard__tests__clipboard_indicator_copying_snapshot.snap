@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/specialized/clipboard/mod.rs
+expression: "snapshot_attrs(&api_for_state(State::Copying).indicator_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "clipboard",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "copying",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

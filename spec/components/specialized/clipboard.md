@@ -12,10 +12,11 @@ references:
 # Clipboard
 
 A `Clipboard` component copies text to the system clipboard and provides visual/audible
-feedback. It wraps the `navigator.clipboard.writeText()` API with a state machine
-that tracks the copy lifecycle.
+feedback. The framework-agnostic machine tracks the copy lifecycle and emits typed
+effect intents; adapters perform the actual platform clipboard write, timeout, and
+announcement work.
 
-> **Security:** The component uses `navigator.clipboard.writeText()` only (write-only). This requires a secure context (HTTPS) and transient user activation (user gesture). Reading from the clipboard is NOT supported. For iframe usage, the `allow="clipboard-write"` permission policy is required. If `navigator.clipboard` is unavailable (pre-2019 browsers, non-HTTPS, or permission denied), the adapter layer falls back to the legacy `document.execCommand("copy")` approach, or the machine enters `Error` state. Clipboard write operations that do not resolve within **5 seconds** are aborted with a `Timeout` error.
+> **Security:** Adapters use `navigator.clipboard.writeText()` only (write-only) where available. This requires a secure context (HTTPS) and transient user activation (user gesture). Reading from the clipboard is NOT supported. For iframe usage, the `allow="clipboard-write"` permission policy is required. If `navigator.clipboard` is unavailable (pre-2019 browsers, non-HTTPS, or permission denied), the adapter layer falls back to the legacy `document.execCommand("copy")` approach, or reports `CopyFailureReason::ApiUnavailable` / `CopyFailureReason::PermissionDenied` back to the machine. Clipboard write operations that do not resolve within **5 seconds** are aborted by the adapter with a `Timeout` error.
 
 ```rust
 /// Why a clipboard copy operation failed.
@@ -60,12 +61,16 @@ pub enum State {
 pub enum Event {
     /// User triggered a copy.
     Copy,
-    /// Copy succeeded.
+    /// Adapter reported a successful clipboard write.
     CopySuccess,
-    /// Copy failed with a structured reason.
+    /// Adapter reported a failed clipboard write.
     CopyError(CopyFailureReason),
     /// Feedback timeout expired; return to idle.
     ResetTimeout,
+    /// Synchronize the externally controlled value prop.
+    SetValue(Option<String>),
+    /// Synchronize output-affecting props stored in context.
+    SetProps,
 }
 ```
 
@@ -106,6 +111,8 @@ pub struct Props {
     pub feedback_duration_ms: u32,
     /// Disabled state.
     pub disabled: bool,
+    /// Callback invoked by the write-text effect with the current text and send handle.
+    pub on_copy: Option<Callback<CopyRequestFn>>,
 }
 
 impl Default for Props {
@@ -116,8 +123,33 @@ impl Default for Props {
             default_value: String::new(),
             feedback_duration_ms: 2000,
             disabled: false,
+            on_copy: None,
         }
     }
+}
+```
+
+```rust
+/// Dynamic callable signature for `Props::on_copy`.
+///
+/// The callback receives an owned `String` so adapters can bridge the request
+/// into asynchronous platform code without borrowing machine context beyond the
+/// effect setup call.
+pub type CopyRequestFn = dyn Fn((String, WeakSend<Event>)) + Send + Sync;
+```
+
+```rust
+/// Typed effect intents emitted by the clipboard machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter writes the current text to the platform clipboard.
+    WriteText,
+    /// Adapter starts a feedback timer that dispatches `Event::ResetTimeout`.
+    FeedbackTimer,
+    /// Adapter announces the copied feedback message.
+    AnnounceCopied,
+    /// Adapter announces the error feedback message.
+    AnnounceError,
 }
 ```
 
@@ -132,6 +164,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -156,60 +189,29 @@ impl ars_core::Machine for Machine {
     fn transition(
         state: &Self::State,
         event: &Self::Event,
-        ctx: &Self::Context,
-        _props: &Self::Props,
+        _ctx: &Self::Context,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled { return None; }
-
         match (state, event) {
+            (_, Event::Copy) if props.disabled => None,
+
             (State::Idle, Event::Copy) => {
-                Some(TransitionPlan::to(State::Copying).with_named_effect("clipboard-write", |ctx, _props, send| {
-                    let value = ctx.value.get().clone();
-                    clipboard_write_text(&value, move |result| {
-                        match result {
-                            Ok(()) => send(Event::CopySuccess),
-                            Err(reason) => send(Event::CopyError(reason)),
-                        }
-                    });
-                    no_cleanup()
-                }))
+                Some(copying_plan())
             }
 
             (State::Copying, Event::CopySuccess) => {
                 Some(TransitionPlan::to(State::Copied).apply(|ctx| {
                     ctx.error = None;
-                }).with_named_effect("announce", |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    platform.announce(&(ctx.messages.copied_announcement)(&ctx.locale));
-                    no_cleanup()
-                }).with_named_effect("feedback-timer", |ctx, _props, send| {
-                    let platform = use_platform_effects();
-                    let duration = ctx.feedback_duration_ms;
-                    let handle = platform.set_timeout(duration, Box::new(move || {
-                        send(Event::ResetTimeout);
-                    }));
-                    let pc = platform.clone();
-                    Box::new(move || pc.clear_timeout(handle))
-                }))
+                }).with_effect(PendingEffect::named(Effect::AnnounceCopied))
+                  .with_effect(PendingEffect::named(Effect::FeedbackTimer)))
             }
 
             (State::Copying, Event::CopyError(reason)) => {
                 let reason = reason.clone();
                 Some(TransitionPlan::to(State::Error).apply(move |ctx| {
                     ctx.error = Some(reason);
-                }).with_named_effect("announce", |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    platform.announce(&(ctx.messages.error_announcement)(&ctx.locale));
-                    no_cleanup()
-                }).with_named_effect("error-feedback-timer", |ctx, _props, send| {
-                    let platform = use_platform_effects();
-                    let duration = ctx.feedback_duration_ms;
-                    let handle = platform.set_timeout(duration, Box::new(move || {
-                        send(Event::ResetTimeout);
-                    }));
-                    let pc = platform.clone();
-                    Box::new(move || pc.clear_timeout(handle))
-                }))
+                }).with_effect(PendingEffect::named(Effect::AnnounceError))
+                  .with_effect(PendingEffect::named(Effect::FeedbackTimer)))
             }
 
             (State::Copied, Event::ResetTimeout)
@@ -222,20 +224,48 @@ impl ars_core::Machine for Machine {
             // Allow re-copy while in Copied or Error state
             (State::Copied, Event::Copy)
             | (State::Error, Event::Copy) => {
-                Some(TransitionPlan::to(State::Copying).with_named_effect("clipboard-write", |ctx, _props, send| {
-                    let value = ctx.value.get().clone();
-                    clipboard_write_text(&value, move |result| {
-                        match result {
-                            Ok(()) => send(Event::CopySuccess),
-                            Err(reason) => send(Event::CopyError(reason)),
-                        }
-                    });
-                    no_cleanup()
+                Some(copying_plan().cancel_effect(Effect::FeedbackTimer))
+            }
+
+            (_, Event::SetValue(value)) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    if let Some(value) = value {
+                        ctx.value.set(value.clone());
+                        ctx.value.sync_controlled(Some(value));
+                    } else {
+                        ctx.value.sync_controlled(None);
+                    }
+                }))
+            }
+
+            (_, Event::SetProps) => {
+                let feedback_duration_ms = props.feedback_duration_ms;
+                let disabled = props.disabled;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.feedback_duration_ms = feedback_duration_ms;
+                    ctx.disabled = disabled;
                 }))
             }
 
             _ => None,
         }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(old.id, new.id, "clipboard::Props.id must remain stable after init");
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SetValue(new.value.clone()));
+        }
+
+        if old.feedback_duration_ms != new.feedback_duration_ms || old.disabled != new.disabled {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -246,6 +276,24 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+fn copying_plan() -> TransitionPlan<Machine> {
+    TransitionPlan::to(State::Copying)
+        .apply(|ctx| {
+            ctx.error = None;
+        })
+        .with_effect(write_text_effect())
+}
+
+fn write_text_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::WriteText, |ctx, props, send| {
+        if let Some(on_copy) = &props.on_copy {
+            on_copy((ctx.value.get().clone(), send));
+        }
+
+        no_cleanup()
+    })
 }
 ```
 
@@ -275,6 +323,7 @@ impl<'a> Api<'a> {
     pub fn is_copying(&self) -> bool { *self.state == State::Copying }
     pub fn is_error(&self) -> bool { *self.state == State::Error }
     pub fn error(&self) -> Option<&CopyFailureReason> { self.ctx.error.as_ref() }
+    pub fn value(&self) -> &str { self.ctx.value.get() }
     pub fn copy(&self) { (self.send)(Event::Copy); }
 
     fn state_str(&self) -> &'static str {
@@ -289,6 +338,7 @@ impl<'a> Api<'a> {
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
+        attrs.set(HtmlAttr::Id, self.ctx.ids.id());
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Data("ars-state"), self.state_str());
@@ -313,12 +363,14 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("trigger"));
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), match self.state {
             State::Idle => (self.ctx.messages.trigger_label)(&self.ctx.locale),
             State::Copying => (self.ctx.messages.copying_label)(&self.ctx.locale),
             State::Copied => (self.ctx.messages.copied_label)(&self.ctx.locale),
             State::Error => (self.ctx.messages.error_label)(&self.ctx.locale),
         });
+        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
         attrs.set(HtmlAttr::Data("ars-state"), self.state_str());
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);

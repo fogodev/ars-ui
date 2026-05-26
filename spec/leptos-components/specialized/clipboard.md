@@ -32,7 +32,7 @@ The adapter renders the optional `Label` and `ValueText` parts from props rather
 
 - Props parity: full parity with bindable value, feedback duration, disabled state, and accessible labeling.
 - Part parity: full parity with `Root`, `Label`, `Trigger`, `Indicator`, `Status`, and `ValueText`.
-- Adapter additions: explicit browser permission, fallback, timeout, and live-region wiring rules.
+- Adapter additions: explicit browser permission, fallback, timeout, live-region wiring rules, and routing for the core `WriteText`, `FeedbackTimer`, `AnnounceCopied`, and `AnnounceError` effect intents.
 
 ## 4. Part Mapping
 
@@ -65,17 +65,18 @@ The adapter renders the optional `Label` and `ValueText` parts from props rather
 | `default_value`                    | uncontrolled | init only               | initial context             | initial copied text                         | ignored after mount in controlled mode             |
 | `disabled`, `feedback_duration_ms` | controlled   | rerender                | prop rebuild                | changes trigger enablement and reset timing | timer behavior follows latest props                |
 
-| UI event                             | Preconditions          | Machine event / callback path | Ordering notes                                               | Notes                                        |
-| ------------------------------------ | ---------------------- | ----------------------------- | ------------------------------------------------------------ | -------------------------------------------- |
-| trigger click or keyboard activation | not disabled           | `Copy`                        | browser clipboard write must start directly from the gesture | secure-context requirement applies           |
-| successful write                     | copy request in flight | `CopySuccess`                 | announce success before scheduling reset timer               | status text updates immediately              |
-| failed write                         | copy request in flight | `CopyError(reason)`           | announce failure before scheduling reset timer               | reason stays adapter-visible for diagnostics |
+| UI event                             | Preconditions          | Machine event / callback path                                               | Ordering notes                                               | Notes                                        |
+| ------------------------------------ | ---------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------- |
+| trigger click or keyboard activation | not disabled           | `Copy`, then run returned `WriteText` effect synchronously                  | browser clipboard write must start directly from the gesture | secure-context requirement applies           |
+| successful write                     | copy request in flight | `CopySuccess`, then route `AnnounceCopied` and `FeedbackTimer` effects      | announce success before scheduling reset timer               | status text updates immediately              |
+| failed write                         | copy request in flight | `CopyError(reason)`, then route `AnnounceError` and `FeedbackTimer` effects | announce failure before scheduling reset timer               | reason stays adapter-visible for diagnostics |
 
 ## 8. Registration and Cleanup Contract
 
-| Registered entity    | Registration trigger              | Identity key       | Cleanup trigger                          | Cleanup action | Notes                    |
-| -------------------- | --------------------------------- | ------------------ | ---------------------------------------- | -------------- | ------------------------ |
-| feedback reset timer | `Copied` or `Error` state entered | component instance | timer fire, new copy attempt, or cleanup | cancel timer   | at most one active timer |
+| Registered entity    | Registration trigger                    | Identity key       | Cleanup trigger                          | Cleanup action      | Notes                                            |
+| -------------------- | --------------------------------------- | ------------------ | ---------------------------------------- | ------------------- | ------------------------------------------------ |
+| feedback reset timer | `Copied` or `Error` state entered       | component instance | timer fire, new copy attempt, or cleanup | cancel timer        | at most one active timer                         |
+| write-text request   | `WriteText` effect returned from `Copy` | component instance | request settles or component cleanup     | no retained cleanup | execute synchronously inside the gesture handler |
 
 ## 9. Ref and Node Contract
 
@@ -92,7 +93,7 @@ The adapter renders the optional `Label` and `ValueText` parts from props rather
 
 ## 11. Callback Payload Contract
 
-No dedicated public callback is required. Consumers observe state through the rendered indicator and status text.
+No dedicated public consumer callback is required. The adapter wires the core `Props::on_copy` callback internally so the `WriteText` effect can invoke the browser clipboard helper with the current value and send `CopySuccess` or `CopyError(reason)` back to the machine.
 
 ## 12. Failure and Degradation Rules
 
@@ -127,9 +128,10 @@ The component owns no repeated descendants. Timer identity is the component inst
 ## 17. Recommended Implementation Sequence
 
 1. Initialize the machine and idle status region.
-2. Wire the trigger gesture to the clipboard helper.
-3. Add success or error announcements and reset timing.
-4. Verify SSR idle behavior and fallback handling.
+2. Set `Props::on_copy` to the adapter clipboard helper.
+3. Wire the trigger gesture to send `Copy` and immediately run returned `WriteText` effects.
+4. Route success or error announcements and reset timing through returned effects.
+5. Verify SSR idle behavior and fallback handling.
 
 ## 18. Anti-Patterns
 
@@ -168,14 +170,16 @@ The component owns no repeated descendants. Timer identity is the component inst
 
 ## 23. Framework-Specific Behavior
 
-Leptos should keep copy initiation inside the trigger event closure and use effect cleanup only for the feedback timer, not for the clipboard write itself.
+Leptos should send `Copy` inside the trigger event closure and immediately execute any returned `WriteText` effect in that same closure so `navigator.clipboard.writeText()` still has transient user activation. Timer and announcement effects may be routed through normal effect cleanup bookkeeping.
 
 ## 24. Canonical Implementation Sketch
 
 ```rust
 #[component]
 pub fn Clipboard(value: Option<RwSignal<String>>) -> impl IntoView {
-    let machine = use_machine::<clipboard::Machine>(clipboard::Props::default());
+    let machine = use_machine::<clipboard::Machine>(
+        clipboard::Props::default().on_copy(copy_to_platform_clipboard),
+    );
     let trigger_attrs = machine.derive(|api| api.trigger_attrs());
     let status_attrs = machine.derive(|api| api.status_attrs());
     view! {
@@ -191,8 +195,9 @@ pub fn Clipboard(value: Option<RwSignal<String>>) -> impl IntoView {
 
 - Bind the value through `Bindable<String>`.
 - Render the permanent status node.
-- Call the clipboard helper from the trigger handler.
-- Schedule and cancel the feedback timer from machine transitions.
+- Provide the adapter clipboard helper through `Props::on_copy`.
+- Run returned `WriteText` effects from the trigger handler.
+- Schedule and cancel the feedback timer from `FeedbackTimer` effects.
 
 ## 26. Adapter Invariants
 

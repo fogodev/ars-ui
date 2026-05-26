@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/specialized/clipboard/mod.rs
+expression: "snapshot_attrs(&api_for_state(State::Idle).value_text_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "value-text",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "clipboard",
+            ),
+        ),
+    ],
+    styles: [],
+}

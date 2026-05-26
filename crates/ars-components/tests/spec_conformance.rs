@@ -38,5 +38,8 @@ mod overlay;
 #[path = "spec_conformance/selection.rs"]
 mod selection;
 
+#[path = "spec_conformance/specialized.rs"]
+mod specialized;
+
 #[path = "spec_conformance/utility/mod.rs"]
 mod utility;
