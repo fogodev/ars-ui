@@ -1126,6 +1126,10 @@ fn effective_open_item<'a>(state: &'a State, ctx: &'a Context) -> Option<&'a Key
 }
 
 fn open_item_plan(state: &State, ctx: &Context, item: Key) -> Option<TransitionPlan<Machine>> {
+    if !item_is_registered(ctx, &item) {
+        return None;
+    }
+
     if effective_open_item(state, ctx) == Some(&item) {
         None
     } else {
@@ -1979,6 +1983,17 @@ mod tests {
 
         assert_eq!(*service.state(), State::Open { item: key("blog") });
         assert_eq!(connect_noop(&service).open_item(), Some(&key("docs")));
+        assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn open_event_ignores_unregistered_items_after_registration() {
+        let mut service = service_with_items(props(), &[key("docs")]);
+
+        let result = service.send(Event::Open(key("blog")));
+
+        assert_eq!(*service.state(), State::Idle);
+        assert_eq!(service.context().value.get(), &None);
         assert!(result.pending_effects.is_empty());
     }
 
