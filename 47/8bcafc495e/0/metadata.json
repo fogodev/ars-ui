@@ -1,0 +1,109 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "478bcafc495e",
+  "session_id": "4d98eae2-3053-4a1e-9381-945f939d752b",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-26T16:44:24.10137Z",
+  "branch": "claude/friendly-grothendieck-886c35",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/calendar/mod.rs",
+    "crates/ars-components/src/date_time/calendar/grid.rs",
+    "spec/components/date-time/calendar.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "8a1c53355f7c",
+  "checkpoint_transcript_start": 1443,
+  "transcript_lines_at_start": 1443,
+  "token_usage": {
+    "input_tokens": 63,
+    "cache_creation_tokens": 729486,
+    "cache_read_tokens": 38128324,
+    "output_tokens": 29338,
+    "api_call_count": 53
+  },
+  "session_metrics": {
+    "turn_count": 9
+  },
+  "summary": {
+    "intent": "Fix six bugs identified in a second Codex review pass for a calendar UI component in a Rust/ars-ui project, following a test-driven approach with spec synchronization.",
+    "outcome": "All six bugs were fixed with 9 new regression tests added (130→139 passing tests), no snapshot churn, clean clippy, healthy coverage, and the spec synced before pushing.",
+    "learnings": {
+      "repo": [
+        "Calendar component follows a state-machine pattern (Machine/Event/Context) mirroring date_field: SyncProps event + on_props_changed hook is the established pattern for parent controlled-prop propagation.",
+        "spec/components/date-time/calendar.md is kept in sync with implementation and validated as part of the pre-push gate.",
+        "xci-fast is the pre-push gate command; passing it is required before commit+push.",
+        "Snapshots use root_attrs, not trigger attrs, so adding HTML disabled to nav buttons (N4 fix) did not cause snapshot churn.",
+        "weeks_for contract is always 6 rows; returning partial rows on boundary failure violates the spec — return empty instead."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "Initial focused_date must be clamped to min/max; value/default_value/today are valid sources but unclamped values cause the cell to get both tabindex=0 and HTML disabled with no valid focus target."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "set_props must dispatch SyncProps event and handle it via on_props_changed hook to propagate parent controlled-prop changes — same pattern as date_field."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "SetMonth/SetYear arms only updated visible_month/year, leaving focused_date stale; they must also advance focused_date in sync."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "is_prev_disabled/is_next_disabled only checked min/max bounds; ctx.disabled must also disable both nav triggers."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "month_step_plan must be atomic: attempt focused_date arithmetic first and abort the entire plan (including visible_month advance) if it fails."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/grid.rs",
+          "finding": "weeks_for must return empty Vec on add_days failure near calendar boundaries rather than returning a partial week, to uphold the always-6-rows contract."
+        }
+      ],
+      "workflow": [
+        "Write failing tests for all findings before implementing any fixes — confirms the test correctly captures the bug before fixing it.",
+        "Verify 'expected failures' count matches finding count before proceeding to implementation.",
+        "After implementation, check for snapshot churn explicitly to confirm no unintended rendering regressions.",
+        "Spec sync is part of the standard commit checklist alongside clippy and coverage.",
+        "Codex review passes are iterative; second-pass findings (N1–N6) were distinct from first-pass findings."
+      ]
+    },
+    "friction": [
+      "Clippy caught an issue after implementation requiring an additional edit+retry cycle before the pre-push gate could run.",
+      "Multiple spec sections required individual targeted edits (§1.2, §1.6, §1.7, §1.8) with no bulk-update mechanism, making spec sync tedious.",
+      "Finding anchor locations in mod.rs required repeated grep/Read calls due to file size."
+    ],
+    "open_items": [
+      "The SyncProps bypass-guard in the transition function and on_props_changed hook should be verified against the date_field implementation to ensure full parity.",
+      "cell_trigger spec block was noted as still having an old version mid-session and was patched — worth a final diff review to confirm the spec fully reflects T1 semantics.",
+      "No snapshot was updated for N4 (nav button disabled state) because existing snapshots use root_attrs; a dedicated snapshot covering trigger disabled state would improve regression coverage."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-26T16:43:56.336253Z",
+    "agent_lines": 264,
+    "agent_removed": 53,
+    "human_added": 176,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 440,
+    "total_lines_changed": 493,
+    "agent_percentage": 64.3002028397566,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 70,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 70
+      }
+    }
+  ]
+}

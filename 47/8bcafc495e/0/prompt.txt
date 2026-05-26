@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bqkthtm4k</task-id>
+<tool-use-id>toolu_01TPnyQVBztSK5CNZz8utL95</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui--claude-worktrees-friendly-grothendieck-886c35/4d98eae2-3053-4a1e-9381-945f939d752b/tasks/bqkthtm4k.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll until next verdict" completed (exit code 0)</summary>
+</task-notification>

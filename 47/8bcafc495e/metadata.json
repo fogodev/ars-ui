@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "478bcafc495e",
+  "strategy": "manual-commit",
+  "branch": "claude/friendly-grothendieck-886c35",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/calendar/grid.rs",
+    "crates/ars-components/src/date_time/calendar/mod.rs",
+    "spec/components/date-time/calendar.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/47/8bcafc495e/0/metadata.json",
+      "transcript": "/47/8bcafc495e/0/full.jsonl",
+      "content_hash": "/47/8bcafc495e/0/content_hash.txt",
+      "prompt": "/47/8bcafc495e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 63,
+    "cache_creation_tokens": 729486,
+    "cache_read_tokens": 38128324,
+    "output_tokens": 29338,
+    "api_call_count": 53
+  }
+}
