@@ -237,10 +237,19 @@ fn can_activate(ctx: &Context) -> bool { !ctx.disabled && !ctx.readonly }
 fn effective_blur_submits(ctx: &Context) -> bool {
     ctx.submit_on_blur && matches!(ctx.submit_mode, SubmitMode::Blur | SubmitMode::Both)
 }
-fn clamp_to_max_chars(value: &str, max_length: Option<usize>) -> String {
-    match max_length {
-        Some(max_length) => value.chars().take(max_length).collect(),
-        None => value.to_string(),
+fn clamp_to_max_length(value: &str, max_length: Option<usize>) -> String {
+    if let Some(max_length) = max_length {
+        let mut units = 0;
+        let mut end = 0;
+        for (index, ch) in value.char_indices() {
+            let next_units = units + ch.len_utf16();
+            if next_units > max_length { break; }
+            units = next_units;
+            end = index + ch.len_utf8();
+        }
+        value[..end].to_string()
+    } else {
+        value.to_string()
     }
 }
 ```
@@ -333,7 +342,7 @@ impl ars_core::Machine for Machine {
                 let max_length = ctx.max_length;
                 let val = val.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.edit_value = clamp_to_max_chars(&val, max_length);
+                    ctx.edit_value = clamp_to_max_length(&val, max_length);
                 }))
             }
 
@@ -342,7 +351,7 @@ impl ars_core::Machine for Machine {
                 let val = val.clone();
                 let max_length = ctx.max_length;
                 Some(TransitionPlan::to(State::Preview).apply(move |ctx| {
-                    let val = clamp_to_max_chars(&val, max_length);
+                    let val = clamp_to_max_length(&val, max_length);
                     ctx.edit_value = val.clone();
                     if !ctx.value.is_controlled() {
                         ctx.value.set(val);
@@ -387,7 +396,7 @@ impl ars_core::Machine for Machine {
             })),
 
             (State::Editing, Event::CompositionEnd(value)) => {
-                let value = clamp_to_max_chars(value, ctx.max_length);
+                let value = clamp_to_max_length(value, ctx.max_length);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.is_composing = false;
                     if !ctx.disabled && !ctx.readonly {
@@ -404,13 +413,13 @@ impl ars_core::Machine for Machine {
                 let value = value.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     if let Some(value) = value {
-                        let edit_value = clamp_to_max_chars(&value, ctx.max_length);
+                        let edit_value = clamp_to_max_length(&value, ctx.max_length);
                         ctx.value.set(edit_value.clone());
                         ctx.value.sync_controlled(Some(value));
                         ctx.edit_value = edit_value;
                     } else {
                         ctx.value.sync_controlled(None);
-                        ctx.edit_value = clamp_to_max_chars(ctx.value.get(), ctx.max_length);
+                        ctx.edit_value = clamp_to_max_length(ctx.value.get(), ctx.max_length);
                     }
                 }))
             }
@@ -430,7 +439,7 @@ impl ars_core::Machine for Machine {
                     ctx.name = props.name;
                     ctx.form = props.form;
                     ctx.submit_on_blur = props.submit_on_blur;
-                    ctx.edit_value = clamp_to_max_chars(&ctx.edit_value, ctx.max_length);
+                    ctx.edit_value = clamp_to_max_length(&ctx.edit_value, ctx.max_length);
                 }))
             }
 
@@ -494,6 +503,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.id());
         attrs.set(HtmlAttr::Role, "group");
         attrs.set(HtmlAttr::Data("ars-state"), match self.state {
             State::Preview => "preview",
@@ -789,7 +799,7 @@ See §1.4 for the `Messages` struct definition and `Default` implementation.
 | Submit mode        | `submit_mode: SubmitMode`     | `submitMode`           | Full parity    |
 | Auto-select        | `auto_select: bool`           | `selectOnFocus`        | Full parity    |
 | Placeholder        | `placeholder: Option<String>` | `placeholder`          | Full parity    |
-| Max length         | `max_length: Option<usize>`   | `maxLength`            | Full parity    |
+| Max length         | `max_length: Option<usize>`   | `maxLength` in native UTF-16 code units | Full parity    |
 | Form name          | `name: Option<String>`        | `name`                 | Full parity    |
 | Form ID            | `form: Option<String>`        | `form`                 | Full parity    |
 | Auto-resize        | --                            | `autoResize`           | See note below |

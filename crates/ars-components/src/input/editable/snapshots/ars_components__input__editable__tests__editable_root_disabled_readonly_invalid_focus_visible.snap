@@ -53,6 +53,12 @@ AttrMap {
             ),
         ),
         (
+            Id,
+            String(
+                "editable",
+            ),
+        ),
+        (
             Role,
             String(
                 "group",

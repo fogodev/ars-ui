@@ -157,7 +157,7 @@ pub struct Context {
     /// The placeholder text for the input.
     pub placeholder: Option<String>,
 
-    /// The maximum character count of the input.
+    /// The maximum UTF-16 code unit count of the input, matching native `maxlength`.
     pub max_length: Option<usize>,
 
     /// Form field name associated with the editable input.
@@ -218,7 +218,7 @@ pub struct Props {
     /// The placeholder text for the input.
     pub placeholder: Option<String>,
 
-    /// The maximum character count of the input.
+    /// The maximum UTF-16 code unit count of the input, matching native `maxlength`.
     pub max_length: Option<usize>,
 
     /// Whether the editable is in an invalid state.
@@ -343,14 +343,14 @@ impl Props {
         self
     }
 
-    /// Sets the maximum character count.
+    /// Sets the maximum UTF-16 code unit count.
     #[must_use]
     pub const fn max_length(mut self, max_length: usize) -> Self {
         self.max_length = Some(max_length);
         self
     }
 
-    /// Clears the maximum character count.
+    /// Clears the maximum UTF-16 code unit count.
     #[must_use]
     pub const fn no_max_length(mut self) -> Self {
         self.max_length = None;
@@ -527,7 +527,7 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                let value = clamp_to_max_chars(value, ctx.max_length);
+                let value = clamp_to_max_length(value, ctx.max_length);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.edit_value = value;
                 }))
@@ -538,7 +538,7 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                let value = clamp_to_max_chars(value, ctx.max_length);
+                let value = clamp_to_max_length(value, ctx.max_length);
                 Some(
                     TransitionPlan::to(State::Preview).apply(move |ctx: &mut Context| {
                         ctx.edit_value = value.clone();
@@ -599,7 +599,7 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Editing, Event::CompositionEnd(value)) => {
-                let value = clamp_to_max_chars(value, ctx.max_length);
+                let value = clamp_to_max_length(value, ctx.max_length);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.is_composing = false;
 
@@ -619,14 +619,14 @@ impl ars_core::Machine for Machine {
                 let value = value.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     if let Some(value) = value {
-                        let edit_value = clamp_to_max_chars(&value, ctx.max_length);
+                        let edit_value = clamp_to_max_length(&value, ctx.max_length);
 
                         ctx.value.set(edit_value.clone());
                         ctx.value.sync_controlled(Some(value));
                         ctx.edit_value = edit_value;
                     } else {
                         ctx.value.sync_controlled(None);
-                        ctx.edit_value = clamp_to_max_chars(ctx.value.get(), ctx.max_length);
+                        ctx.edit_value = clamp_to_max_length(ctx.value.get(), ctx.max_length);
                     }
                 }))
             }
@@ -646,7 +646,7 @@ impl ars_core::Machine for Machine {
                     ctx.name = props.name;
                     ctx.form = props.form;
                     ctx.submit_on_blur = props.submit_on_blur;
-                    ctx.edit_value = clamp_to_max_chars(&ctx.edit_value, ctx.max_length);
+                    ctx.edit_value = clamp_to_max_length(&ctx.edit_value, ctx.max_length);
                 }))
             }
 
@@ -751,6 +751,7 @@ impl Api<'_> {
         let mut attrs = part_attrs(&Part::Root);
 
         attrs
+            .set(HtmlAttr::Id, self.ctx.ids.id())
             .set(HtmlAttr::Role, "group")
             .set(HtmlAttr::Data("ars-state"), self.state.to_string());
 
@@ -1031,9 +1032,23 @@ const fn effective_blur_submits(ctx: &Context) -> bool {
     ctx.submit_on_blur && matches!(ctx.submit_mode, SubmitMode::Blur | SubmitMode::Both)
 }
 
-fn clamp_to_max_chars(value: &str, max_length: Option<usize>) -> String {
+fn clamp_to_max_length(value: &str, max_length: Option<usize>) -> String {
     if let Some(max_length) = max_length {
-        value.chars().take(max_length).collect()
+        let mut units = 0;
+        let mut end = 0;
+
+        for (index, ch) in value.char_indices() {
+            let next_units = units + ch.len_utf16();
+
+            if next_units > max_length {
+                break;
+            }
+
+            units = next_units;
+            end = index + ch.len_utf8();
+        }
+
+        value[..end].to_string()
     } else {
         value.to_string()
     }
@@ -1179,13 +1194,24 @@ mod tests {
     }
 
     #[test]
-    fn editable_change_updates_transient_value_and_clamps_by_chars() {
+    fn editable_change_updates_transient_value_and_clamps_by_native_maxlength_units() {
         let mut editable = service(props().max_length(3));
 
         drop(editable.send(Event::Activate));
-        drop(editable.send(Event::Change("aé日b".to_string())));
+        drop(editable.send(Event::Change("a😀b".to_string())));
 
-        assert_eq!(editable.context().edit_value, "aé日");
+        assert_eq!(editable.context().edit_value, "a😀");
+        assert_eq!(editable.context().value.get(), "saved");
+    }
+
+    #[test]
+    fn editable_maxlength_does_not_split_non_bmp_scalars() {
+        let mut editable = service(props().max_length(1));
+
+        drop(editable.send(Event::Activate));
+        drop(editable.send(Event::Change("😀a".to_string())));
+
+        assert_eq!(editable.context().edit_value, "");
         assert_eq!(editable.context().value.get(), "saved");
     }
 
