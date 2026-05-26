@@ -495,12 +495,16 @@ impl ars_core::Machine for Machine {
         match (state, event) {
             (_, Event::Open(item)) => open_item_plan(state, ctx, item.clone()),
 
-            (State::Open { .. }, Event::Close(now_ms) | Event::SelectLink(now_ms)) => {
+            (_, Event::Close(now_ms) | Event::SelectLink(now_ms))
+                if effective_open_item(state, ctx).is_some() =>
+            {
                 Some(close_plan(*now_ms))
             }
 
             (_, Event::PointerEnter(item, now_ms)) => {
-                if matches!(state, State::Open { item: open } if open == item) {
+                let rendered_open = effective_open_item(state, ctx);
+
+                if rendered_open == Some(item) {
                     return Some(
                         TransitionPlan::context_only(|ctx: &mut Context| {
                             ctx.pending_open_item = None;
@@ -510,7 +514,7 @@ impl ars_core::Machine for Machine {
                     );
                 }
 
-                if matches!(state, State::Open { .. }) || in_skip_delay_window(ctx, *now_ms) {
+                if rendered_open.is_some() || in_skip_delay_window(ctx, *now_ms) {
                     open_item_plan(state, ctx, item.clone())
                         .map(|plan| plan.cancel_effect(Effect::CloseDelay))
                 } else {
@@ -524,12 +528,16 @@ impl ars_core::Machine for Machine {
                 }
             }
 
-            (State::Open { .. }, Event::PointerLeave | Event::ContentPointerLeave) => Some(
-                TransitionPlan::context_only(|ctx: &mut Context| {
-                    ctx.pointer_in_content = false;
-                })
-                .with_effect(PendingEffect::named(Effect::CloseDelay)),
-            ),
+            (_, Event::PointerLeave | Event::ContentPointerLeave)
+                if effective_open_item(state, ctx).is_some() =>
+            {
+                Some(
+                    TransitionPlan::context_only(|ctx: &mut Context| {
+                        ctx.pointer_in_content = false;
+                    })
+                    .with_effect(PendingEffect::named(Effect::CloseDelay)),
+                )
+            }
 
             (State::Idle, Event::PointerLeave) => Some(
                 TransitionPlan::context_only(|ctx: &mut Context| {
@@ -538,7 +546,7 @@ impl ars_core::Machine for Machine {
                 .cancel_effect(Effect::OpenDelay),
             ),
 
-            (State::Open { .. }, Event::ContentPointerEnter) => Some(
+            (_, Event::ContentPointerEnter) if effective_open_item(state, ctx).is_some() => Some(
                 TransitionPlan::context_only(|ctx: &mut Context| {
                     ctx.pointer_in_content = true;
                 })
@@ -559,7 +567,7 @@ impl ars_core::Machine for Machine {
                 )
             }
 
-            (State::Open { .. }, Event::CloseTimerFired(now_ms)) => {
+            (_, Event::CloseTimerFired(now_ms)) if effective_open_item(state, ctx).is_some() => {
                 if ctx.pointer_in_content {
                     return None;
                 }
@@ -1118,9 +1126,7 @@ fn effective_open_item<'a>(state: &'a State, ctx: &'a Context) -> Option<&'a Key
 }
 
 fn open_item_plan(state: &State, ctx: &Context, item: Key) -> Option<TransitionPlan<Machine>> {
-    if ctx.value.get().as_ref() == Some(&item)
-        && matches!(state, State::Open { item: open } if open == &item)
-    {
+    if effective_open_item(state, ctx) == Some(&item) {
         None
     } else {
         let previous = ctx
@@ -1529,6 +1535,18 @@ mod tests {
     }
 
     #[test]
+    fn pointer_leave_uses_rendered_controlled_open_item() {
+        let mut service = service(props().value(Some(key("docs"))));
+
+        drop(service.send(Event::Close(100)));
+        let result = service.send(Event::PointerLeave);
+
+        assert_eq!(*service.state(), State::Idle);
+        assert_eq!(connect_noop(&service).open_item(), Some(&key("docs")));
+        assert_eq!(effect_names(&result), vec![Effect::CloseDelay]);
+    }
+
+    #[test]
     fn content_pointer_enter_cancels_close_delay() {
         let mut service = service(props().default_value(key("docs")));
 
@@ -1572,6 +1590,19 @@ mod tests {
         let result = service.send(Event::SelectLink(300));
 
         assert_eq!(*service.state(), State::Idle);
+        assert_eq!(service.context().last_close_time, Some(300));
+        assert_eq!(effect_names(&result), vec![Effect::ValueChange]);
+    }
+
+    #[test]
+    fn select_link_uses_rendered_controlled_open_item() {
+        let mut service = service(props().value(Some(key("docs"))));
+
+        drop(service.send(Event::Close(100)));
+        let result = service.send(Event::SelectLink(300));
+
+        assert_eq!(*service.state(), State::Idle);
+        assert_eq!(connect_noop(&service).open_item(), Some(&key("docs")));
         assert_eq!(service.context().last_close_time, Some(300));
         assert_eq!(effect_names(&result), vec![Effect::ValueChange]);
     }
@@ -1937,17 +1968,18 @@ mod tests {
     }
 
     #[test]
-    fn open_event_reconverges_state_when_controlled_value_already_matches_target() {
+    fn open_event_noops_when_rendered_item_already_matches_target() {
         let mut service = service_with_items(
             props().value(Some(key("docs"))),
             &[key("docs"), key("blog")],
         );
 
         drop(service.send(Event::Open(key("blog"))));
-        drop(service.send(Event::Open(key("docs"))));
+        let result = service.send(Event::Open(key("docs")));
 
-        assert_eq!(*service.state(), State::Open { item: key("docs") });
+        assert_eq!(*service.state(), State::Open { item: key("blog") });
         assert_eq!(connect_noop(&service).open_item(), Some(&key("docs")));
+        assert!(result.pending_effects.is_empty());
     }
 
     #[test]
