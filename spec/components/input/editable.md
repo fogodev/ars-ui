@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: []
 references:
-  ark-ui: Editable
+    ark-ui: Editable
 ---
 
 # Editable
@@ -35,7 +35,7 @@ pub enum State {
 
 ```rust
 /// Events for the Editable component.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// Enter edit mode (double-click, Enter key, or programmatic trigger).
     Activate,
@@ -52,6 +52,14 @@ pub enum Event {
     },
     /// Focus lost.
     Blur,
+    /// IME composition started.
+    CompositionStart,
+    /// IME composition ended with the final committed text.
+    CompositionEnd(String),
+    /// Synchronize the externally controlled value prop.
+    SetValue(Option<String>),
+    /// Synchronize output-affecting props stored in context.
+    SetProps,
 }
 ```
 
@@ -59,7 +67,7 @@ pub enum Event {
 
 ```rust
 /// Controls how the edit is submitted.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SubmitMode {
     /// Submit when the input loses focus.
     Blur,
@@ -72,7 +80,7 @@ pub enum SubmitMode {
 }
 
 /// Controls how edit mode is activated.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActivateMode {
     /// Single click activates.
     Click,
@@ -97,6 +105,8 @@ pub struct Context {
     pub readonly: bool,
     /// Whether the component is invalid.
     pub invalid: bool,
+    /// Whether the editable is required.
+    pub required: bool,
     /// Determines how the edit is submitted.
     pub submit_mode: SubmitMode,
     /// Determines how edit mode is activated.
@@ -107,10 +117,18 @@ pub struct Context {
     pub placeholder: Option<String>,
     /// The maximum length of the input.
     pub max_length: Option<usize>,
+    /// The name for form submission.
+    pub name: Option<String>,
+    /// The ID of the form element the input is associated with.
+    pub form: Option<String>,
+    /// Whether blur may submit when the submit mode includes blur.
+    pub submit_on_blur: bool,
     /// Whether the component is focused.
     pub focused: bool,
     /// Whether the focus is visible.
     pub focus_visible: bool,
+    /// True while an IME composition session is active.
+    pub is_composing: bool,
     /// Resolved locale for i18n.
     pub locale: Locale,
     /// Resolved messages for the editable.
@@ -216,6 +234,15 @@ impl ComponentMessages for Messages {}
 fn is_disabled(ctx: &Context) -> bool { ctx.disabled }
 fn is_readonly(ctx: &Context) -> bool { ctx.readonly }
 fn can_activate(ctx: &Context) -> bool { !ctx.disabled && !ctx.readonly }
+fn effective_blur_submits(ctx: &Context) -> bool {
+    ctx.submit_on_blur && matches!(ctx.submit_mode, SubmitMode::Blur | SubmitMode::Both)
+}
+fn clamp_to_max_chars(value: &str, max_length: Option<usize>) -> String {
+    match max_length {
+        Some(max_length) => value.chars().take(max_length).collect(),
+        None => value.to_string(),
+    }
+}
 ```
 
 ### 1.6 Full Machine Implementation
@@ -231,6 +258,7 @@ impl ars_core::Machine for Machine {
     type Props = Props;
     type Api<'a> = Api<'a>;
     type Messages = Messages;
+    type Effect = NoEffect;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let locale = env.locale.clone();
@@ -247,13 +275,18 @@ impl ars_core::Machine for Machine {
             disabled: props.disabled,
             readonly: props.readonly,
             invalid: props.invalid,
+            required: props.required,
             submit_mode: props.submit_mode,
-            activate_mode: props.activate_mode.clone(),
+            activate_mode: props.activate_mode,
             auto_select: props.auto_select,
             placeholder: props.placeholder.clone(),
             max_length: props.max_length,
+            name: props.name.clone(),
+            form: props.form.clone(),
+            submit_on_blur: props.submit_on_blur,
             focused: false,
             focus_visible: false,
+            is_composing: false,
             locale,
             messages,
             ids: ComponentIds::from_id(&props.id),
@@ -274,10 +307,12 @@ impl ars_core::Machine for Machine {
                 let current_value = ctx.value.get().clone();
                 Some(TransitionPlan::to(State::Editing).apply(move |ctx| {
                     ctx.edit_value = current_value;
+                    ctx.focused = true;
+                    ctx.focus_visible = false;
                 }))
             }
 
-            (State::Preview, Event::Focus { is_keyboard }) => {
+            (_, Event::Focus { is_keyboard }) => {
                 let is_kb = *is_keyboard;
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.focused = true;
@@ -294,23 +329,27 @@ impl ars_core::Machine for Machine {
 
             // --- Editing state ---
             (State::Editing, Event::Change(val)) => {
+                if ctx.disabled || ctx.readonly || ctx.is_composing { return None; }
                 let max_length = ctx.max_length;
                 let val = val.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let clamped = match max_length {
-                        Some(max) if val.len() > max => val[..max].to_string(),
-                        _ => val,
-                    };
-                    ctx.edit_value = clamped;
+                    ctx.edit_value = clamp_to_max_chars(&val, max_length);
                 }))
             }
 
             (State::Editing, Event::Submit(val)) => {
+                if ctx.disabled || ctx.readonly { return None; }
                 let val = val.clone();
+                let max_length = ctx.max_length;
                 Some(TransitionPlan::to(State::Preview).apply(move |ctx| {
-                    ctx.value.set(val);
+                    let val = clamp_to_max_chars(&val, max_length);
+                    ctx.edit_value = val.clone();
+                    if !ctx.value.is_controlled() {
+                        ctx.value.set(val);
+                    }
                     ctx.focused = false;
                     ctx.focus_visible = false;
+                    ctx.is_composing = false;
                 }))
             }
 
@@ -320,37 +359,95 @@ impl ars_core::Machine for Machine {
                     ctx.edit_value = committed;
                     ctx.focused = false;
                     ctx.focus_visible = false;
+                    ctx.is_composing = false;
                 }))
             }
 
             (State::Editing, Event::Blur) => {
-                let submit_mode = ctx.submit_mode;
                 let edit_value = ctx.edit_value.clone();
                 let committed = ctx.value.get().clone();
+                let should_submit = effective_blur_submits(ctx);
                 Some(TransitionPlan::to(State::Preview).apply(move |ctx| {
-                    match submit_mode {
-                        SubmitMode::Blur | SubmitMode::Both => {
-                            ctx.value.set(edit_value);
+                    if should_submit && !ctx.disabled && !ctx.readonly {
+                        if !ctx.value.is_controlled() {
+                            ctx.value.set(edit_value.clone());
                         }
-                        _ => {
-                            ctx.edit_value = committed;
-                        }
+                        ctx.edit_value = edit_value;
+                    } else {
+                        ctx.edit_value = committed;
                     }
                     ctx.focused = false;
                     ctx.focus_visible = false;
+                    ctx.is_composing = false;
                 }))
             }
 
-            (State::Editing, Event::Focus { is_keyboard }) => {
-                let is_kb = *is_keyboard;
+            (_, Event::CompositionStart) => Some(TransitionPlan::context_only(|ctx| {
+                ctx.is_composing = true;
+            })),
+
+            (State::Editing, Event::CompositionEnd(value)) => {
+                let value = clamp_to_max_chars(value, ctx.max_length);
                 Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.focused = true;
-                    ctx.focus_visible = is_kb;
+                    ctx.is_composing = false;
+                    if !ctx.disabled && !ctx.readonly {
+                        ctx.edit_value = value;
+                    }
+                }))
+            }
+
+            (State::Preview, Event::CompositionEnd(_)) => Some(TransitionPlan::context_only(|ctx| {
+                ctx.is_composing = false;
+            })),
+
+            (_, Event::SetValue(value)) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    if let Some(value) = value {
+                        let edit_value = clamp_to_max_chars(&value, ctx.max_length);
+                        ctx.value.set(edit_value.clone());
+                        ctx.value.sync_controlled(Some(value));
+                        ctx.edit_value = edit_value;
+                    } else {
+                        ctx.value.sync_controlled(None);
+                        ctx.edit_value = clamp_to_max_chars(ctx.value.get(), ctx.max_length);
+                    }
+                }))
+            }
+
+            (_, Event::SetProps) => {
+                let props = _props.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.invalid = props.invalid;
+                    ctx.required = props.required;
+                    ctx.submit_mode = props.submit_mode;
+                    ctx.activate_mode = props.activate_mode;
+                    ctx.auto_select = props.auto_select;
+                    ctx.placeholder = props.placeholder;
+                    ctx.max_length = props.max_length;
+                    ctx.name = props.name;
+                    ctx.form = props.form;
+                    ctx.submit_on_blur = props.submit_on_blur;
+                    ctx.edit_value = clamp_to_max_chars(&ctx.edit_value, ctx.max_length);
                 }))
             }
 
             _ => None,
         }
+    }
+
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(old.id, new.id, "editable::Props.id must remain stable after init");
+        let mut events = Vec::new();
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+        if old.value != new.value {
+            events.push(Event::SetValue(new.value.clone()));
+        }
+        events
     }
 
     fn connect<'a>(
@@ -439,13 +536,13 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.field_label)(&self.ctx.locale));
         if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
         if self.ctx.readonly { attrs.set_bool(HtmlAttr::ReadOnly, true); }
-        if self.props.required { attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true"); }
+        if self.ctx.required { attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true"); }
         if self.ctx.invalid { attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true"); }
         attrs.set(HtmlAttr::Value, &self.ctx.edit_value);
         if let Some(p) = &self.ctx.placeholder { attrs.set(HtmlAttr::Placeholder, p); }
         if let Some(max) = self.ctx.max_length { attrs.set(HtmlAttr::MaxLength, max.to_string()); }
-        if let Some(ref name) = self.props.name { attrs.set(HtmlAttr::Name, name); }
-        if let Some(ref form) = self.props.form { attrs.set(HtmlAttr::Form, form.as_str()); }
+        if let Some(ref name) = self.ctx.name { attrs.set(HtmlAttr::Name, name); }
+        if let Some(ref form) = self.ctx.form { attrs.set(HtmlAttr::Form, form.as_str()); }
         attrs
     }
 
@@ -458,6 +555,7 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.submit_label)(&self.ctx.locale));
         attrs.set(HtmlAttr::TabIndex, "-1");
+        if self.ctx.disabled || self.ctx.readonly { attrs.set_bool(HtmlAttr::Disabled, true); }
         attrs
     }
 
@@ -470,6 +568,7 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.cancel_label)(&self.ctx.locale));
         attrs.set(HtmlAttr::TabIndex, "-1");
+        if self.ctx.disabled || self.ctx.readonly { attrs.set_bool(HtmlAttr::Disabled, true); }
         attrs
     }
 
@@ -482,17 +581,74 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.edit_label)(&self.ctx.locale));
         attrs.set(HtmlAttr::TabIndex, "-1");
+        if self.ctx.disabled || self.ctx.readonly { attrs.set_bool(HtmlAttr::Disabled, true); }
         attrs
     }
 
-    pub fn on_preview_click(&self) { (self.send)(Event::Activate); }
-    pub fn on_preview_focus(&self, is_keyboard: bool) { (self.send)(Event::Focus { is_keyboard }); }
+    pub fn on_preview_click(&self) {
+        if self.ctx.activate_mode == ActivateMode::Click {
+            (self.send)(Event::Activate);
+        }
+    }
+    pub fn on_preview_dblclick(&self) {
+        if self.ctx.activate_mode == ActivateMode::DblClick {
+            (self.send)(Event::Activate);
+        }
+    }
+    pub fn on_preview_focus(&self, is_keyboard: bool) {
+        (self.send)(Event::Focus { is_keyboard });
+        if self.ctx.activate_mode == ActivateMode::Focus {
+            (self.send)(Event::Activate);
+        }
+    }
     pub fn on_preview_blur(&self) { (self.send)(Event::Blur); }
-    pub fn on_input_change(&self, val: String) { (self.send)(Event::Change(val)); }
+    pub fn on_preview_keydown(&self, data: &KeyboardEventData) {
+        if data.key == KeyboardKey::Enter && !self.is_keyboard_composing(data) {
+            (self.send)(Event::Activate);
+        }
+    }
+    pub fn on_input_change(&self, val: String) {
+        if !self.ctx.is_composing {
+            (self.send)(Event::Change(val));
+        }
+    }
     pub fn on_input_blur(&self) { (self.send)(Event::Blur); }
+    pub fn on_input_keydown(&self, data: &KeyboardEventData) {
+        self.on_input_keydown_impl(data, false);
+    }
+    pub fn on_input_keydown_after_composition_check(&self, data: &KeyboardEventData) {
+        self.on_input_keydown_impl(data, true);
+    }
+    pub fn on_input_composition_start(&self) { (self.send)(Event::CompositionStart); }
+    pub fn on_input_composition_end(&self, final_value: String) {
+        (self.send)(Event::CompositionEnd(final_value));
+    }
     pub fn on_submit_click(&self) { (self.send)(Event::Submit(self.ctx.edit_value.clone())); }
     pub fn on_cancel_click(&self) { (self.send)(Event::Cancel); }
     pub fn on_edit_trigger_click(&self) { (self.send)(Event::Activate); }
+
+    fn on_input_keydown_impl(&self, data: &KeyboardEventData, after_composition_check: bool) {
+        let composing = self.is_keyboard_composing(data);
+        match data.key {
+            KeyboardKey::Process => (self.send)(Event::CompositionStart),
+            KeyboardKey::Escape if !composing => (self.send)(Event::Cancel),
+            KeyboardKey::Enter
+                if (!composing || after_composition_check)
+                    && !self.ctx.is_composing
+                    && matches!(self.ctx.submit_mode, SubmitMode::Enter | SubmitMode::Both) =>
+            {
+                (self.send)(Event::Submit(self.ctx.edit_value.clone()));
+            }
+            KeyboardKey::Tab if !composing => {
+                (self.send)(Event::Submit(self.ctx.edit_value.clone()));
+            }
+            _ => {}
+        }
+    }
+
+    fn is_keyboard_composing(&self, data: &KeyboardEventData) -> bool {
+        self.ctx.is_composing || data.is_composing || data.key == KeyboardKey::Process
+    }
 }
 
 impl ConnectApi for Api<'_> {
@@ -582,7 +738,7 @@ The `Editable` component must handle IME (Input Method Editor) composition corre
 - Add `is_composing: bool` field to the Editable context/state.
 - On `compositionstart`: set `is_composing = true`. Suppress value commit and `on_change` emission for the duration.
 - On `compositionupdate`: update the visual display but do NOT commit the value or fire `on_change`.
-- On `compositionend`: set `is_composing = false`, apply the final composed value, then emit `on_change` with the completed text.
+- On `compositionend`: set `is_composing = false` and apply the final composed value through `Event::CompositionEnd`; adapter-level value-change callbacks are outside the agnostic core surface.
 - **Enter key during composition**: If `is_composing` is true, Enter key confirms the IME candidate rather than committing the edit. The edit commit only happens on a subsequent Enter press (or blur) after composition ends.
 
 ## 4. Internationalization

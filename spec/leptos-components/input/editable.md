@@ -21,11 +21,15 @@ pub fn Editable(
     #[prop(optional)] default_value: String,
     #[prop(optional)] activation_mode: editable::ActivateMode,
     #[prop(optional)] submit_mode: editable::SubmitMode,
+    #[prop(optional)] placeholder: Option<String>,
+    #[prop(optional)] max_length: Option<usize>,
     #[prop(optional)] name: Option<String>,
     #[prop(optional)] form: Option<String>,
     #[prop(optional, into)] disabled: Signal<bool>,
     #[prop(optional, into)] readonly: Signal<bool>,
     #[prop(optional, into)] invalid: Signal<bool>,
+    #[prop(optional, into)] required: Signal<bool>,
+    #[prop(optional)] submit_on_blur: bool,
     children: Children,
 ) -> impl IntoView
 ```
@@ -35,7 +39,7 @@ The adapter also exposes locale or messages and optional callbacks such as commi
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with the core editable contract, including activation and submission modes.
-- Event parity: `Activate`, `Confirm`, `Cancel`, `InputChange`, `Focus`, `Blur`, `CompositionStart`, and `CompositionEnd` remain machine-owned.
+- Event parity: `Activate`, `Submit`, `Cancel`, `Change`, `Focus`, `Blur`, `CompositionStart`, `CompositionEnd`, `SetValue`, and `SetProps` remain machine-owned.
 - Core machine ownership: `use_machine::<editable::Machine>(...)` owns preview state, edit buffer state, and trigger visibility.
 
 ## 4. Part Mapping
@@ -47,14 +51,14 @@ The adapter also exposes locale or messages and optional callbacks such as commi
 | `Preview`             | required  | `<span>`                 | adapter-owned | `api.preview_attrs()`        | visible in preview state                         |
 | `Input`               | required  | native `<input>`         | adapter-owned | `api.input_attrs()`          | visible in editing state and can submit to forms |
 | `EditTrigger`         | optional  | `<button>`               | adapter-owned | `api.edit_trigger_attrs()`   | preview-state trigger                            |
-| `SubmitTrigger`       | optional  | `<button>`               | adapter-owned | `api.submit_trigger_attrs()` | editing-state confirm trigger                    |
+| `SubmitTrigger`       | optional  | `<button>`               | adapter-owned | `api.submit_trigger_attrs()` | editing-state submit trigger                     |
 | `CancelTrigger`       | optional  | `<button>`               | adapter-owned | `api.cancel_trigger_attrs()` | editing-state cancel trigger                     |
 
 ## 5. Attr Merge and Ownership Rules
 
 - Root state attrs, input naming, and trigger button semantics always win.
 - `class` and `style` merge additively across preview, input, and triggers.
-- Consumer handlers may decorate preview or input content, but activation and confirm or cancel sequencing remain adapter-owned.
+- Consumer handlers may decorate preview or input content, but activation and submit or cancel sequencing remain adapter-owned.
 
 ## 6. Composition / Context Contract
 
@@ -62,14 +66,15 @@ The adapter also exposes locale or messages and optional callbacks such as commi
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                        | Mode          | Sync trigger           | Machine event / update path                  | Visible effect                            |
-| ----------------------------------- | ------------- | ---------------------- | -------------------------------------------- | ----------------------------------------- |
-| `value`                             | controlled    | signal change          | `SetValue`                                   | updates committed preview and edit buffer |
-| `disabled` / `readonly` / `invalid` | controlled    | signal change          | `SetDisabled` / `SetReadonly` / `SetInvalid` | updates guards and attrs                  |
-| preview or trigger activation       | machine-owned | click, focus, keyboard | `Activate`                                   | enters editing state                      |
-| confirm or cancel paths             | machine-owned | key or trigger         | `Confirm` / `Cancel`                         | commits or discards edit buffer           |
+| Adapter prop / path                              | Mode          | Sync trigger           | Machine event / update path   | Visible effect                            |
+| ------------------------------------------------ | ------------- | ---------------------- | ----------------------------- | ----------------------------------------- |
+| `value`                                          | controlled    | signal change          | `SetValue`                    | updates committed preview and edit buffer |
+| `disabled` / `readonly` / output-affecting props | controlled    | signal change          | `SetProps`                    | updates guards, behavior, and attrs       |
+| preview or trigger activation                    | machine-owned | click, focus, keyboard | `Activate`                    | enters editing state                      |
+| submit or cancel paths                           | machine-owned | key, blur, or trigger  | `Submit` / `Cancel`           | commits or discards edit buffer           |
+| text entry and composition                       | machine-owned | input / IME events     | `Change` / composition events | updates edit buffer without eager commit  |
 
-IME composition suppresses eager confirm behavior while editing.
+IME composition suppresses eager submit behavior while editing.
 
 ## 8. Registration and Cleanup Contract
 
@@ -80,18 +85,18 @@ IME composition suppresses eager confirm behavior while editing.
 ## 9. Ref and Node Contract
 
 - `Input` owns the live editing ref.
-- `Preview` may own a ref for re-focusing after cancel or confirm.
+- `Preview` may own a ref for re-focusing after cancel or submit.
 - Trigger refs are optional and may be used for focus restoration only.
 
 ## 10. State Machine Boundary Rules
 
 - The machine owns preview or editing state and the transient edit buffer.
-- The adapter must not commit or discard the edit buffer outside `Confirm` or `Cancel`.
+- The adapter must not commit or discard the edit buffer outside `Submit` or `Cancel`.
 - Native form submission, when editing, uses the committed input name and form attrs on the active `Input`.
 
 ## 11. Callback Payload Contract
 
-- Commit callbacks emit the committed string value after `Confirm`.
+- Commit callbacks emit the committed string value after `Submit`.
 - Editing-state callbacks emit the committed preview-versus-editing state after the transition.
 - Cancel callbacks should not leak transient buffer text unless the wrapper explicitly documents it.
 
@@ -131,7 +136,7 @@ IME composition suppresses eager confirm behavior while editing.
 1. Initialize the editable machine and derive attrs for preview, input, and triggers.
 2. Render `Root`, optional `Label`, `Preview`, `Input`, and any triggers in stable order.
 3. Wire controlled prop synchronization and editing input events.
-4. Compose activation, confirm, and cancel paths.
+4. Compose activation, submit, and cancel paths.
 5. Finish focus-restoration and diagnostics behavior.
 
 ## 18. Anti-Patterns
@@ -164,7 +169,7 @@ IME composition suppresses eager confirm behavior while editing.
 | Helper concept       | Required?   | Responsibility                                                  | Notes                              |
 | -------------------- | ----------- | --------------------------------------------------------------- | ---------------------------------- |
 | composition helper   | required    | suppress eager commit or cancel behavior during IME composition | shared with text-entry controls    |
-| focus-restore helper | recommended | return focus to preview or trigger after confirm or cancel      | shared with interactive composites |
+| focus-restore helper | recommended | return focus to preview or trigger after submit or cancel       | shared with interactive composites |
 
 ## 23. Framework-Specific Behavior
 
@@ -187,14 +192,14 @@ view! {
 
 - Initialize the machine and keep preview-state and edit-buffer ownership entirely inside it.
 - Render both preview and input parts according to the documented stateful visibility policy.
-- Route activation, confirm, cancel, and composition-aware text entry through machine transitions only.
+- Route activation, submit, cancel, and composition-aware text entry through machine transitions only.
 
 ## 26. Adapter Invariants
 
 - Preview-versus-editing state always lives in the machine.
 - The edit buffer is never committed or discarded outside machine transitions.
 - The native input remains the only form-submitting node while editing.
-- IME composition suppresses eager confirm paths.
+- IME composition suppresses eager submit paths.
 
 ## 27. Accessibility and SSR Notes
 
@@ -210,21 +215,21 @@ view! {
 ## 29. Test Scenarios
 
 - Preview activation enters editing without losing the committed value.
-- Confirm commits the edit buffer and returns to preview with the updated text.
+- Submit commits the edit buffer and returns to preview with the updated text.
 - Cancel discards the edit buffer and restores preview text.
-- IME composition suppresses eager confirm behavior until composition ends.
+- IME composition suppresses eager submit behavior until composition ends.
 
 ## 30. Test Oracle Notes
 
 - Assert preview-versus-editing transitions from machine-driven state logs.
-- Inspect the DOM to confirm only the editing input owns form attrs while editing.
-- Verify focus restoration after confirm or cancel with explicit focus assertions.
+- Inspect the DOM to verify only the editing input owns form attrs while editing.
+- Verify focus restoration after submit or cancel with explicit focus assertions.
 
 ## 31. Implementation Checklist
 
 - [ ] Keep preview state and edit buffer machine-owned.
 - [ ] Render preview, input, and triggers in the documented structural positions.
-- [ ] Route activation, confirm, and cancel through machine transitions only.
+- [ ] Route activation, submit, and cancel through machine transitions only.
 - [ ] Preserve stable input identity within one editing session.
-- [ ] Suppress eager confirm paths during IME composition.
+- [ ] Suppress eager submit paths during IME composition.
 - [ ] Keep focus restoration adapter-owned and explicit.
