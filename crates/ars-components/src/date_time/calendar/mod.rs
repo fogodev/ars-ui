@@ -575,6 +575,20 @@ pub struct Messages {
     /// Separator inserted between month names in a multi-month range
     /// heading (e.g., `" – "`).
     pub month_range_separator: MessageFn<LocaleLabelFn>,
+
+    /// Suffix appended to a date cell's `aria-label` when the date is
+    /// marked **unavailable** by the user predicate (focusable but not
+    /// selectable). The full label reads
+    /// `"{month} {day}, {year}, {weekday} {unavailable_suffix}"` with a
+    /// leading space inserted automatically — supply the parenthesised
+    /// or bracketed phrase verbatim (default: `"(unavailable)"`).
+    pub unavailable_suffix: MessageFn<LocaleLabelFn>,
+
+    /// Suffix appended to a date cell's `aria-label` when the date is
+    /// **disabled** by the configured `min`/`max` range. See
+    /// [`Messages::unavailable_suffix`] for the formatting contract
+    /// (default: `"(disabled)"`).
+    pub disabled_suffix: MessageFn<LocaleLabelFn>,
 }
 
 impl Default for Messages {
@@ -589,6 +603,8 @@ impl Default for Messages {
                 format!("Next {count} months")
             }),
             month_range_separator: MessageFn::static_str(" \u{2013} "),
+            unavailable_suffix: MessageFn::static_str("(unavailable)"),
+            disabled_suffix: MessageFn::static_str("(disabled)"),
         }
     }
 }
@@ -606,6 +622,8 @@ impl PartialEq for Messages {
             && self.prev_page_label == other.prev_page_label
             && self.next_page_label == other.next_page_label
             && self.month_range_separator == other.month_range_separator
+            && self.unavailable_suffix == other.unavailable_suffix
+            && self.disabled_suffix == other.disabled_suffix
     }
 }
 
@@ -1895,10 +1913,15 @@ impl<'a> Api<'a> {
                 .weekday_long_label(date.weekday(), &self.ctx.locale),
         );
 
+        // Status suffix flows through `Messages` so it can be localized
+        // (e.g., German `(nicht verfügbar)`); the leading space joins the
+        // base label and the suffix automatically.
         let label = if unavailable {
-            format!("{base_label} (unavailable)")
+            let suffix = (self.ctx.messages.unavailable_suffix)(&self.ctx.locale);
+            format!("{base_label} {suffix}")
         } else if disabled {
-            format!("{base_label} (disabled)")
+            let suffix = (self.ctx.messages.disabled_suffix)(&self.ctx.locale);
+            format!("{base_label} {suffix}")
         } else {
             base_label
         };
@@ -1956,13 +1979,10 @@ impl<'a> Api<'a> {
             return true;
         }
 
-        let Some(min) = &self.ctx.min else {
-            return false;
-        };
-
-        // Compute the LAST visible month after pressing prev. If even its
-        // last day is below `min`, the next page back has no selectable
-        // dates and prev is disabled.
+        // Compute the LAST visible month after pressing prev. If the
+        // arithmetic fails (calendar boundary), `month_step_plan` will
+        // drop the click — so we must surface that as a disabled
+        // control rather than leaving a clickable no-op.
         let step = self.nav_step_size();
         let (new_first_month, new_first_year) = advance_month_pair(
             self.ctx.visible_month,
@@ -1975,15 +1995,20 @@ impl<'a> Api<'a> {
 
         let Ok(first_of_new_last) = CalendarDate::new_gregorian(new_last_year, new_last_month, 1)
         else {
-            return false;
+            return true;
         };
         let days_in_month = first_of_new_last.days_in_month();
         let Ok(last_of_new_last) =
             CalendarDate::new_gregorian(new_last_year, new_last_month, days_in_month)
         else {
-            return false;
+            return true;
         };
 
+        // Past the representable range, also check the min constraint:
+        // if the post-step page is entirely below `min`, disable.
+        let Some(min) = &self.ctx.min else {
+            return false;
+        };
         matches!(last_of_new_last.compare(min), Ordering::Less)
     }
 
@@ -2000,13 +2025,10 @@ impl<'a> Api<'a> {
             return true;
         }
 
-        let Some(max) = &self.ctx.max else {
-            return false;
-        };
-
-        // Compute the FIRST visible month after pressing next. If its
-        // first day is already above `max`, the next page forward has no
-        // selectable dates and next is disabled.
+        // Compute the FIRST visible month after pressing next. If the
+        // arithmetic fails (calendar boundary), `month_step_plan` will
+        // drop the click — so surface that as disabled rather than a
+        // clickable no-op.
         let step = self.nav_step_size();
         let (new_first_month, new_first_year) = advance_month_pair(
             self.ctx.visible_month,
@@ -2016,9 +2038,13 @@ impl<'a> Api<'a> {
         let Ok(first_of_new_first) =
             CalendarDate::new_gregorian(new_first_year, new_first_month, 1)
         else {
-            return false;
+            return true;
         };
 
+        // Past representable range, also check the max constraint.
+        let Some(max) = &self.ctx.max else {
+            return false;
+        };
         matches!(first_of_new_first.compare(max), Ordering::Greater)
     }
 

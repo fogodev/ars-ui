@@ -2345,3 +2345,67 @@ fn announce_month_effect_skipped_on_boundary_failure() {
     );
     assert!(result.context_changed);
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Codex review regressions, pass 6 (PR #688)
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn unavailable_suffix_label_uses_messages_default() {
+    // Codex N20 (P2): the "(unavailable)" suffix in the cell aria-label
+    // must come from `Messages` so it can be localized. The default value
+    // matches what was previously hard-coded, so existing snapshots stay
+    // the same.
+    let predicate = Callback::new_ref(|d: &CalendarDate| d.day() == 12);
+    let svc = service_with(props().is_date_unavailable(Some(predicate)), en_us());
+    let api = svc.connect(&|_| {});
+    let trigger = api.cell_trigger_attrs(&date(2024, 1, 12));
+    let label = attr(&trigger, HtmlAttr::Aria(AriaAttr::Label)).unwrap_or_default();
+    assert!(
+        label.ends_with("(unavailable)"),
+        "default Messages must keep the existing English suffix; got {label:?}",
+    );
+}
+
+#[test]
+fn unavailable_suffix_label_routes_through_messages_override() {
+    // Localised Messages must reach the aria-label so a German consumer
+    // can replace `(unavailable)` with `(nicht verfügbar)`.
+    let predicate = Callback::new_ref(|d: &CalendarDate| d.day() == 12);
+    let messages = Messages {
+        unavailable_suffix: MessageFn::static_str("(nicht verfügbar)"),
+        ..Messages::default()
+    };
+    let svc = Service::<Machine>::new(
+        props().is_date_unavailable(Some(predicate)),
+        &env(en_us()),
+        &messages,
+    );
+    let api = svc.connect(&|_| {});
+    let trigger = api.cell_trigger_attrs(&date(2024, 1, 12));
+    let label = attr(&trigger, HtmlAttr::Aria(AriaAttr::Label)).unwrap_or_default();
+    assert!(
+        label.ends_with("(nicht verfügbar)"),
+        "localized suffix must flow through; got {label:?}",
+    );
+}
+
+#[test]
+fn disabled_suffix_label_routes_through_messages_override() {
+    let messages = Messages {
+        disabled_suffix: MessageFn::static_str("(deaktiviert)"),
+        ..Messages::default()
+    };
+    let svc = Service::<Machine>::new(
+        props().min(Some(date(2024, 1, 20))),
+        &env(en_us()),
+        &messages,
+    );
+    let api = svc.connect(&|_| {});
+    let trigger = api.cell_trigger_attrs(&date(2024, 1, 5));
+    let label = attr(&trigger, HtmlAttr::Aria(AriaAttr::Label)).unwrap_or_default();
+    assert!(
+        label.ends_with("(deaktiviert)"),
+        "localized disabled suffix must flow through; got {label:?}",
+    );
+}

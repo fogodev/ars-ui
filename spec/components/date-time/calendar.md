@@ -1272,10 +1272,15 @@ impl<'a> Api<'a> {
             date.year(),
             self.ctx.intl_backend.weekday_long_label(date.weekday(), &self.ctx.locale),
         );
+        // Status suffix flows through `Messages` so it can be localized
+        // (e.g., German `(nicht verfügbar)`); a single space joins base
+        // and suffix automatically.
         let label = if unavailable {
-            format!("{} (unavailable)", base_label)
+            let suffix = (self.ctx.messages.unavailable_suffix)(&self.ctx.locale);
+            format!("{base_label} {suffix}")
         } else if disabled {
-            format!("{} (disabled)", base_label)
+            let suffix = (self.ctx.messages.disabled_suffix)(&self.ctx.locale);
+            format!("{base_label} {suffix}")
         } else {
             base_label
         };
@@ -1355,42 +1360,47 @@ impl<'a> Api<'a> {
     }
 
     /// Whether the prev button should be disabled — either the calendar
-    /// is globally disabled, or pressing prev (stepping by the active
-    /// `page_behavior`) would yield a visible range with **no** dates
-    /// ≥ `min`. The check looks at the LAST month of the post-step range
-    /// so multi-month + `PageBehavior::Single` doesn't disable too early.
+    /// is globally disabled, the post-step range is unrepresentable
+    /// (calendar boundary), or stepping by the active `page_behavior`
+    /// would yield a visible range with **no** dates ≥ `min`. The check
+    /// looks at the LAST month of the post-step range so multi-month +
+    /// `PageBehavior::Single` doesn't disable too early.
     pub fn is_prev_disabled(&self) -> bool {
         if self.ctx.disabled { return true; }
-        let Some(min) = &self.ctx.min else { return false; };
         let step = self.nav_step_size();
         let (new_first_m, new_first_y) = advance_month(
             self.ctx.visible_month, self.ctx.visible_year, -(step as i32),
         );
         let last_offset = self.ctx.visible_months.saturating_sub(1);
         let (new_last_m, new_last_y) = month_year_at_offset(new_first_m, new_first_y, last_offset);
+        // Construction failure means the post-step range is past the
+        // representable calendar limit — paging would be a no-op, so
+        // surface as disabled rather than leaving a clickable no-op.
         let Ok(first_of_new_last) = CalendarDate::new_gregorian(new_last_y, new_last_m, 1)
-        else { return false; };
+        else { return true; };
         let Ok(last_of_new_last) =
             CalendarDate::new_gregorian(new_last_y, new_last_m, first_of_new_last.days_in_month())
-        else { return false; };
+        else { return true; };
+        // Past representability, also apply the min constraint.
+        let Some(min) = &self.ctx.min else { return false; };
         matches!(last_of_new_last.compare(min), Ordering::Less)
     }
 
     /// Whether the next button should be disabled — either the calendar
-    /// is globally disabled, or pressing next (stepping by the active
-    /// `page_behavior`) would yield a visible range with **no** dates
-    /// ≤ `max`. Symmetric to `is_prev_disabled`: checks the FIRST month
-    /// of the post-step range so multi-month + `PageBehavior::Single`
-    /// doesn't disable too early.
+    /// is globally disabled, the post-step range is unrepresentable
+    /// (calendar boundary), or stepping by the active `page_behavior`
+    /// would yield a visible range with **no** dates ≤ `max`. Symmetric
+    /// to `is_prev_disabled`.
     pub fn is_next_disabled(&self) -> bool {
         if self.ctx.disabled { return true; }
-        let Some(max) = &self.ctx.max else { return false; };
         let step = self.nav_step_size();
         let (new_first_m, new_first_y) = advance_month(
             self.ctx.visible_month, self.ctx.visible_year, step as i32,
         );
+        // Construction failure → calendar boundary → disable.
         let Ok(first_of_new_first) = CalendarDate::new_gregorian(new_first_y, new_first_m, 1)
-        else { return false; };
+        else { return true; };
+        let Some(max) = &self.ctx.max else { return false; };
         matches!(first_of_new_first.compare(max), Ordering::Greater)
     }
 
@@ -1587,6 +1597,13 @@ pub struct Messages {
     pub next_page_label: MessageFn<PageLabelFn>,
     /// Separator between month names in multi-month range heading (e.g., " – ").
     pub month_range_separator: MessageFn<LocaleLabelFn>,
+    /// Suffix appended to a date cell's `aria-label` when the date is
+    /// marked **unavailable** (default `"(unavailable)"`). Localizable so
+    /// non-English consumers don't end up with mixed-language labels.
+    pub unavailable_suffix: MessageFn<LocaleLabelFn>,
+    /// Suffix appended to a date cell's `aria-label` when the date is
+    /// **disabled** by `min`/`max` (default `"(disabled)"`).
+    pub disabled_suffix: MessageFn<LocaleLabelFn>,
 }
 // Month names, weekday names, and abbreviations are resolved from the
 // `IntlBackend` via `intl_backend.month_long_name(month, &locale)`,
@@ -1601,6 +1618,8 @@ impl Default for Messages {
             prev_page_label: MessageFn::new(|count, _locale| format!("Previous {} months", count)),
             next_page_label: MessageFn::new(|count, _locale| format!("Next {} months", count)),
             month_range_separator: MessageFn::static_str(" \u{2013} "),
+            unavailable_suffix: MessageFn::static_str("(unavailable)"),
+            disabled_suffix: MessageFn::static_str("(disabled)"),
         }
     }
 }
