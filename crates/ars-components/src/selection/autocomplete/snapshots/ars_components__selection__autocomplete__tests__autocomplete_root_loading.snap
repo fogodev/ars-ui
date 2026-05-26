@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/selection/autocomplete/mod.rs
+expression: snapshot_attrs(&loading_api.root_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-loading",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "autocomplete",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "loading",
+            ),
+        ),
+        (
+            Aria(
+                Busy,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "ac",
+            ),
+        ),
+    ],
+    styles: [],
+}

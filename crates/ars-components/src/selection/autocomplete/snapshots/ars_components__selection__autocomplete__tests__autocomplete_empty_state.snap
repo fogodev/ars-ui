@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/selection/autocomplete/mod.rs
+expression: snapshot_attrs(&empty_api.empty_state_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "empty-state",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "autocomplete",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "ac-empty-state",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "status",
+            ),
+        ),
+    ],
+    styles: [],
+}

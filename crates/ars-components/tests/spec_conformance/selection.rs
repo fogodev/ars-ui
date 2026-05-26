@@ -1,7 +1,9 @@
 //! Spec-conformance tests for `crates/ars-components/src/selection/*`.
 
 use ars_collections::Key;
-use ars_components::selection::{combobox, context_menu, listbox, menu, menu_bar, select};
+use ars_components::selection::{
+    autocomplete, combobox, context_menu, listbox, menu, menu_bar, select,
+};
 
 use super::helper::assert_anatomy;
 
@@ -149,6 +151,34 @@ fn combobox_anatomy_matches_spec() {
             (combobox::Part::Description, "description"),
             (combobox::Part::ErrorMessage, "error-message"),
             (combobox::Part::LiveRegion, "live-region"),
+        ],
+    );
+}
+
+#[test]
+fn autocomplete_anatomy_matches_spec() {
+    assert_anatomy(
+        "autocomplete",
+        &[
+            (autocomplete::Part::Root, "root"),
+            (autocomplete::Part::Input, "input"),
+            (autocomplete::Part::ClearTrigger, "clear-trigger"),
+            (autocomplete::Part::Content, "content"),
+            (
+                autocomplete::Part::Item {
+                    key: Key::default(),
+                },
+                "item",
+            ),
+            (
+                autocomplete::Part::ItemText {
+                    key: Key::default(),
+                },
+                "item-text",
+            ),
+            (autocomplete::Part::EmptyState, "empty-state"),
+            (autocomplete::Part::LoadingIndicator, "loading-indicator"),
+            (autocomplete::Part::LiveRegion, "live-region"),
         ],
     );
 }
