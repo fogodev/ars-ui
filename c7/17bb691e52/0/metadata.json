@@ -1,0 +1,156 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c717bb691e52",
+  "session_id": "019e61e6-d933-75e1-bda2-8f4289cbfed9",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-26T04:24:06.284225Z",
+  "branch": "codex/issue-255-autocomplete-core",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/selection/autocomplete/mod.rs",
+    "crates/ars-components/src/selection/autocomplete/snapshots/ars_components__selection__autocomplete__tests__autocomplete_clear_trigger.snap",
+    "crates/ars-components/src/selection/autocomplete/snapshots/ars_components__selection__autocomplete__tests__autocomplete_clear_trigger_disabled.snap",
+    "crates/ars-components/src/selection/autocomplete/snapshots/ars_components__selection__autocomplete__tests__autocomplete_content.snap",
+    "crates/ars-components/src/selection/autocomplete/snapshots/ars_components__selection__autocomplete__tests__autocomplete_empty_state.snap",
+    "crates/ars-components/src/selection/autocomplete/snapshots/ars_components__selection__autocomplete__tests__autocomplete_input_disabled.snap",
+    "crates/ars-components/src/selection/autocomplete/snapshots/ars_components__selection__autocomplete__tests__autocomplete_input_highlighted.snap",
+    "crates/ars-components/src/selection/autocomplete/snapshots/ars_components__selection__autocomplete__tests__autocomplete_item_highlighted.snap",
+    "crates/ars-components/src/selection/autocomplete/snapshots/ars_components__selection__autocomplete__tests__autocomplete_item_text.snap",
+    "crates/ars-components/src/selection/autocomplete/snapshots/ars_components__selection__autocomplete__tests__autocomplete_live_region.snap",
+    "crates/ars-components/src/selection/autocomplete/snapshots/ars_components__selection__autocomplete__tests__autocomplete_loading_indicator.snap",
+    "crates/ars-components/src/selection/autocomplete/snapshots/ars_components__selection__autocomplete__tests__autocomplete_root_interacting.snap",
+    "crates/ars-components/src/selection/autocomplete/snapshots/ars_components__selection__autocomplete__tests__autocomplete_root_loading.snap",
+    "crates/ars-components/src/selection/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "crates/ars-components/tests/spec_conformance/selection.rs",
+    "spec/components/selection/autocomplete.md",
+    "spec/dioxus-components/selection/autocomplete.md",
+    "spec/foundation/02-component-catalog.md",
+    "spec/leptos-components/selection/autocomplete.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "4dd3396f492a",
+  "token_usage": {
+    "input_tokens": 967441,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 46467456,
+    "output_tokens": 66545,
+    "api_call_count": 359
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "summary": {
+    "intent": "Update the Autocomplete spec for task #255 to reflect a framework-agnostic selection controller contract, then implement the core Rust module following a TDD + post-implementation audit workflow, and ship a non-draft GitHub PR.",
+    "outcome": "Successfully implemented `crates/ars-components/src/selection/autocomplete/mod.rs` with full state machine, all focused test gates green (unit, spec-conformance, proptest, snapshot, doctest), mutation score at 0 missed out of 149 tested, 93.15% line coverage, and a non-draft PR pushed to GitHub with commit closing issue #255.",
+    "learnings": {
+      "repo": [
+        "`cargo xci --profile fast` is the required pre-push CI gate; it runs fmt, check, clippy, unit tests, snapshot count, and spec validation sequentially.",
+        "`cargo xtask spec validate` enforces frontmatter contracts including a `related` field; omitting or mismatching that field is a hard validation failure.",
+        "`cargo insta test -p ars-components --unreferenced=reject` is unusable as a scoped filter gate because insta counts filtered-out snapshots as unreferenced; use `cargo insta test -p ars-components -- selection::autocomplete` instead.",
+        "`cargo mutants` runs the full test baseline by default and hits unrelated failures; pass `-- <filter>` to scope baseline runs to the new module's tests.",
+        "`cargo mutants --iterate` reuses prior caught/unviable results but invalidates the skip set when source files change (e.g., after `cargo fmt`), triggering a full re-pass.",
+        "Session recovery artifacts live in `.codex/sessions/YYYY/MM/DD/*.jsonl`; prior state is recoverable via `jq` queries on those files.",
+        "The repo has a mandatory post-implementation audit skill (`.agents/skills/post-implementation-audit/SKILL.md`) covering spec-to-code drift, adapter spec alignment, catalog entries, and coverage gating.",
+        "Leptos and Dioxus adapter specs (`spec/leptos-components/`, `spec/dioxus-components/`) must be updated in sync with core spec changes even when no adapter code is written.",
+        "The component catalog at `spec/foundation/02-component-catalog.md` contains prose summaries that drift from implementation and must be patched as part of any spec update."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/autocomplete/mod.rs",
+          "line": 1,
+          "finding": "New file: agnostic Autocomplete state machine owning input value, visible_keys, highlighted_key, loading, debounce_pending, and selected_key; delegates DOM focus, positioning, scrolling, and async fetch to adapters."
+        },
+        {
+          "path": "crates/ars-components/src/selection/mod.rs",
+          "finding": "Added `pub mod autocomplete;` export to surface the new module."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/selection.rs",
+          "finding": "Added anatomy coverage asserting all Autocomplete part roles and ARIA attributes against the updated spec."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/selection.rs",
+          "finding": "Added property-test invariants for highlight/visible-key consistency across arbitrary event sequences."
+        },
+        {
+          "path": "spec/components/selection/autocomplete.md",
+          "finding": "Expanded from Root/Input/ClearTrigger stub to full owned anatomy: Content, Item, ItemText, EmptyState, LoadingIndicator, LiveRegion; states Idle/Focused/Interacting/Loading; debounce and loading props."
+        },
+        {
+          "path": "spec/foundation/02-component-catalog.md",
+          "line": 35,
+          "end_line": 48,
+          "finding": "Stale catalog entry described Autocomplete as a SearchInput/Menu pairing with role=menu; updated to reflect owned listbox-suggestion contract."
+        }
+      ],
+      "workflow": [
+        "TDD red-green flow: add failing tests that fail at import/module resolution first, confirm failure, then write the implementation — proves the public surface didn't exist before the code landed.",
+        "Mutation testing should be scoped with `-- <test-filter>` from the start to avoid unrelated baseline failures; add `#[mutants::skip]` or behavioral assertions iteratively until 0 missed.",
+        "`cargo llvm-cov report --summary-only | rg '<module>|TOTAL'` is the fastest way to check per-file line coverage after an instrumented run.",
+        "Post-implementation audit should check adapter specs and the component catalog as named deliverables, not just the core spec and implementation files.",
+        "When `--iterate` invalidates due to source changes, treat it as a full re-pass rather than trying to preserve prior results; the overhead is comparable to the gap-filling tests added."
+      ]
+    },
+    "friction": [
+      "Session recovery required manually grepping `.codex/sessions/` JSONL files and the worktree was detached at `origin/main`, adding setup overhead before any implementation work.",
+      "`cargo xtask spec digest autocomplete` and `cargo xtask spec toc` hung on Cargo's package-cache lock during initial exploration, requiring fallback to direct Markdown reads.",
+      "Broad `cargo insta test -p ars-components --unreferenced=reject` hit pre-existing data-display snapshot failures unrelated to the Autocomplete work, blocking its use as a clean gate.",
+      "Three full mutation runs plus one `--iterate` pass were needed to drive missed mutants to zero; each full run took significant wall-clock time due to 149 mutants × compile+test cycle.",
+      "`cargo mutants --iterate` invalidated the prior skip set after `cargo fmt` ran, requiring a fourth full pass instead of a cheap re-check.",
+      "`cargo xci --profile fast` took noticeably longer than its nominal runtime due to broad dependency recompilation in a fresh worktree.",
+      "Spec validation failed on `related` frontmatter mismatch, requiring a targeted revert after the initial spec patch.",
+      "Multiple clippy lint fixes were needed in the new module after the implementation pass, requiring an extra edit-compile-fix cycle."
+    ],
+    "open_items": [
+      "Leptos and Dioxus adapter wrapper components (`ars-leptos`, `ars-dioxus`) were not implemented — only their specs were updated; adapter implementations remain as future work.",
+      "Package-wide `cargo insta test -p ars-components --unreferenced=reject` is broken due to pre-existing unrelated snapshot hygiene issues; needs a separate cleanup pass across the repo.",
+      "6.85% of lines in `autocomplete/mod.rs` are uncovered (93.15% line coverage); specific uncovered paths were not identified and may warrant additional edge-case tests.",
+      "Browser/E2E tests for the Autocomplete component are not yet possible since no adapter rendering layer was implemented in this task."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-26T04:23:07.689882Z",
+    "agent_lines": 2701,
+    "agent_removed": 568,
+    "human_added": 264,
+    "human_modified": 364,
+    "human_removed": 0,
+    "total_committed": 3147,
+    "total_lines_changed": 3897,
+    "agent_percentage": 83.88503977418526,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 314,
+      "user_lines_removed": 182,
+      "agent_lines_added": 3197,
+      "agent_lines_removed": 750,
+      "user_added_per_file": {
+        "crates/ars-components/src/selection/autocomplete/mod.rs": 152,
+        "crates/ars-components/tests/proptest_state_machines/selection.rs": 2,
+        "spec/components/selection/autocomplete.md": 36,
+        "spec/dioxus-components/selection/autocomplete.md": 57,
+        "spec/foundation/02-component-catalog.md": 10,
+        "spec/leptos-components/selection/autocomplete.md": 57
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/selection/autocomplete/mod.rs": 22,
+        "spec/components/selection/autocomplete.md": 36,
+        "spec/dioxus-components/selection/autocomplete.md": 57,
+        "spec/foundation/02-component-catalog.md": 10,
+        "spec/leptos-components/selection/autocomplete.md": 57
+      }
+    }
+  ]
+}

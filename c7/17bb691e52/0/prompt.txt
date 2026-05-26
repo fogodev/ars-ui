@@ -1,0 +1,57 @@
+Can you resume the session that was running in this worktree here?
+
+---
+
+No, I want to update the spec and build a proper plan
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Autocomplete Spec Update + Agnostic Core Plan
+
+## Summary
+Update task #255 to make the spec match the issue: Autocomplete should be a framework-agnostic selection controller that owns input value, suggestion items, filtering/highlight state, active-descendant semantics, debounce intent, loading state, and empty/loading output. Keep Leptos/Dioxus adapters out of scope; live focus, caret, positioning, scrolling, and async fetching remain adapter responsibilities.
+
+## Key Changes
+- Update `spec/components/selection/autocomplete.md` so §1 defines the real contract:
+  - states: `Idle`, `Focused`, `Interacting`, `Loading`
+  - events: focus/blur, input change, debounce expiry/cancel/restart, set loading, update items, highlight navigation, item selection, clear, controlled prop sync
+  - context: `items`, `visible_keys`, `highlighted_key`, `input_value`, `selected_key`, `loading`, `debounce_pending`, `disabled`, `collection_id`, ids/messages
+  - props: `items`, `input_value`, `default_input_value`, `filter_mode`, `debounce: Option<Duration>`, `loading`, `disabled`, `collection_id`
+- Expand anatomy from `Root/Input/ClearTrigger` to include owned suggestion output:
+  - `Root`, `Input`, `ClearTrigger`, `Content`, `Item { key }`, `ItemText { key }`, `EmptyState`, `LoadingIndicator`, `LiveRegion`
+- Implement `crates/ars-components/src/selection/autocomplete/mod.rs` following Combobox/Listbox patterns:
+  - use `ars_collections::{Key, StaticCollection}` and a local `Item { label: String }`
+  - filter visible keys with existing `FilterMode`
+  - keep keyboard navigation in core and set `aria-activedescendant` from `highlighted_key`
+  - emit `Effect::AutocompleteDebounce` using `PendingEffect` like `SearchInput`
+  - selecting an item populates uncontrolled input and stores `selected_key`; controlled input records selection but waits for prop sync
+- Export the module from `crates/ars-components/src/selection/mod.rs`.
+
+## Test Plan
+- Add failing tests first in the new module for every issue-named behavior:
+  - input change filters suggestions and schedules debounce when configured
+  - `DebounceExpired` clears pending debounce without changing selection
+  - loading state exposes `aria-busy`, loading indicator attrs, and `State::Loading`
+  - empty filtered results expose `EmptyState`
+  - Arrow/Home/End navigate visible suggestions and update `aria-activedescendant`
+  - Enter/select item populates uncontrolled input
+  - disabled autocomplete ignores input/navigation/selection
+  - `ConnectApi` emits correct `role="combobox"`, `aria-autocomplete`, `aria-expanded`, `aria-haspopup="listbox"`, `aria-controls`, and item/listbox roles
+- Add spec-conformance anatomy coverage in `crates/ars-components/tests/spec_conformance/selection.rs`.
+- Add snapshot coverage for each part and output branch: idle/focused/loading/empty/highlighted/disabled/debounce-relevant attrs.
+- Add proptest coverage in `crates/ars-components/tests/proptest_state_machines/selection.rs` for highlight/visible-key invariants.
+- Run focused verification:
+  - `cargo test -p ars-components selection::autocomplete --lib`
+  - `cargo test -p ars-components --test spec_conformance autocomplete`
+  - `cargo test -p ars-components --test proptest_state_machines autocomplete`
+  - `cargo insta test -p ars-components --unreferenced=reject`
+  - `cargo xtask spec validate`
+  - `cargo clippy -p ars-components --all-targets --all-features -- -D warnings`
+  - targeted mutation run for `crates/ars-components/src/selection/autocomplete/mod.rs`
+
+## Assumptions
+- The spec update intentionally overrides the issue’s stale “No spec change required” line.
+- Autocomplete owns listbox suggestion semantics in core, but not DOM focus, popup positioning, scrolling, or async fetch execution.
+- No new dependency crates are needed.
+- Implementation follows TDD and the required post-implementation audit before any commit or push.
