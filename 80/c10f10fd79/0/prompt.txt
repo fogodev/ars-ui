@@ -1,0 +1,9 @@
+I reviewed here, let's commit and push a PR to github. Don't forget to include yourself as co-author and don't use a Draft PR
+
+---
+
+Why haven't you used the @.agents/skills/waiting-for-codex-review/SKILL.md ?
+
+---
+
+The reviews are there, you stopped polling too soon
