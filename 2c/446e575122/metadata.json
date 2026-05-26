@@ -1,0 +1,44 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "2c446e575122",
+  "strategy": "manual-commit",
+  "branch": "t3code/db05eb6d",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/input/editable/mod.rs",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_cancel_trigger.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_disabled_trigger.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_edit_trigger.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_input_default.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_input_disabled.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_input_form_constraints.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_input_readonly.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_label.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_preview.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_root_disabled_readonly_invalid_focus_visible.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_root_editing.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_root_preview.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_submit_trigger.snap",
+    "crates/ars-components/src/input/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/input.rs",
+    "crates/ars-components/tests/spec_conformance/input.rs",
+    "spec/components/input/editable.md",
+    "spec/dioxus-components/input/editable.md",
+    "spec/leptos-components/input/editable.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/2c/446e575122/0/metadata.json",
+      "transcript": "/2c/446e575122/0/full.jsonl",
+      "content_hash": "/2c/446e575122/0/content_hash.txt",
+      "prompt": "/2c/446e575122/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 714852,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 41209984,
+    "output_tokens": 59859,
+    "api_call_count": 304
+  }
+}

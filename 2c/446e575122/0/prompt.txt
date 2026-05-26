@@ -1,0 +1,306 @@
+Implement task #241
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #241 Editable Agnostic Core Implementation Plan
+
+## Summary
+
+Implement GitHub issue #241: `Editable` framework-agnostic core in `ars-components`, scoped to `spec/components/input/editable.md` and the issue comment’s IME requirements. No Leptos/Dioxus adapter components will be added. The implementation will follow the existing `text_field`, `textarea`, and `combobox` state-machine patterns, use TDD first, then run the mandatory post-implementation audit before presenting the diff for review.
+
+## Current State
+
+- Issue #241 is open and in roadmap status `Todo`.
+- No `editable` core module exists under `crates/ars-components/src/input/`.
+- Spec registration already exists in `spec/manifest.toml`.
+- Nearby implementation patterns exist in:
+  - `crates/ars-components/src/input/text_field/mod.rs`
+  - `crates/ars-components/src/input/textarea/mod.rs`
+  - `crates/ars-components/src/selection/combobox/mod.rs`
+  - `crates/ars-components/tests/spec_conformance/input.rs`
+
+## Scope
+
+In scope:
+- New `ars_components::input::editable` module.
+- Public state machine types exactly aligned with `spec/components/input/editable.md` §1 where possible.
+- IME composition behavior from `spec/components/input/editable.md` §3.4 and issue comment.
+- Unit tests, snapshot tests, spec-conformance test, focused coverage/mutation validation.
+- Add `pub mod editable;` to `crates/ars-components/src/input/mod.rs`.
+
+Out of scope:
+- Leptos or Dioxus adapter components.
+- Adapter DOM focus/selection/caret/autosize behavior.
+- New dependency crates.
+- Commit, push, PR creation, or board mutation without explicit approval outside Plan Mode.
+
+## Public API / Interface Additions
+
+Add `crates/ars-components/src/input/editable/mod.rs` with public items:
+
+- `State`
+  - `Preview`
+  - `Editing`
+
+- `Event`
+  - `Activate`
+  - `Submit(String)`
+  - `Cancel`
+  - `Change(String)`
+  - `Focus { is_keyboard: bool }`
+  - `Blur`
+  - `CompositionStart`
+  - `CompositionEnd(String)`
+  - `SetValue(Option<String>)`
+  - `SetProps`
+
+- `SubmitMode`
+  - `Blur`
+  - `Enter`
+  - `Both`
+  - `None`
+
+- `ActivateMode`
+  - `Click`
+  - `DblClick`
+  - `Focus`
+  - `None`
+
+- `Context`
+  - fields from the spec, plus `required`, `name`, `form`, `submit_on_blur`, and `is_composing` where needed for output and IME behavior.
+
+- `Props`
+  - fields from the spec.
+  - builder methods consistent with existing input components.
+  - no new dependency crate.
+  - no callback props unless implementation audit finds a repo-wide convention that requires them for controlled updates. Default plan is to avoid extra public callbacks because the spec does not declare them.
+
+- `Messages`
+  - `field_label`
+  - `submit_label`
+  - `cancel_label`
+  - `edit_label`
+
+- `Machine`
+
+- `Part`
+  - `Root`
+  - `Label`
+  - `Preview`
+  - `Input`
+  - `SubmitTrigger`
+  - `CancelTrigger`
+  - `EditTrigger`
+
+- `Api<'a>`
+  - `is_editing()`
+  - `root_attrs()`
+  - `label_attrs()`
+  - `preview_attrs()`
+  - `input_attrs()`
+  - `submit_trigger_attrs()`
+  - `cancel_trigger_attrs()`
+  - `edit_trigger_attrs()`
+  - `on_preview_click()`
+  - `on_preview_dblclick()`
+  - `on_preview_focus(is_keyboard: bool)`
+  - `on_preview_blur()`
+  - `on_preview_keydown(&KeyboardEventData)`
+  - `on_input_change(String)`
+  - `on_input_blur()`
+  - `on_input_keydown(&KeyboardEventData)`
+  - `on_input_keydown_after_composition_check(&KeyboardEventData)`
+  - `on_input_composition_start()`
+  - `on_input_composition_end(String)`
+  - `on_submit_click()`
+  - `on_cancel_click()`
+  - `on_edit_trigger_click()`
+
+## Behavioral Decisions
+
+1. Activation:
+   - `Activate` transitions `Preview -> Editing` only when not disabled and not readonly.
+   - Enter on focused preview activates editing.
+   - Preview click activates only when `activate_mode == Click`.
+   - Preview double-click activates only when `activate_mode == DblClick`.
+   - Preview focus activates only when `activate_mode == Focus`.
+   - Edit trigger activates regardless of `activate_mode`, unless disabled/readonly.
+
+2. Editing value:
+   - `Change(String)` updates `edit_value` only while editing and not disabled/readonly/composing.
+   - `max_length` clamps by character count, not byte slicing, to avoid panics on multibyte text.
+
+3. Submit/cancel:
+   - `Submit(value)` commits to `ctx.value` in uncontrolled mode and returns to `Preview`.
+   - In controlled mode, `ctx.value` remains parent-owned; `edit_value` reflects submitted text locally until props sync.
+   - `Cancel` restores `edit_value` from committed `ctx.value` and returns to `Preview`.
+   - Escape in editing cancels.
+   - Enter in editing submits only when `submit_mode == Enter || submit_mode == Both`.
+   - Blur/external click is represented by `Event::Blur`; it submits when effective blur submission is enabled, otherwise cancels.
+   - Effective blur submission is true only when `submit_on_blur == true` and `submit_mode == Blur || submit_mode == Both`.
+
+4. IME:
+   - `CompositionStart` sets `is_composing = true`.
+   - `on_input_change` suppresses `Change` while composing.
+   - `CompositionEnd(final_value)` sets `is_composing = false`, updates `edit_value` to the final value, and does not auto-submit.
+   - `KeyboardKey::Process` dispatches `CompositionStart` to cover Chrome’s pre-composition keydown.
+   - Enter during composition does not submit.
+   - `on_input_keydown_after_composition_check` retries Enter handling only after the adapter’s microtask; it submits only if composition has ended.
+
+5. Attributes:
+   - Root sets `data-ars-scope="editable"`, `data-ars-part="root"`, `role="group"`, `data-ars-state`.
+   - Root sets `data-ars-disabled`, `data-ars-readonly`, `data-ars-focus-visible` when applicable.
+   - Label uses `id=<base>-label` and `for=<base>-input`.
+   - Preview is focusable with `tabindex="0"` and exposes part/scope attrs.
+   - Input sets `id`, `aria-label`, `value`, `placeholder`, `maxlength`, `name`, `form`, disabled/readonly, `aria-required`, and `aria-invalid`.
+   - Trigger buttons set `type="button"`, localized `aria-label`, `tabindex="-1"`, and disabled when disabled/readonly prevents use.
+
+## Implementation Steps
+
+1. Move issue #241 to `In Progress` on the GitHub Project board once execution is authorized.
+
+2. Add failing spec-conformance coverage:
+   - Modify `crates/ars-components/tests/spec_conformance/input.rs`.
+   - Import `editable`.
+   - Add `editable_anatomy_matches_spec()` for all seven spec parts.
+
+3. Add the new module shell:
+   - Create `crates/ars-components/src/input/editable/mod.rs`.
+   - Add crate docs, public documented types, `Machine`, `Part`, and `Api`.
+   - Add `pub mod editable;` in `crates/ars-components/src/input/mod.rs`.
+
+4. Write unit tests first inside `editable/mod.rs`:
+   - Initial state uses controlled value or default value.
+   - Preview activates editing on `Activate`.
+   - Disabled/readonly ignore activation.
+   - `Change` updates transient edit value and clamps max length by chars.
+   - `Submit` commits uncontrolled value.
+   - Controlled submit does not overwrite parent-owned committed value.
+   - `Cancel` reverts edit value.
+   - Escape cancels.
+   - Enter submits for `Enter`/`Both` and is ignored for `Blur`/`None`.
+   - Blur submits or cancels according to effective blur behavior.
+   - Click/double-click/focus activation modes dispatch only their matching activation.
+   - Props sync updates output-affecting context and controlled value.
+   - IME composition lifecycle tracks `is_composing`.
+   - Input change is suppressed while composing.
+   - `CompositionEnd` applies final composed edit value.
+   - `KeyboardKey::Process` starts composition.
+   - Enter during composition is suppressed.
+   - After-composition retry handles Enter only once composition is no longer active.
+   - `part_attrs` delegates to every part method.
+   - `Debug` redacts sender, matching local API conventions.
+
+5. Implement transitions:
+   - Match the spec’s `State`, `Event`, `SubmitMode`, `ActivateMode`, `Context`, `Props`, and `Messages`.
+   - Use `ars_core::{Bindable, ComponentIds, ComponentMessages, ComponentPart, ConnectApi, Env, HtmlAttr, AriaAttr, Locale, MessageFn, TransitionPlan}`.
+   - Use `ars_interactions::KeyboardEventData` and `ars_core::KeyboardKey`.
+   - Implement `Machine::on_props_changed` with stable-id assertion and `SetValue`/`SetProps` events.
+
+6. Implement `Api` helpers:
+   - Attribute methods first.
+   - Event fan-out helpers second.
+   - Private helpers:
+     - `effective_blur_submits()`
+     - `can_activate()`
+     - `is_keyboard_composing(data)`
+     - `clamp_to_max_chars(value, max_length)`
+
+7. Add snapshots:
+   - Create committed insta snapshots under `crates/ars-components/src/input/editable/snapshots/`.
+   - Snapshot every anatomy part.
+   - Snapshot output-affecting branches:
+     - root preview
+     - root editing
+     - root disabled/readonly/invalid/focus-visible
+     - label
+     - preview
+     - input default
+     - input with placeholder/maxlength/name/form/required/invalid
+     - submit trigger
+     - cancel trigger
+     - edit trigger
+     - disabled triggers
+
+8. Add focused proptest coverage if implementation exposes enough stateful invariants:
+   - Modify `crates/ars-components/tests/proptest_state_machines/input.rs`.
+   - Add an Editable event sequence test that asserts disabled/readonly never enter editing and that committed value equals last successful submit/blur-submit under uncontrolled mode.
+   - If the unit tests already fully cover the small state surface and mutation testing confirms no gap, document in the audit that proptest was assessed and not needed.
+
+9. Run focused tests while developing:
+   - `cargo test -p ars-components editable --features i18n`
+   - `cargo test -p ars-components --test spec_conformance editable --features i18n`
+   - `cargo insta test -p ars-components editable --features i18n --unreferenced=reject`
+
+10. Run targeted component validation:
+   - `cargo test -p ars-components input --features i18n`
+   - `cargo clippy -p ars-components --all-targets --features i18n -- -D warnings`
+   - `cargo xtask spec info editable`
+   - `cargo xtask spec validate`
+
+11. Run mandatory mutation and coverage checks for the new agnostic component:
+   - `cargo mutants -p ars-components -f crates/ars-components/src/input/editable/mod.rs`
+   - Triage every `MISSED` mutant in this same work:
+     - add a killing test for real gaps;
+     - add a justified `.cargo/mutants.toml` skip only for true equivalent mutations.
+   - `cargo llvm-cov test -p ars-components --features i18n --lib --no-fail-fast --text -- input::editable`
+   - Review every uncovered branch in the annotated output.
+
+12. Invoke `.agents/skills/post-implementation-audit/SKILL.md` after named tests pass:
+   - Phase 1: spec/implementation drift audit against `spec/components/input/editable.md` and IME refs in foundation specs.
+   - Phase 2: at least two “anything else missing?” rounds, including adapter specs, manifest/catalog, dependency and prelude surfaces.
+   - Phase 3: test coverage audit covering unit, snapshot, proptest decision, mutation, doc, spec-conformance, and llvm-cov.
+   - Land every finding in the same work before presenting the result.
+
+13. Final local verification before user review:
+   - `cargo test -p ars-components editable --features i18n`
+   - `cargo test -p ars-components --test spec_conformance editable --features i18n`
+   - `cargo insta test -p ars-components editable --features i18n --unreferenced=reject`
+   - `cargo clippy -p ars-components --all-targets --features i18n -- -D warnings`
+   - `cargo xtask spec validate`
+   - `cargo mutants -p ars-components -f crates/ars-components/src/input/editable/mod.rs`
+   - `cargo llvm-cov test -p ars-components --features i18n --lib --no-fail-fast --text -- input::editable`
+
+14. Present the result for user review before any commit.
+
+15. After explicit user approval only:
+   - Run `cargo xci-fast`.
+   - Commit and push a PR targeting `main`.
+   - PR body must include `Closes #241`.
+   - If `.snap` files are created or modified, add `snapshot-reviewed`.
+   - Invoke `.agents/skills/waiting-for-codex-review/SKILL.md` after first push and after every subsequent push.
+   - Do not close the issue until the PR is merged, CI is green, and Codex leaves 👍.
+
+## Test Cases / Acceptance Scenarios
+
+Required named issue tests:
+- Preview to Editing on activation.
+- Submit commits value.
+- Cancel reverts.
+- Escape cancels.
+- Enter submits.
+- External click/blur submits or cancels according to props.
+- ConnectApi produces ARIA/data attrs for preview and input areas.
+
+Additional required tests:
+- Disabled and readonly block activation/change/submit.
+- Controlled value sync does not overwrite parent-owned value on local submit.
+- `submit_on_blur=false` converts blur from submit to cancel.
+- `SubmitMode::None` prevents auto-submit from blur and Enter.
+- Activation modes dispatch correctly for click, double-click, focus, and none.
+- IME composition start/end lifecycle.
+- `KeyboardKey::Process` starts composition.
+- Enter is suppressed during active composition.
+- After-composition retry submits only after composition ends.
+- Max length clamps multibyte-safe by chars.
+- Snapshot tests cover all parts and state/prop branches.
+- Spec-conformance anatomy test covers all parts.
+
+## Assumptions / Defaults
+
+- `Event::Blur` is the agnostic representation for external click behavior; adapters will decide whether an outside click causes blur and call `on_input_blur`.
+- Focus, text selection, caret placement, native element refs, and Firefox microtask scheduling are adapter responsibilities. The core provides `on_input_keydown_after_composition_check` for adapters to call after the microtask.
+- No spec change is expected. If implementation reveals spec drift, resolve it during the mandatory audit in the same work.
+- No new dependency crate will be added.
+- No commit, push, PR creation, issue close, or project board update happens until execution is authorized outside Plan Mode and the relevant approval gate is met.

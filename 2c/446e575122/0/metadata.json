@@ -1,0 +1,144 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "2c446e575122",
+  "session_id": "019e6068-c2d1-7bf3-8ab1-9fb53346afcd",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-26T00:45:33.124605Z",
+  "branch": "t3code/db05eb6d",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/input/editable/mod.rs",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_cancel_trigger.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_disabled_trigger.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_edit_trigger.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_input_default.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_input_disabled.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_input_form_constraints.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_input_readonly.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_label.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_preview.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_root_disabled_readonly_invalid_focus_visible.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_root_editing.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_root_preview.snap",
+    "crates/ars-components/src/input/editable/snapshots/ars_components__input__editable__tests__editable_submit_trigger.snap",
+    "crates/ars-components/src/input/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/input.rs",
+    "crates/ars-components/tests/spec_conformance/input.rs",
+    "spec/components/input/editable.md",
+    "spec/dioxus-components/input/editable.md",
+    "spec/leptos-components/input/editable.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "90797fbd2d5c",
+  "token_usage": {
+    "input_tokens": 714852,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 41209984,
+    "output_tokens": 59859,
+    "api_call_count": 304
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #241: the `Editable` framework-agnostic core component in `ars-components`, following the component spec and issue comment's IME composition requirements, with no Leptos/Dioxus adapter work.",
+    "outcome": "Fully implemented `ars_components::input::editable` with state machine, IME composition handling, 13 committed insta snapshots, spec-conformance tests, proptest invariant tests, and 0 mutation survivors (133 caught, 15 unviable out of 148). Committed and pushed a non-draft PR targeting main with `Closes #241`.",
+    "learnings": {
+      "repo": [
+        "New input components follow the `text_field`/`textarea`/`combobox` state-machine pattern: `State`, `Event`, `Context`, `Props`, `Messages`, `Machine`, `Part`, `Api<'a>` in one `mod.rs` under `crates/ars-components/src/input/<name>/`.",
+        "`ComponentPart` derive already provides basic trait impls for `Part`; adding duplicate derives is a compile error, not a warning.",
+        "Snapshots live at `crates/ars-components/src/input/<component>/snapshots/` and are committed; `INSTA_UPDATE=always` is the accepted workflow for first-recording.",
+        "`cargo insta test --unreferenced=reject` must target the full crate, not a filtered subset — a filter causes all non-matching snapshots to appear unreferenced and fails the check.",
+        "Post-implementation audit is a mandatory repo skill and covers spec/code drift, adapter specs, manifest/catalog surfaces, dependency surfaces, and test-coverage completeness before any commit.",
+        "Adapter specs (`spec/leptos-components/`, `spec/dioxus-components/`) must be kept in sync with the core contract — they had stale event names (`Confirm`, `InputChange`, `SetDisabled`) that were fixed as part of this work.",
+        "GitHub project board item IDs must be discovered via `gh project item-list` + `--jq` before `gh project item-edit` can move an issue to In Progress.",
+        "`cargo mutants -p ars-components -f <file>` is the required mutation gate; it runs ~23–26 minutes and must be run twice: once to find survivors, once to verify all gaps are closed.",
+        "Tab key submits while editing regardless of `submit_mode` per spec §3 — the initial implementation incorrectly tied it to the blur-submit mode, caught during the post-implementation spec drift audit."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/input/text_field/mod.rs",
+          "line": 752,
+          "end_line": 775,
+          "finding": "Reference pattern for `ComponentPart` derive and `Part` enum; shows the minimum needed without duplicate trait impls."
+        },
+        {
+          "path": "spec/components/input/editable.md",
+          "line": 558,
+          "end_line": 586,
+          "finding": "Tab key behavior spec: Tab submits unconditionally while editing, independent of `submit_mode`. Was not reflected in the initial implementation."
+        },
+        {
+          "path": "crates/ars-components/src/input/editable/mod.rs",
+          "line": 900,
+          "end_line": 1060,
+          "finding": "IME composition guard: `on_input_change` suppresses `Change` while `is_composing`; `on_input_keydown_after_composition_check` retries Enter only after the adapter's microtask resolves composition state."
+        }
+      ],
+      "workflow": [
+        "TDD order: add failing spec-conformance test first (compile error is the red), then the production module, then unit tests before implementing transitions.",
+        "`cargo +nightly fmt --all` must run after all code changes and before the final clippy pass — formatting changes can introduce new clippy findings.",
+        "Private helper functions should be `const fn` by convention; clippy with `-D warnings` catches this but only after formatting is clean.",
+        "`cargo llvm-cov report --text --output-path /tmp/cov.txt` then grep for `\\^0` is the practical way to find uncovered branches in a specific module.",
+        "Mutation survivors cluster by type: builder-unsetter methods, boolean guard inversions, per-prop sync detectors — adding one test per cluster type is more efficient than one test per survivor.",
+        "Running `cargo mutants` twice (find survivors → add tests → verify clean) is required even when the source changes are style-only, because the mutation baseline must match current source."
+      ]
+    },
+    "friction": [
+      "`cargo insta test` filter semantics: passing a filter with `--unreferenced=reject` marks every non-matching snapshot as unreferenced, requiring a full-crate run instead of a scoped one.",
+      "Mutation runs take 23–26 minutes each; two full passes were required (first pass found 37 survivors, second pass confirmed 0), making mutation the longest gate by far.",
+      "GitHub project board update required three exploratory API calls (`gh project list`, `gh project field-list`, `gh project item-list`) to discover the opaque GraphQL IDs before the actual `item-edit` could proceed.",
+      "`cargo llvm-cov` inline test output does not include annotated per-file branch data; `--output-path` with a separate report step is required to see `^0` markers.",
+      "Nightly formatter changed code after clippy was already clean, forcing a second clippy run and minor patch for an induced style issue.",
+      "The `ComponentPart` duplicate-derive failure was not surfaced until the first compile — the convention is only discoverable by reading existing modules, not from error messages alone."
+    ],
+    "open_items": [
+      "Leptos adapter component for Editable is explicitly out of scope — future work tracked in `spec/leptos-components/input/editable.md`.",
+      "Dioxus adapter component for Editable is explicitly out of scope — future work tracked in `spec/dioxus-components/input/editable.md`.",
+      "DOM-level adapter responsibilities deferred: focus management, text selection, caret placement, native element refs, and Firefox microtask scheduling for `on_input_keydown_after_composition_check`.",
+      "Proptest coverage was assessed as non-additive given unit test coverage of the small state surface; document decision should be revisited if the state machine grows."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-26T00:44:26.739243Z",
+    "agent_lines": 2787,
+    "agent_removed": 54,
+    "human_added": 114,
+    "human_modified": 50,
+    "human_removed": 0,
+    "total_committed": 2926,
+    "total_lines_changed": 3005,
+    "agent_percentage": 94.54242928452578,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 82,
+      "user_lines_removed": 25,
+      "agent_lines_added": 2894,
+      "agent_lines_removed": 79,
+      "user_added_per_file": {
+        "crates/ars-components/src/input/editable/mod.rs": 50,
+        "crates/ars-components/tests/proptest_state_machines/input.rs": 17,
+        "spec/components/input/editable.md": 1,
+        "spec/dioxus-components/input/editable.md": 7,
+        "spec/leptos-components/input/editable.md": 7
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/input/editable/mod.rs": 10,
+        "spec/components/input/editable.md": 1,
+        "spec/dioxus-components/input/editable.md": 7,
+        "spec/leptos-components/input/editable.md": 7
+      }
+    }
+  ]
+}
