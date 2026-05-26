@@ -230,7 +230,7 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
             Event::Toggle if !ctx.disabled => open_transition(ctx, !ctx.open.get()),
@@ -277,6 +277,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "collapsible::Props.id must remain stable after init"
+        );
+
         let mut events = Vec::new();
 
         if old.disabled != new.disabled
@@ -298,7 +303,7 @@ impl ars_core::Machine for Machine {
 }
 ```
 
-Controlled-mode `Toggle` and `SetOpen` update the pending internal value via `Bindable::set`, but visible state continues to follow the controlled `open` value until the parent rerenders and `SyncControlledOpen` applies the new controlled prop. `SyncControlledOpen` also updates the bindable's internal fallback to the controlled value so that leaving controlled mode resumes from the latest visible state. When `open` changes from `Some(_)` to `None`, `SyncProps` returns the bindable to uncontrolled mode and the visible state follows that synchronized internal value.
+Controlled-mode `Toggle` and `SetOpen` update the pending internal value via `Bindable::set`, but visible state continues to follow the controlled `open` value until the parent rerenders and `SyncControlledOpen` applies the new controlled prop. `SyncControlledOpen` also updates the bindable's internal fallback to the controlled value so that leaving controlled mode resumes from the latest visible state. When `open` changes from `Some(_)` to `None`, `SyncProps` first resets the bindable's internal fallback to the last visible controlled value, then returns the bindable to uncontrolled mode so uncommitted internal toggle attempts do not leak through. `id` is stable after initialization; changing it after mount is a programmer error because generated `id`/ARIA relationships are cached in context.
 
 ### 1.6 Connect / API
 
@@ -423,7 +428,10 @@ impl<'a> Api<'a> {
     /// Returns `true` when the key was handled so adapters can prevent the
     /// native button activation click and avoid dispatching a duplicate toggle.
     pub fn on_trigger_keydown(&self, data: &KeyboardEventData) -> bool {
-        if !self.ctx.disabled && (data.key == KeyboardKey::Enter || data.key == KeyboardKey::Space) {
+        if !self.ctx.disabled
+            && !data.repeat
+            && (data.key == KeyboardKey::Enter || data.key == KeyboardKey::Space)
+        {
             (self.send)(Event::Toggle);
             return true;
         }

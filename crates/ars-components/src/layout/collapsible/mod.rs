@@ -332,6 +332,11 @@ impl ars_core::Machine for Machine {
     }
 
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "collapsible::Props.id must remain stable after init"
+        );
+
         let mut events = Vec::new();
 
         let prop_backed_context_changed = old.disabled != new.disabled
@@ -525,7 +530,9 @@ impl Api<'_> {
     /// Returns `true` when the key was handled so adapters can prevent the
     /// native button activation click and avoid dispatching a duplicate toggle.
     pub fn on_trigger_keydown(&self, data: &KeyboardEventData) -> bool {
-        if !self.ctx.disabled && (data.key == KeyboardKey::Enter || data.key == KeyboardKey::Space)
+        if !self.ctx.disabled
+            && !data.repeat
+            && (data.key == KeyboardKey::Enter || data.key == KeyboardKey::Space)
         {
             (self.send)(Event::Toggle);
             return true;
@@ -592,13 +599,10 @@ fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
     let collapsed_width = props.collapsed_width.clone();
     let was_controlled = ctx.open.is_controlled();
     let leaving_controlled = was_controlled && props.open.is_none();
+    let visible_open = *ctx.open.get();
 
     let target_state = if leaving_controlled {
-        let mut open = ctx.open.clone();
-
-        open.sync_controlled(None);
-
-        Some(state_from_bool(*open.get()))
+        Some(state_from_bool(visible_open))
     } else {
         None
     };
@@ -615,6 +619,7 @@ fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
         ctx.collapsed_width = collapsed_width;
 
         if leaving_controlled {
+            ctx.open.set(visible_open);
             ctx.open.sync_controlled(None);
         }
 
@@ -866,6 +871,22 @@ mod tests {
     }
 
     #[test]
+    fn controlled_to_uncontrolled_ignores_uncommitted_internal_toggle() {
+        let mut service = service(props().open(false));
+
+        drop(service.send(Event::Toggle));
+
+        assert_eq!(service.state(), &State::Closed);
+        assert_eq!(service.context().open.get(), &false);
+
+        drop(service.set_props(props().uncontrolled()));
+
+        assert_eq!(service.state(), &State::Closed);
+        assert_eq!(service.context().open.get(), &false);
+        assert!(!service.context().open.is_controlled());
+    }
+
+    #[test]
     fn controlled_sync_transition_only_noops_for_matching_controlled_state() {
         let controlled = service(props().open(false));
 
@@ -943,8 +964,8 @@ mod tests {
 
         let uncontrolled = service.set_props(props());
 
-        assert!(uncontrolled.state_changed);
-        assert_eq!(service.state(), &State::Open);
+        assert!(uncontrolled.context_changed);
+        assert_eq!(service.state(), &State::Closed);
         assert!(!service.context().open.is_controlled());
     }
 
@@ -1024,12 +1045,26 @@ mod tests {
 
         events.borrow_mut().clear();
 
+        let mut repeated = keyboard(KeyboardKey::Space);
+        repeated.repeat = true;
+
+        assert!(!api.on_trigger_keydown(&repeated));
+        assert!(events.borrow().is_empty());
+
         let disabled = service(props().disabled(true));
 
         let disabled_api = disabled.connect(&send);
 
         assert!(!disabled_api.on_trigger_keydown(&keyboard(KeyboardKey::Enter)));
         assert!(events.borrow().is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "collapsible::Props.id must remain stable after init")]
+    fn collapsible_set_props_panics_when_id_changes() {
+        let mut service = service(props());
+
+        drop(service.set_props(props().id("next-collapsible")));
     }
 
     #[test]
