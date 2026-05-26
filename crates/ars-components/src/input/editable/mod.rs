@@ -1007,7 +1007,9 @@ impl Api<'_> {
 
             KeyboardKey::Escape if !composing => (self.send)(Event::Cancel),
 
-            KeyboardKey::Enter if self.ctx.suppress_next_enter_after_composition => {
+            KeyboardKey::Enter
+                if after_composition_check && self.ctx.suppress_next_enter_after_composition =>
+            {
                 (self.send)(Event::CompositionConfirmKey);
             }
 
@@ -1763,6 +1765,25 @@ mod tests {
                 Event::CompositionConfirmKey,
                 Event::Submit("final".to_string()),
             ]
+        );
+    }
+
+    #[test]
+    fn editable_normal_enter_after_composition_end_can_submit() {
+        let sent = RefCell::new(Vec::new());
+        let mut editable = service(props().submit_mode(SubmitMode::Enter));
+
+        drop(editable.send(Event::Activate));
+        drop(editable.send(Event::CompositionStart));
+        drop(editable.send(Event::CompositionEnd("final".to_string())));
+
+        editable
+            .connect(&|event| sent.borrow_mut().push(event))
+            .on_input_keydown(&keyboard(KeyboardKey::Enter, false));
+
+        assert_eq!(
+            sent.borrow().as_slice(),
+            &[Event::Submit("final".to_string())]
         );
     }
 

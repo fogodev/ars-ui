@@ -500,7 +500,11 @@ proptest! {
                 }
 
                 EditableAction::Submit(value) => {
-                    if expected_state == editable::State::Editing && !props.disabled && !props.readonly {
+                    if expected_state == editable::State::Editing
+                        && !props.disabled
+                        && !props.readonly
+                        && !expected_composing
+                    {
                         let value = clamp_editable_text(&value);
 
                         expected_committed = value.clone();
@@ -525,7 +529,7 @@ proptest! {
                 EditableAction::Focus(is_keyboard) => editable::Event::Focus { is_keyboard },
 
                 EditableAction::Blur => {
-                    if expected_state == editable::State::Editing {
+                    if expected_state == editable::State::Editing && !expected_composing {
                         expected_committed = expected_edit.clone();
                         expected_state = editable::State::Preview;
                         expected_composing = false;

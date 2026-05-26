@@ -661,7 +661,9 @@ impl<'a> Api<'a> {
         match data.key {
             KeyboardKey::Process => (self.send)(Event::CompositionStart),
             KeyboardKey::Escape if !composing => (self.send)(Event::Cancel),
-            KeyboardKey::Enter if self.ctx.suppress_next_enter_after_composition => {
+            KeyboardKey::Enter
+                if after_composition_check && self.ctx.suppress_next_enter_after_composition =>
+            {
                 (self.send)(Event::CompositionConfirmKey);
             }
             KeyboardKey::Enter
@@ -772,7 +774,7 @@ The `Editable` component must handle IME (Input Method Editor) composition corre
 - On `compositionstart`: set `is_composing = true`. Suppress value commit and `on_change` emission for the duration.
 - On `compositionupdate`: update the visual display but do NOT commit the value or fire `on_change`.
 - On `compositionend`: set `is_composing = false` and apply the final composed value through `Event::CompositionEnd`; adapter-level value-change callbacks are outside the agnostic core surface.
-- **Enter key during composition**: If `is_composing` is true, Enter key confirms the IME candidate rather than committing the edit. `CompositionEnd` marks the next Enter as a possible IME confirmation key so WebKit/Safari ordering (`compositionend` before the confirming `keydown`) is also suppressed. The edit commit only happens on a subsequent Enter press (or blur) after composition ends.
+- **Enter key during composition**: If `is_composing` is true, Enter key confirms the IME candidate rather than committing the edit. `CompositionEnd` marks the next Enter as a possible IME confirmation key; `on_input_keydown_after_composition_check` consumes that key so WebKit/Safari ordering (`compositionend` before the confirming `keydown`) is also suppressed. A normal later Enter still submits with `SubmitMode::Enter` or `Both`.
 - **Commit while composing**: `Submit` and blur-submit are ignored during active composition so stale pre-composition text is not committed before `CompositionEnd` supplies the final text.
 
 ## 4. Internationalization
