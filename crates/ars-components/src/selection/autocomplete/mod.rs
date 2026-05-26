@@ -647,14 +647,15 @@ impl ars_core::Machine for Machine {
                     State::Focused
                 })
                 .apply(|ctx: &mut Context| {
+                    let empty = String::new();
+
+                    ctx.input_value.set(empty.clone());
+
                     if ctx.input_value.is_controlled() {
-                        let input = ctx.input_value.get().clone();
-                        ctx.visible_keys = visible_keys_for(ctx, &input);
-                    } else {
-                        ctx.input_value.set(String::new());
-                        ctx.visible_keys = None;
+                        ctx.input_value.sync_controlled(Some(empty));
                     }
 
+                    ctx.visible_keys = None;
                     ctx.highlighted_key = None;
                     ctx.selected_key = None;
                     ctx.debounce_pending = false;
@@ -666,9 +667,18 @@ impl ars_core::Machine for Machine {
                 let value = value.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     if let Some(value) = &value {
+                        let preserve_selection = ctx
+                            .selected_key
+                            .as_ref()
+                            .and_then(|key| ctx.items.get(key))
+                            .is_some_and(|node| node.text_value == *value);
+
                         ctx.input_value.set(value.clone());
                         ctx.input_value.sync_controlled(Some(value.clone()));
-                        ctx.selected_key = None;
+
+                        if !preserve_selection {
+                            ctx.selected_key = None;
+                        }
 
                         refresh_filter_and_highlight(ctx, value);
                     } else {
@@ -1081,6 +1091,8 @@ impl Api<'_> {
         match data.key {
             KeyboardKey::ArrowDown => (self.send)(Event::HighlightNext),
             KeyboardKey::ArrowUp => (self.send)(Event::HighlightPrev),
+            KeyboardKey::Home if self.popup_visible() => (self.send)(Event::HighlightFirst),
+            KeyboardKey::End if self.popup_visible() => (self.send)(Event::HighlightLast),
             KeyboardKey::Enter if !data.is_composing => (self.send)(Event::SelectHighlighted),
             KeyboardKey::Escape if !self.ctx.input_value.get().is_empty() => {
                 (self.send)(Event::Clear);
@@ -1652,6 +1664,27 @@ mod tests {
     }
 
     #[test]
+    fn controlled_input_sync_preserves_matching_selected_key() {
+        let mut autocomplete = service(props().input_value("br"));
+
+        drop(autocomplete.send(Event::SelectItem(key("bravo"))));
+
+        assert_eq!(autocomplete.context().selected_key, Some(key("bravo")));
+
+        drop(autocomplete.set_props(props().input_value("Bravo")));
+
+        assert_eq!(autocomplete.context().input_value.get(), "Bravo");
+        assert_eq!(autocomplete.context().selected_key, Some(key("bravo")));
+        assert_eq!(
+            autocomplete
+                .connect(&|_| {})
+                .item_attrs(&key("bravo"))
+                .get(&HtmlAttr::Aria(AriaAttr::Selected)),
+            Some("true")
+        );
+    }
+
+    #[test]
     fn debounce_prop_sync_cancels_pending_when_debounce_is_removed() {
         let mut autocomplete = service(props().debounce(Duration::from_millis(100)));
 
@@ -1667,24 +1700,25 @@ mod tests {
     }
 
     #[test]
-    fn clear_does_not_overwrite_controlled_input_value() {
+    fn clear_updates_controlled_input_value() {
         let mut autocomplete = service(props().input_value("Alpha"));
 
         drop(autocomplete.send(Event::SelectItem(key("alpha"))));
 
         drop(autocomplete.send(Event::Clear));
 
-        assert_eq!(autocomplete.context().input_value.get(), "Alpha");
+        assert_eq!(autocomplete.context().input_value.get(), "");
         assert_eq!(autocomplete.context().selected_key, None);
         assert_eq!(autocomplete.context().highlighted_key, None);
+        assert_eq!(autocomplete.context().visible_keys, None);
 
         drop(autocomplete.set_props(props().uncontrolled()));
 
-        assert_eq!(autocomplete.context().input_value.get(), "Alpha");
+        assert_eq!(autocomplete.context().input_value.get(), "");
     }
 
     #[test]
-    fn controlled_clear_preserves_visible_keys_for_authoritative_input() {
+    fn controlled_clear_clears_visible_keys_with_input_value() {
         let mut autocomplete = service(props().input_value("br"));
 
         drop(autocomplete.send(Event::SelectItem(key("bravo"))));
@@ -1696,12 +1730,9 @@ mod tests {
 
         drop(autocomplete.send(Event::Clear));
 
-        assert_eq!(autocomplete.context().input_value.get(), "br");
+        assert_eq!(autocomplete.context().input_value.get(), "");
         assert_eq!(autocomplete.context().selected_key, None);
-        assert_eq!(
-            autocomplete.context().visible_keys,
-            Some(BTreeSet::from([key("bravo")]))
-        );
+        assert_eq!(autocomplete.context().visible_keys, None);
     }
 
     #[test]
@@ -1822,6 +1853,25 @@ mod tests {
         api.on_input_keydown(&composing_keyboard(KeyboardKey::Enter));
 
         assert!(events.into_inner().is_empty());
+    }
+
+    #[test]
+    fn input_keydown_handles_home_end_when_popup_is_active() {
+        let events = RefCell::new(Vec::new());
+        let send = |event| events.borrow_mut().push(event);
+        let mut autocomplete = service(props().default_input_value("br"));
+
+        drop(autocomplete.send(Event::Focus { is_keyboard: true }));
+
+        let api = autocomplete.connect(&send);
+
+        api.on_input_keydown(&keyboard(KeyboardKey::Home));
+        api.on_input_keydown(&keyboard(KeyboardKey::End));
+
+        assert_eq!(
+            events.into_inner(),
+            vec![Event::HighlightFirst, Event::HighlightLast]
+        );
     }
 
     #[test]
