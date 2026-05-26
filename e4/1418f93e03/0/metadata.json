@@ -1,0 +1,82 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "e41418f93e03",
+  "session_id": "019e6078-cd16-7713-88b1-ed2b19e4f6db",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-26T03:17:45.444296Z",
+  "branch": "t3code/ed7b7f39",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "3c0edf7fe36b",
+  "token_usage": {
+    "input_tokens": 1390987,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 59896448,
+    "output_tokens": 63878,
+    "api_call_count": 381
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "summary": {
+    "intent": "Implement the framework-agnostic `layout::collapsible` component (issue #275) in `ars-components` with full test coverage, then reorganize layout snapshots into per-component directories to match the utility category pattern.",
+    "outcome": "The Collapsible core was implemented and shipped as PR #684 with 17 unit tests, spec-conformance, proptest, 9 snapshots, 94% line coverage, and 0 mutation survivors. Layout snapshot directories were restructured per-component. Two Codex review findings (controlled fallback state and keydown handled signal) were addressed in a follow-up commit.",
+    "learnings": {
+      "repo": [
+        "Layout modules should use directory-backed `<component>/mod.rs` layout (not flat `.rs` files) when they own snapshots, matching the utility category convention.",
+        "Snapshots belong in `crates/ars-components/src/layout/<component>/snapshots/` — a single shared `layout/snapshots/` directory is not the expected pattern.",
+        "Issue project-board status is updated via `gh project item-edit` with `--project-id`, `--id` (PVTI_...), `--field-id` (PVTSSF_...), and `--single-select-option-id`.",
+        "The Codex review workflow uses emoji reactions: 👀 = reviewing in progress, 👍 = approved; threads appear as unresolved GraphQL `reviewThreads` nodes.",
+        "`cargo xci-fast` is the required pre-push gate; mutation testing (`cargo mutants -f <file>`) and `cargo llvm-cov` are post-implementation audit gates that run before commit but after named tests are green.",
+        "The `post-implementation-audit` skill runs two 'anything else missing?' rounds and requires spec/adapter-spec drift to be fixed in the same changeset.",
+        "Adapter specs (Leptos, Dioxus) must be kept in sync with core event semantics — in particular, controlled `open` changes use `SyncControlledOpen`, not `SetOpen`.",
+        "The `cargo xtask spec validate` command validates all spec files and catches drift from the markdown contract."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/collapsible/mod.rs",
+          "finding": "SyncProps was accidentally dropping controlled mode when collapsed-size props changed — prop-sync must preserve the controlled/uncontrolled distinction and only emit SyncControlledOpen when the controlled `open` prop itself changes."
+        },
+        {
+          "path": "crates/ars-components/src/layout/collapsible/mod.rs",
+          "finding": "The trigger keydown handler must return a handled/preventDefault signal so framework adapters can suppress the browser's native button click and avoid a double toggle."
+        },
+        {
+          "path": "crates/ars-components/src/layout/collapsible/mod.rs",
+          "finding": "When transitioning from controlled to uncontrolled mode, the last controlled `open` value must be preserved as the Bindable's internal fallback — otherwise the component snaps to the default instead of the last user-visible state."
+        }
+      ],
+      "workflow": [
+        "`cargo insta test --unreferenced=reject` must be run against the full test surface, not a filtered subset, otherwise every snapshot not touched by the filtered run appears orphaned. CI is the correct place for this check.",
+        "When a flat Rust module is converted to a directory-backed `mod.rs` with identical code, a second mutation run against the new path is not necessary — the previous `0 missed` result is still valid.",
+        "Mutation test survivors fall into predictable categories: disabled guards, prop-sync branches, handler no-ops, and controlled/uncontrolled sync conditions. Targeted unit tests (not skip lists) are the right fix for each.",
+        "Snapshot file routing by name prefix can misroute if a component's test names include another component's name (e.g., `frame_*aspect_ratio.snap` matched the aspect_ratio bucket). Verify routing after bulk moves.",
+        "Running `cargo mutants` first with a broad file scope and then adding only the tests that kill specific survivors is more efficient than writing exhaustive tests upfront."
+      ]
+    },
+    "friction": [
+      "`cargo insta test -p ars-components --unreferenced=reject -- collapsible` fails whenever run with a test filter because it scans the whole snapshot tree but only references snapshots touched by the filtered tests — the error message looks like a Collapsible failure but is not.",
+      "Snapshot filename routing via shell `case` patterns during bulk `git mv` misassigned two frame snapshots (`frame_*aspect_ratio.snap`) to the aspect_ratio bucket, requiring a corrective move pass.",
+      "Mutation testing was mistakenly rerun after the file path changed from `collapsible.rs` to `collapsible/mod.rs` even though the code was identical — the user had to point this out.",
+      "The Codex review took an extended period (multiple 2-minute polling cycles, ~20+ minutes total) with no intermediate feedback visible before threads appeared.",
+      "The proptest uncovered a real controlled-mode bug (SyncProps dropping controlled state) that required a source fix mid-verification, adding an extra round of test/run cycles."
+    ],
+    "open_items": [
+      "Full workspace `cargo insta test --unreferenced=reject` sweep to clear pre-existing orphaned snapshots in non-Collapsible layout components — currently deferred to CI.",
+      "Leptos and Dioxus adapter implementations for Collapsible are explicitly out of scope for issue #275 and will be separate tasks.",
+      "Pre-existing rustdoc link warnings in `ars-components` (not Collapsible-related) were observed during `cargo doc` but not addressed.",
+      "`cargo xci-fast` did not run corpus/snippet tests for the `collapsible` spec section because no matching test existed — spec snippet coverage for Collapsible is not yet wired up."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
