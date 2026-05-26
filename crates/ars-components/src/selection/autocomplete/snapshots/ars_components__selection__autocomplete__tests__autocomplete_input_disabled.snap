@@ -22,14 +22,6 @@ AttrMap {
         ),
         (
             Aria(
-                ActiveDescendant,
-            ),
-            String(
-                "ac-item-alpha",
-            ),
-        ),
-        (
-            Aria(
                 AutoComplete,
             ),
             String(

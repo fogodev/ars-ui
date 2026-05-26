@@ -822,7 +822,10 @@ impl Api<'_> {
                 (self.ctx.messages.input_label)(&self.ctx.locale),
             );
 
-        if let Some(key) = valid_highlight(self.ctx) {
+        if self.popup_visible()
+            && !self.ctx.disabled
+            && let Some(key) = valid_highlight(self.ctx)
+        {
             attrs.set(
                 HtmlAttr::Aria(AriaAttr::ActiveDescendant),
                 self.ctx.ids.item("item", key),
@@ -1078,9 +1081,7 @@ impl Api<'_> {
         match data.key {
             KeyboardKey::ArrowDown => (self.send)(Event::HighlightNext),
             KeyboardKey::ArrowUp => (self.send)(Event::HighlightPrev),
-            KeyboardKey::Home => (self.send)(Event::HighlightFirst),
-            KeyboardKey::End => (self.send)(Event::HighlightLast),
-            KeyboardKey::Enter => (self.send)(Event::SelectHighlighted),
+            KeyboardKey::Enter if !data.is_composing => (self.send)(Event::SelectHighlighted),
             KeyboardKey::Escape if !self.ctx.input_value.get().is_empty() => {
                 (self.send)(Event::Clear);
             }
@@ -1170,8 +1171,7 @@ fn refresh_filter_and_highlight(ctx: &mut Context, input: &str) {
     ctx.highlighted_key = ctx
         .highlighted_key
         .clone()
-        .filter(|key| is_visible_focusable_key(ctx, key))
-        .or_else(|| first_visible_key(ctx));
+        .filter(|key| is_visible_focusable_key(ctx, key));
 }
 
 fn visible_keys_for(ctx: &Context, input: &str) -> Option<BTreeSet<Key>> {
@@ -1364,6 +1364,13 @@ mod tests {
         }
     }
 
+    fn composing_keyboard(key: KeyboardKey) -> KeyboardEventData {
+        KeyboardEventData {
+            is_composing: true,
+            ..keyboard(key)
+        }
+    }
+
     fn snapshot_attrs(attrs: &AttrMap) -> String {
         format!("{attrs:#?}")
     }
@@ -1380,10 +1387,23 @@ mod tests {
             autocomplete.context().visible_keys,
             Some(BTreeSet::from([key("bravo")]))
         );
-        assert_eq!(autocomplete.context().highlighted_key, Some(key("bravo")));
+        assert_eq!(autocomplete.context().highlighted_key, None);
         assert!(autocomplete.context().debounce_pending);
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, Effect::AutocompleteDebounce);
+    }
+
+    #[test]
+    fn input_change_does_not_highlight_until_user_navigation() {
+        let mut autocomplete = service(props());
+
+        drop(autocomplete.send(Event::InputChange("br".into())));
+
+        assert_eq!(autocomplete.context().highlighted_key, None);
+
+        drop(autocomplete.send(Event::HighlightNext));
+
+        assert_eq!(autocomplete.context().highlighted_key, Some(key("bravo")));
     }
 
     #[test]
@@ -1443,12 +1463,16 @@ mod tests {
 
         let api = autocomplete.connect(&|_| {});
 
-        assert_eq!(autocomplete.context().highlighted_key, Some(key("bravo")));
+        assert_eq!(autocomplete.context().highlighted_key, Some(key("alpha")));
         assert_eq!(
             api.input_attrs()
                 .get(&HtmlAttr::Aria(AriaAttr::ActiveDescendant)),
-            Some("ac-item-bravo")
+            Some("ac-item-alpha")
         );
+
+        drop(autocomplete.send(Event::HighlightNext));
+
+        assert_eq!(autocomplete.context().highlighted_key, Some(key("bravo")));
 
         drop(autocomplete.send(Event::HighlightLast));
 
@@ -1464,6 +1488,7 @@ mod tests {
         let mut autocomplete = service(props());
 
         drop(autocomplete.send(Event::InputChange("br".into())));
+        drop(autocomplete.send(Event::HighlightNext));
         drop(autocomplete.send(Event::SelectHighlighted));
 
         assert_eq!(autocomplete.context().selected_key, Some(key("bravo")));
@@ -1490,7 +1515,7 @@ mod tests {
         drop(autocomplete.send(Event::SelectItem(key("bravo"))));
 
         assert_eq!(autocomplete.context().input_value.get(), "");
-        assert_eq!(autocomplete.context().highlighted_key, Some(key("alpha")));
+        assert_eq!(autocomplete.context().highlighted_key, None);
         assert_eq!(autocomplete.context().selected_key, None);
     }
 
@@ -1765,8 +1790,6 @@ mod tests {
         api.on_item_leave();
         api.on_input_keydown(&keyboard(KeyboardKey::ArrowDown));
         api.on_input_keydown(&keyboard(KeyboardKey::ArrowUp));
-        api.on_input_keydown(&keyboard(KeyboardKey::Home));
-        api.on_input_keydown(&keyboard(KeyboardKey::End));
         api.on_input_keydown(&keyboard(KeyboardKey::Enter));
         api.on_input_keydown(&keyboard(KeyboardKey::Escape));
 
@@ -1780,12 +1803,25 @@ mod tests {
                 Event::HighlightItem(None),
                 Event::HighlightNext,
                 Event::HighlightPrev,
-                Event::HighlightFirst,
-                Event::HighlightLast,
                 Event::SelectHighlighted,
                 Event::Clear,
             ]
         );
+    }
+
+    #[test]
+    fn input_keydown_preserves_native_home_end_and_composing_enter() {
+        let events = RefCell::new(Vec::new());
+        let send = |event| events.borrow_mut().push(event);
+        let autocomplete = service(props().default_input_value("br"));
+
+        let api = autocomplete.connect(&send);
+
+        api.on_input_keydown(&keyboard(KeyboardKey::Home));
+        api.on_input_keydown(&keyboard(KeyboardKey::End));
+        api.on_input_keydown(&composing_keyboard(KeyboardKey::Enter));
+
+        assert!(events.into_inner().is_empty());
     }
 
     #[test]
@@ -1820,7 +1856,7 @@ mod tests {
             autocomplete.context().visible_keys,
             Some(BTreeSet::from([key("bravo")]))
         );
-        assert_eq!(autocomplete.context().highlighted_key, Some(key("bravo")));
+        assert_eq!(autocomplete.context().highlighted_key, None);
 
         drop(autocomplete.send(Event::InputChange("a".into())));
 
@@ -1828,7 +1864,7 @@ mod tests {
             autocomplete.context().visible_keys,
             Some(BTreeSet::from([key("alpha")]))
         );
-        assert_eq!(autocomplete.context().highlighted_key, Some(key("alpha")));
+        assert_eq!(autocomplete.context().highlighted_key, None);
 
         drop(autocomplete.send(Event::InputChange(String::new())));
         drop(autocomplete.send(Event::HighlightFirst));
@@ -1847,6 +1883,33 @@ mod tests {
         drop(autocomplete.send(Event::HighlightPrev));
 
         assert_eq!(autocomplete.context().highlighted_key, Some(key("charlie")));
+    }
+
+    #[test]
+    fn active_descendant_is_gated_to_active_popup_navigation() {
+        let mut autocomplete = service(props());
+
+        drop(autocomplete.send(Event::HighlightFirst));
+
+        let idle_api = autocomplete.connect(&|_| {});
+
+        assert_eq!(
+            idle_api
+                .input_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ActiveDescendant)),
+            None
+        );
+
+        drop(autocomplete.send(Event::Focus { is_keyboard: true }));
+
+        let focused_api = autocomplete.connect(&|_| {});
+
+        assert_eq!(
+            focused_api
+                .input_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ActiveDescendant)),
+            Some("ac-item-alpha")
+        );
     }
 
     #[test]
@@ -1924,6 +1987,7 @@ mod tests {
 
         drop(autocomplete.send(Event::Focus { is_keyboard: true }));
         drop(autocomplete.send(Event::InputChange("br".into())));
+        drop(autocomplete.send(Event::HighlightNext));
 
         let api = autocomplete.connect(&|_| {});
 
