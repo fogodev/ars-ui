@@ -1,0 +1,96 @@
+Implement task #275
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #275 Collapsible Agnostic Core Plan
+
+## Summary
+Implement the framework-agnostic `layout::collapsible` component in `ars-components`, matching `spec/components/layout/collapsible.md`. Scope is core state machine, connect API, unit tests, snapshots, spec-conformance, proptest, mutation/coverage audit, and local verification. No Leptos/Dioxus adapter work is included.
+
+## Files
+- Create: `crates/ars-components/src/layout/collapsible.rs`
+- Modify: `crates/ars-components/src/layout/mod.rs`
+- Modify: `crates/ars-components/tests/spec_conformance/layout.rs`
+- Modify: `crates/ars-components/tests/proptest_state_machines/layout.rs`
+- Possibly modify: `.cargo/mutants.toml` only if mutation audit finds true equivalent surviving mutants
+- Generated snapshots: `crates/ars-components/src/layout/snapshots/ars_components__layout__collapsible__tests__*.snap`
+
+## Public API
+Add `ars_components::layout::collapsible` with:
+- `State::{Open, Closed}` with default `Closed`
+- `Event::{Toggle, SetOpen(bool), Focus { is_keyboard: bool }, Blur, SyncProps, SyncControlledOpen(bool)}`
+- `Context` containing `open: Bindable<bool>`, `disabled`, `focused`, `focus_visible`, `ids`, `collapsed_height`, `collapsed_width`, `locale`, `messages`
+- `Props` matching the spec: `id`, `open`, `default_open`, `disabled`, `lazy_mount`, `unmount_on_exit`, `collapsed_height`, `collapsed_width`
+- Builder methods for every prop, including `open(bool)`, `uncontrolled()`, `default_open(bool)`, `collapsed_height(...)`, `collapsed_width(...)`
+- `Messages` with `expand_label` and `collapse_label`
+- `Machine` implementing `ars_core::Machine` with `type Effect = ars_core::NoEffect`
+- `Part::{Root, Trigger, Indicator, Content}` with `#[scope = "collapsible"]`
+- `Api` methods: `is_open`, `root_attrs`, `trigger_attrs`, `indicator_attrs`, `content_attrs`, trigger event handlers, and `ConnectApi::part_attrs`
+
+## Behavior
+- Initial state uses `props.open.unwrap_or(props.default_open)`.
+- `Toggle` and `SetOpen` are ignored when disabled.
+- Controlled mode stores requested internal changes via `Bindable::set`, but visible state follows `Bindable::get()` until `SyncControlledOpen` updates the controlled value.
+- `on_props_changed` emits:
+  - `SyncProps` when disabled/collapsed size props change
+  - `SyncControlledOpen(new)` when `open` changes to `Some(new)`
+  - `SyncProps` when leaving controlled mode
+- `data-ars-state` is `"open"` or `"closed"` on root, trigger, indicator, and content.
+- Trigger attrs include `type="button"`, `aria-expanded`, `aria-controls`, localized `aria-label`, `disabled` and `data-ars-disabled` when disabled.
+- Content attrs include `role="region"`, `aria-labelledby`, `hidden` only when closed without collapsed height/width, collapsed size CSS custom properties, and `data-ars-collapsed-size` when either collapsed size exists.
+- Height/width animation support is represented as adapter-consumable intent through collapsed size CSS vars and data attrs. Live DOM measurement remains adapter responsibility per issue #275.
+
+## Test Plan
+Add tests first, then implement:
+- `closed_to_open_on_toggle_event`
+- `trigger_attrs_include_aria_expanded_and_controls`
+- `content_attrs_include_region_and_labelledby`
+- `collapsed_height_width_emit_animation_intent_without_hidden`
+- `data_ars_state_reflects_open_closed`
+- `disabled_state_blocks_toggle_and_marks_attrs`
+- `default_open_initializes_open`
+- `controlled_and_uncontrolled_open_sync`
+- `keyboard_enter_and_space_toggle`
+- `focus_and_blur_update_focus_attrs`
+- `part_attrs_matches_direct_methods`
+- Snapshot tests for root, trigger, indicator, content across open, closed, disabled, focused, collapsed-size, and custom-message branches.
+- Spec-conformance entry for `collapsible::Part`.
+- Proptest sequence coverage for toggle/set/focus/blur/prop sync invariants.
+
+## Verification
+Run focused checks during implementation:
+- `cargo test -p ars-components layout::collapsible`
+- `cargo test -p ars-components --test spec_conformance layout`
+- `PROPTEST_CASES=128 cargo test -p ars-components --test proptest_state_machines collapsible -- --ignored`
+- `cargo insta test -p ars-components --unreferenced=reject collapsible`
+
+After named tests pass, invoke `.agents/skills/post-implementation-audit/SKILL.md` and land every finding in the same change. Final local validation should include:
+- `cargo +nightly fmt --all --check`
+- `cargo clippy -p ars-components --all-targets --all-features -- -D warnings`
+- `cargo llvm-cov test -p ars-components --text -- layout::collapsible`
+- `cargo mutants -p ars-components -f crates/ars-components/src/layout/collapsible.rs`
+- `cargo xtask spec validate`
+- `cargo xci-fast` only after user review/approval before any commit or push.
+
+## Workflow Assumptions
+- Move issue #275 from `Todo` to `In Progress` when execution starts.
+- Do not commit or push until explicit user approval after the final implementation summary.
+- If snapshots change, inspect them and later apply `snapshot-reviewed` to the PR after publishing.
+- PR body must include `Closes #275` if/when publishing is approved.
+
+---
+
+I didn't get what is the issue with the cargo insta test
+
+---
+
+The full verification runs in CI usually
+
+---
+
+It seems that we haven't organized the snapshot directories for the layout category of components. We need to have a snapshot directory for each component, like we have for the utility category for example, let's properly organize it
+
+---
+
+Why are you running mutation tests again with the same code as before?
