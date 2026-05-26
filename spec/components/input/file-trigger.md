@@ -6,12 +6,12 @@ foundation_deps: [architecture, accessibility, interactions, forms]
 shared_deps: []
 related: [file-upload]
 references:
-  react-aria: FileTrigger
+    react-aria: FileTrigger
 ---
 
 # FileTrigger
 
-A `FileTrigger` is a thin, **stateless** wrapper around a hidden `<input type="file">` that opens the native file picker when a trigger element is pressed. Unlike FileUpload (full drag-drop + upload lifecycle) and DropZone (drag-drop target), FileTrigger is the simplest file-selection primitive: click, pick, callback.
+A `FileTrigger` is a thin, **stateless** wrapper around a hidden `<input type="file">` that maps trigger activation to an adapter-resolvable picker intent. Unlike FileUpload (full drag-drop + upload lifecycle) and DropZone (drag-drop target), FileTrigger is the simplest file-selection primitive: click, pick, callback.
 
 `FileTrigger` can be composed with `DropZone` and `FileUpload`. For example, `FileUpload`'s trigger part internally behaves like a `FileTrigger`.
 
@@ -35,8 +35,18 @@ pub enum CaptureMode {
     Environment,
 }
 
+impl CaptureMode {
+    /// Returns the native `capture` attribute token for this mode.
+    pub const fn as_attr_value(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Environment => "environment",
+        }
+    }
+}
+
 /// Props for the FileTrigger component.
-#[derive(Clone, Debug, PartialEq, HasId)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, HasId)]
 pub struct Props {
     /// Component instance ID.
     pub id: String,
@@ -57,26 +67,32 @@ pub struct Props {
     // `on_select` callback is framework-specific; provided by adapter layer.
 }
 
-impl Default for Props {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            accept: Vec::new(),
-            multiple: false,
-            directory: false,
-            capture: None,
-            disabled: false,
-            name: None,
-        }
-    }
+impl Props {
+    pub fn new() -> Self;
+    pub fn id(self, id: impl Into<String>) -> Self;
+    pub fn accept<I, S>(self, accept: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>;
+    pub fn clear_accept(self) -> Self;
+    pub const fn multiple(self, value: bool) -> Self;
+    pub const fn directory(self, value: bool) -> Self;
+    pub const fn capture(self, mode: CaptureMode) -> Self;
+    pub const fn clear_capture(self) -> Self;
+    pub const fn disabled(self, value: bool) -> Self;
+    pub fn name(self, name: impl Into<String>) -> Self;
+    pub fn clear_name(self) -> Self;
 }
 
+/// Dynamic callable signature for [`Messages::input_label`].
+pub type InputLabelFn = dyn Fn(bool, &Locale) -> String + Send + Sync;
+
 /// Messages for the FileTrigger component.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Accessible label for the hidden file input.
     /// Default (en): "Choose file" / "Choose files" depending on `multiple`.
-    pub input_label: MessageFn<dyn Fn(bool, &Locale) -> String + Send + Sync>,
+    pub input_label: MessageFn<InputLabelFn>,
 }
 
 impl Default for Messages {
@@ -103,19 +119,29 @@ pub enum Part {
     Input,
 }
 
+/// Adapter-resolvable intent to open the native file picker.
+///
+/// This marker carries no DOM target. Adapters resolve it against their own
+/// hidden input reference or platform file-picker abstraction.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OpenPickerIntent;
+
 /// API for the FileTrigger component (stateless — created directly from Props).
-pub struct Api<'a> {
-    props: &'a Props,
+pub struct Api {
+    props: Props,
     locale: Locale,
     messages: Messages,
 }
 
-impl<'a> Api<'a> {
-    pub fn new(props: &'a Props, env: &Env, messages: &Messages) -> Self {
-        let locale = env.locale.clone();
-        let messages = messages.clone();
+impl Api {
+    pub fn new(props: Props, locale: Locale, messages: Messages) -> Self {
         Self { props, locale, messages }
     }
+
+    pub const fn props(&self) -> &Props;
+    pub const fn id(&self) -> &str;
+    pub const fn is_disabled(&self) -> bool;
+    pub fn accept(&self) -> &[String];
 
     /// Attributes for the root wrapper.
     pub fn root_attrs(&self) -> AttrMap {
@@ -123,6 +149,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, self.props.id.as_str());
         if self.props.disabled {
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
         }
@@ -130,7 +157,8 @@ impl<'a> Api<'a> {
     }
 
     /// Attributes for the pressable trigger element (e.g. a Button).
-    /// Adapter wires: on:click → open_file_picker().
+    /// Adapter wires activation to `open_picker_intent()` and resolves the
+    /// returned intent with its own input ref or platform picker handle.
     pub fn trigger_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Trigger.data_attrs();
@@ -175,14 +203,17 @@ impl<'a> Api<'a> {
         attrs
     }
 
-    /// Programmatically opens the native file picker.
-    /// Adapter implements via DOM ref: input_ref.click().
-    pub fn open_file_picker(&self) {
-        // Imperative — adapter calls input_ref.click() on the DOM element.
+    /// Returns adapter-resolvable picker intent when activation is enabled.
+    pub fn open_picker_intent(&self) -> Option<OpenPickerIntent> {
+        if self.props.disabled {
+            None
+        } else {
+            Some(OpenPickerIntent)
+        }
     }
 }
 
-impl ConnectApi for Api<'_> {
+impl ConnectApi for Api {
     type Part = Part;
 
     fn part_attrs(&self, part: Part) -> AttrMap {

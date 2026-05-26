@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/input/file_trigger/mod.rs
+expression: "snapshot_attrs(&api(Props::new().id(\"files\")).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "file-trigger",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "files",
+            ),
+        ),
+    ],
+    styles: [],
+}

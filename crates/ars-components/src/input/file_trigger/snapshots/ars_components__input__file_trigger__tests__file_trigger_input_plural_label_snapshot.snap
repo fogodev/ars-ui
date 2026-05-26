@@ -1,0 +1,59 @@
+---
+source: crates/ars-components/src/input/file_trigger/mod.rs
+expression: "snapshot_attrs(&api(Props::new().multiple(true)).input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "file-trigger",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Choose files",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Multiple,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Type,
+            String(
+                "file",
+            ),
+        ),
+    ],
+    styles: [],
+}

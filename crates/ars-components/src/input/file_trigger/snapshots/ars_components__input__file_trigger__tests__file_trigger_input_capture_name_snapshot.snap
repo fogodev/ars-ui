@@ -1,0 +1,65 @@
+---
+source: crates/ars-components/src/input/file_trigger/mod.rs
+expression: "snapshot_attrs(&api(Props::new().capture(CaptureMode::Environment).name(\"attachments\")).input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "file-trigger",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Choose file",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Capture,
+            String(
+                "environment",
+            ),
+        ),
+        (
+            Name,
+            String(
+                "attachments",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "file",
+            ),
+        ),
+    ],
+    styles: [],
+}
