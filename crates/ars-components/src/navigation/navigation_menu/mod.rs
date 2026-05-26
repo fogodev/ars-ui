@@ -633,22 +633,32 @@ impl ars_core::Machine for Machine {
                     TransitionPlan::new()
                 };
 
-                Some(plan.apply(move |ctx: &mut Context| {
-                    ctx.items = items;
-                    if let Some(focused) = &ctx.focused_trigger
-                        && !ctx.items.iter().any(|item| item == focused)
-                    {
-                        ctx.focused_trigger = None;
-                        ctx.focus_visible = false;
-                    }
+                let plan = if open_removed {
+                    plan.with_effect(value_change_effect(None))
+                } else {
+                    plan
+                };
 
-                    if open_removed {
-                        ctx.previous_item = ctx.value.get().clone();
-                        ctx.value.set(None);
+                Some(
+                    plan.apply(move |ctx: &mut Context| {
+                        ctx.items = items;
                         ctx.pending_open_item = None;
-                        ctx.pointer_in_content = false;
-                    }
-                }))
+                        if let Some(focused) = &ctx.focused_trigger
+                            && !ctx.items.iter().any(|item| item == focused)
+                        {
+                            ctx.focused_trigger = None;
+                            ctx.focus_visible = false;
+                        }
+
+                        if open_removed {
+                            ctx.previous_item = ctx.value.get().clone();
+                            ctx.value.set(None);
+                            ctx.pointer_in_content = false;
+                        }
+                    })
+                    .cancel_effect(Effect::OpenDelay)
+                    .cancel_effect(Effect::CloseDelay),
+                )
             }
 
             (_, Event::SyncProps) => {
@@ -674,10 +684,15 @@ impl ars_core::Machine for Machine {
                 };
 
                 Some(
-                    TransitionPlan::to(next_state).apply(move |ctx: &mut Context| {
-                        ctx.previous_item = ctx.value.get().clone();
-                        ctx.value.sync_controlled(Some(value));
-                    }),
+                    TransitionPlan::to(next_state)
+                        .apply(move |ctx: &mut Context| {
+                            ctx.previous_item = ctx.value.get().clone();
+                            ctx.pending_open_item = None;
+                            ctx.pointer_in_content = false;
+                            ctx.value.sync_controlled(Some(value));
+                        })
+                        .cancel_effect(Effect::OpenDelay)
+                        .cancel_effect(Effect::CloseDelay),
                 )
             }
 
@@ -1119,6 +1134,8 @@ fn open_item_plan(state: &State, ctx: &Context, item: Key) -> Option<TransitionP
 }
 
 fn open_to_plan(previous: Option<Key>, item: Key) -> TransitionPlan<Machine> {
+    let next_value = Some(item.clone());
+
     TransitionPlan::to(State::Open { item: item.clone() })
         .apply(move |ctx: &mut Context| {
             ctx.previous_item = previous;
@@ -1126,7 +1143,7 @@ fn open_to_plan(previous: Option<Key>, item: Key) -> TransitionPlan<Machine> {
             ctx.pointer_in_content = false;
             ctx.pending_open_item = None;
         })
-        .with_effect(value_change_effect())
+        .with_effect(value_change_effect(next_value))
 }
 
 fn close_plan(now_ms: u64) -> TransitionPlan<Machine> {
@@ -1140,15 +1157,15 @@ fn close_plan(now_ms: u64) -> TransitionPlan<Machine> {
         })
         .cancel_effect(Effect::OpenDelay)
         .cancel_effect(Effect::CloseDelay)
-        .with_effect(value_change_effect())
+        .with_effect(value_change_effect(None))
 }
 
-fn value_change_effect() -> PendingEffect<Machine> {
+fn value_change_effect(value: Option<Key>) -> PendingEffect<Machine> {
     PendingEffect::new(
         Effect::ValueChange,
-        |ctx: &Context, props: &Props, _send| {
+        move |_ctx: &Context, props: &Props, _send| {
             if let Some(callback) = &props.on_value_change {
-                callback(ctx.value.get().clone());
+                callback(value.clone());
             }
 
             no_cleanup()
@@ -1773,6 +1790,19 @@ mod tests {
     }
 
     #[test]
+    fn set_items_clear_emits_value_change_and_cancels_delays() {
+        let mut service =
+            service_with_items(props().default_value(key("b")), &[key("a"), key("b")]);
+
+        drop(service.send(Event::PointerLeave));
+        let result = service.send(Event::SetItems(vec![key("a")]));
+
+        assert_eq!(effect_names(&result), vec![Effect::ValueChange]);
+        assert!(result.cancel_effects.contains(&Effect::OpenDelay));
+        assert!(result.cancel_effects.contains(&Effect::CloseDelay));
+    }
+
+    #[test]
     fn set_items_closes_when_registry_becomes_empty() {
         let mut service =
             service_with_items(props().default_value(key("b")), &[key("a"), key("b")]);
@@ -1783,6 +1813,18 @@ mod tests {
         assert_eq!(connect_noop(&service).open_item(), None);
         assert_eq!(service.context().value.get(), &None);
         assert_eq!(service.context().previous_item, Some(key("b")));
+    }
+
+    #[test]
+    fn set_items_replacement_cancels_pending_open_delay() {
+        let mut service = service_with_items(props(), &[key("a"), key("b")]);
+
+        drop(service.send(Event::PointerEnter(key("b"), 10)));
+        let result = service.send(Event::SetItems(vec![key("a"), key("b")]));
+
+        assert_eq!(service.context().pending_open_item, None);
+        assert!(result.cancel_effects.contains(&Effect::OpenDelay));
+        assert!(result.cancel_effects.contains(&Effect::CloseDelay));
     }
 
     #[test]
@@ -1797,6 +1839,18 @@ mod tests {
 
         assert_eq!(*service.state(), State::Open { item: key("blog") });
         assert_eq!(connect_noop(&service).open_item(), Some(&key("docs")));
+    }
+
+    #[test]
+    fn sync_controlled_value_cancels_stale_delay_effects() {
+        let mut service = service(props().value(Some(key("docs"))));
+
+        drop(service.send(Event::PointerLeave));
+        let result = service.send(Event::SyncControlledValue(Some(key("blog"))));
+
+        assert_eq!(*service.state(), State::Open { item: key("blog") });
+        assert!(result.cancel_effects.contains(&Effect::OpenDelay));
+        assert!(result.cancel_effects.contains(&Effect::CloseDelay));
     }
 
     #[test]
@@ -2388,5 +2442,36 @@ mod tests {
         }
 
         assert_eq!(*calls.lock().expect("lock"), vec![Some(key("docs"))]);
+    }
+
+    #[test]
+    fn controlled_value_change_effect_reports_requested_value() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = std::sync::Arc::clone(&calls);
+
+        let mut service = service(
+            props()
+                .value(Some(key("docs")))
+                .on_value_change(Callback::new(move |value: Option<Key>| {
+                    captured.lock().expect("lock").push(value);
+                })),
+        );
+
+        for result in [
+            service.send(Event::Open(key("blog"))),
+            service.send(Event::Close(50)),
+        ] {
+            for effect in result.pending_effects {
+                let cleanup = effect.run(
+                    service.context(),
+                    service.props(),
+                    alloc::sync::Arc::new(|_| {}),
+                );
+
+                cleanup();
+            }
+        }
+
+        assert_eq!(*calls.lock().expect("lock"), vec![Some(key("blog")), None]);
     }
 }
