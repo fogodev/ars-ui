@@ -1,5 +1,1 @@
-Don't run mutation tests for each review round, it will take forever
-
----
-
-Does our implementation docs for agnostic components mentions that the review loop need to run mutation tests again and again?
+Then explicitly mention that the agent MUST NOT run mutation tests again after the PR is opened
