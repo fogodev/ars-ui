@@ -716,12 +716,12 @@ impl ars_core::Machine for Machine {
 
         let mut events = Vec::new();
 
-        if old.value != new.value {
-            events.push(Event::SyncValue(new.value));
-        }
-
         if props_output_changed(old, new) {
             events.push(Event::SetProps);
+        }
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
         }
 
         events
@@ -1079,9 +1079,6 @@ impl Api<'_> {
 
         let is_thumb_disabled = thumb_disabled(self.ctx, thumb);
 
-        let is_roving =
-            !self.ctx.disabled && self.ctx.focused_thumb.unwrap_or(ThumbIndex::Start) == thumb;
-
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
@@ -1105,7 +1102,10 @@ impl Api<'_> {
                     ThumbIndex::End => (self.ctx.messages.end_label)(&self.ctx.locale),
                 },
             )
-            .set(HtmlAttr::TabIndex, if is_roving { "0" } else { "-1" })
+            .set(
+                HtmlAttr::TabIndex,
+                if self.ctx.disabled { "-1" } else { "0" },
+            )
             .set(HtmlAttr::Data("ars-index"), thumb.token())
             .set_style(position_prop, position)
             .set(
@@ -1129,13 +1129,6 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true").set(
                 HtmlAttr::Aria(AriaAttr::ErrorMessage),
                 self.ctx.ids.part("error-message"),
-            );
-        }
-
-        if self.ctx.has_label {
-            attrs.set(
-                HtmlAttr::Aria(AriaAttr::LabelledBy),
-                self.ctx.ids.part("label"),
             );
         }
 
@@ -2611,6 +2604,24 @@ mod tests {
     }
 
     #[test]
+    fn set_props_applies_new_bounds_before_syncing_controlled_value() {
+        let mut svc = service(Props {
+            value: Some([20.0, 80.0]),
+            max: 100.0,
+            ..props()
+        });
+
+        drop(svc.set_props(Props {
+            value: Some([120.0, 180.0]),
+            max: 200.0,
+            ..props()
+        }));
+
+        assert!(svc.context().value.is_controlled());
+        assert_eq!(*svc.context().value.get(), [120.0, 180.0]);
+    }
+
+    #[test]
     fn props_output_changed_detects_each_output_affecting_prop() {
         let base = props();
 
@@ -2733,14 +2744,15 @@ mod tests {
         assert_eq!(start.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("25"));
         assert_eq!(start.get(&HtmlAttr::TabIndex), Some("0"));
         assert_eq!(start.get(&HtmlAttr::Data("ars-index")), Some("0"));
-        assert!(start.contains(&HtmlAttr::Aria(AriaAttr::LabelledBy)));
+        assert!(!start.contains(&HtmlAttr::Aria(AriaAttr::LabelledBy)));
         assert!(start.contains(&HtmlAttr::Aria(AriaAttr::DescribedBy)));
         assert!(start.contains(&HtmlAttr::Data("ars-focus-visible")));
         assert!(!end.contains(&HtmlAttr::Data("ars-focus-visible")));
 
         assert_eq!(end.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("35"));
         assert_eq!(end.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("100"));
-        assert_eq!(end.get(&HtmlAttr::TabIndex), Some("-1"));
+        assert_eq!(end.get(&HtmlAttr::TabIndex), Some("0"));
+        assert!(!end.contains(&HtmlAttr::Aria(AriaAttr::LabelledBy)));
 
         let hidden_start = api.hidden_input_attrs(ThumbIndex::Start);
         let hidden_end = api.hidden_input_attrs(ThumbIndex::End);
@@ -2760,6 +2772,46 @@ mod tests {
             .thumb_attrs(ThumbIndex::Start);
 
         assert_eq!(disabled_attrs.get(&HtmlAttr::TabIndex), Some("-1"));
+    }
+
+    #[test]
+    fn both_enabled_thumbs_remain_in_tab_sequence() {
+        let mut svc = service(props());
+
+        drop(svc.send(Event::Focus {
+            thumb: ThumbIndex::Start,
+            is_keyboard: true,
+        }));
+
+        let api = svc.connect(&|_| {});
+
+        assert_eq!(
+            api.thumb_attrs(ThumbIndex::Start).get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
+        assert_eq!(
+            api.thumb_attrs(ThumbIndex::End).get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
+    }
+
+    #[test]
+    fn thumb_accessible_names_remain_distinct_when_label_is_present() {
+        let mut svc = service(props());
+
+        drop(svc.send(Event::SetHasLabel(true)));
+
+        let api = svc.connect(&|_| {});
+        let start = api.thumb_attrs(ThumbIndex::Start);
+        let end = api.thumb_attrs(ThumbIndex::End);
+
+        assert_eq!(
+            start.get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("Range start")
+        );
+        assert_eq!(end.get(&HtmlAttr::Aria(AriaAttr::Label)), Some("Range end"));
+        assert!(!start.contains(&HtmlAttr::Aria(AriaAttr::LabelledBy)));
+        assert!(!end.contains(&HtmlAttr::Aria(AriaAttr::LabelledBy)));
     }
 
     #[test]
