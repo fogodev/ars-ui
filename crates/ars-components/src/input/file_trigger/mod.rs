@@ -290,6 +290,10 @@ impl Api {
             .set(HtmlAttr::Aria(AriaAttr::Hidden), "true")
             .set(HtmlAttr::TabIndex, "-1");
 
+        if self.props.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
+
         if !self.props.accept.is_empty() {
             attrs.set(HtmlAttr::Accept, self.props.accept.join(","));
         }
@@ -466,6 +470,10 @@ mod tests {
         );
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Hidden)), Some("true"));
         assert_eq!(attrs.get(&HtmlAttr::TabIndex), Some("-1"));
+        assert_eq!(attrs.get(&HtmlAttr::Disabled), None);
+
+        let disabled_attrs = api(Props::new().disabled(true)).input_attrs();
+        assert_eq!(disabled_attrs.get(&HtmlAttr::Disabled), Some("true"));
     }
 
     #[test]

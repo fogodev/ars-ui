@@ -178,6 +178,9 @@ impl Api {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Type, "file");
+        if self.props.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         if !self.props.accept.is_empty() {
             attrs.set(HtmlAttr::Accept, self.props.accept.join(","));
         }
@@ -239,7 +242,7 @@ FileTrigger
 | ------- | ----------------------- | -------------------------------------------- |
 | Root    | `<div>`                 | `data-ars-scope="file-trigger"`              |
 | Trigger | slot (consumer element) | `aria-disabled` when disabled                |
-| Input   | `<input type="file">`   | `aria-label`, `aria-hidden`, `tabindex="-1"` |
+| Input   | `<input type="file">`   | `aria-label`, `aria-hidden`, `tabindex="-1"`, `disabled` when disabled |
 
 The Trigger is a slot — the consumer renders their own element (e.g., `<Button>`) and spreads `trigger_attrs()` onto it.
 
@@ -253,6 +256,7 @@ The Trigger is a slot — the consumer renders their own element (e.g., `<Button
 | `aria-label`    | Input   | From `messages.input_label`           |
 | `aria-hidden`   | Input   | `"true"` — hidden from assistive tech |
 | `tabindex`      | Input   | `"-1"` — not in tab order             |
+| `disabled`      | Input   | Present when disabled                 |
 | `aria-disabled` | Trigger | `"true"` when disabled                |
 
 - The trigger element itself should be a focusable, pressable element (Button recommended).
