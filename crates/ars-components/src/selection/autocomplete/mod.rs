@@ -643,8 +643,10 @@ impl ars_core::Machine for Machine {
             Event::Clear => Some(
                 TransitionPlan::to(if ctx.loading {
                     State::Loading
-                } else {
+                } else if ctx.focused {
                     State::Focused
+                } else {
+                    State::Idle
                 })
                 .apply(|ctx: &mut Context| {
                     let empty = String::new();
@@ -1088,12 +1090,16 @@ impl Api<'_> {
 
     /// Handles keydown events on the input.
     pub fn on_input_keydown(&self, data: &KeyboardEventData) {
+        if data.is_composing {
+            return;
+        }
+
         match data.key {
             KeyboardKey::ArrowDown => (self.send)(Event::HighlightNext),
             KeyboardKey::ArrowUp => (self.send)(Event::HighlightPrev),
             KeyboardKey::Home if self.popup_visible() => (self.send)(Event::HighlightFirst),
             KeyboardKey::End if self.popup_visible() => (self.send)(Event::HighlightLast),
-            KeyboardKey::Enter if !data.is_composing => (self.send)(Event::SelectHighlighted),
+            KeyboardKey::Enter => (self.send)(Event::SelectHighlighted),
             KeyboardKey::Escape if !self.ctx.input_value.get().is_empty() => {
                 (self.send)(Event::Clear);
             }
@@ -1170,6 +1176,7 @@ fn select_item_plan(ctx: &Context, key: Key) -> Option<TransitionPlan<Machine>> 
 
             if !ctx.input_value.is_controlled() {
                 ctx.input_value.set(label.clone());
+                refresh_filter_and_highlight(ctx, &label);
             }
 
             ctx.debounce_pending = false;
@@ -1508,6 +1515,27 @@ mod tests {
     }
 
     #[test]
+    fn uncontrolled_selection_refreshes_visible_keys_for_selected_label() {
+        let mut autocomplete = service(props());
+
+        drop(autocomplete.send(Event::InputChange("a".into())));
+
+        assert_eq!(
+            autocomplete.context().visible_keys,
+            Some(BTreeSet::from([key("alpha"), key("bravo"), key("charlie")]))
+        );
+
+        drop(autocomplete.send(Event::SelectItem(key("bravo"))));
+
+        assert_eq!(autocomplete.context().input_value.get(), "Bravo");
+        assert_eq!(
+            autocomplete.context().visible_keys,
+            Some(BTreeSet::from([key("bravo")]))
+        );
+        assert_eq!(autocomplete.connect(&|_| {}).visible_count(), 1);
+    }
+
+    #[test]
     fn controlled_selection_records_key_without_overwriting_input() {
         let mut autocomplete = service(props().input_value("br"));
 
@@ -1718,6 +1746,17 @@ mod tests {
     }
 
     #[test]
+    fn clear_keeps_idle_state_when_input_is_unfocused() {
+        let mut autocomplete = service(props().default_input_value("Alpha"));
+
+        drop(autocomplete.send(Event::Clear));
+
+        assert_eq!(autocomplete.state(), &State::Idle);
+        assert!(!autocomplete.context().focused);
+        assert_eq!(autocomplete.context().input_value.get(), "");
+    }
+
+    #[test]
     fn controlled_clear_clears_visible_keys_with_input_value() {
         let mut autocomplete = service(props().input_value("br"));
 
@@ -1787,15 +1826,9 @@ mod tests {
             .map(|node| (node.key.clone(), node.text_value.clone()))
             .collect();
 
-        assert_eq!(
-            visible,
-            vec![
-                (key("alpha"), "Alpha".to_string()),
-                (key("bravo"), "Bravo".to_string()),
-                (key("charlie"), "Charlie".to_string()),
-            ]
-        );
-        assert_eq!(api.visible_count(), 3);
+        assert_eq!(visible, vec![(key("alpha"), "Alpha".to_string())]);
+        assert_eq!(api.visible_count(), 1);
+        assert_eq!(api.results_announcement(), "1 result available");
         assert!(!api.empty_visible());
         assert_eq!(api.input_value(), "Alpha");
         assert_eq!(api.selected_key(), Some(&key("alpha")));
@@ -1851,6 +1884,24 @@ mod tests {
         api.on_input_keydown(&keyboard(KeyboardKey::Home));
         api.on_input_keydown(&keyboard(KeyboardKey::End));
         api.on_input_keydown(&composing_keyboard(KeyboardKey::Enter));
+
+        assert!(events.into_inner().is_empty());
+    }
+
+    #[test]
+    fn input_keydown_ignores_highlight_navigation_during_composition() {
+        let events = RefCell::new(Vec::new());
+        let send = |event| events.borrow_mut().push(event);
+        let mut autocomplete = service(props().default_input_value("br"));
+
+        drop(autocomplete.send(Event::Focus { is_keyboard: true }));
+
+        let api = autocomplete.connect(&send);
+
+        api.on_input_keydown(&composing_keyboard(KeyboardKey::ArrowDown));
+        api.on_input_keydown(&composing_keyboard(KeyboardKey::ArrowUp));
+        api.on_input_keydown(&composing_keyboard(KeyboardKey::Home));
+        api.on_input_keydown(&composing_keyboard(KeyboardKey::End));
 
         assert!(events.into_inner().is_empty());
     }
@@ -1997,6 +2048,7 @@ mod tests {
             ConnectApi::part_attrs(&api, Part::Input).get(&HtmlAttr::Role),
             Some("combobox")
         );
+        assert_eq!(api.results_announcement(), "3 results available");
     }
 
     #[test]
