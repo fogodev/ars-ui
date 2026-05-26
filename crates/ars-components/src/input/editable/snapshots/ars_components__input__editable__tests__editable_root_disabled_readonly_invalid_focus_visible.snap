@@ -1,0 +1,69 @@
+---
+source: crates/ars-components/src/input/editable/mod.rs
+expression: "snapshot_attrs(&flagged.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-disabled",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-focus-visible",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-readonly",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "editable",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "preview",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "editable",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/input/editable/mod.rs
+expression: "snapshot_attrs(&service(props()).connect(&|_| {}).input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "editable",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Editable field",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "editable-input",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "saved",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -4,8 +4,8 @@
 //! spec's §2 anatomy table and asserts the impl's `Part` enum matches.
 
 use ars_components::input::{
-    checkbox, checkbox_group, number_input, password_input, pin_input, radio_group, search_input,
-    slider, switch, text_field, textarea,
+    checkbox, checkbox_group, editable, number_input, password_input, pin_input, radio_group,
+    search_input, slider, switch, text_field, textarea,
 };
 
 use super::helper::assert_anatomy;
@@ -111,6 +111,22 @@ fn text_field_anatomy_matches_spec() {
             (text_field::Part::ClearTrigger, "clear-trigger"),
             (text_field::Part::Description, "description"),
             (text_field::Part::ErrorMessage, "error-message"),
+        ],
+    );
+}
+
+#[test]
+fn editable_anatomy_matches_spec() {
+    assert_anatomy(
+        "editable",
+        &[
+            (editable::Part::Root, "root"),
+            (editable::Part::Label, "label"),
+            (editable::Part::Preview, "preview"),
+            (editable::Part::Input, "input"),
+            (editable::Part::EditTrigger, "edit-trigger"),
+            (editable::Part::SubmitTrigger, "submit-trigger"),
+            (editable::Part::CancelTrigger, "cancel-trigger"),
         ],
     );
 }

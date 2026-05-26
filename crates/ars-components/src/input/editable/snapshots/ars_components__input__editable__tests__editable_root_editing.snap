@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/input/editable/mod.rs
+expression: "snapshot_attrs(&editing.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "editable",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "editing",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "editable",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}

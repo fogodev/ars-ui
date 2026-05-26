@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/input/editable/mod.rs
+expression: "snapshot_attrs(&service(props()).connect(&|_| {}).preview_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "preview",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "editable",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -117,6 +117,8 @@ cargo mutants -p ars-components
 - spec-conformance tests for the component's anatomy/public contract, including its `Part` enum and required API/attribute surface;
 - same-task triage of every `MISSED` mutant: add tests for real gaps, or add a justified line-agnostic `.cargo/mutants.toml` exclude only for true equivalent mutations.
 
+This mutation gate is a pre-PR implementation/audit gate. Once the PR has been opened, agents **MUST NOT** rerun mutation tests during Codex review rounds unless the user explicitly asks for another mutation run. Review-loop fixes should use focused regression tests, snapshots, coverage, clippy, and spec validation appropriate to the changed code.
+
 **Reading the output:** Results land in `mutants.out/mutants.out/` (gitignored). The two files that matter:
 
 - `caught.txt` — mutations that broke at least one test ✅

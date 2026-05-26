@@ -6,6 +6,9 @@ pub mod checkbox;
 /// CheckboxGroup machine.
 pub mod checkbox_group;
 
+/// Editable machine.
+pub mod editable;
+
 /// PasswordInput machine.
 pub mod password_input;
 
