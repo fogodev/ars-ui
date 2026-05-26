@@ -1,0 +1,6 @@
+---
+source: crates/ars-components/src/navigation/navigation_menu/mod.rs
+expression: "snapshot_attrs(&api.item_attrs(&key(\"docs\")))"
+---
+data-ars-part=item
+data-ars-scope=navigation-menu

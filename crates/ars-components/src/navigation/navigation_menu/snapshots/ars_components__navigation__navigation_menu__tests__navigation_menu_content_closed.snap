@@ -1,0 +1,9 @@
+---
+source: crates/ars-components/src/navigation/navigation_menu/mod.rs
+expression: "snapshot_attrs(&api.content_attrs(&key(\"docs\")))"
+---
+data-ars-part=content
+data-ars-scope=navigation-menu
+data-ars-state=closed
+hidden=true
+id=nav-content-s-646f6373

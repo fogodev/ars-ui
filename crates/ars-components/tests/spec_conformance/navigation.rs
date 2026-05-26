@@ -5,7 +5,9 @@
 //! matches the declared `(scope, part-name)` ordering.
 
 use ars_collections::Key;
-use ars_components::navigation::{accordion, breadcrumbs, link, pagination, steps, tabs};
+use ars_components::navigation::{
+    accordion, breadcrumbs, link, navigation_menu, pagination, steps, tabs,
+};
 use ars_core::SafeUrl;
 
 use super::helper::assert_anatomy;
@@ -148,6 +150,39 @@ fn accordion_anatomy_matches_spec() {
                 },
                 "item-content",
             ),
+        ],
+    );
+}
+
+#[test]
+fn navigation_menu_anatomy_matches_spec() {
+    assert_anatomy(
+        "navigation-menu",
+        &[
+            (navigation_menu::Part::Root, "root"),
+            (navigation_menu::Part::List, "list"),
+            (
+                navigation_menu::Part::Item {
+                    item_key: Key::default(),
+                },
+                "item",
+            ),
+            (
+                navigation_menu::Part::Trigger {
+                    item_key: Key::default(),
+                    content_id: String::new(),
+                },
+                "trigger",
+            ),
+            (
+                navigation_menu::Part::Content {
+                    item_key: Key::default(),
+                },
+                "content",
+            ),
+            (navigation_menu::Part::Link { active: false }, "link"),
+            (navigation_menu::Part::Indicator, "indicator"),
+            (navigation_menu::Part::Viewport, "viewport"),
         ],
     );
 }

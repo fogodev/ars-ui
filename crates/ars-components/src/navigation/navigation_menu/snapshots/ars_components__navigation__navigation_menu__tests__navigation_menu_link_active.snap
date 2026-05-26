@@ -1,0 +1,8 @@
+---
+source: crates/ars-components/src/navigation/navigation_menu/mod.rs
+expression: snapshot_attrs(&api.link_attrs(true))
+---
+aria-current=page
+data-ars-active=true
+data-ars-part=link
+data-ars-scope=navigation-menu

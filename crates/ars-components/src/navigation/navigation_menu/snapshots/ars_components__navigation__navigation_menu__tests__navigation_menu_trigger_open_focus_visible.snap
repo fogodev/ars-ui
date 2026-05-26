@@ -1,0 +1,14 @@
+---
+source: crates/ars-components/src/navigation/navigation_menu/mod.rs
+expression: "snapshot_attrs(&api.trigger_attrs(&key(\"blog\"), &content_id))"
+---
+aria-controls=nav-content-s-626c6f67
+aria-expanded=true
+aria-haspopup=true
+data-ars-focus-visible=true
+data-ars-part=trigger
+data-ars-scope=navigation-menu
+data-ars-state=open
+id=nav-trigger-s-626c6f67
+role=menuitem
+tabindex=0

@@ -22,3 +22,6 @@ pub mod accordion;
 
 /// Tabs component — a tab list paired with associated content panels.
 pub mod tabs;
+
+/// Navigation menu component — menubar navigation with delayed submenu content.
+pub mod navigation_menu;

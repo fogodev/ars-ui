@@ -1,0 +1,7 @@
+---
+source: crates/ars-components/src/navigation/navigation_menu/mod.rs
+expression: snapshot_attrs(&closed_api.viewport_attrs())
+---
+data-ars-part=viewport
+data-ars-scope=navigation-menu
+data-ars-state=closed
