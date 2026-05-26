@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d326d54f4fdf",
+  "strategy": "manual-commit",
+  "branch": "t3code/577ff5df",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/specialized/clipboard/mod.rs",
+    "spec/components/specialized/clipboard.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d3/26d54f4fdf/0/metadata.json",
+      "transcript": "/d3/26d54f4fdf/0/full.jsonl",
+      "content_hash": "/d3/26d54f4fdf/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 53568,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 8082816,
+    "output_tokens": 4245,
+    "api_call_count": 37
+  }
+}
