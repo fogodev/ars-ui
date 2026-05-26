@@ -1,0 +1,39 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "375091fab56c",
+  "strategy": "manual-commit",
+  "branch": "t3code/implement-task-228",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/input/file_trigger/mod.rs",
+    "crates/ars-components/src/input/file_trigger/snapshots/ars_components__input__file_trigger__tests__file_trigger_input_accept_multiple_directory_snapshot.snap",
+    "crates/ars-components/src/input/file_trigger/snapshots/ars_components__input__file_trigger__tests__file_trigger_input_capture_name_snapshot.snap",
+    "crates/ars-components/src/input/file_trigger/snapshots/ars_components__input__file_trigger__tests__file_trigger_input_default_snapshot.snap",
+    "crates/ars-components/src/input/file_trigger/snapshots/ars_components__input__file_trigger__tests__file_trigger_input_plural_label_snapshot.snap",
+    "crates/ars-components/src/input/file_trigger/snapshots/ars_components__input__file_trigger__tests__file_trigger_root_disabled_snapshot.snap",
+    "crates/ars-components/src/input/file_trigger/snapshots/ars_components__input__file_trigger__tests__file_trigger_root_snapshot.snap",
+    "crates/ars-components/src/input/file_trigger/snapshots/ars_components__input__file_trigger__tests__file_trigger_trigger_disabled_snapshot.snap",
+    "crates/ars-components/src/input/file_trigger/snapshots/ars_components__input__file_trigger__tests__file_trigger_trigger_snapshot.snap",
+    "crates/ars-components/src/input/mod.rs",
+    "crates/ars-components/tests/spec_conformance/input.rs",
+    "spec/components/input/file-trigger.md",
+    "spec/dioxus-components/input/file-trigger.md",
+    "spec/foundation/02-component-catalog.md",
+    "spec/leptos-components/input/file-trigger.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/37/5091fab56c/0/metadata.json",
+      "transcript": "/37/5091fab56c/0/full.jsonl",
+      "content_hash": "/37/5091fab56c/0/content_hash.txt",
+      "prompt": "/37/5091fab56c/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 847361,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 36845696,
+    "output_tokens": 38619,
+    "api_call_count": 264
+  }
+}

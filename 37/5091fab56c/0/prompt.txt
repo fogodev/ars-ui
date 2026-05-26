@@ -1,0 +1,182 @@
+Implement task #228
+
+---
+
+What are the tradeoffs of each approach? I want to have the best outcome possible, if we have a clear winner here, regardless of what the spec says, just pick the best one then
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Implement FileTrigger Agnostic Core
+
+## Summary
+
+Implement GitHub issue #228: add the framework-agnostic `FileTrigger` core in `ars-components` as a stateless, DOM-free attribute mapper. The component will expose root, trigger, and hidden file input attributes, reflect `accept`, `multiple`, `directory`, `capture`, `name`, and `disabled`, and represent picker opening as a typed adapter-resolvable intent.
+
+Chosen design: add a new explicit method `open_picker_intent() -> Option<OpenPickerIntent>`. This is the clearest outcome: it does not imply the agnostic core opens the native picker, avoids a callback prop in a stateless mapper, and gives adapters a typed value to resolve via `NodeRef`, mounted handles, or platform file-picker abstractions.
+
+## Scope
+
+In scope:
+- `crates/ars-components/src/input/file_trigger/mod.rs`
+- `crates/ars-components/src/input/mod.rs`
+- `crates/ars-components/tests/spec_conformance/input.rs`
+- `spec/components/input/file-trigger.md`
+- `spec/leptos-components/input/file-trigger.md`
+- `spec/dioxus-components/input/file-trigger.md`
+- Generated insta snapshots under `crates/ars-components/src/input/file_trigger/snapshots/`
+
+Out of scope:
+- Leptos/Dioxus adapter component implementation.
+- Direct DOM `.click()`, ID lookup, `ars-dom`, or platform file picker execution.
+- New dependencies.
+
+## Public API Changes
+
+Add `ars_components::input::file_trigger` with:
+- `CaptureMode::{User, Environment}`
+- `Props`
+- `Messages`
+- `InputLabelFn`
+- `Part::{Root, Trigger, Input}` with `#[scope = "file-trigger"]`
+- `OpenPickerIntent`
+- `Api`
+
+`Props` fields:
+- `id: String`
+- `accept: Vec<String>`
+- `multiple: bool`
+- `directory: bool`
+- `capture: Option<CaptureMode>`
+- `disabled: bool`
+- `name: Option<String>`
+
+`Api` shape:
+- `Api::new(props: Props, locale: Locale, messages: Messages) -> Self`
+- `props(&self) -> &Props`
+- `id(&self) -> &str`
+- `is_disabled(&self) -> bool`
+- `accept(&self) -> &[String]`
+- `root_attrs(&self) -> AttrMap`
+- `trigger_attrs(&self) -> AttrMap`
+- `input_attrs(&self) -> AttrMap`
+- `open_picker_intent(&self) -> Option<OpenPickerIntent>`
+- `impl ConnectApi for Api`
+
+`open_picker_intent()` returns:
+- `Some(OpenPickerIntent)` when enabled.
+- `None` when disabled.
+
+`OpenPickerIntent` is intentionally data-light for now. It is a typed permission/intent signal, not a DOM target lookup. Adapters already own the concrete input ref or platform picker handle.
+
+## Implementation Steps
+
+1. Move issue #228 to `In Progress` on the GitHub Project board before code work.
+
+2. Add failing tests first in `crates/ars-components/src/input/file_trigger/mod.rs`:
+   - defaults match spec.
+   - builder methods round-trip all props.
+   - `HasId` derive round-trips.
+   - root attrs include `data-ars-scope="file-trigger"` and `data-ars-part="root"`.
+   - disabled root includes `data-ars-disabled`.
+   - trigger attrs include scope/part.
+   - disabled trigger includes `aria-disabled="true"`.
+   - input attrs include `type="file"`, `aria-label`, `aria-hidden="true"`, `tabindex="-1"`.
+   - accept joins as comma-separated `accept`.
+   - `multiple`, `webkitdirectory`, `capture`, and `name` are emitted only when set.
+   - `open_picker_intent()` returns `Some` when enabled and `None` when disabled.
+   - `part_attrs()` dispatches each `Part` to the matching attrs method.
+   - snapshots cover root, disabled root, trigger, disabled trigger, default input, accept/multiple/directory input, capture/name input, and plural input label.
+
+3. Add the spec-conformance test in `crates/ars-components/tests/spec_conformance/input.rs`:
+   - import `file_trigger`.
+   - assert anatomy for `Root`, `Trigger`, `Input`.
+
+4. Implement `crates/ars-components/src/input/file_trigger/mod.rs`:
+   - follow `utility/download_trigger` style for stateless API and inline tests.
+   - use only `alloc`, `core`, `ars_core`, and `ars_i18n`.
+   - document every public item and variant.
+   - derive `Clone`, `Debug`, `PartialEq`, `HasId` where appropriate.
+   - use `ComponentPart` for `Part`.
+   - use `HtmlAttr::{Accept, Multiple, WebkitDirectory, Capture, Name, Type, TabIndex}` and `AriaAttr::{Disabled, Hidden, Label}`.
+   - keep all DOM activation out of core.
+
+5. Register the module:
+   - add `pub mod file_trigger;` to `crates/ars-components/src/input/mod.rs`.
+
+6. Update specs because the current core spec incorrectly implies agnostic `.click()`:
+   - in `spec/components/input/file-trigger.md`, replace `open_file_picker()` and DOM-ref wording with `open_picker_intent() -> Option<OpenPickerIntent>`.
+   - state that adapters resolve the intent using their own input ref/platform handle.
+   - keep hidden-input activation out of core and avoid ID lookup language.
+   - align Leptos and Dioxus adapter specs with the new core method name and intent behavior.
+
+7. Run focused verification:
+   - `cargo test -p ars-components file_trigger`
+   - `cargo test -p ars-components --test spec_conformance file_trigger_anatomy_matches_spec`
+   - `cargo insta test -p ars-components --unreferenced=reject file_trigger`
+   - `cargo xtask spec validate`
+   - `cargo +nightly fmt --all --check`
+   - `cargo clippy -p ars-components --all-targets -- -D warnings`
+
+8. Run the required agnostic-component mutation gate:
+   - `cargo mutants -p ars-components -f crates/ars-components/src/input/file_trigger/mod.rs`
+   - triage every `MISSED` mutant in the same change.
+   - add tests for real gaps.
+   - add `.cargo/mutants.toml` skips only for true equivalent mutations, with narrow regex and justification.
+
+9. Invoke `.agents/skills/post-implementation-audit/SKILL.md` after named tests pass:
+   - spec/implementation drift audit.
+   - at least two “anything else missing?” rounds.
+   - coverage/test-surface audit.
+   - land every finding in this same PR scope.
+
+10. Present the final local diff and verification results for user review before any commit.
+
+11. Only after explicit user approval:
+   - run `cargo xci-fast`.
+   - commit.
+   - push.
+   - open a normal PR targeting `main` with `Closes #228`.
+   - if snapshots changed, apply `snapshot-reviewed`.
+   - invoke `.agents/skills/waiting-for-codex-review/SKILL.md` and loop until Codex leaves 👍 and CI is green.
+
+## Test Cases And Scenarios
+
+Unit tests:
+- default props and builders.
+- `HasId`.
+- all `AttrMap` branches for root, trigger, input.
+- disabled picker intent suppression.
+- enabled picker intent emission.
+- plural-aware input label.
+- `ConnectApi::part_attrs()` dispatch.
+
+Snapshot tests:
+- every anatomy part.
+- each output-affecting prop/state branch:
+  - default enabled.
+  - disabled.
+  - accept.
+  - multiple.
+  - directory.
+  - capture user/environment.
+  - name.
+  - plural label.
+
+Spec-conformance:
+- `Part::scope() == "file-trigger"`.
+- `Part::all()` order is root, trigger, input.
+- part names are `root`, `trigger`, `input`.
+
+Mutation:
+- targeted `cargo mutants` on the new module.
+- no untriaged `MISSED` results.
+
+## Assumptions And Defaults
+
+- No new dependency crate is needed.
+- `FileTrigger` remains stateless and does not implement a `Machine`.
+- The adapter owns the concrete hidden input ref and native picker execution.
+- `OpenPickerIntent` is a typed marker, not an ID or DOM target.
+- Spec updates are required because current examples imply agnostic DOM `.click()`.
+- No commit, push, PR, or project-board mutation happens until Plan Mode ends and the user explicitly approves execution/publish steps.
