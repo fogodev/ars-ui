@@ -1,0 +1,132 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3892c9a8ee7c",
+  "session_id": "4d98eae2-3053-4a1e-9381-945f939d752b",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-26T18:18:33.701785Z",
+  "branch": "claude/friendly-grothendieck-886c35",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/calendar/mod.rs",
+    "crates/ars-components/src/date_time/calendar/tests.rs",
+    "spec/components/date-time/calendar.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "8b6fcd7adeb1",
+  "token_usage": {
+    "input_tokens": 11177,
+    "cache_creation_tokens": 3744027,
+    "cache_read_tokens": 317464483,
+    "output_tokens": 371955,
+    "api_call_count": 571
+  },
+  "summary": {
+    "intent": "Implement task #280: a framework-agnostic Calendar machine (single + multi-select, locale-aware grid, min/max constraints, focus management, ARIA announcements) for the ars-ui Rust component library.",
+    "outcome": "Calendar machine fully implemented and merged to PR #688 with 157+ tests, 6 Codex review passes addressed, spec kept in sync with all implementation deviations documented, and all CI gates green.",
+    "learnings": {
+      "repo": [
+        "CalendarDate does not implement Ord — comparisons must use .compare() method; BTreeSet<CalendarDate> is unusable, requiring a SelectedDates sorted-Vec newtype.",
+        "ars-i18n real API uses u8 + Result<_, CalendarError> for date construction and arithmetic, not the NonZero<u8> + infallible API described in the spec.",
+        "Callback<dyn Fn(Args) -> Out> requires Args: 'static, making it incompatible with &T reference arguments out of the box; required adding a new_ref constructor.",
+        "Tests use drop(svc.send(...)) not let _ = svc.send(...) — clippy enforces this distinction.",
+        "ConnectApi is accessed via svc.connect not Machine::connect.",
+        "ComponentIds replaces raw heading_id/grid_id string fields for part ID derivation.",
+        "cargo xci-fast is the mandatory pre-push gate (10 steps); must pass before every push.",
+        "cargo insta review accepts all pending snapshots workspace-wide — unrelated snapshots (e.g., data_display) get caught and must be manually reverted after acceptance.",
+        "Codex auto-triggers on push (shows 👀 immediately); posting a manual @codex review when 👀 is already present queues a duplicate review against the same commit, producing stale duplicate finding threads.",
+        "proptest_config() is the required harness setup for proptest_state_machines tests.",
+        "Button elements in connect attrs must set type=button explicitly or they default to submit and trigger parent form submission."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-core/src/callback.rs",
+          "line": 74,
+          "end_line": 74,
+          "finding": "Callback::new requires Args: 'static, blocking use with &T reference args. Added new_ref constructor using HRTB (for<'a> Fn(&'a T) -> Out) to support predicate callbacks over references."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "month_step_plan must be atomic: try focused_date shift first, abort (return None) if it fails, then advance visible_month/year only on success. Otherwise visible and focused state diverge on calendar boundaries."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "sync_visible_to_focused must be called after any focused_date clamp (in sync_props_into_ctx, SetMonth, SetYear, and paging) or the view renders the wrong month with no cell at tabindex=0."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "FocusOut and SyncProps events must bypass the ctx.disabled guard — only interaction events should be blocked when disabled, not focus lifecycle or prop sync events."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "is_prev_disabled / is_next_disabled must account for page step size (visible_months * page_behavior step) and return true when post-step date construction fails at calendar boundaries."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "Unavailable cells must NOT receive HTML disabled attribute — only aria-disabled. HTML disabled removes the cell from the focus model entirely, violating the spec (unavailable dates are focusable, not selectable)."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/grid.rs",
+          "finding": "weeks_for must return an empty Vec (not a partial result) when add_days fails near calendar boundaries — the spec contract is always 6 complete rows or nothing."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "Part::Cell and Part::CellTrigger need an offset: usize field so multi-month consumers using generic part_attrs correctly route to the right grid offset rather than always using the first visible month."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "aria-label suffixes '(unavailable)' and '(disabled)' must be routed through the Messages struct, not hardcoded English strings."
+        }
+      ],
+      "workflow": [
+        "TDD discipline: write failing regression tests for every Codex finding before implementing the fix — prevents re-regression and proves the fix targets the right code path.",
+        "Batch all fixes for a Codex pass into a single commit+push, then resolve all threads atomically — avoids Codex reviewing intermediate states and generating duplicate stale findings.",
+        "Check for 👀 reaction before posting @codex review; auto-trigger on push makes manual trigger redundant and produces duplicate review queues.",
+        "When accepting insta snapshots after a fix, filter to only the target component's snapshots to avoid inadvertently accepting unrelated pre-existing failures.",
+        "Spec and implementation changes must ship in the same commit — keeping them in sync within the PR prevents spec drift and makes the PR self-documenting.",
+        "Mutation tests (cargo mutants) are unreliable in this repo due to pre-existing baseline failures; use --baseline=skip and treat partial runs as signal rather than ground truth."
+      ]
+    },
+    "friction": [
+      "Callback type's Args: 'static constraint blocked use with &CalendarDate reference predicates — required adding a new_ref constructor to ars-core (unplanned ars-core change).",
+      "CalendarDate lacking Ord forced a SelectedDates newtype workaround and manual comparison throughout, despite BTreeSet being the natural data structure for a date set.",
+      "Codex reviewing against pre-push commits generated 3–4 stale duplicate finding threads per pass, adding noise and requiring manual identification of dups vs new findings.",
+      "cargo insta review accepted data_display and meter snapshots that had pre-existing failures — required manual revert after each acceptance run.",
+      "cargo mutants ran for 15+ minutes and timed out or produced ambiguous output multiple times; had to be killed and treated as incomplete signal.",
+      "The spec used NonZero<u8> + infallible CalendarDate API that doesn't match real ars-i18n — required discovering the real API surface through source reading rather than spec trust.",
+      "Manual PartialEq impl was required for Props when using fn pointer (before Callback migration) due to clippy fn-pointer comparison warning.",
+      "SetMonth and SetYear required multiple fix iterations: first for atomicity (don't write visible state before focused_date succeeds), then again for sync_visible_to_focused after clamp — each discovered in a separate Codex pass."
+    ],
+    "open_items": [
+      "§5.5 multi-select keyboard extras deferred: Shift+Space range-from-anchor and Ctrl+A select-all require an undefined 'anchor' concept not yet in the spec — needs spec design before implementation.",
+      "Hover events (Event::HoverDate, Event::HoverEnd), Context.is_range/range_start/range_end, and on_cell_hover/on_grid_mouseleave are deferred to a future RangeCalendar component — noted in PR body.",
+      "Callback::new_ref is now available in ars-core but other components with fn-pointer predicate Props (similar to is_date_unavailable) could adopt it — no tracking issue created.",
+      "Mutation test coverage not definitively established due to tooling instability; two partial runs showed 0 MISSED but a complete run was never confirmed.",
+      "Shift+Space anchor-range and Ctrl+A select-all noted in tests as explicit TODOs but not test-gated — if spec adds anchor concept, implementation will be needed."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-26T18:17:23.120737Z",
+    "agent_lines": 144,
+    "agent_removed": 35,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 144,
+    "total_lines_changed": 179,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 72,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 72
+      }
+    }
+  ]
+}

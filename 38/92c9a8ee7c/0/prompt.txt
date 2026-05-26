@@ -1,0 +1,21 @@
+You already have more reviews there
+
+---
+
+# Autonomous loop tick (dynamic pacing)
+
+Run the autonomous check using the loop instructions established earlier in this conversation. If you cannot find them, treat this as a no-op tick.
+
+You scheduled this tick via the ScheduleWakeup tool (not a recurring cron). To keep the loop alive, call ScheduleWakeup again at the end of this turn with `prompt` set to the literal sentinel `<<autonomous-loop-dynamic>>` — otherwise the loop ends after this tick.
+
+If a Monitor is armed (check TaskList), keep `delaySeconds` at 1200–1800s — the Monitor is the wake signal and this is only the fallback heartbeat. If you were woken by a `<task-notification>`, handle the event before rescheduling. To stop the loop, also TaskStop the monitor (use TaskList to find its task ID if no longer in context).
+
+---
+
+<task-notification>
+<task-id>bzn4exll1</task-id>
+<tool-use-id>toolu_01ARk2PMsanasZpzE3NfUsfz</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui--claude-worktrees-friendly-grothendieck-886c35/4d98eae2-3053-4a1e-9381-945f939d752b/tasks/bzn4exll1.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll for next verdict" completed (exit code 0)</summary>
+</task-notification>
