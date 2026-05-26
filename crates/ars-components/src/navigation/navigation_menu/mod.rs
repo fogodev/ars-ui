@@ -590,8 +590,8 @@ impl ars_core::Machine for Machine {
                 }
             }
 
-            (State::Open { item }, Event::EscapeKey(now_ms)) => {
-                let item = item.clone();
+            (_, Event::EscapeKey(now_ms)) => {
+                let item = effective_open_item(state, ctx)?.clone();
                 Some(
                     close_plan(*now_ms)
                         .apply(move |ctx: &mut Context| {
@@ -621,9 +621,7 @@ impl ars_core::Machine for Machine {
 
             (_, Event::SetItems(items)) => {
                 let items = dedupe_keys(items);
-                let open_removed = state_open_item(state).is_some_and(|item| {
-                    !items.is_empty() && !items.iter().any(|candidate| candidate == item)
-                }) || ctx.value.get().as_ref().is_some_and(|item| {
+                let open_removed = ctx.value.get().as_ref().is_some_and(|item| {
                     !items.is_empty() && !items.iter().any(|candidate| candidate == item)
                 });
 
@@ -653,13 +651,11 @@ impl ars_core::Machine for Machine {
 
             (_, Event::SyncProps) => {
                 let orientation = props.orientation;
-                let dir = props.dir;
                 let delay_ms = props.delay_ms;
                 let skip_delay_ms = props.skip_delay_ms;
                 let value = props.value.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.orientation = orientation;
-                    ctx.dir = dir;
                     ctx.delay_ms = delay_ms;
                     ctx.skip_delay_ms = skip_delay_ms;
                     ctx.value.sync_controlled(value);
@@ -718,8 +714,11 @@ impl ars_core::Machine for Machine {
 
         let mut events = Vec::new();
 
+        if old.dir != new.dir {
+            events.push(Event::SetDirection(new.dir));
+        }
+
         let needs_sync_props = old.orientation != new.orientation
-            || old.dir != new.dir
             || old.delay_ms != new.delay_ms
             || old.skip_delay_ms != new.skip_delay_ms;
 
@@ -1093,8 +1092,18 @@ fn item_is_registered(ctx: &Context, item: &Key) -> bool {
     ctx.items.is_empty() || ctx.items.iter().any(|candidate| candidate == item)
 }
 
+fn effective_open_item<'a>(state: &'a State, ctx: &'a Context) -> Option<&'a Key> {
+    ctx.value
+        .get()
+        .as_ref()
+        .filter(|item| item_is_registered(ctx, item))
+        .or_else(|| state_open_item(state))
+}
+
 fn open_item_plan(state: &State, ctx: &Context, item: Key) -> Option<TransitionPlan<Machine>> {
-    if ctx.value.get().as_ref() == Some(&item) && matches!(state, State::Open { .. }) {
+    if ctx.value.get().as_ref() == Some(&item)
+        && matches!(state, State::Open { item: open } if open == &item)
+    {
         None
     } else {
         let previous = ctx
@@ -1563,6 +1572,23 @@ mod tests {
     }
 
     #[test]
+    fn escape_key_focuses_rendered_controlled_item_when_state_lags() {
+        let mut service = service_with_items(
+            props().value(Some(key("docs"))),
+            &[key("docs"), key("blog")],
+        );
+
+        drop(service.send(Event::Open(key("blog"))));
+        let result = service.send(Event::EscapeKey(400));
+
+        assert_eq!(service.context().focused_trigger, Some(key("docs")));
+        assert_eq!(
+            effect_names(&result),
+            vec![Effect::ValueChange, Effect::FocusTrigger]
+        );
+    }
+
+    #[test]
     fn focus_next_prev_first_last_follow_orientation_looping() {
         let mut service = service_with_items(props(), &[key("a"), key("b"), key("c")]);
 
@@ -1745,6 +1771,20 @@ mod tests {
     }
 
     #[test]
+    fn set_items_keeps_controlled_open_item_when_transient_state_item_is_removed() {
+        let mut service = service_with_items(
+            props().value(Some(key("docs"))),
+            &[key("docs"), key("blog")],
+        );
+
+        drop(service.send(Event::Open(key("blog"))));
+        drop(service.send(Event::SetItems(vec![key("docs")])));
+
+        assert_eq!(*service.state(), State::Open { item: key("blog") });
+        assert_eq!(connect_noop(&service).open_item(), Some(&key("docs")));
+    }
+
+    #[test]
     fn sync_controlled_value_updates_state_and_bindable_value() {
         let mut service = service(props().value(Some(key("docs"))));
 
@@ -1800,6 +1840,17 @@ mod tests {
     }
 
     #[test]
+    fn sync_props_preserves_resolved_auto_direction() {
+        let mut service = service(props().dir(Direction::Auto));
+
+        drop(service.send(Event::SetDirection(Direction::Rtl)));
+        service.set_props(props().dir(Direction::Auto).delay_ms(500));
+
+        assert_eq!(service.context().dir, Direction::Rtl);
+        assert_eq!(service.context().delay_ms, 500);
+    }
+
+    #[test]
     fn controlled_sync_updates_motion_previous_item() {
         let mut service = service_with_items(
             props().value(Some(key("docs"))),
@@ -1814,6 +1865,20 @@ mod tests {
                 .get(&HtmlAttr::Data("ars-motion")),
             Some("from-end")
         );
+    }
+
+    #[test]
+    fn open_event_reconverges_state_when_controlled_value_already_matches_target() {
+        let mut service = service_with_items(
+            props().value(Some(key("docs"))),
+            &[key("docs"), key("blog")],
+        );
+
+        drop(service.send(Event::Open(key("blog"))));
+        drop(service.send(Event::Open(key("docs"))));
+
+        assert_eq!(*service.state(), State::Open { item: key("docs") });
+        assert_eq!(connect_noop(&service).open_item(), Some(&key("docs")));
     }
 
     #[test]
@@ -1848,10 +1913,6 @@ mod tests {
                 ..base.clone()
             },
             Props {
-                dir: Direction::Rtl,
-                ..base.clone()
-            },
-            Props {
                 delay_ms: 450,
                 ..base.clone()
             },
@@ -1865,6 +1926,17 @@ mod tests {
                 vec![Event::SyncProps]
             );
         }
+
+        assert_eq!(
+            <Machine as ars_core::Machine>::on_props_changed(
+                &base,
+                &Props {
+                    dir: Direction::Rtl,
+                    ..base.clone()
+                },
+            ),
+            vec![Event::SetDirection(Direction::Rtl)]
+        );
 
         assert!(<Machine as ars_core::Machine>::on_props_changed(&base, &base).is_empty());
     }
