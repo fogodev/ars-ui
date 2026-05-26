@@ -1,0 +1,100 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "92f1b7b0203f",
+  "session_id": "4d98eae2-3053-4a1e-9381-945f939d752b",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-26T16:02:44.385652Z",
+  "branch": "claude/friendly-grothendieck-886c35",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "32fbfcf2c544",
+  "token_usage": {
+    "input_tokens": 10937,
+    "cache_creation_tokens": 1356009,
+    "cache_read_tokens": 158133365,
+    "output_tokens": 249460,
+    "api_call_count": 371
+  },
+  "session_metrics": {
+    "turn_count": 8
+  },
+  "summary": {
+    "intent": "Implement task #280: a framework-agnostic Calendar core component (state machine, grid math, connect API, tests) for the ars-ui Rust component library, then port all implementation learnings back to the spec.",
+    "outcome": "Calendar component fully implemented (mod.rs, grid.rs, tests.rs) with 130 passing tests (unit, snapshot, proptest, spec-conformance), spec updated to match the real API surface, and PR #688 created. Post-Codex-review, 5 bugs were fixed (HTML disabled vs aria-disabled, missing cell_trigger_attrs_for, paging not advancing focused_date, disabled guard blocking FocusOut) and the fixes committed.",
+    "learnings": {
+      "repo": [
+        "CalendarDate has no Ord impl, so BTreeSet<CalendarDate> is unusable; need a SelectedDates newtype using CalendarDate::compare() to maintain sorted order.",
+        "Callback::new requires Args: 'static and cannot wrap &T reference arguments; a new Callback::new_ref constructor accepting HRTB closures (for<'a> Fn(&'a T)) was needed in ars-core.",
+        "The idiomatic pattern for discarding send results is drop(svc.send(...)), not let _ = svc.send(...) — clippy enforces this distinction.",
+        "ComponentIds replaces manual heading_id/grid_id string fields across component connect APIs.",
+        "spec validation runs via cargo xtask spec validate (checks 340 files); pre-push gate is cargo xci-fast.",
+        "The real ars-i18n CalendarDate API uses u8 + Result<_, CalendarError> returns (not NonZero<u8> + infallible); add_days/add_months propagate errors.",
+        "Snapshot tests use cargo insta; after cargo insta review --accept, verify no unrelated snapshots were accepted accidentally.",
+        "cargo-mutants baseline fails when pre-existing unrelated tests (meter/progress snapshots) break; workaround is to skip the baseline check.",
+        "GitHub project board status updates go through the GraphQL API (gh api graphql), not standard gh issue commands.",
+        "ConnectApi pattern: Machine::connect is not called directly in tests; use service().connect via svc variable."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-core/src/callback.rs",
+          "line": 74,
+          "end_line": 80,
+          "finding": "Callback::new signature requires Args: 'static, blocking use with &CalendarDate. Added new_ref constructor for Callback<dyn for<'a> Fn(&'a T) -> Out + Send + Sync> to support higher-ranked closure predicates."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "Unavailable cells must only set aria-disabled, not HTML disabled — HTML disabled removes the focus model entirely, but unavailable dates must remain focusable per spec."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "month_step_plan must advance focused_date by the same step as visible_month/year; failing to do so leaves no cell with tabindex=0 after paging, breaking keyboard re-entry."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "Top-level ctx.disabled guard must allow focus-lifecycle events (FocusOut) through; blocking them leaves stale Focused state if the calendar is disabled mid-focus."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "cell_trigger_attrs used the first-visible-month for outside-month detection. Refactored to cell_trigger_attrs_for(date, offset) with a shared inner accepting an offset parameter."
+        }
+      ],
+      "workflow": [
+        "TDD order: write named failing tests first (compile errors expected), implement to make them pass, accept snapshots, then verify clippy and coverage gates.",
+        "Spawn parallel exploration agents for large spec reads to protect main context window; then verify disagreements with targeted grep.",
+        "AskUserQuestion during plan phase to settle scope ambiguities (multi-select inclusion, hover-events scope) before writing any code.",
+        "Worktree-based development isolates feature work; all edits target the worktree path, not the main workspace.",
+        "Autonomous loop (ScheduleWakeup) keeps work moving between user interactions; irreversible actions (push, PR) wait for explicit approval.",
+        "Codex review is triggered via waiting-for-codex-review skill after PR creation; poll output file for verdict, then address findings as a structured task list.",
+        "Coverage check before and after bug fixes confirms no regression; mutation tests catch logic gaps that line coverage misses."
+      ]
+    },
+    "friction": [
+      "CalendarDate missing Ord impl was a silent gap in the spec — the spec specified BTreeSet<CalendarDate> which is uncompilable, only caught during implementation.",
+      "Callback::new's 'static bound on Args is a fundamental API limitation that required extending ars-core; this was not discoverable from the type alias alone.",
+      "cargo-mutants repeatedly hit pre-existing baseline failures (meter/progress snapshots unrelated to Calendar), requiring multiple workaround attempts before finding --skip-baseline.",
+      "Batch sed replacement of let _ = svc.send(...) → drop(svc.send(...)) left .bak files and required manual cleanup.",
+      "cargo insta review --accept accidentally accepted unrelated data_display snapshot regressions that had to be separately reverted.",
+      "Spec used NonZero<u8> and nzu8() helper throughout but the actual ars-i18n API uses plain u8 + Result — required touching nearly every code example in the spec."
+    ],
+    "open_items": [
+      "Shift+Space range-from-anchor and Ctrl+A select-all multi-select keyboard extras are unimplemented — they require an 'anchor' concept not yet defined in the spec; flagged as deferred pending spec refinement.",
+      "Hover events (Event::HoverDate/HoverEnd), is_range/range_start/range_end context fields, and on_cell_hover/on_grid_mouseleave API methods were removed as range-calendar drift — need proper spec design for the future RangeCalendar component.",
+      "Mutation test full run was never completed due to tooling issues (baseline failures, long runtime); partial runs showed 0 MISSED across 159 outcomes but a clean full run is still outstanding.",
+      "Codex review thread resolution and re-triggering Codex after the bug-fix commit was the last action in the transcript — PR thread cleanup may still be pending."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 70,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 70
+      }
+    }
+  ]
+}

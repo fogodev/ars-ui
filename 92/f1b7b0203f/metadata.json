@@ -1,0 +1,23 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "92f1b7b0203f",
+  "strategy": "manual-commit",
+  "branch": "claude/friendly-grothendieck-886c35",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/92/f1b7b0203f/0/metadata.json",
+      "transcript": "/92/f1b7b0203f/0/full.jsonl",
+      "content_hash": "/92/f1b7b0203f/0/content_hash.txt",
+      "prompt": "/92/f1b7b0203f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 10937,
+    "cache_creation_tokens": 1356009,
+    "cache_read_tokens": 158133365,
+    "output_tokens": 249460,
+    "api_call_count": 371
+  }
+}
