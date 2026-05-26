@@ -342,6 +342,13 @@ exclude_re = [
   'number_input/mod\.rs:\d+:\d+: replace > with >= in baseline',
   'number_input/mod\.rs:\d+:\d+: replace < with <= in baseline',
 
+  # RangeSlider normalize equality boundaries assign the same values:
+  # - `start == end` sorts to the same pair whether or not `swap` runs.
+  # - `end - start == gap` leaves the already-valid gap unchanged; entering
+  #   the repair branch assigns `end = start + gap`, the same value.
+  'range_slider/mod\.rs:\d+:\d+: replace > with >= in normalize_values',
+  'range_slider/mod\.rs:\d+:\d+: replace < with <= in normalize_values',
+
   # PinInput paste caps `filtered` with `take(length - start)`, so the
   # enumerated `pos` values are always strictly less than `length`; allowing
   # equality cannot change reachable behavior.

@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/input/range_slider/mod.rs
+expression: snapshot_attrs(&api.error_message_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "error-message",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "range-slider",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "price-error-message",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/input/range_slider/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).dragging_indicator_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "dragging-indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "range-slider",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "dragging",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}
