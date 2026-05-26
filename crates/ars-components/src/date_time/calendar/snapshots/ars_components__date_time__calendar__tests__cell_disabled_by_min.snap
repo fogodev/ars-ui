@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/date_time/calendar/tests.rs
+expression: "snapshot_attrs(&api.cell_attrs(&date(2024, 1, 5)))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "cell",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "calendar",
+            ),
+        ),
+        (
+            Aria(
+                Disabled,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "gridcell",
+            ),
+        ),
+    ],
+    styles: [],
+}

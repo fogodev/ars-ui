@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/date_time/calendar/tests.rs
+expression: snapshot_attrs(&api.root_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "calendar",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "focused",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cal",
+            ),
+        ),
+    ],
+    styles: [],
+}

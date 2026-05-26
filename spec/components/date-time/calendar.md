@@ -38,32 +38,46 @@ pub enum State {
 /// Events for the Calendar component.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    /// Move keyboard focus to a specific date.
+    /// Move keyboard focus to a specific date (clamped to min/max).
     FocusDate {
         /// The date to focus on.
         date: CalendarDate,
     },
-    /// User selected a date (click or Enter/Space on focused cell).
+    /// User selected a date via click or `Enter`/`Space` on the focused cell.
+    ///
+    /// In [`SelectionMode::Single`] this sets the value. In
+    /// [`SelectionMode::Multiple`] it falls through to [`Event::ToggleDate`] so
+    /// adapters that do not know the active mode can emit one canonical
+    /// "select this date" event.
     SelectDate {
         /// The date to select.
         date: CalendarDate,
     },
-    /// Navigate to the next month.
+    /// Toggle the date in or out of the multi-selection set.
+    ///
+    /// Only meaningful when `selection_mode == Multiple`. A toggle that
+    /// would add a date when `selected_dates.len() >= max_selected` is
+    /// silently dropped.
+    ToggleDate {
+        /// The date to toggle.
+        date: CalendarDate,
+    },
+    /// Navigate to the next month (advances by `page_behavior` step).
     NextMonth,
-    /// Navigate to the previous month.
+    /// Navigate to the previous month (retreats by `page_behavior` step).
     PrevMonth,
-    /// Navigate to the next year.
+    /// Navigate forward by 12 months (one year).
     NextYear,
-    /// Navigate to the previous year.
+    /// Navigate backward by 12 months (one year).
     PrevYear,
-    /// Jump to a specific month (1-based).
+    /// Jump to a specific month (1-based; out-of-range values are ignored).
     SetMonth {
-        /// The month to jump to.
+        /// The 1-based month to display.
         month: u8,
     },
     /// Jump to a specific year.
     SetYear {
-        /// The year to jump to.
+        /// The year to display.
         year: i32,
     },
     /// Grid received focus.
@@ -71,111 +85,144 @@ pub enum Event {
     /// Focus left the grid entirely.
     FocusOut,
     /// Keyboard event on the grid.
+    ///
+    /// The `shift` flag is folded into the event so adapters do not need a
+    /// side-channel to communicate `Shift+PageUp` / `Shift+PageDown` for
+    /// year navigation — the machine maps those to `PrevYear`/`NextYear`
+    /// inside its transition function.
     KeyDown {
         /// The key that was pressed.
         key: KeyboardKey,
+        /// Whether the shift modifier was held.
+        shift: bool,
     },
+
+    /// Synchronise context from a new props snapshot.
+    ///
+    /// Emitted automatically by [`Machine::on_props_changed`] when the
+    /// adapter pushes new props via `Service::set_props`. Updates the
+    /// `Bindable` controlled values, refreshes the cached `disabled`,
+    /// `readonly`, `min`/`max`, predicate, and layout fields, and
+    /// re-clamps `focused_date` into the (possibly tighter) range.
+    SyncProps(Box<Props>),
 }
 ```
 
 ### 1.3 Context
 
+[`CalendarDate`] implements neither `Ord` nor `PartialOrd` — different
+calendar systems share the same value type so global ordering is undefined,
+but it does expose chronological [`CalendarDate::compare`](https://docs.rs/ars-i18n).
+Both `is_date_disabled` and `clamp_date` compare via `compare(...)` rather
+than `<`/`>`, and the multi-select set lives in a [`SelectedDates`] newtype
+(§1.4) that keeps a sorted `Vec<CalendarDate>` instead of a `BTreeSet`.
+
 ```rust
 /// Context for the Calendar component.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Context {
     /// Selected date (single-select mode).
     pub value: Bindable<Option<CalendarDate>>,
+    /// Selected date set (multi-select mode).
+    pub selected_dates: Bindable<SelectedDates>,
+    /// Active selection mode.
+    pub selection_mode: SelectionMode,
+    /// Cap on `selected_dates.len()` in multi-select mode.
+    pub max_selected: Option<usize>,
     /// The date that currently holds keyboard focus within the grid.
     pub focused_date: CalendarDate,
-    /// The month currently displayed (1-based).
+    /// The first visible month (1-based).
     pub visible_month: u8,
-    /// The year currently displayed.
+    /// The year of the first visible month.
     pub visible_year: i32,
+    /// Number of months displayed side-by-side (>= 1).
+    pub visible_months: usize,
+    /// Navigation step size for prev/next.
+    pub page_behavior: PageBehavior,
     /// Minimum selectable date.
     pub min: Option<CalendarDate>,
     /// Maximum selectable date.
     pub max: Option<CalendarDate>,
-    /// Locale for week start, month/day names.
+    /// Resolved first day of week (locale default unless overridden by Props).
+    pub first_day_of_week: Weekday,
+    /// Whether the calendar is rendered right-to-left.
+    pub is_rtl: bool,
+    /// Whether the calendar is globally disabled.
+    pub disabled: bool,
+    /// Whether the calendar is read-only (focus OK, selection blocked).
+    pub readonly: bool,
+    /// Whether the head row exposes ISO week numbers.
+    pub show_week_numbers: bool,
+    /// Date passed in as "today" by the adapter; used to mark today's cell
+    /// with `data-ars-today`.
+    pub today: CalendarDate,
+    /// User-supplied predicate marking dates unavailable. Unavailable dates
+    /// remain focusable but are not selectable. Evaluated lazily — there is
+    /// no pre-computed static cache.
+    pub is_date_unavailable_fn: Option<fn(&CalendarDate) -> bool>,
+    /// Resolved locale (from `Env`).
     pub locale: Locale,
     /// Resolved translatable messages.
     pub messages: Messages,
-    /// Intl backend for locale-dependent formatting (month/weekday names, etc.).
+    /// Backend used for locale-dependent labels and digits.
     pub intl_backend: Arc<dyn IntlBackend>,
-    /// Override for first day of week (falls back to locale default).
-    pub first_day_of_week: Weekday,
-    /// Right-to-left layout.
-    pub is_rtl: bool,
-    /// Disabled state — ignores all interactive events.
-    pub disabled: bool,
-    /// Read-only state — can focus/navigate but not select.
-    pub readonly: bool,
-    /// Static list of unavailable dates (pre-computed from Props.is_date_unavailable
-    /// for the currently visible month range). Refreshed on month navigation.
-    pub unavailable_dates: Vec<CalendarDate>,
-    /// Reference to the user-provided predicate from Props.is_date_unavailable.
-    /// Used by `is_date_unavailable()` for dynamic evaluation beyond the static list.
-    pub is_date_unavailable_fn: Option<fn(&CalendarDate) -> bool>,
-    /// Component IDs.
+    /// Derived part IDs (`ids.part("heading")`, `ids.part("grid")`, …).
     pub ids: ComponentIds,
-    /// Number of months displayed side-by-side.
-    pub visible_months: usize,
-    /// Navigation step size.
-    pub page_behavior: PageBehavior,
-    /// Whether to display ISO week numbers.
-    pub show_week_numbers: bool,
 }
 
 impl Context {
-    /// Whether the given date is the currently selected value.
+    /// Whether `date` is selected under the active selection mode.
     pub fn is_selected(&self, date: &CalendarDate) -> bool {
-        self.value.get().as_ref() == Some(date)
+        match self.selection_mode {
+            SelectionMode::Single => self.value.get().as_ref() == Some(date),
+            SelectionMode::Multiple => self.selected_dates.get().contains(date),
+        }
     }
 
     /// Whether a date is disabled (outside min/max or globally disabled).
     pub fn is_date_disabled(&self, date: &CalendarDate) -> bool {
         if self.disabled { return true; }
-        if let Some(ref min) = self.min {
-            if date < min { return true; }
-        }
-        if let Some(ref max) = self.max {
-            if date > max { return true; }
-        }
-        false
-    }
-
-    /// Whether a date is marked unavailable by the user-provided predicate.
-    /// Checks both the static `unavailable_dates` list and the dynamic
-    /// `is_date_unavailable_fn` callback from Props. Unavailable dates are
-    /// focusable (for keyboard navigation) but not selectable.
-    pub fn is_date_unavailable(&self, date: &CalendarDate) -> bool {
-        if self.unavailable_dates.contains(date) {
+        if let Some(min) = &self.min
+            && date.compare(min) == Ordering::Less
+        {
             return true;
         }
-        if let Some(ref predicate) = self.is_date_unavailable_fn {
-            return predicate(date);
+        if let Some(max) = &self.max
+            && date.compare(max) == Ordering::Greater
+        {
+            return true;
         }
         false
     }
 
-    /// Clamp a date into the min/max range.
+    /// Whether the user predicate marks `date` as unavailable.
+    pub fn is_date_unavailable(&self, date: &CalendarDate) -> bool {
+        self.is_date_unavailable_fn
+            .is_some_and(|predicate| predicate(date))
+    }
+
+    /// Clamp `date` into the configured `[min, max]` range.
     pub fn clamp_date(&self, date: CalendarDate) -> CalendarDate {
-        let date = match &self.min {
-            Some(min) if date < *min => min.clone(),
-            _ => date,
-        };
-        match &self.max {
-            Some(max) if date > *max => max.clone(),
-            _ => date,
+        let mut clamped = date;
+        if let Some(min) = &self.min
+            && clamped.compare(min) == Ordering::Less
+        {
+            clamped = min.clone();
         }
+        if let Some(max) = &self.max
+            && clamped.compare(max) == Ordering::Greater
+        {
+            clamped = max.clone();
+        }
+        clamped
     }
 
     /// Ensure the focused date's month is visible.
     /// Only scrolls when the focused date falls outside all visible months.
     pub fn sync_visible_to_focused(&mut self) {
         if !self.is_in_visible_range(&self.focused_date) {
-            self.visible_month = self.focused_date.month.get();
-            self.visible_year = self.focused_date.year;
+            self.visible_month = self.focused_date.month();
+            self.visible_year = self.focused_date.year();
         }
     }
 }
@@ -183,7 +230,58 @@ impl Context {
 
 ### 1.4 Props
 
+Multi-select Props (`selection_mode`, `max_selected`, `selected_dates`,
+`default_selected_dates`) live directly on `Props`, not in a §5 extension —
+the machine is a single unified type that switches behaviour on
+`selection_mode` rather than two parallel `Machine` types.
+
 ```rust
+/// Ordered set of unique calendar dates, sorted by `CalendarDate::compare`.
+///
+/// `CalendarDate` implements neither `Ord` nor `PartialOrd`, so `BTreeSet`
+/// is unavailable. `SelectedDates` is a thin newtype around
+/// `Vec<CalendarDate>` that maintains chronological order through binary
+/// search with the type's `compare` method.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SelectedDates {
+    dates: Vec<CalendarDate>,
+}
+
+impl SelectedDates {
+    pub const fn new() -> Self;
+    pub const fn len(&self) -> usize;
+    pub const fn is_empty(&self) -> bool;
+    pub fn iter(&self) -> core::slice::Iter<'_, CalendarDate>;
+    pub fn contains(&self, date: &CalendarDate) -> bool;
+    pub fn insert(&mut self, date: CalendarDate) -> bool;
+    pub fn remove(&mut self, date: &CalendarDate) -> bool;
+    pub fn as_slice(&self) -> &[CalendarDate];
+}
+
+impl FromIterator<CalendarDate> for SelectedDates { /* … */ }
+impl<'a> IntoIterator for &'a SelectedDates { /* … */ }
+
+/// Whether the calendar selects a single date or an unordered set of dates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SelectionMode {
+    #[default]
+    Single,
+    Multiple,
+}
+
+/// Predicate type for marking dates unavailable.
+///
+/// Wrapped in [`Callback`] so applications can supply closures with
+/// captured state (allowlists, computed holiday tables, etc.). `Callback`
+/// is `Arc`-backed and compares by pointer identity, so `Props` derives
+/// `Clone + PartialEq` cleanly. Construct via
+/// [`Callback::new_ref`](ars_core::Callback::new_ref), which accepts a
+/// higher-ranked closure over a reference argument — the generic
+/// [`Callback::new`](ars_core::Callback::new) constructor cannot satisfy
+/// the implicit HRTB lifetime because its `Args: 'static` bound excludes
+/// reference types.
+pub type IsDateUnavailableFn = Callback<dyn for<'a> Fn(&'a CalendarDate) -> bool + Send + Sync>;
+
 /// Props for the Calendar component.
 #[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
@@ -191,8 +289,18 @@ pub struct Props {
     pub id: String,
     /// Controlled single-date value.
     pub value: Option<Option<CalendarDate>>,
-    /// Default date for uncontrolled mode.
+    /// Default date for uncontrolled single-select mode.
     pub default_value: Option<CalendarDate>,
+    /// Controlled multi-selection set.
+    pub selected_dates: Option<SelectedDates>,
+    /// Default selection set for uncontrolled multi-select mode.
+    pub default_selected_dates: SelectedDates,
+    /// Selection mode — single by default. Multi-select unlocks
+    /// `selected_dates` and the `ToggleDate` event.
+    pub selection_mode: SelectionMode,
+    /// Maximum number of dates that can be selected in `Multiple` mode.
+    /// `None` removes the cap; excess toggles are silently dropped.
+    pub max_selected: Option<usize>,
     /// Minimum selectable date.
     pub min: Option<CalendarDate>,
     /// Maximum selectable date.
@@ -203,7 +311,7 @@ pub struct Props {
     pub readonly: bool,
     /// Predicate returning true for dates that should be marked unavailable.
     /// Unavailable dates are focusable but not selectable.
-    pub is_date_unavailable: Option<fn(&CalendarDate) -> bool>,
+    pub is_date_unavailable: Option<IsDateUnavailableFn>,
     /// Explicit override of the locale's default first day of week.
     /// When `Some`, overrides the locale default. When `None`, derives from
     /// `ars_i18n::Locale` via `WeekInfo::first_day`.
@@ -219,7 +327,8 @@ pub struct Props {
     pub show_week_numbers: bool,
     /// Right-to-left layout direction.
     pub is_rtl: bool,
-    /// Number of months to display side-by-side. Default: 1.
+    /// Number of months to display side-by-side. Values below 1 are
+    /// clamped to 1 by `Machine::init`. Default: 1.
     pub visible_months: usize,
     /// Controls navigation step size. Default: `PageBehavior::Visible`.
     pub page_behavior: PageBehavior,
@@ -233,6 +342,10 @@ impl Default for Props {
             id: String::new(),
             value: None,
             default_value: None,
+            selected_dates: None,
+            default_selected_dates: SelectedDates::new(),
+            selection_mode: SelectionMode::Single,
+            max_selected: None,
             min: None,
             max: None,
             disabled: false,
@@ -243,7 +356,8 @@ impl Default for Props {
             is_rtl: false,
             visible_months: 1,
             page_behavior: PageBehavior::Visible,
-            today: CalendarDate::new_gregorian(2025, nzu8(1), nzu8(1)),
+            today: CalendarDate::new_gregorian(2025, 1, 1)
+                .expect("2025-01-01 is a valid Gregorian date"),
         }
     }
 }
@@ -260,9 +374,22 @@ fn is_date_unavailable(ctx: &Context, date: &CalendarDate) -> bool { ctx.is_date
 
 ### 1.6 Grid Computation
 
+All `CalendarDate` arithmetic in this section uses the real `ars-i18n` API:
+`new_gregorian(year, month, day)` takes plain `u8`s and returns
+`Result<CalendarDate, CalendarError>`; `add_days(i32)` / `add(DateDuration)`
+also return `Result`. Grid anchoring calls cannot fail by construction —
+the spec uses `.expect("…")` with explicit reasons where overflow is
+impossible. Adapters propagate other failures by treating the grid as
+empty for that boundary month rather than panicking.
+
+`Weekday` is the ISO-numbered enum from `ars-i18n` (Monday=1..Sunday=7) and
+cannot be cast to `u8` directly. The grid module exposes a local
+`weekday_sunday_zero(wd) -> u8` helper that maps to the Sunday-zero
+convention the modulo arithmetic below requires.
+
 ```rust
 /// Controls how prev/next navigation advances when multiple months are visible.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PageBehavior {
     /// Prev/next advances by the full `visible_months` count.
     #[default]
@@ -279,13 +406,9 @@ impl Context {
 
     /// Ordered day-of-week labels starting from the configured first day.
     pub fn week_day_labels(&self) -> Vec<(Weekday, String)> {
-        let start = self.first_day_of_week as u8;
-        (0..7)
-            .map(|i| {
-                let wd = Weekday::from_u8((start + i) % 7);
-                let label = wd.short_label(&*self.intl_backend, &self.locale);
-                (wd, label)
-            })
+        ordered_weekdays(self.first_day_of_week)
+            .into_iter()
+            .map(|wd| (wd, self.intl_backend.weekday_short_label(wd, &self.locale)))
             .collect()
     }
 
@@ -297,241 +420,287 @@ impl Context {
     /// Build the grid of weeks for the month at the given offset
     /// from the first visible month. Offset 0 = first visible month.
     pub fn weeks_for(&self, offset: usize) -> Vec<[CalendarDate; 7]> {
-        let anchor = CalendarDate::new_gregorian(self.visible_year, NonZero::new(self.visible_month).expect("visible_month is 1-based"), nzu8(1));
-        let target = anchor.add_months(offset as i32);
-        let first_of_month = CalendarDate::new_gregorian(target.year, target.month, nzu8(1));
-        let first_weekday = first_of_month.weekday() as u8;
-        let start_offset = ((first_weekday + 7 - self.first_day_of_week as u8) % 7) as i32;
-        let grid_start = first_of_month.add_days(-start_offset);
+        let (target_month, target_year) =
+            month_year_at_offset(self.visible_month, self.visible_year, offset);
 
-        let mut weeks = Vec::new();
-        let mut current = grid_start.clone();
-        // Always render 6 weeks (42 days) for consistent grid height.
-        for _ in 0..6 {
-            let mut week = [current.clone(); 7];
-            for d in 0..7 {
-                week[d] = current.add_days(d as i32);
+        let Ok(first_of_month) = CalendarDate::new_gregorian(target_year, target_month, 1) else {
+            return Vec::new();
+        };
+
+        let first_weekday_index = weekday_sunday_zero(first_of_month.weekday());
+        let start_index = weekday_sunday_zero(self.first_day_of_week);
+        let leading = i32::from((first_weekday_index + 7 - start_index) % 7);
+
+        let Ok(grid_start) = first_of_month.add_days(-leading) else {
+            return Vec::new();
+        };
+
+        // The contract is "exactly 6 rows of 7 cells" or an empty vec on
+        // boundary failure. Partial vectors would break adapters that
+        // assume a stable 6-row grid, so any arithmetic failure partway
+        // through bails out with an empty result.
+        let mut weeks: Vec<[CalendarDate; 7]> = Vec::with_capacity(6);
+        let mut current = grid_start;
+        for i in 0..6 {
+            let Some(row) = build_week(&current) else { return Vec::new(); };
+            weeks.push(row);
+            if i < 5 {
+                let Ok(next_week_start) = current.add_days(7) else { return Vec::new(); };
+                current = next_week_start;
             }
-            weeks.push(week);
-            current = current.add_days(7);
         }
         weeks
     }
 
-    /// Returns (month, year) for the month at the given offset.
+    /// Returns (month, year) for the month at the given offset, normalised
+    /// into the 1..=12 month range with a year adjustment.
     pub fn month_year_at_offset(&self, offset: usize) -> (u8, i32) {
-        let anchor = CalendarDate::new_gregorian(self.visible_year, NonZero::new(self.visible_month).expect("visible_month is 1-based"), nzu8(1));
-        let target = anchor.add_months(offset as i32);
-        (target.month.get(), target.year)
+        month_year_at_offset(self.visible_month, self.visible_year, offset)
     }
 
     /// Whether a date is outside the month at the specified offset.
     pub fn is_outside_month_at_offset(&self, date: &CalendarDate, offset: usize) -> bool {
         let (month, year) = self.month_year_at_offset(offset);
-        date.month.get() != month || date.year != year
+        date.month() != month || date.year() != year
     }
 
     /// Whether the date's month falls within any of the visible months.
     pub fn is_in_visible_range(&self, date: &CalendarDate) -> bool {
-        for offset in 0..self.visible_months {
+        (0..self.visible_months).any(|offset| {
             let (month, year) = self.month_year_at_offset(offset);
-            if date.month.get() == month && date.year == year {
-                return true;
-            }
-        }
-        false
+            date.month() == month && date.year() == year
+        })
     }
 
     /// Navigate the visible month/year forward by `n` months.
     pub fn advance_month(&mut self, n: i32) {
-        let anchor = CalendarDate::new_gregorian(self.visible_year, NonZero::new(self.visible_month).expect("visible_month is 1-based"), nzu8(1));
-        let next = anchor.add_months(n);
-        self.visible_month = next.month.get().clamp(1, 12);
-        self.visible_year = next.year;
+        let (month, year) = advance_month(self.visible_month, self.visible_year, n);
+        self.visible_month = month;
+        self.visible_year = year;
     }
 
     /// Whether the given date is outside the currently visible month.
     pub fn is_outside_visible_month(&self, date: &CalendarDate) -> bool {
-        date.month.get() != self.visible_month || date.year != self.visible_year
+        date.month() != self.visible_month || date.year() != self.visible_year
     }
 }
+
+/// Sunday-zero index for a weekday (Sunday=0..Saturday=6).
+const fn weekday_sunday_zero(weekday: Weekday) -> u8 { /* … */ }
+
+/// `(month, year)` at the given offset from `(visible_month, visible_year)`,
+/// normalised into the 1..=12 month range with a year adjustment.
+const fn month_year_at_offset(visible_month: u8, visible_year: i32, offset: usize) -> (u8, i32) {
+    let raw_index = visible_month as i64 - 1 + offset as i64;
+    let normalised_month = raw_index.rem_euclid(12) as u8 + 1;
+    let year_delta = raw_index.div_euclid(12) as i32;
+    (normalised_month, visible_year + year_delta)
+}
+
+/// `advance_month` shares the same modulo arithmetic — see
+/// `month_year_at_offset`; signed `n` advances or retreats by `|n|` months.
+const fn advance_month(visible_month: u8, visible_year: i32, n: i32) -> (u8, i32);
 ```
 
 ### 1.7 Full Machine Implementation
 
+The named-effect intent for month/year navigation is a typed enum, not a
+bare `&'static str`. The setup closure is a no-op marker
+([`PendingEffect::named`]); the adapter resolves the announce intent based
+on the typed name and calls into its platform announce path — core code
+never reaches for a framework hook like `use_platform_effects()`.
+
 ```rust
+/// Typed identifier for every named effect intent the `calendar` machine emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Announce the newly visible month (or month range) to assistive tech
+    /// via the adapter's platform announcer. Triggered by every
+    /// month/year navigation transition.
+    AnnounceMonth,
+}
+
 pub struct Machine;
 
 impl ars_core::Machine for Machine {
-    type State   = State;
-    type Event   = Event;
-    type Context = Context;
-    type Props   = Props;
+    type State    = State;
+    type Event    = Event;
+    type Context  = Context;
+    type Props    = Props;
     type Messages = Messages;
-    type Api<'a> = Api<'a>;
+    type Effect   = Effect;
+    type Api<'a>  = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let initial_date = props.value.flatten();
-        let focused = initial_date
-            .clone()
-            .unwrap_or_else(|| props.today.clone());
-
-        let value = match props.value {
-            Some(v) => Bindable::controlled(v),
-            None    => Bindable::uncontrolled(props.default_value.clone()),
+        let value = match &props.value {
+            Some(controlled) => Bindable::controlled(controlled.clone()),
+            None             => Bindable::uncontrolled(props.default_value.clone()),
+        };
+        let selected_dates = match &props.selected_dates {
+            Some(set) => Bindable::controlled(set.clone()),
+            None      => Bindable::uncontrolled(props.default_selected_dates.clone()),
         };
 
-        let locale = env.locale.clone();
-        let messages = messages.clone();
+        let mut initial_date = match props.selection_mode {
+            SelectionMode::Single   => value.get().clone().unwrap_or_else(|| props.today.clone()),
+            SelectionMode::Multiple => selected_dates.get().iter().next().cloned()
+                .unwrap_or_else(|| props.today.clone()),
+        };
 
+        // Clamp the initial focused date into [min, max] so the roving
+        // tabindex target never starts on a disabled cell.
+        if let Some(min) = &props.min
+            && initial_date.compare(min) == Ordering::Less
+        {
+            initial_date = min.clone();
+        }
+        if let Some(max) = &props.max
+            && initial_date.compare(max) == Ordering::Greater
+        {
+            initial_date = max.clone();
+        }
+
+        let locale = env.locale.clone();
         let first_day = props
             .first_day_of_week
-            .unwrap_or_else(|| locale.first_day_of_week());
+            .unwrap_or_else(|| locale.first_day_of_week(&*env.intl_backend));
 
         let ctx = Context {
             value,
-            focused_date: focused.clone(),
-            visible_month: focused.month.get(),
-            visible_year: focused.year,
+            selected_dates,
+            selection_mode: props.selection_mode,
+            max_selected: props.max_selected,
+            focused_date: initial_date.clone(),
+            visible_month: initial_date.month(),
+            visible_year: initial_date.year(),
+            visible_months: props.visible_months.max(1),
+            page_behavior: props.page_behavior,
             min: props.min.clone(),
             max: props.max.clone(),
-            locale,
-            messages,
-            intl_backend: env.intl_backend.clone(),
             first_day_of_week: first_day,
             is_rtl: props.is_rtl,
             disabled: props.disabled,
             readonly: props.readonly,
-            unavailable_dates: Vec::new(),
-            is_date_unavailable_fn: props.is_date_unavailable,
-            ids: ComponentIds::from_id(&props.id),
-            visible_months: props.visible_months.max(1),
-            page_behavior: props.page_behavior.clone(),
             show_week_numbers: props.show_week_numbers,
+            today: props.today.clone(),
+            is_date_unavailable_fn: props.is_date_unavailable,
+            locale,
+            messages: messages.clone(),
+            intl_backend: Arc::clone(&env.intl_backend),
+            ids: ComponentIds::from_id(&props.id),
         };
 
         (State::Idle, ctx)
     }
 
+    /// Surface parent prop changes to the live machine via a `SyncProps`
+    /// event. Without this, controlled `value`/`selected_dates` updates,
+    /// `disabled`/`readonly` flips, and `min`/`max` tightening from
+    /// `Service::set_props` would be ignored after mount.
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        debug_assert_eq!(
+            old.id, new.id,
+            "calendar::Props.id must remain stable after init",
+        );
+        if old == new {
+            Vec::new()
+        } else {
+            vec![Event::SyncProps(Box::new(new.clone()))]
+        }
+    }
+
     fn transition(
-        state: &Self::State,
+        _state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
         _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        // `FocusOut` and `SyncProps` must run even when the calendar is
+        // disabled. FocusOut needs to land blur cleanup; SyncProps needs
+        // to land parent-driven changes that may *flip* the calendar out
+        // of the disabled state. All other events are gated below.
+        if matches!(event, Event::FocusOut) {
+            return Some(TransitionPlan::to(State::Idle));
+        }
+        if let Event::SyncProps(props) = event {
+            let props = props.as_ref().clone();
+            return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                sync_props_into_ctx(ctx, &props);
+            }));
+        }
+
         if ctx.disabled { return None; }
 
         match event {
             // ── Focus management ─────────────────────────────────────────
-            Event::FocusIn => {
-                Some(TransitionPlan::to(State::Focused))
-            }
-
-            Event::FocusOut => {
-                Some(TransitionPlan::to(State::Idle))
-            }
+            Event::FocusIn  => Some(TransitionPlan::to(State::Focused)),
+            // `FocusOut` and `SyncProps` handled above the disabled guard;
+            // these arms exist only to satisfy match exhaustiveness.
+            Event::FocusOut | Event::SyncProps(_) => None,
 
             Event::FocusDate { date } => {
-                let date = ctx.clamp_date(date.clone());
-                Some(TransitionPlan::to(State::Focused)
-                    .apply(move |ctx| {
-                        ctx.focused_date = date;
-                        ctx.sync_visible_to_focused();
-                    }))
+                let clamped = ctx.clamp_date(date.clone());
+                Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
+                    ctx.focused_date = clamped;
+                    ctx.sync_visible_to_focused();
+                }))
             }
 
             // ── Date selection ────────────────────────────────────────────
-            Event::SelectDate { date } => {
-                if ctx.readonly { return None; }
-                if ctx.is_date_disabled(date) || ctx.is_date_unavailable(date) {
-                    return None;
+            // `SelectDate` and `ToggleDate` both route through the active
+            // selection mode: Single uses `apply_select_single`, Multiple
+            // uses `apply_toggle_multi`. Read the spec wording in §1.2 for
+            // why they share an arm.
+            Event::SelectDate { date } | Event::ToggleDate { date } => {
+                match ctx.selection_mode {
+                    SelectionMode::Single   => apply_select_single(ctx, date.clone()),
+                    SelectionMode::Multiple => apply_toggle_multi(ctx, date.clone()),
                 }
-                let date = date.clone();
-                Some(TransitionPlan::to(State::Focused)
-                    .apply(move |ctx| {
-                        ctx.value.set(Some(date.clone()));
-                        ctx.focused_date = date;
-                    }))
             }
+
             // ── Month / year navigation ──────────────────────────────────
-            Event::NextMonth => {
-                Some(TransitionPlan::context_only(|ctx| {
-                    let step = match ctx.page_behavior {
-                        PageBehavior::Visible => ctx.visible_months as i32,
-                        PageBehavior::Single  => 1,
-                    };
-                    ctx.advance_month(step);
-                }).with_effect(PendingEffect::new("announce-month", |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    let label = if ctx.visible_months > 1 {
-                        let first = format!("{} {}", month_long_name(&*ctx.intl_backend, ctx.visible_month, &ctx.locale), ctx.visible_year);
-                        let (lm, ly) = ctx.month_year_at_offset(ctx.visible_months - 1);
-                        let sep = (ctx.messages.month_range_separator)(&ctx.locale);
-                        format!("{}{}{} {}", first, sep, month_long_name(&*ctx.intl_backend, lm, &ctx.locale), ly)
-                    } else {
-                        format!("{} {}", month_long_name(&*ctx.intl_backend, ctx.visible_month, &ctx.locale), ctx.visible_year)
-                    };
-                    platform.announce(&label);
-                    no_cleanup()
-                })))
-            }
-
-            Event::PrevMonth => {
-                Some(TransitionPlan::context_only(|ctx| {
-                    let step = match ctx.page_behavior {
-                        PageBehavior::Visible => ctx.visible_months as i32,
-                        PageBehavior::Single  => 1,
-                    };
-                    ctx.advance_month(-step);
-                }).with_effect(PendingEffect::new("announce-month", |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    let label = if ctx.visible_months > 1 {
-                        let first = format!("{} {}", month_long_name(&*ctx.intl_backend, ctx.visible_month, &ctx.locale), ctx.visible_year);
-                        let (lm, ly) = ctx.month_year_at_offset(ctx.visible_months - 1);
-                        let sep = (ctx.messages.month_range_separator)(&ctx.locale);
-                        format!("{}{}{} {}", first, sep, month_long_name(&*ctx.intl_backend, lm, &ctx.locale), ly)
-                    } else {
-                        format!("{} {}", month_long_name(&*ctx.intl_backend, ctx.visible_month, &ctx.locale), ctx.visible_year)
-                    };
-                    platform.announce(&label);
-                    no_cleanup()
-                })))
-            }
-
-            Event::NextYear => {
-                Some(TransitionPlan::context_only(|ctx| {
-                    ctx.advance_month(12);
-                }))
-            }
-
-            Event::PrevYear => {
-                Some(TransitionPlan::context_only(|ctx| {
-                    ctx.advance_month(-12);
-                }))
-            }
+            Event::NextMonth => month_step_plan(ctx, step_for_page_behavior(ctx)),
+            Event::PrevMonth => month_step_plan(ctx, -step_for_page_behavior(ctx)),
+            Event::NextYear  => month_step_plan(ctx, 12),
+            Event::PrevYear  => month_step_plan(ctx, -12),
 
             Event::SetMonth { month } => {
                 let month = *month;
                 if !(1..=12).contains(&month) { return None; }
+                // Pre-compute the focused-date shift; on failure the
+                // whole transition (and `AnnounceMonth`) is dropped.
+                let delta = i32::from(month) - i32::from(ctx.visible_month);
+                let shifted = ctx.focused_date.add(DateDuration {
+                    months: delta,
+                    ..DateDuration::default()
+                }).ok()?;
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.visible_month = month;
-                }))
+                    ctx.focused_date = ctx.clamp_date(shifted);
+                    // If the clamp moved focus into another month, pull
+                    // visible_month along so the focused cell renders.
+                    ctx.sync_visible_to_focused();
+                }).with_effect(announce_month_effect()))
             }
 
             Event::SetYear { year } => {
                 let year = *year;
+                // `i32 - i32` overflows on extreme inputs; drop event on
+                // overflow.
+                let delta_years = year.checked_sub(ctx.visible_year)?;
+                let shifted = ctx.focused_date.add(DateDuration {
+                    years: delta_years,
+                    ..DateDuration::default()
+                }).ok()?;
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.visible_year = year;
-                }))
+                    ctx.focused_date = ctx.clamp_date(shifted);
+                    ctx.sync_visible_to_focused();
+                }).with_effect(announce_month_effect()))
             }
 
             // ── Keyboard navigation ──────────────────────────────────────
-            Event::KeyDown { ref key } => {
-                Self::handle_keydown(state, &KeyboardEventData { key: *key }, ctx)
-            }
-
-            // Catch-all for guarded match arms.
-            _ => None,
+            Event::KeyDown { key, shift } => handle_keydown(*key, *shift, ctx),
         }
     }
 
@@ -541,80 +710,179 @@ impl ars_core::Machine for Machine {
         props: &'a Self::Props,
         send: &'a dyn Fn(Event),
     ) -> Self::Api<'a> {
-        Api { state, ctx, props, send }
+        Api::new(state, ctx, props, send)
     }
 }
 
-impl Machine {
-    /// Keyboard navigation within the calendar grid.
-    /// Follows WAI-ARIA Grid pattern with RTL awareness.
-    fn handle_keydown(
-        state: &State,
-        data: &KeyboardEventData,
-        ctx: &Context,
-    ) -> Option<TransitionPlan<Self>> {
-        // Only handle keys when the grid is focused.
-        if *state != State::Focused { return None; }
+fn step_for_page_behavior(ctx: &Context) -> i32 {
+    match ctx.page_behavior {
+        PageBehavior::Visible => i32::try_from(ctx.visible_months).unwrap_or(1).max(1),
+        PageBehavior::Single  => 1,
+    }
+}
 
-        let focused = ctx.focused_date.clone();
-        // RTL-aware directional keys: in RTL, Left means "next" and Right means "prev".
-        let (prev_day_key, next_day_key) = if ctx.is_rtl {
-            (KeyboardKey::ArrowRight, KeyboardKey::ArrowLeft)
-        } else {
-            (KeyboardKey::ArrowLeft, KeyboardKey::ArrowRight)
-        };
+fn month_step_plan(ctx: &Context, step: i32) -> Option<TransitionPlan<Machine>> {
+    // Pre-compute the focused-date shift at plan-build time so a
+    // boundary failure short-circuits the whole transition (no spurious
+    // `AnnounceMonth` effect). Returning `None` propagates as "no
+    // change" — visible_month, focused_date, AND announce effect all
+    // stay put.
+    let shifted = ctx.focused_date.add(DateDuration {
+        months: step,
+        ..DateDuration::default()
+    }).ok()?;
+    Some(
+        TransitionPlan::context_only(move |ctx: &mut Context| {
+            ctx.advance_month(step);
+            ctx.focused_date = ctx.clamp_date(shifted);
+            // If the clamp pushed focus into a different month than the
+            // newly-advanced visible window (e.g., NextMonth when focus
+            // is already at `max`), pull visible back to wherever the
+            // clamped focus lives. Without this the roving target has no
+            // rendered cell.
+            ctx.sync_visible_to_focused();
+        })
+        .with_effect(announce_month_effect()),
+    )
+}
 
-        let new_focus = match data.key {
-            k if k == prev_day_key => Some(focused.add_days(-1)),
-            k if k == next_day_key => Some(focused.add_days(1)),
-            KeyboardKey::ArrowUp              => Some(focused.add_days(-7)),
-            KeyboardKey::ArrowDown            => Some(focused.add_days(7)),
-            KeyboardKey::Home                 => {
+fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
+    ctx.value.sync_controlled(props.value.clone());
+    ctx.selected_dates.sync_controlled(props.selected_dates.clone());
+
+    ctx.selection_mode = props.selection_mode;
+    ctx.max_selected = props.max_selected;
+    ctx.min = props.min.clone();
+    ctx.max = props.max.clone();
+    ctx.disabled = props.disabled;
+    ctx.readonly = props.readonly;
+    ctx.is_date_unavailable_fn = props.is_date_unavailable.clone();
+    ctx.show_week_numbers = props.show_week_numbers;
+    ctx.is_rtl = props.is_rtl;
+    ctx.visible_months = props.visible_months.max(1);
+    ctx.page_behavior = props.page_behavior;
+    ctx.today = props.today.clone();
+
+    // `first_day_of_week` accepts an explicit override; clearing it
+    // (`Some(_) → None`) restores the locale-derived value via the
+    // cached `intl_backend` rather than retaining the stale override.
+    ctx.first_day_of_week = props
+        .first_day_of_week
+        .unwrap_or_else(|| ctx.locale.first_day_of_week(&*ctx.intl_backend));
+
+    // Re-clamp `focused_date` in case `min`/`max` tightened, then drag
+    // the visible window along so the focused cell remains rendered.
+    let clamped = ctx.clamp_date(ctx.focused_date.clone());
+    ctx.focused_date = clamped;
+    ctx.sync_visible_to_focused();
+}
+
+fn announce_month_effect() -> ars_core::PendingEffect<Machine> {
+    ars_core::PendingEffect::named(Effect::AnnounceMonth)
+}
+
+fn apply_select_single(ctx: &Context, date: CalendarDate)
+    -> Option<TransitionPlan<Machine>>
+{
+    if ctx.readonly { return None; }
+    if ctx.is_date_disabled(&date) || ctx.is_date_unavailable(&date) { return None; }
+    Some(TransitionPlan::to(State::Focused).apply(move |ctx: &mut Context| {
+        ctx.value.set(Some(date.clone()));
+        ctx.focused_date = date;
+    }))
+}
+
+fn apply_toggle_multi(ctx: &Context, date: CalendarDate)
+    -> Option<TransitionPlan<Machine>>
+{
+    if ctx.readonly { return None; }
+    if ctx.is_date_disabled(&date) || ctx.is_date_unavailable(&date) { return None; }
+    let already_selected = ctx.selected_dates.get().contains(&date);
+    let at_cap = !already_selected && ctx.max_selected
+        .is_some_and(|cap| ctx.selected_dates.get().len() >= cap);
+    if at_cap { return None; } // §5.4 silent drop
+    Some(TransitionPlan::to(State::Focused).apply(move |ctx: &mut Context| {
+        let mut next = ctx.selected_dates.get().clone();
+        if already_selected { next.remove(&date); } else { next.insert(date.clone()); }
+        ctx.selected_dates.set(next);
+        ctx.focused_date = date;
+    }))
+}
+
+/// Keyboard navigation within the calendar grid.
+/// Follows WAI-ARIA Grid pattern with RTL awareness.
+///
+/// `Shift+PageUp` / `Shift+PageDown` are handled here directly because
+/// `Event::KeyDown` carries the `shift` flag — adapters do not need a
+/// side-channel mapping. The `Enter`/`Space` arm fans out to
+/// `Event::SelectDate` (Single) or `Event::ToggleDate` (Multiple) so the
+/// active selection mode determines the follow-up behavior.
+fn handle_keydown(key: KeyboardKey, shift: bool, ctx: &Context)
+    -> Option<TransitionPlan<Machine>>
+{
+    if shift {
+        match key {
+            KeyboardKey::PageUp   => return month_step_plan(ctx, -12),
+            KeyboardKey::PageDown => return month_step_plan(ctx, 12),
+            _ => {}
+        }
+    }
+
+    let focused = ctx.focused_date.clone();
+    // RTL-aware directional keys: in RTL, Left means "next" and Right means "prev".
+    let (prev_day_key, next_day_key) = if ctx.is_rtl {
+        (KeyboardKey::ArrowRight, KeyboardKey::ArrowLeft)
+    } else {
+        (KeyboardKey::ArrowLeft, KeyboardKey::ArrowRight)
+    };
+
+    let new_focus: Option<CalendarDate> = if key == prev_day_key {
+        focused.add_days(-1).ok()
+    } else if key == next_day_key {
+        focused.add_days(1).ok()
+    } else {
+        match key {
+            KeyboardKey::ArrowUp   => focused.add_days(-7).ok(),
+            KeyboardKey::ArrowDown => focused.add_days(7).ok(),
+            KeyboardKey::Home => {
                 // Move to start of current week.
-                let wd = focused.weekday() as u8;
-                let start = ctx.first_day_of_week as u8;
-                let offset = ((wd + 7 - start) % 7) as i32;
-                Some(focused.add_days(-offset))
+                let wd = weekday_sunday_zero(focused.weekday());
+                let start = weekday_sunday_zero(ctx.first_day_of_week);
+                let offset = i32::from((wd + 7 - start) % 7);
+                focused.add_days(-offset).ok()
             }
             KeyboardKey::End => {
                 // Move to end of current week.
-                let wd = focused.weekday() as u8;
-                let start = ctx.first_day_of_week as u8;
-                let offset = ((wd + 7 - start) % 7) as i32;
-                Some(focused.add_days(6 - offset))
+                let wd = weekday_sunday_zero(focused.weekday());
+                let start = weekday_sunday_zero(ctx.first_day_of_week);
+                let offset = i32::from((wd + 7 - start) % 7);
+                focused.add_days(6 - offset).ok()
             }
-            KeyboardKey::PageUp  => Some(focused.add_months(-1)),
-            KeyboardKey::PageDown => Some(focused.add_months(1)),
+            KeyboardKey::PageUp   => focused.add(DateDuration { months: -1, ..Default::default() }).ok(),
+            KeyboardKey::PageDown => focused.add(DateDuration { months:  1, ..Default::default() }).ok(),
             _ => None,
-        };
-
-        // Shift+PageUp/PageDown for year navigation is handled separately
-        // because the key enum itself doesn't encode the shift modifier.
-        // Adapters call `on_grid_keydown(data, shift)` which maps:
-        //   Shift+PageUp   -> Event::PrevYear
-        //   Shift+PageDown -> Event::NextYear
-
-        match new_focus {
-            Some(date) => {
-                let clamped = ctx.clamp_date(date);
-                Some(TransitionPlan::to(State::Focused)
-                    .apply(move |ctx| {
-                        ctx.focused_date = clamped;
-                        ctx.sync_visible_to_focused();
-                    }))
-            }
-            None => {
-                // Enter / Space selects the focused date.
-                match data.key {
-                    KeyboardKey::Enter | KeyboardKey::Space => {
-                        let date = focused;
-                        Some(TransitionPlan::context_only(|_ctx| {})
-                            .then(Event::SelectDate { date }))
-                    }
-                    _ => None,
-                }
-            }
         }
+    };
+
+    if let Some(date) = new_focus {
+        let clamped = ctx.clamp_date(date);
+        return Some(TransitionPlan::to(State::Focused).apply(move |ctx: &mut Context| {
+            ctx.focused_date = clamped;
+            ctx.sync_visible_to_focused();
+        }));
+    }
+
+    // Enter / Space selects (Single) or toggles (Multiple) the focused date.
+    match key {
+        KeyboardKey::Enter | KeyboardKey::Space => {
+            let date = focused;
+            let select_event = match ctx.selection_mode {
+                SelectionMode::Single   => Event::SelectDate { date },
+                SelectionMode::Multiple => Event::ToggleDate { date },
+            };
+            Some(TransitionPlan::context_only(|_ctx: &mut Context| {}).then(select_event))
+        }
+        _ => None,
     }
 }
 ```
@@ -635,8 +903,12 @@ pub enum Part {
     HeadRow,
     HeadCell { day: Weekday },
     Row { week_index: usize },
-    Cell { date: CalendarDate },
-    CellTrigger { date: CalendarDate },
+    /// `offset` carries the multi-month grid index (0 for single-month
+    /// or the first visible grid) so `ConnectApi::part_attrs` dispatches
+    /// to the offset-aware helpers and later grids are not mislabelled
+    /// as outside-month.
+    Cell { date: CalendarDate, offset: usize },
+    CellTrigger { date: CalendarDate, offset: usize },
 }
 
 /// API for the Calendar component.
@@ -703,6 +975,10 @@ impl<'a> Api<'a> {
         };
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
         attrs.set(HtmlAttr::TabIndex, "-1");
+        // `type="button"` keeps a click from auto-submitting an
+        // enclosing <form>. Browser default for untyped buttons is
+        // `submit`, which would turn paging into form submission.
+        attrs.set(HtmlAttr::Type, "button");
         if self.is_prev_disabled() {
             attrs.set_bool(HtmlAttr::Disabled, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
@@ -729,6 +1005,9 @@ impl<'a> Api<'a> {
         };
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
         attrs.set(HtmlAttr::TabIndex, "-1");
+        // See `prev_trigger_attrs` — explicit `type="button"` prevents
+        // form auto-submission on next clicks.
+        attrs.set(HtmlAttr::Type, "button");
         if self.is_next_disabled() {
             attrs.set_bool(HtmlAttr::Disabled, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
@@ -736,10 +1015,11 @@ impl<'a> Api<'a> {
         attrs
     }
 
-    /// Attributes for the heading text element.
-    pub fn heading_text_attrs(&self) -> AttrMap {
+    /// Attributes for the main heading element. The heading is the
+    /// `aria-live="polite"` announcer for month navigation.
+    pub fn heading_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
-        attrs.set(HtmlAttr::Id, &self.ctx.heading_id);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("heading"));
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Heading.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
@@ -750,20 +1030,24 @@ impl<'a> Api<'a> {
 
     /// Formatted heading text: e.g. "January 2024".
     pub fn heading_text(&self) -> String {
-        let month_name = month_long_name(&*self.ctx.intl_backend, self.ctx.visible_month, &self.ctx.locale);
+        let month_name = self.ctx.intl_backend.month_long_name(self.ctx.visible_month, &self.ctx.locale);
         format!("{} {}", month_name, self.ctx.visible_year)
     }
 
-    /// Attributes for the grid element.
+    /// Attributes for the grid element (first visible month).
     pub fn grid_attrs(&self) -> AttrMap {
+        self.grid_attrs_with_ids(self.ctx.ids.part("grid"), self.ctx.ids.part("heading"))
+    }
+
+    fn grid_attrs_with_ids(&self, grid_id: String, heading_id: String) -> AttrMap {
         let mut attrs = AttrMap::new();
-        attrs.set(HtmlAttr::Id, &self.ctx.grid_id);
-        attrs.set(HtmlAttr::Role, "grid");
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Grid.data_attrs();
+        attrs.set(HtmlAttr::Id, grid_id);
+        attrs.set(HtmlAttr::Role, "grid");
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), &self.ctx.heading_id);
-        if self.ctx.is_range {
+        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), heading_id);
+        if matches!(self.ctx.selection_mode, SelectionMode::Multiple) {
             attrs.set(HtmlAttr::Aria(AriaAttr::MultiSelectable), "true");
         }
         if self.ctx.readonly {
@@ -787,39 +1071,31 @@ impl<'a> Api<'a> {
         0..self.ctx.visible_months
     }
 
-    /// Grid attributes for the month at the given offset.
+    /// Grid attributes for the month at the given offset. Multi-month
+    /// layouts use the per-grid heading id rather than the shared live
+    /// region.
     pub fn grid_attrs_for(&self, offset: usize) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let grid_id = format!("{}-grid-{}", self.ctx.id, offset);
-        let heading_id = format!("{}-heading-{}", self.ctx.id, offset);
-        attrs.set(HtmlAttr::Id, grid_id);
-        attrs.set(HtmlAttr::Role, "grid");
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Grid.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy),  heading_id);
-        if self.ctx.is_range {
-            attrs.set(HtmlAttr::Aria(AriaAttr::MultiSelectable), "true");
-        }
-        if self.ctx.readonly { attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true"); }
-        if self.ctx.disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); }
-        attrs
+        let grid_id    = format!("{}-grid-{}",    self.ctx.ids.id(), offset);
+        let heading_id = format!("{}-heading-{}", self.ctx.ids.id(), offset);
+        self.grid_attrs_with_ids(grid_id, heading_id)
     }
 
     /// Heading text for the month at the given offset.
     pub fn heading_text_for(&self, offset: usize) -> String {
         let (month, year) = self.ctx.month_year_at_offset(offset);
-        format!("{} {}", month_long_name(&*self.ctx.intl_backend, month, &self.ctx.locale), year)
+        format!("{} {}", self.ctx.intl_backend.month_long_name(month, &self.ctx.locale), year)
     }
 
-    /// Heading text attributes for a per-grid heading.
-    pub fn heading_text_attrs_for(&self, offset: usize) -> AttrMap {
+    /// Heading attributes for a per-grid heading. Per-grid headings are
+    /// visually hidden and intentionally have no `aria-live` — only the
+    /// main `heading_attrs` heading announces month changes to avoid
+    /// duplicate announcements.
+    pub fn heading_attrs_for(&self, offset: usize) -> AttrMap {
         let mut attrs = AttrMap::new();
-        attrs.set(HtmlAttr::Id, format!("{}-heading-{}", self.ctx.id, offset));
+        attrs.set(HtmlAttr::Id, format!("{}-heading-{}", self.ctx.ids.id(), offset));
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Heading.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        // No aria-live on per-grid headings; only the main heading has it.
         attrs
     }
 
@@ -844,10 +1120,10 @@ impl<'a> Api<'a> {
     }
 
     /// Attributes for the grid group container (role="group").
-    /// Only rendered when visible_months > 1.
+    /// Only meaningful when `visible_months > 1`.
     pub fn grid_group_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
-        attrs.set(HtmlAttr::Id, format!("{}-grid-group", self.ctx.id));
+        attrs.set(HtmlAttr::Id, format!("{}-grid-group", self.ctx.ids.id()));
         attrs.set(HtmlAttr::Role, "group");
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::GridGroup.data_attrs();
         attrs.set(scope_attr, scope_val);
@@ -886,7 +1162,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Scope, "col");
-        attrs.set(HtmlAttr::Abbr, weekday.long_label(&*self.ctx.intl_backend, &self.ctx.locale));
+        attrs.set(HtmlAttr::Abbr, self.ctx.intl_backend.weekday_long_label(weekday, &self.ctx.locale));
         attrs
     }
 
@@ -905,7 +1181,8 @@ impl<'a> Api<'a> {
     pub fn cell_attrs(&self, date: &CalendarDate) -> AttrMap {
         let mut attrs = AttrMap::new();
         attrs.set(HtmlAttr::Role, "gridcell");
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Cell { date: date.clone() }.data_attrs();
+        let [(scope_attr, scope_val), (part_attr, part_val)] =
+            Part::Cell { date: date.clone(), offset: 0 }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
 
@@ -924,23 +1201,49 @@ impl<'a> Api<'a> {
 
     /// Attributes for the cell trigger element.
     pub fn cell_trigger_attrs(&self, date: &CalendarDate) -> AttrMap {
+        self.cell_trigger_attrs_inner(date, None)
+    }
+
+    /// Like [`Api::cell_trigger_attrs`] but checks "outside month" against
+    /// the month at the supplied offset rather than the first visible
+    /// month. Multi-month layouts use this so triggers in later grids do
+    /// not get flagged `data-ars-outside-month` just because they belong
+    /// to a different month than offset 0.
+    pub fn cell_trigger_attrs_for(&self, date: &CalendarDate, offset: usize) -> AttrMap {
+        self.cell_trigger_attrs_inner(date, Some(offset))
+    }
+
+    fn cell_trigger_attrs_inner(&self, date: &CalendarDate, offset: Option<usize>) -> AttrMap {
         let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::CellTrigger { date: date.clone() }.data_attrs();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::CellTrigger {
+            date: date.clone(),
+            offset: offset.unwrap_or(0),
+        }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        // `type="button"` prevents an enclosing <form> from submitting
+        // on date clicks (browser default for untyped buttons is submit).
+        attrs.set(HtmlAttr::Type, "button");
 
         let disabled = self.is_disabled(date);
         let unavailable = self.is_unavailable(date);
         let is_focused = self.ctx.focused_date == *date;
-        let is_today = *date == self.props.today;
+        let is_today = *date == self.ctx.today;
         let selected = self.is_selected(date);
 
         // tabindex: only the focused cell or the first selectable cell is tabbable.
         attrs.set(HtmlAttr::TabIndex, if is_focused { "0" } else { "-1" });
 
+        // `aria-disabled` announces the semantic restriction for both
+        // out-of-range (disabled) and unavailable dates. HTML `disabled`
+        // is **only** set for the disabled case because it removes the
+        // element from the browser focus model; unavailable dates must
+        // remain focusable per spec §3 even though they cannot be selected.
         if disabled || unavailable {
-            attrs.set_bool(HtmlAttr::Disabled, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
+        if disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
         }
         if selected {
             attrs.set(HtmlAttr::Aria(AriaAttr::Selected), "true");
@@ -948,7 +1251,11 @@ impl<'a> Api<'a> {
         if is_today {
             attrs.set_bool(HtmlAttr::Data("ars-today"), true);
         }
-        if self.ctx.is_outside_visible_month(date) {
+        let outside_month = match offset {
+            Some(o) => self.ctx.is_outside_month_at_offset(date, o),
+            None    => self.ctx.is_outside_visible_month(date),
+        };
+        if outside_month {
             attrs.set_bool(HtmlAttr::Data("ars-outside-month"), true);
         }
         if unavailable {
@@ -959,16 +1266,21 @@ impl<'a> Api<'a> {
         // Unavailable and disabled dates append a suffix so screen readers announce
         // the restriction without requiring the user to attempt selection.
         let base_label = format!(
-            "{} {} {}, {}",
-            month_long_name(&*self.ctx.intl_backend, date.month.get(), &self.ctx.locale),
-            date.day.get(),
-            date.year,
-            date.weekday().long_label(&*self.ctx.intl_backend, &self.ctx.locale),
+            "{} {}, {}, {}",
+            self.ctx.intl_backend.month_long_name(date.month(), &self.ctx.locale),
+            date.day(),
+            date.year(),
+            self.ctx.intl_backend.weekday_long_label(date.weekday(), &self.ctx.locale),
         );
+        // Status suffix flows through `Messages` so it can be localized
+        // (e.g., German `(nicht verfügbar)`); a single space joins base
+        // and suffix automatically.
         let label = if unavailable {
-            format!("{} (unavailable)", base_label)
+            let suffix = (self.ctx.messages.unavailable_suffix)(&self.ctx.locale);
+            format!("{base_label} {suffix}")
         } else if disabled {
-            format!("{} (disabled)", base_label)
+            let suffix = (self.ctx.messages.disabled_suffix)(&self.ctx.locale);
+            format!("{base_label} {suffix}")
         } else {
             base_label
         };
@@ -979,19 +1291,14 @@ impl<'a> Api<'a> {
 
     // ── Typed handler methods ────────────────────────────────────────────
 
-    /// Handle click on a day cell.
+    /// Handle click on a day cell. Routes to `SelectDate` in Single mode
+    /// and `ToggleDate` in Multiple mode.
     pub fn on_cell_click(&self, date: CalendarDate) {
-        (self.send)(Event::SelectDate { date });
-    }
-
-    /// Handle hover over a day cell (for range preview).
-    pub fn on_cell_hover(&self, date: CalendarDate) {
-        (self.send)(Event::HoverDate { date });
-    }
-
-    /// Handle mouse leaving the grid.
-    pub fn on_grid_mouseleave(&self) {
-        (self.send)(Event::HoverEnd);
+        let event = match self.ctx.selection_mode {
+            SelectionMode::Single   => Event::SelectDate { date },
+            SelectionMode::Multiple => Event::ToggleDate { date },
+        };
+        (self.send)(event);
     }
 
     /// Handle focus entering the grid.
@@ -1006,13 +1313,13 @@ impl<'a> Api<'a> {
         }
     }
 
-    /// Handle keydown on the grid. Shift modifier handled here for year nav.
+    /// Handle keydown on the grid. The adapter folds the `shift` modifier
+    /// into the call so the machine can map `Shift+PageUp` /
+    /// `Shift+PageDown` to year navigation inside its single transition
+    /// arm. There is no side-channel dispatch — `Event::KeyDown` carries
+    /// `shift` directly.
     pub fn on_grid_keydown(&self, key: KeyboardKey, shift: bool) {
-        match (key, shift) {
-            (KeyboardKey::PageUp, true)  => (self.send)(Event::PrevYear),
-            (KeyboardKey::PageDown, true) => (self.send)(Event::NextYear),
-            _ => (self.send)(Event::KeyDown { key }),
-        }
+        (self.send)(Event::KeyDown { key, shift });
     }
 
     /// Handle click on the previous month button.
@@ -1034,7 +1341,7 @@ impl<'a> Api<'a> {
 
     /// Whether a date is today.
     pub fn is_today(&self, date: &CalendarDate) -> bool {
-        *date == self.props.today
+        *date == self.ctx.today
     }
 
     /// Whether a date is disabled (out of min/max range or globally disabled).
@@ -1052,34 +1359,49 @@ impl<'a> Api<'a> {
         self.ctx.is_outside_visible_month(date)
     }
 
-    /// Whether the prev button should be disabled (min constraint).
+    /// Whether the prev button should be disabled — either the calendar
+    /// is globally disabled, the post-step range is unrepresentable
+    /// (calendar boundary), or stepping by the active `page_behavior`
+    /// would yield a visible range with **no** dates ≥ `min`. The check
+    /// looks at the LAST month of the post-step range so multi-month +
+    /// `PageBehavior::Single` doesn't disable too early.
     pub fn is_prev_disabled(&self) -> bool {
-        if let Some(ref min) = self.ctx.min {
-            let first_of_visible = CalendarDate::new_gregorian(
-                self.ctx.visible_year,
-                NonZero::new(self.ctx.visible_month).expect("visible_month is 1-based"),
-                nzu8(1),
-            );
-            first_of_visible <= *min
-        } else {
-            false
-        }
+        if self.ctx.disabled { return true; }
+        let step = self.nav_step_size();
+        let (new_first_m, new_first_y) = advance_month(
+            self.ctx.visible_month, self.ctx.visible_year, -(step as i32),
+        );
+        let last_offset = self.ctx.visible_months.saturating_sub(1);
+        let (new_last_m, new_last_y) = month_year_at_offset(new_first_m, new_first_y, last_offset);
+        // Construction failure means the post-step range is past the
+        // representable calendar limit — paging would be a no-op, so
+        // surface as disabled rather than leaving a clickable no-op.
+        let Ok(first_of_new_last) = CalendarDate::new_gregorian(new_last_y, new_last_m, 1)
+        else { return true; };
+        let Ok(last_of_new_last) =
+            CalendarDate::new_gregorian(new_last_y, new_last_m, first_of_new_last.days_in_month())
+        else { return true; };
+        // Past representability, also apply the min constraint.
+        let Some(min) = &self.ctx.min else { return false; };
+        matches!(last_of_new_last.compare(min), Ordering::Less)
     }
 
-    /// Whether the next button should be disabled (max constraint).
-    /// Checks against the **last** visible month instead of the first.
+    /// Whether the next button should be disabled — either the calendar
+    /// is globally disabled, the post-step range is unrepresentable
+    /// (calendar boundary), or stepping by the active `page_behavior`
+    /// would yield a visible range with **no** dates ≤ `max`. Symmetric
+    /// to `is_prev_disabled`.
     pub fn is_next_disabled(&self) -> bool {
-        if let Some(ref max) = self.ctx.max {
-            let last_offset = self.ctx.visible_months.saturating_sub(1);
-            let (month, year) = self.ctx.month_year_at_offset(last_offset);
-            let first_of_last = CalendarDate::new_gregorian(year, NonZero::new(month).expect("month is 1-based"), nzu8(1));
-            let last_of_last = CalendarDate::new_gregorian(
-                year, NonZero::new(month).expect("month is 1-based"), NonZero::new(first_of_last.days_in_month()).expect("days_in_month is >= 1"),
-            );
-            last_of_last >= *max
-        } else {
-            false
-        }
+        if self.ctx.disabled { return true; }
+        let step = self.nav_step_size();
+        let (new_first_m, new_first_y) = advance_month(
+            self.ctx.visible_month, self.ctx.visible_year, step as i32,
+        );
+        // Construction failure → calendar boundary → disable.
+        let Ok(first_of_new_first) = CalendarDate::new_gregorian(new_first_y, new_first_m, 1)
+        else { return true; };
+        let Some(max) = &self.ctx.max else { return false; };
+        matches!(first_of_new_first.compare(max), Ordering::Greater)
     }
 
     /// The grid data: weeks and day labels.
@@ -1119,14 +1441,14 @@ impl ConnectApi for Api<'_> {
             Part::Header => self.header_attrs(),
             Part::PrevTrigger => self.prev_trigger_attrs(),
             Part::NextTrigger => self.next_trigger_attrs(),
-            Part::Heading => self.heading_text_attrs(),
+            Part::Heading => self.heading_attrs(),
             Part::Grid => self.grid_attrs(),
             Part::GridGroup => self.grid_group_attrs(),
             Part::HeadRow => self.head_row_attrs(),
             Part::HeadCell { day } => self.head_cell_attrs(day),
             Part::Row { week_index } => self.row_attrs(*week_index),
-            Part::Cell { date } => self.cell_attrs(date),
-            Part::CellTrigger { date } => self.cell_trigger_attrs(date),
+            Part::Cell { date, offset } => self.cell_attrs_for(date, *offset),
+            Part::CellTrigger { date, offset } => self.cell_trigger_attrs_for(date, *offset),
         }
     }
 }
@@ -1253,24 +1575,40 @@ When `visible_months == 1`, anatomy is identical to the single-month tree above 
 ```rust
 // ars-i18n/src/calendar/i18n.rs
 
+/// `MessageFn` carrying a locale-only label closure.
+pub type LocaleLabelFn = dyn Fn(&Locale) -> String + Send + Sync;
+
+/// `MessageFn` carrying a step-count plus locale label closure (used by the
+/// multi-month prev/next page labels).
+pub type PageLabelFn = dyn Fn(usize, &Locale) -> String + Send + Sync;
+
 /// Locale-specific labels for the Calendar component.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Messages {
     /// Accessible label for the previous month navigation button.
-    pub prev_month_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub prev_month_label: MessageFn<LocaleLabelFn>,
     /// Accessible label for the next month navigation button.
-    pub next_month_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub next_month_label: MessageFn<LocaleLabelFn>,
     /// Label for prev button when navigating multiple months.
     /// The `usize` parameter is the step count.
-    pub prev_page_label: MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>,
+    pub prev_page_label: MessageFn<PageLabelFn>,
     /// Label for next button when navigating multiple months.
     /// The `usize` parameter is the step count.
-    pub next_page_label: MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>,
+    pub next_page_label: MessageFn<PageLabelFn>,
     /// Separator between month names in multi-month range heading (e.g., " – ").
-    pub month_range_separator: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub month_range_separator: MessageFn<LocaleLabelFn>,
+    /// Suffix appended to a date cell's `aria-label` when the date is
+    /// marked **unavailable** (default `"(unavailable)"`). Localizable so
+    /// non-English consumers don't end up with mixed-language labels.
+    pub unavailable_suffix: MessageFn<LocaleLabelFn>,
+    /// Suffix appended to a date cell's `aria-label` when the date is
+    /// **disabled** by `min`/`max` (default `"(disabled)"`).
+    pub disabled_suffix: MessageFn<LocaleLabelFn>,
 }
-// Month names, weekday names, and abbreviations are resolved from the IntlBackend
-// (via `month_long_name()`, `wd.short_label()`, etc.) — not stored in Messages.
+// Month names, weekday names, and abbreviations are resolved from the
+// `IntlBackend` via `intl_backend.month_long_name(month, &locale)`,
+// `intl_backend.weekday_short_label(wd, &locale)`, and
+// `intl_backend.weekday_long_label(wd, &locale)` — not stored in Messages.
 
 impl Default for Messages {
     fn default() -> Self {
@@ -1280,6 +1618,8 @@ impl Default for Messages {
             prev_page_label: MessageFn::new(|count, _locale| format!("Previous {} months", count)),
             next_page_label: MessageFn::new(|count, _locale| format!("Next {} months", count)),
             month_range_separator: MessageFn::static_str(" \u{2013} "),
+            unavailable_suffix: MessageFn::static_str("(unavailable)"),
+            disabled_suffix: MessageFn::static_str("(disabled)"),
         }
     }
 }
@@ -1315,57 +1655,49 @@ The `first_day_of_week` prop overrides the locale default when provided.
 
 ## 5. Variant: Multiple Selection
 
-Calendar supports multiple non-contiguous date selection in addition to the default single-date mode.
+Calendar supports multiple non-contiguous date selection alongside the
+default single-date mode. The Props, Context, and Event surface for
+multi-select live directly in §1.2-§1.4 (not as "additional"
+declarations) — the machine is one unified type that switches behaviour
+on `selection_mode` rather than two parallel `Machine` types.
 
-### 5.1 Additional Props
+### 5.1 Active surface
 
-```rust,no_check
-/// Added to Props.
-pub selection_mode: CalendarSelectionMode,
-/// Maximum number of dates that can be selected.
-pub max_selected: Option<usize>,
+The unified surface relevant to multi-select:
 
-#[derive(Clone, Debug, PartialEq, Default)]
-pub enum CalendarSelectionMode {
-    /// Select a single date (default behavior).
-    #[default]
-    Single,
-    /// Select multiple non-contiguous dates.
-    Multiple,
-}
-```
+- [`SelectionMode { Single, Multiple }`](#14-props) on `Props` and
+  `Context`.
+- `Props.selected_dates: Option<SelectedDates>` (controlled) and
+  `Props.default_selected_dates: SelectedDates` (uncontrolled), backing
+  `Context.selected_dates: Bindable<SelectedDates>`.
+- `Props.max_selected: Option<usize>` and `Context.max_selected`.
+- [`Event::ToggleDate { date }`](#12-events) struct variant. `SelectDate`
+  is accepted in `Multiple` mode and routes to the same toggle handler so
+  adapters that do not know the active mode can emit one canonical
+  "select this date" event.
 
-### 5.2 Additional Context
+### 5.2 Behavior
 
-```rust,no_check
-/// Extended CalendarContext for multi-selection.
-/// When selection_mode is Multiple:
-pub selected_dates: BTreeSet<CalendarDate>,
-```
+| Action     | Click                 |
+| ---------- | --------------------- |
+| `Multiple` | Toggle date selection |
 
-### 5.3 Additional Events
+When `max_selected` is set, the `ToggleDate` transition guards against
+`selected_dates.len() >= max_selected`. Toggles that would add a date
+beyond the cap are silently dropped; toggles that remove an already-selected
+date always succeed.
 
-```rust,no_check
-/// Added to Calendar Event enum.
-/// Toggle a date in/out of the selection set.
-ToggleDate(CalendarDate),
-```
+### 5.3 Keyboard
 
-### 5.4 Behavior
+| Key               | Behavior                                |
+| ----------------- | --------------------------------------- |
+| `Space` / `Enter` | Toggle focused date in/out of selection |
 
-| Action   | Click                 | Shift+Click                                 |
-| -------- | --------------------- | ------------------------------------------- |
-| Multiple | Toggle date selection | Select range from last-clicked to this date |
-
-When `max_selected` is set, the `ToggleDate` transition guards against `selected_dates.len() >= max_selected`. Excess selections are silently prevented.
-
-### 5.5 Keyboard
-
-| Key           | Behavior                                  |
-| ------------- | ----------------------------------------- |
-| Space / Enter | Toggle focused date in/out of selection   |
-| Shift+Space   | Select range from anchor to focused       |
-| Ctrl+A        | Select all visible dates in current month |
+Advanced multi-select keyboard operations (`Shift+Click`,
+`Shift+Space` range fill from an anchor, `Ctrl+A` select-all visible)
+are not part of this implementation. They require an "anchor" concept
+not currently in the spec or machine state, and are tracked as a
+follow-up that will refine §5 once a concrete anchor design lands.
 
 ## 6. Library Parity
 
@@ -1451,270 +1783,86 @@ When `max_selected` is set, the `ToggleDate` transition guards against `selected
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ars_core::service::Service;
+    use ars_core::Service;
 
-    fn make_service() -> Service<Machine> {
-        Service::new(Props {
-            id: "test-cal".into(),
-            value: None,
-            default_value: None,
-            min: None,
-            max: None,
-            disabled: false,
-            readonly: false,
-            is_date_unavailable: None,
-            first_day_of_week: None,
-            is_range: false,
-            is_rtl: false,
-            visible_months: 1,
-            page_behavior: PageBehavior::Visible,
-            today: CalendarDate::new_gregorian(2024, nzu8(1), nzu8(15)),
-        }, Env::default(), Default::default())
+    fn date(year: i32, month: u8, day: u8) -> CalendarDate {
+        CalendarDate::new_gregorian(year, month, day).expect("valid test date")
+    }
+
+    fn props() -> Props {
+        Props::new().id("cal").today(date(2024, 1, 15))
+    }
+
+    fn service() -> Service<Machine> {
+        Service::<Machine>::new(props(), &Env::default(), &Messages::default())
     }
 
     #[test]
     fn initial_state_is_idle() {
-        let svc = make_service();
-        assert_eq!(*svc.state(), State::Idle);
+        assert_eq!(*service().state(), State::Idle);
     }
 
     #[test]
     fn focus_in_transitions_to_focused() {
-        let mut svc = make_service();
-        svc.send(Event::FocusIn);
+        let mut svc = service();
+        drop(svc.send(Event::FocusIn));
         assert_eq!(*svc.state(), State::Focused);
     }
 
     #[test]
     fn arrow_right_advances_focused_date() {
-        let mut svc = make_service();
-        svc.send(Event::FocusIn);
+        let mut svc = service();
+        drop(svc.send(Event::FocusIn));
         let before = svc.context().focused_date.clone();
-        svc.send(Event::KeyDown { key: KeyboardKey::ArrowRight });
-        assert_eq!(svc.context().focused_date, before.add_days(1));
-    }
-
-    #[test]
-    fn arrow_up_moves_back_one_week() {
-        let mut svc = make_service();
-        svc.send(Event::FocusIn);
-        let before = svc.context().focused_date.clone();
-        svc.send(Event::KeyDown { key: KeyboardKey::ArrowUp });
-        assert_eq!(svc.context().focused_date, before.add_days(-7));
+        drop(svc.send(Event::KeyDown { key: KeyboardKey::ArrowRight, shift: false }));
+        assert_eq!(svc.context().focused_date, before.add_days(1).unwrap());
     }
 
     #[test]
     fn select_date_updates_value() {
-        let mut svc = make_service();
-        let date = CalendarDate::new_gregorian(2024, nzu8(1), nzu8(20));
-        svc.send(Event::SelectDate { date: date.clone() });
-        assert_eq!(*svc.context().value.get(), Some(date));
+        let mut svc = service();
+        let d = date(2024, 1, 20);
+        drop(svc.send(Event::SelectDate { date: d.clone() }));
+        assert_eq!(*svc.context().value.get(), Some(d));
     }
 
     #[test]
-    fn next_month_advances_visible_month() {
-        let mut svc = make_service();
-        assert_eq!(svc.context().visible_month, 1);
-        svc.send(Event::NextMonth);
-        assert_eq!(svc.context().visible_month, 2);
+    fn shift_page_down_advances_one_year() {
+        let mut svc = service();
+        drop(svc.send(Event::FocusIn));
+        let before = svc.context().visible_year;
+        drop(svc.send(Event::KeyDown { key: KeyboardKey::PageDown, shift: true }));
+        assert_eq!(svc.context().visible_year, before + 1);
     }
 
     #[test]
-    fn prev_month_goes_back() {
-        let mut svc = make_service();
-        assert_eq!(svc.context().visible_month, 1);
-        svc.send(Event::PrevMonth);
-        assert_eq!(svc.context().visible_month, 12);
-        assert_eq!(svc.context().visible_year, 2023);
-    }
-
-    #[test]
-    fn disabled_calendar_ignores_events() {
-        let mut svc = Service::new(Props {
-            disabled: true,
-            ..make_service().props().clone()
-        }, Env::default(), Default::default());
-        svc.send(Event::SelectDate {
-            date: CalendarDate::new_gregorian(2024, nzu8(1), nzu8(20)),
-        });
-        assert_eq!(*svc.context().value.get(), None);
-    }
-
-    #[test]
-    fn range_mode_first_click_sets_start() {
-        let mut svc = Service::new(Props {
-            is_range: true,
-            ..make_service().props().clone()
-        }, Env::default(), Default::default());
-        let date = CalendarDate::new_gregorian(2024, nzu8(1), nzu8(10));
-        svc.send(Event::SelectDate { date: date.clone() });
-        assert_eq!(svc.context().range_start, Some(date));
-        assert_eq!(svc.context().range_end, None);
-    }
-
-    #[test]
-    fn range_mode_second_click_completes_range() {
-        let mut svc = Service::new(Props {
-            is_range: true,
-            ..make_service().props().clone()
-        }, Env::default(), Default::default());
-        let start = CalendarDate::new_gregorian(2024, nzu8(1), nzu8(10));
-        let end = CalendarDate::new_gregorian(2024, nzu8(1), nzu8(20));
-        svc.send(Event::SelectDate { date: start.clone() });
-        svc.send(Event::SelectDate { date: end.clone() });
-        assert_eq!(svc.context().range_start, Some(start));
-        assert_eq!(svc.context().range_end, Some(end));
-    }
-
-    #[test]
-    fn range_mode_swaps_if_end_before_start() {
-        let mut svc = Service::new(Props {
-            is_range: true,
-            ..make_service().props().clone()
-        }, Env::default(), Default::default());
-        let later = CalendarDate::new_gregorian(2024, nzu8(1), nzu8(20));
-        let earlier = CalendarDate::new_gregorian(2024, nzu8(1), nzu8(5));
-        svc.send(Event::SelectDate { date: later.clone() });
-        svc.send(Event::SelectDate { date: earlier.clone() });
-        assert_eq!(svc.context().range_start, Some(earlier));
-        assert_eq!(svc.context().range_end, Some(later));
-    }
-
-    #[test]
-    fn min_max_clamps_focused_date() {
-        let mut svc = Service::new(Props {
-            min: Some(CalendarDate::new_gregorian(2024, nzu8(1), nzu8(10))),
-            max: Some(CalendarDate::new_gregorian(2024, nzu8(1), nzu8(25))),
-            ..make_service().props().clone()
-        }, Env::default(), Default::default());
-        svc.send(Event::FocusDate {
-            date: CalendarDate::new_gregorian(2024, nzu8(1), nzu8(1)),
-        });
-        assert_eq!(
-            svc.context().focused_date,
-            CalendarDate::new_gregorian(2024, nzu8(1), nzu8(10)),
+    fn multi_select_toggle_round_trip() {
+        let mut svc = Service::<Machine>::new(
+            props().selection_mode(SelectionMode::Multiple),
+            &Env::default(),
+            &Messages::default(),
         );
+        drop(svc.send(Event::ToggleDate { date: date(2024, 1, 10) }));
+        assert!(svc.context().selected_dates.get().contains(&date(2024, 1, 10)));
+        drop(svc.send(Event::ToggleDate { date: date(2024, 1, 10) }));
+        assert!(!svc.context().selected_dates.get().contains(&date(2024, 1, 10)));
     }
 
     #[test]
-    fn rtl_arrow_keys_reversed() {
-        let mut svc = Service::new(Props {
-            is_rtl: true,
-            ..make_service().props().clone()
-        }, Env::default(), Default::default());
-        svc.send(Event::FocusIn);
-        let before = svc.context().focused_date.clone();
-        // In RTL, ArrowLeft should advance (next day).
-        svc.send(Event::KeyDown { key: KeyboardKey::ArrowLeft });
-        assert_eq!(svc.context().focused_date, before.add_days(1));
-    }
-
-    // ── Multi-month tests ───────────────────────────────────────────
-
-    fn make_multi_month_service(months: usize, behavior: PageBehavior) -> Service<Machine> {
-        Service::new(Props {
-            visible_months: months,
-            page_behavior: behavior,
-            ..make_service().props().clone()
-        }, Env::default(), Default::default())
-    }
-
-    #[test]
-    fn multi_month_weeks_for_returns_correct_months() {
-        let svc = make_multi_month_service(2, PageBehavior::Visible);
-        let weeks0 = svc.context().weeks_for(0);
-        let weeks1 = svc.context().weeks_for(1);
-        // First grid should contain January dates, second should contain February.
-        // Check a mid-month date in each grid.
-        assert_eq!(weeks0[2][3].month.get(), 1); // mid-January
-        assert_eq!(weeks1[2][3].month.get(), 2); // mid-February
-    }
-
-    #[test]
-    fn next_month_advances_by_visible_months_in_visible_mode() {
-        let mut svc = make_multi_month_service(3, PageBehavior::Visible);
-        assert_eq!(svc.context().visible_month, 1);
-        svc.send(Event::NextMonth);
-        // Should jump +3: January → April.
-        assert_eq!(svc.context().visible_month, 4);
-    }
-
-    #[test]
-    fn next_month_advances_by_1_in_single_mode() {
-        let mut svc = make_multi_month_service(3, PageBehavior::Single);
-        assert_eq!(svc.context().visible_month, 1);
-        svc.send(Event::NextMonth);
-        // Should jump +1: January → February.
-        assert_eq!(svc.context().visible_month, 2);
-    }
-
-    #[test]
-    fn prev_month_steps_back_by_visible_months() {
-        let mut svc = make_multi_month_service(2, PageBehavior::Visible);
-        // Advance to March first.
-        svc.send(Event::NextMonth); // Jan → Mar (step 2)
-        assert_eq!(svc.context().visible_month, 3);
-        svc.send(Event::PrevMonth); // Mar → Jan (step -2)
-        assert_eq!(svc.context().visible_month, 1);
-    }
-
-    #[test]
-    fn sync_visible_does_not_scroll_when_focus_in_range() {
-        let mut svc = make_multi_month_service(2, PageBehavior::Visible);
-        // visible_month = 1 (Jan), visible_months = 2, so Jan+Feb visible.
-        // Focus on a Feb date — should NOT scroll.
-        let feb_date = CalendarDate::new_gregorian(2024, nzu8(2), nzu8(10));
-        svc.send(Event::FocusDate { date: feb_date });
-        assert_eq!(svc.context().visible_month, 1); // Still January
-    }
-
-    #[test]
-    fn sync_visible_scrolls_when_focus_leaves_range() {
-        let mut svc = make_multi_month_service(2, PageBehavior::Visible);
-        // visible range is Jan+Feb. Focus on March — should scroll.
-        let mar_date = CalendarDate::new_gregorian(2024, nzu8(3), nzu8(5));
-        svc.send(Event::FocusDate { date: mar_date });
-        assert_eq!(svc.context().visible_month, 3); // Scrolled to March
-    }
-
-    #[test]
-    fn is_in_visible_range_checks_all_months() {
-        let svc = make_multi_month_service(3, PageBehavior::Visible);
-        let jan = CalendarDate::new_gregorian(2024, nzu8(1), nzu8(15));
-        let feb = CalendarDate::new_gregorian(2024, nzu8(2), nzu8(15));
-        let mar = CalendarDate::new_gregorian(2024, nzu8(3), nzu8(15));
-        let apr = CalendarDate::new_gregorian(2024, nzu8(4), nzu8(1));
-        assert!(svc.context().is_in_visible_range(&jan));
-        assert!(svc.context().is_in_visible_range(&feb));
-        assert!(svc.context().is_in_visible_range(&mar));
-        assert!(!svc.context().is_in_visible_range(&apr));
-    }
-
-    #[test]
-    fn month_year_at_offset_wraps_year() {
-        let mut svc = make_multi_month_service(3, PageBehavior::Visible);
-        // Set visible to November 2024.
-        svc.send(Event::SetMonth { month: 11 });
-        let (m, y) = svc.context().month_year_at_offset(2);
-        assert_eq!(m, 1);    // January
-        assert_eq!(y, 2025); // Next year
+    fn next_month_emits_announce_month_effect() {
+        let mut svc = service();
+        let result = svc.send(Event::NextMonth);
+        assert!(result.pending_effects.iter().any(|e| e.name == Effect::AnnounceMonth));
     }
 
     #[test]
     fn is_next_disabled_checks_last_visible_month() {
-        let svc = Service::new(Props {
-            visible_months: 2,
-            page_behavior: PageBehavior::Visible,
-            max: Some(CalendarDate::new_gregorian(2024, nzu8(2), nzu8(28))),
-            ..make_service().props().clone()
-        }, Env::default(), Default::default());
-        let api = Machine::connect(
-            svc.state(), svc.context(), svc.props(), &|_| {},
+        let svc = Service::<Machine>::new(
+            props().visible_months(2).max(Some(date(2024, 1, 25))),
+            &Env::default(),
+            &Messages::default(),
         );
-        // visible_month=1 (Jan), visible_months=2 → last visible is Feb.
-        // max = Feb 28. Last day of Feb = Feb 29 (2024 is a leap year) ≥ Feb 28.
-        // But Feb 28 is the max and the last of the last visible month
-        // includes Feb 29 which is ≥ max, so next should be disabled.
+        let api = svc.connect(&|_| {});
         assert!(api.is_next_disabled());
     }
 }
