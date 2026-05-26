@@ -1,0 +1,119 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d958ddf48e97",
+  "session_id": "019e61e6-d933-75e1-bda2-8f4289cbfed9",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-26T05:43:45.890678Z",
+  "branch": "codex/issue-255-autocomplete-core",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "4dd3396f492a",
+  "token_usage": {
+    "input_tokens": 1488646,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 68166016,
+    "output_tokens": 101400,
+    "api_call_count": 572
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "summary": {
+    "intent": "Implement task #255: build Autocomplete as a framework-agnostic selection controller in ars-ui, starting by updating the spec to match the real intended contract, then implementing core, tests, and shipping a PR.",
+    "outcome": "Autocomplete core was fully implemented in `crates/ars-components/src/selection/autocomplete/mod.rs`, specs updated (core, Leptos, Dioxus adapter, component catalog), TDD/snapshot/proptest/mutation coverage added, and PR #685 opened. Three rounds of Codex review were addressed with targeted fixes; the final commit addressing controlled keyboard semantics was being pushed at transcript end.",
+    "learnings": {
+      "repo": [
+        "Pre-push gate is `cargo xci --profile fast` — must pass all 10 steps before every push, not just the focused tests.",
+        "Commits require `Co-authored-by: Codex <codex@openai.com>` and follow `codex/issue-NNN-description` branch naming.",
+        "PRs that change `.snap` files require the `snapshot-reviewed` label to be re-applied on every push that touches snapshots.",
+        "Codex review is triggered by posting `@codex review` as a PR comment; approval is signaled by a +1 reaction after the 👀 reaction clears.",
+        "Post-implementation audit is mandatory and structured: Phase 1 = spec-to-code drift, Phase 2 = adapter spec drift (Leptos/Dioxus + catalog), Phase 3 = coverage + mutation.",
+        "`cargo insta test -p ars-components --unreferenced=reject` cannot be used as a scoped filter — it always scans the whole package and fails on pre-existing unrelated snapshots. Scoped form is `cargo insta test -p ars-components -- selection::autocomplete`.",
+        "`cargo mutants` baseline fails if unrelated tests are already broken (data-display tests); must add `-- autocomplete` to scope the baseline to the target module.",
+        "`cargo mutants --iterate` invalidates its skip set if any source file changes (including formatting/doc additions), triggering a full re-run rather than a delta run.",
+        "Spec frontmatter `related:` list must match the manifest exactly or `cargo xtask spec validate` fails — cannot add related components that are not yet in the manifest.",
+        "New `pub mod` exports must be added to `crates/ars-components/src/selection/mod.rs` for the module to be reachable.",
+        "`cargo fmt --all` emits stable-channel warnings about nightly-only formatting options — these are expected and not errors in this repo."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/autocomplete/mod.rs",
+          "line": 800,
+          "end_line": 840,
+          "finding": "Default input keydown helper must NOT map bare Home/End — those should only fire HighlightFirst/HighlightLast when the popup is already active; otherwise they conflict with native text-cursor movement."
+        },
+        {
+          "path": "crates/ars-components/src/selection/autocomplete/mod.rs",
+          "line": 1068,
+          "end_line": 1090,
+          "finding": "`aria-activedescendant` must be emitted only while the popup is active and the component is not disabled — emitting it unconditionally breaks screen-reader semantics."
+        },
+        {
+          "path": "crates/ars-components/src/selection/autocomplete/mod.rs",
+          "line": 1160,
+          "end_line": 1178,
+          "finding": "Controlled input prop sync must clear `selected_key` before recomputing filter/highlight — failing to do so leaves a stale selection when the controlled value no longer matches any item."
+        },
+        {
+          "path": "crates/ars-components/src/selection/autocomplete/mod.rs",
+          "line": 600,
+          "end_line": 660,
+          "finding": "Filter refresh (InputChange) must preserve an existing highlighted key only if it is still in `visible_keys`; otherwise leave `highlighted_key` as None until explicit navigation — auto-highlighting on filter creates accessibility issues."
+        },
+        {
+          "path": "crates/ars-components/src/selection/autocomplete/mod.rs",
+          "line": 520,
+          "end_line": 575,
+          "finding": "IME composition: Enter dispatch must check `KeyboardEventData::is_composing` and skip `SelectHighlighted` while true — otherwise Enter commits IME mid-composition."
+        },
+        {
+          "path": "crates/ars-components/src/selection/autocomplete/mod.rs",
+          "line": 1420,
+          "end_line": 1475,
+          "finding": "Controlled Clear must actually clear the controller value (empty string), not preserve the old controlled display value — the prior fix to preserve `visible_keys` accidentally preserved the input value too."
+        },
+        {
+          "path": "crates/ars-components/src/input/search_input/mod.rs",
+          "line": 380,
+          "end_line": 560,
+          "finding": "Debounce effect pattern: use `PendingEffect` to emit `Effect::AutocompleteDebounce` on input change, cancel on clear/selection — mirrors SearchInput's debounce shape exactly."
+        },
+        {
+          "path": "crates/ars-core/src/lib.rs",
+          "line": 460,
+          "end_line": 560,
+          "finding": "`Bindable` type controls controlled vs. uncontrolled prop behavior — check `.is_controlled()` before overwriting uncontrolled state from prop sync."
+        }
+      ],
+      "workflow": [
+        "TDD sequence: add failing tests at module import (red at compile), implement core, run unit tests, fix compile/assertion failures, accept snapshots with `INSTA_UPDATE=always`, then broaden to spec-conformance/proptest.",
+        "Mutation testing workflow: first pass reveals gaps, add targeted behavioral assertions for each missed mutant category, rerun; `--iterate` only works cleanly if no source files changed since the prior run.",
+        "Codex review loop timing: first pass ~5-10 min, subsequent passes can take 15-20+ min — poll with 2-min sleep intervals, watch for 👀 dropping as the signal to fetch threads.",
+        "When resolving Codex review threads: reply inline with the fix commit SHA + one-sentence summary, then resolve via GraphQL `resolveReviewThread` mutation, then post fresh `@codex review`.",
+        "Coverage target: `cargo llvm-cov test -p ars-components --lib --no-fail-fast --text -- selection::autocomplete` then `cargo llvm-cov report --summary-only | rg 'selection/autocomplete'` — track per-file line coverage across review iterations.",
+        "Detached HEAD worktrees need `git switch -c <branch>` before any edits — otherwise commits land in detached state with no branch tracking.",
+        "Unstage generated snapshot files with `git restore --staged <path>` if they get staged inadvertently before a manual review of the full diff."
+      ]
+    },
+    "friction": [
+      "`cargo insta test -p ars-components --unreferenced=reject` is unusable as a scoped check — it always fails on pre-existing unrelated data-display snapshot fixtures, requiring a workaround scoped form.",
+      "`cargo mutants --iterate` invalidated its skip list after `cargo fmt --all` changed the source file, forcing a full third mutation pass (~149 mutants) instead of a delta run.",
+      "Worktree was detached at `origin/main` on session resume — required `git switch -c` before any work could be staged.",
+      "Snapshot files got inadvertently staged during the run (via an untracked `git add` from a prior tool call), requiring explicit `git restore --staged` before the final diff review.",
+      "`cargo xci --profile fast` failed on the second push attempt due to a `clippy::if_not_else` lint introduced by the controlled-clear fix — required an additional format/fix/rerun cycle.",
+      "Broad `cargo-mutants` baseline hits unrelated data-display test failures unless the test filter `-- autocomplete` is appended, which is non-obvious from the tool's help text.",
+      "Three rounds of Codex review were required (7 total findings across passes), each round requiring: wait for review, fetch threads, write red tests, patch impl, rerun fast CI, commit, push, reply, resolve, re-trigger.",
+      "Polling Codex review state requires parallel reaction + GraphQL thread queries; a shell `while` loop approach hit a transient GraphQL parse issue that returned empty thread counts, causing a false-negative state.",
+      "The terminal `write_stdin` pattern for waiting on long-running commands (mutation, CI) produced many near-silent polling steps with no visible progress indication."
+    ],
+    "open_items": [
+      "Leptos and Dioxus adapter implementations for Autocomplete are explicitly out of scope — adapter specs were updated but no adapter wrapper code (`crates/ars-leptos`, `crates/ars-dioxus`) was written.",
+      "Package-wide snapshot hygiene: `cargo insta test -p ars-components --unreferenced=reject` fails on pre-existing data-display snapshots unrelated to this PR — that repo-wide debt was not addressed.",
+      "Third Codex review round (controlled keyboard semantics fix) was being pushed at transcript end — confirmation of clean Codex approval on pass 3 is not in the transcript.",
+      "Mutation coverage ceiling: 130/149 caught with 19 unviable after final pass — the unviable set was not inspected to confirm none are equivalent mutants masking real gaps.",
+      "`.cargo/mutants.toml` was checked but not updated with the new `autocomplete` module path for future targeted runs — currently relies on `-f` flag being passed manually."
+    ]
+  }
+}
