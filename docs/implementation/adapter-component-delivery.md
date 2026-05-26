@@ -228,7 +228,13 @@ Before asking for review:
 - include the issue auto-close keyword in the PR body;
 - list spec refs and validation commands in the PR body;
 - attach `snapshot-reviewed` if `.snap` files changed;
-- invoke `.agents/skills/waiting-for-codex-review/SKILL.md` after every push;
+
+After the first push (and after every subsequent push to the PR branch), **read
+and follow** `.agents/skills/waiting-for-codex-review/SKILL.md` through to Codex
+👍. Posting `@codex review` alone does not satisfy this step — the full poll
+loop, thread triage, fix/push/reply/resolve cycle, and re-trigger are all
+required. Do not treat the PR as merge-ready until the skill completes.
+
 - keep the issue, PR, and Project board state aligned with the actual work.
 
 Do not close the issue until the PR is merged, CI is green, and Codex review has

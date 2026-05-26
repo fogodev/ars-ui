@@ -290,12 +290,17 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::DismissButton.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.messages.close_label)(&self.locale));
         attrs
     }
 
     pub fn on_trigger_click(&self) {
         self.popover_api.toggle();
+    }
+
+    pub fn on_dismiss_button_click(&self) {
+        self.popover_api.close();
     }
 
     pub fn on_content_keydown(&self, data: &KeyboardEventData) {
@@ -343,7 +348,7 @@ ContextualHelp
 | Heading       | `<h3>`     | `id` (linked from `aria-labelledby`)                                                         |
 | Body          | `<div>`    | main help text                                                                               |
 | Footer        | `<div>`    | optional link/action area                                                                    |
-| DismissButton | `<button>` | `aria-label` (close label), visually hidden                                                  |
+| DismissButton | `<button>` | `type="button"`, `aria-label` (close label), visually hidden                               |
 
 ## 3. Accessibility
 
@@ -353,7 +358,7 @@ ContextualHelp
 | ------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
 | Trigger       | `button` | `aria-label` (variant-dependent), `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`, `data-ars-variant` |
 | Content       | `dialog` | `id`, `aria-labelledby` (Heading id), `tabindex="-1"`, `data-ars-state`, `dir` (from `Props::dir` or locale)     |
-| DismissButton | `button` | `aria-label` (close label), visually hidden                                                                      |
+| DismissButton | `button` | `type="button"`, `aria-label` (close label), visually hidden                                                     |
 
 ### 3.2 Keyboard Interaction
 

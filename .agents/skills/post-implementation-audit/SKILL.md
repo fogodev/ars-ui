@@ -278,6 +278,11 @@ cargo build -p ars-dioxus --features icu4x,web
 
 Then write **one consolidated user summary** covering all three phases' findings + the verification table. Hand off for user review per CLAUDE.md workflow step 8 (which was the old step 7 before this skill was inserted).
 
+After the user approves commit/push and the PR is opened, **read and follow**
+`.agents/skills/waiting-for-codex-review/SKILL.md` through to Codex 👍. That
+skill is AGENTS.md step 12 — posting `@codex review` is only the trigger inside
+the loop, not a substitute for the full poll/triage/fix cycle.
+
 ## Anti-patterns
 
 - **Deferring** any finding ("we can fix that in a follow-up"). This is the rule the user set explicitly. Breaking it makes the audit ceremonial.

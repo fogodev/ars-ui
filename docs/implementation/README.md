@@ -47,6 +47,27 @@ cargo xtask spec validate
 For adapter work, also follow the spec-sync checklist in
 [adapter-contract.md](./adapter-contract.md).
 
+## PR closeout and Codex review
+
+After the user approves commit and the PR branch is pushed, **read and follow**
+`.agents/skills/waiting-for-codex-review/SKILL.md` in full. This is mandatory
+for every PR — the same requirement as AGENTS.md Development Workflow step 12.
+
+Posting `@codex review` is only step 2 of that skill. It is **not** a substitute
+for the skill. Agents must stay in the skill's poll loop until Codex leaves 👍:
+
+1. Post `@codex review` (once per review pass).
+2. Poll PR reactions and unresolved Codex review threads on the cadence in the
+   skill.
+3. If 👀 drops and threads appear, address every finding in the same PR with
+   the same rigor as `post-implementation-audit`, then reply inline, resolve
+   threads, push, and post `@codex review` again.
+4. Repeat until 👍 is present. Green CI alone is not the merge gate.
+
+Do not hand the PR back to the user as "done" after push until step 4 completes
+or the skill's escalation rules say to ping the user (for example Codex never
+starts after 5 minutes).
+
 Start with:
 
 1. [roadmap.md](./roadmap.md) for the phase plan.

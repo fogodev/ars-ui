@@ -377,6 +377,7 @@ impl<'a> Api<'a> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
+            .set(HtmlAttr::Type, "button")
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.messages.close_label)(&self.locale),
@@ -388,6 +389,11 @@ impl<'a> Api<'a> {
     /// Adapter handler: the trigger element was activated.
     pub fn on_trigger_click(&self) {
         self.popover_api.toggle();
+    }
+
+    /// Adapter handler: the visually hidden dismiss button was activated.
+    pub fn on_dismiss_button_click(&self) {
+        self.popover_api.close();
     }
 
     /// Adapter handler: a key was pressed on the content element.
@@ -619,6 +625,43 @@ mod tests {
         api.on_trigger_click();
 
         assert_eq!(drain_events(&events), vec![popover::Event::Toggle]);
+    }
+
+    #[test]
+    fn dismiss_button_attrs_include_type_button() {
+        let attrs = contextual_help_api(true, test_props()).dismiss_button_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Type), Some("button"));
+    }
+
+    #[test]
+    fn on_dismiss_button_click_closes_popover() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let events_capture = Rc::clone(&events);
+
+        let help_props = Box::leak(Box::new(test_props()));
+        let service = Box::leak(Box::new(Service::<popover::Machine>::new(
+            help_props.popover_props(),
+            &Env::default(),
+            &popover::Messages::default(),
+        )));
+
+        let _open = service.send(popover::Event::Open);
+
+        let send = Box::leak(Box::new(move |event| {
+            events_capture.borrow_mut().push(event);
+        }));
+
+        let api = Api::new(
+            service.connect(send),
+            help_props,
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        api.on_dismiss_button_click();
+
+        assert!(drain_events(&events).contains(&popover::Event::Close));
     }
 
     #[test]

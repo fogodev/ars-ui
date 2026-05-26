@@ -28,6 +28,12 @@ AttrMap {
                 "Dismiss",
             ),
         ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
     ],
     styles: [],
 }
