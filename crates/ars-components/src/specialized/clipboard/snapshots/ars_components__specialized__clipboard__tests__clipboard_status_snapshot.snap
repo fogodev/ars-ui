@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/specialized/clipboard/mod.rs
+expression: "snapshot_attrs(&api_for_state(State::Idle).status_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "status",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "clipboard",
+            ),
+        ),
+        (
+            Aria(
+                Atomic,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "status",
+            ),
+        ),
+    ],
+    styles: [],
+}

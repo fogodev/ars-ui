@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/specialized/clipboard/mod.rs
+expression: snapshot_attrs(&api.root_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-disabled",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "clipboard",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "clip",
+            ),
+        ),
+    ],
+    styles: [],
+}
