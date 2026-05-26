@@ -545,7 +545,7 @@ impl ars_core::Machine for Machine {
             Event::PointerMove { value } => {
                 let thumb = ctx.dragging_thumb?;
 
-                if !value.is_finite() {
+                if thumb_disabled(ctx, thumb) || !value.is_finite() {
                     return None;
                 }
 
@@ -1220,8 +1220,7 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Type, "hidden")
-            .set(HtmlAttr::Value, number_string(values[thumb.index()]))
-            .set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+            .set(HtmlAttr::Value, number_string(values[thumb.index()]));
 
         if let Some(name) = &self.ctx.name {
             attrs.set(HtmlAttr::Name, format!("{name}[{}]", thumb.index()));
@@ -1514,7 +1513,7 @@ fn set_thumb_value(
         bounded_values(ctx)
     };
 
-    if track_drag && ctx.allow_thumb_swap {
+    if track_drag && ctx.allow_thumb_swap && !thumb_disabled(ctx, thumb.other()) {
         match thumb {
             ThumbIndex::Start if snapped > end => active = ThumbIndex::End,
             ThumbIndex::End if snapped < start => active = ThumbIndex::Start,
@@ -2249,6 +2248,49 @@ mod tests {
     }
 
     #[test]
+    fn thumb_swap_does_not_move_into_disabled_thumb() {
+        let mut svc = service(Props {
+            allow_thumb_swap: true,
+            start_disabled: true,
+            ..props()
+        });
+
+        drop(svc.send(Event::PointerDown {
+            thumb: ThumbIndex::End,
+            value: 20.0,
+        }));
+
+        assert_eq!(*svc.context().value.get(), [25.0, 25.0]);
+        assert_eq!(svc.context().dragging_thumb, Some(ThumbIndex::End));
+        assert_eq!(
+            svc.state(),
+            &State::Dragging {
+                thumb: ThumbIndex::End,
+            }
+        );
+    }
+
+    #[test]
+    fn pointer_move_stops_after_active_thumb_becomes_disabled() {
+        let mut svc = service(props());
+
+        drop(svc.send(Event::PointerDown {
+            thumb: ThumbIndex::Start,
+            value: 30.0,
+        }));
+
+        drop(svc.set_props(Props {
+            start_disabled: true,
+            ..props()
+        }));
+
+        drop(svc.send(Event::PointerMove { value: 40.0 }));
+
+        assert_eq!(*svc.context().value.get(), [30.0, 75.0]);
+        assert_eq!(svc.context().dragging_thumb, Some(ThumbIndex::Start));
+    }
+
+    #[test]
     fn keyboard_navigation_updates_requested_thumb() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&sent);
@@ -2760,8 +2802,10 @@ mod tests {
         assert_eq!(hidden_start.get(&HtmlAttr::Name), Some("price[0]"));
         assert_eq!(hidden_start.get(&HtmlAttr::Value), Some("25"));
         assert_eq!(hidden_start.get(&HtmlAttr::Form), Some("filters"));
+        assert!(!hidden_start.contains(&HtmlAttr::Aria(AriaAttr::Hidden)));
         assert_eq!(hidden_end.get(&HtmlAttr::Name), Some("price[1]"));
         assert_eq!(hidden_end.get(&HtmlAttr::Value), Some("75"));
+        assert!(!hidden_end.contains(&HtmlAttr::Aria(AriaAttr::Hidden)));
 
         let whole_disabled = service(Props {
             disabled: true,
