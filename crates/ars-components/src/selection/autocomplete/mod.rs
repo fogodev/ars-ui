@@ -508,12 +508,14 @@ impl ars_core::Machine for Machine {
                 .apply(move |ctx: &mut Context| {
                     if !ctx.input_value.is_controlled() {
                         ctx.input_value.set(value.clone());
+                        ctx.selected_key = None;
                     }
 
-                    ctx.selected_key = None;
                     ctx.debounce_pending = schedule_debounce;
 
-                    refresh_filter_and_highlight(ctx, &value);
+                    let input = ctx.input_value.get().clone();
+
+                    refresh_filter_and_highlight(ctx, &input);
                 })
                 .cancel_effect(Effect::AutocompleteDebounce);
 
@@ -553,7 +555,7 @@ impl ars_core::Machine for Machine {
 
             Event::SetLoading(loading) => {
                 let loading = *loading;
-                let target = next_state_for_loading(*state, ctx.focused, loading);
+                let target = next_state_for_loading(*state, ctx, loading);
 
                 Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
                     ctx.loading = loading;
@@ -572,7 +574,7 @@ impl ars_core::Machine for Machine {
                     if ctx
                         .selected_key
                         .as_ref()
-                        .is_some_and(|key| !ctx.items.contains_key(key))
+                        .is_some_and(|key| !is_selectable_item_key(ctx, key))
                     {
                         ctx.selected_key = None;
                     }
@@ -650,16 +652,16 @@ impl ars_core::Machine for Machine {
                 })
                 .apply(|ctx: &mut Context| {
                     let empty = String::new();
+                    let input = if ctx.input_value.is_controlled() {
+                        ctx.input_value.get().clone()
+                    } else {
+                        ctx.input_value.set(empty);
+                        String::new()
+                    };
 
-                    ctx.input_value.set(empty.clone());
-
-                    if ctx.input_value.is_controlled() {
-                        ctx.input_value.sync_controlled(Some(empty));
-                    }
-
-                    ctx.visible_keys = None;
-                    ctx.highlighted_key = None;
                     ctx.selected_key = None;
+                    refresh_filter_and_highlight(ctx, &input);
+                    ctx.highlighted_key = None;
                     ctx.debounce_pending = false;
                 })
                 .cancel_effect(Effect::AutocompleteDebounce),
@@ -695,21 +697,24 @@ impl ars_core::Machine for Machine {
 
             Event::SyncProps => {
                 let props = props.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.disabled = props.disabled;
-                    ctx.loading = props.loading;
-                    ctx.filter_mode = props.filter_mode;
 
-                    ctx.collection_id = if props.collection_id.is_empty() {
-                        ctx.ids.part("content")
-                    } else {
-                        props.collection_id.clone()
-                    };
-
-                    let input = ctx.input_value.get().clone();
-
-                    refresh_filter_and_highlight(ctx, &input);
-                }))
+                if props.disabled {
+                    Some(
+                        TransitionPlan::to(State::Idle)
+                            .apply(move |ctx: &mut Context| {
+                                apply_synced_props(ctx, &props);
+                                ctx.focused = false;
+                                ctx.focus_visible = false;
+                                ctx.highlighted_key = None;
+                                ctx.debounce_pending = false;
+                            })
+                            .cancel_effect(Effect::AutocompleteDebounce),
+                    )
+                } else {
+                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                        apply_synced_props(ctx, &props);
+                    }))
+                }
             }
         }
     }
@@ -1145,16 +1150,32 @@ fn props_output_changed(old: &Props, new: &Props) -> bool {
         || old.collection_id != new.collection_id
 }
 
-const fn next_state_for_loading(current: State, focused: bool, loading: bool) -> State {
+const fn next_state_for_loading(current: State, ctx: &Context, loading: bool) -> State {
     if loading {
         State::Loading
-    } else if focused {
-        State::Focused
-    } else if matches!(current, State::Interacting) {
+    } else if matches!(current, State::Interacting) || (ctx.focused && ctx.visible_keys.is_some()) {
         State::Interacting
+    } else if ctx.focused {
+        State::Focused
     } else {
         State::Idle
     }
+}
+
+fn apply_synced_props(ctx: &mut Context, props: &Props) {
+    ctx.disabled = props.disabled;
+    ctx.loading = props.loading;
+    ctx.filter_mode = props.filter_mode;
+
+    ctx.collection_id = if props.collection_id.is_empty() {
+        ctx.ids.part("content")
+    } else {
+        props.collection_id.clone()
+    };
+
+    let input = ctx.input_value.get().clone();
+
+    refresh_filter_and_highlight(ctx, &input);
 }
 
 fn select_item_plan(ctx: &Context, key: Key) -> Option<TransitionPlan<Machine>> {
@@ -1240,13 +1261,17 @@ fn visible_focusable_keys(ctx: &Context) -> Vec<Key> {
 }
 
 fn is_visible_focusable_key(ctx: &Context, key: &Key) -> bool {
-    ctx.items
-        .get(key)
-        .is_some_and(|node| node.node_type == NodeType::Item)
+    is_selectable_item_key(ctx, key)
         && ctx
             .visible_keys
             .as_ref()
             .is_none_or(|keys| keys.contains(key))
+}
+
+fn is_selectable_item_key(ctx: &Context, key: &Key) -> bool {
+    ctx.items
+        .get(key)
+        .is_some_and(|node| node.node_type == NodeType::Item)
 }
 
 fn valid_highlight(ctx: &Context) -> Option<&Key> {
@@ -1604,7 +1629,7 @@ mod tests {
 
         assert_eq!(autocomplete.context().input_value.get(), "br");
         assert_eq!(autocomplete.context().filter_mode, FilterMode::StartsWith);
-        assert!(autocomplete.context().debounce_pending);
+        assert!(!autocomplete.context().debounce_pending);
         assert!(autocomplete.context().loading);
         assert!(autocomplete.context().disabled);
         assert_eq!(autocomplete.context().collection_id, "synced-list");
@@ -1612,7 +1637,11 @@ mod tests {
             autocomplete.context().visible_keys,
             Some(BTreeSet::from([key("bravo")]))
         );
-        assert_eq!(result.pending_effects[0].name, Effect::AutocompleteDebounce);
+        assert!(
+            result
+                .cancel_effects
+                .contains(&Effect::AutocompleteDebounce)
+        );
 
         drop(
             autocomplete.set_props(
@@ -1674,6 +1703,46 @@ mod tests {
     }
 
     #[test]
+    fn loading_completion_restores_interacting_state_for_active_filter() {
+        let mut autocomplete = service(props());
+
+        drop(autocomplete.send(Event::Focus { is_keyboard: true }));
+        drop(autocomplete.send(Event::InputChange("br".into())));
+        drop(autocomplete.send(Event::SetLoading(true)));
+        drop(autocomplete.send(Event::SetLoading(false)));
+
+        assert_eq!(autocomplete.state(), &State::Interacting);
+        assert!(autocomplete.context().focused);
+        assert_eq!(
+            autocomplete.context().visible_keys,
+            Some(BTreeSet::from([key("bravo")]))
+        );
+    }
+
+    #[test]
+    fn disabled_prop_sync_collapses_focus_and_popup_state() {
+        let mut autocomplete = service(props());
+
+        drop(autocomplete.send(Event::Focus { is_keyboard: true }));
+        drop(autocomplete.send(Event::InputChange("br".into())));
+        drop(autocomplete.send(Event::HighlightNext));
+
+        drop(autocomplete.set_props(props().disabled(true)));
+
+        assert_eq!(autocomplete.state(), &State::Idle);
+        assert!(!autocomplete.context().focused);
+        assert!(!autocomplete.context().focus_visible);
+        assert_eq!(autocomplete.context().highlighted_key, None);
+        assert_eq!(
+            autocomplete
+                .connect(&|_| {})
+                .input_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::Expanded)),
+            Some("false")
+        );
+    }
+
+    #[test]
     fn controlled_input_sync_clears_stale_selected_key() {
         let mut autocomplete = service(props().input_value("br"));
 
@@ -1728,21 +1797,20 @@ mod tests {
     }
 
     #[test]
-    fn clear_updates_controlled_input_value() {
+    fn clear_preserves_controlled_input_value_until_prop_sync() {
         let mut autocomplete = service(props().input_value("Alpha"));
 
         drop(autocomplete.send(Event::SelectItem(key("alpha"))));
 
         drop(autocomplete.send(Event::Clear));
 
-        assert_eq!(autocomplete.context().input_value.get(), "");
+        assert_eq!(autocomplete.context().input_value.get(), "Alpha");
         assert_eq!(autocomplete.context().selected_key, None);
         assert_eq!(autocomplete.context().highlighted_key, None);
-        assert_eq!(autocomplete.context().visible_keys, None);
-
-        drop(autocomplete.set_props(props().uncontrolled()));
-
-        assert_eq!(autocomplete.context().input_value.get(), "");
+        assert_eq!(
+            autocomplete.context().visible_keys,
+            Some(BTreeSet::from([key("alpha")]))
+        );
     }
 
     #[test]
@@ -1757,7 +1825,23 @@ mod tests {
     }
 
     #[test]
-    fn controlled_clear_clears_visible_keys_with_input_value() {
+    fn controlled_input_change_filters_from_canonical_value() {
+        let mut autocomplete = service(props().input_value("br"));
+
+        drop(autocomplete.send(Event::SelectItem(key("bravo"))));
+
+        drop(autocomplete.send(Event::InputChange("ch".into())));
+
+        assert_eq!(autocomplete.context().input_value.get(), "br");
+        assert_eq!(autocomplete.context().selected_key, Some(key("bravo")));
+        assert_eq!(
+            autocomplete.context().visible_keys,
+            Some(BTreeSet::from([key("bravo")]))
+        );
+    }
+
+    #[test]
+    fn controlled_clear_keeps_visible_keys_for_canonical_value() {
         let mut autocomplete = service(props().input_value("br"));
 
         drop(autocomplete.send(Event::SelectItem(key("bravo"))));
@@ -1769,9 +1853,12 @@ mod tests {
 
         drop(autocomplete.send(Event::Clear));
 
-        assert_eq!(autocomplete.context().input_value.get(), "");
+        assert_eq!(autocomplete.context().input_value.get(), "br");
         assert_eq!(autocomplete.context().selected_key, None);
-        assert_eq!(autocomplete.context().visible_keys, None);
+        assert_eq!(
+            autocomplete.context().visible_keys,
+            Some(BTreeSet::from([key("bravo")]))
+        );
     }
 
     #[test]
@@ -1810,6 +1897,29 @@ mod tests {
             autocomplete.context().visible_keys,
             Some(BTreeSet::from([key("brook")]))
         );
+    }
+
+    #[test]
+    fn item_prop_sync_clears_selection_when_key_becomes_structural() {
+        let mut autocomplete = service(props().input_value("br"));
+
+        drop(autocomplete.send(Event::SelectItem(key("bravo"))));
+
+        let replacement = CollectionBuilder::new()
+            .section(key("bravo"), "Bravo")
+            .item(
+                key("brook"),
+                "Brook",
+                Item {
+                    label: "Brook".into(),
+                },
+            )
+            .build();
+
+        drop(autocomplete.set_props(props().input_value("br").items(replacement)));
+
+        assert_eq!(autocomplete.context().selected_key, None);
+        assert_eq!(autocomplete.context().highlighted_key, None);
     }
 
     #[test]
