@@ -1,0 +1,57 @@
+---
+source: crates/ars-components/src/selection/autocomplete/mod.rs
+expression: snapshot_attrs(&disabled_api.clear_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "clear-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "autocomplete",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Clear search",
+            ),
+        ),
+        (
+            Hidden,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Id,
+            String(
+                "ac-clear-trigger",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

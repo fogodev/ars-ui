@@ -5,6 +5,9 @@
 //! matching while leaving rendering and live DOM operations to framework
 //! adapters.
 
+/// Autocomplete component machine.
+pub mod autocomplete;
+
 /// Combobox component machine.
 pub mod combobox;
 
