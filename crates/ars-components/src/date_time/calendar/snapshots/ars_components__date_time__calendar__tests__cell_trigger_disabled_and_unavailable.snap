@@ -1,5 +1,6 @@
 ---
 source: crates/ars-components/src/date_time/calendar/tests.rs
+assertion_line: 1226
 expression: "snapshot_attrs(&api.cell_trigger_attrs(&date(2024, 1, 5)))"
 ---
 AttrMap {
@@ -54,6 +55,12 @@ AttrMap {
             Disabled,
             Bool(
                 true,
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
             ),
         ),
     ],

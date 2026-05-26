@@ -659,45 +659,43 @@ impl ars_core::Machine for Machine {
             }
 
             // ── Month / year navigation ──────────────────────────────────
-            Event::NextMonth => Some(month_step_plan(step_for_page_behavior(ctx))),
-            Event::PrevMonth => Some(month_step_plan(-step_for_page_behavior(ctx))),
-            Event::NextYear  => Some(month_step_plan(12)),
-            Event::PrevYear  => Some(month_step_plan(-12)),
+            Event::NextMonth => month_step_plan(ctx, step_for_page_behavior(ctx)),
+            Event::PrevMonth => month_step_plan(ctx, -step_for_page_behavior(ctx)),
+            Event::NextYear  => month_step_plan(ctx, 12),
+            Event::PrevYear  => month_step_plan(ctx, -12),
 
             Event::SetMonth { month } => {
                 let month = *month;
                 if !(1..=12).contains(&month) { return None; }
+                // Pre-compute the focused-date shift; on failure the
+                // whole transition (and `AnnounceMonth`) is dropped.
+                let delta = i32::from(month) - i32::from(ctx.visible_month);
+                let shifted = ctx.focused_date.add(DateDuration {
+                    months: delta,
+                    ..DateDuration::default()
+                }).ok()?;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    // visible_month and focused_date move atomically:
-                    // compute the shifted date first and only commit
-                    // `visible_month` if the shift succeeds, otherwise
-                    // leave both untouched. Out-of-range targets clamp
-                    // back to [min, max].
-                    let delta = i32::from(month) - i32::from(ctx.visible_month);
-                    let Ok(shifted) = ctx.focused_date.add(DateDuration {
-                        months: delta,
-                        ..DateDuration::default()
-                    }) else { return; };
                     ctx.visible_month = month;
                     ctx.focused_date = ctx.clamp_date(shifted);
+                    // If the clamp moved focus into another month, pull
+                    // visible_month along so the focused cell renders.
+                    ctx.sync_visible_to_focused();
                 }).with_effect(announce_month_effect()))
             }
 
             Event::SetYear { year } => {
                 let year = *year;
+                // `i32 - i32` overflows on extreme inputs; drop event on
+                // overflow.
+                let delta_years = year.checked_sub(ctx.visible_year)?;
+                let shifted = ctx.focused_date.add(DateDuration {
+                    years: delta_years,
+                    ..DateDuration::default()
+                }).ok()?;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    // `i32 - i32` overflows on extreme inputs
-                    // (`SetYear { year: i32::MIN }` with positive
-                    // `visible_year`); use `checked_sub` and drop the
-                    // event on overflow.
-                    let Some(delta_years) = year.checked_sub(ctx.visible_year) else { return; };
-                    // visible_year and focused_date move atomically.
-                    let Ok(shifted) = ctx.focused_date.add(DateDuration {
-                        years: delta_years,
-                        ..DateDuration::default()
-                    }) else { return; };
                     ctx.visible_year = year;
                     ctx.focused_date = ctx.clamp_date(shifted);
+                    ctx.sync_visible_to_focused();
                 }).with_effect(announce_month_effect()))
             }
 
@@ -723,23 +721,29 @@ fn step_for_page_behavior(ctx: &Context) -> i32 {
     }
 }
 
-fn month_step_plan(step: i32) -> TransitionPlan<Machine> {
-    TransitionPlan::context_only(move |ctx: &mut Context| {
-        // `visible_month/year` and `focused_date` must advance atomically.
-        // If the focused-date shift fails near a representable calendar
-        // boundary, leave both untouched so the roving-tabindex target
-        // can never end up outside the rendered grid. The clamp keeps
-        // out-of-range targets snapped to `[min, max]`.
-        let Ok(shifted) = ctx.focused_date.add(DateDuration {
-            months: step,
-            ..DateDuration::default()
-        }) else {
-            return;
-        };
-        ctx.advance_month(step);
-        ctx.focused_date = ctx.clamp_date(shifted);
-    })
-    .with_effect(announce_month_effect())
+fn month_step_plan(ctx: &Context, step: i32) -> Option<TransitionPlan<Machine>> {
+    // Pre-compute the focused-date shift at plan-build time so a
+    // boundary failure short-circuits the whole transition (no spurious
+    // `AnnounceMonth` effect). Returning `None` propagates as "no
+    // change" — visible_month, focused_date, AND announce effect all
+    // stay put.
+    let shifted = ctx.focused_date.add(DateDuration {
+        months: step,
+        ..DateDuration::default()
+    }).ok()?;
+    Some(
+        TransitionPlan::context_only(move |ctx: &mut Context| {
+            ctx.advance_month(step);
+            ctx.focused_date = ctx.clamp_date(shifted);
+            // If the clamp pushed focus into a different month than the
+            // newly-advanced visible window (e.g., NextMonth when focus
+            // is already at `max`), pull visible back to wherever the
+            // clamped focus lives. Without this the roving target has no
+            // rendered cell.
+            ctx.sync_visible_to_focused();
+        })
+        .with_effect(announce_month_effect()),
+    )
 }
 
 fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
@@ -818,8 +822,8 @@ fn handle_keydown(key: KeyboardKey, shift: bool, ctx: &Context)
 {
     if shift {
         match key {
-            KeyboardKey::PageUp   => return Some(month_step_plan(-12)),
-            KeyboardKey::PageDown => return Some(month_step_plan(12)),
+            KeyboardKey::PageUp   => return month_step_plan(ctx, -12),
+            KeyboardKey::PageDown => return month_step_plan(ctx, 12),
             _ => {}
         }
     }
@@ -899,8 +903,12 @@ pub enum Part {
     HeadRow,
     HeadCell { day: Weekday },
     Row { week_index: usize },
-    Cell { date: CalendarDate },
-    CellTrigger { date: CalendarDate },
+    /// `offset` carries the multi-month grid index (0 for single-month
+    /// or the first visible grid) so `ConnectApi::part_attrs` dispatches
+    /// to the offset-aware helpers and later grids are not mislabelled
+    /// as outside-month.
+    Cell { date: CalendarDate, offset: usize },
+    CellTrigger { date: CalendarDate, offset: usize },
 }
 
 /// API for the Calendar component.
@@ -967,6 +975,10 @@ impl<'a> Api<'a> {
         };
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
         attrs.set(HtmlAttr::TabIndex, "-1");
+        // `type="button"` keeps a click from auto-submitting an
+        // enclosing <form>. Browser default for untyped buttons is
+        // `submit`, which would turn paging into form submission.
+        attrs.set(HtmlAttr::Type, "button");
         if self.is_prev_disabled() {
             attrs.set_bool(HtmlAttr::Disabled, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
@@ -993,6 +1005,9 @@ impl<'a> Api<'a> {
         };
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
         attrs.set(HtmlAttr::TabIndex, "-1");
+        // See `prev_trigger_attrs` — explicit `type="button"` prevents
+        // form auto-submission on next clicks.
+        attrs.set(HtmlAttr::Type, "button");
         if self.is_next_disabled() {
             attrs.set_bool(HtmlAttr::Disabled, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
@@ -1166,7 +1181,8 @@ impl<'a> Api<'a> {
     pub fn cell_attrs(&self, date: &CalendarDate) -> AttrMap {
         let mut attrs = AttrMap::new();
         attrs.set(HtmlAttr::Role, "gridcell");
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Cell { date: date.clone() }.data_attrs();
+        let [(scope_attr, scope_val), (part_attr, part_val)] =
+            Part::Cell { date: date.clone(), offset: 0 }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
 
@@ -1199,9 +1215,15 @@ impl<'a> Api<'a> {
 
     fn cell_trigger_attrs_inner(&self, date: &CalendarDate, offset: Option<usize>) -> AttrMap {
         let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::CellTrigger { date: date.clone() }.data_attrs();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::CellTrigger {
+            date: date.clone(),
+            offset: offset.unwrap_or(0),
+        }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        // `type="button"` prevents an enclosing <form> from submitting
+        // on date clicks (browser default for untyped buttons is submit).
+        attrs.set(HtmlAttr::Type, "button");
 
         let disabled = self.is_disabled(date);
         let unavailable = self.is_unavailable(date);
@@ -1415,8 +1437,8 @@ impl ConnectApi for Api<'_> {
             Part::HeadRow => self.head_row_attrs(),
             Part::HeadCell { day } => self.head_cell_attrs(day),
             Part::Row { week_index } => self.row_attrs(*week_index),
-            Part::Cell { date } => self.cell_attrs(date),
-            Part::CellTrigger { date } => self.cell_trigger_attrs(date),
+            Part::Cell { date, offset } => self.cell_attrs_for(date, *offset),
+            Part::CellTrigger { date, offset } => self.cell_trigger_attrs_for(date, *offset),
         }
     }
 }

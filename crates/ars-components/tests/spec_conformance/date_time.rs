@@ -40,12 +40,14 @@ fn calendar_anatomy_matches_spec() {
             (
                 calendar::Part::Cell {
                     date: example.clone(),
+                    offset: 0,
                 },
                 "cell",
             ),
             (
                 calendar::Part::CellTrigger {
                     date: example.clone(),
+                    offset: 0,
                 },
                 "cell-trigger",
             ),

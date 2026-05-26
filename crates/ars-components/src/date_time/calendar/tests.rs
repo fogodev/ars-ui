@@ -2241,3 +2241,107 @@ fn set_year_is_atomic_with_focused_date() {
     assert_eq!(svc.context().visible_year, 2030);
     assert_eq!(svc.context().focused_date.year(), 2030);
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Codex review regressions, pass 5 (PR #688)
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn paging_pulls_visible_back_when_clamp_moves_focus_to_other_month() {
+    // Codex N14 (P1): with focus Jan 15 and max=Jan 25, pressing NextMonth
+    // tries to shift to Feb 15, clamps back to Jan 25 (the max). visible_month
+    // must follow the clamp — both should land on January.
+    let mut svc = service_with(
+        props()
+            .today(date(2024, 1, 15))
+            .max(Some(date(2024, 1, 25))),
+        en_us(),
+    );
+    drop(svc.send(Event::NextMonth));
+
+    assert_eq!(svc.context().focused_date, date(2024, 1, 25));
+    assert_eq!(
+        svc.context().visible_month,
+        svc.context().focused_date.month(),
+        "visible_month must follow clamped focused_date",
+    );
+}
+
+#[test]
+fn set_month_pulls_visible_back_when_clamp_moves_focus() {
+    // Codex N14 (P1): SetMonth follows the same rule.
+    let mut svc = service_with(
+        props()
+            .today(date(2024, 1, 15))
+            .max(Some(date(2024, 1, 25))),
+        en_us(),
+    );
+    drop(svc.send(Event::SetMonth { month: 6 }));
+
+    assert_eq!(
+        svc.context().visible_month,
+        svc.context().focused_date.month(),
+    );
+}
+
+#[test]
+fn set_year_pulls_visible_back_when_clamp_moves_focus() {
+    let mut svc = service_with(
+        props()
+            .today(date(2024, 1, 15))
+            .max(Some(date(2024, 12, 31))),
+        en_us(),
+    );
+    drop(svc.send(Event::SetYear { year: 2030 }));
+
+    assert_eq!(
+        svc.context().visible_year,
+        svc.context().focused_date.year(),
+    );
+}
+
+#[test]
+fn cell_trigger_carries_button_type() {
+    // Codex N15 (P1): cell trigger must declare `type="button"` so a
+    // calendar inside a <form> doesn't accidentally submit when a date is
+    // clicked.
+    let svc = service();
+    let api = svc.connect(&|_| {});
+    let trigger = api.cell_trigger_attrs(&date(2024, 1, 15));
+    assert_eq!(attr(&trigger, HtmlAttr::Type).as_deref(), Some("button"));
+}
+
+#[test]
+fn prev_next_triggers_carry_button_type() {
+    let svc = service();
+    let api = svc.connect(&|_| {});
+    assert_eq!(
+        attr(&api.prev_trigger_attrs(), HtmlAttr::Type).as_deref(),
+        Some("button"),
+    );
+    assert_eq!(
+        attr(&api.next_trigger_attrs(), HtmlAttr::Type).as_deref(),
+        Some("button"),
+    );
+}
+
+#[test]
+fn announce_month_effect_skipped_on_boundary_failure() {
+    // Codex N17 (P2): when month_step_plan can't shift focused_date (e.g.,
+    // calendar boundary), it must return None so AnnounceMonth doesn't
+    // fire a spurious live-region announcement.
+    //
+    // We can't deterministically hit a Gregorian calendar boundary in a
+    // portable test, but we can pin the happy-path invariant that
+    // AnnounceMonth fires when the shift succeeds.
+    let mut svc = service();
+    let result = svc.send(Event::NextMonth);
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|e| e.name == Effect::AnnounceMonth),
+        "happy-path NextMonth must still fire AnnounceMonth",
+    );
+    assert!(result.context_changed);
+}

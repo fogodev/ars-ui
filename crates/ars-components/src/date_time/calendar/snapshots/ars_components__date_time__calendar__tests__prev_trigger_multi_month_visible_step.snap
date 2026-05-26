@@ -1,5 +1,6 @@
 ---
 source: crates/ars-components/src/date_time/calendar/tests.rs
+assertion_line: 1047
 expression: snapshot_attrs(&api.prev_trigger_attrs())
 ---
 AttrMap {
@@ -38,6 +39,12 @@ AttrMap {
             TabIndex,
             String(
                 "-1",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
             ),
         ),
     ],
