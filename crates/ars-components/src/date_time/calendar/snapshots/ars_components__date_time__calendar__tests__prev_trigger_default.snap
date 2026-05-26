@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/date_time/calendar/tests.rs
+expression: snapshot_attrs(&api.prev_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "prev-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "calendar",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Previous month",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cal-prev-trigger",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

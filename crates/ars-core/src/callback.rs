@@ -86,6 +86,27 @@ impl<F: Fn(Args) -> Out + Send + Sync + 'static, Args: 'static, Out: 'static> Fr
     }
 }
 
+// ── Constructors for Callback<dyn for<'a> Fn(&'a T) -> Out + Send + Sync> ─
+// The generic `Callback::new` requires `Args: 'static`, which excludes
+// `&T` (since the reference itself is not `'static`). This sibling
+// constructor accepts a higher-ranked closure over a reference argument
+// so predicate-style Props fields (e.g. `Calendar::is_date_unavailable`)
+// can still use `Callback` without falling back to raw `fn` pointers.
+
+/// Constructor for `Callback<dyn for<'a> Fn(&'a T) -> Out + Send + Sync>`.
+impl<T: ?Sized + 'static, Out: 'static> Callback<dyn for<'a> Fn(&'a T) -> Out + Send + Sync> {
+    /// Creates a new callback wrapping a higher-ranked closure over a
+    /// reference argument.
+    ///
+    /// Use when the closure signature is `Fn(&T) -> Out` (predicates,
+    /// transformers, key extractors) — the regular [`Callback::new`]
+    /// constructor cannot satisfy the implicit HRTB lifetime because its
+    /// `Args: 'static` bound excludes reference types.
+    pub fn new_ref(f: impl for<'a> Fn(&'a T) -> Out + Send + Sync + 'static) -> Self {
+        Self(Arc::new(f))
+    }
+}
+
 // ── Constructors for Callback<dyn Fn() + Send + Sync> (zero-argument) ─
 // `dyn Fn() + Send + Sync` and `dyn Fn(Args) -> Out + Send + Sync` are
 // distinct trait objects in Rust, so the generic `Callback::new` cannot
@@ -119,7 +140,7 @@ pub fn callback<Args: 'static, Out: 'static>(
 
 #[cfg(test)]
 mod tests {
-    use alloc::format;
+    use alloc::{format, string::String};
 
     use super::*;
 
@@ -190,6 +211,29 @@ mod tests {
         let cb: Callback<dyn Fn(i32) -> i32 + Send + Sync> = Callback::from(|value| value + 2);
 
         assert_eq!(cb(40), 42);
+    }
+
+    #[test]
+    fn callback_new_ref_invokes_higher_ranked_closure() {
+        let cb: Callback<dyn for<'a> Fn(&'a str) -> usize + Send + Sync> =
+            Callback::new_ref(|s: &str| s.len());
+
+        assert_eq!(cb("hello"), 5);
+
+        let owned = String::from("world!");
+
+        assert_eq!(cb(&owned), 6);
+    }
+
+    #[test]
+    fn callback_new_ref_supports_captured_state() {
+        let allowed = alloc::vec![1, 2, 3];
+
+        let cb: Callback<dyn for<'a> Fn(&'a i32) -> bool + Send + Sync> =
+            Callback::new_ref(move |value: &i32| allowed.contains(value));
+
+        assert!(cb(&2));
+        assert!(!cb(&5));
     }
 
     #[test]

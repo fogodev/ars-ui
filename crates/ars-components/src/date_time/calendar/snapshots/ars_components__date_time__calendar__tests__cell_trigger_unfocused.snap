@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/date_time/calendar/tests.rs
+expression: "snapshot_attrs(&api.cell_trigger_attrs(&date(2024, 1, 20)))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "cell-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "calendar",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "January 20, 2024, Saturday",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

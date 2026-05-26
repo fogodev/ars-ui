@@ -1,0 +1,53 @@
+---
+source: crates/ars-components/src/date_time/calendar/tests.rs
+expression: snapshot_attrs(&api.grid_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "grid",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "calendar",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "cal-heading",
+            ),
+        ),
+        (
+            Aria(
+                MultiSelectable,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cal-grid",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "grid",
+            ),
+        ),
+    ],
+    styles: [],
+}
