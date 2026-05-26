@@ -1,0 +1,9 @@
+---
+source: crates/ars-components/src/navigation/navigation_menu/mod.rs
+expression: snapshot_attrs(&api.list_attrs())
+---
+aria-orientation=horizontal
+data-ars-part=list
+data-ars-scope=navigation-menu
+id=nav-list
+role=menubar

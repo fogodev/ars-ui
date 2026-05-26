@@ -1,0 +1,6 @@
+---
+source: crates/ars-components/src/navigation/navigation_menu/mod.rs
+expression: "snapshot_attrs(&api.sub_item_attrs(&key(\"blog\")))"
+---
+data-ars-part=sub-item
+data-ars-scope=navigation-menu

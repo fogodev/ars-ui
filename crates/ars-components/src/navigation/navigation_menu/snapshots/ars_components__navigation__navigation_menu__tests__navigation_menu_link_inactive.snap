@@ -1,0 +1,6 @@
+---
+source: crates/ars-components/src/navigation/navigation_menu/mod.rs
+expression: snapshot_attrs(&api.link_attrs(false))
+---
+data-ars-part=link
+data-ars-scope=navigation-menu
