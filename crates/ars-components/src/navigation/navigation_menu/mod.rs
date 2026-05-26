@@ -621,9 +621,11 @@ impl ars_core::Machine for Machine {
 
             (_, Event::SetItems(items)) => {
                 let items = dedupe_keys(items);
-                let open_removed = ctx.value.get().as_ref().is_some_and(|item| {
-                    !items.is_empty() && !items.iter().any(|candidate| candidate == item)
-                });
+                let open_removed = ctx
+                    .value
+                    .get()
+                    .as_ref()
+                    .is_some_and(|item| !items.iter().any(|candidate| candidate == item));
 
                 let plan = if open_removed {
                     TransitionPlan::to(State::Idle)
@@ -1766,6 +1768,19 @@ mod tests {
         drop(service.send(Event::SetItems(vec![key("a")])));
 
         assert_eq!(*service.state(), State::Idle);
+        assert_eq!(service.context().value.get(), &None);
+        assert_eq!(service.context().previous_item, Some(key("b")));
+    }
+
+    #[test]
+    fn set_items_closes_when_registry_becomes_empty() {
+        let mut service =
+            service_with_items(props().default_value(key("b")), &[key("a"), key("b")]);
+
+        drop(service.send(Event::SetItems(Vec::new())));
+
+        assert_eq!(*service.state(), State::Idle);
+        assert_eq!(connect_noop(&service).open_item(), None);
         assert_eq!(service.context().value.get(), &None);
         assert_eq!(service.context().previous_item, Some(key("b")));
     }
