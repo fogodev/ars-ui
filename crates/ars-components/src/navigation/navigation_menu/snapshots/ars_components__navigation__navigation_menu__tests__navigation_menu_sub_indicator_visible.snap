@@ -1,0 +1,8 @@
+---
+source: crates/ars-components/src/navigation/navigation_menu/mod.rs
+expression: snapshot_attrs(&api.sub_indicator_attrs())
+---
+aria-hidden=true
+data-ars-part=sub-indicator
+data-ars-scope=navigation-menu
+data-ars-state=visible

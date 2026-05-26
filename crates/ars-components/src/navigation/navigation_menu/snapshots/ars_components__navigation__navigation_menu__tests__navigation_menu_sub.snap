@@ -1,0 +1,8 @@
+---
+source: crates/ars-components/src/navigation/navigation_menu/mod.rs
+expression: snapshot_attrs(&api.sub_attrs())
+---
+data-ars-orientation=horizontal
+data-ars-part=sub
+data-ars-scope=navigation-menu
+dir=ltr

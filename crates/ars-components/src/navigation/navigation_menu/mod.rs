@@ -361,6 +361,9 @@ pub struct Context {
     /// Registered trigger keys in DOM order.
     pub items: Vec<Key>,
 
+    /// Whether adapters have synced the trigger registry at least once.
+    pub items_registered: bool,
+
     /// The key of the previously open item.
     pub previous_item: Option<Key>,
 
@@ -425,6 +428,39 @@ pub enum Part {
 
     /// Optional animated content viewport.
     Viewport,
+
+    /// Root element for a nested navigation menu inside content.
+    Sub,
+
+    /// Menubar list container for a nested navigation menu.
+    SubList,
+
+    /// Nested item wrapper.
+    SubItem {
+        /// Stable nested item key.
+        item_key: Key,
+    },
+
+    /// Nested trigger that opens associated nested content.
+    SubTrigger {
+        /// Stable nested item key.
+        item_key: Key,
+
+        /// Associated nested content element id.
+        content_id: String,
+    },
+
+    /// Dropdown content for a nested trigger.
+    SubContent {
+        /// Stable nested item key.
+        item_key: Key,
+    },
+
+    /// Visual active-trigger indicator for a nested menu.
+    SubIndicator,
+
+    /// Optional animated content viewport for a nested menu.
+    SubViewport,
 }
 
 /// Machine for the `NavigationMenu` component.
@@ -475,6 +511,7 @@ impl ars_core::Machine for Machine {
                 last_close_time: None,
                 pointer_in_content: false,
                 items: Vec::new(),
+                items_registered: false,
                 previous_item: None,
                 list_id,
                 ids,
@@ -650,6 +687,7 @@ impl ars_core::Machine for Machine {
                 Some(
                     plan.apply(move |ctx: &mut Context| {
                         ctx.items = items;
+                        ctx.items_registered = true;
                         ctx.pending_open_item = None;
                         if let Some(focused) = &ctx.focused_trigger
                             && !ctx.items.iter().any(|item| item == focused)
@@ -989,6 +1027,170 @@ impl<'a> Api<'a> {
         attrs
     }
 
+    /// Attrs for the root element of a nested navigation menu.
+    #[must_use]
+    pub fn sub_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Sub.data_attrs();
+
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(
+                HtmlAttr::Data("ars-orientation"),
+                orientation_value(self.ctx.orientation),
+            )
+            .set(HtmlAttr::Dir, direction_value(self.ctx.dir));
+
+        attrs
+    }
+
+    /// Attrs for the menubar list container of a nested navigation menu.
+    #[must_use]
+    pub fn sub_list_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::SubList.data_attrs();
+
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Role, "menubar")
+            .set(
+                HtmlAttr::Aria(AriaAttr::Orientation),
+                orientation_value(self.ctx.orientation),
+            );
+
+        attrs
+    }
+
+    /// Attrs for a nested item wrapper.
+    #[must_use]
+    pub fn sub_item_attrs(&self, _item_key: &Key) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::SubItem {
+            item_key: Key::default(),
+        }
+        .data_attrs();
+
+        attrs.set(scope_attr, scope_val).set(part_attr, part_val);
+
+        attrs
+    }
+
+    /// Attrs for a nested trigger that opens or closes a nested content panel.
+    #[must_use]
+    pub fn sub_trigger_attrs(&self, item_key: &Key, content_id: &str) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::SubTrigger {
+            item_key: Key::default(),
+            content_id: String::new(),
+        }
+        .data_attrs();
+
+        let is_open = self.is_item_open(item_key);
+        let is_focused = self.ctx.focused_trigger.as_ref() == Some(item_key);
+
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Id, trigger_dom_id(&self.ctx.ids, item_key))
+            .set(HtmlAttr::Role, "menuitem")
+            .set(HtmlAttr::Aria(AriaAttr::HasPopup), "true")
+            .set(
+                HtmlAttr::Aria(AriaAttr::Expanded),
+                if is_open { "true" } else { "false" },
+            )
+            .set(
+                HtmlAttr::Data("ars-state"),
+                if is_open { "open" } else { "closed" },
+            )
+            .set(HtmlAttr::TabIndex, self.trigger_tab_index(item_key));
+
+        if is_open {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Controls), content_id);
+        }
+
+        if is_focused && self.ctx.focus_visible {
+            attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
+        }
+
+        attrs
+    }
+
+    /// Attrs for a nested content panel revealed when its trigger is active.
+    #[must_use]
+    pub fn sub_content_attrs(&self, item_key: &Key) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::SubContent {
+            item_key: Key::default(),
+        }
+        .data_attrs();
+
+        let is_open = self.is_item_open(item_key);
+
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Id, content_dom_id(&self.ctx.ids, item_key))
+            .set(
+                HtmlAttr::Data("ars-state"),
+                if is_open { "open" } else { "closed" },
+            );
+
+        if let Some(motion) = self.motion_direction(item_key) {
+            attrs.set(HtmlAttr::Data("ars-motion"), motion);
+        }
+
+        if !is_open {
+            attrs.set_bool(HtmlAttr::Hidden, true);
+        }
+
+        attrs
+    }
+
+    /// Attrs for the visual indicator of a nested navigation menu.
+    #[must_use]
+    pub fn sub_indicator_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::SubIndicator.data_attrs();
+
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Aria(AriaAttr::Hidden), "true")
+            .set(
+                HtmlAttr::Data("ars-state"),
+                if self.open_item().is_some() {
+                    "visible"
+                } else {
+                    "hidden"
+                },
+            );
+
+        attrs
+    }
+
+    /// Attrs for the optional viewport container of a nested navigation menu.
+    #[must_use]
+    pub fn sub_viewport_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::SubViewport.data_attrs();
+
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(
+                HtmlAttr::Data("ars-state"),
+                if self.open_item().is_some() {
+                    "open"
+                } else {
+                    "closed"
+                },
+            );
+
+        attrs
+    }
+
     /// Handle pointer enter on a trigger.
     pub fn on_trigger_pointer_enter(&self, item_key: &Key, now_ms: u64) {
         (self.send)(Event::PointerEnter(item_key.clone(), now_ms));
@@ -1094,6 +1296,16 @@ impl ConnectApi for Api<'_> {
             Part::Link { active } => self.link_attrs(active),
             Part::Indicator => self.indicator_attrs(),
             Part::Viewport => self.viewport_attrs(),
+            Part::Sub => self.sub_attrs(),
+            Part::SubList => self.sub_list_attrs(),
+            Part::SubItem { item_key } => self.sub_item_attrs(&item_key),
+            Part::SubTrigger {
+                item_key,
+                content_id,
+            } => self.sub_trigger_attrs(&item_key, &content_id),
+            Part::SubContent { item_key } => self.sub_content_attrs(&item_key),
+            Part::SubIndicator => self.sub_indicator_attrs(),
+            Part::SubViewport => self.sub_viewport_attrs(),
         }
     }
 }
@@ -1114,7 +1326,7 @@ const fn state_open_item(state: &State) -> Option<&Key> {
 }
 
 fn item_is_registered(ctx: &Context, item: &Key) -> bool {
-    ctx.items.is_empty() || ctx.items.iter().any(|candidate| candidate == item)
+    !ctx.items_registered || ctx.items.iter().any(|candidate| candidate == item)
 }
 
 fn effective_open_item<'a>(state: &'a State, ctx: &'a Context) -> Option<&'a Key> {
@@ -1122,7 +1334,7 @@ fn effective_open_item<'a>(state: &'a State, ctx: &'a Context) -> Option<&'a Key
         .get()
         .as_ref()
         .filter(|item| item_is_registered(ctx, item))
-        .or_else(|| state_open_item(state))
+        .or_else(|| state_open_item(state).filter(|item| item_is_registered(ctx, item)))
 }
 
 fn open_item_plan(state: &State, ctx: &Context, item: Key) -> Option<TransitionPlan<Machine>> {
@@ -1851,6 +2063,25 @@ mod tests {
     }
 
     #[test]
+    fn controlled_open_item_is_hidden_when_registry_becomes_empty() {
+        let mut service = service_with_items(props().value(Some(key("b"))), &[key("a"), key("b")]);
+
+        drop(service.send(Event::SetItems(Vec::new())));
+
+        let api = connect_noop(&service);
+
+        assert_eq!(api.open_item(), None);
+        assert_eq!(
+            api.indicator_attrs().get(&HtmlAttr::Data("ars-state")),
+            Some("hidden")
+        );
+        assert_eq!(
+            api.viewport_attrs().get(&HtmlAttr::Data("ars-state")),
+            Some("closed")
+        );
+    }
+
+    #[test]
     fn set_items_replacement_cancels_pending_open_delay() {
         let mut service = service_with_items(props(), &[key("a"), key("b")]);
 
@@ -1874,6 +2105,20 @@ mod tests {
 
         assert_eq!(*service.state(), State::Open { item: key("blog") });
         assert_eq!(connect_noop(&service).open_item(), Some(&key("docs")));
+    }
+
+    #[test]
+    fn effective_open_item_does_not_fallback_to_unregistered_state() {
+        let mut service = service_with_items(props().value(Some(key("docs"))), &[key("blog")]);
+
+        drop(service.send(Event::SyncControlledValue(Some(key("docs")))));
+
+        assert_eq!(*service.state(), State::Open { item: key("docs") });
+        assert_eq!(connect_noop(&service).open_item(), None);
+
+        let result = service.send(Event::PointerLeave);
+
+        assert!(result.pending_effects.is_empty());
     }
 
     #[test]
@@ -2129,6 +2374,45 @@ mod tests {
         assert_snapshot!(
             "navigation_menu_item",
             snapshot_attrs(&api.item_attrs(&key("docs")))
+        );
+    }
+
+    #[test]
+    fn sub_part_snapshots() {
+        let mut menu_service = service_with_items(
+            props().default_value(key("docs")),
+            &[key("docs"), key("blog")],
+        );
+
+        drop(menu_service.send(Event::Open(key("blog"))));
+
+        let api = connect_noop(&menu_service);
+        let content_id = content_dom_id(&menu_service.context().ids, &key("blog"));
+
+        assert_snapshot!("navigation_menu_sub", snapshot_attrs(&api.sub_attrs()));
+        assert_snapshot!(
+            "navigation_menu_sub_list",
+            snapshot_attrs(&api.sub_list_attrs())
+        );
+        assert_snapshot!(
+            "navigation_menu_sub_item",
+            snapshot_attrs(&api.sub_item_attrs(&key("blog")))
+        );
+        assert_snapshot!(
+            "navigation_menu_sub_trigger_open",
+            snapshot_attrs(&api.sub_trigger_attrs(&key("blog"), &content_id))
+        );
+        assert_snapshot!(
+            "navigation_menu_sub_content_open",
+            snapshot_attrs(&api.sub_content_attrs(&key("blog")))
+        );
+        assert_snapshot!(
+            "navigation_menu_sub_indicator_visible",
+            snapshot_attrs(&api.sub_indicator_attrs())
+        );
+        assert_snapshot!(
+            "navigation_menu_sub_viewport_open",
+            snapshot_attrs(&api.sub_viewport_attrs())
         );
     }
 
@@ -2433,6 +2717,32 @@ mod tests {
         );
         assert_eq!(api.part_attrs(Part::Indicator), api.indicator_attrs());
         assert_eq!(api.part_attrs(Part::Viewport), api.viewport_attrs());
+        assert_eq!(api.part_attrs(Part::Sub), api.sub_attrs());
+        assert_eq!(api.part_attrs(Part::SubList), api.sub_list_attrs());
+        assert_eq!(
+            api.part_attrs(Part::SubItem {
+                item_key: key("docs")
+            }),
+            api.sub_item_attrs(&key("docs"))
+        );
+        assert_eq!(
+            api.part_attrs(Part::SubTrigger {
+                item_key: key("docs"),
+                content_id: content_id.clone(),
+            }),
+            api.sub_trigger_attrs(&key("docs"), &content_id)
+        );
+        assert_eq!(
+            api.part_attrs(Part::SubContent {
+                item_key: key("docs")
+            }),
+            api.sub_content_attrs(&key("docs"))
+        );
+        assert_eq!(
+            api.part_attrs(Part::SubIndicator),
+            api.sub_indicator_attrs()
+        );
+        assert_eq!(api.part_attrs(Part::SubViewport), api.sub_viewport_attrs());
     }
 
     #[test]

@@ -1,0 +1,9 @@
+---
+source: crates/ars-components/src/navigation/navigation_menu/mod.rs
+expression: "snapshot_attrs(&api.sub_content_attrs(&key(\"blog\")))"
+---
+data-ars-motion=from-end
+data-ars-part=sub-content
+data-ars-scope=navigation-menu
+data-ars-state=open
+id=nav-content-s-626c6f67

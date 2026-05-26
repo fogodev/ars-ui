@@ -183,6 +183,29 @@ fn navigation_menu_anatomy_matches_spec() {
             (navigation_menu::Part::Link { active: false }, "link"),
             (navigation_menu::Part::Indicator, "indicator"),
             (navigation_menu::Part::Viewport, "viewport"),
+            (navigation_menu::Part::Sub, "sub"),
+            (navigation_menu::Part::SubList, "sub-list"),
+            (
+                navigation_menu::Part::SubItem {
+                    item_key: Key::default(),
+                },
+                "sub-item",
+            ),
+            (
+                navigation_menu::Part::SubTrigger {
+                    item_key: Key::default(),
+                    content_id: String::new(),
+                },
+                "sub-trigger",
+            ),
+            (
+                navigation_menu::Part::SubContent {
+                    item_key: Key::default(),
+                },
+                "sub-content",
+            ),
+            (navigation_menu::Part::SubIndicator, "sub-indicator"),
+            (navigation_menu::Part::SubViewport, "sub-viewport"),
         ],
     );
 }
