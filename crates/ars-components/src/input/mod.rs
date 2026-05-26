@@ -18,6 +18,9 @@ pub mod pin_input;
 /// RadioGroup machine.
 pub mod radio_group;
 
+/// RangeSlider machine.
+pub mod range_slider;
+
 /// NumberInput machine.
 pub mod number_input;
 

@@ -1,0 +1,49 @@
+---
+source: crates/ars-components/src/input/range_slider/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).hidden_input_attrs(ThumbIndex::Start))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "hidden-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "range-slider",
+            ),
+        ),
+        (
+            Form,
+            String(
+                "filters",
+            ),
+        ),
+        (
+            Name,
+            String(
+                "price[0]",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "hidden",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "25",
+            ),
+        ),
+    ],
+    styles: [],
+}

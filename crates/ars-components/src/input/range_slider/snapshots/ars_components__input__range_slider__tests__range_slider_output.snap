@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/input/range_slider/mod.rs
+expression: snapshot_attrs(&api.output_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "output",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "range-slider",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "off",
+            ),
+        ),
+        (
+            For,
+            String(
+                "price-thumb-start price-thumb-end",
+            ),
+        ),
+    ],
+    styles: [],
+}

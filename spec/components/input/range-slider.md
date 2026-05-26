@@ -71,6 +71,14 @@ pub enum Event {
     SetToMax { thumb: ThumbIndex },
     /// Set both values.
     SetValues([f64; 2]),
+    /// Synchronize the externally controlled value prop.
+    SyncValue(Option<[f64; 2]>),
+    /// Synchronize output-affecting props stored in context.
+    SetProps,
+    /// Track whether a Description part is rendered.
+    SetHasDescription(bool),
+    /// Track whether a Label part is rendered.
+    SetHasLabel(bool),
 }
 ```
 
@@ -92,6 +100,8 @@ pub struct Context {
     pub large_step: Option<f64>,
     /// Minimum number of steps between the thumbs.
     pub min_steps_between: u32,
+    /// When true, dragging past the opposite thumb swaps active thumb.
+    pub allow_thumb_swap: bool,
     /// Whether the component is disabled.
     pub disabled: bool,
     /// Whether the component is readonly.
@@ -108,16 +118,24 @@ pub struct Context {
     pub focus_visible: bool,
     /// The thumb being dragged.
     pub dragging_thumb: Option<ThumbIndex>,
+    /// Pending drag value used for controlled commit callbacks.
+    pub drag_value: Option<[f64; 2]>,
+    /// Whether the active drag changed the effective value.
+    pub drag_changed: bool,
     /// How the thumbs align with the track boundaries.
     pub thumb_alignment: ThumbAlignment,
     /// The name attribute for form submission.
     pub name: Option<String>,
+    /// The ID of the form element the hidden inputs are associated with.
+    pub form: Option<String>,
     /// Whether the start thumb is individually disabled.
     pub start_disabled: bool,
     /// Whether the end thumb is individually disabled.
     pub end_disabled: bool,
     /// Whether a Description part is rendered (gates aria-describedby).
     pub has_description: bool,
+    /// Whether a Label part is rendered (gates aria-labelledby).
+    pub has_label: bool,
     /// Resolved locale for i18n.
     pub locale: Locale,
     /// Resolved messages for the range slider.
@@ -169,12 +187,14 @@ pub struct Props {
     /// Whether the end thumb is individually disabled.
     pub end_disabled: bool,
     /// Formatter for `aria-valuetext`. Receives `(this_value, other_value)`.
-    pub format_value: Option<Callback<(f64, f64), String>>,
+    pub format_value: Option<Callback<dyn Fn((f64, f64)) -> String + Send + Sync>>,
     /// How the thumbs align with the track ends. See `slider::ThumbAlignment`.
     pub thumb_alignment: ThumbAlignment,
+    /// Callback fired when value-changing user intent requests a new range.
+    pub on_value_change: Option<Callback<dyn Fn([f64; 2]) + Send + Sync>>,
     /// Callback fired when a drag interaction ends (pointerup), as opposed to
     /// continuous change callbacks. Receives the final `[start, end]` value pair.
-    pub on_value_change_end: Option<Callback<[f64; 2]>>,
+    pub on_value_change_end: Option<Callback<dyn Fn([f64; 2]) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -195,6 +215,7 @@ impl Default for Props {
             end_disabled: false,
             format_value: None,
             thumb_alignment: ThumbAlignment::Contain,
+            on_value_change: None,
             on_value_change_end: None,
         }
     }
@@ -223,37 +244,19 @@ impl ComponentMessages for Messages {}
 
 ### 1.5 Guards
 
-The RangeSlider maintains the invariant `start_value <= end_value` at all times:
+The RangeSlider maintains these invariants at all times:
 
-```rust
-fn is_disabled(ctx: &Context) -> bool { ctx.disabled }
-fn is_readonly(ctx: &Context) -> bool { ctx.readonly }
-fn is_thumb_disabled(ctx: &Context, thumb: ThumbIndex) -> bool {
-    ctx.disabled || match thumb {
-        ThumbIndex::Start => ctx.start_disabled,
-        ThumbIndex::End => ctx.end_disabled,
-    }
-}
-
-/// Set the value of a specific thumb, enforcing the non-crossing invariant.
-fn set_thumb_value(ctx: &mut Context, thumb: ThumbIndex, raw: f64) {
-    let snapped = snap_to_step(raw, ctx.min, ctx.max, ctx.step);
-    let min_gap = ctx.min_steps_between as f64 * ctx.step;
-    let [start, end] = *ctx.value.get();
-
-    let new_values = match thumb {
-        ThumbIndex::Start => {
-            let clamped = snapped.clamp(ctx.min, end - min_gap);
-            [clamped, end]
-        }
-        ThumbIndex::End => {
-            let clamped = snapped.clamp(start + min_gap, ctx.max);
-            [start, clamped]
-        }
-    };
-    ctx.value.set(new_values);
-}
-```
+- Values are finite. Non-finite event values are rejected; non-finite props
+  normalize to the nearest safe bounded value.
+- Bounds are normalized before value math, so reversed `min`/`max` props behave
+  like their sorted pair.
+- Values snap to the step grid when `step` is finite and positive.
+- `start <= end`.
+- `min_steps_between` is enforced when the requested gap is representable within
+  the normalized bounds.
+- Whole-component `disabled` and `readonly` block value-changing events.
+- Per-thumb disabled blocks value-changing events for that thumb only.
+- `allow_thumb_swap` can change the active thumb only during pointer drag.
 
 ### 1.6 Drag-Past Behavior
 
@@ -262,498 +265,131 @@ When the user drags a thumb past the other during a pointer interaction:
 - **Clamp (default)**: The dragged thumb is clamped so it cannot exceed the other thumb's position (minus `min_steps_between`). The user must release and grab the other thumb.
 - **Swap (opt-in)**: When `allow_thumb_swap: true`, dragging past causes the active thumb identity to swap. The previously-dragged thumb stays at the crossover point and the other thumb becomes the drag target.
 
-In both modes, the machine fires `on_change` with the corrected `[start, end]` values, maintaining `start <= end`.
+In both modes, the machine fires `on_value_change` with the corrected `[start, end]`
+values when the effective range changes, maintaining `start <= end`. The
+`on_value_change_end` callback fires for committed keyboard/programmatic changes
+and at pointer-up only when the drag changed the effective value.
 
-### 1.7 Full Machine Implementation
+### 1.7 Machine Contract
 
 ```rust
 /// Machine for the RangeSlider component.
+#[derive(Debug)]
 pub struct Machine;
 
-impl ars_core::Machine for Machine {
-    type State = State;
-    type Event = Event;
-    type Context = Context;
-    type Props = Props;
-    type Api<'a> = Api<'a>;
-    type Messages = Messages;
-
-    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let locale = env.locale.clone();
-        let messages = messages.clone();
-        let state = State::Idle;
-        let ctx = Context {
-            value: match props.value {
-                Some(v) => Bindable::controlled(v),
-                None => Bindable::uncontrolled(props.default_value),
-            },
-            min: props.min, max: props.max, step: props.step,
-            large_step: props.large_step,
-            min_steps_between: props.min_steps_between,
-            disabled: props.disabled, readonly: props.readonly, invalid: props.invalid,
-            orientation: props.orientation, dir: props.dir,
-            focused_thumb: None, focus_visible: false, dragging_thumb: None, thumb_alignment: props.thumb_alignment,
-            name: props.name.clone(),
-            start_disabled: props.start_disabled,
-            end_disabled: props.end_disabled,
-            has_description: false,
-            locale,
-            messages,
-            ids: ComponentIds::from_id(&props.id),
-        };
-        (state, ctx)
-    }
-
-    fn transition(
-        state: &Self::State,
-        event: &Self::Event,
-        ctx: &Self::Context,
-        _props: &Self::Props,
-    ) -> Option<TransitionPlan<Self>> {
-        if is_disabled(ctx) || is_readonly(ctx) {
-            match event {
-                Event::PointerDown { .. } | Event::PointerMove { .. }
-                | Event::Increment { .. } | Event::Decrement { .. }
-                | Event::IncrementLarge { .. } | Event::DecrementLarge { .. }
-                | Event::SetToMin { .. } | Event::SetToMax { .. }
-                | Event::SetValues(_) => return None,
-                _ => {}
-            }
-        }
-
-        match event {
-            Event::Focus { thumb, is_keyboard } => {
-                let thumb = *thumb;
-                let is_kb = *is_keyboard;
-                Some(TransitionPlan::to(State::Focused { thumb }).apply(move |ctx| {
-                    ctx.focused_thumb = Some(thumb);
-                    ctx.focus_visible = is_kb;
-                }))
-            }
-            Event::Blur { .. } => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    ctx.focused_thumb = None;
-                    ctx.focus_visible = false;
-                    ctx.dragging_thumb = None;
-                }))
-            }
-            Event::PointerDown { thumb, value } => {
-                if is_thumb_disabled(ctx, *thumb) { return None; }
-                let thumb = *thumb;
-                let value = *value;
-                Some(TransitionPlan::to(State::Dragging { thumb }).apply(move |ctx| {
-                    ctx.dragging_thumb = Some(thumb);
-                    set_thumb_value(ctx, thumb, value);
-                }))
-            }
-            Event::PointerMove { value } => {
-                let thumb = match ctx.dragging_thumb {
-                    Some(t) => t,
-                    None => return None,
-                };
-                let value = *value;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    set_thumb_value(ctx, thumb, value);
-                }))
-            }
-            Event::PointerUp => {
-                if ctx.dragging_thumb.is_none() { return None; }
-                let focused = ctx.focused_thumb;
-                let final_value = *ctx.value.get();
-                Some(TransitionPlan::to(match focused {
-                        Some(t) => State::Focused { thumb: t },
-                        None => State::Idle,
-                    }).apply(|ctx| {
-                        ctx.dragging_thumb = None;
-                    }).with_effect(PendingEffect::new("value-change-end", move |_ctx, props, _send| {
-                        if let Some(ref cb) = props.on_value_change_end {
-                            cb.call(final_value);
-                        }
-                        no_cleanup()
-                    }))
-                )
-            }
-            Event::Increment { thumb } => {
-                if is_thumb_disabled(ctx, *thumb) { return None; }
-                let thumb = *thumb;
-                let current = match thumb {
-                    ThumbIndex::Start => ctx.value.get()[0],
-                    ThumbIndex::End => ctx.value.get()[1],
-                };
-                let next = current + ctx.step;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    set_thumb_value(ctx, thumb, next);
-                }))
-            }
-            Event::Decrement { thumb } => {
-                if is_thumb_disabled(ctx, *thumb) { return None; }
-                let thumb = *thumb;
-                let current = match thumb {
-                    ThumbIndex::Start => ctx.value.get()[0],
-                    ThumbIndex::End => ctx.value.get()[1],
-                };
-                let prev = current - ctx.step;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    set_thumb_value(ctx, thumb, prev);
-                }))
-            }
-            Event::IncrementLarge { thumb } => {
-                if is_thumb_disabled(ctx, *thumb) { return None; }
-                let thumb = *thumb;
-                let step = ctx.large_step.unwrap_or(ctx.step * 10.0);
-                let current = match thumb {
-                    ThumbIndex::Start => ctx.value.get()[0],
-                    ThumbIndex::End => ctx.value.get()[1],
-                };
-                let next = current + step;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    set_thumb_value(ctx, thumb, next);
-                }))
-            }
-            Event::DecrementLarge { thumb } => {
-                if is_thumb_disabled(ctx, *thumb) { return None; }
-                let thumb = *thumb;
-                let step = ctx.large_step.unwrap_or(ctx.step * 10.0);
-                let current = match thumb {
-                    ThumbIndex::Start => ctx.value.get()[0],
-                    ThumbIndex::End => ctx.value.get()[1],
-                };
-                let prev = current - step;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    set_thumb_value(ctx, thumb, prev);
-                }))
-            }
-            Event::SetToMin { thumb } => {
-                if is_thumb_disabled(ctx, *thumb) { return None; }
-                let thumb = *thumb;
-                let min = ctx.min;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    set_thumb_value(ctx, thumb, min);
-                }))
-            }
-            Event::SetToMax { thumb } => {
-                if is_thumb_disabled(ctx, *thumb) { return None; }
-                let thumb = *thumb;
-                let max = ctx.max;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    set_thumb_value(ctx, thumb, max);
-                }))
-            }
-            Event::SetValues([start, end]) => {
-                let s = start.min(*end);
-                let e = start.max(*end);
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.value.set([s, e]);
-                }))
-            }
-        }
-    }
-
-    fn connect<'a>(
-        state: &'a Self::State,
-        ctx: &'a Self::Context,
-        props: &'a Self::Props,
-        send: &'a dyn Fn(Self::Event),
-    ) -> Self::Api<'a> {
-        Api { state, ctx, props, send }
-    }
-}
-
-fn snap_to_step(value: f64, min: f64, max: f64, step: f64) -> f64 {
-    let clamped = value.clamp(min, max);
-    let steps_from_min = ((clamped - min) / step).round();
-    (min + steps_from_min * step).clamp(min, max)
+/// Typed identifier for side effects emitted by the range-slider machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Invoke `Props::on_value_change`.
+    ValueChange,
+    /// Invoke `Props::on_value_change_end`.
+    ValueChangeEnd,
 }
 ```
 
+The machine initializes from `value` when controlled and from `default_value`
+otherwise, normalizing the selected pair before storing it in context.
+
+Transition rules:
+
+- `Focus` is ignored when the whole component is disabled; otherwise it records
+  `focused_thumb` and `focus_visible`.
+- `Blur` clears focus-visible state and clears any active drag bookkeeping.
+- `PointerDown` and `PointerMove` require a finite adapter-supplied value and a
+  value-change-enabled thumb.
+- `PointerMove` is ignored unless a thumb is currently dragging.
+- `PointerUp` returns to the focused thumb state when present, otherwise idle.
+  It emits `Effect::ValueChangeEnd` only when the drag changed the effective
+  value, using `drag_value` so controlled drags commit the pending value rather
+  than the stale controlled prop.
+- Keyboard and programmatic value events snap, clamp, sort, and enforce the
+  minimum representable gap without swapping thumb identity.
+- `SetValues` normalizes both values and emits both change and change-end
+  effects only when the effective value changes.
+- `SyncValue` syncs controlled mode and normalizes finite controlled values;
+  non-finite controlled values fall back to the current bounded value.
+- `SetProps` updates output-affecting context fields, resnaps the current value,
+  and preserves active drag bookkeeping across prop changes.
+- `SetHasDescription` and `SetHasLabel` gate `aria-describedby` and
+  `aria-labelledby`.
+
 ### 1.8 Connect / API
 
-```rust
-#[derive(ComponentPart)]
-#[scope = "range-slider"]
+```rust,no_check
+/// Anatomy parts emitted by the RangeSlider connect API.
+#[derive(Clone, Copy, Debug)]
 pub enum Part {
     Root,
     Label,
     Track,
     Range,
-    Thumb { thumb: ThumbIndex },       // which thumb
+    Thumb { thumb: ThumbIndex },
     Output,
     MarkerGroup,
-    Marker { value: f64 },             // mark value
-    HiddenInput { thumb: ThumbIndex }, // which thumb
+    Marker { value: f64 },
+    HiddenInput { thumb: ThumbIndex },
     DraggingIndicator,
     Description,
     ErrorMessage,
 }
 
 /// API for the RangeSlider component.
+#[derive(Clone, Copy, Debug)]
 pub struct Api<'a> {
-    state: &'a State,
-    ctx: &'a Context,
-    props: &'a Props,
-    send: &'a dyn Fn(Event),
+    pub state: &'a State,
+    pub ctx: &'a Context,
+    pub props: &'a Props,
+    pub send: &'a dyn Fn(Event),
 }
 
-impl<'a> Api<'a> {
-    fn percent(&self, value: f64) -> f64 {
-        ((value - self.ctx.min) / (self.ctx.max - self.ctx.min) * 100.0).clamp(0.0, 100.0)
-    }
+impl Api<'_> {
+    pub fn root_attrs(&self) -> AttrMap;
+    pub fn label_attrs(&self) -> AttrMap;
+    pub fn track_attrs(&self) -> AttrMap;
+    pub fn range_attrs(&self) -> AttrMap;
+    pub fn thumb_attrs(&self, thumb: ThumbIndex) -> AttrMap;
+    pub fn output_attrs(&self) -> AttrMap;
+    pub fn marker_group_attrs(&self) -> AttrMap;
+    pub fn marker_attrs(&self, value: f64) -> AttrMap;
+    pub fn hidden_input_attrs(&self, thumb: ThumbIndex) -> AttrMap;
+    pub fn description_attrs(&self) -> AttrMap;
+    pub fn error_message_attrs(&self) -> AttrMap;
+    pub fn dragging_indicator_attrs(&self) -> AttrMap;
 
-    /// Attributes for the root container.
-    pub fn root_attrs(&self) -> AttrMap {
-        let is_horizontal = self.ctx.orientation == Orientation::Horizontal;
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Data("ars-orientation"), if is_horizontal { "horizontal" } else { "vertical" });
-        if self.ctx.disabled { attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
-        if self.ctx.dragging_thumb.is_some() { attrs.set_bool(HtmlAttr::Data("ars-dragging"), true); }
-        attrs
-    }
-
-    /// Attributes for the label element.
-    pub fn label_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Label.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("label"));
-        attrs
-    }
-
-    /// Attributes for the track element.
-    pub fn track_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Track.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs
-    }
-
-    /// Attributes for the range (filled portion between thumbs).
-    pub fn range_attrs(&self) -> AttrMap {
-        let [start, end] = *self.ctx.value.get();
-        let start_pct = self.percent(start);
-        let end_pct = self.percent(end);
-        let is_horizontal = self.ctx.orientation == Orientation::Horizontal;
-
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Range.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set_style(
-            if is_horizontal { CssProperty::Left } else { CssProperty::Bottom },
-            format!("{}%", start_pct),
-        );
-        attrs.set_style(
-            if is_horizontal { CssProperty::Width } else { CssProperty::Height },
-            format!("{}%", end_pct - start_pct),
-        );
-        attrs
-    }
-
-    /// Attributes for a specific thumb.
-    pub fn thumb_attrs(&self, thumb: ThumbIndex) -> AttrMap {
-        let [start, end] = *self.ctx.value.get();
-        let (value, other) = match thumb {
-            ThumbIndex::Start => (start, end),
-            ThumbIndex::End => (end, start),
-        };
-        let pct = self.percent(value);
-        let is_horizontal = self.ctx.orientation == Orientation::Horizontal;
-        let min_gap = self.ctx.min_steps_between as f64 * self.ctx.step;
-
-        let value_text = self.props.format_value.as_ref()
-            .map(|f| f((value, other)))
-            .unwrap_or_else(|| format!("{}", value));
-
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Thumb { thumb }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Role, "slider");
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), value.to_string());
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), value_text);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Orientation),
-            if is_horizontal { "horizontal" } else { "vertical" });
-        match thumb {
-            ThumbIndex::Start => {
-                attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), self.ctx.min.to_string());
-                attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), (end - min_gap).to_string());
-                attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.start_label)(&self.ctx.locale));
-            }
-            ThumbIndex::End => {
-                attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), (start + min_gap).to_string());
-                attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), self.ctx.max.to_string());
-                attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.end_label)(&self.ctx.locale));
-            }
-        }
-        let is_thumb_disabled = is_thumb_disabled(self.ctx, thumb);
-        if is_thumb_disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); }
-        let is_focused = self.ctx.focused_thumb == Some(thumb);
-        attrs.set(HtmlAttr::TabIndex, if is_focused && !is_thumb_disabled { "0" } else { "-1" });
-        if self.ctx.focus_visible && is_focused {
-            attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
-        }
-        attrs.set(HtmlAttr::Data("ars-index"), match thumb {
-            ThumbIndex::Start => "0",
-            ThumbIndex::End => "1",
-        });
-        attrs.set_style(
-            if is_horizontal { CssProperty::Left } else { CssProperty::Bottom },
-            format!("{}%", pct),
-        );
-        attrs.set(HtmlAttr::Class, "ars-touch-none");
-        attrs
-    }
-
-    /// Attributes for the output display.
-    pub fn output_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Output.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Live), "off");
-        attrs
-    }
-
-    /// Attributes for the marker group.
-    pub fn marker_group_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::MarkerGroup.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Role, "presentation");
-        attrs
-    }
-
-    /// Attributes for a single marker.
-    pub fn marker_attrs(&self, value: f64) -> AttrMap {
-        let [start, end] = *self.ctx.value.get();
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Marker { value }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        if value >= start && value <= end {
-            attrs.set_bool(HtmlAttr::Data("ars-in-range"), true);
-        }
-        attrs
-    }
-
-    /// Attributes for a hidden input (form submission).
-    pub fn hidden_input_attrs(&self, thumb: ThumbIndex) -> AttrMap {
-        let value = match thumb {
-            ThumbIndex::Start => self.ctx.value.get()[0],
-            ThumbIndex::End => self.ctx.value.get()[1],
-        };
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::HiddenInput { thumb }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Type, "hidden");
-        if let Some(ref name) = self.ctx.name {
-            let suffix = match thumb { ThumbIndex::Start => "[0]", ThumbIndex::End => "[1]" };
-            attrs.set(HtmlAttr::Name, format!("{name}{suffix}"));
-        }
-        if let Some(ref form) = self.props.form {
-            attrs.set(HtmlAttr::Form, form);
-        }
-        attrs.set(HtmlAttr::Value, value.to_string());
-        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
-        attrs
-    }
-
-    /// Attributes for the description/help text.
-    pub fn description_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Description.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("description"));
-        attrs
-    }
-
-    /// Attributes for the error message element.
-    pub fn error_message_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ErrorMessage.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("error-message"));
-        attrs.set(HtmlAttr::Aria(AriaAttr::Live), "polite");
-        attrs
-    }
-
-    /// Attributes for the dragging indicator element.
-    /// A purely decorative visual element shown only during thumb drag operations.
-    pub fn dragging_indicator_attrs(&self) -> AttrMap {
-        let is_dragging = self.ctx.dragging_thumb.is_some();
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::DraggingIndicator.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Data("ars-state"), if is_dragging { "dragging" } else { "idle" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
-        if !is_dragging {
-            attrs.set_bool(HtmlAttr::Hidden, true);
-        }
-        attrs
-    }
-
-    pub fn on_thumb_focus(&self, thumb: ThumbIndex, is_keyboard: bool) {
-        (self.send)(Event::Focus { thumb, is_keyboard });
-    }
-    pub fn on_thumb_blur(&self, thumb: ThumbIndex) {
-        (self.send)(Event::Blur { thumb });
-    }
-    pub fn on_thumb_keydown(&self, thumb: ThumbIndex, data: &KeyboardEventData) {
-        let is_rtl = self.ctx.dir == Direction::Rtl;
-        let is_horizontal = self.ctx.orientation == Orientation::Horizontal;
-        match data.key {
-            KeyboardKey::ArrowRight => {
-                if is_horizontal && is_rtl { (self.send)(Event::Decrement { thumb }) }
-                else { (self.send)(Event::Increment { thumb }) }
-            }
-            KeyboardKey::ArrowLeft => {
-                if is_horizontal && is_rtl { (self.send)(Event::Increment { thumb }) }
-                else { (self.send)(Event::Decrement { thumb }) }
-            }
-            KeyboardKey::ArrowUp => (self.send)(Event::Increment { thumb }),
-            KeyboardKey::ArrowDown => (self.send)(Event::Decrement { thumb }),
-            KeyboardKey::PageUp => (self.send)(Event::IncrementLarge { thumb }),
-            KeyboardKey::PageDown => (self.send)(Event::DecrementLarge { thumb }),
-            KeyboardKey::Home => (self.send)(Event::SetToMin { thumb }),
-            KeyboardKey::End => (self.send)(Event::SetToMax { thumb }),
-            _ => {}
-        }
-    }
-    pub fn on_track_pointerdown(&self, thumb: ThumbIndex, value: f64) {
-        (self.send)(Event::PointerDown { thumb, value });
-    }
+    pub fn on_thumb_focus(&self, thumb: ThumbIndex, is_keyboard: bool);
+    pub fn on_thumb_blur(&self, thumb: ThumbIndex);
+    pub fn on_thumb_keydown(&self, thumb: ThumbIndex, key: KeyboardKey, shift: bool);
+    pub fn on_track_pointerdown(&self, thumb: ThumbIndex, value: f64);
+    pub fn on_track_pointermove(&self, value: f64);
+    pub fn on_pointerup(&self);
 }
 
 impl ConnectApi for Api<'_> {
     type Part = Part;
 
-    fn part_attrs(&self, part: Part) -> AttrMap {
-        match part {
-            Part::Root => self.root_attrs(),
-            Part::Label => self.label_attrs(),
-            Part::Track => self.track_attrs(),
-            Part::Range => self.range_attrs(),
-            Part::Thumb { thumb } => self.thumb_attrs(thumb),
-            Part::Output => self.output_attrs(),
-            Part::MarkerGroup => self.marker_group_attrs(),
-            Part::Marker { value } => self.marker_attrs(value),
-            Part::HiddenInput { thumb } => self.hidden_input_attrs(thumb),
-            Part::DraggingIndicator => self.dragging_indicator_attrs(),
-            Part::Description => self.description_attrs(),
-            Part::ErrorMessage => self.error_message_attrs(),
-        }
-    }
+    fn part_attrs(&self, part: Part) -> AttrMap;
 }
 ```
+
+`Part` is implemented manually rather than with `derive(ComponentPart)` because
+`Marker { value: f64 }` must compare and hash by `to_bits()` so distinct marker
+values and NaN payloads remain stable in attribute dispatch.
+
+The range and thumb styles mirror in horizontal RTL. Vertical orientation always
+uses bottom-to-top geometry and is not affected by `dir`.
+
+```rust,no_check
+pub fn value_from_pointer(
+    pointer: slider::SliderPointer,
+    track: Rect,
+    ctx: &Context,
+) -> Option<f64>;
+```
+
+`value_from_pointer` maps adapter-supplied pointer and track geometry into a
+snapped logical value. It returns `None` when the relevant pointer coordinate,
+track origin, or track size is non-finite, or when the relevant track size is
+zero or negative.
 
 ## 2. Anatomy
 
@@ -789,7 +425,15 @@ RangeSlider
 | Description       | `<div>`    | Help text; linked via `aria-describedby` (optional)     |
 | ErrorMessage      | `<div>`    | Validation error (optional)                             |
 
-Per-thumb disabled state: When `start_disabled` or `end_disabled` is true, the respective thumb sets `aria-disabled="true"` but can still receive focus (for discoverability). Pointer interactions are ignored.
+Disabled state:
+
+- Whole-component `disabled` removes both thumbs from keyboard interaction and
+  blocks all value-changing events.
+- Per-thumb disabled state (`start_disabled` / `end_disabled`) sets
+  `aria-disabled="true"` on that thumb and blocks value-changing pointer and
+  keyboard events for that thumb.
+- Per-thumb disabled thumbs remain focusable when adapter focus reaches them so
+  assistive technology can discover the disabled state.
 
 ## 3. Accessibility
 
@@ -799,8 +443,8 @@ Per-thumb disabled state: When `start_disabled` or `end_disabled` is true, the r
 | ------------------ | ----------------- | ------------------------------------------------------------ |
 | `role`             | Each Thumb        | `slider`                                                     |
 | `aria-valuenow`    | Each Thumb        | Current thumb value                                          |
-| `aria-valuemin`    | Start Thumb       | `min`; End Thumb: `start_value + min_gap`                    |
-| `aria-valuemax`    | Start Thumb       | `end_value - min_gap`; End Thumb: `max`                      |
+| `aria-valuemin`    | Start Thumb       | `min`; End Thumb: `start_value + effective gap`              |
+| `aria-valuemax`    | Start Thumb       | `end_value - effective gap`; End Thumb: `max`                |
 | `aria-valuetext`   | Each Thumb        | Formatted value (via `format_value`)                         |
 | `aria-label`       | Each Thumb        | From `messages.start_label` / `messages.end_label`           |
 | `aria-orientation` | Each Thumb        | `"horizontal"` or `"vertical"`                               |
@@ -827,6 +471,8 @@ Same as Slider, applied to the focused thumb. RTL arrow reversal applies for hor
 - Roving tabindex: only the focused thumb has `tabindex="0"`.
 - Tab moves focus between thumbs, then out of the slider.
 - `touch-action: none` on each thumb prevents scroll interference.
+- The agnostic core stores focus intent and active thumb identity only; adapters
+  resolve live element handles and perform any framework-specific focus calls.
 
 ### 3.4 Thumb Focus Announcement
 
@@ -845,6 +491,9 @@ Each thumb has a distinct `aria-label` identifying its role. When `aria-valuetex
 - **Validation states**: `aria-invalid` can be set on the Root if needed by wrapping in a Field.
 - **Reset behavior**: On form reset, the adapter restores values to `default_value`.
 - **Disabled propagation**: When inside a `Field` or `Fieldset`, the adapter merges `disabled` from `FieldCtx` per `07-forms.md` §12.6.
+- **Geometry boundary**: Core pointer helpers accept adapter-supplied pointer and
+  track geometry. The core never reads DOM layout, resolves DOM IDs to elements,
+  or performs direct focus.
 
 ## 6. Variant: N-Thumb
 
@@ -938,6 +587,7 @@ Each thumb is an independent `role="slider"` with its own `aria-valuenow`, `aria
 | Thumb swap         | `allow_thumb_swap: bool`        | `thumbCollisionBehavior` | --                    | Ark parity (swap mode)      |
 | Per-thumb disabled | `start_disabled`/`end_disabled` | --                       | --                    | ars-ui enhancement          |
 | Value format       | `format_value`                  | `getAriaValueText`       | `formatOptions`       | Full parity                 |
+| On value change    | `on_value_change`               | `onValueChange`          | `onChange`            | Full parity                 |
 | On change end      | `on_value_change_end`           | `onValueChangeEnd`       | `onChangeEnd`         | Full parity                 |
 
 **Gaps:** None.
@@ -961,10 +611,10 @@ Each thumb is an independent `role="slider"` with its own `aria-valuenow`, `aria
 
 ### 7.3 Events
 
-| Callback     | ars-ui                                              | Ark UI             | React Aria    | Notes       |
-| ------------ | --------------------------------------------------- | ------------------ | ------------- | ----------- |
-| Value change | `Increment`/`Decrement`/`PointerDown`/`PointerMove` | `onValueChange`    | `onChange`    | Full parity |
-| Change end   | `on_value_change_end`                               | `onValueChangeEnd` | `onChangeEnd` | Full parity |
+| Callback     | ars-ui                | Ark UI             | React Aria    | Notes       |
+| ------------ | --------------------- | ------------------ | ------------- | ----------- |
+| Value change | `on_value_change`     | `onValueChange`    | `onChange`    | Full parity |
+| Change end   | `on_value_change_end` | `onValueChangeEnd` | `onChangeEnd` | Full parity |
 
 **Gaps:** None.
 

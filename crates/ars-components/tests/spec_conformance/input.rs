@@ -5,7 +5,7 @@
 
 use ars_components::input::{
     checkbox, checkbox_group, editable, number_input, password_input, pin_input, radio_group,
-    search_input, slider, switch, text_field, textarea,
+    range_slider, search_input, slider, switch, text_field, textarea,
 };
 
 use super::helper::assert_anatomy;
@@ -211,6 +211,37 @@ fn slider_anatomy_matches_spec() {
             (slider::Part::DraggingIndicator, "dragging-indicator"),
             (slider::Part::Description, "description"),
             (slider::Part::ErrorMessage, "error-message"),
+        ],
+    );
+}
+
+#[test]
+fn range_slider_anatomy_matches_spec() {
+    assert_anatomy(
+        "range-slider",
+        &[
+            (range_slider::Part::Root, "root"),
+            (range_slider::Part::Label, "label"),
+            (range_slider::Part::Track, "track"),
+            (range_slider::Part::Range, "range"),
+            (
+                range_slider::Part::Thumb {
+                    thumb: range_slider::ThumbIndex::Start,
+                },
+                "thumb",
+            ),
+            (range_slider::Part::Output, "output"),
+            (range_slider::Part::MarkerGroup, "marker-group"),
+            (range_slider::Part::Marker { value: 0.0 }, "marker"),
+            (
+                range_slider::Part::HiddenInput {
+                    thumb: range_slider::ThumbIndex::Start,
+                },
+                "hidden-input",
+            ),
+            (range_slider::Part::DraggingIndicator, "dragging-indicator"),
+            (range_slider::Part::Description, "description"),
+            (range_slider::Part::ErrorMessage, "error-message"),
         ],
     );
 }

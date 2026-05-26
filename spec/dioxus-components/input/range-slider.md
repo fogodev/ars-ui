@@ -24,8 +24,10 @@ pub struct RangeSliderProps {
     pub max: f64,
     pub step: f64,
     #[props(optional)]
-    pub min_gap: Option<f64>,
+    pub large_step: Option<f64>,
+    pub min_steps_between: u32,
     pub orientation: Orientation,
+    pub dir: Direction,
     #[props(default = false)]
     pub start_disabled: bool,
     #[props(default = false)]
@@ -33,11 +35,19 @@ pub struct RangeSliderProps {
     #[props(default = false)]
     pub disabled: bool,
     #[props(default = false)]
+    pub readonly: bool,
+    #[props(default = false)]
     pub invalid: bool,
     #[props(optional)]
     pub name: Option<String>,
     #[props(optional)]
     pub form: Option<String>,
+    #[props(default = false)]
+    pub allow_thumb_swap: bool,
+    #[props(optional)]
+    pub on_value_change: Option<Callback<[f64; 2]>>,
+    #[props(optional)]
+    pub on_value_change_end: Option<Callback<[f64; 2]>>,
     pub children: Element,
 }
 
@@ -80,12 +90,12 @@ The adapter also forwards locale, messages, mark definitions, output formatting,
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                                | Mode          | Sync trigger          | Machine event / update path | Visible effect                                             |
-| ------------------------------------------- | ------------- | --------------------- | --------------------------- | ---------------------------------------------------------- |
-| `value`                                     | controlled    | prop change           | `SetValue`                  | updates both thumbs, range fill, output, and hidden inputs |
-| `min` / `max` / `step` / `min_gap`          | controlled    | prop change           | constraint updates          | updates per-thumb bounds and keyboard behavior             |
-| `disabled` / per-thumb disabled / `invalid` | controlled    | prop change           | `SetDisabled`-style updates | guards dragging and selection                              |
-| pointer or keyboard interaction             | machine-owned | thumb or track events | range-slider events         | updates the active thumb and range values                  |
+| Adapter prop                                 | Mode          | Sync trigger          | Machine event / update path | Visible effect                                             |
+| -------------------------------------------- | ------------- | --------------------- | --------------------------- | ---------------------------------------------------------- |
+| `value`                                      | controlled    | prop change           | `SyncValue`                 | updates both thumbs, range fill, output, and hidden inputs |
+| `min` / `max` / `step` / `min_steps_between` | controlled    | prop change           | `SetProps`                  | updates per-thumb bounds and keyboard behavior             |
+| `disabled` / per-thumb disabled / `invalid`  | controlled    | prop change           | `SetProps`                  | guards dragging and selection                              |
+| pointer or keyboard interaction              | machine-owned | thumb or track events | range-slider events         | updates the active thumb and range values                  |
 
 ## 8. Registration and Cleanup Contract
 
@@ -107,7 +117,11 @@ The adapter also forwards locale, messages, mark definitions, output formatting,
 
 ## 11. Callback Payload Contract
 
-- Value-change callbacks emit the committed `[start, end]` value pair after snapping and clamping.
+- `on_value_change` emits the effective `[start, end]` pair for continuous
+  pointer movement and keyboard or programmatic value changes after snapping and
+  clamping.
+- `on_value_change_end` emits for committed keyboard or programmatic changes and
+  at pointer-up only when the active drag changed the effective value.
 - Active-thumb or dragging callbacks, if exposed, must reflect the machine-owned thumb identity.
 - Output text must stay aligned with the same localized value text exposed through each thumb.
 
