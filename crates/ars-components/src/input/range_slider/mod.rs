@@ -497,18 +497,25 @@ impl ars_core::Machine for Machine {
 
             Event::Blur { thumb } => {
                 let thumb = *thumb;
-                Some(
-                    TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
-                        if ctx.focused_thumb == Some(thumb) {
-                            ctx.focused_thumb = None;
-                        }
+                let plan = if ctx.dragging_thumb.is_some() && ctx.dragging_thumb != Some(thumb) {
+                    TransitionPlan::new()
+                } else {
+                    TransitionPlan::to(State::Idle)
+                };
 
-                        ctx.focus_visible = false;
+                Some(plan.apply(move |ctx: &mut Context| {
+                    if ctx.focused_thumb == Some(thumb) {
+                        ctx.focused_thumb = None;
+                    }
+
+                    ctx.focus_visible = false;
+
+                    if ctx.dragging_thumb == Some(thumb) {
                         ctx.dragging_thumb = None;
                         ctx.drag_value = None;
                         ctx.drag_changed = false;
-                    }),
-                )
+                    }
+                }))
             }
 
             Event::PointerDown { thumb, value } => {
@@ -1508,7 +1515,11 @@ fn set_thumb_value(
 
     let snapped = snap_to_step(raw, min, max, ctx.step);
 
-    let [start, end] = bounded_values(ctx);
+    let [start, end] = if track_drag {
+        ctx.drag_value.unwrap_or_else(|| bounded_values(ctx))
+    } else {
+        bounded_values(ctx)
+    };
 
     if track_drag && ctx.allow_thumb_swap {
         match thumb {
@@ -1967,6 +1978,37 @@ mod tests {
     }
 
     #[test]
+    fn unrelated_blur_does_not_cancel_active_drag() {
+        let mut svc = service(props());
+
+        drop(svc.send(Event::Focus {
+            thumb: ThumbIndex::Start,
+            is_keyboard: true,
+        }));
+        drop(svc.send(Event::PointerDown {
+            thumb: ThumbIndex::End,
+            value: 80.0,
+        }));
+        drop(svc.send(Event::Blur {
+            thumb: ThumbIndex::Start,
+        }));
+
+        assert_eq!(svc.context().focused_thumb, None);
+        assert_eq!(svc.context().dragging_thumb, Some(ThumbIndex::End));
+        assert!(svc.context().drag_changed);
+
+        drop(svc.send(Event::PointerMove { value: 90.0 }));
+
+        assert_eq!(*svc.context().value.get(), [25.0, 90.0]);
+        assert_eq!(
+            svc.state(),
+            &State::Dragging {
+                thumb: ThumbIndex::End,
+            }
+        );
+    }
+
+    #[test]
     fn disabled_readonly_and_per_thumb_disabled_suppress_value_changes() {
         for props in [
             Props {
@@ -2176,6 +2218,41 @@ mod tests {
 
         assert_eq!(*end_equal.context().value.get(), [25.0, 25.0]);
         assert_eq!(end_equal.context().dragging_thumb, Some(ThumbIndex::End));
+    }
+
+    #[test]
+    fn controlled_swap_drag_continues_from_pending_drag_value() {
+        let ends = Arc::new(Mutex::new(Vec::new()));
+        let captured_ends = Arc::clone(&ends);
+        let on_value_change_end = callback(move |value: [f64; 2]| {
+            captured_ends.lock().unwrap().push(value);
+        });
+
+        let mut svc = service(Props {
+            allow_thumb_swap: true,
+            value: Some([10.0, 20.0]),
+            on_value_change_end: Some(on_value_change_end),
+            ..props()
+        });
+
+        drop(svc.send(Event::PointerDown {
+            thumb: ThumbIndex::Start,
+            value: 80.0,
+        }));
+
+        assert_eq!(svc.context().dragging_thumb, Some(ThumbIndex::End));
+        assert_eq!(svc.context().drag_value, Some([10.0, 80.0]));
+
+        drop(svc.send(Event::PointerMove { value: 90.0 }));
+
+        assert_eq!(svc.context().dragging_thumb, Some(ThumbIndex::End));
+        assert_eq!(svc.context().drag_value, Some([10.0, 90.0]));
+
+        let mut end = svc.send(Event::PointerUp);
+
+        run_effects(&mut end.pending_effects, svc.context(), svc.props());
+
+        assert_eq!(ends.lock().unwrap().as_slice(), &[[10.0, 90.0]]);
     }
 
     #[test]
