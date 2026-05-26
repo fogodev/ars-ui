@@ -21,16 +21,13 @@ references:
 
 ```rust
 /// States of the `Collapsible`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum State {
     /// The content region is visible.
     Open,
     /// The content region is hidden.
+    #[default]
     Closed,
-}
-
-impl Default for State {
-    fn default() -> Self { State::Closed }
 }
 ```
 
@@ -38,7 +35,7 @@ impl Default for State {
 
 ```rust
 /// Events sent to the `Collapsible`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Event {
     /// Toggle between open and closed states.
     Toggle,
@@ -51,6 +48,10 @@ pub enum Event {
     },
     /// The trigger or content lost focus.
     Blur,
+    /// Synchronize prop-backed context fields.
+    SyncProps,
+    /// Synchronize the controlled open value.
+    SyncControlledOpen(bool),
 }
 ```
 
@@ -126,6 +127,65 @@ impl Default for Props {
         }
     }
 }
+
+impl Props {
+    /// Returns fresh collapsible props with documented defaults.
+    pub fn new() -> Self { Self::default() }
+
+    /// Sets the component instance ID.
+    pub fn id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    /// Sets `open`, making the collapsible controlled at mount.
+    pub fn open(mut self, open: bool) -> Self {
+        self.open = Some(open);
+        self
+    }
+
+    /// Clears `open`, making the collapsible uncontrolled.
+    pub fn uncontrolled(mut self) -> Self {
+        self.open = None;
+        self
+    }
+
+    /// Sets `default_open`.
+    pub fn default_open(mut self, default_open: bool) -> Self {
+        self.default_open = default_open;
+        self
+    }
+
+    /// Sets `disabled`.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    /// Sets `lazy_mount`.
+    pub fn lazy_mount(mut self, lazy_mount: bool) -> Self {
+        self.lazy_mount = lazy_mount;
+        self
+    }
+
+    /// Sets `unmount_on_exit`.
+    pub fn unmount_on_exit(mut self, unmount_on_exit: bool) -> Self {
+        self.unmount_on_exit = unmount_on_exit;
+        self
+    }
+
+    /// Sets `collapsed_height`.
+    pub fn collapsed_height(mut self, collapsed_height: impl Into<String>) -> Self {
+        self.collapsed_height = Some(collapsed_height.into());
+        self
+    }
+
+    /// Sets `collapsed_width`.
+    pub fn collapsed_width(mut self, collapsed_width: impl Into<String>) -> Self {
+        self.collapsed_width = Some(collapsed_width.into());
+        self
+    }
+}
 ```
 
 ### 1.5 Full Machine Implementation
@@ -139,6 +199,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = NoEffect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -172,28 +233,9 @@ impl ars_core::Machine for Machine {
         _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
-            Event::Toggle if !ctx.disabled => {
-                let next = match state {
-                    State::Open   => State::Closed,
-                    State::Closed => State::Open,
-                };
-                let val = next == State::Open;
-                Some(TransitionPlan::to(next).apply(move |ctx| {
-                    ctx.open.set(val);
-                }))
-            }
+            Event::Toggle if !ctx.disabled => open_transition(ctx, !ctx.open.get()),
 
-            Event::SetOpen(value) if !ctx.disabled => {
-                let next = if *value { State::Open } else { State::Closed };
-                if &next != state {
-                    let v = *value;
-                    Some(TransitionPlan::to(next).apply(move |ctx| {
-                        ctx.open.set(v);
-                    }))
-                } else {
-                    None
-                }
-            }
+            Event::SetOpen(value) if !ctx.disabled => open_transition(ctx, *value),
 
             Event::Focus { is_keyboard } => {
                 let kb = *is_keyboard;
@@ -210,6 +252,16 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            Event::SyncProps => Some(sync_props_plan(ctx, props)),
+
+            Event::SyncControlledOpen(value) => {
+                let value = *value;
+                let next = if value { State::Open } else { State::Closed };
+                Some(TransitionPlan::to(next).apply(move |ctx| {
+                    ctx.open.sync_controlled(Some(value));
+                }))
+            }
+
             _ => None,
         }
     }
@@ -222,8 +274,30 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        let mut events = Vec::new();
+
+        if old.disabled != new.disabled
+            || old.collapsed_height != new.collapsed_height
+            || old.collapsed_width != new.collapsed_width
+            || (old.open.is_some() && new.open.is_none())
+        {
+            events.push(Event::SyncProps);
+        }
+
+        if old.open != new.open {
+            if let Some(open) = new.open {
+                events.push(Event::SyncControlledOpen(open));
+            }
+        }
+
+        events
+    }
 }
 ```
+
+Controlled-mode `Toggle` and `SetOpen` update the pending internal value via `Bindable::set`, but visible state continues to follow the controlled `open` value until the parent rerenders and `SyncControlledOpen` applies the new controlled prop. When `open` changes from `Some(_)` to `None`, `SyncProps` returns the bindable to uncontrolled mode and the visible state follows the pending internal value.
 
 ### 1.6 Connect / API
 
@@ -271,6 +345,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, trigger_id);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if self.is_open() { "true" } else { "false" });
         attrs.set(HtmlAttr::Aria(AriaAttr::Controls), content_id);
         // State-dependent accessible label: "Show content" when collapsed, "Hide content" when expanded.
@@ -282,6 +357,7 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
+            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
         }
         attrs.set(HtmlAttr::Data("ars-state"), if self.is_open() { "open" } else { "closed" });
         if self.ctx.focused {
@@ -337,16 +413,22 @@ impl<'a> Api<'a> {
         attrs
     }
 
-    pub fn on_trigger_click(&self) { (self.send)(Event::Toggle); }
+    pub fn on_trigger_click(&self) {
+        if !self.ctx.disabled {
+            (self.send)(Event::Toggle);
+        }
+    }
 
     pub fn on_trigger_keydown(&self, data: &KeyboardEventData) {
-        if data.key == KeyboardKey::Enter || data.key == KeyboardKey::Space {
+        if !self.ctx.disabled && (data.key == KeyboardKey::Enter || data.key == KeyboardKey::Space) {
             (self.send)(Event::Toggle);
         }
     }
 
     pub fn on_trigger_focus(&self, is_keyboard: bool) {
-        (self.send)(Event::Focus { is_keyboard });
+        if !self.ctx.disabled {
+            (self.send)(Event::Focus { is_keyboard });
+        }
     }
 
     pub fn on_trigger_blur(&self) { (self.send)(Event::Blur); }
@@ -420,7 +502,7 @@ When `disabled` is `true`, the trigger receives the `disabled` attribute and is 
 ### 4.1 Messages
 
 ```rust
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Accessible label for the trigger when collapsed. Default: `"Show content"`.
     pub expand_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,

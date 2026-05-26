@@ -74,11 +74,11 @@ pub mod collapsible {
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                     | Mode       | Sync trigger                      | Machine event / update path                                    | Visible effect                                              | Notes                                                        |
-| -------------------------------- | ---------- | --------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------ |
-| `open`                           | controlled | signal change after mount         | `SetOpen(bool)`                                                | updates state attrs, trigger labels, and content visibility | do not support controlled/uncontrolled switching after mount |
-| `disabled`                       | controlled | signal change after mount         | adapter rebuilds core props or dispatches equivalent sync path | blocks toggle behavior and focusable interaction            | visibility stays derived from current state                  |
-| `lazy_mount` / `unmount_on_exit` | controlled | render-time and state transitions | adapter-owned presence policy                                  | decides whether content remains mounted while closed        | not a machine state by itself                                |
+| Adapter prop                     | Mode       | Sync trigger                      | Machine event / update path                                               | Visible effect                                              | Notes                                                                 |
+| -------------------------------- | ---------- | --------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------- |
+| `open`                           | controlled | signal change after mount         | rebuild core props so `on_props_changed` emits `SyncControlledOpen(bool)` | updates state attrs, trigger labels, and content visibility | controlled/uncontrolled switching follows the core prop-sync contract |
+| `disabled`                       | controlled | signal change after mount         | rebuild core props so `on_props_changed` emits `SyncProps`                | blocks toggle behavior and focusable interaction            | visibility stays derived from current state                           |
+| `lazy_mount` / `unmount_on_exit` | controlled | render-time and state transitions | adapter-owned presence policy                                             | decides whether content remains mounted while closed        | not a machine state by itself                                         |
 
 | UI event                  | Preconditions                    | Machine event / callback path | Ordering notes                                                 | Notes                                  |
 | ------------------------- | -------------------------------- | ----------------------------- | -------------------------------------------------------------- | -------------------------------------- |
