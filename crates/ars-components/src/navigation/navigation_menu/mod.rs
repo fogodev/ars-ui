@@ -493,7 +493,7 @@ impl ars_core::Machine for Machine {
         props: &Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
-            (_, Event::Open(item)) => open_item_plan(state, item.clone()),
+            (_, Event::Open(item)) => open_item_plan(state, ctx, item.clone()),
 
             (State::Open { .. }, Event::Close(now_ms) | Event::SelectLink(now_ms)) => {
                 Some(close_plan(*now_ms))
@@ -501,11 +501,18 @@ impl ars_core::Machine for Machine {
 
             (_, Event::PointerEnter(item, now_ms)) => {
                 if matches!(state, State::Open { item: open } if open == item) {
-                    return None;
+                    return Some(
+                        TransitionPlan::context_only(|ctx: &mut Context| {
+                            ctx.pending_open_item = None;
+                            ctx.pointer_in_content = false;
+                        })
+                        .cancel_effect(Effect::CloseDelay),
+                    );
                 }
 
                 if matches!(state, State::Open { .. }) || in_skip_delay_window(ctx, *now_ms) {
-                    open_item_plan(state, item.clone())
+                    open_item_plan(state, ctx, item.clone())
+                        .map(|plan| plan.cancel_effect(Effect::CloseDelay))
                 } else {
                     let item = item.clone();
                     Some(
@@ -538,13 +545,19 @@ impl ars_core::Machine for Machine {
                 .cancel_effect(Effect::CloseDelay),
             ),
 
-            (State::Idle, Event::OpenTimerFired(item)) => Some(
-                open_to_plan(None, item.clone())
-                    .apply(|ctx: &mut Context| {
-                        ctx.pending_open_item = None;
-                    })
-                    .cancel_effect(Effect::OpenDelay),
-            ),
+            (State::Idle, Event::OpenTimerFired(item)) => {
+                if ctx.pending_open_item.as_ref() != Some(item) {
+                    return None;
+                }
+
+                Some(
+                    open_to_plan(None, item.clone())
+                        .apply(|ctx: &mut Context| {
+                            ctx.pending_open_item = None;
+                        })
+                        .cancel_effect(Effect::OpenDelay),
+                )
+            }
 
             (State::Open { .. }, Event::CloseTimerFired(now_ms)) => {
                 if ctx.pointer_in_content {
@@ -608,13 +621,32 @@ impl ars_core::Machine for Machine {
 
             (_, Event::SetItems(items)) => {
                 let items = dedupe_keys(items);
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                let open_removed = state_open_item(state).is_some_and(|item| {
+                    !items.is_empty() && !items.iter().any(|candidate| candidate == item)
+                }) || ctx.value.get().as_ref().is_some_and(|item| {
+                    !items.is_empty() && !items.iter().any(|candidate| candidate == item)
+                });
+
+                let plan = if open_removed {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+
+                Some(plan.apply(move |ctx: &mut Context| {
                     ctx.items = items;
                     if let Some(focused) = &ctx.focused_trigger
                         && !ctx.items.iter().any(|item| item == focused)
                     {
                         ctx.focused_trigger = None;
                         ctx.focus_visible = false;
+                    }
+
+                    if open_removed {
+                        ctx.previous_item = ctx.value.get().clone();
+                        ctx.value.set(None);
+                        ctx.pending_open_item = None;
+                        ctx.pointer_in_content = false;
                     }
                 }))
             }
@@ -624,11 +656,13 @@ impl ars_core::Machine for Machine {
                 let dir = props.dir;
                 let delay_ms = props.delay_ms;
                 let skip_delay_ms = props.skip_delay_ms;
+                let value = props.value.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.orientation = orientation;
                     ctx.dir = dir;
                     ctx.delay_ms = delay_ms;
                     ctx.skip_delay_ms = skip_delay_ms;
+                    ctx.value.sync_controlled(value);
                 }))
             }
 
@@ -643,6 +677,7 @@ impl ars_core::Machine for Machine {
 
                 Some(
                     TransitionPlan::to(next_state).apply(move |ctx: &mut Context| {
+                        ctx.previous_item = ctx.value.get().clone();
                         ctx.value.sync_controlled(Some(value));
                     }),
                 )
@@ -683,17 +718,23 @@ impl ars_core::Machine for Machine {
 
         let mut events = Vec::new();
 
-        if old.value != new.value
-            && let Some(value) = &new.value
-        {
-            events.push(Event::SyncControlledValue(value.clone()));
-        }
-
-        if old.orientation != new.orientation
+        let needs_sync_props = old.orientation != new.orientation
             || old.dir != new.dir
             || old.delay_ms != new.delay_ms
-            || old.skip_delay_ms != new.skip_delay_ms
-        {
+            || old.skip_delay_ms != new.skip_delay_ms;
+
+        let mut emitted_sync_props = false;
+
+        if old.value != new.value {
+            if let Some(value) = &new.value {
+                events.push(Event::SyncControlledValue(value.clone()));
+            } else {
+                events.push(Event::SyncProps);
+                emitted_sync_props = true;
+            }
+        }
+
+        if needs_sync_props && !emitted_sync_props {
             events.push(Event::SyncProps);
         }
 
@@ -722,11 +763,9 @@ impl Debug for Api<'_> {
 impl<'a> Api<'a> {
     /// Get the key of the currently open item, if any.
     #[must_use]
-    pub const fn open_item(&self) -> Option<&Key> {
-        match self.state {
-            State::Open { item } => Some(item),
-            State::Idle => None,
-        }
+    pub fn open_item(&self) -> Option<&Key> {
+        let item = self.ctx.value.get().as_ref()?;
+        item_is_registered(self.ctx, item).then_some(item)
     }
 
     /// Check whether a specific item's content is currently showing.
@@ -895,7 +934,7 @@ impl<'a> Api<'a> {
             .set(HtmlAttr::Aria(AriaAttr::Hidden), "true")
             .set(
                 HtmlAttr::Data("ars-state"),
-                if matches!(self.state, State::Open { .. }) {
+                if self.open_item().is_some() {
                     "visible"
                 } else {
                     "hidden"
@@ -916,7 +955,7 @@ impl<'a> Api<'a> {
             .set(part_attr, part_val)
             .set(
                 HtmlAttr::Data("ars-state"),
-                if matches!(self.state, State::Open { .. }) {
+                if self.open_item().is_some() {
                     "open"
                 } else {
                     "closed"
@@ -945,7 +984,7 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown on a trigger.
-    pub fn on_trigger_keydown(&self, item_key: &Key, data: &KeyboardEventData) {
+    pub fn on_trigger_keydown(&self, item_key: &Key, data: &KeyboardEventData, now_ms: u64) {
         let (prev_key, next_key) = navigation_keys(self.ctx.orientation, self.ctx.dir);
 
         if data.key == next_key {
@@ -959,7 +998,7 @@ impl<'a> Api<'a> {
         } else if data.key == KeyboardKey::Enter || data.key == KeyboardKey::Space {
             (self.send)(Event::Open(item_key.clone()));
         } else if data.key == KeyboardKey::Escape {
-            (self.send)(Event::EscapeKey(0));
+            (self.send)(Event::EscapeKey(now_ms));
         } else if self.ctx.orientation == Orientation::Horizontal
             && (data.key == KeyboardKey::ArrowDown || data.key == KeyboardKey::ArrowUp)
         {
@@ -978,9 +1017,9 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown inside the content area.
-    pub fn on_content_keydown(&self, data: &KeyboardEventData) {
+    pub fn on_content_keydown(&self, data: &KeyboardEventData, now_ms: u64) {
         if data.key == KeyboardKey::Escape {
-            (self.send)(Event::EscapeKey(0));
+            (self.send)(Event::EscapeKey(now_ms));
         }
     }
 
@@ -1043,14 +1082,26 @@ fn in_skip_delay_window(ctx: &Context, now_ms: u64) -> bool {
     }
 }
 
-fn open_item_plan(state: &State, item: Key) -> Option<TransitionPlan<Machine>> {
-    if matches!(state, State::Open { item: open } if open == &item) {
+const fn state_open_item(state: &State) -> Option<&Key> {
+    match state {
+        State::Open { item } => Some(item),
+        State::Idle => None,
+    }
+}
+
+fn item_is_registered(ctx: &Context, item: &Key) -> bool {
+    ctx.items.is_empty() || ctx.items.iter().any(|candidate| candidate == item)
+}
+
+fn open_item_plan(state: &State, ctx: &Context, item: Key) -> Option<TransitionPlan<Machine>> {
+    if ctx.value.get().as_ref() == Some(&item) && matches!(state, State::Open { .. }) {
         None
     } else {
-        let previous = match state {
-            State::Open { item } => Some(item.clone()),
-            State::Idle => None,
-        };
+        let previous = ctx
+            .value
+            .get()
+            .clone()
+            .or_else(|| state_open_item(state).cloned());
 
         Some(open_to_plan(previous, item))
     }
@@ -1361,11 +1412,31 @@ mod tests {
     fn open_timer_fired_opens_pending_item() {
         let mut service = service(props());
 
+        drop(service.send(Event::PointerEnter(key("docs"), 10)));
         let result = service.send(Event::OpenTimerFired(key("docs")));
 
         assert_eq!(*service.state(), State::Open { item: key("docs") });
         assert_eq!(service.context().value.get(), &Some(key("docs")));
         assert_eq!(effect_names(&result), vec![Effect::ValueChange]);
+    }
+
+    #[test]
+    fn stale_open_timer_fired_is_ignored() {
+        let mut service = service(props());
+
+        drop(service.send(Event::PointerEnter(key("docs"), 10)));
+        let result = service.send(Event::OpenTimerFired(key("blog")));
+
+        assert_eq!(*service.state(), State::Idle);
+        assert_eq!(service.context().pending_open_item, Some(key("docs")));
+        assert!(result.pending_effects.is_empty());
+
+        drop(service.send(Event::PointerLeave));
+
+        let result = service.send(Event::OpenTimerFired(key("docs")));
+
+        assert_eq!(*service.state(), State::Idle);
+        assert!(result.pending_effects.is_empty());
     }
 
     #[test]
@@ -1376,7 +1447,20 @@ mod tests {
 
         assert_eq!(*service.state(), State::Open { item: key("blog") });
         assert_eq!(service.context().previous_item, Some(key("docs")));
+        assert!(result.cancel_effects.contains(&Effect::CloseDelay));
         assert_eq!(effect_names(&result), vec![Effect::ValueChange]);
+    }
+
+    #[test]
+    fn pointer_enter_open_item_cancels_pending_close_delay() {
+        let mut service = service(props().default_value(key("docs")));
+
+        drop(service.send(Event::PointerLeave));
+        let result = service.send(Event::PointerEnter(key("docs"), 50));
+
+        assert_eq!(*service.state(), State::Open { item: key("docs") });
+        assert!(result.cancel_effects.contains(&Effect::CloseDelay));
+        assert!(result.pending_effects.is_empty());
     }
 
     #[test]
@@ -1538,8 +1622,8 @@ mod tests {
 
         let api = service.connect(&send);
 
-        api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowRight));
-        api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft));
+        api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowRight), 0);
+        api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft), 0);
 
         assert_eq!(
             recorder.into_inner(),
@@ -1649,6 +1733,18 @@ mod tests {
     }
 
     #[test]
+    fn set_items_closes_when_open_item_is_removed() {
+        let mut service =
+            service_with_items(props().default_value(key("b")), &[key("a"), key("b")]);
+
+        drop(service.send(Event::SetItems(vec![key("a")])));
+
+        assert_eq!(*service.state(), State::Idle);
+        assert_eq!(service.context().value.get(), &None);
+        assert_eq!(service.context().previous_item, Some(key("b")));
+    }
+
+    #[test]
     fn sync_controlled_value_updates_state_and_bindable_value() {
         let mut service = service(props().value(Some(key("docs"))));
 
@@ -1656,11 +1752,68 @@ mod tests {
 
         assert_eq!(*service.state(), State::Open { item: key("blog") });
         assert_eq!(service.context().value.get(), &Some(key("blog")));
+        assert_eq!(service.context().previous_item, Some(key("docs")));
 
         drop(service.send(Event::SyncControlledValue(None)));
 
         assert_eq!(*service.state(), State::Idle);
         assert_eq!(service.context().value.get(), &None);
+        assert_eq!(service.context().previous_item, Some(key("blog")));
+    }
+
+    #[test]
+    fn controlled_value_drives_public_open_item_and_attrs_until_parent_syncs() {
+        let mut service = service_with_items(
+            props().value(Some(key("docs"))),
+            &[key("docs"), key("blog")],
+        );
+
+        drop(service.send(Event::Open(key("blog"))));
+
+        let api = connect_noop(&service);
+
+        assert_eq!(api.open_item(), Some(&key("docs")));
+        assert!(api.is_item_open(&key("docs")));
+        assert!(!api.is_item_open(&key("blog")));
+        assert_eq!(
+            api.trigger_attrs(&key("docs"), "docs-content")
+                .get(&HtmlAttr::Aria(AriaAttr::Expanded)),
+            Some("true")
+        );
+        assert_eq!(
+            api.trigger_attrs(&key("blog"), "blog-content")
+                .get(&HtmlAttr::Aria(AriaAttr::Expanded)),
+            Some("false")
+        );
+    }
+
+    #[test]
+    fn sync_props_can_switch_controlled_value_back_to_uncontrolled() {
+        let mut service = service(props().value(Some(key("docs"))));
+
+        drop(service.send(Event::Open(key("blog"))));
+        service.set_props(props());
+
+        assert!(!service.context().value.is_controlled());
+        assert_eq!(service.context().value.get(), &Some(key("blog")));
+        assert_eq!(connect_noop(&service).open_item(), Some(&key("blog")));
+    }
+
+    #[test]
+    fn controlled_sync_updates_motion_previous_item() {
+        let mut service = service_with_items(
+            props().value(Some(key("docs"))),
+            &[key("docs"), key("blog")],
+        );
+
+        service.set_props(props().value(Some(key("blog"))));
+
+        assert_eq!(
+            connect_noop(&service)
+                .content_attrs(&key("blog"))
+                .get(&HtmlAttr::Data("ars-motion")),
+            Some("from-end")
+        );
     }
 
     #[test]
@@ -1676,6 +1829,17 @@ mod tests {
                 },
             ),
             vec![Event::SyncControlledValue(Some(key("blog")))]
+        );
+
+        assert_eq!(
+            <Machine as ars_core::Machine>::on_props_changed(
+                &base,
+                &Props {
+                    value: None,
+                    ..base.clone()
+                },
+            ),
+            vec![Event::SyncProps]
         );
 
         for changed in [
@@ -1963,15 +2127,15 @@ mod tests {
         {
             let api = service.connect(&send);
 
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowRight));
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft));
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Home));
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::End));
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Enter));
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Space));
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Escape));
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowDown));
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Backspace));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowRight), 700);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft), 700);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Home), 700);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::End), 700);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Enter), 700);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Space), 700);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Escape), 700);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowDown), 700);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Backspace), 700);
         }
 
         assert_eq!(
@@ -1983,7 +2147,7 @@ mod tests {
                 Event::FocusLast,
                 Event::Open(key("a")),
                 Event::Open(key("a")),
-                Event::EscapeKey(0),
+                Event::EscapeKey(700),
                 Event::Open(key("a")),
             ]
         );
@@ -1999,7 +2163,7 @@ mod tests {
         {
             let api = service.connect(&send);
 
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowDown));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowDown), 0);
         }
 
         assert_eq!(recorder.into_inner(), vec![Event::Open(key("a"))]);
@@ -2015,9 +2179,9 @@ mod tests {
         {
             let api = service.connect(&send);
 
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowDown));
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowUp));
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowDown), 0);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowUp), 0);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft), 0);
         }
 
         assert_eq!(
@@ -2036,14 +2200,14 @@ mod tests {
         {
             let api = service.connect(&send);
 
-            api.on_content_keydown(&keyboard(KeyboardKey::Backspace));
+            api.on_content_keydown(&keyboard(KeyboardKey::Backspace), 900);
 
             assert!(recorder.borrow().is_empty());
 
-            api.on_content_keydown(&keyboard(KeyboardKey::Escape));
+            api.on_content_keydown(&keyboard(KeyboardKey::Escape), 900);
         }
 
-        assert_eq!(recorder.into_inner(), vec![Event::EscapeKey(0)]);
+        assert_eq!(recorder.into_inner(), vec![Event::EscapeKey(900)]);
     }
 
     #[test]
