@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/input/file_trigger/mod.rs
+expression: "snapshot_attrs(&api(Props::new().disabled(true)).trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "file-trigger",
+            ),
+        ),
+        (
+            Aria(
+                Disabled,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

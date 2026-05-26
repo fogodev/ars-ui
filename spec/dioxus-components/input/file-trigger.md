@@ -43,7 +43,7 @@ The adapter forwards the full core prop surface, including capture mode, locale 
 
 - Props parity: full parity with the stateless core contract plus Dioxus callback wiring.
 - Event parity: the core API remains stateless; adapter-owned events are trigger press and input `change`.
-- Core API ownership: `Api::new(props)` remains the source of truth for root, trigger, and input attrs.
+- Core API ownership: `Api::new(core_props, locale, messages)` remains the source of truth for root, trigger, input attrs, and picker intent.
 
 ## 4. Part Mapping
 
@@ -71,12 +71,12 @@ The adapter forwards the full core prop surface, including capture mode, locale 
 | `accept` / `multiple` / `directory` / `capture` | immediate | prop change    | attr re-derivation | changes native picker configuration |
 | `on_select`                                     | callback  | input `change` | adapter callback   | emits selected file snapshot        |
 
-Trigger press or click maps to `input_ref.click()` only when not disabled. Input `change` maps to callback emission and should preserve the browser's selected file ordering.
+Trigger press or click calls `api.open_picker_intent()`; the adapter resolves `Some(OpenPickerIntent)` with its mounted input handle or platform file-picker abstraction only on supported client hosts. Input `change` maps to callback emission and should preserve the browser's selected file ordering.
 
 ## 8. Registration and Cleanup Contract
 
 - No machine or descendant registry exists.
-- The adapter owns a live input ref and any imperative click bridge attached to the trigger.
+- The adapter owns a live input ref and any picker-intent bridge attached to the trigger.
 - No global listeners are required; unmount simply drops refs and callbacks.
 
 ## 9. Ref and Node Contract
@@ -113,11 +113,11 @@ Trigger press or click maps to `input_ref.click()` only when not disabled. Input
 
 - SSR renders the wrapper, slotted trigger structure, and hidden input attrs only.
 - Picker opening and file enumeration are client-only.
-- Hydration must preserve the hidden-input node so the trigger-to-input bridge stays valid.
+- Hydration must preserve the hidden-input node so the picker-intent bridge stays valid.
 
 ## 15. Performance Constraints
 
-- Keep the trigger-to-input bridge instance-local.
+- Keep the picker-intent bridge instance-local.
 - Do not clone file objects until callback emission actually occurs.
 - Avoid re-rendering the slotted trigger solely to mirror transient selection state that belongs to the native input.
 
@@ -130,7 +130,7 @@ Trigger press or click maps to `input_ref.click()` only when not disabled. Input
 ## 17. Recommended Implementation Sequence
 
 1. Build the stateless core API and derive root, trigger, and input attrs.
-2. Establish the hidden-input ref and the trigger-to-input click bridge.
+2. Establish the hidden-input ref and the picker-intent bridge.
 3. Render the trigger slot and hidden input in stable order.
 4. Wire the input `change` handler to `on_select`.
 5. Add failure handling for invalid slot composition and unavailable picker environments.
@@ -162,26 +162,30 @@ Trigger press or click maps to `input_ref.click()` only when not disabled. Input
 
 ## 22. Shared Adapter Helper Notes
 
-| Helper concept         | Required?   | Responsibility                                        | Notes                             |
-| ---------------------- | ----------- | ----------------------------------------------------- | --------------------------------- |
-| trigger bridge helper  | required    | connect trigger activation to hidden-input `.click()` | shared with upload-style wrappers |
-| file extraction helper | recommended | convert `FileList` into stable callback payloads      | keeps selection ordering intact   |
+| Helper concept         | Required?   | Responsibility                                                             | Notes                             |
+| ---------------------- | ----------- | -------------------------------------------------------------------------- | --------------------------------- |
+| trigger bridge helper  | required    | resolve `OpenPickerIntent` with the hidden input handle or platform picker | shared with upload-style wrappers |
+| file extraction helper | recommended | convert `FileList` into stable callback payloads                           | keeps selection ordering intact   |
 
 ## 23. Framework-Specific Behavior
 
-Dioxus should keep the hidden input in a mounted-data or direct DOM ref path that can issue `.click()` on supported hosts, and it should isolate host-specific file-dialog differences behind the adapter rather than leaking them to consumers.
+Dioxus should keep the hidden input in a mounted-data or direct DOM ref path that can resolve `OpenPickerIntent` on supported hosts, and it should isolate host-specific file-dialog differences behind the adapter rather than leaking them to consumers.
 
 ## 24. Canonical Implementation Sketch
 
 ```rust,no_check
-let api = file_trigger::Api::new(&props);
+let api = file_trigger::Api::new(core_props, locale, messages);
 let input_ref = use_signal(|| None::<MountedData>);
 
 rsx! {
     div { ..api.root_attrs(),
         button {
             ..api.trigger_attrs(),
-            onclick: move |_| trigger_picker(input_ref),
+            onclick: move |_| {
+                if api.open_picker_intent().is_some() {
+                    trigger_picker(input_ref);
+                }
+            },
             {children}
         }
         input {
@@ -195,14 +199,14 @@ rsx! {
 
 ## 25. Reference Implementation Skeleton
 
-- Build the stateless API from props only.
-- Create one hidden-input ref and one trigger bridge closure.
+- Build the stateless API from core props, locale, and messages.
+- Create one hidden-input ref and one trigger intent bridge closure.
 - Render the slotted trigger and hidden input together, then translate native `change` into callback payloads.
 
 ## 26. Adapter Invariants
 
 - The hidden input is always the native file-selection owner.
-- Trigger activation never fires `on_select` directly; it only opens the picker.
+- Trigger activation never fires `on_select` directly; it only resolves `OpenPickerIntent`.
 - The trigger slot must accept the required attrs and disabled semantics.
 - SSR never attempts to open the picker.
 
@@ -234,7 +238,7 @@ rsx! {
 
 - [ ] Render `Root`, one slotted `Trigger`, and one hidden `Input`.
 - [ ] Keep the hidden input as the only file-selection owner.
-- [ ] Bridge trigger activation to `input.click()` only on supported client hosts.
+- [ ] Resolve trigger activation through `OpenPickerIntent` only on supported client hosts.
 - [ ] Emit `on_select` only from the native input `change` path.
 - [ ] Preserve documented `accept`, `multiple`, `directory`, and `capture` attrs.
 - [ ] Fail fast on invalid trigger-slot composition.

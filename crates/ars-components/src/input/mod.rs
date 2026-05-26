@@ -9,6 +9,9 @@ pub mod checkbox_group;
 /// Editable machine.
 pub mod editable;
 
+/// FileTrigger stateless connect API.
+pub mod file_trigger;
+
 /// PasswordInput machine.
 pub mod password_input;
 

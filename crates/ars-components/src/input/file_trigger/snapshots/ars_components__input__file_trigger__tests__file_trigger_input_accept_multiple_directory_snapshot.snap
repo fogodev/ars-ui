@@ -1,0 +1,71 @@
+---
+source: crates/ars-components/src/input/file_trigger/mod.rs
+expression: "snapshot_attrs(&api(Props::new().accept([\"image/*\",\n\".pdf\"]).multiple(true).directory(true)).input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "file-trigger",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Choose files",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Accept,
+            String(
+                "image/*,.pdf",
+            ),
+        ),
+        (
+            Multiple,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Type,
+            String(
+                "file",
+            ),
+        ),
+        (
+            WebkitDirectory,
+            Bool(
+                true,
+            ),
+        ),
+    ],
+    styles: [],
+}
