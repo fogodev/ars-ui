@@ -657,6 +657,26 @@ impl<'a> Api<'a> {
     /// `min-width: <trigger-width>px` on the positioner.
     pub const fn same_width(&self) -> bool { self.props.same_width }
 
+    /// Returns the hydration-stable content element id used for ARIA wiring.
+    pub fn content_id(&self) -> &str { &self.ctx.content_id }
+
+    /// Returns the hydration-stable heading element id for composition layers
+    /// such as [`contextual_help`](../specialized/contextual-help.md) that
+    /// render a required heading part alongside popover content.
+    pub fn heading_id(&self) -> String {
+        ComponentIds::from_id(&self.props.id).part("heading")
+    }
+
+    /// Toggles the popover open state.
+    pub fn toggle(&self) {
+        (self.send)(Event::Toggle);
+    }
+
+    /// Closes the popover programmatically.
+    pub fn close(&self) {
+        (self.send)(Event::Close);
+    }
+
     // ── Anatomy attribute methods ───────────────────────────────────
 
     /// The attributes for the root element.

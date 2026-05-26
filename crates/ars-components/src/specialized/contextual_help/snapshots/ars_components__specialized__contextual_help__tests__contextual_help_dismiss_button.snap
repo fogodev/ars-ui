@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/specialized/contextual_help/mod.rs
+expression: "snapshot_attrs(&contextual_help_api(true,\ntest_props()).dismiss_button_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "dismiss-button",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "contextual-help",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Dismiss",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

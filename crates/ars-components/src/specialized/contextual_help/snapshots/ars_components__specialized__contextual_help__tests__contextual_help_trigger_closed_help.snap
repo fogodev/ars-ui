@@ -1,0 +1,71 @@
+---
+source: crates/ars-components/src/specialized/contextual_help/mod.rs
+expression: "snapshot_attrs(&contextual_help_api(false, test_props()).trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "contextual-help",
+            ),
+        ),
+        (
+            Data(
+                "ars-variant",
+            ),
+            String(
+                "help",
+            ),
+        ),
+        (
+            Aria(
+                Expanded,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                HasPopup,
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Help",
+            ),
+        ),
+        (
+            Aria(
+                Controls,
+            ),
+            String(
+                "help-content",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

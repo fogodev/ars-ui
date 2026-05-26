@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/specialized/contextual_help/mod.rs
+expression: "snapshot_attrs(&contextual_help_api(true, test_props()).footer_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "footer",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "contextual-help",
+            ),
+        ),
+    ],
+    styles: [],
+}

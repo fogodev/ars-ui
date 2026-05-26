@@ -100,20 +100,24 @@ cargo install cargo-mutants --locked --version 27.0.0
 
 **Local commands (state-machine modules are the most rewarding targets):**
 
+Prefer `cargo xmutants` over bare `cargo mutants` — it applies the same
+per-crate `--features` profile as Nightly CI (for example
+`ars-components/i18n`) so snapshot and i18n-gated tests match CI.
+
 ```bash
 # Run on a single component machine (~6 min for popover)
-cargo mutants -p ars-components -f crates/ars-components/src/overlay/popover/mod.rs
+cargo xmutants -p ars-components -f crates/ars-components/src/overlay/popover/mod.rs
 
 # Just list what would be mutated, without running tests (fast)
-cargo mutants -p ars-components -f crates/ars-components/src/overlay/popover/mod.rs --list
+cargo xmutants -p ars-components -f crates/ars-components/src/overlay/popover/mod.rs --list
 
 # Whole crate (slow — only if you really mean it)
-cargo mutants -p ars-components
+cargo xmutants -p ars-components
 ```
 
 **Agnostic component implementation gate:** whenever an agent implements a new framework-agnostic component, or materially changes an existing one, the delivery must include:
 
-- a targeted mutation run for the component source file, usually `cargo mutants -p ars-components -f crates/ars-components/src/<category>/<component>/mod.rs` (adjust the path for single-file modules);
+- a targeted mutation run for the component source file, usually `cargo xmutants -p ars-components -f crates/ars-components/src/<category>/<component>/mod.rs` (adjust the path for single-file modules);
 - spec-conformance tests for the component's anatomy/public contract, including its `Part` enum and required API/attribute surface;
 - same-task triage of every `MISSED` mutant: add tests for real gaps, or add a justified line-agnostic `.cargo/mutants.toml` exclude only for true equivalent mutations.
 

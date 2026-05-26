@@ -80,16 +80,24 @@ numbering is mandatory and sequential with no gaps.
 ## Spec Synchronization Rules
 
 These rules apply to all implementation work, not just adapter tasks. They are
-restated here for completeness.
+restated here for completeness. See also
+[README.md § Spec synchronization](./README.md#spec-synchronization).
 
 1. Each task must declare **Spec impact** in the issue.
 2. If implementation proves the spec wrong or incomplete, update the spec in the
-   same task.
+   same task — including polish the implementation surfaced but the spec sketch
+   never captured:
+    - missing public helpers and builders on the component under delivery;
+    - incomplete §1 code examples relative to §3/§4 prose promises;
+    - new accessors on dependency machines that composition specs already call;
+    - anatomy/ARIA tables that omit attrs the connect API emits;
+    - default-source wording when struct-update defaults replace redundant fields.
 3. Shared abstraction changes go into `spec/foundation/` or `spec/shared/`.
 4. Adapter-specific realization belongs in `spec/foundation/08-adapter-leptos.md`,
    `spec/foundation/09-adapter-dioxus.md`, and the per-component adapter specs.
 5. Adapter code must not become the only authoritative explanation for behavior
    that future framework ports would need to reproduce.
+6. Run `cargo xtask spec validate` after every spec edit in the task.
 
 ## Related Documents
 

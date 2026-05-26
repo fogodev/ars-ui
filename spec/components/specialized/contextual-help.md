@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: [popover]
 references:
-  react-aria: ContextualHelp
+    react-aria: ContextualHelp
 ---
 
 # ContextualHelp
@@ -22,14 +22,16 @@ Equivalent to React Spectrum's `ContextualHelp`.
 
 ContextualHelp is **not** a standalone state machine. It is a thin composition layer
 over the existing `popover::Machine`, providing a pre-wired trigger button,
-variant-aware labeling, and structured content anatomy. Internally it instantiates
-a `popover::Machine` with the following hardcoded configuration:
+variant-aware labeling, and structured content anatomy. Internally adapters build
+a `popover::Machine` from `Props::popover_props()`, which applies
+the following non-overridable dismiss policy via [`popover::Props::default()`]:
 
 - `modal: false`
 - `close_on_escape: true`
 - `close_on_interact_outside: true`
-- Positioning parameters forwarded from Props (`placement`, `offset`, `cross_offset`,
-  `should_flip`, `container_padding`)
+
+and forwards positioning parameters from Props (`placement`, `offset`,
+`cross_offset`, `should_flip`, `container_padding`).
 
 Framework adapters create the `popover::Machine` inside the ContextualHelp
 component, so consumers never interact with Popover directly.
@@ -42,6 +44,16 @@ pub enum Variant {
     Help,
     /// "i" icon — brief, specific, contextual clarification.
     Info,
+}
+
+impl Variant {
+    /// Returns the `data-ars-variant` token for this variant.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Help => "help",
+            Self::Info => "info",
+        }
+    }
 }
 ```
 
@@ -84,6 +96,82 @@ impl Default for Props {
         }
     }
 }
+
+impl Props {
+    /// Returns fresh contextual help props with documented defaults.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the component instance ID.
+    pub fn id(mut self, id: impl Into<String>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    /// Sets the help or info variant.
+    pub const fn variant(mut self, variant: Variant) -> Self {
+        self.variant = variant;
+        self
+    }
+
+    /// Sets the preferred popover placement.
+    pub const fn placement(mut self, placement: Placement) -> Self {
+        self.placement = placement;
+        self
+    }
+
+    /// Sets the main-axis offset in pixels.
+    pub const fn offset(mut self, offset: f64) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Sets the cross-axis offset in pixels.
+    pub const fn cross_offset(mut self, cross_offset: f64) -> Self {
+        self.cross_offset = cross_offset;
+        self
+    }
+
+    /// Sets whether the popover may flip when it would overflow.
+    pub const fn should_flip(mut self, should_flip: bool) -> Self {
+        self.should_flip = should_flip;
+        self
+    }
+
+    /// Sets the padding between the popover and container edges.
+    pub const fn container_padding(mut self, container_padding: f64) -> Self {
+        self.container_padding = container_padding;
+        self
+    }
+
+    /// Sets the text direction override.
+    pub const fn dir(mut self, dir: Direction) -> Self {
+        self.dir = Some(dir);
+        self
+    }
+
+    /// Builds the hardcoded popover configuration for this contextual help
+    /// instance.
+    ///
+    /// Dismiss policy fields (`modal`, `close_on_escape`,
+    /// `close_on_interact_outside`) come from [`popover::Props::default()`];
+    /// positioning fields are forwarded from this props surface.
+    pub fn popover_props(&self) -> popover::Props {
+        popover::Props {
+            id: self.id.clone(),
+            positioning: PositioningOptions {
+                placement: self.placement,
+                flip: self.should_flip,
+                shift_padding: self.container_padding,
+                ..PositioningOptions::default()
+            },
+            offset: self.offset,
+            cross_offset: self.cross_offset,
+            ..popover::Props::default()
+        }
+    }
+}
 ```
 
 ### 1.2 Connect / API
@@ -94,12 +182,19 @@ impl Default for Props {
 #[derive(ComponentPart)]
 #[scope = "contextual-help"]
 pub enum Part {
+    /// The root container element.
     Root,
+    /// The trigger button that toggles the help popover.
     Trigger,
+    /// The non-modal dialog content surface.
     Content,
+    /// The required heading element linked from `aria-labelledby`.
     Heading,
+    /// The required body element containing the main help text.
     Body,
+    /// The optional footer element for links or actions.
     Footer,
+    /// The visually hidden dismiss button for screen readers.
     DismissButton,
 }
 
@@ -143,10 +238,7 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::HasPopup), "dialog");
         attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if self.is_open() { "true" } else { "false" });
         attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.popover_api.content_id());
-        attrs.set(HtmlAttr::Data("ars-variant"), match self.props.variant {
-            Variant::Help => "help",
-            Variant::Info => "info",
-        });
+        attrs.set(HtmlAttr::Data("ars-variant"), self.props.variant.as_str());
         attrs
     }
 
@@ -160,6 +252,11 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::TabIndex, "-1");
         attrs.set(HtmlAttr::Id, self.popover_api.content_id());
         attrs.set(HtmlAttr::Data("ars-state"), if self.is_open() { "open" } else { "closed" });
+        let resolved_dir = self.props.dir.map_or_else(
+            || self.locale.direction(),
+            |dir| dir.resolve(self.locale.direction()),
+        );
+        attrs.set(HtmlAttr::Dir, resolved_dir.as_html_attr());
         attrs
     }
 
@@ -193,12 +290,17 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::DismissButton.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.messages.close_label)(&self.locale));
         attrs
     }
 
     pub fn on_trigger_click(&self) {
         self.popover_api.toggle();
+    }
+
+    pub fn on_dismiss_button_click(&self) {
+        self.popover_api.close();
     }
 
     pub fn on_content_keydown(&self, data: &KeyboardEventData) {
@@ -238,25 +340,25 @@ ContextualHelp
     └── DismissButton (required — visually hidden, for screen readers)
 ```
 
-| Part          | Element    | Key Attributes                                          |
-| ------------- | ---------- | ------------------------------------------------------- |
-| Root          | `<div>`    | container                                               |
-| Trigger       | `<button>` | `aria-label`, `aria-haspopup="dialog"`, `aria-expanded` |
-| Content       | `<div>`    | `role="dialog"`, `aria-labelledby`, `tabindex="-1"`     |
-| Heading       | `<h3>`     | `id` (linked from `aria-labelledby`)                    |
-| Body          | `<div>`    | main help text                                          |
-| Footer        | `<div>`    | optional link/action area                               |
-| DismissButton | `<button>` | `aria-label` (close label), visually hidden             |
+| Part          | Element    | Key Attributes                                                                               |
+| ------------- | ---------- | -------------------------------------------------------------------------------------------- |
+| Root          | `<div>`    | container                                                                                    |
+| Trigger       | `<button>` | `aria-label`, `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`, `data-ars-variant` |
+| Content       | `<div>`    | `role="dialog"`, `id`, `aria-labelledby`, `tabindex="-1"`, `data-ars-state`, `dir`           |
+| Heading       | `<h3>`     | `id` (linked from `aria-labelledby`)                                                         |
+| Body          | `<div>`    | main help text                                                                               |
+| Footer        | `<div>`    | optional link/action area                                                                    |
+| DismissButton | `<button>` | `type="button"`, `aria-label` (close label), visually hidden                               |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Part          | Role     | Properties                                                                                   |
-| ------------- | -------- | -------------------------------------------------------------------------------------------- |
-| Trigger       | `button` | `aria-label` (variant-dependent), `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls` |
-| Content       | `dialog` | `aria-labelledby` (Heading id), `tabindex="-1"`                                              |
-| DismissButton | `button` | `aria-label` (close label), visually hidden                                                  |
+| Part          | Role     | Properties                                                                                                       |
+| ------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| Trigger       | `button` | `aria-label` (variant-dependent), `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`, `data-ars-variant` |
+| Content       | `dialog` | `id`, `aria-labelledby` (Heading id), `tabindex="-1"`, `data-ars-state`, `dir` (from `Props::dir` or locale)     |
+| DismissButton | `button` | `type="button"`, `aria-label` (close label), visually hidden                                                     |
 
 ### 3.2 Keyboard Interaction
 
