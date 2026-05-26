@@ -1,0 +1,84 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "68acc3d2c1e0",
+  "session_id": "4d98eae2-3053-4a1e-9381-945f939d752b",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-26T17:02:11.323996Z",
+  "branch": "claude/friendly-grothendieck-886c35",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/calendar/mod.rs",
+    "spec/components/date-time/calendar.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "bf0635e53fc2",
+  "checkpoint_transcript_start": 1648,
+  "transcript_lines_at_start": 1648,
+  "token_usage": {
+    "input_tokens": 28,
+    "cache_creation_tokens": 757345,
+    "cache_read_tokens": 13139517,
+    "output_tokens": 15258,
+    "api_call_count": 18
+  },
+  "session_metrics": {
+    "turn_count": 10
+  },
+  "summary": {
+    "intent": "Resolve open Codex review threads on a Rust UI calendar component, distinguishing already-fixed duplicate findings from genuinely new bugs, then fix the new bugs.",
+    "outcome": "4 duplicate Codex threads were resolved with explanations, and 2 genuine bugs in page-step-aware prev/next disabled logic were fixed, tested, and pushed with all 143 calendar tests passing and Clippy clean.",
+    "learnings": {
+      "repo": [
+        "Codex review jobs can start before a push lands, causing duplicate findings that refer to already-fixed code — these need to be identified and resolved manually.",
+        "The calendar component uses a PageBehavior::Single mode with visible_months that affects how prev/next disabled logic should account for page steps, not just current visible range vs min/max.",
+        "The project uses an 'xci-fast' pre-push gate that must pass before commits are pushed.",
+        "Spec files at spec/components/date-time/calendar.md track behavioral contracts (e.g., §1.8 prev/next disabled) alongside implementation."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "is_prev_disabled and is_next_disabled were checking only the current first/last visible month against min/max, ignoring the page step size. With visible_months=3 and PageBehavior::Single, they should check whether the next/previous page would still contain selectable dates within the min/max bounds."
+        },
+        {
+          "path": "spec/components/date-time/calendar.md",
+          "finding": "Section §1.8 documents the prev/next disabled behavioral contract — updated to reflect page-step-aware logic."
+        }
+      ],
+      "workflow": [
+        "Failing tests were written first before implementing the fix, confirming the regression bugs existed.",
+        "Codex re-trigger was performed after the commit and push to validate the fixes against the review tool.",
+        "Clippy was run as a final check before the pre-push gate."
+      ]
+    },
+    "friction": [
+      "Codex review jobs started before the push landed, creating 4 spurious duplicate threads that required manual identification and resolution — adding noise to the review process.",
+      "Distinguishing duplicate vs. genuine findings required reading full thread bodies and tracing commit timing against the review job start."
+    ],
+    "open_items": []
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-26T17:01:55.051043Z",
+    "agent_lines": 74,
+    "agent_removed": 36,
+    "human_added": 85,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 159,
+    "total_lines_changed": 195,
+    "agent_percentage": 56.41025641025641,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 70,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 70
+      }
+    }
+  ]
+}
