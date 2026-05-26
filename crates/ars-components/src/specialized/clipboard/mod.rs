@@ -611,6 +611,8 @@ fn write_text_effect() -> PendingEffect<Machine> {
     PendingEffect::new(Effect::WriteText, |ctx: &Context, props: &Props, send| {
         if let Some(on_copy) = &props.on_copy {
             on_copy((ctx.value.get().clone(), send));
+        } else {
+            send.call_if_alive(Event::CopyError(CopyFailureReason::ApiUnavailable));
         }
 
         no_cleanup()
@@ -1111,6 +1113,29 @@ mod tests {
 
         assert_eq!(*copied.lock().unwrap(), vec!["copy me".to_string()]);
         assert_eq!(*sent.lock().unwrap(), vec![Event::CopySuccess]);
+    }
+
+    #[test]
+    fn clipboard_write_effect_without_copy_callback_reports_api_unavailable() {
+        let mut service =
+            Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+        let result = service.send(Event::Copy);
+
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let captured_sent = Arc::clone(&sent);
+        let send: StrongSend<Event> = Arc::new(move |event| {
+            captured_sent.lock().unwrap().push(event);
+        });
+
+        for effect in result.pending_effects {
+            drop(effect.run(service.context(), service.props(), Arc::clone(&send)));
+        }
+
+        assert_eq!(
+            *sent.lock().unwrap(),
+            vec![Event::CopyError(CopyFailureReason::ApiUnavailable)]
+        );
     }
 
     #[test]

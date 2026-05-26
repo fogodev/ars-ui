@@ -290,6 +290,8 @@ fn write_text_effect() -> PendingEffect<Machine> {
     PendingEffect::new(Effect::WriteText, |ctx, props, send| {
         if let Some(on_copy) = &props.on_copy {
             on_copy((ctx.value.get().clone(), send));
+        } else {
+            send.call_if_alive(Event::CopyError(CopyFailureReason::ApiUnavailable));
         }
 
         no_cleanup()
