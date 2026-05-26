@@ -75,6 +75,12 @@ AttrMap {
             ),
         ),
         (
+            Required,
+            Bool(
+                true,
+            ),
+        ),
+        (
             Value,
             String(
                 "draft",

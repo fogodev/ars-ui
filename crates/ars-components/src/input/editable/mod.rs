@@ -786,7 +786,9 @@ impl Api<'_> {
     pub fn preview_attrs(&self) -> AttrMap {
         let mut attrs = part_attrs(&Part::Preview);
 
-        attrs.set(HtmlAttr::TabIndex, "0");
+        if !self.ctx.disabled {
+            attrs.set(HtmlAttr::TabIndex, "0");
+        }
 
         attrs
     }
@@ -813,6 +815,7 @@ impl Api<'_> {
         }
 
         if self.ctx.required {
+            attrs.set_bool(HtmlAttr::Required, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
 
@@ -914,7 +917,10 @@ impl Api<'_> {
 
     /// Handles normalized keydown data on the preview element.
     pub fn on_preview_keydown(&self, data: &KeyboardEventData) {
-        if data.key == KeyboardKey::Enter && !self.is_keyboard_composing(data) {
+        if data.key == KeyboardKey::Enter
+            && self.ctx.activate_mode != ActivateMode::None
+            && !self.is_keyboard_composing(data)
+        {
             (self.send)(Event::Activate);
         }
     }
@@ -982,7 +988,7 @@ impl Api<'_> {
                 (self.send)(Event::Submit(self.ctx.edit_value.clone()));
             }
 
-            KeyboardKey::Tab if !composing => {
+            KeyboardKey::Tab if !composing && effective_blur_submits(self.ctx) => {
                 (self.send)(Event::Submit(self.ctx.edit_value.clone()));
             }
 
@@ -1045,9 +1051,7 @@ fn part_attrs(part: &Part) -> AttrMap {
 fn trigger_attrs(part: &Part) -> AttrMap {
     let mut attrs = part_attrs(part);
 
-    attrs
-        .set(HtmlAttr::Type, "button")
-        .set(HtmlAttr::TabIndex, "-1");
+    attrs.set(HtmlAttr::Type, "button");
 
     attrs
 }
@@ -1433,7 +1437,7 @@ mod tests {
         let sent = RefCell::new(Vec::new());
         let send = |event| sent.borrow_mut().push(event);
 
-        let editable = service(props().activate_mode(ActivateMode::None));
+        let editable = service(props().activate_mode(ActivateMode::DblClick));
 
         let api = editable.connect(&send);
 
@@ -1668,16 +1672,14 @@ mod tests {
     }
 
     #[test]
-    fn editable_tab_submits_regardless_of_submit_mode() {
-        for mode in [
-            SubmitMode::Blur,
-            SubmitMode::Enter,
-            SubmitMode::Both,
-            SubmitMode::None,
+    fn editable_tab_submits_only_when_blur_submission_is_effective() {
+        for props in [
+            props().submit_mode(SubmitMode::Blur),
+            props().submit_mode(SubmitMode::Both),
         ] {
             let sent = RefCell::new(Vec::new());
 
-            let mut editable = service(props().submit_mode(mode));
+            let mut editable = service(props);
 
             drop(editable.send(Event::Activate));
             drop(editable.send(Event::Change("draft".to_string())));
@@ -1691,6 +1693,25 @@ mod tests {
                 &[Event::Submit("draft".to_string())]
             );
         }
+
+        for props in [
+            props().submit_mode(SubmitMode::Enter),
+            props().submit_mode(SubmitMode::None),
+            props().submit_mode(SubmitMode::Both).submit_on_blur(false),
+        ] {
+            let sent = RefCell::new(Vec::new());
+
+            let mut editable = service(props);
+
+            drop(editable.send(Event::Activate));
+            drop(editable.send(Event::Change("draft".to_string())));
+
+            editable
+                .connect(&|event| sent.borrow_mut().push(event))
+                .on_input_keydown(&keyboard(KeyboardKey::Tab, false));
+
+            assert!(sent.borrow().is_empty());
+        }
     }
 
     #[test]
@@ -1702,6 +1723,19 @@ mod tests {
         editable
             .connect(&|event| sent.borrow_mut().push(event))
             .on_preview_keydown(&keyboard(KeyboardKey::Enter, true));
+
+        assert!(sent.borrow().is_empty());
+    }
+
+    #[test]
+    fn editable_preview_enter_respects_activate_mode_none() {
+        let sent = RefCell::new(Vec::new());
+
+        let editable = service(props().activate_mode(ActivateMode::None));
+
+        editable
+            .connect(&|event| sent.borrow_mut().push(event))
+            .on_preview_keydown(&keyboard(KeyboardKey::Enter, false));
 
         assert!(sent.borrow().is_empty());
     }
@@ -1724,6 +1758,15 @@ mod tests {
                     .input_attrs()
             )
         );
+    }
+
+    #[test]
+    fn editable_disabled_preview_is_not_tabbable() {
+        let attrs = service(props().disabled(true))
+            .connect(&|_| {})
+            .preview_attrs();
+
+        assert!(!attrs.contains(&HtmlAttr::TabIndex));
     }
 
     #[test]

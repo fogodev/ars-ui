@@ -522,7 +522,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Preview.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::TabIndex, "0");
+        if !self.ctx.disabled { attrs.set(HtmlAttr::TabIndex, "0"); }
         attrs
     }
 
@@ -536,7 +536,10 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.field_label)(&self.ctx.locale));
         if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
         if self.ctx.readonly { attrs.set_bool(HtmlAttr::ReadOnly, true); }
-        if self.ctx.required { attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true"); }
+        if self.ctx.required {
+            attrs.set_bool(HtmlAttr::Required, true);
+            attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
+        }
         if self.ctx.invalid { attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true"); }
         attrs.set(HtmlAttr::Value, &self.ctx.edit_value);
         if let Some(p) = &self.ctx.placeholder { attrs.set(HtmlAttr::Placeholder, p); }
@@ -554,7 +557,6 @@ impl<'a> Api<'a> {
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.submit_label)(&self.ctx.locale));
-        attrs.set(HtmlAttr::TabIndex, "-1");
         if self.ctx.disabled || self.ctx.readonly { attrs.set_bool(HtmlAttr::Disabled, true); }
         attrs
     }
@@ -567,7 +569,6 @@ impl<'a> Api<'a> {
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.cancel_label)(&self.ctx.locale));
-        attrs.set(HtmlAttr::TabIndex, "-1");
         if self.ctx.disabled || self.ctx.readonly { attrs.set_bool(HtmlAttr::Disabled, true); }
         attrs
     }
@@ -580,7 +581,6 @@ impl<'a> Api<'a> {
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.edit_label)(&self.ctx.locale));
-        attrs.set(HtmlAttr::TabIndex, "-1");
         if self.ctx.disabled || self.ctx.readonly { attrs.set_bool(HtmlAttr::Disabled, true); }
         attrs
     }
@@ -603,7 +603,10 @@ impl<'a> Api<'a> {
     }
     pub fn on_preview_blur(&self) { (self.send)(Event::Blur); }
     pub fn on_preview_keydown(&self, data: &KeyboardEventData) {
-        if data.key == KeyboardKey::Enter && !self.is_keyboard_composing(data) {
+        if data.key == KeyboardKey::Enter
+            && self.ctx.activate_mode != ActivateMode::None
+            && !self.is_keyboard_composing(data)
+        {
             (self.send)(Event::Activate);
         }
     }
@@ -639,7 +642,7 @@ impl<'a> Api<'a> {
             {
                 (self.send)(Event::Submit(self.ctx.edit_value.clone()));
             }
-            KeyboardKey::Tab if !composing => {
+            KeyboardKey::Tab if !composing && effective_blur_submits(self.ctx) => {
                 (self.send)(Event::Submit(self.ctx.edit_value.clone()));
             }
             _ => {}
@@ -685,7 +688,7 @@ Editable
 | ------------- | ---------- | ------------------------------------------------------ |
 | Root          | `<div>`    | `role="group"`, `data-ars-state` ("preview"/"editing") |
 | Label         | `<label>`  | `for` points to Input id (optional)                    |
-| Preview       | `<span>`   | `tabindex="0"` — displays committed value              |
+| Preview       | `<span>`   | `tabindex="0"` when enabled — displays committed value |
 | Input         | `<input>`  | `aria-label`, value, maxlength                         |
 | EditTrigger   | `<button>` | `aria-label` from `messages.edit_label` (optional)     |
 | SubmitTrigger | `<button>` | `aria-label` from `messages.submit_label` (optional)   |
@@ -709,7 +712,7 @@ Editable
 | `aria-invalid`      | Input   | Present when `invalid` is true                          |
 | `data-ars-disabled` | Root    | Present when `disabled` is true                         |
 | `data-ars-readonly` | Root    | Present when `readonly` is true                         |
-| `tabindex`          | Preview | `0` (focusable in Preview state)                        |
+| `tabindex`          | Preview | `0` when enabled (focusable in Preview state)           |
 
 ### 3.2 Keyboard Interaction
 
@@ -718,7 +721,8 @@ Editable
 | `Enter`  | Preview focused                         | Activate editing                                    |
 | `Enter`  | Editing (submit_mode `Enter` or `Both`) | Submit current value                                |
 | `Escape` | Editing                                 | Cancel editing, revert to committed value           |
-| `Tab`    | Editing                                 | Submit current value and move focus to next element |
+| `Tab`    | Editing with effective blur submission  | Submit current value and move focus to next element |
+| `Tab`    | Editing without effective blur submission | Move focus to next element without committing      |
 
 ### 3.3 Screen Reader Behavior
 

@@ -7,7 +7,7 @@ The repo is expected to operate with these rules:
 - Build the platform first: workspace, core contracts, subsystems, harnesses, then components.
 - Run TDD-style delivery: define the exact tests first, then implement the minimum code needed.
 - Keep the specification synchronized with implementation. If implementation changes the intended contract, update the relevant spec in the same task.
-- For every new or materially changed framework-agnostic component, add spec-conformance tests for its anatomy/public contract and run a targeted mutation test for the component source file (`cargo mutants -p ars-components -f crates/ars-components/src/<category>/<component>/mod.rs` or the equivalent file path). Triage every `MISSED` mutant in the same task: add tests for real gaps, or document true equivalence in `.cargo/mutants.toml`.
+- For every new or materially changed framework-agnostic component, add spec-conformance tests for its anatomy/public contract and run a targeted mutation test for the component source file (`cargo mutants -p ars-components -f crates/ars-components/src/<category>/<component>/mod.rs` or the equivalent file path). Triage every `MISSED` mutant in the same task: add tests for real gaps, or document true equivalence in `.cargo/mutants.toml`. This is a pre-PR implementation/audit gate; after the PR is opened, agents **MUST NOT** rerun mutation tests during Codex review rounds unless the user explicitly asks for another mutation run.
 - Use GitHub Projects with issue-backed items only.
 - Keep most agent-ready tasks at `1`, `2`, `3`, or `5` points. `8` is exceptional. `13` must be split before pickup.
 

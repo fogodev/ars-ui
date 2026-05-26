@@ -29,12 +29,6 @@ AttrMap {
             ),
         ),
         (
-            TabIndex,
-            String(
-                "-1",
-            ),
-        ),
-        (
             Type,
             String(
                 "button",

@@ -213,6 +213,8 @@ The canonical entry-prompt:
    - New invariants on a computation pipeline → proptest invariants strongly recommended
    - New `AttrMap` helpers → snapshot tests for each branch required
 
+The targeted cargo-mutants run is a pre-PR implementation/audit requirement. After the PR is opened, agents **MUST NOT** rerun mutation tests during Codex review rounds unless the user explicitly asks for another mutation run.
+
 4. **Cumulative assessment.** Present the before/after metrics in a table:
 
 | Metric | Before this phase | After this phase |
