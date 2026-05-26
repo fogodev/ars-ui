@@ -2076,3 +2076,88 @@ fn month_step_plan_keeps_visible_and_focused_in_sync_at_boundary() {
         svc.context().visible_year,
     );
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Codex review regressions, pass 3 (PR #688)
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn prev_disabled_considers_page_behavior_single_in_multi_month() {
+    // Codex N7 (P2): with visible_months=3 and PageBehavior::Single, the
+    // calendar shows Mar-Apr-May. If `min = Mar 15`, paging back by one
+    // month (Single) yields Feb-Mar-Apr — which still contains
+    // selectable dates (≥ Mar 15 in April). prev must NOT be disabled.
+    let svc = service_with(
+        props()
+            .today(date(2024, 3, 15))
+            .visible_months(3)
+            .page_behavior(PageBehavior::Single)
+            .min(Some(date(2024, 3, 15))),
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    assert!(
+        !api.is_prev_disabled(),
+        "prev must not be disabled when the next page back still has selectable dates",
+    );
+}
+
+#[test]
+fn prev_disabled_when_full_prev_page_below_min() {
+    // Conversely, prev IS disabled when the whole prev page would be
+    // entirely below min — visible Jan 2024, min = Jan 15, paging back
+    // (Single) → Dec 2023 which is fully below min.
+    let svc = service_with(
+        props()
+            .today(date(2024, 1, 15))
+            .min(Some(date(2024, 1, 15))),
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    assert!(
+        api.is_prev_disabled(),
+        "prev must be disabled when stepping back yields no selectable dates",
+    );
+}
+
+#[test]
+fn next_disabled_considers_page_behavior_single_in_multi_month() {
+    // Codex N8 (P2): symmetric case for next. visible Jan-Feb-Mar with
+    // PageBehavior::Single and max = Mar 15. Paging forward by one
+    // month (Single) yields Feb-Mar-Apr — Feb still has selectable
+    // dates (≤ Mar 15 in February). next must NOT be disabled.
+    let svc = service_with(
+        props()
+            .today(date(2024, 1, 15))
+            .visible_months(3)
+            .page_behavior(PageBehavior::Single)
+            .max(Some(date(2024, 3, 15))),
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    assert!(
+        !api.is_next_disabled(),
+        "next must not be disabled when the next page forward still has selectable dates",
+    );
+}
+
+#[test]
+fn next_disabled_when_full_next_page_above_max() {
+    // visible Jan 2024 with max = Jan 25, paging forward (Single) → Feb 2024
+    // which is fully above max. next IS disabled.
+    let svc = service_with(
+        props()
+            .today(date(2024, 1, 15))
+            .max(Some(date(2024, 1, 25))),
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    assert!(
+        api.is_next_disabled(),
+        "next must be disabled when the next page forward yields no selectable dates",
+    );
+}

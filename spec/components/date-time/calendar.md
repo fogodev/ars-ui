@@ -1324,33 +1324,43 @@ impl<'a> Api<'a> {
     }
 
     /// Whether the prev button should be disabled — either the calendar
-    /// is globally disabled or the visible range is already at `min`.
+    /// is globally disabled, or pressing prev (stepping by the active
+    /// `page_behavior`) would yield a visible range with **no** dates
+    /// ≥ `min`. The check looks at the LAST month of the post-step range
+    /// so multi-month + `PageBehavior::Single` doesn't disable too early.
     pub fn is_prev_disabled(&self) -> bool {
         if self.ctx.disabled { return true; }
         let Some(min) = &self.ctx.min else { return false; };
-        let Ok(first_of_visible) =
-            CalendarDate::new_gregorian(self.ctx.visible_year, self.ctx.visible_month, 1)
+        let step = self.nav_step_size();
+        let (new_first_m, new_first_y) = advance_month(
+            self.ctx.visible_month, self.ctx.visible_year, -(step as i32),
+        );
+        let last_offset = self.ctx.visible_months.saturating_sub(1);
+        let (new_last_m, new_last_y) = month_year_at_offset(new_first_m, new_first_y, last_offset);
+        let Ok(first_of_new_last) = CalendarDate::new_gregorian(new_last_y, new_last_m, 1)
         else { return false; };
-        !matches!(first_of_visible.compare(min), Ordering::Greater)
+        let Ok(last_of_new_last) =
+            CalendarDate::new_gregorian(new_last_y, new_last_m, first_of_new_last.days_in_month())
+        else { return false; };
+        matches!(last_of_new_last.compare(min), Ordering::Less)
     }
 
     /// Whether the next button should be disabled — either the calendar
-    /// is globally disabled or the visible range is already at `max`.
-    /// Checks against the **last** visible month so multi-month layouts
-    /// behave correctly.
+    /// is globally disabled, or pressing next (stepping by the active
+    /// `page_behavior`) would yield a visible range with **no** dates
+    /// ≤ `max`. Symmetric to `is_prev_disabled`: checks the FIRST month
+    /// of the post-step range so multi-month + `PageBehavior::Single`
+    /// doesn't disable too early.
     pub fn is_next_disabled(&self) -> bool {
         if self.ctx.disabled { return true; }
         let Some(max) = &self.ctx.max else { return false; };
-        let last_offset = self.ctx.visible_months.saturating_sub(1);
-        let (month, year) = self.ctx.month_year_at_offset(last_offset);
-        let Ok(first_of_last) = CalendarDate::new_gregorian(year, month, 1) else {
-            return false;
-        };
-        let days_in_month = first_of_last.days_in_month();
-        let Ok(last_of_last) = CalendarDate::new_gregorian(year, month, days_in_month) else {
-            return false;
-        };
-        !matches!(last_of_last.compare(max), Ordering::Less)
+        let step = self.nav_step_size();
+        let (new_first_m, new_first_y) = advance_month(
+            self.ctx.visible_month, self.ctx.visible_year, step as i32,
+        );
+        let Ok(first_of_new_first) = CalendarDate::new_gregorian(new_first_y, new_first_m, 1)
+        else { return false; };
+        matches!(first_of_new_first.compare(max), Ordering::Greater)
     }
 
     /// The grid data: weeks and day labels.

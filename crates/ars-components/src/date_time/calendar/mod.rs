@@ -1881,7 +1881,13 @@ impl<'a> Api<'a> {
     }
 
     /// Whether the prev-trigger should be disabled — either the calendar
-    /// is globally disabled or the visible range is already at `min`.
+    /// is globally disabled or stepping back by `page_behavior`'s step
+    /// would yield a visible range with no selectable dates ≥ `min`.
+    ///
+    /// The check honours [`PageBehavior::Single`] vs [`PageBehavior::Visible`]:
+    /// with multi-month + `Single`, paging back by one month may still
+    /// produce a range that contains selectable dates even if the current
+    /// first visible month already starts at-or-before `min`.
     #[must_use]
     pub fn is_prev_disabled(&self) -> bool {
         if self.ctx.disabled {
@@ -1892,19 +1898,40 @@ impl<'a> Api<'a> {
             return false;
         };
 
-        let Ok(first_of_visible) =
-            CalendarDate::new_gregorian(self.ctx.visible_year, self.ctx.visible_month, 1)
+        // Compute the LAST visible month after pressing prev. If even its
+        // last day is below `min`, the next page back has no selectable
+        // dates and prev is disabled.
+        let step = self.nav_step_size();
+        let (new_first_month, new_first_year) = advance_month_pair(
+            self.ctx.visible_month,
+            self.ctx.visible_year,
+            -i32::try_from(step).unwrap_or(1),
+        );
+        let last_offset = self.ctx.visible_months.saturating_sub(1);
+        let (new_last_month, new_last_year) =
+            grid_month_year_at_offset(new_first_month, new_first_year, last_offset);
+
+        let Ok(first_of_new_last) = CalendarDate::new_gregorian(new_last_year, new_last_month, 1)
+        else {
+            return false;
+        };
+        let days_in_month = first_of_new_last.days_in_month();
+        let Ok(last_of_new_last) =
+            CalendarDate::new_gregorian(new_last_year, new_last_month, days_in_month)
         else {
             return false;
         };
 
-        !matches!(first_of_visible.compare(min), Ordering::Greater)
+        matches!(last_of_new_last.compare(min), Ordering::Less)
     }
 
     /// Whether the next-trigger should be disabled — either the calendar
-    /// is globally disabled or the visible range is already at `max`.
-    /// Checks against the **last** visible month so multi-month layouts
-    /// behave correctly.
+    /// is globally disabled or stepping forward by `page_behavior`'s step
+    /// would yield a visible range with no selectable dates ≤ `max`.
+    ///
+    /// Symmetric to [`Api::is_prev_disabled`]: the check honours
+    /// [`PageBehavior::Single`] vs [`PageBehavior::Visible`] so multi-month
+    /// + single-step paging doesn't disable too early.
     #[must_use]
     pub fn is_next_disabled(&self) -> bool {
         if self.ctx.disabled {
@@ -1915,21 +1942,22 @@ impl<'a> Api<'a> {
             return false;
         };
 
-        let last_offset = self.ctx.visible_months.saturating_sub(1);
-
-        let (month, year) = self.ctx.month_year_at_offset(last_offset);
-
-        let Ok(first_of_last) = CalendarDate::new_gregorian(year, month, 1) else {
+        // Compute the FIRST visible month after pressing next. If its
+        // first day is already above `max`, the next page forward has no
+        // selectable dates and next is disabled.
+        let step = self.nav_step_size();
+        let (new_first_month, new_first_year) = advance_month_pair(
+            self.ctx.visible_month,
+            self.ctx.visible_year,
+            i32::try_from(step).unwrap_or(1),
+        );
+        let Ok(first_of_new_first) =
+            CalendarDate::new_gregorian(new_first_year, new_first_month, 1)
+        else {
             return false;
         };
 
-        let days_in_month = first_of_last.days_in_month();
-
-        let Ok(last_of_last) = CalendarDate::new_gregorian(year, month, days_in_month) else {
-            return false;
-        };
-
-        !matches!(last_of_last.compare(max), Ordering::Less)
+        matches!(first_of_new_first.compare(max), Ordering::Greater)
     }
 
     /// Returns the configured "today" date.
