@@ -63,6 +63,9 @@ pub enum Event {
     /// IME composition ended with the final committed text.
     CompositionEnd(String),
 
+    /// The key used to confirm an IME candidate was consumed.
+    CompositionConfirmKey,
+
     /// Synchronize the externally controlled value prop.
     SetValue(Option<String>),
 
@@ -177,6 +180,9 @@ pub struct Context {
 
     /// True while an IME composition session is active.
     pub is_composing: bool,
+
+    /// True when the next Enter key may be the IME confirmation key.
+    pub suppress_next_enter_after_composition: bool,
 
     /// Resolved locale for i18n.
     pub locale: Locale,
@@ -479,6 +485,7 @@ impl ars_core::Machine for Machine {
                 focused: false,
                 focus_visible: false,
                 is_composing: false,
+                suppress_next_enter_after_composition: false,
                 locale: env.locale.clone(),
                 messages: messages.clone(),
                 ids: ComponentIds::from_id(&props.id),
@@ -530,11 +537,12 @@ impl ars_core::Machine for Machine {
                 let value = clamp_to_max_length(value, ctx.max_length);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.edit_value = value;
+                    ctx.suppress_next_enter_after_composition = false;
                 }))
             }
 
             (State::Editing, Event::Submit(value)) => {
-                if ctx.disabled || ctx.readonly {
+                if ctx.disabled || ctx.readonly || ctx.is_composing {
                     return None;
                 }
 
@@ -550,6 +558,7 @@ impl ars_core::Machine for Machine {
                         clear_focus(ctx);
 
                         ctx.is_composing = false;
+                        ctx.suppress_next_enter_after_composition = false;
                     }),
                 )
             }
@@ -563,11 +572,16 @@ impl ars_core::Machine for Machine {
                         clear_focus(ctx);
 
                         ctx.is_composing = false;
+                        ctx.suppress_next_enter_after_composition = false;
                     }),
                 )
             }
 
             (State::Editing, Event::Blur) => {
+                if ctx.is_composing {
+                    return None;
+                }
+
                 let edit_value = ctx.edit_value.clone();
                 let committed = ctx.value.get().clone();
 
@@ -588,6 +602,7 @@ impl ars_core::Machine for Machine {
                         clear_focus(ctx);
 
                         ctx.is_composing = false;
+                        ctx.suppress_next_enter_after_composition = false;
                     }),
                 )
             }
@@ -595,6 +610,7 @@ impl ars_core::Machine for Machine {
             (_, Event::CompositionStart) => {
                 Some(TransitionPlan::context_only(|ctx: &mut Context| {
                     ctx.is_composing = true;
+                    ctx.suppress_next_enter_after_composition = false;
                 }))
             }
 
@@ -602,6 +618,7 @@ impl ars_core::Machine for Machine {
                 let value = clamp_to_max_length(value, ctx.max_length);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.is_composing = false;
+                    ctx.suppress_next_enter_after_composition = true;
 
                     if !ctx.disabled && !ctx.readonly {
                         ctx.edit_value = value;
@@ -612,6 +629,13 @@ impl ars_core::Machine for Machine {
             (State::Preview, Event::CompositionEnd(_)) => {
                 Some(TransitionPlan::context_only(|ctx: &mut Context| {
                     ctx.is_composing = false;
+                    ctx.suppress_next_enter_after_composition = false;
+                }))
+            }
+
+            (State::Editing, Event::CompositionConfirmKey) => {
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.suppress_next_enter_after_composition = false;
                 }))
             }
 
@@ -624,9 +648,11 @@ impl ars_core::Machine for Machine {
                         ctx.value.set(edit_value.clone());
                         ctx.value.sync_controlled(Some(value));
                         ctx.edit_value = edit_value;
+                        ctx.suppress_next_enter_after_composition = false;
                     } else {
                         ctx.value.sync_controlled(None);
                         ctx.edit_value = clamp_to_max_length(ctx.value.get(), ctx.max_length);
+                        ctx.suppress_next_enter_after_composition = false;
                     }
                 }))
             }
@@ -981,6 +1007,10 @@ impl Api<'_> {
 
             KeyboardKey::Escape if !composing => (self.send)(Event::Cancel),
 
+            KeyboardKey::Enter if self.ctx.suppress_next_enter_after_composition => {
+                (self.send)(Event::CompositionConfirmKey);
+            }
+
             KeyboardKey::Enter
                 if (!composing || after_composition_check)
                     && !self.ctx.is_composing
@@ -1256,6 +1286,20 @@ mod tests {
     }
 
     #[test]
+    fn editable_submit_is_blocked_during_composition() {
+        let mut editable = service(props());
+
+        drop(editable.send(Event::Activate));
+        drop(editable.send(Event::CompositionStart));
+        drop(editable.send(Event::Submit("stale".to_string())));
+
+        assert_eq!(*editable.state(), State::Editing);
+        assert_eq!(editable.context().value.get(), "saved");
+        assert_eq!(editable.context().edit_value, "saved");
+        assert!(editable.context().is_composing);
+    }
+
+    #[test]
     fn editable_submit_keeps_controlled_committed_value_parent_owned() {
         let mut editable = service(props().value("parent"));
 
@@ -1382,6 +1426,20 @@ mod tests {
             assert_eq!(editable.context().edit_value, "saved");
             assert_eq!(*editable.state(), State::Preview);
         }
+    }
+
+    #[test]
+    fn editable_blur_is_blocked_during_composition() {
+        let mut editable = service(props().submit_mode(SubmitMode::Blur));
+
+        drop(editable.send(Event::Activate));
+        drop(editable.send(Event::CompositionStart));
+        drop(editable.send(Event::Blur));
+
+        assert_eq!(*editable.state(), State::Editing);
+        assert_eq!(editable.context().value.get(), "saved");
+        assert_eq!(editable.context().edit_value, "saved");
+        assert!(editable.context().is_composing);
     }
 
     #[test]
@@ -1691,9 +1749,20 @@ mod tests {
             .connect(&|event| sent.borrow_mut().push(event))
             .on_input_keydown_after_composition_check(&keyboard(KeyboardKey::Enter, false));
 
+        assert_eq!(sent.borrow().as_slice(), &[Event::CompositionConfirmKey]);
+
+        drop(editable.send(Event::CompositionConfirmKey));
+
+        editable
+            .connect(&|event| sent.borrow_mut().push(event))
+            .on_input_keydown(&keyboard(KeyboardKey::Enter, false));
+
         assert_eq!(
             sent.borrow().as_slice(),
-            &[Event::Submit("final".to_string())]
+            &[
+                Event::CompositionConfirmKey,
+                Event::Submit("final".to_string()),
+            ]
         );
     }
 

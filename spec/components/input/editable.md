@@ -56,6 +56,8 @@ pub enum Event {
     CompositionStart,
     /// IME composition ended with the final committed text.
     CompositionEnd(String),
+    /// The key used to confirm an IME candidate was consumed.
+    CompositionConfirmKey,
     /// Synchronize the externally controlled value prop.
     SetValue(Option<String>),
     /// Synchronize output-affecting props stored in context.
@@ -129,6 +131,8 @@ pub struct Context {
     pub focus_visible: bool,
     /// True while an IME composition session is active.
     pub is_composing: bool,
+    /// True when the next Enter key may be the IME confirmation key.
+    pub suppress_next_enter_after_composition: bool,
     /// Resolved locale for i18n.
     pub locale: Locale,
     /// Resolved messages for the editable.
@@ -296,6 +300,7 @@ impl ars_core::Machine for Machine {
             focused: false,
             focus_visible: false,
             is_composing: false,
+            suppress_next_enter_after_composition: false,
             locale,
             messages,
             ids: ComponentIds::from_id(&props.id),
@@ -347,7 +352,7 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Editing, Event::Submit(val)) => {
-                if ctx.disabled || ctx.readonly { return None; }
+                if ctx.disabled || ctx.readonly || ctx.is_composing { return None; }
                 let val = val.clone();
                 let max_length = ctx.max_length;
                 Some(TransitionPlan::to(State::Preview).apply(move |ctx| {
@@ -359,6 +364,7 @@ impl ars_core::Machine for Machine {
                     ctx.focused = false;
                     ctx.focus_visible = false;
                     ctx.is_composing = false;
+                    ctx.suppress_next_enter_after_composition = false;
                 }))
             }
 
@@ -369,10 +375,12 @@ impl ars_core::Machine for Machine {
                     ctx.focused = false;
                     ctx.focus_visible = false;
                     ctx.is_composing = false;
+                    ctx.suppress_next_enter_after_composition = false;
                 }))
             }
 
             (State::Editing, Event::Blur) => {
+                if ctx.is_composing { return None; }
                 let edit_value = ctx.edit_value.clone();
                 let committed = ctx.value.get().clone();
                 let should_submit = effective_blur_submits(ctx);
@@ -388,17 +396,20 @@ impl ars_core::Machine for Machine {
                     ctx.focused = false;
                     ctx.focus_visible = false;
                     ctx.is_composing = false;
+                    ctx.suppress_next_enter_after_composition = false;
                 }))
             }
 
             (_, Event::CompositionStart) => Some(TransitionPlan::context_only(|ctx| {
                 ctx.is_composing = true;
+                ctx.suppress_next_enter_after_composition = false;
             })),
 
             (State::Editing, Event::CompositionEnd(value)) => {
                 let value = clamp_to_max_length(value, ctx.max_length);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.is_composing = false;
+                    ctx.suppress_next_enter_after_composition = true;
                     if !ctx.disabled && !ctx.readonly {
                         ctx.edit_value = value;
                     }
@@ -407,6 +418,11 @@ impl ars_core::Machine for Machine {
 
             (State::Preview, Event::CompositionEnd(_)) => Some(TransitionPlan::context_only(|ctx| {
                 ctx.is_composing = false;
+                ctx.suppress_next_enter_after_composition = false;
+            })),
+
+            (State::Editing, Event::CompositionConfirmKey) => Some(TransitionPlan::context_only(|ctx| {
+                ctx.suppress_next_enter_after_composition = false;
             })),
 
             (_, Event::SetValue(value)) => {
@@ -645,6 +661,9 @@ impl<'a> Api<'a> {
         match data.key {
             KeyboardKey::Process => (self.send)(Event::CompositionStart),
             KeyboardKey::Escape if !composing => (self.send)(Event::Cancel),
+            KeyboardKey::Enter if self.ctx.suppress_next_enter_after_composition => {
+                (self.send)(Event::CompositionConfirmKey);
+            }
             KeyboardKey::Enter
                 if (!composing || after_composition_check)
                     && !self.ctx.is_composing
@@ -753,7 +772,8 @@ The `Editable` component must handle IME (Input Method Editor) composition corre
 - On `compositionstart`: set `is_composing = true`. Suppress value commit and `on_change` emission for the duration.
 - On `compositionupdate`: update the visual display but do NOT commit the value or fire `on_change`.
 - On `compositionend`: set `is_composing = false` and apply the final composed value through `Event::CompositionEnd`; adapter-level value-change callbacks are outside the agnostic core surface.
-- **Enter key during composition**: If `is_composing` is true, Enter key confirms the IME candidate rather than committing the edit. The edit commit only happens on a subsequent Enter press (or blur) after composition ends.
+- **Enter key during composition**: If `is_composing` is true, Enter key confirms the IME candidate rather than committing the edit. `CompositionEnd` marks the next Enter as a possible IME confirmation key so WebKit/Safari ordering (`compositionend` before the confirming `keydown`) is also suppressed. The edit commit only happens on a subsequent Enter press (or blur) after composition ends.
+- **Commit while composing**: `Submit` and blur-submit are ignored during active composition so stale pre-composition text is not committed before `CompositionEnd` supplies the final text.
 
 ## 4. Internationalization
 
