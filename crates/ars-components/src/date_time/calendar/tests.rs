@@ -8,7 +8,7 @@ use alloc::{format, string::String, sync::Arc, vec::Vec};
 
 use ars_core::{AttrMap, Callback, ComponentPart, Env, HtmlAttr, KeyboardKey, Service};
 use ars_i18n::{
-    CalendarDate, Locale, StubIntlBackend,
+    CalendarDate, DateDuration, Locale, StubIntlBackend,
     locales::{ar_sa, de_de, en_gb, en_us, fa},
 };
 use insta::assert_snapshot;
@@ -1662,4 +1662,241 @@ fn disabled_calendar_blocks_navigation_too() {
     drop(svc.send(Event::NextMonth));
 
     assert_eq!(svc.context().visible_month, before_month);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Codex review regressions (PR #688)
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn unavailable_cell_trigger_stays_focusable_and_not_html_disabled() {
+    // Codex T1 (P1): unavailable cells must remain focusable per spec §3.
+    // HTML `disabled` removes the element from the focus model, so we only
+    // surface `aria-disabled` + the data hook for unavailable-but-not-disabled
+    // dates; HTML `disabled` is reserved for the min/max-disabled case.
+    let predicate = Callback::new_ref(|d: &CalendarDate| d.day() == 12);
+    let svc = service_with(props().is_date_unavailable(Some(predicate)), en_us());
+    let api = svc.connect(&|_| {});
+
+    let trigger = api.cell_trigger_attrs(&date(2024, 1, 12));
+
+    // aria-disabled is set (semantic restriction is announced).
+    assert_eq!(
+        attr(&trigger, HtmlAttr::Aria(AriaAttr::Disabled)).as_deref(),
+        Some("true"),
+    );
+    // HTML `disabled` is NOT set — the cell must remain in the focus model.
+    assert!(
+        trigger.get(&HtmlAttr::Disabled).is_none(),
+        "unavailable cell triggers must remain focusable; HTML disabled removes them from tab order",
+    );
+}
+
+#[test]
+fn min_max_disabled_cell_trigger_is_html_disabled() {
+    // Sanity check the other branch: dates outside min/max keep both
+    // `aria-disabled` and HTML `disabled` set.
+    let svc = service_with(props().min(Some(date(2024, 1, 10))), en_us());
+    let api = svc.connect(&|_| {});
+
+    let trigger = api.cell_trigger_attrs(&date(2024, 1, 5));
+
+    assert_eq!(
+        attr(&trigger, HtmlAttr::Aria(AriaAttr::Disabled)).as_deref(),
+        Some("true"),
+    );
+    assert_eq!(
+        trigger.get(&HtmlAttr::Disabled).map(ToString::to_string),
+        Some(String::from("true")),
+    );
+}
+
+#[test]
+fn cell_trigger_attrs_for_offset_marks_outside_for_other_grids_month() {
+    // Codex T2 (P2): cell_trigger_attrs_for(offset) checks against the grid's
+    // own month, not the first visible month.
+    let svc = service_with(props().visible_months(2), en_us());
+    let api = svc.connect(&|_| {});
+
+    // From offset=1 (February), Jan 15 is outside-month.
+    let trigger = api.cell_trigger_attrs_for(&date(2024, 1, 15), 1);
+    assert_eq!(
+        attr(&trigger, HtmlAttr::Data("ars-outside-month")).as_deref(),
+        Some("true"),
+    );
+
+    // From offset=0 (January), Jan 15 is inside.
+    let trigger = api.cell_trigger_attrs_for(&date(2024, 1, 15), 0);
+    assert!(trigger.get(&HtmlAttr::Data("ars-outside-month")).is_none());
+
+    // Feb 15 from offset=1 (Feb's grid) — should NOT be outside-month
+    // (which is the regression the bare cell_trigger_attrs has).
+    let trigger = api.cell_trigger_attrs_for(&date(2024, 2, 15), 1);
+    assert!(
+        trigger.get(&HtmlAttr::Data("ars-outside-month")).is_none(),
+        "Feb 15 in Feb's grid must not be flagged outside-month",
+    );
+}
+
+#[test]
+fn next_month_advances_focused_date() {
+    // Codex T4 (P1): paging keeps focused_date in the visible range so the
+    // roving tab target remains rendered.
+    let mut svc = service();
+    let before = svc.context().focused_date.clone();
+
+    drop(svc.send(Event::NextMonth));
+
+    let expected = before
+        .add(DateDuration {
+            months: 1,
+            ..DateDuration::default()
+        })
+        .expect("Jan 15 + 1 month is valid");
+    assert_eq!(svc.context().focused_date, expected);
+    assert!(
+        svc.context()
+            .is_in_visible_range(&svc.context().focused_date),
+        "focused_date must land in the new visible range",
+    );
+}
+
+#[test]
+fn prev_month_retreats_focused_date() {
+    let mut svc = service();
+    let before = svc.context().focused_date.clone();
+
+    drop(svc.send(Event::PrevMonth));
+
+    let expected = before
+        .add(DateDuration {
+            months: -1,
+            ..DateDuration::default()
+        })
+        .expect("Jan 15 - 1 month is valid");
+    assert_eq!(svc.context().focused_date, expected);
+}
+
+#[test]
+fn next_year_advances_focused_date_by_twelve_months() {
+    // Codex T4 (P1) — year paging.
+    let mut svc = service();
+    let before = svc.context().focused_date.clone();
+
+    drop(svc.send(Event::NextYear));
+
+    let expected = before
+        .add(DateDuration {
+            months: 12,
+            ..DateDuration::default()
+        })
+        .expect("Jan 15 + 12 months is valid");
+    assert_eq!(svc.context().focused_date, expected);
+}
+
+#[test]
+fn prev_year_retreats_focused_date_by_twelve_months() {
+    let mut svc = service();
+    let before = svc.context().focused_date.clone();
+
+    drop(svc.send(Event::PrevYear));
+
+    let expected = before
+        .add(DateDuration {
+            months: -12,
+            ..DateDuration::default()
+        })
+        .expect("Jan 15 - 12 months is valid");
+    assert_eq!(svc.context().focused_date, expected);
+}
+
+#[test]
+fn shift_page_down_advances_focused_date_by_one_year() {
+    // Codex T3 (P2): keyboard year nav also moves focused_date, matching
+    // spec §3.2 ("Shift+PageDown: same day, next year").
+    let mut svc = service();
+    drop(svc.send(Event::FocusIn));
+    let before = svc.context().focused_date.clone();
+
+    drop(svc.send(Event::KeyDown {
+        key: KeyboardKey::PageDown,
+        shift: true,
+    }));
+
+    let expected = before
+        .add(DateDuration {
+            months: 12,
+            ..DateDuration::default()
+        })
+        .expect("Jan 15 + 12 months is valid");
+    assert_eq!(svc.context().focused_date, expected);
+}
+
+#[test]
+fn shift_page_up_retreats_focused_date_by_one_year() {
+    let mut svc = service();
+    drop(svc.send(Event::FocusIn));
+    let before = svc.context().focused_date.clone();
+
+    drop(svc.send(Event::KeyDown {
+        key: KeyboardKey::PageUp,
+        shift: true,
+    }));
+
+    let expected = before
+        .add(DateDuration {
+            months: -12,
+            ..DateDuration::default()
+        })
+        .expect("Jan 15 - 12 months is valid");
+    assert_eq!(svc.context().focused_date, expected);
+}
+
+#[test]
+fn paging_clamps_focused_date_into_min_max_range() {
+    // When paging pushes focused_date past max (or min), clamp it back into
+    // the configured range — the roving tab target must remain selectable.
+    let mut svc = service_with(
+        props()
+            .today(date(2024, 1, 15))
+            .max(Some(date(2024, 1, 31))),
+        en_us(),
+    );
+
+    drop(svc.send(Event::NextMonth));
+
+    // Without clamping, focused_date would be Feb 15 (out of range). With
+    // clamping, it lands on Jan 31 — the maximum allowed date.
+    assert_eq!(svc.context().focused_date, date(2024, 1, 31));
+}
+
+#[test]
+fn focus_out_processes_even_when_context_becomes_disabled() {
+    // Codex T5 (P2): the disabled guard must not swallow FocusOut, otherwise
+    // a calendar that becomes disabled mid-focus stays stuck in State::Focused.
+    let mut svc = service();
+    drop(svc.send(Event::FocusIn));
+    assert_eq!(*svc.state(), State::Focused);
+
+    // Simulate the parent flipping `disabled` to true while focused (e.g.,
+    // a controlled prop change). The real plumbing for prop propagation is
+    // adapter-side; here we mutate the live context directly.
+    svc.context_mut().disabled = true;
+
+    drop(svc.send(Event::FocusOut));
+
+    assert_eq!(
+        *svc.state(),
+        State::Idle,
+        "FocusOut must process even when ctx.disabled is true; otherwise the calendar stays stuck in Focused",
+    );
+}
+
+#[test]
+fn focus_in_still_blocked_when_disabled() {
+    // The disabled guard still gates interaction events including FocusIn —
+    // a disabled calendar should not be enterable via focus.
+    let mut svc = service_with(props().disabled(true), en_us());
+    drop(svc.send(Event::FocusIn));
+    assert_eq!(*svc.state(), State::Idle);
 }

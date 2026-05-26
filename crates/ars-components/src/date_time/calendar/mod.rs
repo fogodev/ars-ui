@@ -1017,6 +1017,15 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        // `FocusOut` must run even when the calendar is disabled — a
+        // calendar that becomes disabled while focused still needs its
+        // blur cleanup to land, otherwise it stays stuck in
+        // `State::Focused` with stale `data-ars-state="focused"`. All
+        // other events are gated by the disabled guard below.
+        if matches!(event, Event::FocusOut) {
+            return Some(TransitionPlan::to(State::Idle));
+        }
+
         if ctx.disabled {
             return None;
         }
@@ -1024,8 +1033,11 @@ impl ars_core::Machine for Machine {
         match event {
             Event::FocusIn => Some(TransitionPlan::to(State::Focused)),
 
-            Event::FocusOut => Some(TransitionPlan::to(State::Idle)),
-
+            // `FocusOut` is handled above the disabled guard so blur
+            // cleanup still runs when the context becomes disabled while
+            // focused. Control never reaches this arm — it exists purely
+            // to satisfy match exhaustiveness over `Event`.
+            Event::FocusOut => None,
             Event::FocusDate { date } => {
                 let clamped = ctx.clamp_date(date.clone());
                 Some(
@@ -1098,6 +1110,18 @@ fn step_for_page_behavior(ctx: &Context) -> i32 {
 fn month_step_plan(step: i32) -> TransitionPlan<Machine> {
     TransitionPlan::context_only(move |ctx: &mut Context| {
         ctx.advance_month(step);
+        // Keep `focused_date` aligned with the newly visible range so the
+        // roving-tabindex target still has a rendered cell. Without this,
+        // paging from Jan 15 → Feb leaves focused_date on Jan 15, which is
+        // not in February's 6-week grid, and no cell gets `tabindex="0"`.
+        // The shifted date is clamped into the configured `[min, max]`
+        // range so out-of-range targets snap back to the boundary.
+        if let Ok(shifted) = ctx.focused_date.add(ars_i18n::DateDuration {
+            months: step,
+            ..ars_i18n::DateDuration::default()
+        }) {
+            ctx.focused_date = ctx.clamp_date(shifted);
+        }
     })
     .with_effect(announce_month_effect())
 }
@@ -1637,6 +1661,20 @@ impl<'a> Api<'a> {
     /// Attributes for the interactive trigger inside a cell.
     #[must_use]
     pub fn cell_trigger_attrs(&self, date: &CalendarDate) -> AttrMap {
+        self.cell_trigger_attrs_inner(date, None)
+    }
+
+    /// Like [`Api::cell_trigger_attrs`] but checks "outside month" against
+    /// the month at the supplied offset rather than the first visible
+    /// month. Multi-month layouts use this so triggers in later grids do
+    /// not get flagged `data-ars-outside-month` just because they belong
+    /// to a different month than offset 0.
+    #[must_use]
+    pub fn cell_trigger_attrs_for(&self, date: &CalendarDate, offset: usize) -> AttrMap {
+        self.cell_trigger_attrs_inner(date, Some(offset))
+    }
+
+    fn cell_trigger_attrs_inner(&self, date: &CalendarDate, offset: Option<usize>) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] =
             Part::CellTrigger { date: date.clone() }.data_attrs();
@@ -1651,10 +1689,17 @@ impl<'a> Api<'a> {
 
         attrs.set(HtmlAttr::TabIndex, if is_focused { "0" } else { "-1" });
 
+        // `aria-disabled` announces the semantic restriction for both
+        // out-of-range (disabled) and unavailable dates. HTML `disabled`
+        // is **only** set for the disabled case because it removes the
+        // element from the browser focus model; unavailable dates must
+        // remain focusable per spec §3 even though they cannot be selected.
         if disabled || unavailable {
-            attrs
-                .set_bool(HtmlAttr::Disabled, true)
-                .set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
+
+        if disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
         if selected {
@@ -1665,7 +1710,11 @@ impl<'a> Api<'a> {
             attrs.set_bool(HtmlAttr::Data("ars-today"), true);
         }
 
-        if self.ctx.is_outside_visible_month(date) {
+        let outside_month = match offset {
+            Some(o) => self.ctx.is_outside_month_at_offset(date, o),
+            None => self.ctx.is_outside_visible_month(date),
+        };
+        if outside_month {
             attrs.set_bool(HtmlAttr::Data("ars-outside-month"), true);
         }
 
