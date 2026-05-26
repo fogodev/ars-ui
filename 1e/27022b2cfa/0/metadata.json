@@ -1,0 +1,212 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "1e27022b2cfa",
+  "session_id": "3c464268-f140-4c2c-8431-32011525a080",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-26T23:18:42.164089Z",
+  "branch": "audit-input-components",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/input/checkbox/mod.rs",
+    "crates/ars-components/src/input/checkbox/snapshots/ars_components__input__checkbox__tests__checkbox_control_description_and_error.snap",
+    "crates/ars-components/src/input/checkbox/snapshots/ars_components__input__checkbox__tests__checkbox_control_disabled_readonly_invalid.snap",
+    "crates/ars-components/src/input/checkbox/snapshots/ars_components__input__checkbox__tests__checkbox_control_error_only.snap",
+    "crates/ars-components/src/input/radio_group/mod.rs",
+    "crates/ars-components/src/input/radio_group/snapshots/ars_components__input__radio_group__tests__radio_group_error_message.snap",
+    "crates/ars-components/src/input/switch/mod.rs",
+    "crates/ars-components/src/input/switch/snapshots/ars_components__input__switch__tests__switch_control_description_and_error.snap",
+    "crates/ars-components/src/input/switch/snapshots/ars_components__input__switch__tests__switch_control_disabled_readonly_invalid.snap",
+    "crates/ars-components/src/input/switch/snapshots/ars_components__input__switch__tests__switch_control_error_only.snap",
+    "crates/ars-components/src/input/text_field/mod.rs",
+    "crates/ars-components/src/input/text_field/snapshots/ars_components__input__text_field__tests__text_field_input_described_invalid.snap",
+    "crates/ars-components/src/input/textarea/mod.rs",
+    "crates/ars-components/src/input/textarea/snapshots/ars_components__input__textarea__tests__textarea_described_invalid.snap",
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/input.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/checkbox.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/checkbox_group.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/editable.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/number_input.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/password_input.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/pin_input.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/radio_group.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/range_slider.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/search_input.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/slider.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/switch.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/text_field.rs",
+    "crates/ars-components/tests/proptest_state_machines/input/textarea.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/input.rs",
+    "crates/ars-components/tests/spec_conformance/input/checkbox.rs",
+    "crates/ars-components/tests/spec_conformance/input/checkbox_group.rs",
+    "crates/ars-components/tests/spec_conformance/input/editable.rs",
+    "crates/ars-components/tests/spec_conformance/input/file_trigger.rs",
+    "crates/ars-components/tests/spec_conformance/input/mod.rs",
+    "crates/ars-components/tests/spec_conformance/input/number_input.rs",
+    "crates/ars-components/tests/spec_conformance/input/password_input.rs",
+    "crates/ars-components/tests/spec_conformance/input/pin_input.rs",
+    "crates/ars-components/tests/spec_conformance/input/radio_group.rs",
+    "crates/ars-components/tests/spec_conformance/input/range_slider.rs",
+    "crates/ars-components/tests/spec_conformance/input/search_input.rs",
+    "crates/ars-components/tests/spec_conformance/input/slider.rs",
+    "crates/ars-components/tests/spec_conformance/input/switch.rs",
+    "crates/ars-components/tests/spec_conformance/input/text_field.rs",
+    "crates/ars-components/tests/spec_conformance/input/textarea.rs",
+    "crates/ars-i18n/src/number/mod.rs",
+    "spec/components/input/checkbox-group.md",
+    "spec/components/input/checkbox.md",
+    "spec/components/input/number-input.md",
+    "spec/components/input/password-input.md",
+    "spec/components/input/pin-input.md",
+    "spec/components/input/range-slider.md",
+    "spec/components/input/search-input.md",
+    "spec/components/input/slider.md",
+    "spec/components/input/switch.md",
+    "spec/components/input/text-field.md",
+    "spec/components/input/textarea.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-7[1m]",
+  "turn_id": "48e9a8e42242",
+  "token_usage": {
+    "input_tokens": 9816,
+    "cache_creation_tokens": 1295540,
+    "cache_read_tokens": 79503558,
+    "output_tokens": 236035,
+    "api_call_count": 254
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Audit all 14 agnostic input components for implementation correctness, proptest coverage, and spec conformance, while reorganizing the monolithic test files into per-component modules matching the existing overlay/utility layout.",
+    "outcome": "All 14 input components audited and verified; both test monoliths split into per-component files (spec_conformance: 274→15 files, proptest: 1,403→14 files); two new proptests added (checkbox_group, radio_group); one spec/impl drift fixed (radio_group error message), one a11y bug fixed at root (ars-i18n fallback % suffix), aria-errormessage rolled out to 4 remaining components, and 11 specs updated. All gates green; PR committed and pushed, closing Epic #220.",
+    "learnings": {
+      "repo": [
+        "Per-component test layout convention follows overlay/ and utility/ precedent: each component gets its own .rs file, shared helpers/strategies hoist into mod.rs.",
+        "cargo xci-fast runs --workspace --all-features, so tests that fail under default features (e.g., i18n-dependent data_display snapshots) still pass the real gate.",
+        "spec/foundation/03-accessibility.md lines 1210-1225 blesses the aria-errormessage + aria-describedby dual pattern as the workspace a11y convention.",
+        "Spec files use string effect names (PendingEffect::new(\"complete\", ...)) corpus-wide, not typed Effect enums — modernizing one spec in isolation would create inconsistency.",
+        "xtask spec validate checks 340 files; compile-snippets checks 2,171 code blocks in markdown specs.",
+        "file_trigger has no state machine (stateless) and is intentionally skipped in proptests — documented in mod.rs.",
+        "Snapshots that change require a snapshot-reviewed PR label.",
+        "PRs that close Epic-level issues use Closes #NNN in the body, not the title."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-i18n/src/number/mod.rs",
+          "finding": "fallback_format (no-icu4x/no-web-intl path) never appended % suffix for Style::Percent, producing aria-valuetext=\"50\" instead of \"50%\" in default-feature builds — a real a11y bug, not just a test issue."
+        },
+        {
+          "path": "crates/ars-components/src/input/radio_group/mod.rs",
+          "line": 890,
+          "end_line": 890,
+          "finding": "Error message emitted role=\"alert\" while the component's own spec (§1.7) and all 8 sibling input components mandate aria-live=\"polite\"."
+        },
+        {
+          "path": "spec/foundation/03-accessibility.md",
+          "line": 1210,
+          "end_line": 1225,
+          "finding": "Workspace convention explicitly blesses aria-errormessage alongside aria-describedby; checkbox/switch/text_field/textarea were deviating from this foundation contract."
+        },
+        {
+          "path": "spec/components/input/range-slider.md",
+          "finding": "§5 prose stated validation delegates entirely to a Field wrapper, but the impl sets aria-invalid + aria-errormessage on thumbs directly — spec was contradicting the impl."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/input.rs",
+          "line": 1,
+          "end_line": 1403,
+          "finding": "1,403-line monolith contained 12 existing proptests + arbitraries for 12 components; checkbox_group and radio_group had no proptests at all."
+        }
+      ],
+      "workflow": [
+        "Parallel Explore agents (14) dispatched in two batches of 7 for per-component drift audit — agent reports were often imprecise/excerpt-based and required direct grep/read verification before acting.",
+        "TDD snapshot approach: run tests first to confirm snapshot failures catch the new attribute, then regenerate — ensures snapshots are mutation-resistant.",
+        "Stash-based verification to distinguish pre-existing failures from introduced regressions: git stash → run failing tests → confirmed failures predated the work.",
+        "Post-implementation audit phase should check adapter specs and foundation contracts, not just direct component spec/impl pairs.",
+        "When a fallback code path produces semantically wrong output (not just cosmetically different), fixing the root cause is better than gating tests behind feature flags."
+      ]
+    },
+    "friction": [
+      "7 pre-existing data_display::meter and data_display::progress test failures at branch HEAD (\"50%\" vs \"50\") were unrelated to input work but appeared as blockers until confirmed pre-existing via stash.",
+      "Explore agents produced imprecise findings from excerpt-limited reads — every agent finding required manual grep/read verification before acting, adding significant overhead.",
+      "range-slider spec §5 prose actively contradicted the impl, requiring both code investigation and prose correction rather than a simple attribute addition.",
+      "Proptest monolith (1,403 lines) required multiple sequential Read calls with offset pagination to fully ingest.",
+      "cargo test only accepts one filter at a time — snapshot regeneration for 4 components required 4 separate commands instead of one."
+    ],
+    "open_items": [
+      "pin-input spec still uses string effect names (PendingEffect::new(\"complete\", ...)) rather than the typed Effect enum — this is a corpus-wide spec convention gap, not a pin-input-specific issue; deferred as a separate corpus-wide task.",
+      "Mutation testing was explicitly skipped per user decision — coverage of new proptests (checkbox_group, radio_group) and the new aria-errormessage unit assertions has not been mutation-verified.",
+      "Codex review loop was set up (task created) but its completion is not shown in the transcript — review threads may need addressing.",
+      "checkbox/switch/text_field/textarea previously lacked aria-errormessage in all-features CI runs too (not just fallback) — the fix is landed but no regression test existed before this session to catch future drift."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-26T23:17:52.434569Z",
+    "agent_lines": 2258,
+    "agent_removed": 1698,
+    "human_added": 13,
+    "human_modified": 108,
+    "human_removed": 0,
+    "total_committed": 2379,
+    "total_lines_changed": 4077,
+    "agent_percentage": 97.03213146921756,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 133,
+      "user_lines_removed": 108,
+      "agent_lines_added": 2376,
+      "agent_lines_removed": 1708,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 12,
+        "crates/ars-components/tests/proptest_state_machines/input/checkbox_group.rs": 10,
+        "crates/ars-components/tests/proptest_state_machines/input/radio_group.rs": 3,
+        "spec/components/input/checkbox.md": 11,
+        "spec/components/input/number-input.md": 12,
+        "spec/components/input/password-input.md": 9,
+        "spec/components/input/pin-input.md": 9,
+        "spec/components/input/range-slider.md": 14,
+        "spec/components/input/search-input.md": 12,
+        "spec/components/input/slider.md": 14,
+        "spec/components/input/switch.md": 11,
+        "spec/components/input/text-field.md": 7,
+        "spec/components/input/textarea.md": 9
+      },
+      "user_removed_per_file": {
+        "spec/components/input/checkbox.md": 11,
+        "spec/components/input/number-input.md": 12,
+        "spec/components/input/password-input.md": 9,
+        "spec/components/input/pin-input.md": 9,
+        "spec/components/input/range-slider.md": 14,
+        "spec/components/input/search-input.md": 12,
+        "spec/components/input/slider.md": 14,
+        "spec/components/input/switch.md": 11,
+        "spec/components/input/text-field.md": 7,
+        "spec/components/input/textarea.md": 9
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 12,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2487,
+      "agent_lines_removed": 1806,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 12
+      }
+    }
+  ]
+}
