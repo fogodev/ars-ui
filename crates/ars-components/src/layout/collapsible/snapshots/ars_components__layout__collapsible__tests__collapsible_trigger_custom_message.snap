@@ -1,0 +1,12 @@
+---
+source: crates/ars-components/src/layout/collapsible.rs
+expression: "snapshot_attrs(&custom_messages.connect(&|_| {}).trigger_attrs())"
+---
+aria-controls=collapsible-content
+aria-expanded=false
+aria-label=Show details
+data-ars-part=trigger
+data-ars-scope=collapsible
+data-ars-state=closed
+id=collapsible-trigger
+type=button

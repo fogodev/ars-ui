@@ -1,0 +1,8 @@
+---
+source: crates/ars-components/src/layout/collapsible.rs
+expression: "snapshot_attrs(&open.connect(&|_| {}).indicator_attrs())"
+---
+aria-hidden=true
+data-ars-part=indicator
+data-ars-scope=collapsible
+data-ars-state=open

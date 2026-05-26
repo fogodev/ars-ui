@@ -99,16 +99,16 @@ pub mod collapsible {
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                     | Mode       | Sync trigger                      | Machine event / update path                                    | Visible effect                                              | Notes                                                        |
-| -------------------------------- | ---------- | --------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------ |
-| `open`                           | controlled | signal change after mount         | `SetOpen(bool)`                                                | updates state attrs, trigger labels, and content visibility | do not support controlled/uncontrolled switching after mount |
-| `disabled`                       | controlled | prop change after mount           | adapter rebuilds core props or dispatches equivalent sync path | blocks toggle behavior and focusable interaction            | visibility stays derived from current state                  |
-| `lazy_mount` / `unmount_on_exit` | controlled | render-time and state transitions | adapter-owned presence policy                                  | decides whether content remains mounted while closed        | not a machine state by itself                                |
+| Adapter prop                     | Mode       | Sync trigger                      | Machine event / update path                                               | Visible effect                                              | Notes                                                                 |
+| -------------------------------- | ---------- | --------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------- |
+| `open`                           | controlled | signal change after mount         | rebuild core props so `on_props_changed` emits `SyncControlledOpen(bool)` | updates state attrs, trigger labels, and content visibility | controlled/uncontrolled switching follows the core prop-sync contract |
+| `disabled`                       | controlled | prop change after mount           | rebuild core props so `on_props_changed` emits `SyncProps`                | blocks toggle behavior and focusable interaction            | visibility stays derived from current state                           |
+| `lazy_mount` / `unmount_on_exit` | controlled | render-time and state transitions | adapter-owned presence policy                                             | decides whether content remains mounted while closed        | not a machine state by itself                                         |
 
 | UI event                  | Preconditions                    | Machine event / callback path | Ordering notes                                                 | Notes                                  |
 | ------------------------- | -------------------------------- | ----------------------------- | -------------------------------------------------------------- | -------------------------------------- |
 | trigger click             | not disabled                     | `Toggle`                      | adapter toggles before wrapper callbacks observe the new state | primary activation path                |
-| trigger `Enter` / `Space` | trigger focused and not disabled | `Toggle`                      | must not double-fire with native button click                  | keyboard disclosure path               |
+| non-repeating trigger `Enter` / `Space` | trigger focused and not disabled | `Toggle` via `api.on_trigger_keydown`, then prevent default when it returns `true` | prevents native button activation from dispatching a duplicate click toggle | keyboard disclosure path               |
 | trigger focus             | trigger receives focus           | `Focus { is_keyboard }`       | focus-visible repair runs before attrs are read                | keeps `data-ars-focus-visible` in sync |
 | trigger or content blur   | focus leaves the active region   | `Blur`                        | blur must clear focus-visible bookkeeping before late cleanup  | preserves disclosure focus state       |
 

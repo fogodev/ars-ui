@@ -6,6 +6,9 @@ pub mod aspect_ratio;
 /// Center component connect API.
 pub mod center;
 
+/// Collapsible component machine.
+pub mod collapsible;
+
 /// Frame component connect API.
 pub mod frame;
 

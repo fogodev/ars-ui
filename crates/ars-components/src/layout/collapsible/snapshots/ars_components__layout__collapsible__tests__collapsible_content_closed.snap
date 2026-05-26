@@ -1,0 +1,11 @@
+---
+source: crates/ars-components/src/layout/collapsible.rs
+expression: "snapshot_attrs(&closed.connect(&|_| {}).content_attrs())"
+---
+aria-labelledby=collapsible-trigger
+data-ars-part=content
+data-ars-scope=collapsible
+data-ars-state=closed
+hidden=true
+id=collapsible-content
+role=region

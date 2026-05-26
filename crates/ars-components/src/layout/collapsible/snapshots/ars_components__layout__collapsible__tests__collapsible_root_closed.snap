@@ -1,0 +1,8 @@
+---
+source: crates/ars-components/src/layout/collapsible.rs
+expression: "snapshot_attrs(&closed.connect(&|_| {}).root_attrs())"
+---
+data-ars-part=root
+data-ars-scope=collapsible
+data-ars-state=closed
+id=collapsible
