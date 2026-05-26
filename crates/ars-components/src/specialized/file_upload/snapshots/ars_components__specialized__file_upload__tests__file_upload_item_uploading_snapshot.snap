@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/specialized/file_upload/tests.rs
+expression: "snapshot_attrs(&api_with_files(vec![item(\"file-1\", \"photo.png\",\nStatus::Uploading)]).item_attrs(0))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-file-id",
+            ),
+            String(
+                "file-1",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "file-upload",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "uploading",
+            ),
+        ),
+        (
+            Aria(
+                Description,
+            ),
+            String(
+                "1 KB",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "listitem",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -18,11 +18,11 @@ dropzone area, a file list, and integrates with the native `<input type="file">`
 ```rust
 // crates/ars-core/src/components/file_upload.rs
 
-use crate::{Bindable, ComponentId};
+use crate::Bindable;
 use crate::machine::{Machine, TransitionPlan, ComponentIds, AttrMap};
 
 /// Represents a single file in the upload queue.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Item {
     /// Unique identifier for this file item.
     pub id: String,
@@ -189,6 +189,10 @@ pub enum Event {
         /// The part that was blurred.
         part: &'static str,
     },
+    /// Synchronize the externally controlled file list prop.
+    SetFiles(Option<Vec<Item>>),
+    /// Synchronize output-affecting props stored in context.
+    SetProps,
 }
 
 /// Raw file data from the browser File API, prior to validation.
@@ -243,8 +247,8 @@ pub struct Context {
     pub locale: Locale,
     /// Resolved translatable messages.
     pub messages: Messages,
-    /// Component instance IDs.
-    pub id: ComponentId,
+    /// Component instance base id.
+    pub id: String,
     /// The id of the dropzone.
     pub dropzone_id: String,
     /// The id of the input.
@@ -372,7 +376,9 @@ fn validate_files(
         }
 
         // Check MIME type
-        if !ctx.accept.is_empty() && !mime_matches(&file.mime_type, &ctx.accept) {
+        if !ctx.accept.is_empty()
+            && !mime_matches(&file.mime_type, &file.name, &ctx.accept)
+        {
             rejected.push(Rejection {
                 name: file.name.clone(),
                 size: file.size,
@@ -421,14 +427,13 @@ fn validate_files(
     (accepted, rejected)
 }
 
-fn mime_matches(mime: &str, patterns: &[String]) -> bool {
+fn mime_matches(mime: &str, name: &str, patterns: &[String]) -> bool {
     patterns.iter().any(|pattern| {
         if pattern.ends_with("/*") {
             let prefix = &pattern[..pattern.len() - 1];
             mime.starts_with(prefix)
         } else if pattern.starts_with('.') {
-            // Extension-based: ".pdf", ".png"
-            mime.ends_with(pattern) || mime_from_extension(pattern).map_or(false, |m| m == mime)
+            name.ends_with(pattern)
         } else {
             mime == pattern
         }
@@ -693,8 +698,75 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (_, Event::SetFiles(files)) => {
+                let files = files.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    if let Some(files) = files {
+                        ctx.files.set(files.clone());
+                        ctx.files.sync_controlled(Some(files));
+                    } else {
+                        ctx.files.sync_controlled(None);
+                    }
+                }))
+            }
+
+            (_, Event::SetProps) => Some(TransitionPlan::context_only({
+                let disabled = props.disabled;
+                let readonly = props.readonly;
+                let required = props.required;
+                let multiple = props.multiple;
+                let accept = props.accept.clone();
+                let max_file_size = props.max_file_size;
+                let min_file_size = props.min_file_size;
+                let max_files = props.max_files;
+                let auto_upload = props.auto_upload;
+                let directory = props.directory;
+
+                move |ctx| {
+                    ctx.disabled = disabled;
+                    ctx.readonly = readonly;
+                    ctx.required = required;
+                    ctx.multiple = multiple;
+                    ctx.accept = accept;
+                    ctx.max_file_size = max_file_size;
+                    ctx.min_file_size = min_file_size;
+                    ctx.max_files = max_files;
+                    ctx.auto_upload = auto_upload;
+                    ctx.directory = directory;
+                }
+            })),
+
             _ => None,
         }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "file_upload::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.files != new.files {
+            events.push(Event::SetFiles(new.files.clone()));
+        }
+
+        if old.disabled != new.disabled
+            || old.readonly != new.readonly
+            || old.required != new.required
+            || old.multiple != new.multiple
+            || old.accept != new.accept
+            || old.max_file_size != new.max_file_size
+            || old.min_file_size != new.min_file_size
+            || old.max_files != new.max_files
+            || old.auto_upload != new.auto_upload
+            || old.directory != new.directory
+        {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -865,6 +937,7 @@ impl<'a> Api<'a> {
                 Status::Uploading => "uploading",
                 Status::Complete => "complete",
                 Status::Failed(_) => "error",
+                Status::Cancelled => "cancelled",
             });
             attrs.set(HtmlAttr::Data("ars-file-id"), &file.id);
             attrs.set(HtmlAttr::Aria(AriaAttr::Description),
@@ -937,8 +1010,14 @@ impl<'a> Api<'a> {
         if self.ctx.directory {
             attrs.set(HtmlAttr::WebkitDirectory, "");
         }
+        if let Some(ref capture) = self.props.capture {
+            attrs.set(HtmlAttr::Capture, capture);
+        }
         if let Some(ref name) = self.props.name {
             attrs.set(HtmlAttr::Name, name);
+        }
+        if self.ctx.required {
+            attrs.set_bool(HtmlAttr::Required, true);
         }
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -992,6 +1071,11 @@ impl<'a> Api<'a> {
     /// Retry a failed upload.
     pub fn retry_file(&self, file_id: &str) {
         (self.send)(Event::RetryFile { file_id: file_id.to_string() });
+    }
+
+    /// Cancel an in-progress upload.
+    pub fn cancel_file(&self, file_id: &str) {
+        (self.send)(Event::CancelFile { file_id: file_id.to_string() });
     }
 }
 
@@ -1081,7 +1165,7 @@ The adapter MUST:
 
 1. Insert a visually-hidden `<div aria-live="assertive" aria-atomic="true">` as
    a sibling of the dropzone.
-2. On `DragEnter` transition, set its text content to `messages.drop_zone_active`.
+2. On `DragEnter` transition, set its text content to `messages.dropzone_active`.
 3. On `DragLeave` (when `drag_counter` reaches 0), set text to `messages.drop_zone_left`.
 4. On `Drop` transition, set text to `(messages.files_added)(accepted_count)`.
 5. Clear the live region text after a 3-second timeout to avoid stale announcements.
@@ -1095,6 +1179,8 @@ The adapter MUST:
 pub struct Messages {
     pub dropzone_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub dropzone_active: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub drop_zone_left: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub files_added: MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>,
     pub trigger_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub file_list_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub remove_label: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
@@ -1110,7 +1196,9 @@ impl Default for Messages {
         Self {
             dropzone_label: MessageFn::static_str("Drag and drop files here, or click to browse"),
             dropzone_active: MessageFn::static_str("Drop files to upload"),
-            trigger_label: MessageFn::static_str("Browse files"),
+            drop_zone_left: MessageFn::static_str("Drop zone is no longer active"),
+            files_added: MessageFn::new(|count, _locale| format!("{} files added", count)),
+            trigger_label: MessageFn::static_str("Choose files to upload"),
             file_list_label: MessageFn::static_str("Uploaded files"),
             remove_label: MessageFn::new(|name, _locale| format!("Remove {}", name)),
             rejection_message: MessageFn::new(|count, _locale| format!("{} files rejected", count)),
@@ -1159,7 +1247,7 @@ drop zone activity. The adapter populates the live region text from
 
 | DnD Event   | Live Region Text Source         | Default (en-US)                   |
 | ----------- | ------------------------------- | --------------------------------- |
-| `dragenter` | `messages.drop_zone_active`     | `"Drop zone is active"`           |
+| `dragenter` | `messages.dropzone_active`      | `"Drop files to upload"`          |
 | `dragleave` | `messages.drop_zone_left`       | `"Drop zone is no longer active"` |
 | `drop`      | `(messages.files_added)(count)` | `"{N} files added"`               |
 
