@@ -2161,3 +2161,83 @@ fn next_disabled_when_full_next_page_above_max() {
         "next must be disabled when the next page forward yields no selectable dates",
     );
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Codex review regressions, pass 4 (PR #688)
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn sync_props_keeps_focused_date_in_visible_range() {
+    // Codex N9 (P1): after `sync_props_into_ctx` clamps focused_date, the
+    // visible month/year window must follow, otherwise the focused cell
+    // is no longer rendered.
+    let mut svc = service_with(props().today(date(2024, 1, 15)), en_us());
+    assert_eq!(svc.context().visible_month, 1);
+
+    // Parent installs a new min in July — clamping pushes focused_date
+    // to Jul 1, and the visible window must follow.
+    drop(svc.set_props(props().today(date(2024, 1, 15)).min(Some(date(2024, 7, 1)))));
+
+    assert_eq!(svc.context().focused_date, date(2024, 7, 1));
+    assert!(
+        svc.context()
+            .is_in_visible_range(&svc.context().focused_date),
+        "visible window must follow the clamped focused_date",
+    );
+}
+
+#[test]
+fn sync_props_clears_first_day_of_week_override() {
+    // Codex N10 (P2): when the parent flips `first_day_of_week` Some→None
+    // the override clears and context returns to the locale-derived value.
+    let mut svc = service_with(props().first_day_of_week(Some(Weekday::Wednesday)), en_us());
+    assert_eq!(svc.context().first_day_of_week, Weekday::Wednesday);
+
+    // Parent removes the override.
+    drop(svc.set_props(props().first_day_of_week(None)));
+
+    // en_us locale default is Sunday — context must return to it.
+    assert_eq!(
+        svc.context().first_day_of_week,
+        Weekday::Sunday,
+        "clearing the override must restore the locale default",
+    );
+}
+
+#[test]
+fn set_year_handles_extreme_year_without_overflow() {
+    // Codex N11 (P2): `SetYear { year: i32::MIN }` would overflow the
+    // delta computation against a positive current visible_year. The
+    // transition must drop the event safely instead of panicking in
+    // debug or wrapping in release.
+    let mut svc = service();
+    let visible_before = svc.context().visible_year;
+    let focused_before = svc.context().focused_date.clone();
+
+    drop(svc.send(Event::SetYear { year: i32::MIN }));
+
+    // The event is dropped (no overflow). Visible year and focused date
+    // remain unchanged.
+    assert_eq!(svc.context().visible_year, visible_before);
+    assert_eq!(svc.context().focused_date, focused_before);
+}
+
+#[test]
+fn set_month_is_atomic_with_focused_date() {
+    // Codex N12 (P2): SetMonth must commit `visible_month` only after
+    // the focused-date shift succeeds. Happy-path invariant: after
+    // SetMonth, focused_date.month() always equals visible_month.
+    let mut svc = service();
+    drop(svc.send(Event::SetMonth { month: 7 }));
+    assert_eq!(svc.context().visible_month, 7);
+    assert_eq!(svc.context().focused_date.month(), 7);
+}
+
+#[test]
+fn set_year_is_atomic_with_focused_date() {
+    // Codex N13 (P2): SetYear same atomicity rule.
+    let mut svc = service();
+    drop(svc.send(Event::SetYear { year: 2030 }));
+    assert_eq!(svc.context().visible_year, 2030);
+    assert_eq!(svc.context().focused_date.year(), 2030);
+}

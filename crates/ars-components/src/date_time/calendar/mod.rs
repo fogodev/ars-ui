@@ -1114,18 +1114,21 @@ impl ars_core::Machine for Machine {
 
                 Some(
                     TransitionPlan::context_only(move |ctx: &mut Context| {
-                        // Move both visible_month and focused_date by the
-                        // same month delta so the roving-tabindex target
-                        // still has a rendered cell. The shifted date is
-                        // clamped into [min, max].
+                        // visible_month and focused_date must move
+                        // atomically. Compute the shifted date first and
+                        // only commit `visible_month` if the shift
+                        // succeeds — otherwise leave both untouched so
+                        // the roving target can never end up outside the
+                        // rendered grid.
                         let delta = i32::from(month) - i32::from(ctx.visible_month);
-                        ctx.visible_month = month;
-                        if let Ok(shifted) = ctx.focused_date.add(ars_i18n::DateDuration {
+                        let Ok(shifted) = ctx.focused_date.add(ars_i18n::DateDuration {
                             months: delta,
                             ..ars_i18n::DateDuration::default()
-                        }) {
-                            ctx.focused_date = ctx.clamp_date(shifted);
-                        }
+                        }) else {
+                            return;
+                        };
+                        ctx.visible_month = month;
+                        ctx.focused_date = ctx.clamp_date(shifted);
                     })
                     .with_effect(announce_month_effect()),
                 )
@@ -1135,14 +1138,24 @@ impl ars_core::Machine for Machine {
                 let year = *year;
                 Some(
                     TransitionPlan::context_only(move |ctx: &mut Context| {
-                        let delta_years = year - ctx.visible_year;
-                        ctx.visible_year = year;
-                        if let Ok(shifted) = ctx.focused_date.add(ars_i18n::DateDuration {
+                        // `i32 - i32` overflows on extreme inputs
+                        // (`SetYear { year: i32::MIN }` with positive
+                        // `visible_year`). Bail out via `checked_sub`
+                        // instead of panicking in debug or wrapping in
+                        // release.
+                        let Some(delta_years) = year.checked_sub(ctx.visible_year) else {
+                            return;
+                        };
+                        // visible_year and focused_date move atomically —
+                        // commit only after the shift succeeds.
+                        let Ok(shifted) = ctx.focused_date.add(ars_i18n::DateDuration {
                             years: delta_years,
                             ..ars_i18n::DateDuration::default()
-                        }) {
-                            ctx.focused_date = ctx.clamp_date(shifted);
-                        }
+                        }) else {
+                            return;
+                        };
+                        ctx.visible_year = year;
+                        ctx.focused_date = ctx.clamp_date(shifted);
                     })
                     .with_effect(announce_month_effect()),
                 )
@@ -1185,18 +1198,21 @@ fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
     ctx.today = props.today.clone();
 
     // `first_day_of_week` is the only field that can come from *either*
-    // props or the locale-derived default in `Env`. If props supplies an
-    // explicit override, honour it; otherwise leave the locale-derived
-    // value as-is (we cannot re-derive it from here because `Env` is not
-    // threaded through props updates).
-    if let Some(fdow) = props.first_day_of_week {
-        ctx.first_day_of_week = fdow;
-    }
+    // props or the locale-derived default. An explicit override always
+    // wins; clearing the override (`Some(_) → None`) restores the
+    // locale-derived value via the cached `intl_backend`, otherwise
+    // context would keep the stale weekday in violation of the Props
+    // contract.
+    ctx.first_day_of_week = props
+        .first_day_of_week
+        .unwrap_or_else(|| ctx.locale.first_day_of_week(&*ctx.intl_backend));
 
     // Re-clamp `focused_date` in case `min`/`max` tightened so the roving
-    // target never points at an out-of-range cell.
+    // target never points at an out-of-range cell, then drag the visible
+    // window along if the clamp moved focus into a different month.
     let clamped = ctx.clamp_date(ctx.focused_date.clone());
     ctx.focused_date = clamped;
+    ctx.sync_visible_to_focused();
 }
 
 fn step_for_page_behavior(ctx: &Context) -> i32 {

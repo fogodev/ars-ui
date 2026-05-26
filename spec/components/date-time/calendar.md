@@ -668,32 +668,36 @@ impl ars_core::Machine for Machine {
                 let month = *month;
                 if !(1..=12).contains(&month) { return None; }
                 Some(TransitionPlan::context_only(move |ctx| {
-                    // Move both visible_month and focused_date by the
-                    // same delta so the roving-tabindex target still has
-                    // a rendered cell. Out-of-range targets clamp back
-                    // to [min, max].
+                    // visible_month and focused_date move atomically:
+                    // compute the shifted date first and only commit
+                    // `visible_month` if the shift succeeds, otherwise
+                    // leave both untouched. Out-of-range targets clamp
+                    // back to [min, max].
                     let delta = i32::from(month) - i32::from(ctx.visible_month);
-                    ctx.visible_month = month;
-                    if let Ok(shifted) = ctx.focused_date.add(DateDuration {
+                    let Ok(shifted) = ctx.focused_date.add(DateDuration {
                         months: delta,
                         ..DateDuration::default()
-                    }) {
-                        ctx.focused_date = ctx.clamp_date(shifted);
-                    }
+                    }) else { return; };
+                    ctx.visible_month = month;
+                    ctx.focused_date = ctx.clamp_date(shifted);
                 }).with_effect(announce_month_effect()))
             }
 
             Event::SetYear { year } => {
                 let year = *year;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let delta_years = year - ctx.visible_year;
-                    ctx.visible_year = year;
-                    if let Ok(shifted) = ctx.focused_date.add(DateDuration {
+                    // `i32 - i32` overflows on extreme inputs
+                    // (`SetYear { year: i32::MIN }` with positive
+                    // `visible_year`); use `checked_sub` and drop the
+                    // event on overflow.
+                    let Some(delta_years) = year.checked_sub(ctx.visible_year) else { return; };
+                    // visible_year and focused_date move atomically.
+                    let Ok(shifted) = ctx.focused_date.add(DateDuration {
                         years: delta_years,
                         ..DateDuration::default()
-                    }) {
-                        ctx.focused_date = ctx.clamp_date(shifted);
-                    }
+                    }) else { return; };
+                    ctx.visible_year = year;
+                    ctx.focused_date = ctx.clamp_date(shifted);
                 }).with_effect(announce_month_effect()))
             }
 
@@ -755,13 +759,18 @@ fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
     ctx.page_behavior = props.page_behavior;
     ctx.today = props.today.clone();
 
-    if let Some(fdow) = props.first_day_of_week {
-        ctx.first_day_of_week = fdow;
-    }
+    // `first_day_of_week` accepts an explicit override; clearing it
+    // (`Some(_) → None`) restores the locale-derived value via the
+    // cached `intl_backend` rather than retaining the stale override.
+    ctx.first_day_of_week = props
+        .first_day_of_week
+        .unwrap_or_else(|| ctx.locale.first_day_of_week(&*ctx.intl_backend));
 
-    // Re-clamp `focused_date` in case `min`/`max` tightened.
+    // Re-clamp `focused_date` in case `min`/`max` tightened, then drag
+    // the visible window along so the focused cell remains rendered.
     let clamped = ctx.clamp_date(ctx.focused_date.clone());
     ctx.focused_date = clamped;
+    ctx.sync_visible_to_focused();
 }
 
 fn announce_month_effect() -> ars_core::PendingEffect<Machine> {
