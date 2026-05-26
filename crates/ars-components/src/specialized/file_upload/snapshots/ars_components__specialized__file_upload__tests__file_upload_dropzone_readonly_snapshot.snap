@@ -1,6 +1,6 @@
 ---
 source: crates/ars-components/src/specialized/file_upload/tests.rs
-expression: "snapshot_attrs(&api_with_context(ctx, State::Idle).trigger_attrs())"
+expression: "snapshot_attrs(&api_with_context(ctx, State::Idle).dropzone_attrs())"
 ---
 AttrMap {
     attrs: [
@@ -9,7 +9,7 @@ AttrMap {
                 "ars-part",
             ),
             String(
-                "trigger",
+                "dropzone",
             ),
         ),
         (
@@ -18,6 +18,14 @@ AttrMap {
             ),
             String(
                 "file-upload",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
             ),
         ),
         (
@@ -30,22 +38,28 @@ AttrMap {
         ),
         (
             Aria(
-                Label,
+                LabelledBy,
             ),
             String(
-                "Choose files to upload",
+                "upload-label",
             ),
         ),
         (
-            Disabled,
-            Bool(
-                true,
+            Id,
+            String(
+                "upload-dropzone",
             ),
         ),
         (
-            Type,
+            Role,
             String(
                 "button",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
             ),
         ),
     ],

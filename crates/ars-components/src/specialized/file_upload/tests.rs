@@ -731,6 +731,132 @@ fn file_upload_readonly_allows_focus_only() {
 }
 
 #[test]
+fn file_upload_disabled_accepts_set_props_to_clear_disabled() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").disabled(true),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let result = service.set_props(Props {
+        disabled: false,
+        ..service.props().clone()
+    });
+
+    assert!(result.context_changed);
+    assert!(!service.context().disabled);
+
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "a.png",
+        100,
+        "image/png",
+    )])));
+
+    assert_eq!(service.context().files.get().len(), 1);
+}
+
+#[test]
+fn file_upload_disabled_applies_upload_progress_while_uploading() {
+    let mut service = uploading_service("file-1");
+
+    drop(service.set_props(Props {
+        disabled: true,
+        ..service.props().clone()
+    }));
+
+    drop(service.send(Event::UploadProgress {
+        file_id: "file-1".into(),
+        progress: 0.25,
+    }));
+
+    assert!((service.context().files.get()[0].progress - 0.25).abs() < f64::EPSILON);
+}
+
+#[test]
+fn file_upload_uploading_auto_upload_starts_new_pending_files() {
+    let mut service = Service::<Machine>::new(
+        Props::new()
+            .id("upload")
+            .multiple(true)
+            .auto_upload(true)
+            .default_files(vec![item("file-1", "first.png", Status::Pending)]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::StartUpload));
+
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "second.png",
+        100,
+        "image/png",
+    )])));
+
+    let files = service.context().files.get();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[1].status, Status::Uploading);
+}
+
+#[test]
+fn file_upload_non_multiple_rejects_second_file() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").multiple(false),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "first.png",
+        100,
+        "image/png",
+    )])));
+
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "second.png",
+        100,
+        "image/png",
+    )])));
+
+    assert_eq!(service.context().files.get().len(), 1);
+    assert_eq!(
+        service.context().rejected_files[0].reason,
+        RejectionReason::TooMany
+    );
+}
+
+#[test]
+fn file_upload_upload_progress_clamps_invalid_fraction() {
+    let mut service = uploading_service("file-1");
+
+    drop(service.send(Event::UploadProgress {
+        file_id: "file-1".into(),
+        progress: 2.0,
+    }));
+    assert!((service.context().files.get()[0].progress - 1.0).abs() < f64::EPSILON);
+
+    drop(service.send(Event::UploadProgress {
+        file_id: "file-1".into(),
+        progress: f64::NAN,
+    }));
+    assert!((service.context().files.get()[0].progress - 0.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn file_upload_complete_ignores_cancelled_file() {
+    let mut service = uploading_service("file-1");
+
+    drop(service.send(Event::CancelFile {
+        file_id: "file-1".into(),
+    }));
+
+    drop(service.send(Event::UploadComplete {
+        file_id: "file-1".into(),
+    }));
+
+    assert_eq!(service.context().files.get()[0].status, Status::Cancelled);
+}
+
+#[test]
 fn file_upload_open_file_picker_emits_effect() {
     let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
 
@@ -861,6 +987,17 @@ fn file_upload_dropzone_disabled_sets_aria_disabled() {
 }
 
 #[test]
+fn file_upload_dropzone_readonly_sets_aria_disabled() {
+    let mut ctx = Machine::init(&test_props(), &Env::default(), &Messages::default()).1;
+
+    ctx.readonly = true;
+
+    let attrs = api_with_context(ctx, State::Idle).dropzone_attrs();
+
+    assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+}
+
+#[test]
 fn file_upload_messages_include_drag_and_drop_announcement_defaults() {
     let messages = Messages::default();
 
@@ -959,6 +1096,17 @@ fn file_upload_dropzone_disabled_snapshot() {
     let mut ctx = Machine::init(&test_props(), &Env::default(), &Messages::default()).1;
 
     ctx.disabled = true;
+
+    assert_snapshot!(snapshot_attrs(
+        &api_with_context(ctx, State::Idle).dropzone_attrs()
+    ));
+}
+
+#[test]
+fn file_upload_dropzone_readonly_snapshot() {
+    let mut ctx = Machine::init(&test_props(), &Env::default(), &Messages::default()).1;
+
+    ctx.readonly = true;
 
     assert_snapshot!(snapshot_attrs(
         &api_with_context(ctx, State::Idle).dropzone_attrs()

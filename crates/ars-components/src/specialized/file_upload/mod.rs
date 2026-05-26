@@ -650,6 +650,85 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        match event {
+            Event::SetFiles(files) => {
+                let files = files.clone();
+                return Some(TransitionPlan::context_only(
+                    move |context: &mut Context| {
+                        if let Some(files) = files {
+                            context.files.set(files.clone());
+                            context.files.sync_controlled(Some(files));
+                        } else {
+                            context.files.sync_controlled(None);
+                        }
+                    },
+                ));
+            }
+
+            Event::SetProps => {
+                return Some(TransitionPlan::context_only({
+                    let disabled = props.disabled;
+                    let readonly = props.readonly;
+                    let required = props.required;
+                    let multiple = props.multiple;
+                    let accept = props.accept.clone();
+                    let max_file_size = props.max_file_size;
+                    let min_file_size = props.min_file_size;
+                    let max_files = props.max_files;
+                    let auto_upload = props.auto_upload;
+                    let directory = props.directory;
+
+                    move |context: &mut Context| {
+                        context.disabled = disabled;
+                        context.readonly = readonly;
+                        context.required = required;
+                        context.multiple = multiple;
+                        context.accept = accept;
+                        context.max_file_size = max_file_size;
+                        context.min_file_size = min_file_size;
+                        context.max_files = max_files;
+                        context.auto_upload = auto_upload;
+                        context.directory = directory;
+                    }
+                }));
+            }
+
+            Event::UploadProgress { file_id, progress } if matches!(state, State::Uploading) => {
+                let file_id = file_id.clone();
+                let progress = clamp_upload_fraction(*progress);
+                return Some(TransitionPlan::context_only(
+                    move |context: &mut Context| {
+                        update_file_progress(context, &file_id, progress);
+                    },
+                ));
+            }
+
+            Event::UploadComplete { file_id } if matches!(state, State::Uploading) => {
+                let file_id = file_id.clone();
+                let still_uploading = upload_complete_updates(ctx, &file_id);
+                return Some(upload_finish_plan(
+                    still_uploading,
+                    move |context: &mut Context| {
+                        apply_upload_complete(context, &file_id);
+                    },
+                ));
+            }
+
+            Event::UploadError { file_id, error } if matches!(state, State::Uploading) => {
+                let file_id = file_id.clone();
+                let error = error.clone();
+                let still_uploading = upload_error_updates(ctx, &file_id);
+                return Some(upload_finish_plan(
+                    still_uploading,
+                    move |context: &mut Context| {
+                        apply_upload_error(context, &file_id, &error);
+                    },
+                ));
+            }
+
+            _ => {}
+        }
+
         if ctx.disabled || ctx.readonly {
             return match event {
                 Event::Focus { part } => {
@@ -738,37 +817,14 @@ impl ars_core::Machine for Machine {
                 )
             }
 
-            (State::Uploading, Event::UploadProgress { file_id, progress }) => {
-                let file_id = file_id.clone();
-                let progress = *progress;
-                Some(TransitionPlan::context_only(
-                    move |context: &mut Context| {
-                        update_file_progress(context, &file_id, progress);
-                    },
-                ))
-            }
+            (State::Uploading, Event::StartUpload) => {
+                if !has_pending_files(ctx, props) {
+                    return None;
+                }
 
-            (State::Uploading, Event::UploadComplete { file_id }) => {
-                let file_id = file_id.clone();
-                let still_uploading = upload_complete_updates(ctx, &file_id);
-                Some(upload_finish_plan(
-                    still_uploading,
-                    move |context: &mut Context| {
-                        apply_upload_complete(context, &file_id);
-                    },
-                ))
-            }
-
-            (State::Uploading, Event::UploadError { file_id, error }) => {
-                let file_id = file_id.clone();
-                let error = error.clone();
-                let still_uploading = upload_error_updates(ctx, &file_id);
-                Some(upload_finish_plan(
-                    still_uploading,
-                    move |context: &mut Context| {
-                        apply_upload_error(context, &file_id, &error);
-                    },
-                ))
+                Some(TransitionPlan::context_only(|context: &mut Context| {
+                    mark_pending_as_uploading(context);
+                }))
             }
 
             (_, Event::RemoveFile { file_id }) => {
@@ -829,46 +885,6 @@ impl ars_core::Machine for Machine {
                     context.focused_part = None;
                 }))
             }
-
-            (_, Event::SetFiles(files)) => {
-                let files = files.clone();
-                Some(TransitionPlan::context_only(
-                    move |context: &mut Context| {
-                        if let Some(files) = files {
-                            context.files.set(files.clone());
-                            context.files.sync_controlled(Some(files));
-                        } else {
-                            context.files.sync_controlled(None);
-                        }
-                    },
-                ))
-            }
-
-            (_, Event::SetProps) => Some(TransitionPlan::context_only({
-                let disabled = props.disabled;
-                let readonly = props.readonly;
-                let required = props.required;
-                let multiple = props.multiple;
-                let accept = props.accept.clone();
-                let max_file_size = props.max_file_size;
-                let min_file_size = props.min_file_size;
-                let max_files = props.max_files;
-                let auto_upload = props.auto_upload;
-                let directory = props.directory;
-
-                move |context: &mut Context| {
-                    context.disabled = disabled;
-                    context.readonly = readonly;
-                    context.required = required;
-                    context.multiple = multiple;
-                    context.accept = accept;
-                    context.max_file_size = max_file_size;
-                    context.min_file_size = min_file_size;
-                    context.max_files = max_files;
-                    context.auto_upload = auto_upload;
-                    context.directory = directory;
-                }
-            })),
 
             _ => None,
         }
@@ -1132,7 +1148,7 @@ impl Api<'_> {
             attrs.set_bool(HtmlAttr::Data("ars-dragging"), true);
         }
 
-        if self.ctx.disabled {
+        if self.ctx.disabled || self.ctx.readonly {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
 
@@ -1148,12 +1164,13 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
+            .set(HtmlAttr::Type, "button")
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.trigger_label)(&self.ctx.locale),
             );
 
-        if self.ctx.disabled {
+        if self.ctx.disabled || self.ctx.readonly {
             attrs
                 .set_bool(HtmlAttr::Disabled, true)
                 .set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
@@ -1515,7 +1532,16 @@ fn mark_pending_as_uploading(context: &mut Context) {
     context.files.set(updated);
 }
 
+fn clamp_upload_fraction(progress: f64) -> f64 {
+    if progress.is_nan() {
+        0.0
+    } else {
+        progress.clamp(0.0, 1.0)
+    }
+}
+
 fn update_file_progress(context: &mut Context, file_id: &str, progress: f64) {
+    let progress = clamp_upload_fraction(progress);
     let files = context.files.get().clone();
 
     let updated = files
@@ -1567,7 +1593,7 @@ fn projected_files_after_complete(ctx: &Context, file_id: &str) -> Vec<Item> {
         .clone()
         .into_iter()
         .map(|mut file| {
-            if file.id == file_id {
+            if file.id == file_id && file.status == Status::Uploading {
                 file.status = Status::Complete;
                 file.progress = 1.0;
             }
@@ -1583,7 +1609,7 @@ fn projected_files_after_error(ctx: &Context, file_id: &str, error: &str) -> Vec
         .clone()
         .into_iter()
         .map(|mut file| {
-            if file.id == file_id {
+            if file.id == file_id && file.status == Status::Uploading {
                 file.status = Status::Failed(error.to_string());
                 file.error = Some(error.to_string());
             }
@@ -1666,6 +1692,19 @@ fn validate_files(raw: &[RawFile], ctx: &Context) -> (Vec<Item>, Vec<Rejection>)
     let current_count = ctx.files.get().len();
 
     for file in raw {
+        if !ctx.multiple {
+            if current_count >= 1 || !accepted.is_empty() {
+                rejected.push(Rejection {
+                    name: file.name.clone(),
+                    size: file.size,
+                    mime_type: file.mime_type.clone(),
+                    reason: RejectionReason::TooMany,
+                });
+
+                continue;
+            }
+        }
+
         if let Some(max) = ctx.max_files
             && current_count + accepted.len() >= max
         {

@@ -28,6 +28,12 @@ AttrMap {
                 "Choose files to upload",
             ),
         ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
     ],
     styles: [],
 }
