@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/specialized/contextual_help/mod.rs
+expression: "snapshot_attrs(&contextual_help_api(true, test_props()).body_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "body",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "contextual-help",
+            ),
+        ),
+    ],
+    styles: [],
+}

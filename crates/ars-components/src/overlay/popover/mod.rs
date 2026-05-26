@@ -932,6 +932,30 @@ impl Api<'_> {
         self.props.same_width
     }
 
+    /// Returns the hydration-stable content element id used for ARIA wiring.
+    #[must_use]
+    pub fn content_id(&self) -> &str {
+        &self.ctx.content_id
+    }
+
+    /// Returns the hydration-stable heading element id for composition layers
+    /// such as [`crate::specialized::contextual_help`] that render a required
+    /// heading part alongside popover content.
+    #[must_use]
+    pub fn heading_id(&self) -> String {
+        ComponentIds::from_id(&self.props.id).part("heading")
+    }
+
+    /// Toggles the popover open state.
+    pub fn toggle(&self) {
+        (self.send)(Event::Toggle);
+    }
+
+    /// Closes the popover programmatically.
+    pub fn close(&self) {
+        (self.send)(Event::Close);
+    }
+
     const fn state_token(&self) -> &'static str {
         if self.is_open() { "open" } else { "closed" }
     }
@@ -1321,6 +1345,48 @@ mod tests {
             (service.context().messages.dismiss_label)(&service.context().locale),
             "Cerrar"
         );
+    }
+
+    #[test]
+    fn api_content_id_returns_context_value() {
+        let service = fresh_service(test_props());
+
+        assert_eq!(service.connect(&|_| {}).content_id(), "popover-content");
+    }
+
+    #[test]
+    fn api_heading_id_derives_from_props_id() {
+        let service = fresh_service(test_props());
+
+        assert_eq!(service.connect(&|_| {}).heading_id(), "popover-heading");
+    }
+
+    #[test]
+    fn api_toggle_sends_toggle_event() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let events_capture = Rc::clone(&events);
+
+        let service = fresh_service(test_props());
+
+        service
+            .connect(&|event| events_capture.borrow_mut().push(event))
+            .toggle();
+
+        assert_eq!(drain_to_vec(&events), vec![Event::Toggle]);
+    }
+
+    #[test]
+    fn api_close_sends_close_event() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let events_capture = Rc::clone(&events);
+
+        let service = open_service(test_props());
+
+        service
+            .connect(&|event| events_capture.borrow_mut().push(event))
+            .close();
+
+        assert_eq!(drain_to_vec(&events), vec![Event::Close]);
     }
 
     // ── State-machine transitions ─────────────────────────────────

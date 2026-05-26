@@ -9,6 +9,7 @@ pub mod lint;
 pub mod manifest;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+pub mod mutants;
 pub mod spec;
 pub mod test;
 pub mod tool;

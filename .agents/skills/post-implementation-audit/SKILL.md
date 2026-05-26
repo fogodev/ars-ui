@@ -139,7 +139,7 @@ The canonical entry-prompt:
 | **Unit tests** (inline `#[cfg(test)]`) | Logic + edge cases on the named acceptance criteria | List every public API + every edge case the spec describes; cross-reference with the test list |
 | **Snapshot tests** (insta) | `AttrMap` / chunk-output shape regressions | Check coverage of every anatomy part and every output-affecting prop / state / context branch |
 | **Property tests** (proptest) | Invariant violations across the input space | Check that invariants are non-trivial (roundtrip, idempotence, no-adjacent-X, etc.) and the input strategy is broad enough to actually exercise edge locales / multi-byte / large inputs |
-| **Mutation tests** (cargo-mutants) | Tests that *exist* but don't actually constrain behavior | Run `cargo mutants -p <crate> -f <file>` and triage every `MISSED`; this is mandatory for every new or materially changed framework-agnostic component |
+| **Mutation tests** (`cargo xmutants`) | Tests that *exist* but don't actually constrain behavior | Run `cargo xmutants -p <crate> -f <file>` and triage every `MISSED`; this is mandatory for every new or materially changed framework-agnostic component. Prefer `cargo xmutants` over bare `cargo mutants` — it applies the same per-crate `--features` profile as Nightly CI (for example `ars-components/i18n`) so snapshot and i18n-gated tests match CI. |
 | **Doc tests** | Public-API examples broken by future changes | Check `///` blocks for at least one `# Examples` block on the canonical entry point |
 | **Spec-conformance tests** | Anatomy drift between spec and impl | Check `crates/ars-components/tests/spec_conformance/*.rs` for an entry covering the new component's `Part` enum and public API/attribute contract; this is mandatory for every new framework-agnostic component |
 | **Code coverage** (cargo llvm-cov + xtask wasm path) | Unreachable / under-tested code; threshold drift | Use the right command for the crate (see "Procedure" below) — bare `cargo llvm-cov` does **not** measure adapter wasm code paths. Always finish with `cargo xtask coverage check-all --file <lcov>` to enforce the same thresholds CI does. |
@@ -193,13 +193,13 @@ The canonical entry-prompt:
 
 2. **Mutation testing.** Run:
    ```bash
-   cargo mutants -p <crate> -f <file>
+   cargo xmutants -p <crate> -f <file>
    ```
    For framework-agnostic component work in `ars-components`, run this against the component's source file, usually:
    ```bash
-   cargo mutants -p ars-components -f crates/ars-components/src/<category>/<component>/mod.rs
+   cargo xmutants -p ars-components -f crates/ars-components/src/<category>/<component>/mod.rs
    ```
-   Use the actual file path for single-file modules.
+   Use the actual file path for single-file modules. Prefer `cargo xmutants` over bare `cargo mutants` — the xtask wrapper applies the Nightly CI feature profile (for example `ars-components/i18n`) so local runs do not fail on snapshot or i18n-gated code paths that plain `cargo mutants` misses.
 
    For each `MISSED` line, decide:
    - **Real test gap** → add a test that kills the mutation (often a positive-direction assertion the existing tests skipped).
@@ -208,12 +208,12 @@ The canonical entry-prompt:
 
 3. **Test-type breadth audit.** Walk the table above. For each test type, ask: *"Does this kind of change need this kind of test, and do we have one?"* Examples:
    - New framework-agnostic component with an anatomy table → spec-conformance test required
-   - New or materially changed framework-agnostic component → targeted cargo-mutants run required before handoff
+   - New or materially changed framework-agnostic component → targeted `cargo xmutants` run required before handoff
    - New public function → doc test with `# Examples` required
    - New invariants on a computation pipeline → proptest invariants strongly recommended
    - New `AttrMap` helpers → snapshot tests for each branch required
 
-The targeted cargo-mutants run is a pre-PR implementation/audit requirement. After the PR is opened, agents **MUST NOT** rerun mutation tests during Codex review rounds unless the user explicitly asks for another mutation run.
+The targeted `cargo xmutants` run is a pre-PR implementation/audit requirement. After the PR is opened, agents **MUST NOT** rerun mutation tests during Codex review rounds unless the user explicitly asks for another mutation run.
 
 4. **Cumulative assessment.** Present the before/after metrics in a table:
 
@@ -262,7 +262,7 @@ cargo test -p xtask --test spec_corpus_compile_snippets
 cargo insta test --workspace --features <relevant> --unreferenced=reject
 
 # 7. Mutation re-run (must be 0 missed)
-cargo mutants -p <crate> -f <file>
+cargo xmutants -p <crate> -f <file>
 
 # 8. Coverage thresholds — uses the same gate CI enforces. The recipe
 #    depends on which crate the change touches: native-only changes can
@@ -300,7 +300,7 @@ The flow this skill encodes was validated on GitHub issue #204 (`task: Implement
 
 - **Phase 1** surfaced 16 drift findings, including a silent contract violation (the spec said *"Unicode case folding"* but the impl used `to_lowercase` — they aren't equivalent: under `to_lowercase`, query `"ss"` does not match text `"ß"`, violating the spec's explicit eszett contract). Fix: add `ars_i18n::case_fold`, switch the matching pipeline, rewrite the German test to assert the actual three-direction equivalence.
 - **Phase 2 round 1** surfaced 4 more items (adapter spec alignment, adapter feature wiring, roundtrip invariant test, proptest invariants).
-- **Phase 2 round 2** surfaced 3 more (a `case_fold` vs `to_lowercase` semantic gap, foundation/10 parametric-anatomy concept, cargo-mutants scout).
+- **Phase 2 round 2** surfaced 3 more (a `case_fold` vs `to_lowercase` semantic gap, foundation/10 parametric-anatomy concept, `cargo xmutants` scout).
 - **Phase 3** surfaced 4 coverage gaps (dead `continue` branch, `merge_ranges` else branch, fold-expansion partial-match defense, spec-conformance test). Pushed line coverage from 98.67% to 99.91% with all 57 mutations caught.
 
 The cumulative effect: PR landed with one user review pass instead of three, and the spec contract (`ß ↔ ss`) is actually true instead of cosmetically true. That's the value this skill creates.

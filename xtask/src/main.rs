@@ -3,7 +3,7 @@
 use std::{env, path::PathBuf, process, sync};
 
 use clap::{Parser, Subcommand};
-use xtask::{ci, coverage, e2e, examples, lint, manifest, mcp, spec, test};
+use xtask::{ci, coverage, e2e, examples, lint, manifest, mcp, mutants, spec, test};
 
 /// ars-ui workspace task runner.
 #[derive(Parser)]
@@ -101,6 +101,37 @@ enum Command {
     Test {
         #[command(subcommand)]
         cmd: Option<TestCommand>,
+    },
+
+    /// Run mutation testing via cargo-mutants (alias: `cargo xmutants`).
+    ///
+    /// Applies the same per-crate `--features` profile as the Nightly CI
+    /// mutation matrix so local runs match CI (for example
+    /// `ars-components/i18n` for snapshot/i18n-gated code paths).
+    Mutants {
+        /// Crate package name (for example `ars-components`).
+        #[arg(short = 'p', long = "package")]
+        package: String,
+
+        /// Limit mutations to a single source file.
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+
+        /// List mutants without running tests.
+        #[arg(long)]
+        list: bool,
+
+        /// Shard selector forwarded to cargo-mutants (`k/n`, zero-based `k`).
+        #[arg(long)]
+        shard: Option<String>,
+
+        /// Output directory for mutation reports.
+        #[arg(long, default_value = "mutants.out")]
+        output: PathBuf,
+
+        /// Override the workspace default `--features` string for this package.
+        #[arg(long)]
+        features: Option<String>,
     },
 }
 
@@ -679,6 +710,29 @@ fn main() {
             };
 
             if let Err(e) = result {
+                eprintln!("error: {e}");
+
+                process::exit(1);
+            }
+        }
+
+        // ── Mutants ───────────────────────────────────────────────────
+        Command::Mutants {
+            package,
+            file,
+            list,
+            shard,
+            output,
+            features,
+        } => {
+            if let Err(e) = mutants::run(&mutants::Options {
+                package,
+                file,
+                list,
+                shard,
+                output,
+                features,
+            }) {
                 eprintln!("error: {e}");
 
                 process::exit(1);

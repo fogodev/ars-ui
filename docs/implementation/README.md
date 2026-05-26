@@ -7,9 +7,45 @@ The repo is expected to operate with these rules:
 - Build the platform first: workspace, core contracts, subsystems, harnesses, then components.
 - Run TDD-style delivery: define the exact tests first, then implement the minimum code needed.
 - Keep the specification synchronized with implementation. If implementation changes the intended contract, update the relevant spec in the same task.
-- For every new or materially changed framework-agnostic component, add spec-conformance tests for its anatomy/public contract and run a targeted mutation test for the component source file (`cargo mutants -p ars-components -f crates/ars-components/src/<category>/<component>/mod.rs` or the equivalent file path). Triage every `MISSED` mutant in the same task: add tests for real gaps, or document true equivalence in `.cargo/mutants.toml`. This is a pre-PR implementation/audit gate; after the PR is opened, agents **MUST NOT** rerun mutation tests during Codex review rounds unless the user explicitly asks for another mutation run.
+- Port implementation improvements back into the spec in the same PR — not as follow-up cleanup. See [Spec synchronization](#spec-synchronization) below.
+- For every new or materially changed framework-agnostic component, add spec-conformance tests for its anatomy/public contract and run a targeted mutation test for the component source file (`cargo xmutants -p ars-components -f crates/ars-components/src/<category>/<component>/mod.rs` or the equivalent file path). Prefer `cargo xmutants` over bare `cargo mutants` — it applies the same per-crate `--features` profile as Nightly CI (for example `ars-components/i18n`) so snapshot and i18n-gated tests match CI. Triage every `MISSED` mutant in the same task: add tests for real gaps, or document true equivalence in `.cargo/mutants.toml`. This is a pre-PR implementation/audit gate; after the PR is opened, agents **MUST NOT** rerun mutation tests during Codex review rounds unless the user explicitly asks for another mutation run.
 - Use GitHub Projects with issue-backed items only.
 - Keep most agent-ready tasks at `1`, `2`, `3`, or `5` points. `8` is exceptional. `13` must be split before pickup.
+
+## Spec synchronization
+
+Implementation may refine the contract during delivery, but the spec remains the
+authoritative artifact. Every task that adds or materially changes implementation
+code must **port improvements back into the spec in the same PR**.
+
+This is not limited to intentional contract changes. Also update the spec when
+implementation reveals the existing spec is incomplete or stale:
+
+- **Missing public surface** — fluent builders, helper methods (for example
+  `Props::popover_props()`), enum token helpers (for example `Variant::as_str()`).
+- **Incomplete code examples** — prose or accessibility sections promise behavior
+  that the §1 API sketch omits (for example `dir` resolution on content attrs).
+- **Dependency specs** — composition layers need accessors on shared machines
+  that downstream specs already call but the dependency spec never documented
+  (for example `popover::Api::content_id()`, `heading_id()`, `toggle()`,
+  `close()` added for ContextualHelp).
+- **Anatomy and ARIA tables** — §2/§3 tables missing attributes the connect API
+  already emits (`aria-controls`, `data-ars-variant`, `data-ars-state`, `dir`,
+  and similar).
+- **Default-source clarity** — implementation relies on struct-update defaults
+  instead of redundant explicit fields; spec should describe the effective
+  contract, not only the verbose spelling.
+
+Use the post-implementation audit Phase 1 drift pass (`.agents/skills/post-implementation-audit/SKILL.md`) to surface these. When the implementation is correct and the spec is incomplete, update the spec — treat that polish as in-scope delivery work, not a nice-to-have follow-up.
+
+After spec edits, run:
+
+```bash
+cargo xtask spec validate
+```
+
+For adapter work, also follow the spec-sync checklist in
+[adapter-contract.md](./adapter-contract.md).
 
 Start with:
 

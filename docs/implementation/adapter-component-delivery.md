@@ -131,13 +131,20 @@ category list itself changes.
 
 ### Specification Updates
 
-Update the relevant spec in the same PR if implementation reveals drift.
+Update the relevant spec in the same PR whenever implementation reveals drift
+or incomplete spec coverage. Follow
+[README.md § Spec synchronization](../README.md#spec-synchronization).
 
 - Shared behavior belongs in `spec/foundation/` or `spec/shared/`.
+- Dependency-machine changes belong in that machine's component spec (for
+  example new `popover::Api` accessors used by a composition layer).
 - Adapter-specific behavior belongs in
   `spec/foundation/08-adapter-leptos.md`,
   `spec/foundation/09-adapter-dioxus.md`, or the per-component adapter spec.
-- Do not leave spec drift as a follow-up.
+- Do not leave spec drift as a follow-up — port back missing helpers, incomplete
+  code sketches, anatomy/ARIA table gaps, and default-source clarity in the
+  same PR.
+- Run `cargo xtask spec validate` after spec edits.
 
 ## Implementation Order
 
@@ -150,7 +157,9 @@ Use this order unless the issue explicitly says otherwise:
 5. Wire modules, prelude exports, and feature flags.
 6. Add or update E2E fixtures and E2E harness modules.
 7. Add or update widgets examples in the matching category modules.
-8. Update specs if the intended contract changed.
+8. Update specs when the intended contract changed or when implementation
+   surfaced incomplete spec coverage (see
+   [README.md § Spec synchronization](../README.md#spec-synchronization)).
 9. Run focused tests and checks for the edited component.
 10. Invoke `.agents/skills/post-implementation-audit/SKILL.md`.
 11. Fix every audit finding in the same PR.
