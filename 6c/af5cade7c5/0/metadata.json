@@ -1,0 +1,92 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "6caf5cade7c5",
+  "session_id": "019e61e6-d933-75e1-bda2-8f4289cbfed9",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-26T04:49:22.261932Z",
+  "branch": "codex/issue-255-autocomplete-core",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/selection/autocomplete/mod.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "4dd3396f492a",
+  "checkpoint_transcript_start": 1588,
+  "transcript_lines_at_start": 1588,
+  "token_usage": {
+    "input_tokens": 178423,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 4601344,
+    "output_tokens": 11485,
+    "api_call_count": 76
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "summary": {
+    "intent": "Implement a framework-agnostic Autocomplete selection controller for the ars-components crate (issue #255), then address a Codex code review on the resulting PR #685.",
+    "outcome": "PR #685 was opened, Codex review was triggered and returned three actionable threads, all three bugs were fixed with regression tests added first, and a follow-up commit was pushed resolving the review feedback.",
+    "learnings": {
+      "repo": [
+        "The repo uses a `cargo xci --profile fast` command as a fast CI gate covering fmt, check, clippy, and unit tests across ten steps.",
+        "Codex review is triggered by posting `@codex review` as an issue comment, then polled via PR reactions (eyes = in progress, +1 = approved) and GraphQL review threads.",
+        "The review flow is codified in `.agents/skills/waiting-for-codex-review/SKILL.md` and local skills at `~/.claude/skills/`.",
+        "Insta snapshot PRs require a `snapshot-reviewed` label applied via the GitHub API before merging.",
+        "Cargo test only accepts a single filter argument; filtering multiple test names at once is not supported.",
+        "The `if_not_else` clippy lint is enforced and triggered on a newly introduced conditional branch in the autocomplete state machine.",
+        "The project uses `cargo llvm-cov` for coverage and `cargo mutants` for mutation coverage, with per-module text reports available."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/autocomplete/mod.rs",
+          "line": 600,
+          "end_line": 720,
+          "finding": "Loading prop changes must be routed through the `SetLoading` state transition rather than applied inline; skipping this left the state machine in Idle on loading prop sync."
+        },
+        {
+          "path": "crates/ars-components/src/selection/autocomplete/mod.rs",
+          "line": 1080,
+          "end_line": 1145,
+          "finding": "Controlled input prop sync must clear stale `selected_key`; previously the old selection persisted after the input value changed externally."
+        },
+        {
+          "path": "crates/ars-components/src/selection/autocomplete/mod.rs",
+          "line": 1320,
+          "end_line": 1415,
+          "finding": "Controlled clear must preserve filtered visible keys (the suggestion list) while still clearing selection and highlight; the original implementation dropped the filtered keys."
+        }
+      ],
+      "workflow": [
+        "Red-green workflow: write targeted failing regression tests before patching production code to confirm the bug is real and the fix is minimal.",
+        "Polling a background `while true` shell loop with `write_stdin` is fragile; killing and restarting with a defensive thread-count default is safer when GraphQL parse errors occur.",
+        "Killing a commit hook mid-flight can corrupt the git index; always wait for hooks to complete before interrupting.",
+        "Codex review threads reference exact file paths and line numbers; reading them directly and matching to `nl -ba` output is an efficient way to locate the relevant state-machine code."
+      ]
+    },
+    "friction": [
+      "The initial polling loop broke due to a GraphQL query parse issue returning an empty thread count, misread as zero unresolved threads; required killing the process and restarting with a defensive default.",
+      "Cargo's single-filter limitation meant all three regression tests had to be run together under the module filter rather than individually named.",
+      "The clippy `if_not_else` lint fired after the fix patch, requiring a second edit before the fast gate passed.",
+      "The commit hook ran silently for an extended period with no output, causing uncertainty about whether it had stalled or was still working.",
+      "The GitHub API rejected the first label POST due to incorrect array parameter syntax (`labels[]=` vs `'labels[]=`), requiring a retry."
+    ],
+    "open_items": [
+      "CI jobs for coverage, Dioxus feature flags, and release verification were still pending when the session ended; their final status was not confirmed.",
+      "Codex re-review after the fix commit was triggered but not polled to completion in this session.",
+      "Mutation coverage (`cargo mutants`) was listed in the PR verification checklist but not explicitly rerun after the fix."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-26T04:48:57.310022Z",
+    "agent_lines": 64,
+    "agent_removed": 2,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 64,
+    "total_lines_changed": 66,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
