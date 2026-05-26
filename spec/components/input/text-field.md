@@ -440,7 +440,10 @@ impl<'a> Api<'a> {
         if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
         if self.ctx.readonly { attrs.set_bool(HtmlAttr::ReadOnly, true); }
         if self.ctx.required { attrs.set_bool(HtmlAttr::Required, true); }
-        if self.ctx.invalid { attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true"); }
+        if self.ctx.invalid {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+            attrs.set(HtmlAttr::Aria(AriaAttr::ErrorMessage), self.ctx.ids.part("error-message"));
+        }
         if let Some(p) = &self.ctx.placeholder { attrs.set(HtmlAttr::Placeholder, p); }
         if let Some(max) = self.ctx.max_length { attrs.set(HtmlAttr::MaxLength, max.to_string()); }
         if let Some(min) = self.ctx.min_length { attrs.set(HtmlAttr::MinLength, min.to_string()); }
@@ -595,12 +598,13 @@ TextField
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Property           | Element | Value                                    |
-| ------------------ | ------- | ---------------------------------------- |
-| `aria-invalid`     | Input   | Present when `invalid=true`              |
-| `aria-required`    | Input   | Implicit via `required` attribute        |
-| `aria-labelledby`  | Input   | Points to Label id                       |
-| `aria-describedby` | Input   | Points to Description + ErrorMessage ids |
+| Property            | Element | Value                                         |
+| ------------------- | ------- | --------------------------------------------- |
+| `aria-invalid`      | Input   | Present when `invalid=true`                   |
+| `aria-errormessage` | Input   | Points to ErrorMessage id when `invalid=true` |
+| `aria-required`     | Input   | Implicit via `required` attribute             |
+| `aria-labelledby`   | Input   | Points to Label id                            |
+| `aria-describedby`  | Input   | Points to Description + ErrorMessage ids      |
 
 ### 3.2 Keyboard Interaction
 

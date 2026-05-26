@@ -955,6 +955,10 @@ impl Api<'_> {
 
         if self.ctx.invalid {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::ErrorMessage),
+                self.ctx.ids.part("error-message"),
+            );
         }
 
         if let Some(placeholder) = &self.ctx.placeholder {
@@ -1423,6 +1427,10 @@ mod tests {
             Some("bio-field-description bio-field-error-message")
         );
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("true"));
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::ErrorMessage)),
+            Some("bio-field-error-message")
+        );
     }
 
     #[test]

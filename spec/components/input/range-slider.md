@@ -439,18 +439,20 @@ Disabled state:
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Property           | Element           | Value                                                        |
-| ------------------ | ----------------- | ------------------------------------------------------------ |
-| `role`             | Each Thumb        | `slider`                                                     |
-| `aria-valuenow`    | Each Thumb        | Current thumb value                                          |
-| `aria-valuemin`    | Start Thumb       | `min`; End Thumb: `start_value + effective gap`              |
-| `aria-valuemax`    | Start Thumb       | `end_value - effective gap`; End Thumb: `max`                |
-| `aria-valuetext`   | Each Thumb        | Formatted value (via `format_value`)                         |
-| `aria-label`       | Each Thumb        | From `messages.start_label` / `messages.end_label`           |
-| `aria-orientation` | Each Thumb        | `"horizontal"` or `"vertical"`                               |
-| `aria-disabled`    | Each Thumb        | When the specific thumb is disabled                          |
-| `aria-hidden`      | DraggingIndicator | `"true"` — purely decorative visual feedback during drag     |
-| `hidden`           | DraggingIndicator | Present when not dragging (indicator is invisible when idle) |
+| Property            | Element           | Value                                                        |
+| ------------------- | ----------------- | ------------------------------------------------------------ |
+| `role`              | Each Thumb        | `slider`                                                     |
+| `aria-valuenow`     | Each Thumb        | Current thumb value                                          |
+| `aria-valuemin`     | Start Thumb       | `min`; End Thumb: `start_value + effective gap`              |
+| `aria-valuemax`     | Start Thumb       | `end_value - effective gap`; End Thumb: `max`                |
+| `aria-valuetext`    | Each Thumb        | Formatted value (via `format_value`)                         |
+| `aria-label`        | Each Thumb        | From `messages.start_label` / `messages.end_label`           |
+| `aria-orientation`  | Each Thumb        | `"horizontal"` or `"vertical"`                               |
+| `aria-disabled`     | Each Thumb        | When the specific thumb is disabled                          |
+| `aria-invalid`      | Each Thumb        | `"true"` when `invalid=true`                                 |
+| `aria-errormessage` | Each Thumb        | Points to ErrorMessage id when `invalid=true`                |
+| `aria-hidden`       | DraggingIndicator | `"true"` — purely decorative visual feedback during drag     |
+| `hidden`            | DraggingIndicator | Present when not dragging (indicator is invisible when idle) |
 
 ### 3.2 Keyboard Interaction
 
@@ -488,7 +490,7 @@ Each thumb has a distinct `aria-label` identifying its role. When `aria-valuetex
 ## 5. Form Integration
 
 - **Hidden inputs**: Two hidden `<input type="hidden">` elements are rendered — one per thumb. They carry `name[0]` and `name[1]` with the start and end values.
-- **Validation states**: `aria-invalid` can be set on the Root if needed by wrapping in a Field.
+- **Validation states**: when `invalid=true`, each Thumb exposes `aria-invalid="true"` and `aria-errormessage` pointing to the ErrorMessage id. A surrounding `Field` may additionally mark the Root invalid.
 - **Reset behavior**: On form reset, the adapter restores values to `default_value`.
 - **Disabled propagation**: When inside a `Field` or `Fieldset`, the adapter merges `disabled` from `FieldCtx` per `07-forms.md` §12.6.
 - **Geometry boundary**: Core pointer helpers accept adapter-supplied pointer and

@@ -23,7 +23,7 @@ mod data_display;
 #[path = "spec_conformance/date_time.rs"]
 mod date_time;
 
-#[path = "spec_conformance/input.rs"]
+#[path = "spec_conformance/input/mod.rs"]
 mod input;
 
 #[path = "spec_conformance/layout.rs"]

@@ -338,7 +338,10 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), self.ctx.ids.part("error-message"));
         }
         if self.ctx.required { attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true"); }
-        if self.ctx.invalid { attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true"); }
+        if self.ctx.invalid {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+            attrs.set(HtmlAttr::Aria(AriaAttr::ErrorMessage), self.ctx.ids.part("error-message"));
+        }
         if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
         if self.ctx.readonly { attrs.set_bool(HtmlAttr::ReadOnly, true); }
         if let Some(ref placeholder) = self.props.placeholder {
@@ -442,14 +445,15 @@ PasswordInput
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Property           | Element | Value                                                  |
-| ------------------ | ------- | ------------------------------------------------------ |
-| `type`             | Input   | `"password"` (Masked) or `"text"` (Visible)            |
-| `aria-label`       | Toggle  | Dynamic: `show_password_label` / `hide_password_label` |
-| `aria-required`    | Input   | Present when `required=true`                           |
-| `aria-invalid`     | Input   | Present when `invalid=true`                            |
-| `aria-labelledby`  | Input   | Points to Label id                                     |
-| `aria-describedby` | Input   | Points to Description + ErrorMessage ids               |
+| Property            | Element | Value                                                  |
+| ------------------- | ------- | ------------------------------------------------------ |
+| `type`              | Input   | `"password"` (Masked) or `"text"` (Visible)            |
+| `aria-label`        | Toggle  | Dynamic: `show_password_label` / `hide_password_label` |
+| `aria-required`     | Input   | Present when `required=true`                           |
+| `aria-invalid`      | Input   | Present when `invalid=true`                            |
+| `aria-errormessage` | Input   | Points to ErrorMessage id when `invalid=true`          |
+| `aria-labelledby`   | Input   | Points to Label id                                     |
+| `aria-describedby`  | Input   | Points to Description + ErrorMessage ids               |
 
 - Dynamic toggle label communicates state; `aria-pressed` would be redundant and contradictory.
 

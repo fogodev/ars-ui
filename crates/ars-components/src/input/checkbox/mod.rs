@@ -599,6 +599,10 @@ impl Api<'_> {
 
         if self.ctx.invalid {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::ErrorMessage),
+                self.ctx.ids.part("error-message"),
+            );
         }
 
         if self.ctx.disabled {
@@ -1416,6 +1420,13 @@ mod tests {
         assert_eq!(service.context().name.as_deref(), Some("terms"));
         assert_eq!(service.context().form.as_deref(), Some("settings"));
         assert_eq!(service.context().value, "accepted");
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .control_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ErrorMessage)),
+            Some("terms-error-message")
+        );
     }
 
     #[test]

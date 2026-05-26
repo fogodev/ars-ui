@@ -8,7 +8,7 @@
 #[path = "proptest_state_machines/common.rs"]
 mod common;
 
-#[path = "proptest_state_machines/input.rs"]
+#[path = "proptest_state_machines/input/mod.rs"]
 mod input;
 
 #[path = "proptest_state_machines/date_time.rs"]

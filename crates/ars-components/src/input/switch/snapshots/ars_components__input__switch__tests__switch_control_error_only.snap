@@ -38,6 +38,14 @@ AttrMap {
         ),
         (
             Aria(
+                ErrorMessage,
+            ),
+            String(
+                "wifi-error-message",
+            ),
+        ),
+        (
+            Aria(
                 Invalid,
             ),
             String(
