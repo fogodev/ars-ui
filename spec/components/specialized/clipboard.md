@@ -370,7 +370,6 @@ impl<'a> Api<'a> {
             State::Copied => (self.ctx.messages.copied_label)(&self.ctx.locale),
             State::Error => (self.ctx.messages.error_label)(&self.ctx.locale),
         });
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
         attrs.set(HtmlAttr::Data("ars-state"), self.state_str());
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);

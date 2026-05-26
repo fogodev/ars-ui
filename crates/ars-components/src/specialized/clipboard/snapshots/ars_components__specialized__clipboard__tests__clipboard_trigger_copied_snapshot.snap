@@ -37,14 +37,6 @@ AttrMap {
             ),
         ),
         (
-            Aria(
-                LabelledBy,
-            ),
-            String(
-                "clip-label",
-            ),
-        ),
-        (
             Id,
             String(
                 "clip-trigger",

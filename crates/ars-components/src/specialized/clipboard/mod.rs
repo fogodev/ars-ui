@@ -1,6 +1,6 @@
 //! Clipboard component state machine and connect API.
 
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use core::fmt::{self, Debug, Display};
 
 use ars_core::{
@@ -507,10 +507,6 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Aria(AriaAttr::Label), self.trigger_label())
-            .set(
-                HtmlAttr::Aria(AriaAttr::LabelledBy),
-                self.ctx.ids.part("label"),
-            )
             .set(HtmlAttr::Data("ars-state"), self.state_token());
 
         if self.ctx.disabled {
@@ -1038,6 +1034,14 @@ mod tests {
                 .get(&HtmlAttr::Aria(AriaAttr::Label)),
             Some("Copy failed, click to retry")
         );
+    }
+
+    #[test]
+    fn clipboard_trigger_attrs_do_not_combine_accessible_name_sources() {
+        let attrs = api_for_state(State::Copied).trigger_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Label)), Some("Copied!"));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::LabelledBy)));
     }
 
     #[test]
