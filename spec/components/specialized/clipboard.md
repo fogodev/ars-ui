@@ -356,6 +356,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("label"));
+        attrs.set(HtmlAttr::For, self.ctx.ids.part("trigger"));
         attrs
     }
 
@@ -374,6 +375,7 @@ impl<'a> Api<'a> {
         });
         attrs.set(HtmlAttr::Data("ars-state"), self.state_str());
         if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
@@ -443,8 +445,8 @@ Clipboard
 | Part      | Element    | Key Attributes                                       |
 | --------- | ---------- | ---------------------------------------------------- |
 | Root      | `<div>`    | `data-ars-state`, `data-ars-disabled`                |
-| Label     | `<label>`  | `id` for association                                 |
-| Trigger   | `<button>` | `aria-label` (state-dependent), `aria-disabled`      |
+| Label     | `<label>`  | `id`, `for` trigger association                      |
+| Trigger   | `<button>` | `aria-label` (state-dependent), `disabled`, `aria-disabled` |
 | Indicator | `<span>`   | `aria-hidden="true"`, `data-ars-state`               |
 | Status    | `<div>`    | `role="status"`, `aria-live="polite"`, `aria-atomic` |
 | ValueText | `<span>`   | displays the text being copied                       |
@@ -455,7 +457,7 @@ Clipboard
 
 | Part      | Role     | Properties                                        |
 | --------- | -------- | ------------------------------------------------- |
-| Trigger   | `button` | `aria-label` (changes per state), `aria-disabled` |
+| Trigger   | `button` | `aria-label` (changes per state), `disabled`, `aria-disabled` |
 | Indicator | —        | `aria-hidden="true"` (decorative)                 |
 | Status    | `status` | `aria-live="polite"`, `aria-atomic="true"`        |
 

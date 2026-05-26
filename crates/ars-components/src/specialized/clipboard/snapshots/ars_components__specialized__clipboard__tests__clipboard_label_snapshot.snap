@@ -26,6 +26,12 @@ AttrMap {
                 "clip-label",
             ),
         ),
+        (
+            For,
+            String(
+                "clip-trigger",
+            ),
+        ),
     ],
     styles: [],
 }

@@ -489,6 +489,7 @@ impl Api<'_> {
 
         attrs
             .set(HtmlAttr::Id, self.ctx.ids.part("label"))
+            .set(HtmlAttr::For, self.ctx.ids.part("trigger"))
             .set(scope_attr, scope_val)
             .set(part_attr, part_val);
 
@@ -511,6 +512,7 @@ impl Api<'_> {
 
         if self.ctx.disabled {
             attrs
+                .set_bool(HtmlAttr::Disabled, true)
                 .set(HtmlAttr::Aria(AriaAttr::Disabled), "true")
                 .set_bool(HtmlAttr::Data("ars-disabled"), true);
         }
@@ -1072,6 +1074,13 @@ mod tests {
     }
 
     #[test]
+    fn clipboard_label_attrs_associate_with_trigger() {
+        let attrs = api_for_state(State::Idle).label_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::For), Some("clip-trigger"));
+    }
+
+    #[test]
     fn clipboard_connect_api_dispatch_matches_inherent_attrs() {
         let api = api_for_state(State::Idle);
 
@@ -1287,6 +1296,10 @@ mod tests {
 
         let attrs = api.trigger_attrs();
 
+        assert_eq!(
+            attrs.get_value(&HtmlAttr::Disabled),
+            Some(&AttrValue::Bool(true))
+        );
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
         assert_eq!(
             attrs.get_value(&HtmlAttr::Data("ars-disabled")),
