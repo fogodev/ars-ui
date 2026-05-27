@@ -6,6 +6,7 @@
   "checkpoints_count": 6,
   "files_touched": [
     ".agents/skills/post-implementation-audit/SKILL.md",
+    "AGENTS.md",
     "crates/ars-collections/src/tree_collection.rs",
     "crates/ars-components/src/navigation/mod.rs",
     "crates/ars-components/src/navigation/tree_view/mod.rs",
