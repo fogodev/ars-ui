@@ -375,6 +375,7 @@ mod rating_group_proptests {
         prop_oneof![
             (-4.0f64..=12.0f64).prop_map(rating_group::Event::Rate),
             (0usize..8).prop_map(rating_group::Event::HoverItem),
+            (-4.0f64..=12.0f64).prop_map(rating_group::Event::HoverValue),
             Just(rating_group::Event::UnHover),
             (0usize..8, any::<bool>()).prop_map(|(index, is_keyboard)| {
                 rating_group::Event::Focus { index, is_keyboard }

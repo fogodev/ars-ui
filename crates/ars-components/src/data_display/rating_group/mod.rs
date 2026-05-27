@@ -197,6 +197,9 @@ pub enum Event {
     /// Pointer entered a rating item.
     HoverItem(usize),
 
+    /// Pointer previewed a resolved rating value.
+    HoverValue(f64),
+
     /// Pointer left the rating control.
     UnHover,
 
@@ -430,29 +433,31 @@ impl ars_core::Machine for Machine {
         }
 
         match event {
-            Event::Rate(value) => {
+            Event::Rate(value) => Some(rate_plan(
+                *value,
+                context,
+                props,
+                keyboard_focus_index(*value, context, props),
+            )),
+
+            Event::HoverItem(index) => {
+                let index = clamp_index(*index, context.count);
+                let value = (index + 1) as f64;
+
+                Some(TransitionPlan::to(State::Hovering { index }).apply(
+                    move |ctx: &mut Context| {
+                        ctx.hovered_value = Some(value);
+                    },
+                ))
+            }
+
+            Event::HoverValue(value) => {
                 let value = round_to_step(
                     sanitize_value(*value, context.count),
                     effective_step(props),
                     context.count,
                 );
-                let focused_index = context.focused_index;
-                let target = focused_index.map_or(State::Idle, |index| State::Focused { index });
-
-                Some(
-                    TransitionPlan::to(target)
-                        .apply(move |ctx: &mut Context| {
-                            ctx.value.set(value);
-                            ctx.requested_value = Some(value);
-                            ctx.hovered_value = None;
-                        })
-                        .with_named_effect(Effect::ValueChange, |_ctx, _props, _send| no_cleanup()),
-                )
-            }
-
-            Event::HoverItem(index) => {
-                let index = clamp_index(*index, context.count);
-                let value = (index + 1) as f64;
+                let index = value_to_focus_index(value, context.count);
 
                 Some(TransitionPlan::to(State::Hovering { index }).apply(
                     move |ctx: &mut Context| {
@@ -487,16 +492,31 @@ impl ars_core::Machine for Machine {
                 let value =
                     (*context.value.get() + effective_step(props)).min(max_value(context.count));
 
-                Self::transition(_state, &Event::Rate(value), context, props)
+                Some(rate_plan(
+                    value,
+                    context,
+                    props,
+                    keyboard_focus_index(value, context, props),
+                ))
             }
 
             Event::DecrementRating => {
                 let value = (*context.value.get() - effective_step(props)).max(0.0);
 
-                Self::transition(_state, &Event::Rate(value), context, props)
+                Some(rate_plan(
+                    value,
+                    context,
+                    props,
+                    keyboard_focus_index(value, context, props),
+                ))
             }
 
-            Event::ClearRating => Self::transition(_state, &Event::Rate(0.0), context, props),
+            Event::ClearRating => Some(rate_plan(
+                0.0,
+                context,
+                props,
+                keyboard_focus_index(0.0, context, props),
+            )),
 
             Event::SyncProps => unreachable!("SyncProps handled before interactivity guards"),
         }
@@ -784,6 +804,11 @@ impl Api<'_> {
         (self.send)(Event::HoverItem(index));
     }
 
+    /// Dispatches pointer hover for a resolved rating value.
+    pub fn on_value_hover(&self, value: f64) {
+        (self.send)(Event::HoverValue(value));
+    }
+
     /// Dispatches pointer leave from the rating control.
     pub fn on_control_mouse_leave(&self) {
         (self.send)(Event::UnHover);
@@ -792,6 +817,11 @@ impl Api<'_> {
     /// Dispatches a whole-item rating commit.
     pub fn on_item_rate(&self, index: usize) {
         (self.send)(Event::Rate((index + 1) as f64));
+    }
+
+    /// Dispatches a resolved rating-value commit.
+    pub fn on_value_rate(&self, value: f64) {
+        (self.send)(Event::Rate(value));
     }
 
     fn is_item_tabbable(&self, index: usize) -> bool {
@@ -869,7 +899,55 @@ fn max_value(count: NonZero<u32>) -> f64 {
 }
 
 fn round_to_step(value: f64, step: f64, count: NonZero<u32>) -> f64 {
-    sanitize_value((value / step).round() * step, count)
+    let value = sanitize_value(value, count);
+
+    if (value - max_value(count)).abs() < f64::EPSILON {
+        value
+    } else {
+        sanitize_value((value / step).round() * step, count)
+    }
+}
+
+fn rate_plan(
+    value: f64,
+    context: &Context,
+    props: &Props,
+    focused_index: Option<usize>,
+) -> TransitionPlan<Machine> {
+    let value = round_to_step(
+        sanitize_value(value, context.count),
+        effective_step(props),
+        context.count,
+    );
+    let target = focused_index.map_or(State::Idle, |index| State::Focused { index });
+
+    TransitionPlan::to(target)
+        .apply(move |ctx: &mut Context| {
+            ctx.value.set(value);
+            ctx.requested_value = Some(value);
+            ctx.hovered_value = None;
+
+            if let Some(index) = focused_index {
+                ctx.focused_index = Some(index);
+            }
+        })
+        .with_named_effect(Effect::ValueChange, |_ctx, _props, _send| no_cleanup())
+}
+
+fn keyboard_focus_index(value: f64, context: &Context, props: &Props) -> Option<usize> {
+    if context.focused_index.is_some() && effective_step(props).fract().abs() <= f64::EPSILON {
+        Some(value_to_focus_index(value, context.count))
+    } else {
+        context.focused_index
+    }
+}
+
+fn value_to_focus_index(value: f64, count: NonZero<u32>) -> usize {
+    if value <= 0.0 {
+        0
+    } else {
+        clamp_index(value.ceil() as usize - 1, count)
+    }
 }
 
 fn sync_props_value(context: &Context, props: &Props) -> f64 {
@@ -1022,8 +1100,10 @@ mod tests {
         api.on_item_focus(3, true);
         api.on_item_blur();
         api.on_item_hover(4);
+        api.on_value_hover(2.5);
         api.on_control_mouse_leave();
         api.on_item_rate(2);
+        api.on_value_rate(2.5);
 
         assert_eq!(
             events.into_inner(),
@@ -1038,8 +1118,10 @@ mod tests {
                 },
                 Event::Blur,
                 Event::HoverItem(4),
+                Event::HoverValue(2.5),
                 Event::UnHover,
                 Event::Rate(3.0),
+                Event::Rate(2.5),
             ]
         );
     }
@@ -1118,7 +1200,7 @@ mod tests {
     }
 
     #[test]
-    fn rate_preserves_focus_and_exposes_requested_value() {
+    fn whole_rating_keyboard_changes_move_focus_and_expose_requested_value() {
         let mut service = service(Props::new().id("rating").value(2.0));
 
         drop(service.send(Event::Focus {
@@ -1128,14 +1210,20 @@ mod tests {
 
         let result = service.send(Event::IncrementRating);
 
-        assert_eq!(service.state(), &State::Focused { index: 1 });
-        assert_eq!(service.context().focused_index, Some(1));
+        assert_eq!(service.state(), &State::Focused { index: 2 });
+        assert_eq!(service.context().focused_index, Some(2));
         assert!(service.context().focus_visible);
         assert_eq!(*service.context().value.get(), 2.0);
         assert_eq!(service.context().requested_value, Some(3.0));
         assert_eq!(service.connect(&|_| {}).requested_value(), Some(3.0));
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, Effect::ValueChange);
+
+        drop(service.send(Event::ClearRating));
+
+        assert_eq!(service.state(), &State::Focused { index: 0 });
+        assert_eq!(service.context().focused_index, Some(0));
+        assert_eq!(service.context().requested_value, Some(0.0));
     }
 
     #[test]
@@ -1175,6 +1263,11 @@ mod tests {
             control.get(&HtmlAttr::Aria(AriaAttr::ValueText)),
             Some("2.5 of 5 stars")
         );
+
+        drop(rating.send(Event::HoverValue(2.5)));
+
+        assert_eq!(rating.state(), &State::Hovering { index: 2 });
+        assert_eq!(rating.connect(&|_| {}).display_value(), 2.5);
 
         let custom_step = service(Props::new().id("rating").step(1.5).default_value(1.5));
 
@@ -1274,6 +1367,20 @@ mod tests {
         drop(near_default_step.send(Event::IncrementRating));
 
         assert_eq!(*near_default_step.context().value.get(), 1.0);
+
+        let mut non_divisor_step = service(Props::new().id("rating").default_value(4.5).step(1.5));
+
+        drop(non_divisor_step.send(Event::IncrementRating));
+
+        assert_eq!(
+            *non_divisor_step.context().value.get(),
+            5.0,
+            "max remains reachable even when count is not divisible by step"
+        );
+
+        drop(non_divisor_step.send(Event::Rate(5.0)));
+
+        assert_eq!(*non_divisor_step.context().value.get(), 5.0);
 
         let zero = service(Props::new().id("rating").default_value(0.0));
 
