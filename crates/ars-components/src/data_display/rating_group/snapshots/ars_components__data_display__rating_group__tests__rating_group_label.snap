@@ -26,12 +26,6 @@ AttrMap {
                 "rating-label",
             ),
         ),
-        (
-            For,
-            String(
-                "rating-control",
-            ),
-        ),
     ],
     styles: [],
 }

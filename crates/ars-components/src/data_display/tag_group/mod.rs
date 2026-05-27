@@ -698,6 +698,13 @@ impl Api<'_> {
             .items
             .get(key)
             .and_then(|node| node.value.as_ref());
+        if item.is_none() {
+            attrs
+                .set(HtmlAttr::Data("ars-key"), key)
+                .set_bool(HtmlAttr::Hidden, true)
+                .set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+            return attrs;
+        }
 
         let is_disabled = self.context.disabled || item.is_some_and(|tag| tag.disabled);
         let is_focused = self.context.focused_key.as_ref() == Some(key);
@@ -751,6 +758,12 @@ impl Api<'_> {
             .items
             .get(key)
             .and_then(|node| node.value.as_ref());
+        if item.is_none() {
+            attrs
+                .set_bool(HtmlAttr::Hidden, true)
+                .set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+            return attrs;
+        }
 
         let is_disabled = self.context.disabled || item.is_some_and(|tag| tag.disabled);
 
@@ -779,6 +792,12 @@ impl Api<'_> {
     #[must_use]
     pub const fn requested_selected_keys(&self) -> Option<&BTreeSet<Key>> {
         self.context.requested_selected_keys.as_ref()
+    }
+
+    /// Returns the current tag collection after core removals and prop sync.
+    #[must_use]
+    pub const fn items(&self) -> &StaticCollection<Tag> {
+        &self.context.items
     }
 
     /// Dispatches keyboard intent for a focused tag.
@@ -1134,6 +1153,8 @@ mod tests {
 
         drop(service.send(Event::RemoveTag(key("gamma"))));
 
+        let api = service.connect(&|_| {});
+
         assert_eq!(service.context().focused_key, Some(key("alpha")));
         assert!(
             !service
@@ -1141,6 +1162,24 @@ mod tests {
                 .items
                 .keys()
                 .any(|item_key| item_key == &key("gamma"))
+        );
+        assert!(
+            !api.items().keys().any(|item_key| item_key == &key("gamma")),
+            "connect API exposes the current post-removal collection"
+        );
+        assert_eq!(
+            api.tag_attrs(&key("gamma")).get(&HtmlAttr::Hidden),
+            Some("true")
+        );
+        assert_eq!(
+            api.tag_attrs(&key("gamma"))
+                .get(&HtmlAttr::Aria(AriaAttr::Hidden)),
+            Some("true")
+        );
+        assert_eq!(api.tag_attrs(&key("gamma")).get(&HtmlAttr::Role), None);
+        assert_eq!(
+            api.tag_remove_attrs(&key("gamma")).get(&HtmlAttr::Hidden),
+            Some("true")
         );
     }
 

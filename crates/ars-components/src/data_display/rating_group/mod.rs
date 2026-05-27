@@ -129,15 +129,21 @@ impl Props {
 
     /// Enables or disables half-step behavior.
     #[must_use]
-    pub const fn allow_half(mut self, allow_half: bool) -> Self {
+    pub fn allow_half(mut self, allow_half: bool) -> Self {
         self.allow_half = allow_half;
+        if allow_half && (self.step - 1.0).abs() <= f64::EPSILON {
+            self.step = 0.5;
+        }
         self
     }
 
     /// Sets the rating increment.
     #[must_use]
-    pub const fn step(mut self, step: f64) -> Self {
+    pub fn step(mut self, step: f64) -> Self {
         self.step = step;
+        if step.is_finite() && step > 0.0 {
+            self.allow_half = false;
+        }
         self
     }
 
@@ -641,9 +647,7 @@ impl Api<'_> {
     pub fn label_attrs(&self) -> AttrMap {
         let mut attrs = part_attrs(&Part::Label);
 
-        attrs
-            .set(HtmlAttr::Id, format!("{}-label", self.props.id))
-            .set(HtmlAttr::For, format!("{}-control", self.props.id));
+        attrs.set(HtmlAttr::Id, format!("{}-label", self.props.id));
 
         attrs
     }
@@ -725,8 +729,12 @@ impl Api<'_> {
             attrs.set_bool(HtmlAttr::Data("ars-selected"), true);
         }
 
-        if has_half_value(self.display_value(), index) {
-            attrs.set_bool(HtmlAttr::Data("ars-half"), true);
+        if let Some(fraction) = item_fraction(self.display_value(), index) {
+            attrs.set(HtmlAttr::Data("ars-fraction"), fraction.to_string());
+
+            if (fraction - 0.5).abs() <= f64::EPSILON {
+                attrs.set_bool(HtmlAttr::Data("ars-half"), true);
+            }
         }
 
         if !self.uses_slider_pattern() {
@@ -904,8 +912,8 @@ fn rating_value_text(value: f64, count: u32, messages: &Messages, locale: &Local
     )
 }
 
-const fn effective_step(props: &Props) -> f64 {
-    if props.step.is_finite() && props.step > 0.0 && (props.step - 1.0).abs() > f64::EPSILON {
+fn effective_step(props: &Props) -> f64 {
+    if props.step.is_finite() && props.step > 0.0 {
         props.step
     } else if props.allow_half {
         0.5
@@ -1002,11 +1010,15 @@ fn clamp_index(index: usize, count: NonZero<u32>) -> usize {
     index.min(count.get().saturating_sub(1) as usize)
 }
 
-const fn has_half_value(value: f64, index: usize) -> bool {
+fn item_fraction(value: f64, index: usize) -> Option<f64> {
     let lower = index as f64;
     let upper = (index + 1) as f64;
 
-    value > lower && value < upper
+    if value > lower && value < upper {
+        Some(value - lower)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -1160,6 +1172,7 @@ mod tests {
         );
         assert_eq!(api.item_attrs(0).get(&HtmlAttr::TabIndex), Some("-1"));
         assert_eq!(api.item_attrs(1).get(&HtmlAttr::TabIndex), Some("0"));
+        assert_eq!(api.label_attrs().get(&HtmlAttr::For), None);
 
         api.on_control_keydown(&keyboard(KeyboardKey::ArrowRight));
         api.on_control_keydown(&keyboard(KeyboardKey::ArrowLeft));
@@ -1335,6 +1348,7 @@ mod tests {
 
         let half_item = rating.connect(&|_| {}).item_attrs(2);
 
+        assert_eq!(half_item.get(&HtmlAttr::Data("ars-fraction")), Some("0.5"));
         assert_eq!(half_item.get(&HtmlAttr::Data("ars-half")), Some("true"));
 
         drop(rating.send(Event::HoverItem(3)));
@@ -1499,6 +1513,35 @@ mod tests {
             Some("slider")
         );
         assert_eq!(fractional_api.item_attrs(1).get(&HtmlAttr::Role), None);
+        assert_eq!(
+            fractional_api
+                .item_attrs(2)
+                .get(&HtmlAttr::Data("ars-fraction")),
+            Some("0.25")
+        );
+        assert_eq!(
+            fractional_api
+                .item_attrs(2)
+                .get(&HtmlAttr::Data("ars-half")),
+            None
+        );
+
+        let mut explicit_whole = service(
+            Props::new()
+                .id("rating")
+                .allow_half(true)
+                .step(1.0)
+                .default_value(0.0),
+        );
+
+        drop(explicit_whole.send(Event::Rate(2.5)));
+
+        assert_eq!(*explicit_whole.context().value.get(), 3.0);
+        let explicit_whole_api = explicit_whole.connect(&|_| {});
+        assert_eq!(
+            explicit_whole_api.control_attrs().get(&HtmlAttr::Role),
+            Some("radiogroup")
+        );
 
         let mut near_default_step = service(
             Props::new()
@@ -1509,7 +1552,9 @@ mod tests {
 
         drop(near_default_step.send(Event::IncrementRating));
 
-        assert_eq!(*near_default_step.context().value.get(), 1.0);
+        assert!(
+            (*near_default_step.context().value.get() - (1.0 + f64::EPSILON)).abs() <= f64::EPSILON
+        );
 
         let mut non_divisor_step = service(Props::new().id("rating").default_value(4.5).step(1.5));
 
