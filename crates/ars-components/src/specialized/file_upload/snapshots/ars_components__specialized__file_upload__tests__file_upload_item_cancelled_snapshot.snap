@@ -50,6 +50,12 @@ AttrMap {
                 "listitem",
             ),
         ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
     ],
     styles: [],
 }

@@ -2088,6 +2088,98 @@ fn file_upload_max_files_accepts_up_to_limit_then_rejects_in_same_selection() {
 }
 
 #[test]
+fn file_upload_reconcile_enters_uploading_from_drag_over() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").multiple(true).files(vec![item(
+            "file-1",
+            "a.png",
+            Status::Pending,
+        )]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::DragEnter));
+    assert_eq!(service.state(), &State::DragOver);
+    assert!(service.context().dragging);
+
+    // Controlled queue begins uploading mid-drag: enter Uploading, keep dragging.
+    let result = service.send(Event::SetFiles(Some(vec![item(
+        "file-1",
+        "a.png",
+        Status::Uploading,
+    )])));
+    assert!(result.state_changed);
+    assert_eq!(service.state(), &State::Uploading);
+    assert!(service.context().dragging);
+
+    // The Uploading drag-leave path then clears the drag without ending the upload.
+    drop(service.send(Event::DragLeave));
+    assert_eq!(service.state(), &State::Uploading);
+    assert!(!service.context().dragging);
+}
+
+#[test]
+fn file_upload_disabling_during_upload_drag_clears_drag_but_keeps_uploading() {
+    let mut service = uploading_service("file-1");
+
+    drop(service.send(Event::DragEnter));
+    assert!(service.context().dragging);
+
+    let result = service.set_props(Props {
+        disabled: true,
+        ..service.props().clone()
+    });
+
+    assert_eq!(service.state(), &State::Uploading);
+    assert!(!service.context().dragging);
+    assert_eq!(service.context().drag_counter, 0);
+    assert!(result.context_changed);
+}
+
+#[test]
+fn file_upload_item_is_keyboard_focusable() {
+    let api = api_with_files(vec![item("file-1", "a.png", Status::Pending)]);
+
+    assert_eq!(api.item_attrs(0).get(&HtmlAttr::TabIndex), Some("0"));
+}
+
+#[test]
+fn file_upload_open_file_picker_blocked_while_inert() {
+    let disabled = Props::new().id("upload").disabled(true);
+    let readonly = Props::new().id("upload").readonly(true);
+
+    for props in [disabled, readonly] {
+        let mut service = Service::<Machine>::new(props, &Env::default(), &Messages::default());
+        let result = service.send(Event::OpenFilePicker);
+
+        assert!(
+            result.pending_effects.is_empty(),
+            "the file picker must not open while the component is disabled or read-only"
+        );
+    }
+}
+
+#[test]
+fn file_upload_rejection_message_reflects_rejection_state() {
+    // No rejections: None.
+    assert!(api_for_state(State::Idle).rejection_message().is_none());
+
+    // With rejections: a screen-reader summary.
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").max_file_size(50),
+        &Env::default(),
+        &Messages::default(),
+    );
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "big.png",
+        100,
+        "image/png",
+    )])));
+    assert!(service.connect(&|_| {}).rejection_message().is_some());
+}
+
+#[test]
 fn file_upload_open_file_picker_emits_effect() {
     let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
 

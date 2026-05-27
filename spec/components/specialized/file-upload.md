@@ -495,7 +495,10 @@ fn reconciled_state(current: State, files: &[Item]) -> Option<State> {
     let any_uploading = files.iter().any(|f| f.status == Status::Uploading);
     match (current, any_uploading) {
         (State::Uploading, false) => Some(State::Idle),
-        (State::Idle, true) => Some(State::Uploading),
+        // Enter Uploading even from DragOver (keeping the drag flags) when a
+        // controlled queue begins an upload mid-drag, so upload events are
+        // processed and the Uploading drag-leave path can clear the flags.
+        (State::Idle | State::DragOver, true) => Some(State::Uploading),
         _ => None,
     }
 }
@@ -888,10 +891,14 @@ impl ars_core::Machine for Machine {
             (_, Event::SetProps) => {
                 // Becoming disabled/read-only while dragging would trap the machine:
                 // the disabled guard swallows the DragLeave/Drop that clears
-                // `dragging`, so reset to Idle and clear the drag flags as part of
-                // the sync.
-                let reset_drag = (props.disabled || props.readonly)
-                    && matches!(state, State::DragOver);
+                // `dragging`. Clear the drag flags as part of the sync — from
+                // DragOver that returns to Idle; while Uploading (a drag started
+                // via the uploading drag-enter path) only the flags are cleared so
+                // the upload continues.
+                let becoming_inert = props.disabled || props.readonly;
+                let reset_to_idle = becoming_inert && matches!(state, State::DragOver);
+                let clear_drag = reset_to_idle
+                    || (becoming_inert && matches!(state, State::Uploading) && ctx.dragging);
                 let apply = {
                     let disabled = props.disabled;
                     let readonly = props.readonly;
@@ -919,13 +926,13 @@ impl ars_core::Machine for Machine {
                         ctx.directory = directory;
                         ctx.capture = capture;
                         ctx.name = name;
-                        if reset_drag {
+                        if clear_drag {
                             ctx.dragging = false;
                             ctx.drag_counter = 0;
                         }
                     }
                 };
-                Some(if reset_drag {
+                Some(if reset_to_idle {
                     TransitionPlan::to(State::Idle).apply(apply)
                 } else {
                     TransitionPlan::context_only(apply)
@@ -1130,6 +1137,10 @@ impl<'a> Api<'a> {
         let files = self.ctx.files.get();
         if let Some(file) = files.get(index) {
             attrs.set(HtmlAttr::Role, "listitem");
+            // Keyboard-focusable so Tab reaches items and `on_item_keydown`
+            // (Delete/Backspace removal) is usable — a plain listitem is skipped
+            // by sequential focus.
+            attrs.set(HtmlAttr::TabIndex, "0");
             attrs.set(HtmlAttr::Data("ars-state"), match file.status {
                 Status::Pending => "pending",
                 Status::Uploading => "uploading",
@@ -1339,7 +1350,7 @@ FileUpload
 | Dropzone          | `<div>`               | `role="button"`, `tabindex="0"`, `aria-labelledby`      |
 | Trigger           | `<button>`            | `aria-label`                                            |
 | ItemGroup         | `<ul>`                | `role="list"`, `aria-label`                             |
-| Item              | `<li>`                | `role="listitem"`, `data-ars-state`, `data-ars-file-id` |
+| Item              | `<li>`                | `role="listitem"`, `tabindex="0"`, `data-ars-state`, `data-ars-file-id` |
 | ItemName          | `<span>`              | file name text                                          |
 | ItemSizeText      | `<span>`              | formatted file size                                     |
 | ItemDeleteTrigger | `<button>`            | `aria-label="Remove {filename}"`                        |
@@ -1358,6 +1369,7 @@ FileUpload
 | `aria-disabled="true"` | Dropzone, Trigger, ItemDeleteTrigger | When disabled or read-only |
 | `role="list"`          | ItemGroup                            | Semantic list              |
 | `role="listitem"`      | Item                                 | Semantic list item         |
+| `tabindex="0"`         | Item                                 | Keyboard focusable         |
 | `aria-label`           | Trigger                              | `"Choose files to upload"` |
 | `aria-label`           | ItemDeleteTrigger                    | `"Remove {filename}"`      |
 | `aria-label`           | ItemGroup                            | `"Uploaded files"`         |

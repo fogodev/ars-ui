@@ -765,9 +765,9 @@ impl ars_core::Machine for Machine {
 
             Event::ReconcileState => {
                 // `State::Uploading` must hold exactly when at least one file is
-                // uploading. Drive the resting state between `Idle` and
-                // `Uploading` to match the currently visible queue; `DragOver`'s
-                // transient drag lifecycle is left untouched.
+                // uploading. Drive the resting state to match the currently
+                // visible queue (including entering `Uploading` from `DragOver`
+                // when a controlled upload begins mid-drag).
                 return reconciled_state(*state, ctx.files.get()).map(TransitionPlan::to);
             }
 
@@ -775,10 +775,16 @@ impl ars_core::Machine for Machine {
                 // Becoming disabled/read-only while a drag is in progress would
                 // otherwise trap the machine: the guard below swallows the
                 // `DragLeave`/`Drop` that would normally clear `dragging`, so the
-                // dropzone would stay stuck in its drag-over UI/ARIA state. Reset
-                // to `Idle` and clear the drag flags as part of the sync.
-                let reset_drag =
-                    (props.disabled || props.readonly) && matches!(state, State::DragOver);
+                // dropzone would stay stuck in its drag UI/ARIA state. Clear the
+                // drag flags as part of the sync — from `DragOver` that also means
+                // returning to `Idle`; while `Uploading` (a drag started via the
+                // uploading drag-enter path) the upload must continue, so only the
+                // flags are cleared.
+                let becoming_inert = props.disabled || props.readonly;
+                let reset_to_idle = becoming_inert && matches!(state, State::DragOver);
+                let clear_upload_drag =
+                    becoming_inert && matches!(state, State::Uploading) && ctx.dragging;
+                let clear_drag = reset_to_idle || clear_upload_drag;
 
                 let apply = {
                     let disabled = props.disabled;
@@ -808,14 +814,14 @@ impl ars_core::Machine for Machine {
                         context.capture = capture;
                         context.name = name;
 
-                        if reset_drag {
+                        if clear_drag {
                             context.dragging = false;
                             context.drag_counter = 0;
                         }
                     }
                 };
 
-                return Some(if reset_drag {
+                return Some(if reset_to_idle {
                     TransitionPlan::to(State::Idle).apply(apply)
                 } else {
                     TransitionPlan::context_only(apply)
@@ -1425,6 +1431,10 @@ impl Api<'_> {
         if let Some(file) = self.ctx.files.get().get(index) {
             attrs
                 .set(HtmlAttr::Role, "listitem")
+                // Keyboard-focusable so the spec's Tab-to-item / Delete-Backspace
+                // removal flow (`on_item_keydown`) is reachable — a plain listitem
+                // is skipped by sequential focus.
+                .set(HtmlAttr::TabIndex, "0")
                 .set(HtmlAttr::Data("ars-state"), item_status_token(&file.status))
                 .set(HtmlAttr::Data("ars-file-id"), &file.id)
                 .set(
@@ -2131,7 +2141,11 @@ fn reconciled_state(current: State, files: &[Item]) -> Option<State> {
 
     match (current, any_uploading) {
         (State::Uploading, false) => Some(State::Idle),
-        (State::Idle, true) => Some(State::Uploading),
+        // A controlled queue can begin an upload while a drag is in progress.
+        // Enter `Uploading` (keeping the drag flags) so progress/complete/error
+        // events are processed and the `Uploading` drag-leave path can later
+        // clear `dragging` — instead of stranding the upload behind `DragOver`.
+        (State::Idle | State::DragOver, true) => Some(State::Uploading),
         _ => None,
     }
 }
