@@ -1,0 +1,93 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c0bbf40b3cc7",
+  "session_id": "737704b2-0d90-4bb4-bf1c-59b70e20a2e6",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-27T13:42:45.48995Z",
+  "branch": "task-267",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "eaf8c4286090",
+  "token_usage": {
+    "input_tokens": 69720,
+    "cache_creation_tokens": 2057805,
+    "cache_read_tokens": 109570076,
+    "output_tokens": 353568,
+    "api_call_count": 274
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #267: a TreeView agnostic component in a Rust UI library (ars-ui), including the DnD reorder variant, with full spec sync, tests, and audit.",
+    "outcome": "TreeView agnostic core fully implemented with 85 unit tests, 26 snapshots, proptest, 99% line/region coverage, spec synced, 3-phase audit findings landed, mutation gate policy changed, and a PR opened to GitHub.",
+    "learnings": {
+      "repo": [
+        "TreeCollection::nodes() iterates visible_indices only — it does NOT return nodes hidden under collapsed parents. ExpandAll (and any operation needing all nodes) requires new all_keys()/all_nodes() accessors.",
+        "Key does not implement Borrow<str>. The spec used String-based node identity throughout (event payloads, BTreeSet operations), which would not compile and could not round-trip Key::Int values. Entire spec required retyping to Key.",
+        "Key::int(5) serializes to '5', but Key::from(\"5\") yields Key::String(\"5\") — the two never compare equal in a BTreeSet<Key>. String-based identity in specs is a silent correctness pit.",
+        "selection::State::select already rejects disabled keys, but the component must seed disabled_keys from TreeItem.disabled flags in init — otherwise disabled nodes are silently selectable.",
+        "EffectName has a blanket impl; manual impls cause a compiler conflict and must be removed.",
+        "Callback<T> implements Clone + Debug + PartialEq via pointer identity. It is safe to store in Props structs.",
+        "Every sibling nav/input component implements on_props_changed for controlled-prop syncing. Omitting it means controlled selected/expanded updates and post-reorder prop re-supply are silently ignored.",
+        "DraggableCollection::selection(&self) requires live selection state, which the bare collection doesn't own — so DraggableCollection/DroppableCollection trait impls for TreeView belong in the adapter tasks (#366/#509), not the agnostic core.",
+        "Navigation integration tests use a single navigation.rs file, not per-component files. New component tests append there.",
+        "spec-compile-snippets runs syn::parse_file per block — it is a syntax check only, not full type resolution. Blocks don't need to be self-contained.",
+        "CLAUDE.md is a symlink to AGENTS.md. Edits must target AGENTS.md directly.",
+        ".agents/ and .claude/ skill files are hardlinked (same inode); editing either updates both.",
+        "Pre-commit hooks re-stage all tracked modifications, which collapses a planned multi-commit split into a single commit."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-collections/src/tree_collection.rs",
+          "line": 646,
+          "end_line": 646,
+          "finding": "visible_keys() (and nodes()) sits in impl<T: CollectionItem> block and iterates visible_indices only. all_keys()/all_nodes() accessors were added to the no-bound impl<T> block instead."
+        },
+        {
+          "path": "crates/ars-collections/src/selection.rs",
+          "line": 200,
+          "end_line": 200,
+          "finding": "selection::State::select already rejects disabled keys at this line, but only if disabled_keys was seeded during init — the component is responsible for populating it from TreeItem.disabled flags."
+        }
+      ],
+      "workflow": [
+        "TDD is enforced by convention: write failing tests first, confirm red, implement, confirm green. This caught the init seeding bug for collection-default-expanded nodes before it could ship.",
+        "Snapshot tests (insta) create .new files on first run. All generated snapshots must be reviewed for correctness before accepting with INSTA_UPDATE=new.",
+        "cargo-mutants buffers progress; live results land in mutants.out/ incrementally during the run, not on stdout.",
+        "cargo xci --profile fast is the mandatory pre-push gate (runs clippy, tests, snapshots, spec-validate, compile-snippets across all relevant crates).",
+        "Background tasks can be cancelled mid-run via TaskStop when their prerequisite is removed (e.g., policy change making the mutation gate optional).",
+        "Removing a mandatory gate (mutation) should update both the workflow doc (AGENTS.md) and any skill that enforces it (post-implementation-audit/SKILL.md) to stay consistent.",
+        "Coverage analysis via llvm-cov after initial test pass efficiently identifies residual gaps; targeting uncovered lines before mutation testing is more efficient than relying on mutation output alone."
+      ]
+    },
+    "friction": [
+      "The spec used String-based node identity throughout, which was incompatible with the actual codebase convention (Key) and would not have compiled — required a large-scale spec rewrite across §1–§6.",
+      "TreeCollection::nodes() returning visible-only nodes contradicted the spec's ExpandAll semantics, requiring new ars-collections accessors and a spec sync before the component could be written.",
+      "The mutation rerun was stopped due to a mid-session policy change, leaving stale background pollers that fired exit code 1 and caused confusing task notifications.",
+      "Multiple fallback ScheduleWakeup timers fired after the mutation run was stopped, requiring the assistant to explain the superseded state multiple times.",
+      "cargo-mutants does not stream per-mutant results to stdout, making interim progress checks unreliable (the poller contended on the cargo lock and exited with code 1).",
+      "The planned two-commit split (feature vs. policy) collapsed into one because the pre-commit hook re-staged all modified files, requiring an amend to fix the commit message.",
+      "A 529 server overload interrupted the session at the final commit/amend step."
+    ],
+    "open_items": [
+      "Adapter-layer DnD for TreeView (DraggableCollection/DroppableCollection trait impls, pointer/keyboard hit-testing, 500ms hover-expand timer, use_drag/use_drop wiring) is deferred to #366 (Leptos adapter) and #509 (Dioxus adapter).",
+      "Lazy Loading variant (spec §5) is out of scope for this task; no implementation provided.",
+      "Renamable Nodes variant (spec §6) is out of scope; spec was updated to use Key identity but no implementation provided.",
+      "The 6 MISSED + 2 timeout mutants from the first mutation run had killer tests added, but were not re-verified to 0 missed after the policy change stopped the rerun. Nightly CI will surface any survivors.",
+      "Pre-existing MAX_TREE_DEPTH intra-doc-link warning in tree_collection.rs struct doc was not fixed (pre-existing noise, not introduced by this task).",
+      "83 pre-existing rustdoc warnings across ars-components were not addressed (outside task scope)."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
