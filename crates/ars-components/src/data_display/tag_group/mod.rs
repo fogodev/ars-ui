@@ -396,10 +396,26 @@ impl ars_core::Machine for Machine {
 
         if context.disabled {
             return match event {
-                Event::Blur | Event::Focus { .. } => {
-                    Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
-                        ctx.focused_key = None;
-                        ctx.focus_visible = false;
+                Event::Blur => Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
+                    ctx.focused_key = None;
+                    ctx.focus_visible = false;
+                })),
+
+                Event::Focus { item, is_keyboard } => {
+                    let key = item
+                        .as_ref()
+                        .filter(|key| context.items.contains_key(key))
+                        .cloned();
+                    let is_keyboard = *is_keyboard;
+                    let target = if key.is_some() {
+                        State::Focused
+                    } else {
+                        State::Idle
+                    };
+
+                    Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
+                        ctx.focused_key = key;
+                        ctx.focus_visible = is_keyboard && ctx.focused_key.is_some();
                     }))
                 }
 
@@ -444,12 +460,12 @@ impl ars_core::Machine for Machine {
 
                 let next_key = next_focus_after_removal(&context.items, &key);
 
-                let selection_changed = context.selected_keys.get().contains(&key);
+                let selection_changed = selected_keys_source(context).contains(&key);
                 let mut plan = TransitionPlan::to(State::Focused)
                     .apply(move |ctx: &mut Context| {
                         ctx.items = collection_without(&ctx.items, &key);
                         ctx.removed_keys.insert(key.clone());
-                        let mut selected = ctx.selected_keys.get().clone();
+                        let mut selected = selected_keys_source(ctx).clone();
 
                         if selected.remove(&key) {
                             ctx.requested_selected_keys = Some(selected.clone());
@@ -505,7 +521,7 @@ impl ars_core::Machine for Machine {
 
                 Some(
                     TransitionPlan::context_only(move |ctx: &mut Context| {
-                        let mut selected = ctx.selected_keys.get().clone();
+                        let mut selected = selected_keys_source(ctx).clone();
 
                         match ctx.selection_mode {
                             selection::Mode::None => {}
@@ -529,18 +545,19 @@ impl ars_core::Machine for Machine {
 
             Event::DeselectTag(key) => {
                 let key = key.clone();
+                let selected_source = selected_keys_source(context);
 
                 if context.selection_mode == selection::Mode::None
                     || enabled_tag(context, &key).is_none()
-                    || !context.selected_keys.get().contains(&key)
-                    || (props.disallow_empty_selection && context.selected_keys.get().len() <= 1)
+                    || !selected_source.contains(&key)
+                    || (props.disallow_empty_selection && selected_source.len() <= 1)
                 {
                     return None;
                 }
 
                 Some(
                     TransitionPlan::context_only(move |ctx: &mut Context| {
-                        let mut selected = ctx.selected_keys.get().clone();
+                        let mut selected = selected_keys_source(ctx).clone();
 
                         selected.remove(&key);
 
@@ -552,7 +569,7 @@ impl ars_core::Machine for Machine {
             }
 
             Event::ToggleTag(key) => {
-                if context.selected_keys.get().contains(key) {
+                if selected_keys_source(context).contains(key) {
                     Self::transition(_state, &Event::DeselectTag(key.clone()), context, props)
                 } else {
                     Self::transition(_state, &Event::SelectTag(key.clone()), context, props)
@@ -1005,6 +1022,13 @@ fn normalize_selection(selected: &mut BTreeSet<Key>, mode: selection::Mode) {
 
 fn sync_selection(bindable: &mut Bindable<BTreeSet<Key>>, selected: BTreeSet<Key>) {
     bindable.set(selected);
+}
+
+fn selected_keys_source(context: &Context) -> &BTreeSet<Key> {
+    context
+        .requested_selected_keys
+        .as_ref()
+        .unwrap_or_else(|| context.selected_keys.get())
 }
 
 #[cfg(test)]
@@ -1490,6 +1514,37 @@ mod tests {
     }
 
     #[test]
+    fn controlled_selection_changes_build_from_pending_request() {
+        let mut service = service(
+            Props::new()
+                .id("tags")
+                .items(items())
+                .selection_mode(selection::Mode::Multiple)
+                .selected_keys(selected(&["alpha"])),
+        );
+
+        drop(service.send(Event::RemoveTag(key("alpha"))));
+
+        assert_eq!(
+            service.context().requested_selected_keys.as_ref(),
+            Some(&BTreeSet::new())
+        );
+
+        drop(service.send(Event::SelectTag(key("gamma"))));
+
+        assert_eq!(
+            service.context().requested_selected_keys.as_ref(),
+            Some(&selected(&["gamma"])),
+            "pending controlled removals are the base for the next selection request"
+        );
+        assert_eq!(
+            service.context().selected_keys.get(),
+            &selected(&["alpha"]),
+            "controlled bindable state remains on the prop value until parent sync"
+        );
+    }
+
+    #[test]
     fn disabled_group_removes_roving_tab_stop() {
         let service = service(Props::new().id("tags").items(items()).disabled(true));
         let api = service.connect(&|_| {});
@@ -1620,10 +1675,15 @@ mod tests {
             is_keyboard: true,
         }));
 
-        assert_eq!(disabled.context().focused_key, None);
-
-        disabled.context_mut().focused_key = Some(key("alpha"));
-        disabled.context_mut().focus_visible = true;
+        assert_eq!(disabled.context().focused_key, Some(key("alpha")));
+        assert!(disabled.context().focus_visible);
+        assert_eq!(
+            disabled
+                .connect(&|_| {})
+                .tag_attrs(&key("alpha"))
+                .get(&HtmlAttr::Data("ars-focus-visible")),
+            Some("true")
+        );
 
         drop(disabled.send(Event::Blur));
 

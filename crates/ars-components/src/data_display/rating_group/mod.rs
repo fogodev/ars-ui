@@ -513,7 +513,7 @@ impl ars_core::Machine for Machine {
 
             Event::IncrementRating => {
                 let value =
-                    (*context.value.get() + effective_step(props)).min(max_value(context.count));
+                    (pending_value(context) + effective_step(props)).min(max_value(context.count));
 
                 rate_plan(
                     value,
@@ -524,7 +524,7 @@ impl ars_core::Machine for Machine {
             }
 
             Event::DecrementRating => {
-                let value = (*context.value.get() - effective_step(props)).max(0.0);
+                let value = (pending_value(context) - effective_step(props)).max(0.0);
 
                 rate_plan(
                     value,
@@ -956,6 +956,15 @@ fn rate_plan(
         context.count,
     );
     if (value - *context.value.get()).abs() < f64::EPSILON {
+        if context.focused_index != focused_index {
+            let target = focused_index.map_or(State::Idle, |index| State::Focused { index });
+
+            return Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
+                ctx.hovered_value = None;
+                ctx.focused_index = focused_index;
+            }));
+        }
+
         return None;
     }
 
@@ -974,6 +983,12 @@ fn rate_plan(
             })
             .with_named_effect(Effect::ValueChange, |_ctx, _props, _send| no_cleanup()),
     )
+}
+
+fn pending_value(context: &Context) -> f64 {
+    context
+        .requested_value
+        .unwrap_or_else(|| *context.value.get())
 }
 
 fn keyboard_focus_index(value: f64, context: &Context, props: &Props) -> Option<usize> {
@@ -1608,6 +1623,46 @@ mod tests {
             result.pending_effects.is_empty(),
             "unchanged max-bound increment is a no-op"
         );
+    }
+
+    #[test]
+    fn controlled_increment_repeats_from_pending_request() {
+        let mut service = service(Props::new().id("rating").value(1.0));
+
+        drop(service.send(Event::IncrementRating));
+
+        assert_eq!(service.context().requested_value, Some(2.0));
+
+        drop(service.send(Event::IncrementRating));
+
+        assert_eq!(
+            service.context().requested_value,
+            Some(3.0),
+            "keyboard repeats before parent sync continue from the pending request"
+        );
+        assert_eq!(
+            *service.context().value.get(),
+            1.0,
+            "controlled value stays on the prop value until accepted"
+        );
+    }
+
+    #[test]
+    fn unchanged_rating_updates_whole_mode_focus() {
+        let mut service = service(Props::new().id("rating").default_value(0.0));
+
+        drop(service.send(Event::Focus {
+            index: 3,
+            is_keyboard: true,
+        }));
+        drop(service.send(Event::ClearRating));
+
+        assert_eq!(
+            service.context().focused_index,
+            Some(0),
+            "Home keeps the committed zero value but moves the roving tab stop"
+        );
+        assert_eq!(*service.context().value.get(), 0.0);
     }
 
     #[test]
