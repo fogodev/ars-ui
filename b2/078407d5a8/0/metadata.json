@@ -1,0 +1,115 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "b2078407d5a8",
+  "session_id": "737704b2-0d90-4bb4-bf1c-59b70e20a2e6",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-27T16:03:42.957143Z",
+  "branch": "task-267",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "5313ea947d28",
+  "token_usage": {
+    "input_tokens": 88746,
+    "cache_creation_tokens": 3893225,
+    "cache_read_tokens": 305075293,
+    "output_tokens": 531731,
+    "api_call_count": 518
+  },
+  "session_metrics": {
+    "turn_count": 9
+  },
+  "summary": {
+    "intent": "Implement task #267: the TreeView agnostic core component (plus DnD reorder variant) for the ars-ui Rust project, following the spec contract and project conventions.",
+    "outcome": "Full TreeView agnostic core implemented with 110 unit tests, 26 snapshots, spec-conformance, and proptest; ars-collections gained all_keys()/all_nodes() accessors; spec fully synced; PR #695 opened and survived 3 rounds of Codex review (28 total findings fixed); all xci-fast gates green.",
+    "learnings": {
+      "repo": [
+        "TreeCollection::nodes() returns only *visible* nodes (iterates visible_indices), not all nodes — ExpandAll and similar bulk operations must use the new all_nodes() accessor to reach collapsed subtrees.",
+        "Project-wide convention is Key for node identity (not String); Key does not implement Borrow<str>, so String-based BTreeSet operations (.contains(id), .insert(id)) will not compile against BTreeSet<Key>.",
+        "selection::State::select already rejects disabled keys, but the component must seed selection_state.disabled_keys from TreeItem.disabled flags at init — otherwise disabled nodes remain selectable.",
+        "There is a blanket EffectName impl for all Effect types — manual impl is not needed (unlike what the spec implied).",
+        "Navigation integration tests live in a single tests/spec_conformance/navigation.rs file, not split per component.",
+        "ars_collections::typeahead::State (multi-char buffer, locale collation, process_char_with_locale) is the canonical typeahead implementation used by select/listbox/menu — TreeView should use it, not a hand-rolled single-char matcher.",
+        "CLAUDE.md is a symlink to AGENTS.md — edits must target AGENTS.md directly.",
+        ".agents/ and .claude/ skill files are hardlinked (same inode), so editing one updates both.",
+        "Adapter specs (Leptos/Dioxus) already use Key-based api.branch_attrs(key) references — the Key convention applies project-wide.",
+        "DnD primitives (DropPosition, CollectionDndEvent, DraggableCollection/DroppableCollection, CollectionDndMessages) live in ars_collections::dnd, not ars_components.",
+        "DraggableCollection::selection(&self) is a required method that needs live selection state — the bare collection cannot implement it; only the adapter (bundling collection + live selection + DOM hit-testing) can.",
+        "Separate open tasks #366 and #509 cover Leptos/Dioxus adapter DnD; the agnostic core owns only the semantic surface (ReorderEvent, drag-state machine, valid-slot enumeration, keyboard DnD protocol).",
+        "spec-compile-snippets runs syn::parse_file per block (syntax check only, no type resolution) — blocks only need to parse, not type-check across blocks.",
+        "cargo xci --profile fast (xci-fast) is the mandatory pre-push gate covering clippy, tests, snapshots, spec validate, compile-snippets, and proptest."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-collections/src/tree_collection.rs",
+          "line": 646,
+          "end_line": 646,
+          "finding": "visible_keys() sits in the impl<T: CollectionItem> block. Pure read-only accessors like all_keys()/all_nodes() belong in the no-bound impl<T> block (lines 134-175)."
+        },
+        {
+          "path": "crates/ars-collections/src/selection.rs",
+          "line": 200,
+          "end_line": 200,
+          "finding": "selection::State::select already rejects keys in disabled_keys, but the component must populate that set at init from TreeItem.disabled flags or the guard is silently bypassed."
+        },
+        {
+          "path": "crates/ars-collections/src/typeahead.rs",
+          "line": 1,
+          "finding": "Canonical multi-char, locale-aware typeahead::State with process_char_with_locale; requires now_ms timestamp parameter — event shape must be TypeaheadSearch(char, u64) not TypeaheadSearch(char)."
+        },
+        {
+          "path": "crates/ars-collections/src/dnd.rs",
+          "line": 1,
+          "finding": "All DnD collection primitives (DropPosition, CollectionDropTarget, CollectionDndEvent, DraggableCollection, DroppableCollection, CollectionDndMessages) are defined here and already closed/available from issue #549."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/tree_view/mod.rs",
+          "line": 1,
+          "finding": "New file. Key patterns: effective_selection_mode() for TreeItem-derived vs prop-declared mode; clamp_focus_to_visible() after collapse/item removal; apply_selection()/normalize_selection() as the single path for controlled selection; is_interactive_branch() guards expansion and ArrowRight navigation; has_loaded_children() gates ArrowRight entry into lazy branches."
+        },
+        {
+          "path": "crates/ars-components/src/input/checkbox/mod.rs",
+          "line": 1,
+          "finding": "Canonical pattern for callback+effect wiring: store on_checked_change: Option<Callback<...>> in Props, emit Effect::CheckedChange in transition, execute callback in effect setup closure via PendingEffect::run(ctx, props, send)."
+        }
+      ],
+      "workflow": [
+        "TDD is enforced: write failing tests first, confirm red, implement, confirm green — deviating from this order surfaces behavioral drift during audit phases.",
+        "The post-implementation audit runs 3 phases: (1) spec/impl drift walk, (2) multi-round adjacent-surface checks (on_props_changed convention, undocumented methods), (3) coverage + mutation. Each phase can surface real bugs not caught by initial tests.",
+        "Mandatory pre-PR mutation gate for agnostic components was removed — Nightly CI now owns mutant triage; surviving mutants are addressed when CI surfaces them.",
+        "Codex review loop: post @codex review, poll for 👍 or findings, address each finding with TDD (regression test first), reply inline to thread, resolve, re-trigger; repeat until 👍.",
+        "Snapshot tests with insta: first run generates .new files; accept with INSTA_UPDATE=new or cargo insta accept; must run --unreferenced=reject to catch orphaned snapshots.",
+        "When staging files for commit, avoid git add -A — use explicit file paths to exclude runtime artifacts (.lock files, mutants.out/) not covered by .gitignore.",
+        "Pre-commit hooks can re-stage all tracked modifications, collapsing an intended multi-commit split into a single commit — verify staging state after hook runs before assuming the split held.",
+        "Background tasks scheduled with ScheduleWakeup/run_in_background fire stale wakeups after being cancelled — these are harmless but require verifying the task-notification output to confirm it is not the active run."
+      ]
+    },
+    "friction": [
+      "TypeaheadSearch event shape change from (char) to (char, u64) required updating ~8 test sites and the proptest arbitrary — a ripple that would have been avoided by using the canonical typeahead::State from the start.",
+      "Three rounds of Codex review (28 total findings) before approval — each round required TDD fixes, spec sync, xci-fast, commit/push, inline replies, thread resolution, and re-trigger.",
+      "Background mutation runner contended on cargo lock with other concurrent cargo processes, causing the progress poller to exit with code 1 (not a real failure, but confusing).",
+      "Stale fallback ScheduleWakeup notifications fired after the mutation gate was cancelled, requiring context reconstruction to confirm they were not the active run.",
+      "CLAUDE.md being a symlink to AGENTS.md was not surfaced until an edit was attempted — required a readlink step to find the real target.",
+      "The spec's String-based identity throughout §1–§6 (event payloads, Api params, variant sections) required a broad find-and-replace pass; the mismatch with Key was a silent compile-time failure waiting to happen.",
+      "cargo xci-fast with mutation testing takes ~36 minutes — long feedback loop for the final gate.",
+      "Pre-commit hook collapsed an intended two-commit split (feature + policy) into one commit, requiring an amend to fix the message."
+    ],
+    "open_items": [
+      "Adapter-layer DnD (DOM pointer/keyboard hit-testing, 500ms hover-expand timer, use_drag/use_drop wiring, DraggableCollection/DroppableCollection trait impls bundling live selection) deferred to #366 (TreeView Leptos adapter) and #509 (TreeView Dioxus adapter).",
+      "Lazy Loading (§5) and Renamable Nodes (§6) variants remain out-of-scope no_check blocks in the spec — not implemented in the agnostic core.",
+      "Mutation testing for tree_view deferred to Nightly CI — the rerun after adding killer tests was stopped before confirming 0 MISSED; Nightly CI will surface any survivors.",
+      "aria-multiselectable now reflects effective_selection_mode — adapter snapshots may need regeneration when the Leptos/Dioxus adapters are implemented in #366/#509.",
+      "The agnostic-component mutation-gate policy change (AGENTS.md + post-implementation-audit skill) should be reviewed against other component types (adapters, utility) to confirm the scope is correctly bounded to agnostic cores only."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
