@@ -36,6 +36,9 @@ React Aria's `TagGroup`.
 | `FocusPrevious` | —                                      | Move focus to the previous tag (ArrowLeft / ArrowUp).   |
 | `FocusFirst`    | —                                      | Move focus to the first tag (Home).                     |
 | `FocusLast`     | —                                      | Move focus to the last tag (End).                       |
+| `SelectTag`     | `Key`                                  | Select the tag identified by key.                       |
+| `DeselectTag`   | `Key`                                  | Deselect the tag identified by key.                     |
+| `ToggleTag`     | `Key`                                  | Toggle selection for the tag identified by key.         |
 
 ### 1.3 Context
 
@@ -55,8 +58,6 @@ pub struct Context {
     pub selection_mode: selection::Mode,
     /// Currently selected tag keys.
     pub selected_keys: Bindable<BTreeSet<Key>>,
-    /// Unique component instance identifier.
-    pub id: ComponentId,
     /// The current locale for message resolution.
     pub locale: Locale,
     /// Resolved messages for accessibility labels.
@@ -105,7 +106,7 @@ impl Default for Props {
     fn default() -> Self {
         Self {
             id: String::new(),
-            items: Vec::new(),
+            items: StaticCollection::default(),
             selected_keys: None,
             default_selected_keys: BTreeSet::new(),
             selection_mode: selection::Mode::None,
@@ -120,7 +121,7 @@ impl Default for Props {
 ### 1.5 Full Machine Implementation
 
 ```rust
-use ars_core::{TransitionPlan, ComponentIds, AttrMap, Bindable};
+use ars_core::{TransitionPlan, AttrMap, Bindable, no_cleanup};
 
 /// States for the TagGroup.
 #[derive(Clone, Debug, PartialEq)]
@@ -148,6 +149,19 @@ pub enum Event {
     FocusFirst,
     /// Move focus to the last tag (End).
     FocusLast,
+    /// Select the given tag.
+    SelectTag(Key),
+    /// Deselect the given tag.
+    DeselectTag(Key),
+    /// Toggle selection for the given tag.
+    ToggleTag(Key),
+}
+
+/// Typed side-effect intents emitted by the TagGroup machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Announce that a tag was removed.
+    AnnounceRemoved,
 }
 
 /// Machine for the TagGroup.
@@ -174,7 +188,6 @@ impl ars_core::Machine for Machine {
                 Some(keys) => Bindable::controlled(keys.clone()),
                 None       => Bindable::uncontrolled(props.default_selected_keys.clone()),
             },
-            id: ComponentId::new(),
             locale,
             messages,
         })
@@ -200,7 +213,7 @@ impl ars_core::Machine for Machine {
             // ── Focus ────────────────────────────────────────────────────
             Event::Focus { item, is_keyboard } => {
                 let key = item.clone().or_else(|| {
-                    ctx.items.first().map(|t| t.key.clone())
+                    ctx.items.iter().find(|t| !t.disabled).map(|t| t.key.clone())
                 });
                 let kb = *is_keyboard;
                 Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
@@ -240,10 +253,8 @@ impl ars_core::Machine for Machine {
                     ctx.items.retain(|t| t.key != k);
                     ctx.selected_keys.get_mut_owned().retain(|k2| *k2 != k);
                     ctx.focused_key = next_key;
-                }).with_named_effect("announce-removed", move |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    let msg = (ctx.messages.removed_announcement)(&label, &ctx.locale);
-                    platform.announce(&msg);
+                }).with_named_effect(Effect::AnnounceRemoved, move |ctx, _props, _send| {
+                    let _message = (ctx.messages.removed_announcement)(&label, &ctx.locale);
                     no_cleanup()
                 }))
             }
@@ -294,6 +305,11 @@ impl ars_core::Machine for Machine {
                     ctx.focus_visible = true;
                 }))
             }
+
+            // Selection events honor selection::Mode and disallow_empty_selection.
+            Event::SelectTag(key) => { /* insert or replace selected key */ }
+            Event::DeselectTag(key) => { /* remove selected key unless this would empty a required selection */ }
+            Event::ToggleTag(key) => { /* dispatch select or deselect according to current selection state */ }
         }
     }
 
@@ -364,7 +380,7 @@ impl<'a> Api<'a> {
             Part::Label.data_attrs();
         p.set(scope_attr, scope_val);
         p.set(part_attr, part_val);
-        let label_id = format!("{}-label", self.ctx.id);
+        let label_id = format!("{}-label", self.props.id);
         p.set(HtmlAttr::Id, label_id);
         p
     }
@@ -377,7 +393,7 @@ impl<'a> Api<'a> {
         p.set(scope_attr, scope_val);
         p.set(part_attr, part_val);
         p.set(HtmlAttr::Role, "row");
-        let label_id = format!("{}-label", self.ctx.id);
+        let label_id = format!("{}-label", self.props.id);
         p.set(HtmlAttr::Aria(AriaAttr::LabelledBy), label_id);
         p
     }

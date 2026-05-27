@@ -475,8 +475,6 @@ RatingGroup
 ├── Label          (visible label text)
 ├── Control        (role="radiogroup" or role="slider")
 │   ├── Item       (each star slot; data-ars-index, data-ars-highlighted, data-ars-selected)
-│   │   ├── ItemHalf  (left half — half-rating mode only)
-│   │   └── ItemFull  (full star icon)
 │   └── ...
 └── HiddenInput    (<input type="hidden"> for form submission)
 ```
@@ -487,17 +485,15 @@ RatingGroup
 | `Label`       | `<label>`               | `data-ars-scope="rating-group"` `data-ars-part="label"`                                                     |
 | `Control`     | `<div>`                 | `role="radiogroup"` or `role="slider"`                                                                      |
 | `Item`        | `<span>`                | `role="radio"`, `aria-label`, `aria-checked`, `data-ars-index`, `data-ars-highlighted`, `data-ars-selected` |
-| `ItemHalf`    | `<span>`                | Half-star hit area (half-rating mode)                                                                       |
-| `ItemFull`    | `<span>`                | Full-star hit area                                                                                          |
 | `HiddenInput` | `<input type="hidden">` | Form submission value                                                                                       |
 
-RatingGroup items in the half-filled state emit `data-ars-half` (presence attribute) for CSS targeting of half-star styling.
+RatingGroup items in the half-filled state emit `data-ars-half` (presence attribute) for CSS targeting of half-star styling. Adapters may render internal half/full visual spans inside an `Item`, but those spans are adapter-owned visual substructure and are not public agnostic `Part` variants.
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-RatingGroup uses one of two ARIA patterns depending on whether half-ratings are enabled:
+RatingGroup uses one of two ARIA patterns depending on the effective rating step:
 
 #### 3.1.1 Radio group pattern (whole numbers)
 
@@ -508,10 +504,12 @@ RatingGroup uses one of two ARIA patterns depending on whether half-ratings are 
 - Home clears rating (tabindex moves to first item).
 - End sets maximum rating.
 
-#### 3.1.2 Slider pattern (half-ratings)
+#### 3.1.2 Slider pattern (fractional ratings)
 
 - `Control`: `role="slider"`, `aria-valuemin="0"`, `aria-valuemax="{count}"`,
   `aria-valuenow="{value}"`, `aria-valuetext="{N} of {count} stars"`.
+- Used when the effective step is fractional, including `allow_half: true` and explicit
+  `step` values such as `0.25`.
 - Single focusable element; arrow keys adjust the value.
 
 #### 3.1.3 Disabled / Read-only

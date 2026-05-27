@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/data_display/rating_group/mod.rs
+expression: snapshot_attrs(&half_api.item_attrs(2))
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-highlighted",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-index",
+            ),
+            String(
+                "2",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "rating-group",
+            ),
+        ),
+    ],
+    styles: [],
+}

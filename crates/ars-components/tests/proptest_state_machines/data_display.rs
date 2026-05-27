@@ -336,3 +336,210 @@ mod progress_proptests {
         }
     }
 }
+
+// ────────────────────────────────────────────────────────────────────
+// RatingGroup
+// ────────────────────────────────────────────────────────────────────
+
+mod rating_group_proptests {
+    use std::num::NonZero;
+
+    use ars_components::data_display::rating_group;
+    use ars_core::{Env, Service};
+    use proptest::prelude::*;
+
+    fn arb_props() -> impl Strategy<Value = rating_group::Props> {
+        (
+            1u32..=8,
+            0.0f64..=8.0,
+            any::<bool>(),
+            prop_oneof![Just(0.25), Just(0.5), Just(1.0), Just(2.0)],
+            any::<bool>(),
+            any::<bool>(),
+        )
+            .prop_map(
+                |(count, default_value, allow_half, step, readonly, disabled)| {
+                    rating_group::Props::new()
+                        .id("rating")
+                        .count(NonZero::new(count).expect("non-zero"))
+                        .default_value(default_value)
+                        .allow_half(allow_half)
+                        .step(step)
+                        .readonly(readonly)
+                        .disabled(disabled)
+                },
+            )
+    }
+
+    fn arb_event() -> impl Strategy<Value = rating_group::Event> {
+        prop_oneof![
+            (-4.0f64..=12.0f64).prop_map(rating_group::Event::Rate),
+            (0usize..8).prop_map(rating_group::Event::HoverItem),
+            Just(rating_group::Event::UnHover),
+            (0usize..8, any::<bool>()).prop_map(|(index, is_keyboard)| {
+                rating_group::Event::Focus { index, is_keyboard }
+            }),
+            Just(rating_group::Event::Blur),
+            Just(rating_group::Event::IncrementRating),
+            Just(rating_group::Event::DecrementRating),
+            Just(rating_group::Event::ClearRating),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(super::super::common::proptest_config())]
+
+        #[test]
+        #[ignore = "proptest — nightly extended-proptest job"]
+        fn proptest_rating_group_event_sequences_preserve_invariants(
+            props in arb_props(),
+            events in prop::collection::vec(arb_event(), 0..64),
+        ) {
+            let mut service = Service::<rating_group::Machine>::new(
+                props,
+                &Env::default(),
+                &rating_group::Messages::default(),
+            );
+
+            let initial_value = *service.context().value.get();
+
+            for event in events {
+                drop(service.send(event));
+
+                let ctx = service.context();
+                let value = *ctx.value.get();
+                let max = f64::from(ctx.count.get());
+
+                prop_assert!(value.is_finite());
+                prop_assert!((0.0..=max).contains(&value));
+
+                if let Some(hovered) = ctx.hovered_value {
+                    prop_assert!(hovered.is_finite());
+                    prop_assert!((0.0..=max).contains(&hovered));
+                }
+
+                if ctx.disabled || ctx.readonly {
+                    prop_assert_eq!(value, initial_value);
+                }
+            }
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// TagGroup
+// ────────────────────────────────────────────────────────────────────
+
+mod tag_group_proptests {
+    use std::collections::BTreeSet;
+
+    use ars_collections::{Collection, Key, StaticCollection, selection};
+    use ars_components::data_display::tag_group;
+    use ars_core::{Env, Service};
+    use proptest::prelude::*;
+
+    const fn key(value: u64) -> Key {
+        Key::int(value)
+    }
+
+    fn props(disabled: bool) -> tag_group::Props {
+        let items = StaticCollection::new([
+            (
+                key(0),
+                "Zero".to_string(),
+                tag_group::Tag {
+                    key: key(0),
+                    label: "Zero".to_string(),
+                    disabled: false,
+                },
+            ),
+            (
+                key(1),
+                "One".to_string(),
+                tag_group::Tag {
+                    key: key(1),
+                    label: "One".to_string(),
+                    disabled: true,
+                },
+            ),
+            (
+                key(2),
+                "Two".to_string(),
+                tag_group::Tag {
+                    key: key(2),
+                    label: "Two".to_string(),
+                    disabled: false,
+                },
+            ),
+        ]);
+
+        tag_group::Props::new()
+            .id("tags")
+            .items(items)
+            .selection_mode(selection::Mode::Multiple)
+            .disabled(disabled)
+    }
+
+    fn arb_event() -> impl Strategy<Value = tag_group::Event> {
+        prop_oneof![
+            (prop::option::of(0u64..3), any::<bool>()).prop_map(|(item, is_keyboard)| {
+                tag_group::Event::Focus {
+                    item: item.map(key),
+                    is_keyboard,
+                }
+            }),
+            Just(tag_group::Event::Blur),
+            (0u64..3).prop_map(|value| tag_group::Event::RemoveTag(key(value))),
+            Just(tag_group::Event::FocusNext),
+            Just(tag_group::Event::FocusPrevious),
+            Just(tag_group::Event::FocusFirst),
+            Just(tag_group::Event::FocusLast),
+            (0u64..3).prop_map(|value| tag_group::Event::ToggleTag(key(value))),
+            (0u64..3).prop_map(|value| tag_group::Event::SelectTag(key(value))),
+            (0u64..3).prop_map(|value| tag_group::Event::DeselectTag(key(value))),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(super::super::common::proptest_config())]
+
+        #[test]
+        #[ignore = "proptest — nightly extended-proptest job"]
+        fn proptest_tag_group_event_sequences_preserve_invariants(
+            disabled in any::<bool>(),
+            events in prop::collection::vec(arb_event(), 0..64),
+        ) {
+            let mut service = Service::<tag_group::Machine>::new(
+                props(disabled),
+                &Env::default(),
+                &tag_group::Messages::default(),
+            );
+
+            let initial_items = service.context().items.keys().cloned().collect::<BTreeSet<_>>();
+            let initial_selection = service.context().selected_keys.get().clone();
+
+            for event in events {
+                drop(service.send(event));
+
+                let ctx = service.context();
+
+                let item_keys = ctx.items.keys().cloned().collect::<BTreeSet<_>>();
+
+                if let Some(focused) = &ctx.focused_key {
+                    prop_assert!(item_keys.contains(focused));
+                    let item = ctx.items.get(focused).expect("focused key is present");
+                    prop_assert!(!item.value.as_ref().expect("tag value").disabled);
+                }
+
+                for key in ctx.selected_keys.get() {
+                    prop_assert!(item_keys.contains(key));
+                }
+
+                if disabled {
+                    prop_assert_eq!(&item_keys, &initial_items);
+                    prop_assert_eq!(ctx.selected_keys.get(), &initial_selection);
+                }
+            }
+        }
+    }
+}

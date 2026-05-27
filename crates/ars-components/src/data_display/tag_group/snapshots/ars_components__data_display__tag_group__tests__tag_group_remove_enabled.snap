@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/data_display/tag_group/mod.rs
+expression: "snapshot_attrs(&api.tag_remove_attrs(&key(\"alpha\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "tag-remove",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tag-group",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Remove",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "button",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

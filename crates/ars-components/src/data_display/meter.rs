@@ -521,6 +521,116 @@ mod tests {
     }
 
     #[test]
+    fn meter_props_builders_write_all_fields() {
+        let options = number::FormatOptions {
+            max_fraction_digits: 1,
+            ..number::FormatOptions::default()
+        };
+
+        let props = Props::new()
+            .id("disk")
+            .value(72.0)
+            .min(10.0)
+            .max(110.0)
+            .low(30.0)
+            .high(90.0)
+            .optimum(60.0)
+            .format_options(options.clone());
+
+        assert_eq!(props.id, "disk");
+        assert_eq!(props.value, 72.0);
+        assert_eq!(props.min, 10.0);
+        assert_eq!(props.max, 110.0);
+        assert_eq!(props.low, Some(30.0));
+        assert_eq!(props.high, Some(90.0));
+        assert_eq!(props.optimum, Some(60.0));
+        assert_eq!(props.format_options, Some(options));
+    }
+
+    #[test]
+    fn meter_value_text_uses_format_options() {
+        let options = number::FormatOptions {
+            max_fraction_digits: 1,
+            ..number::FormatOptions::default()
+        };
+
+        let api = api(Props::new().id("meter").value(12.5).format_options(options));
+
+        assert_eq!(api.value_text(), "12.5%");
+    }
+
+    #[test]
+    fn meter_value_text_uses_sanitized_display_bounds() {
+        let api = api(Props::new().id("meter").value(50.0).min(100.0).max(0.0));
+
+        let root = api.root_attrs();
+
+        assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0"));
+        assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("100"));
+        assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("50"));
+        assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::ValueText)), Some("50%"));
+        assert_eq!(api.value_text(), "50%");
+        assert!(
+            api.range_attrs()
+                .styles()
+                .contains(&(CssProperty::Width, String::from("50%")))
+        );
+    }
+
+    #[test]
+    fn meter_root_exposes_meter_aria_and_native_attrs() {
+        let attrs = api(Props::new()
+            .id("disk")
+            .value(72.0)
+            .min(0.0)
+            .max(256.0)
+            .low(64.0)
+            .high(192.0)
+            .optimum(32.0))
+        .root_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Role), Some("meter"));
+        assert_eq!(attrs.get(&HtmlAttr::Id), Some("disk"));
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+            Some("disk-label")
+        );
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("72"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("256"));
+        assert_eq!(attrs.get(&HtmlAttr::Value), Some("72"));
+        assert_eq!(attrs.get(&HtmlAttr::Min), Some("0"));
+        assert_eq!(attrs.get(&HtmlAttr::Max), Some("256"));
+        assert_eq!(attrs.get(&HtmlAttr::Low), Some("64"));
+        assert_eq!(attrs.get(&HtmlAttr::High), Some("192"));
+        assert_eq!(attrs.get(&HtmlAttr::Optimum), Some("32"));
+
+        let label = api(Props::new().id("disk")).label_attrs();
+
+        assert_eq!(label.get(&HtmlAttr::Id), Some("disk-label"));
+        assert_eq!(label.get(&HtmlAttr::For), Some("disk"));
+    }
+
+    #[test]
+    fn meter_part_attrs_delegates_for_all_parts() {
+        let api = api(Props::new().id("meter").value(50.0));
+
+        assert_eq!(api.part_attrs(Part::Root), api.root_attrs());
+        assert_eq!(api.part_attrs(Part::Label), api.label_attrs());
+        assert_eq!(api.part_attrs(Part::Track), api.track_attrs());
+        assert_eq!(api.part_attrs(Part::Range), api.range_attrs());
+        assert_eq!(api.part_attrs(Part::ValueText), api.value_text_attrs());
+        assert_eq!(
+            api.label_attrs().get(&HtmlAttr::Data("ars-part")),
+            Some("label")
+        );
+        assert_eq!(
+            api.track_attrs().get(&HtmlAttr::Data("ars-part")),
+            Some("track")
+        );
+    }
+
+    #[test]
     fn meter_root_default_snapshot() {
         assert_snapshot!(
             "meter_root_default",

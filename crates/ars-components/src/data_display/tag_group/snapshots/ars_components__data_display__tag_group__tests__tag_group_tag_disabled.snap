@@ -1,0 +1,61 @@
+---
+source: crates/ars-components/src/data_display/tag_group/mod.rs
+expression: "snapshot_attrs(&api.tag_attrs(&key(\"beta\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-disabled",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-key",
+            ),
+            String(
+                "beta",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "tag",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tag-group",
+            ),
+        ),
+        (
+            Aria(
+                Disabled,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "gridcell",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

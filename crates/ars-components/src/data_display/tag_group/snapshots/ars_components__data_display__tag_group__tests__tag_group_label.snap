@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/data_display/tag_group/mod.rs
+expression: snapshot_attrs(&api.label_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "label",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tag-group",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "tags-label",
+            ),
+        ),
+    ],
+    styles: [],
+}

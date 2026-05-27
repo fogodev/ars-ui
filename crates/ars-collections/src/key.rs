@@ -1,7 +1,9 @@
 // ars-collections/src/key.rs
 
 use alloc::string::String;
-use core::fmt;
+use core::fmt::{self, Display};
+
+use ars_core::AttrValue;
 
 /// The identifier for a node within a collection.
 ///
@@ -262,13 +264,35 @@ impl Default for Key {
     }
 }
 
-impl fmt::Display for Key {
+impl Display for Key {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Key::String(s) => f.write_str(s),
             Key::Int(n) => write!(f, "{n}"),
             #[cfg(feature = "uuid")]
             Key::Uuid(id) => write!(f, "{id}"),
+        }
+    }
+}
+
+impl From<Key> for AttrValue {
+    fn from(key: Key) -> Self {
+        match key {
+            Key::String(s) => AttrValue::String(s),
+            Key::Int(n) => AttrValue::String(n.to_string()),
+            #[cfg(feature = "uuid")]
+            Key::Uuid(id) => AttrValue::String(id.to_string()),
+        }
+    }
+}
+
+impl From<&Key> for AttrValue {
+    fn from(key: &Key) -> Self {
+        match key {
+            Key::String(s) => AttrValue::String(s.clone()),
+            Key::Int(n) => AttrValue::String(n.to_string()),
+            #[cfg(feature = "uuid")]
+            Key::Uuid(id) => AttrValue::String(id.to_string()),
         }
     }
 }

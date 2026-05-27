@@ -833,7 +833,14 @@ const fn effective_event_value(
 
 #[cfg(test)]
 mod tests {
-    use ars_core::Service;
+    use alloc::sync::Arc;
+    use core::{
+        hash::{Hash, Hasher},
+        sync::atomic::{AtomicU64, Ordering},
+    };
+    use std::collections::hash_map::DefaultHasher;
+
+    use ars_core::{Machine as _, MessageFn, Service};
     use insta::assert_snapshot;
 
     use super::*;
@@ -844,6 +851,304 @@ mod tests {
 
     fn snapshot_attrs(attrs: &AttrMap) -> String {
         alloc::format!("{attrs:#?}")
+    }
+
+    fn hash_part(part: &Part) -> u64 {
+        let mut hasher = DefaultHasher::new();
+
+        part.hash(&mut hasher);
+
+        hasher.finish()
+    }
+
+    #[test]
+    fn progress_initializes_determinate_indeterminate_and_complete_states() {
+        let determinate = service(
+            Props::new()
+                .id("upload")
+                .default_value(40.0)
+                .min(0.0)
+                .max(80.0),
+        );
+
+        assert_eq!(determinate.state(), &State::Idle);
+        assert_eq!(determinate.context().percent, 50.0);
+
+        let indeterminate = service(Props::new().id("upload"));
+
+        assert_eq!(indeterminate.state(), &State::Loading);
+        assert!(indeterminate.context().indeterminate);
+
+        let complete = service(Props::new().id("upload").default_value(100.0));
+
+        assert_eq!(complete.state(), &State::Complete);
+        assert_eq!(complete.context().percent, 100.0);
+    }
+
+    #[test]
+    fn progress_props_builders_and_percent_math_match_contract() {
+        let options = number::FormatOptions {
+            max_fraction_digits: 2,
+            ..number::FormatOptions::default()
+        };
+
+        let props = Props::new()
+            .id("upload")
+            .value(Some(45.0))
+            .default_value(10.0)
+            .min(10.0)
+            .max(80.0)
+            .orientation(Orientation::Vertical)
+            .format_options(options.clone());
+
+        assert_eq!(props.id, "upload");
+        assert_eq!(props.value, Some(Some(45.0)));
+        assert_eq!(props.default_value, Some(10.0));
+        assert_eq!(props.min, 10.0);
+        assert_eq!(props.max, 80.0);
+        assert_eq!(props.orientation, Orientation::Vertical);
+        assert_eq!(props.format_options, Some(options));
+        assert_eq!(Context::compute_percent(Some(45.0), 10.0, 80.0), 50.0);
+        assert_eq!(Context::compute_percent(Some(f64::NAN), 10.0, 80.0), 0.0);
+        assert_eq!(
+            Context::compute_percent(Some(f64::INFINITY), 10.0, 80.0),
+            0.0
+        );
+        assert_eq!(Context::compute_percent(Some(50.0), 100.0, 100.0), 0.0);
+    }
+
+    #[test]
+    fn progress_root_attrs_reflect_determinate_and_indeterminate_modes() {
+        let determinate = service(Props::new().id("upload").default_value(25.0));
+
+        assert!(!determinate.connect(&|_| {}).is_indeterminate());
+
+        let attrs = determinate.connect(&|_| {}).root_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Role), Some("progressbar"));
+        assert_eq!(attrs.get(&HtmlAttr::Id), Some("upload"));
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+            Some("upload-label")
+        );
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("100"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("25"));
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-state")), Some("idle"));
+
+        let indeterminate = service(Props::new().id("upload"));
+
+        assert!(indeterminate.connect(&|_| {}).is_indeterminate());
+
+        let attrs = indeterminate.connect(&|_| {}).root_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Data("ars-state")), Some("loading"));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::ValueNow)));
+
+        let label = indeterminate.connect(&|_| {}).label_attrs();
+
+        assert_eq!(label.get(&HtmlAttr::Id), Some("upload-label"));
+    }
+
+    #[test]
+    fn progress_on_props_changed_reports_each_controlled_change() {
+        let old = Props::new()
+            .id("upload")
+            .value(Some(10.0))
+            .min(0.0)
+            .max(100.0)
+            .orientation(Orientation::Horizontal);
+
+        assert!(Machine::on_props_changed(&old, &old).is_empty());
+
+        assert_eq!(
+            Machine::on_props_changed(&old, &old.clone().value(Some(20.0))),
+            vec![Event::SetValue(Some(20.0))]
+        );
+        assert_eq!(
+            Machine::on_props_changed(&old, &old.clone().min(10.0)),
+            vec![Event::SyncProps]
+        );
+        assert_eq!(
+            Machine::on_props_changed(&old, &old.clone().max(120.0)),
+            vec![Event::SyncProps]
+        );
+        assert_eq!(
+            Machine::on_props_changed(&old, &old.clone().orientation(Orientation::Vertical)),
+            vec![Event::SyncProps]
+        );
+    }
+
+    #[test]
+    fn progress_set_props_syncs_controlled_value_bounds_and_orientation() {
+        let mut service = service(
+            Props::new()
+                .id("upload")
+                .value(Some(20.0))
+                .min(0.0)
+                .max(100.0),
+        );
+
+        drop(
+            service.set_props(
+                Props::new()
+                    .id("upload")
+                    .value(Some(50.0))
+                    .min(10.0)
+                    .max(90.0)
+                    .orientation(Orientation::Vertical),
+            ),
+        );
+
+        let ctx = service.context();
+
+        assert_eq!(ctx.value.get(), &Some(50.0));
+        assert_eq!(ctx.min, 10.0);
+        assert_eq!(ctx.max, 90.0);
+        assert_eq!(ctx.orientation, Orientation::Vertical);
+        assert_eq!(ctx.percent, 50.0);
+    }
+
+    #[test]
+    fn progress_part_equality_and_hash_include_circle_radius() {
+        assert_ne!(Part::Root, Part::Label);
+        assert_ne!(
+            Part::CircleRange { radius: 10.0 },
+            Part::CircleRange { radius: 20.0 }
+        );
+        assert_ne!(hash_part(&Part::Root), hash_part(&Part::Label));
+        assert_ne!(
+            hash_part(&Part::CircleRange { radius: 10.0 }),
+            hash_part(&Part::CircleRange { radius: 20.0 })
+        );
+    }
+
+    #[test]
+    fn progress_api_set_value_dispatches_event() {
+        let sent = AtomicU64::new(0);
+        let send = |event| {
+            if event == Event::SetValue(Some(42.0)) {
+                sent.store(1, Ordering::Relaxed);
+            }
+        };
+
+        let service = service(Props::new().id("upload"));
+
+        let api = service.connect(&send);
+
+        api.set_value(Some(42.0));
+
+        assert_eq!(sent.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn progress_events_update_value_max_completion_reset_and_orientation() {
+        let mut service = service(
+            Props::new()
+                .id("upload")
+                .default_value(20.0)
+                .orientation(Orientation::Vertical),
+        );
+
+        let root = service.connect(&|_| {}).root_attrs();
+
+        assert_eq!(
+            root.get(&HtmlAttr::Aria(AriaAttr::Orientation)),
+            Some("vertical")
+        );
+        assert_eq!(
+            root.get(&HtmlAttr::Data("ars-orientation")),
+            Some("vertical")
+        );
+
+        drop(service.send(Event::SetMax(200.0)));
+        drop(service.send(Event::SetValue(Some(50.0))));
+
+        assert_eq!(service.context().max, 200.0);
+        assert_eq!(service.context().percent, 25.0);
+
+        drop(service.send(Event::Complete));
+
+        assert_eq!(service.state(), &State::Complete);
+        assert_eq!(service.context().value.get(), &Some(200.0));
+        assert_eq!(service.context().percent, 100.0);
+
+        drop(service.send(Event::Reset));
+
+        assert_eq!(service.state(), &State::Loading);
+        assert!(service.context().indeterminate);
+        assert_eq!(service.context().percent, 0.0);
+    }
+
+    #[test]
+    fn progress_range_value_text_and_circle_attrs_are_derived() {
+        let service = service(Props::new().id("upload").default_value(25.0));
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.percent(), 25.0);
+        assert_eq!(api.value_text(), "25% complete");
+        assert!(
+            api.range_attrs()
+                .styles()
+                .contains(&(CssProperty::Width, String::from("25%")))
+        );
+        assert_eq!(
+            api.range_attrs().get(&HtmlAttr::Data("ars-indeterminate")),
+            Some("false")
+        );
+
+        let circle = api.circle_range_attrs(10.0);
+
+        assert!(circle.get(&HtmlAttr::StrokeDasharray).is_some());
+        assert!(circle.get(&HtmlAttr::StrokeDashoffset).is_some());
+        assert_eq!(api.circle_stroke_dashoffset(-10.0), 0.0);
+        assert_eq!(
+            api.circle_range_attrs(f64::NAN)
+                .get(&HtmlAttr::StrokeDasharray),
+            Some("0")
+        );
+        assert_eq!(
+            api.circle_range_attrs(f64::INFINITY)
+                .get(&HtmlAttr::StrokeDashoffset),
+            Some("0")
+        );
+    }
+
+    #[test]
+    fn progress_determinate_value_text_comes_from_messages() {
+        let messages = Messages {
+            determinate: MessageFn::new(Arc::new(|percent: &str, _locale: &Locale| {
+                format!("{percent} uploaded")
+            }) as Arc<DeterminateTextFn>),
+            ..Messages::default()
+        };
+
+        let service = Service::<Machine>::new(
+            Props::new().id("upload").default_value(25.0),
+            &Env::default(),
+            &messages,
+        );
+
+        assert_eq!(service.connect(&|_| {}).value_text(), "25% uploaded");
+    }
+
+    #[test]
+    fn progress_part_attrs_delegates_for_all_parts() {
+        let service = service(Props::new().id("upload").default_value(25.0));
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.part_attrs(Part::Root), api.root_attrs());
+        assert_eq!(api.part_attrs(Part::Label), api.label_attrs());
+        assert_eq!(api.part_attrs(Part::Track), api.track_attrs());
+        assert_eq!(api.part_attrs(Part::Range), api.range_attrs());
+        assert_eq!(api.part_attrs(Part::ValueText), api.value_text_attrs());
+        assert_eq!(api.part_attrs(Part::CircleTrack), api.circle_track_attrs());
+        assert_eq!(
+            api.part_attrs(Part::CircleRange { radius: 10.0 }),
+            api.circle_range_attrs(10.0)
+        );
     }
 
     #[test]

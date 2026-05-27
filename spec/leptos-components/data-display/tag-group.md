@@ -20,6 +20,7 @@ pub fn TagGroup(
     #[prop(optional)] id: Option<String>,
     items: StaticCollection<tag_group::Tag>,
     #[prop(optional, into)] selected_keys: Option<Signal<BTreeSet<Key>>>,
+    #[prop(optional)] default_selected_keys: Option<BTreeSet<Key>>,
     #[prop(optional)] selection_mode: Option<selection::Mode>,
     #[prop(optional)] disallow_empty_selection: bool,
     #[prop(optional)] disabled: bool,
@@ -39,19 +40,21 @@ The adapter owns repeated tag rendering, remove buttons, description and field-e
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with explicit adapter slots for description, field error, and empty state.
-- Part parity: full parity for `Root`, repeated tag cells, and remove controls; `Description`, `FieldError`, and `EmptyState` remain adapter-owned structural nodes.
+- Part parity: full parity for `Root`, `Label`, `List`, repeated tag cells, and remove controls; `Description`, `FieldError`, and `EmptyState` remain adapter-owned structural nodes.
 - Traceability note: this spec promotes removal announcements, adapter-level description/error rendering, RTL keyboard behavior, and per-tag disabled semantics from the agnostic spec.
 
 ## 4. Part Mapping
 
-| Core part / structure | Required?         | Adapter rendering target | Ownership     | Attr source                 | Notes                           |
-| --------------------- | ----------------- | ------------------------ | ------------- | --------------------------- | ------------------------------- |
-| `Root`                | required          | `<div>`                  | adapter-owned | `api.root_attrs()`          | Uses grid-style semantics.      |
-| `Tag`                 | repeated          | `<div>`                  | adapter-owned | `api.tag_attrs(key)`        | One per item.                   |
-| `TagRemove`           | optional per item | `<button>`               | adapter-owned | `api.tag_remove_attrs(key)` | Emits removal when allowed.     |
-| `Description`         | optional          | adapter-owned wrapper    | adapter-owned | adapter-local attrs         | Adapter concern only.           |
-| `FieldError`          | optional          | adapter-owned wrapper    | adapter-owned | adapter-local attrs         | Adapter concern only.           |
-| `EmptyState`          | optional          | adapter-owned wrapper    | adapter-owned | adapter-local attrs         | Rendered when `items` is empty. |
+| Core part / structure | Required?                               | Adapter rendering target | Ownership     | Attr source                 | Notes                           |
+| --------------------- | --------------------------------------- | ------------------------ | ------------- | --------------------------- | ------------------------------- |
+| `Root`                | required                                | `<div>`                  | adapter-owned | `api.root_attrs()`          | Uses grid-style semantics.      |
+| `Label`               | required when visible label is rendered | `<span>` or `<label>`    | adapter-owned | `api.label_attrs()`         | Provides a stable label ID.     |
+| `List`                | required                                | `<div>`                  | adapter-owned | `api.list_attrs()`          | Single grid row wrapper.        |
+| `Tag`                 | repeated                                | `<div>`                  | adapter-owned | `api.tag_attrs(key)`        | One per item.                   |
+| `TagRemove`           | optional per item                       | `<button>`               | adapter-owned | `api.tag_remove_attrs(key)` | Emits removal when allowed.     |
+| `Description`         | optional                                | adapter-owned wrapper    | adapter-owned | adapter-local attrs         | Adapter concern only.           |
+| `FieldError`          | optional                                | adapter-owned wrapper    | adapter-owned | adapter-local attrs         | Adapter concern only.           |
+| `EmptyState`          | optional                                | adapter-owned wrapper    | adapter-owned | adapter-local attrs         | Rendered when `items` is empty. |
 
 ## 5. Attr Merge and Ownership Rules
 
@@ -68,6 +71,7 @@ The adapter owns repeated tag rendering, remove buttons, description and field-e
 | Adapter prop / event              | Mode          | Sync trigger              | Machine event / update path | Notes                                     |
 | --------------------------------- | ------------- | ------------------------- | --------------------------- | ----------------------------------------- |
 | `selected_keys`                   | controlled    | signal change after mount | selection-related events    | Controlled selection stays machine-owned. |
+| `default_selected_keys`           | uncontrolled  | initialization            | props initialization        | Initial selection for uncontrolled mode.  |
 | focus and blur                    | adapter event | root or tag focus         | `Focus` / `Blur`            | Preserves AT focus even when disabled.    |
 | arrow/home/end keys               | adapter event | keyboard interaction      | focus navigation events     | RTL reverses horizontal direction.        |
 | delete/backspace or remove button | adapter event | keyboard or click         | `RemoveTag`                 | Fires `on_remove` after machine update.   |

@@ -1312,6 +1312,7 @@ mod tests {
         assert_eq!(formatter.format_percent(0.5, None), "50%");
         assert_eq!(formatter.format_percent(0.0, None), "0%");
         assert_eq!(formatter.format_percent(1.0, None), "100%");
+        assert_eq!(formatter.format_percent(0.125, Some(1)), "12.5%");
     }
 
     #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
