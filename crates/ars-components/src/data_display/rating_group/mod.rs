@@ -636,8 +636,10 @@ impl Api<'_> {
                 )
                 .set(
                     HtmlAttr::Aria(AriaAttr::ValueText),
-                    (self.context.messages.item_label)(
+                    rating_value_text(
                         *self.context.value.get(),
+                        self.context.count.get(),
+                        &self.context.messages,
                         &self.context.locale,
                     ),
                 )
@@ -826,6 +828,14 @@ fn part_attrs(part: &Part) -> AttrMap {
         .set(part_attr, part_value);
 
     attrs
+}
+
+fn rating_value_text(value: f64, count: u32, messages: &Messages, locale: &Locale) -> String {
+    format!(
+        "{} of {}",
+        value,
+        (messages.item_label)(f64::from(count), locale)
+    )
 }
 
 const fn effective_step(props: &Props) -> f64 {
@@ -1146,6 +1156,10 @@ mod tests {
         assert_eq!(
             control.get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
             Some("2.5")
+        );
+        assert_eq!(
+            control.get(&HtmlAttr::Aria(AriaAttr::ValueText)),
+            Some("2.5 of 5 stars")
         );
     }
 

@@ -221,6 +221,12 @@ pub struct Context {
     /// Currently selected tag keys.
     pub selected_keys: Bindable<BTreeSet<Key>>,
 
+    /// Latest user-requested selected keys for adapter change notification.
+    pub requested_selected_keys: Option<BTreeSet<Key>>,
+
+    /// Keys removed by the core machine and hidden from prop-driven item sync.
+    pub removed_keys: BTreeSet<Key>,
+
     /// Latest localized removal announcement for adapters to announce.
     pub removed_announcement: Option<String>,
 
@@ -259,6 +265,9 @@ impl ComponentMessages for Messages {}
 pub enum Effect {
     /// Announce that a tag was removed.
     AnnounceRemoved,
+
+    /// Notify adapters that the user requested a selection change.
+    SelectionChange,
 }
 
 /// Structural parts exposed by the `TagGroup` connect API.
@@ -325,6 +334,8 @@ impl ars_core::Machine for Machine {
                         props.selection_mode,
                     )),
                 },
+                requested_selected_keys: None,
+                removed_keys: BTreeSet::new(),
                 removed_announcement: None,
                 locale: env.locale.clone(),
                 messages: messages.clone(),
@@ -339,10 +350,10 @@ impl ars_core::Machine for Machine {
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         if let Event::SyncProps = event {
-            let items = props.items.clone();
+            let items = collection_without_keys(&props.items, &context.removed_keys);
             let disabled = props.disabled;
             let selection_mode = props.selection_mode;
-            let selected_keys = sync_selected_keys(context, props);
+            let selected_keys = sync_selected_keys(context, props, &items);
             let controlled_keys = props.selected_keys.as_ref().map(|_| selected_keys.clone());
             let focused_key = context
                 .focused_key
@@ -360,6 +371,7 @@ impl ars_core::Machine for Machine {
                     ctx.items = items;
                     ctx.disabled = disabled;
                     ctx.selection_mode = selection_mode;
+                    ctx.requested_selected_keys = None;
                     ctx.focused_key = focused_key;
                     ctx.focus_visible = ctx.focused_key.is_some() && ctx.focus_visible;
                     ctx.selected_keys.sync_controlled(controlled_keys.clone());
@@ -429,6 +441,7 @@ impl ars_core::Machine for Machine {
                     TransitionPlan::to(next_state)
                         .apply(move |ctx: &mut Context| {
                             ctx.items = collection_without(&ctx.items, &key);
+                            ctx.removed_keys.insert(key.clone());
                             let mut selected = ctx.selected_keys.get().clone();
 
                             selected.remove(&key);
@@ -474,24 +487,28 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let mut selected = ctx.selected_keys.get().clone();
+                Some(
+                    TransitionPlan::context_only(move |ctx: &mut Context| {
+                        let mut selected = ctx.selected_keys.get().clone();
 
-                    match ctx.selection_mode {
-                        selection::Mode::None => {}
+                        match ctx.selection_mode {
+                            selection::Mode::None => {}
 
-                        selection::Mode::Single => {
-                            selected.clear();
-                            selected.insert(key);
+                            selection::Mode::Single => {
+                                selected.clear();
+                                selected.insert(key);
+                            }
+
+                            selection::Mode::Multiple => {
+                                selected.insert(key);
+                            }
                         }
 
-                        selection::Mode::Multiple => {
-                            selected.insert(key);
-                        }
-                    }
-
-                    ctx.selected_keys.set(selected);
-                }))
+                        ctx.requested_selected_keys = Some(selected.clone());
+                        sync_selection(&mut ctx.selected_keys, selected);
+                    })
+                    .with_named_effect(Effect::SelectionChange, |_ctx, _props, _send| no_cleanup()),
+                )
             }
 
             Event::DeselectTag(key) => {
@@ -505,13 +522,17 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let mut selected = ctx.selected_keys.get().clone();
+                Some(
+                    TransitionPlan::context_only(move |ctx: &mut Context| {
+                        let mut selected = ctx.selected_keys.get().clone();
 
-                    selected.remove(&key);
+                        selected.remove(&key);
 
-                    ctx.selected_keys.set(selected);
-                }))
+                        ctx.requested_selected_keys = Some(selected.clone());
+                        sync_selection(&mut ctx.selected_keys, selected);
+                    })
+                    .with_named_effect(Effect::SelectionChange, |_ctx, _props, _send| no_cleanup()),
+                )
             }
 
             Event::ToggleTag(key) => {
@@ -716,6 +737,12 @@ impl Api<'_> {
         self.context.removed_announcement.as_deref()
     }
 
+    /// Returns the latest user-requested selected keys.
+    #[must_use]
+    pub const fn requested_selected_keys(&self) -> Option<&BTreeSet<Key>> {
+        self.context.requested_selected_keys.as_ref()
+    }
+
     /// Dispatches keyboard intent for a focused tag.
     pub fn on_tag_keydown(&self, key: &Key, data: &KeyboardEventData) {
         match data.key {
@@ -862,6 +889,18 @@ fn collection_without(items: &StaticCollection<Tag>, removed: &Key) -> StaticCol
         .collect()
 }
 
+fn collection_without_keys(
+    items: &StaticCollection<Tag>,
+    removed: &BTreeSet<Key>,
+) -> StaticCollection<Tag> {
+    items
+        .nodes()
+        .filter_map(|node| node.value.as_ref())
+        .filter(|tag| !removed.contains(&tag.key))
+        .map(|tag| (tag.key.clone(), tag.label.clone(), tag.clone()))
+        .collect()
+}
+
 fn focus_plan(key: Key) -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Focused).apply(move |ctx: &mut Context| {
         ctx.focused_key = Some(key);
@@ -876,7 +915,7 @@ fn filter_selection(
 ) -> BTreeSet<Key> {
     let mut selected = keys
         .iter()
-        .filter(|key| items.contains_key(key))
+        .filter(|key| enabled_tag_in(items, key).is_some())
         .cloned()
         .collect();
 
@@ -909,13 +948,17 @@ fn sync_selection(bindable: &mut Bindable<BTreeSet<Key>>, selected: BTreeSet<Key
     bindable.set(selected);
 }
 
-fn sync_selected_keys(context: &Context, props: &Props) -> BTreeSet<Key> {
+fn sync_selected_keys(
+    context: &Context,
+    props: &Props,
+    items: &StaticCollection<Tag>,
+) -> BTreeSet<Key> {
     let source = props
         .selected_keys
         .as_ref()
         .unwrap_or_else(|| context.selected_keys.get());
 
-    filter_selection(source, &props.items, props.selection_mode)
+    filter_selection(source, items, props.selection_mode)
 }
 
 #[cfg(test)]
@@ -1182,6 +1225,39 @@ mod tests {
         assert_eq!(single.context().selected_keys.get(), &selected(&["gamma"]));
         assert!(!single.context().items.contains_key(&key("alpha")));
 
+        drop(
+            single.set_props(
+                Props::new()
+                    .id("tags")
+                    .items(items())
+                    .selection_mode(selection::Mode::Multiple)
+                    .selected_keys(selected(&["alpha", "gamma"])),
+            ),
+        );
+
+        assert!(
+            !single.context().items.contains_key(&key("alpha")),
+            "prop sync preserves tags removed by the machine"
+        );
+        assert_eq!(
+            single.context().selected_keys.get(),
+            &selected(&["gamma"]),
+            "removed controlled keys stay filtered after prop sync"
+        );
+
+        let disabled_selection = service(
+            Props::new()
+                .id("tags")
+                .items(items())
+                .selection_mode(selection::Mode::Multiple)
+                .default_selected_keys(selected(&["beta"])),
+        );
+
+        assert!(
+            disabled_selection.context().selected_keys.get().is_empty(),
+            "initial selection drops disabled tag keys"
+        );
+
         let none = service(
             Props::new()
                 .id("tags")
@@ -1191,6 +1267,35 @@ mod tests {
         );
 
         assert!(none.context().selected_keys.get().is_empty());
+    }
+
+    #[test]
+    fn controlled_selection_requests_are_exposed() {
+        let mut service = service(
+            Props::new()
+                .id("tags")
+                .items(items())
+                .selection_mode(selection::Mode::Multiple)
+                .selected_keys(selected(&["alpha"])),
+        );
+
+        let result = service.send(Event::SelectTag(key("gamma")));
+
+        assert_eq!(result.pending_effects.len(), 1);
+        assert_eq!(result.pending_effects[0].name, Effect::SelectionChange);
+        assert_eq!(
+            service.context().requested_selected_keys.as_ref(),
+            Some(&selected(&["alpha", "gamma"]))
+        );
+        assert_eq!(
+            service.connect(&|_| {}).requested_selected_keys(),
+            Some(&selected(&["alpha", "gamma"]))
+        );
+        assert_eq!(
+            service.context().selected_keys.get(),
+            &selected(&["alpha", "gamma"]),
+            "controlled request is mirrored so adapters can inspect the requested value"
+        );
     }
 
     #[test]
@@ -1241,9 +1346,13 @@ mod tests {
             Props::new()
                 .id("tags")
                 .items(items())
-                .selection_mode(selection::Mode::Multiple)
-                .default_selected_keys(selected(&["beta"])),
+                .selection_mode(selection::Mode::Multiple),
         );
+
+        disabled
+            .context_mut()
+            .selected_keys
+            .sync_controlled(Some(selected(&["beta"])));
 
         drop(disabled.send(Event::SelectTag(key("beta"))));
         drop(disabled.send(Event::DeselectTag(key("beta"))));
