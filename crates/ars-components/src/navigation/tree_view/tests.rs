@@ -2237,6 +2237,164 @@ fn drag_start_from_hidden_node_is_rejected() {
 }
 
 // ----------------------------------------------------------------------------
+// Codex review regressions, round 7 (PR #695)
+// ----------------------------------------------------------------------------
+
+#[test]
+fn controlled_selection_change_notifies_without_mutating() {
+    // A controlled tree must not change its rendered selection optimistically;
+    // instead it emits `Effect::SelectionChange` so the parent can echo back.
+    let captured: Arc<Mutex<Vec<selection::Set>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&captured);
+    let mut service = service(
+        props()
+            .selected(selection::Set::Empty)
+            .on_selection_change(move |set: selection::Set| sink.lock().unwrap().push(set)),
+    );
+
+    let mut result = service.send(Event::SelectNode(key(2)));
+
+    assert!(
+        service.context().selected.get().is_empty(),
+        "controlled selection does not change until the parent echoes it"
+    );
+    assert!(!service.connect(&|_| {}).is_node_selected(&key(2)));
+    assert_eq!(result.pending_effects.len(), 1);
+    assert_eq!(result.pending_effects[0].name, Effect::SelectionChange);
+
+    let effect = result
+        .pending_effects
+        .pop()
+        .expect("selection-change effect");
+    let noop_send: StrongSend<Event> = Arc::new(|_| {});
+    drop(effect.run(service.context(), service.props(), noop_send));
+    assert_eq!(
+        captured.lock().unwrap().as_slice(),
+        &[selection::Set::Single(key(2))],
+        "the parent is notified of the requested selection"
+    );
+}
+
+#[test]
+fn controlled_expansion_change_notifies_without_mutating() {
+    let captured: Arc<Mutex<Vec<BTreeSet<Key>>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&captured);
+    let mut service = service(
+        props()
+            .expanded(BTreeSet::new()) // controlled, nothing expanded
+            .on_expanded_change(move |set: BTreeSet<Key>| sink.lock().unwrap().push(set)),
+    );
+
+    let mut result = service.send(Event::ExpandNode(key(4))); // Vegetables
+
+    assert!(
+        service.context().expanded.get().is_empty(),
+        "controlled expansion does not change until the parent echoes it"
+    );
+    assert!(!service.connect(&|_| {}).is_node_expanded(&key(4)));
+    assert_eq!(result.pending_effects.len(), 1);
+    assert_eq!(result.pending_effects[0].name, Effect::ExpandedChange);
+
+    let effect = result
+        .pending_effects
+        .pop()
+        .expect("expanded-change effect");
+    let noop_send: StrongSend<Event> = Arc::new(|_| {});
+    drop(effect.run(service.context(), service.props(), noop_send));
+    let expected: BTreeSet<Key> = [key(4)].into_iter().collect();
+    assert_eq!(captured.lock().unwrap().as_slice(), &[expected]);
+}
+
+#[test]
+fn uncontrolled_changes_mutate_and_emit_effects() {
+    // Uncontrolled trees render the change immediately AND emit the effect.
+    let mut service = service(props());
+
+    let result = service.send(Event::SelectNode(key(2)));
+    assert!(service.connect(&|_| {}).is_node_selected(&key(2)));
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::SelectionChange),
+        "an uncontrolled selection change still notifies the parent"
+    );
+
+    let result = service.send(Event::ExpandNode(key(4)));
+    assert!(service.connect(&|_| {}).is_node_expanded(&key(4)));
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::ExpandedChange)
+    );
+}
+
+#[test]
+fn drag_cancelled_when_source_hidden_by_echo() {
+    // Fruits (1) is controlled-expanded so Apple (2) is a visible drag source.
+    let mut expanded = BTreeSet::new();
+    expanded.insert(key(1));
+    let mut service = service(dnd_props().expanded(expanded));
+    drop(service.send(Event::DragStart(key(2)))); // Apple
+    assert_eq!(service.context().dragging, Some(key(2)));
+
+    // Echo a collapse of Fruits: Apple (2) is no longer rendered. The whole drag
+    // is cancelled, matching DragStart's hidden-source rejection.
+    drop(service.set_props(dnd_props().expanded(BTreeSet::new())));
+    assert_eq!(
+        service.context().dragging,
+        None,
+        "a drag whose source becomes hidden is cancelled"
+    );
+    assert_eq!(service.context().drop_target, None);
+}
+
+#[test]
+fn toggle_leaf_click_deselects_already_selected_leaf() {
+    let mut service = service(
+        props()
+            .multiple(true)
+            .selection_mode(selection::Mode::Multiple),
+    );
+    drop(service.send(Event::SelectNode(key(2))));
+    assert!(service.connect(&|_| {}).is_node_selected(&key(2)));
+
+    let recorder = Recorder::default();
+    service
+        .connect(&|event| record(&recorder, event))
+        .on_leaf_click(&key(2));
+    let events = recorder.into_inner();
+    assert!(
+        events.contains(&Event::DeselectNode(key(2))),
+        "under toggle behavior, clicking a selected leaf deselects it"
+    );
+    assert!(!events.contains(&Event::SelectNode(key(2))));
+}
+
+#[test]
+fn replace_leaf_click_always_selects() {
+    let mut service = service(
+        props()
+            .multiple(true)
+            .selection_mode(selection::Mode::Multiple)
+            .selection_behavior(selection::Behavior::Replace),
+    );
+    drop(service.send(Event::SelectNode(key(2))));
+
+    let recorder = Recorder::default();
+    service
+        .connect(&|event| record(&recorder, event))
+        .on_leaf_click(&key(2));
+    let events = recorder.into_inner();
+    assert!(
+        events.contains(&Event::SelectNode(key(2))),
+        "under replace behavior, a click (re)selects rather than deselecting"
+    );
+    assert!(!events.contains(&Event::DeselectNode(key(2))));
+}
+
+// ----------------------------------------------------------------------------
 // Snapshots — every anatomy part across output-affecting branches
 // ----------------------------------------------------------------------------
 

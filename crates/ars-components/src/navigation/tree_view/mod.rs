@@ -170,6 +170,16 @@ pub enum Effect {
     /// the active-descendant pattern, so only scrolling is adapter-resolved.
     ScrollFocusedIntoView,
 
+    /// Adapter invokes [`Props::on_selection_change`] with the requested
+    /// selection set. Emitted on every user-requested selection change so a
+    /// controlled parent can echo the new value back through `Props::selected`.
+    SelectionChange,
+
+    /// Adapter invokes [`Props::on_expanded_change`] with the requested expanded
+    /// set. Emitted on every user-requested expansion change so a controlled
+    /// parent can echo the new value back through `Props::expanded`.
+    ExpandedChange,
+
     /// Adapter invokes [`Props::on_reorder`] with the completed [`ReorderEvent`].
     Reorder,
 }
@@ -259,6 +269,18 @@ pub struct Props {
     /// Enable the drag-and-drop reorder surface.
     pub dnd_enabled: bool,
 
+    /// Called with the requested selection set whenever the user changes the
+    /// selection. This is the controlled echo point: a controlled tree
+    /// (`selected: Some`) updates `selected` from this callback so the rendered
+    /// selection tracks the parent-owned value.
+    pub on_selection_change: Option<Callback<dyn Fn(selection::Set) + Send + Sync>>,
+
+    /// Called with the requested expanded-key set whenever the user expands or
+    /// collapses a branch. This is the controlled echo point: a controlled tree
+    /// (`expanded: Some`) updates `expanded` from this callback so the rendered
+    /// expansion tracks the parent-owned value.
+    pub on_expanded_change: Option<Callback<dyn Fn(BTreeSet<Key>) + Send + Sync>>,
+
     /// Called when a drag-and-drop reorder completes.
     pub on_reorder: Option<Callback<dyn Fn(ReorderEvent) + Send + Sync>>,
 }
@@ -276,6 +298,8 @@ impl Default for Props {
             selection_mode: selection::Mode::Single,
             selection_behavior: selection::Behavior::Toggle,
             dnd_enabled: false,
+            on_selection_change: None,
+            on_expanded_change: None,
             on_reorder: None,
         }
     }
@@ -355,6 +379,26 @@ impl Props {
     #[must_use]
     pub const fn dnd_enabled(mut self, value: bool) -> Self {
         self.dnd_enabled = value;
+        self
+    }
+
+    /// Sets [`on_selection_change`](Self::on_selection_change).
+    #[must_use]
+    pub fn on_selection_change(
+        mut self,
+        callback: impl Into<Callback<dyn Fn(selection::Set) + Send + Sync>>,
+    ) -> Self {
+        self.on_selection_change = Some(callback.into());
+        self
+    }
+
+    /// Sets [`on_expanded_change`](Self::on_expanded_change).
+    #[must_use]
+    pub fn on_expanded_change(
+        mut self,
+        callback: impl Into<Callback<dyn Fn(BTreeSet<Key>) + Send + Sync>>,
+    ) -> Self {
+        self.on_expanded_change = Some(callback.into());
         self
     }
 
@@ -581,52 +625,32 @@ impl ars_core::Machine for Machine {
                 if !is_interactive_branch(&ctx.items, key) {
                     return None;
                 }
-                let key = key.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let mut expanded = ctx.expanded.get().clone();
-
-                    expanded.insert(key);
-
-                    ctx.expanded.set(expanded);
-                }))
+                let mut next = ctx.expanded.get().clone();
+                next.insert(key.clone());
+                // Expanding never hides the focused node, so no focus clamp.
+                expanded_change_plan(ctx, next, false)
             }
 
             Event::CollapseNode(key) => {
                 if !is_interactive_branch(&ctx.items, key) {
                     return None;
                 }
-                let key = key.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let mut expanded = ctx.expanded.get().clone();
-
-                    expanded.remove(&key);
-
-                    ctx.expanded.set(expanded);
-                    // The focused node may now be hidden under the collapsed
-                    // branch; keep `aria-activedescendant` pointing at a
-                    // rendered element.
-                    clamp_focus_to_visible(ctx);
-                }))
+                let mut next = ctx.expanded.get().clone();
+                next.remove(key);
+                // A collapse may hide the focused node, so re-clamp focus.
+                expanded_change_plan(ctx, next, true)
             }
 
             Event::ToggleNode(key) => {
                 if !is_interactive_branch(&ctx.items, key) {
                     return None;
                 }
-                let is_expanded = ctx.expanded.get().contains(key);
-                let key = key.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let mut expanded = ctx.expanded.get().clone();
-
-                    if is_expanded {
-                        expanded.remove(&key);
-                    } else {
-                        expanded.insert(key);
-                    }
-
-                    ctx.expanded.set(expanded);
-                    clamp_focus_to_visible(ctx);
-                }))
+                let mut next = ctx.expanded.get().clone();
+                let collapsing = next.remove(key);
+                if !collapsing {
+                    next.insert(key.clone());
+                }
+                expanded_change_plan(ctx, next, collapsing)
             }
 
             Event::SelectNode(key) => {
@@ -638,19 +662,11 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                let key = key.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let new_state = ctx.selection_state.select(key);
-                    apply_selection(ctx, new_state);
-                }))
+                selection_change_plan(ctx, ctx.selection_state.select(key.clone()))
             }
 
             Event::DeselectNode(key) => {
-                let key = key.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let new_state = ctx.selection_state.deselect(&key);
-                    apply_selection(ctx, new_state);
-                }))
+                selection_change_plan(ctx, ctx.selection_state.deselect(key))
             }
 
             // Pointer / programmatic focus: do not force the keyboard focus
@@ -751,19 +767,12 @@ impl ars_core::Machine for Machine {
                     .map(|node| node.key.clone())
                     .collect::<Vec<_>>();
 
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let mut expanded = ctx.expanded.get().clone();
-
-                    expanded.extend(expandable);
-
-                    ctx.expanded.set(expanded);
-                }))
+                let mut next = ctx.expanded.get().clone();
+                next.extend(expandable);
+                expanded_change_plan(ctx, next, false)
             }
 
-            Event::CollapseAll => Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                ctx.expanded.set(BTreeSet::new());
-                clamp_focus_to_visible(ctx);
-            })),
+            Event::CollapseAll => expanded_change_plan(ctx, BTreeSet::new(), true),
 
             // ── Drag and drop reorder ───────────────────────────────────
             Event::DragStart(key) => {
@@ -926,16 +935,23 @@ impl ars_core::Machine for Machine {
                         ctx.drop_target = None;
                     } else if let Some(dragging) = ctx.dragging.clone() {
                         // Items are unchanged here, so the dragged node is still
-                        // draggable (same existence + disabled flag as at pickup);
-                        // only the drop target can be invalidated — e.g. an
-                        // `expanded` echo collapsed the parent that held it. Drop
-                        // just the target when it is no longer a valid slot.
+                        // enabled (same disabled flag as at pickup), but an
+                        // `expanded` echo may have collapsed an ancestor and
+                        // hidden it. A hidden source cannot be dropped (matching
+                        // DragStart, which rejects hidden sources), so cancel the
+                        // whole drag; otherwise drop only a now-invalid target.
                         let visible = visible_keys(ctx);
-                        let stale = ctx
-                            .drop_target
-                            .as_ref()
-                            .is_some_and(|t| !is_valid_drop(&ctx.items, &visible, &dragging, t));
-                        if stale {
+                        if visible.contains(&dragging) {
+                            // Source still rendered: drop only a now-invalid target.
+                            let stale = ctx.drop_target.as_ref().is_some_and(|t| {
+                                !is_valid_drop(&ctx.items, &visible, &dragging, t)
+                            });
+                            if stale {
+                                ctx.drop_target = None;
+                            }
+                        } else {
+                            // Source hidden by the echo: cancel the whole drag.
+                            ctx.dragging = None;
                             ctx.drop_target = None;
                         }
                     }
@@ -1121,6 +1137,102 @@ fn apply_selection(ctx: &mut Context, mut new_state: selection::State) {
     ctx.selected.set(new_state.selected_keys.clone());
     new_state.selected_keys = normalize_selection(ctx.selected.get().clone(), ctx.selection_mode);
     ctx.selection_state = new_state;
+}
+
+/// Build the transition for a requested selection change, following the
+/// controlled/uncontrolled bindable contract (mirrors `checkbox_group`): always
+/// notify the parent via [`Effect::SelectionChange`], but only optimistically
+/// render (commit the binding + `selection_state`) when **uncontrolled** — a
+/// controlled parent owns `Props::selected` and echoes the requested value back,
+/// so the rendered selection must not change until that echo arrives. Returns
+/// `None` (no transition) when the requested selection equals the current one.
+fn selection_change_plan(
+    ctx: &Context,
+    new_state: selection::State,
+) -> Option<TransitionPlan<Machine>> {
+    let next = normalize_selection(new_state.selected_keys.clone(), ctx.selection_mode);
+    if ctx.selected.get() == &next {
+        return None;
+    }
+
+    let effect = selection_change_effect(next);
+
+    if ctx.selected.is_controlled() {
+        return Some(
+            TransitionPlan::new()
+                .apply(|_: &mut Context| {})
+                .with_effect(effect),
+        );
+    }
+
+    Some(
+        TransitionPlan::context_only(move |ctx: &mut Context| apply_selection(ctx, new_state))
+            .with_effect(effect),
+    )
+}
+
+/// Build the transition for a requested expansion change. `clamp` re-clamps
+/// focus after a collapse (a now-hidden focused node must not dangle). Same
+/// controlled/uncontrolled contract as [`selection_change_plan`]: notify via
+/// [`Effect::ExpandedChange`], commit the binding only when uncontrolled.
+fn expanded_change_plan(
+    ctx: &Context,
+    next: BTreeSet<Key>,
+    clamp: bool,
+) -> Option<TransitionPlan<Machine>> {
+    if ctx.expanded.get() == &next {
+        return None;
+    }
+
+    let effect = expanded_change_effect(next.clone());
+
+    if ctx.expanded.is_controlled() {
+        return Some(
+            TransitionPlan::new()
+                .apply(|_: &mut Context| {})
+                .with_effect(effect),
+        );
+    }
+
+    Some(
+        TransitionPlan::context_only(move |ctx: &mut Context| {
+            ctx.expanded.set(next);
+            if clamp {
+                clamp_focus_to_visible(ctx);
+            }
+        })
+        .with_effect(effect),
+    )
+}
+
+/// Named effect that invokes [`Props::on_selection_change`] with the requested
+/// selection set so a controlled parent can echo it back.
+fn selection_change_effect(next: selection::Set) -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::SelectionChange,
+        move |_ctx: &Context, props: &Props, _send| {
+            if let Some(callback) = &props.on_selection_change {
+                callback(next.clone());
+            }
+
+            no_cleanup()
+        },
+    )
+}
+
+/// Named effect that invokes [`Props::on_expanded_change`] with the requested
+/// expanded-key set so a controlled parent can echo it back.
+fn expanded_change_effect(next: BTreeSet<Key>) -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::ExpandedChange,
+        move |_ctx: &Context, props: &Props, _send| {
+            if let Some(callback) = &props.on_expanded_change {
+                callback(next.clone());
+            }
+
+            no_cleanup()
+        },
+    )
 }
 
 /// The node to activate when the tree first receives focus: the first selected
@@ -1758,10 +1870,25 @@ impl Api<'_> {
         attrs
     }
 
-    /// Handle activation of a leaf node: select and focus.
+    /// Handle activation of a leaf node: select (or toggle) and focus.
+    ///
+    /// Under the default `Toggle` selection behavior, clicking an
+    /// already-selected leaf **deselects** it (mirroring the keyboard Space path
+    /// and the shared collection toggle contract). `Replace` behavior always
+    /// (re)selects, since a click replaces the current selection.
     pub fn on_leaf_click(&self, node_id: &Key) {
-        (self.send)(Event::SelectNode(node_id.clone()));
+        if self.is_toggle_behavior() && self.is_node_selected(node_id) {
+            (self.send)(Event::DeselectNode(node_id.clone()));
+        } else {
+            (self.send)(Event::SelectNode(node_id.clone()));
+        }
         (self.send)(Event::FocusNode(node_id.clone()));
+    }
+
+    /// Whether the tree uses `Toggle` selection behavior (clicks toggle), as
+    /// opposed to `Replace` (clicks replace the selection).
+    const fn is_toggle_behavior(&self) -> bool {
+        matches!(self.props.selection_behavior, selection::Behavior::Toggle)
     }
 
     /// Attributes for the text label inside a leaf node.
