@@ -4,7 +4,7 @@
 //! state, and ARIA/data attributes. Adapters perform live DOM focus and
 //! announce removal effects through their platform layer.
 
-use alloc::{collections::BTreeSet, format, string::String, sync::Arc};
+use alloc::{collections::BTreeSet, format, string::String, sync::Arc, vec, vec::Vec};
 use core::fmt::{self, Debug};
 
 use ars_collections::{Collection, CollectionItem, Key, StaticCollection, selection};
@@ -314,10 +314,15 @@ impl ars_core::Machine for Machine {
                 disabled: props.disabled,
                 selection_mode: props.selection_mode,
                 selected_keys: match &props.selected_keys {
-                    Some(keys) => Bindable::controlled(filter_selection(keys, &props.items)),
+                    Some(keys) => Bindable::controlled(filter_selection(
+                        keys,
+                        &props.items,
+                        props.selection_mode,
+                    )),
                     None => Bindable::uncontrolled(filter_selection(
                         &props.default_selected_keys,
                         &props.items,
+                        props.selection_mode,
                     )),
                 },
                 removed_announcement: None,
@@ -424,7 +429,11 @@ impl ars_core::Machine for Machine {
                     TransitionPlan::to(next_state)
                         .apply(move |ctx: &mut Context| {
                             ctx.items = collection_without(&ctx.items, &key);
-                            ctx.selected_keys.get_mut_owned().remove(&key);
+                            let mut selected = ctx.selected_keys.get().clone();
+
+                            selected.remove(&key);
+                            sync_selection(&mut ctx.selected_keys, selected);
+
                             ctx.focused_key = next_key;
                             ctx.focus_visible = true;
                             ctx.removed_announcement =
@@ -537,6 +546,8 @@ impl ars_core::Machine for Machine {
             || old.default_selected_keys != new.default_selected_keys
             || old.selection_mode != new.selection_mode
             || old.disabled != new.disabled
+            || old.id != new.id
+            || old.label != new.label
         {
             vec![Event::SyncProps]
         } else {
@@ -635,9 +646,10 @@ impl Api<'_> {
         let is_focused = self.context.focused_key.as_ref() == Some(key);
         let is_selected = self.context.selected_keys.get().contains(key);
 
-        let tabindex = if is_focused
-            || (self.context.focused_key.is_none()
-                && first_enabled_key(&self.context.items).as_ref() == Some(key))
+        let tabindex = if !self.context.disabled
+            && (is_focused
+                || (self.context.focused_key.is_none()
+                    && first_enabled_key(&self.context.items).as_ref() == Some(key)))
         {
             "0"
         } else {
@@ -857,11 +869,44 @@ fn focus_plan(key: Key) -> TransitionPlan<Machine> {
     })
 }
 
-fn filter_selection(keys: &BTreeSet<Key>, items: &StaticCollection<Tag>) -> BTreeSet<Key> {
-    keys.iter()
+fn filter_selection(
+    keys: &BTreeSet<Key>,
+    items: &StaticCollection<Tag>,
+    mode: selection::Mode,
+) -> BTreeSet<Key> {
+    let mut selected = keys
+        .iter()
         .filter(|key| items.contains_key(key))
         .cloned()
-        .collect()
+        .collect();
+
+    normalize_selection(&mut selected, mode);
+
+    selected
+}
+
+fn normalize_selection(selected: &mut BTreeSet<Key>, mode: selection::Mode) {
+    match mode {
+        selection::Mode::None => selected.clear(),
+        selection::Mode::Multiple => {}
+        selection::Mode::Single => {
+            let first = selected.pop_first();
+
+            selected.clear();
+
+            if let Some(key) = first {
+                selected.insert(key);
+            }
+        }
+    }
+}
+
+fn sync_selection(bindable: &mut Bindable<BTreeSet<Key>>, selected: BTreeSet<Key>) {
+    if bindable.is_controlled() {
+        bindable.sync_controlled(Some(selected.clone()));
+    }
+
+    bindable.set(selected);
 }
 
 fn sync_selected_keys(context: &Context, props: &Props) -> BTreeSet<Key> {
@@ -870,7 +915,7 @@ fn sync_selected_keys(context: &Context, props: &Props) -> BTreeSet<Key> {
         .as_ref()
         .unwrap_or_else(|| context.selected_keys.get());
 
-    filter_selection(source, &props.items)
+    filter_selection(source, &props.items, props.selection_mode)
 }
 
 #[cfg(test)]
@@ -1081,6 +1126,10 @@ mod tests {
             Machine::on_props_changed(&old, &old.clone().disabled(true)),
             vec![Event::SyncProps]
         );
+        assert_eq!(
+            Machine::on_props_changed(&old, &old.clone().label("Updated")),
+            vec![Event::SyncProps]
+        );
     }
 
     #[test]
@@ -1098,6 +1147,64 @@ mod tests {
         assert_eq!(
             service.connect(&|_| {}).removed_announcement(),
             Some("Alpha, removed")
+        );
+    }
+
+    #[test]
+    fn selection_sync_normalizes_mode_and_removal_filters_controlled_keys() {
+        let mut single = service(
+            Props::new()
+                .id("tags")
+                .items(items())
+                .selection_mode(selection::Mode::Single)
+                .selected_keys(selected(&["alpha", "gamma"])),
+        );
+
+        assert_eq!(single.context().selected_keys.get(), &selected(&["alpha"]));
+
+        drop(
+            single.set_props(
+                Props::new()
+                    .id("tags")
+                    .items(items())
+                    .selection_mode(selection::Mode::Multiple)
+                    .selected_keys(selected(&["alpha", "gamma"])),
+            ),
+        );
+
+        assert_eq!(
+            single.context().selected_keys.get(),
+            &selected(&["alpha", "gamma"])
+        );
+
+        drop(single.send(Event::RemoveTag(key("alpha"))));
+
+        assert_eq!(single.context().selected_keys.get(), &selected(&["gamma"]));
+        assert!(!single.context().items.contains_key(&key("alpha")));
+
+        let none = service(
+            Props::new()
+                .id("tags")
+                .items(items())
+                .selection_mode(selection::Mode::None)
+                .default_selected_keys(selected(&["alpha"])),
+        );
+
+        assert!(none.context().selected_keys.get().is_empty());
+    }
+
+    #[test]
+    fn disabled_group_removes_roving_tab_stop() {
+        let service = service(Props::new().id("tags").items(items()).disabled(true));
+        let api = service.connect(&|_| {});
+
+        assert_eq!(
+            api.tag_attrs(&key("alpha")).get(&HtmlAttr::TabIndex),
+            Some("-1")
+        );
+        assert_eq!(
+            api.tag_attrs(&key("gamma")).get(&HtmlAttr::TabIndex),
+            Some("-1")
         );
     }
 
@@ -1128,7 +1235,7 @@ mod tests {
         drop(none.send(Event::SelectTag(key("alpha"))));
         drop(none.send(Event::DeselectTag(key("alpha"))));
 
-        assert!(none.context().selected_keys.get().contains(&key("alpha")));
+        assert!(none.context().selected_keys.get().is_empty());
 
         let mut disabled = service(
             Props::new()

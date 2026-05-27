@@ -1,6 +1,6 @@
 // ars-collections/src/key.rs
 
-use alloc::string::String;
+use alloc::string::{String, ToString as _};
 use core::fmt::{self, Display};
 
 use ars_core::AttrValue;

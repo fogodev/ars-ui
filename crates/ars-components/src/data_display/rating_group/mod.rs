@@ -8,6 +8,8 @@ use alloc::{
     format,
     string::{String, ToString as _},
     sync::Arc,
+    vec,
+    vec::Vec,
 };
 use core::{
     fmt::{self, Debug},
@@ -16,7 +18,7 @@ use core::{
 
 use ars_core::{
     AriaAttr, AttrMap, Bindable, ComponentMessages, ComponentPart, ConnectApi, Env, HasId,
-    HtmlAttr, Locale, MessageFn, NoEffect, TransitionPlan,
+    HtmlAttr, Locale, MessageFn, TransitionPlan, no_cleanup,
 };
 use ars_i18n::{Plural, format_plural};
 use ars_interactions::{KeyboardEventData, KeyboardKey};
@@ -229,6 +231,9 @@ pub struct Context {
     /// Hover preview value.
     pub hovered_value: Option<f64>,
 
+    /// Latest user-requested committed value for adapter change notification.
+    pub requested_value: Option<f64>,
+
     /// Focused item index.
     pub focused_index: Option<usize>,
 
@@ -278,6 +283,13 @@ impl Default for Messages {
 
 impl ComponentMessages for Messages {}
 
+/// Typed side-effect intents emitted by the `RatingGroup` machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Notify adapters that the user requested a new committed value.
+    ValueChange,
+}
+
 /// Structural parts exposed by the `RatingGroup` connect API.
 #[derive(ComponentPart)]
 #[scope = "rating-group"]
@@ -311,7 +323,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
-    type Effect = NoEffect;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(
@@ -331,6 +343,7 @@ impl ars_core::Machine for Machine {
                     Bindable::uncontrolled(value)
                 },
                 hovered_value: None,
+                requested_value: None,
                 focused_index: None,
                 focus_visible: false,
                 count: props.count,
@@ -370,6 +383,7 @@ impl ars_core::Machine for Machine {
                 }
 
                 ctx.hovered_value = None;
+                ctx.requested_value = None;
                 ctx.focused_index = focused_index;
                 ctx.focus_visible = ctx.focused_index.is_some() && ctx.focus_visible;
                 ctx.count = count;
@@ -422,12 +436,17 @@ impl ars_core::Machine for Machine {
                     effective_step(props),
                     context.count,
                 );
+                let focused_index = context.focused_index;
+                let target = focused_index.map_or(State::Idle, |index| State::Focused { index });
 
                 Some(
-                    TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
-                        ctx.value.set(value);
-                        ctx.hovered_value = None;
-                    }),
+                    TransitionPlan::to(target)
+                        .apply(move |ctx: &mut Context| {
+                            ctx.value.set(value);
+                            ctx.requested_value = Some(value);
+                            ctx.hovered_value = None;
+                        })
+                        .with_named_effect(Effect::ValueChange, |_ctx, _props, _send| no_cleanup()),
                 )
             }
 
@@ -499,11 +518,15 @@ impl ars_core::Machine for Machine {
 
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
         if old.value != new.value
+            || old.id != new.id
             || old.count != new.count
             || old.allow_half != new.allow_half
             || old.step != new.step
             || old.readonly != new.readonly
             || old.disabled != new.disabled
+            || old.required != new.required
+            || old.name != new.name
+            || old.form != new.form
         {
             vec![Event::SyncProps]
         } else {
@@ -537,6 +560,12 @@ impl Api<'_> {
         self.context
             .hovered_value
             .unwrap_or_else(|| *self.context.value.get())
+    }
+
+    /// Returns the latest user-requested committed value.
+    #[must_use]
+    pub const fn requested_value(&self) -> Option<f64> {
+        self.context.requested_value
     }
 
     /// Returns whether the item at `index` is visually highlighted.
@@ -1044,6 +1073,14 @@ mod tests {
             Machine::on_props_changed(&old, &old.clone().disabled(true)),
             vec![Event::SyncProps]
         );
+        assert_eq!(
+            Machine::on_props_changed(&old, &old.clone().required(true)),
+            vec![Event::SyncProps]
+        );
+        assert_eq!(
+            Machine::on_props_changed(&old, &old.clone().form("survey")),
+            vec![Event::SyncProps]
+        );
     }
 
     #[test]
@@ -1054,6 +1091,27 @@ mod tests {
         assert_eq!((messages.item_label)(1.0, &locale), "1 star");
         assert_eq!((messages.item_label)(1.5, &locale), "1.5 stars");
         assert_eq!((messages.item_label)(-1.0, &locale), "-1 star");
+    }
+
+    #[test]
+    fn rate_preserves_focus_and_exposes_requested_value() {
+        let mut service = service(Props::new().id("rating").value(2.0));
+
+        drop(service.send(Event::Focus {
+            index: 1,
+            is_keyboard: true,
+        }));
+
+        let result = service.send(Event::IncrementRating);
+
+        assert_eq!(service.state(), &State::Focused { index: 1 });
+        assert_eq!(service.context().focused_index, Some(1));
+        assert!(service.context().focus_visible);
+        assert_eq!(*service.context().value.get(), 2.0);
+        assert_eq!(service.context().requested_value, Some(3.0));
+        assert_eq!(service.connect(&|_| {}).requested_value(), Some(3.0));
+        assert_eq!(result.pending_effects.len(), 1);
+        assert_eq!(result.pending_effects[0].name, Effect::ValueChange);
     }
 
     #[test]
