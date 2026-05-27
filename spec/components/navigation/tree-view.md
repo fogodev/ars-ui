@@ -284,7 +284,7 @@ impl ars_core::Machine for Machine {
     type Effect = Effect;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let selected = match &props.selected {
+        let mut selected = match &props.selected {
             Some(v) => Bindable::controlled(v.clone()),
             None    => Bindable::uncontrolled(props.default_selected.clone()),
         };
@@ -320,9 +320,14 @@ impl ars_core::Machine for Machine {
         // `select` still rejects them, so they cannot be selected.
         selection_state.disabled_behavior = selection::DisabledBehavior::FocusOnly;
         // Drop any disabled or unknown key from the resolved initial selection so
-        // a disabled node can never initialize as selected.
-        selection_state.selected_keys = sanitize_selection(
+        // a disabled node can never initialize as selected. Write the sanitized
+        // set back to the binding too (a no-op for a controlled binding the parent
+        // owns) so the public `ctx.selected` agrees with `is_node_selected` and
+        // the rendered ARIA state from the first render.
+        let sanitized = sanitize_selection(
             selected.get().clone(), selection_mode, &props.items, &selection_state.disabled_keys);
+        selected.set(sanitized.clone());
+        selection_state.selected_keys = sanitized;
         let locale = env.locale.clone();
         let messages = messages.clone();
         let ids = ComponentIds::from_id(&props.id);
@@ -474,11 +479,16 @@ impl ars_core::Machine for Machine {
             // ExpandAll uses `all_nodes()` (not the visible-only `nodes()`) so
             // expandable branches hidden under collapsed parents are reached,
             // and includes lazy branches (item-level `has_children` flag) so
-            // bulk expansion can trigger consumer lazy-loading.
+            // bulk expansion can trigger consumer lazy-loading. Disabled branches
+            // are skipped — disabled nodes block all interaction, so ExpandAll
+            // honors the same guard as `ExpandNode`/`ToggleNode`.
             Event::ExpandAll => {
                 let expandable = ctx.items.all_nodes()
-                    .filter(|n| n.has_children
-                        || n.value.as_ref().is_some_and(|v| v.has_children))
+                    .filter(|n| {
+                        let item = n.value.as_ref();
+                        (n.has_children || item.is_some_and(|v| v.has_children))
+                            && !item.is_some_and(|v| v.disabled)
+                    })
                     .map(|n| n.key.clone())
                     .collect::<Vec<_>>();
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -500,8 +510,13 @@ impl ars_core::Machine for Machine {
                 if ctx.dragging.is_some() {
                     return None;
                 }
-                // Disabled nodes block all interaction, including drag.
-                if !props.dnd_enabled || !is_draggable(&ctx.items, key) {
+                // Disabled nodes block all interaction, including drag, and a
+                // node hidden under a collapsed parent cannot be picked up from
+                // the rendered tree — so it is not a valid drag source either.
+                if !props.dnd_enabled
+                    || !is_draggable(&ctx.items, key)
+                    || !visible_keys(ctx).contains(key)
+                {
                     return None;
                 }
                 let key = key.clone();
@@ -789,12 +804,16 @@ fn typeahead_time(now_ms: Option<u64>, state: &typeahead::State) -> u64 {
 }
 
 /// Ordered valid keyboard drop slots for the dragged node: for every visible
-/// node that is neither the dragged node nor a descendant of it, three slots
-/// `Before`, `On`, `After`.
+/// node that is neither the dragged node, a descendant of it, nor disabled
+/// (disabled nodes are never drop targets), three slots `Before`, `On`, `After`.
+/// Mirrors the pointer-path validity in `is_valid_drop`.
 fn valid_drop_slots(ctx: &Context, dragging: &Key) -> Vec<CollectionDropTarget> {
     let mut slots = Vec::new();
     for key in visible_keys(ctx) {
-        if &key == dragging || is_descendant(&ctx.items, dragging, &key) { continue; }
+        if &key == dragging
+            || is_descendant(&ctx.items, dragging, &key)
+            || is_disabled_node(&ctx.items, &key)
+        { continue; }
         for position in [DropPosition::Before, DropPosition::On, DropPosition::After] {
             slots.push(CollectionDropTarget { key: key.clone(), position });
         }
@@ -839,14 +858,15 @@ fn is_descendant(items: &TreeCollection<TreeItem>, ancestor: &Key, candidate: &K
     false
 }
 
-/// A drop is valid when the target is a currently **visible** node (adapters can
-/// send stale keys for rows hidden under a collapsed parent during pointer
-/// hit-testing or virtualization) and is not the dragged node or one of its
-/// descendants (which would create a cycle). `visible` is the live visible-key
-/// set (`visible_keys`).
+/// A drop is valid when the target is a currently **visible**, **enabled** node
+/// (adapters can send stale keys for rows hidden under a collapsed parent during
+/// pointer hit-testing or virtualization, and disabled nodes block all
+/// interaction) and is not the dragged node or one of its descendants (which
+/// would create a cycle). `visible` is the live visible-key set (`visible_keys`).
 fn is_valid_drop(items: &TreeCollection<TreeItem>, visible: &[Key], dragging: &Key, target: &CollectionDropTarget) -> bool {
     visible.contains(&target.key)
         && &target.key != dragging
+        && !is_disabled_node(items, &target.key)
         && !is_descendant(items, dragging, &target.key)
 }
 
@@ -858,6 +878,12 @@ fn is_draggable(items: &TreeCollection<TreeItem>, key: &Key) -> bool {
         && !node.and_then(|n| n.value.as_ref()).is_some_and(|i| i.disabled)
 }
 
+/// Whether `key` names a disabled node (disabled nodes block all interaction, so
+/// they are never valid drag sources or drop targets).
+fn is_disabled_node(items: &TreeCollection<TreeItem>, key: &Key) -> bool {
+    items.get(key).and_then(|n| n.value.as_ref()).is_some_and(|i| i.disabled)
+}
+
 /// Whether `key` names a node that can be selected: it exists and is not
 /// disabled. Keeps the rendered selection free of removed or disabled keys.
 fn is_selectable_key(items: &TreeCollection<TreeItem>, disabled: &BTreeSet<Key>, key: &Key) -> bool {
@@ -867,14 +893,21 @@ fn is_selectable_key(items: &TreeCollection<TreeItem>, disabled: &BTreeSet<Key>,
 /// Drop selection keys that cannot be selected in `items` (missing or disabled
 /// nodes), then normalize the remainder for `mode`. Applied at init and on every
 /// `SyncProps` so the rendered selection (and the uncontrolled binding) can
-/// never report a removed or disabled node as selected. The symbolic `All` and
-/// any future `#[non_exhaustive]` `Set` variant pass through unfiltered.
+/// never report a removed or disabled node as selected. The symbolic `All` is
+/// resolved to the concrete selectable keys so it cannot bypass the filtering;
+/// any future `#[non_exhaustive]` `Set` variant passes through unfiltered.
 fn sanitize_selection(set: selection::Set, mode: selection::Mode, items: &TreeCollection<TreeItem>, disabled: &BTreeSet<Key>) -> selection::Set {
     let retained = match set {
         selection::Set::Single(key) =>
             if is_selectable_key(items, disabled, &key) { selection::Set::Single(key) } else { selection::Set::Empty },
         selection::Set::Multiple(keys) => {
             let kept = keys.into_iter().filter(|k| is_selectable_key(items, disabled, k)).collect::<BTreeSet<Key>>();
+            if kept.is_empty() { selection::Set::Empty } else { selection::Set::Multiple(kept) }
+        }
+        // `Set::All`'s `contains` returns true for every key (including disabled
+        // or absent ones); resolve it to the concrete selectable keys present.
+        selection::Set::All => {
+            let kept = items.all_keys().filter(|k| !disabled.contains(k)).cloned().collect::<BTreeSet<Key>>();
             if kept.is_empty() { selection::Set::Empty } else { selection::Set::Multiple(kept) }
         }
         other => other,
@@ -1197,6 +1230,11 @@ impl Api<'_> {
             } else {
                 (self.send)(Event::SelectNode(node_id.clone()));
             },
+            // Ignore character input mid-IME-composition (CJK/accented text):
+            // the adapter sends `is_composing = true` with a transient character
+            // that must not drive typeahead or `*`-expansion until composition
+            // completes.
+            _ if data.is_composing => {}
             _ => if let Some(ch) = data.character {
                 if ch == '*' { self.expand_siblings(node_id); }
                 else if !ch.is_control() {
@@ -1402,7 +1440,7 @@ container's ID.
 | `Space`             | Toggle selection of the focused node — deselects it when already selected (multiple mode).                                                |
 | `*` (asterisk)      | Expand all siblings of the focused node.                                                                                                  |
 | `F2`                | Start inline rename on the focused node (when `renamable` is true). See [section 6](#6-variant-renamable-nodes).                          |
-| Printable character | Typeahead: jump to the next node whose visible label starts with the typed character.                                                     |
+| Printable character | Typeahead: jump to the next node whose visible label starts with the typed character. Suppressed while an IME composition is active (`is_composing`). |
 
 ### 3.3 RTL Navigation Semantics
 
@@ -1526,12 +1564,18 @@ protocol); pointer hit-testing and the hover-expand timer are **adapter**-resolv
   changed (paths now stale), or the dragged/target keys are no longer valid (a target hidden by a
   collapsed parent is dropped while the pickup is preserved). This keeps a controlled-expanded tree's
   hover-expand `expanded` echo from breaking a reorder.
-- **Drop validity**: A valid drop target must be a currently **visible** node (a row hidden under a
-  collapsed parent is rejected, since pointer hit-testing can send stale keys during
-  collapse/virtualization) and never the dragged node itself or one of its descendants (cycle
-  prevention). This is enforced in both `DragOver` and `Drop`. When `DragOver` reports an **invalid**
-  target during an active drag, any previously-set `ctx.drop_target` is **cleared** so a later `Drop`
-  cannot fire against a slot the user is no longer indicating.
+- **Drag source validity**: `DragStart` only accepts an **enabled, currently-visible** node. A
+  disabled node (blocks all interaction) or a node hidden under a collapsed parent (could not have
+  been grabbed from the rendered tree) is rejected, so no reorder can begin from a row the user
+  cannot see.
+- **Drop validity**: A valid drop target must be a currently **visible, enabled** node — a row
+  hidden under a collapsed parent is rejected (pointer hit-testing can send stale keys during
+  collapse/virtualization) and a **disabled** node is never a target (disabled nodes block all
+  interaction) — and never the dragged node itself or one of its descendants (cycle prevention).
+  This is enforced for both the pointer path (`is_valid_drop`, used by `DragOver`/`Drop`) and the
+  keyboard path (`valid_drop_slots`). When `DragOver` reports an **invalid** target during an active
+  drag, any previously-set `ctx.drop_target` is **cleared** so a later `Drop` cannot fire against a
+  slot the user is no longer indicating.
 - **Reorder callback**: `Props::on_reorder: Option<Callback<ReorderEvent>>` fires when a drop is
   completed. The core never mutates `ctx.items`; the consumer applies the reorder to its data
   source and re-supplies props (pure-notification, like Tabs).

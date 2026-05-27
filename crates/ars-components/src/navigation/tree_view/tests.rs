@@ -2127,6 +2127,116 @@ fn stale_drop_target_cleared_when_echo_hides_it() {
 }
 
 // ----------------------------------------------------------------------------
+// Codex review regressions, round 6 (PR #695)
+// ----------------------------------------------------------------------------
+
+#[test]
+fn typeahead_ignored_during_ime_composition() {
+    // A key event with is_composing=true carries a transient IME character that
+    // must not drive typeahead until composition completes.
+    let service = service(props());
+    let mut data = printable('g');
+    data.is_composing = true;
+    assert!(
+        dispatch_key(&service, &key(1), &data).is_empty(),
+        "no typeahead is dispatched while an IME composition is active"
+    );
+}
+
+#[test]
+fn ime_asterisk_does_not_expand_siblings() {
+    // The `*` expand-siblings shortcut is also character input: suppress it mid
+    // composition.
+    let recorder = Recorder::default();
+    let service = service(props());
+    let mut data = printable('*');
+    data.is_composing = true;
+    service
+        .connect(&|event| record(&recorder, event))
+        .on_node_keydown(&key(2), &data);
+    assert!(recorder.into_inner().is_empty());
+}
+
+#[test]
+fn init_sanitizes_uncontrolled_selected_binding() {
+    // Apple (2) is disabled; the public uncontrolled binding must agree with
+    // `is_node_selected` (both empty), not retain the stale key.
+    let service = service(
+        props()
+            .items(disabled_items())
+            .default_selected(selection::Set::Single(key(2))),
+    );
+    assert!(
+        service.context().selected.get().is_empty(),
+        "the uncontrolled selected binding is sanitized at init"
+    );
+}
+
+#[test]
+fn expand_all_skips_disabled_branches() {
+    // disabled_branch_tree: node 1 is a disabled, collapsed branch.
+    let mut service = service(props().items(disabled_branch_tree()));
+    drop(service.send(Event::ExpandAll));
+    assert!(
+        !service.context().expanded.get().contains(&key(1)),
+        "ExpandAll honors the disabled guard and does not expand a disabled branch"
+    );
+}
+
+#[test]
+fn drag_over_disabled_target_is_rejected() {
+    // disabled_items: Apple (2) disabled, Grains (7) enabled. Drag 7 over 2.
+    let mut service = service(props().items(disabled_items()).dnd_enabled(true));
+    drop(service.send(Event::DragStart(key(7))));
+    let result = service.send(Event::DragOver(CollectionDropTarget {
+        key: key(2),
+        position: DropPosition::On,
+    }));
+    assert!(!result.context_changed);
+    assert_eq!(
+        service.context().drop_target,
+        None,
+        "a disabled node is never a valid drop target"
+    );
+}
+
+#[test]
+fn select_all_resolves_to_selectable_keys() {
+    // `Set::All` under multiple mode must resolve to the concrete selectable
+    // keys, never reporting a disabled node as selected.
+    let service = service(
+        props()
+            .items(disabled_items())
+            .multiple(true)
+            .selection_mode(selection::Mode::Multiple)
+            .default_selected(selection::Set::All),
+    );
+    let api = service.connect(&|_| {});
+    assert!(
+        !api.is_node_selected(&key(2)),
+        "All does not select the disabled node"
+    );
+    assert!(api.is_node_selected(&key(7)), "All selects an enabled leaf");
+    assert!(
+        api.is_node_selected(&key(1)),
+        "All selects an enabled branch"
+    );
+}
+
+#[test]
+fn drag_start_from_hidden_node_is_rejected() {
+    // Vegetables (4) is collapsed, so Carrot (5) is not in the rendered tree.
+    let mut service = service(dnd_props());
+    let result = service.send(Event::DragStart(key(5)));
+    assert!(!result.context_changed);
+    assert_eq!(
+        service.context().dragging,
+        None,
+        "a node hidden under a collapsed parent cannot be a drag source"
+    );
+}
+
+// ----------------------------------------------------------------------------
 // Snapshots — every anatomy part across output-affecting branches
 // ----------------------------------------------------------------------------
 
