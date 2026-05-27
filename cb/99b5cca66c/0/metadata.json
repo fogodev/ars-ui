@@ -1,0 +1,121 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "cb99b5cca66c",
+  "session_id": "737704b2-0d90-4bb4-bf1c-59b70e20a2e6",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-27T17:46:09.001793Z",
+  "branch": "task-267",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-7[1m]",
+  "turn_id": "6bcbc2b1a261",
+  "token_usage": {
+    "input_tokens": 137926,
+    "cache_creation_tokens": 5693961,
+    "cache_read_tokens": 377378000,
+    "output_tokens": 697439,
+    "api_call_count": 753
+  },
+  "session_metrics": {
+    "turn_count": 12
+  },
+  "summary": {
+    "intent": "Implement task #267: the WAI-ARIA TreeView agnostic core component (expand/collapse, selection, keyboard nav, typeahead, ARIA, DnD reorder variant) for the ars-ui Rust workspace, per spec/components/navigation/tree-view.md.",
+    "outcome": "PR #695 opened with the full TreeView machine + DnD reorder variant across 6 Codex review rounds (33+ findings fixed), 126+ unit tests, 26 snapshots, spec-conformance, proptest, ~98% module coverage, and complete spec sync. Awaiting Codex round-6 approval before merge.",
+    "learnings": {
+      "repo": [
+        "TreeCollection::nodes() / keys() return only visible nodes (iterate visible_indices). ExpandAll and typeahead must use the newly-added all_nodes()/all_keys() accessors to reach collapsed subtrees.",
+        "Key does not implement Borrow<str>, so the spec's String-based node identity (Set<String>, .contains(id)) won't compile; all sibling components use Key identity — spec must be synced.",
+        "selection::Set is #[non_exhaustive] — always needs a wildcard arm; selection::State::select already rejects disabled keys, but disabled_keys must be seeded in init from collection item flags.",
+        "EffectName has a project-wide blanket impl — never implement it manually on a new Effect type.",
+        "Every navigation/input component implements on_props_changed to sync controlled props; omitting it silently breaks controlled mode and post-reorder re-supply flows.",
+        "ars_collections::typeahead::State is the canonical shared typeahead implementation (multi-char buffer, locale-aware collation, timeout). Used by select/listbox/menu — TreeView must adopt it, not a bespoke single-char matcher.",
+        "DraggableCollection/DroppableCollection traits + DOM hit-testing/hover-expand/use_drag/use_drop are adapter-layer concerns (#366 Leptos, #509 Dioxus). The agnostic core owns: drag-state machine, valid-slot enumeration, cycle-free drop-validity, keyboard DnD protocol, ReorderEvent.",
+        "spec-compile-snippets uses syn::parse_file (syntax check only, no type resolution) — code blocks only need to parse cleanly.",
+        "CLAUDE.md is a symlink to AGENTS.md. Edits must target AGENTS.md directly. .agents/ and .claude/ skill files are hardlinked (same inode), so editing either updates both.",
+        "selection::DisabledBehavior::FocusOnly keeps disabled nodes reachable by typeahead but non-selectable — the correct semantic for tree disabled items (not Skip, which hides them from typeahead).",
+        "TreeCollection::set_expanded is single-key only; bulk expansion (ExpandAll with live ctx.expanded reconciliation) requires iterating and calling it per node.",
+        "typeahead::State.process_char_with_locale uses the collection's text_value field for matching and calls collection.nodes() for visibility — must pass a reconciled collection reflecting ctx.expanded to search live visible nodes.",
+        "WAI-ARIA APG tree pattern does NOT wrap at focus boundaries (ArrowDown at last node = no-op, ArrowUp at first = no-op). Initial implementation wrapped, corrected in Codex round 5.",
+        "Dragging from hidden nodes (collapsed subtree) must be rejected — DragStart should check that the source key is in the current visible set.",
+        "Drop targets that are hidden, disabled, or are the dragged node / its descendants must all be rejected by is_valid_drop; keyboard DnD valid_drop_slots must also skip disabled targets."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-collections/src/tree_collection.rs",
+          "line": 646,
+          "end_line": 646,
+          "finding": "visible_keys() sits in the impl<T: CollectionItem> block; pure-read accessors without the bound (all_keys, all_nodes) belong in the no-bound impl<T> block around lines 134-175."
+        },
+        {
+          "path": "crates/ars-collections/src/selection.rs",
+          "line": 200,
+          "end_line": 200,
+          "finding": "State::select already rejects disabled keys, but disabled_keys must be seeded from TreeItem.disabled flags in init, otherwise disabled nodes are silently selectable."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/tree_view/mod.rs",
+          "line": 1,
+          "end_line": 1700,
+          "finding": "New file. Key design decisions: active-descendant pattern (root tabindex=0 + aria-activedescendant); stable node DOM ids via node_dom_id; effective_selection_mode (const fn) derives actual mode from props (None disables selection, gates aria-selected); sanitize_selection filters disabled/missing/mode-incompatible keys; reconciled_items applies ctx.expanded to a cloned collection for typeahead search."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/accordion/mod.rs",
+          "line": 1,
+          "end_line": 1,
+          "finding": "Canonical pattern for: Part derive with #[scope], manual Debug for Api, Callback<T>+Effect wiring, on_props_changed controlled sync, PendingEffect::run — TreeView mirrors all of these."
+        },
+        {
+          "path": "crates/ars-collections/src/typeahead.rs",
+          "line": 1,
+          "end_line": 1,
+          "finding": "typeahead::State fields: search (String), last_key_time_ms (u64), search_start_key (Option<Key>). Method: process_char_with_locale(ch, now_ms, focus, collection, locale, disabled_keys, disabled_behavior). Requires is_composing guard at call site (IME suppression)."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/navigation.rs",
+          "line": 1,
+          "end_line": 1,
+          "finding": "TypeaheadSearch event shape changed twice during development (char → (char, u64) for now_ms); proptest arbitrary must match the current arity. ClearTypeahead must be included as a separate event in the arbitrary."
+        }
+      ],
+      "workflow": [
+        "Codex review typically requires 4-6 rounds with 6-10 findings per pass before approval; budget implementation time accordingly and run the mandatory waiting-for-codex-review loop to completion.",
+        "The mandatory pre-PR mutation gate was removed for agnostic components — surviving mutants are now triaged when Nightly CI surfaces them, not as a local pre-PR step.",
+        "Two-commit splits (feature vs policy) can collapse into one if the pre-commit hook re-stages all tracked modifications. Amend the message to accurately describe both in that case.",
+        "zsh ${!arr[@]} associative-array syntax fails in the harness — use bash <<'SCRIPT'...SCRIPT heredocs for complex shell operations with arrays.",
+        "snapshot-reviewed label must be re-applied on every commit that touches .snap files, including fixup commits during the Codex review loop.",
+        "Background mutation runs hold the cargo lock — parallel clippy/test runs will fail with lock contention. Use sequential verification or separate worktrees.",
+        "Spec sync must happen in the same PR as the implementation (spec-as-contract project convention); every behavioral change to Event/Context/Props/Api/helpers must be mirrored in tree-view.md."
+      ]
+    },
+    "friction": [
+      "EffectName has a blanket impl that conflicts with any manual impl — error only appears at compile time, not obvious from the trait definition.",
+      "missing_debug_implementations deny-lint on Api (which holds closures) requires a manual fmt::Debug impl; the pattern isn't documented, had to discover it from Accordion.",
+      "Two-commit split for feature vs policy change collapsed because the pre-commit hook re-stages all tracked modifications — no way to split commits without the hook knowing about it.",
+      "zsh ${!arr[@]} associative-array syntax doesn't work in the harness; complex shell scripts with arrays require explicit bash invocation.",
+      "API 529 Overloaded error mid-session interrupted flow and required recovery from context summary.",
+      "Background mutation run was stopped mid-execution when user changed the policy; stale completion notifications from the stopped run vs the active rerun caused confusion across multiple wakeups.",
+      "typeahead::State uses collection.nodes() internally for visibility — but this reflects the collection's own expansion state, not ctx.expanded. Required the reconciled_items workaround (clone + apply ctx.expanded) to make typeahead search the live visible set.",
+      "33+ Codex findings across 6 rounds of review required 6 full fix/test/spec-sync/commit/reply/resolve cycles — significant overhead but each finding was legitimate.",
+      "selection::Set is #[non_exhaustive] discovered only at compile time when adding the sanitize_selection match — required restructuring to add a wildcard arm.",
+      "Stale scheduled wakeup notifications fired after the mutation gate was cancelled, requiring disambiguation of which task notification was the active one."
+    ],
+    "open_items": [
+      "Mutation testing for tree_view deferred to Nightly CI — 8 surviving mutants were identified (typeahead equality/wrap, drag guards) and killer tests were added, but the final gate run was cancelled per policy change.",
+      "Adapter tasks #366 (TreeView Leptos adapter) and #509 (TreeView Dioxus adapter) remain open — they own: DraggableCollection/DroppableCollection trait impls, pointer hit-testing, hover-expand timer, use_drag/use_drop wiring.",
+      "PR #695 awaiting Codex round-6 approval before merge; issue #267 must not be closed until merged + CI green + Codex thumbs-up.",
+      "Lazy Loading (§5) and Renamable Nodes (§6) variants are documented in tree-view.md as gated no_check blocks — not in core scope, left for separate tasks.",
+      "§6 rename-variant events (BeginRename, CommitRename, CancelRename) use Key identity in spec but have no corresponding implementation tasks yet created."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
