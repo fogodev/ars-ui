@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/data_display/rating_group/mod.rs
+expression: snapshot_attrs(&whole_api.control_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "control",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "rating-group",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "rating-label",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "rating-control",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "radiogroup",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,85 @@
+---
+source: crates/ars-components/src/data_display/tag_group/mod.rs
+expression: snapshot_attrs(&api.root_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tag-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "focused",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Selected tags",
+            ),
+        ),
+        (
+            Aria(
+                MultiSelectable,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Atomic,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Aria(
+                Relevant,
+            ),
+            String(
+                "additions removals",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "tags",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "grid",
+            ),
+        ),
+    ],
+    styles: [],
+}

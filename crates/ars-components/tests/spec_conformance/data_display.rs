@@ -3,7 +3,7 @@
 //! Asserts the impl's `Part` enum matches the spec's declared anatomy.
 
 use ars_collections::Key;
-use ars_components::data_display::{meter, progress, stat, table};
+use ars_components::data_display::{meter, progress, rating_group, stat, table, tag_group};
 
 use super::helper::assert_anatomy;
 
@@ -115,6 +115,44 @@ fn progress_anatomy_matches_spec() {
             (progress::Part::ValueText, "value-text"),
             (progress::Part::CircleTrack, "circle-track"),
             (progress::Part::CircleRange { radius: 10.0 }, "circle-range"),
+        ],
+    );
+}
+
+#[test]
+fn rating_group_anatomy_matches_spec() {
+    assert_anatomy(
+        "rating-group",
+        &[
+            (rating_group::Part::Root, "root"),
+            (rating_group::Part::Label, "label"),
+            (rating_group::Part::Control, "control"),
+            (rating_group::Part::Item { index: 0 }, "item"),
+            (rating_group::Part::HiddenInput, "hidden-input"),
+        ],
+    );
+}
+
+#[test]
+fn tag_group_anatomy_matches_spec() {
+    assert_anatomy(
+        "tag-group",
+        &[
+            (tag_group::Part::Root, "root"),
+            (tag_group::Part::Label, "label"),
+            (tag_group::Part::List, "list"),
+            (
+                tag_group::Part::Tag {
+                    key: Key::default(),
+                },
+                "tag",
+            ),
+            (
+                tag_group::Part::TagRemove {
+                    key: Key::default(),
+                },
+                "tag-remove",
+            ),
         ],
     );
 }

@@ -1,0 +1,75 @@
+---
+source: crates/ars-components/src/data_display/rating_group/mod.rs
+expression: snapshot_attrs(&half_api.control_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "control",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "rating-group",
+            ),
+        ),
+        (
+            Aria(
+                ValueMax,
+            ),
+            String(
+                "5",
+            ),
+        ),
+        (
+            Aria(
+                ValueMin,
+            ),
+            String(
+                "0",
+            ),
+        ),
+        (
+            Aria(
+                ValueNow,
+            ),
+            String(
+                "2.5",
+            ),
+        ),
+        (
+            Aria(
+                ValueText,
+            ),
+            String(
+                "2.5 of 5 stars",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "rating-control",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "slider",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

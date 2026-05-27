@@ -1,0 +1,43 @@
+---
+source: crates/ars-components/src/data_display/rating_group/mod.rs
+expression: snapshot_attrs(&whole_api.hidden_input_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "hidden-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "rating-group",
+            ),
+        ),
+        (
+            Name,
+            String(
+                "score",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "hidden",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "2",
+            ),
+        ),
+    ],
+    styles: [],
+}

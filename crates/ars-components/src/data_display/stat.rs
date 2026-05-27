@@ -381,6 +381,105 @@ mod tests {
     }
 
     #[test]
+    fn stat_props_builders_write_all_fields() {
+        let options = number::FormatOptions {
+            min_fraction_digits: 1,
+            max_fraction_digits: 1,
+            ..number::FormatOptions::default()
+        };
+
+        let props = Props::new()
+            .id("revenue")
+            .label("Revenue")
+            .value("$42k")
+            .change(-4.5)
+            .trend(Trend::Down)
+            .help_text("Trailing 30 days")
+            .loading(true)
+            .format_options(options.clone());
+
+        assert_eq!(props.id, "revenue");
+        assert_eq!(props.label, "Revenue");
+        assert_eq!(props.value, "$42k");
+        assert_eq!(props.change, Some(-4.5));
+        assert_eq!(props.trend, Some(Trend::Down));
+        assert_eq!(props.help_text, Some("Trailing 30 days".to_string()));
+        assert!(props.loading);
+        assert_eq!(props.format_options, Some(options));
+    }
+
+    #[test]
+    fn stat_root_and_structural_parts_match_contract() {
+        let api = api(Props::new()
+            .id("revenue")
+            .label("Total Revenue")
+            .value("$45,231")
+            .loading(true)
+            .help_text("Trailing 30 days"));
+
+        let root = api.root_attrs();
+
+        assert_eq!(root.get(&HtmlAttr::Role), Some("group"));
+        assert_eq!(root.get(&HtmlAttr::Id), Some("revenue"));
+        assert_eq!(
+            root.get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("Total Revenue: $45,231")
+        );
+        assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::Busy)), Some("true"));
+        assert_eq!(root.get(&HtmlAttr::Data("ars-loading")), Some("true"));
+        assert_eq!(api.part_attrs(Part::Label), api.label_attrs());
+        assert_eq!(api.part_attrs(Part::Value), api.value_attrs());
+        assert_eq!(api.part_attrs(Part::HelpText), api.help_text_attrs());
+    }
+
+    #[test]
+    fn stat_derives_and_exposes_trend_direction() {
+        let up = api(Props::new().id("stat").change(12.5));
+
+        assert_eq!(up.resolved_trend(), Some(Trend::Up));
+        assert_eq!(
+            up.change_attrs().get(&HtmlAttr::Data("ars-trend")),
+            Some("up")
+        );
+        assert_eq!(
+            up.trend_indicator_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::Hidden)),
+            Some("true")
+        );
+
+        let down = api(Props::new().id("stat").change(-3.2));
+
+        assert_eq!(down.resolved_trend(), Some(Trend::Down));
+        assert_eq!(
+            down.change_attrs().get(&HtmlAttr::Data("ars-trend")),
+            Some("down")
+        );
+
+        let neutral = api(Props::new().id("stat").change(0.0));
+
+        assert_eq!(neutral.resolved_trend(), Some(Trend::Neutral));
+        assert_eq!(
+            neutral.change_attrs().get(&HtmlAttr::Data("ars-trend")),
+            Some("neutral")
+        );
+
+        let override_trend = api(Props::new().id("stat").change(12.5).trend(Trend::Down));
+
+        assert_eq!(override_trend.resolved_trend(), Some(Trend::Down));
+    }
+
+    #[test]
+    fn stat_formats_change_and_accessible_label() {
+        let api = api(Props::new().id("stat").change(12.5));
+
+        assert_eq!(api.formatted_change(), Some("↑ 12.5%".to_string()));
+        assert_eq!(
+            api.change_attrs().get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("12.5% increase")
+        );
+    }
+
+    #[test]
     fn stat_root_default_snapshot() {
         assert_snapshot!(
             "stat_root_default",

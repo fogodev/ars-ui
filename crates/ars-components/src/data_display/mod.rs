@@ -12,6 +12,9 @@ pub mod meter;
 /// Progress component state machine and connect API.
 pub mod progress;
 
+/// RatingGroup component state machine and connect API.
+pub mod rating_group;
+
 /// Skeleton component connect API.
 pub mod skeleton;
 
@@ -20,3 +23,6 @@ pub mod stat;
 
 /// Table component state machine and connect API.
 pub mod table;
+
+/// TagGroup component state machine and connect API.
+pub mod tag_group;
