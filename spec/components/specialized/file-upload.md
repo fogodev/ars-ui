@@ -309,6 +309,10 @@ pub struct Props {
     pub directory: bool,
     /// Name for form submission.
     pub name: Option<String>,
+    /// Invoked with the updated queue when the file set changes (selection,
+    /// drop, removal, clear). Required for controlled mode so the parent can sync
+    /// its `files` prop; fired via the `FilesChanged` effect.
+    pub on_files_change: Option<Callback<dyn Fn(Vec<Item>) + Send + Sync>>,
     /// Component instance ID.
     pub id: String,
 }
@@ -330,6 +334,7 @@ impl Default for Props {
             auto_upload: false,
             directory: false,
             name: None,
+            on_files_change: None,
             id: String::new(),
         }
     }
@@ -380,7 +385,22 @@ fn validate_files(
     let mut rejected = Vec::new();
     let current_count = ctx.files.get().len();
 
+    // A directory upload imports a folder's contents, so it accepts many files
+    // regardless of `multiple`; only `max_files` constrains it.
+    let single_file = !ctx.multiple && !ctx.directory;
+
     for (i, file) in raw.iter().enumerate() {
+        // Enforce single-file mode unless `multiple`/`directory` allow more.
+        if single_file && (current_count >= 1 || !accepted.is_empty()) {
+            rejected.push(Rejection {
+                name: file.name.clone(),
+                size: file.size,
+                mime_type: file.mime_type.clone(),
+                reason: RejectionReason::TooMany,
+            });
+            continue;
+        }
+
         // Check max files
         if let Some(max) = ctx.max_files {
             if current_count + accepted.len() >= max {
@@ -480,6 +500,18 @@ fn reconciled_state(current: State, files: &[Item]) -> Option<State> {
     }
 }
 
+/// Writes the queue, mirroring it into the controlled value when controlled.
+/// In controlled mode `Bindable::get` returns the parent's value, so a bare
+/// `set` would leave `api.files()` stale; this optimistically syncs the
+/// controlled value so the queue is visible immediately, while the parent
+/// confirms it via `SetFiles` (driven by the `FilesChanged` callback).
+fn commit_files(ctx: &mut Context, files: Vec<Item>) {
+    if ctx.files.is_controlled() {
+        ctx.files.sync_controlled(Some(files.clone()));
+    }
+    ctx.files.set(files);
+}
+
 fn mime_matches(mime: &str, name: &str, patterns: &[String]) -> bool {
     patterns.iter().any(|pattern| {
         if pattern.ends_with("/*") {
@@ -520,8 +552,11 @@ impl ars_core::Machine for Machine {
         let locale = env.locale.clone();
         let messages = messages.clone();
         let next_file_id = next_id_after(files.get());
+        // Honor the `State::Uploading` invariant from the start: a seeded queue
+        // with an uploading item boots in `Uploading`, not `Idle`.
+        let initial_state = reconciled_state(State::Idle, files.get()).unwrap_or(State::Idle);
 
-        (State::Idle, Context {
+        (initial_state, Context {
             files,
             rejected_files: Vec::new(),
             dragging: false,
@@ -623,8 +658,9 @@ impl ars_core::Machine for Machine {
 
             (State::DragOver, Event::Drop(raw_files)) => {
                 // Validate up front so the accepted/rejected counts can drive the
-                // `announce-files-added` / `announce-files-rejected` effects
-                // (polite; `messages.files_added` / `messages.rejection_message`).
+                // `announce-files-added` / `announce-files-rejected` effects, and
+                // the accepted set drives `files-changed`. `commit_files` syncs the
+                // controlled value so `api.files()` reflects the drop.
                 let raw = raw_files.clone();
                 Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
                     ctx.dragging = false;
@@ -635,8 +671,43 @@ impl ars_core::Machine for Machine {
                     ctx.rejected_files = rejected;
                     let mut current = ctx.files.get().clone();
                     current.extend(accepted);
-                    ctx.files.set(current);
-                })) // + announce-files-added{count} / announce-files-rejected{count}
+                    commit_files(ctx, current);
+                })) // + announce-files-added/rejected{count} + files-changed{queue}
+            }
+
+            // Drag-and-drop stays available during an active upload, mirroring
+            // `FilesSelected`. Drag is tracked via `dragging`/`drag_counter` without
+            // leaving `Uploading`; the first `DragEnter` announces dropzone-active,
+            // and `DragLeave` to 0 announces dropzone-left.
+            (State::Uploading, Event::DragEnter) => {
+                let first = ctx.drag_counter == 0;
+                let plan = TransitionPlan::context_only(|ctx| {
+                    ctx.drag_counter = ctx.drag_counter.saturating_add(1);
+                    ctx.dragging = true;
+                });
+                Some(if first { plan /* + announce-dropzone-active */ } else { plan })
+            }
+            (State::Uploading, Event::DragLeave) => {
+                let new_counter = ctx.drag_counter.saturating_sub(1);
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.drag_counter = new_counter;
+                    if new_counter == 0 { ctx.dragging = false; }
+                })) // + announce-dropzone-left when new_counter == 0
+            }
+            (State::Uploading, Event::Drop(raw_files)) => {
+                // Same as the DragOver drop, but stays in `Uploading`.
+                let raw = raw_files.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.dragging = false;
+                    ctx.drag_counter = 0;
+                    let mut next_file_id = ctx.next_file_id;
+                    let (accepted, rejected) = validate_files(&raw, ctx, &mut next_file_id);
+                    ctx.next_file_id = next_file_id;
+                    ctx.rejected_files = rejected;
+                    let mut current = ctx.files.get().clone();
+                    current.extend(accepted);
+                    commit_files(ctx, current);
+                })) // + announce-files-added/rejected{count} + files-changed{queue}
             }
 
             // --- File selection via input ---
@@ -650,9 +721,9 @@ impl ars_core::Machine for Machine {
                     ctx.rejected_files = rejected;
                     let mut current = ctx.files.get().clone();
                     current.extend(accepted);
-                    ctx.files.set(current);
+                    commit_files(ctx, current);
                     // If auto_upload, chain a StartUpload event.
-                })) // + announce-files-added{count} / announce-files-rejected{count}
+                })) // + announce-files-added/rejected{count} + files-changed{queue}
             }
 
             // --- Upload lifecycle ---
@@ -725,26 +796,33 @@ impl ars_core::Machine for Machine {
 
             // --- File management ---
             (_, Event::RemoveFile { file_id }) => {
+                // `commit_files` writes the queue and, when controlled, mirrors it
+                // into the controlled value so `api.files()` reflects the change.
+                // Removing a file changes the set, so emit `FilesChanged` so a
+                // controlled parent can sync its `files` prop.
                 let fid = file_id.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     let files = ctx.files.get().clone();
                     let updated: Vec<Item> = files.into_iter()
                         .filter(|f| f.id != fid)
                         .collect();
-                    ctx.files.set(updated);
-                }))
+                    commit_files(ctx, updated);
+                })) // + files-changed{queue}
             }
 
             (_, Event::ClearFiles) => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    ctx.files.set(Vec::new());
+                    commit_files(ctx, Vec::new());
                     ctx.rejected_files.clear();
-                }))
+                })) // + files-changed{[]}
             }
 
             (_, Event::RetryFile { file_id }) => {
+                // Reset the failed file to Pending. Mirror `FilesSelected`: when
+                // `auto_upload` is set, immediately resume uploading so the retry
+                // control is not a silent no-op.
                 let fid = file_id.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
+                let plan = TransitionPlan::context_only(move |ctx| {
                     let files = ctx.files.get().clone();
                     let updated: Vec<Item> = files.into_iter().map(|mut f| {
                         if f.id == fid && matches!(f.status, Status::Failed(_)) {
@@ -754,8 +832,9 @@ impl ars_core::Machine for Machine {
                         }
                         f
                     }).collect();
-                    ctx.files.set(updated);
-                }))
+                    commit_files(ctx, updated);
+                });
+                Some(if props.auto_upload { plan.then(Event::StartUpload) } else { plan })
             }
 
             (_, Event::OpenFilePicker) => {
@@ -1127,7 +1206,8 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Type, "file");
         attrs.set(HtmlAttr::TabIndex, "-1");
         attrs.set(HtmlAttr::Class, "ars-sr-input");
-        if self.ctx.multiple {
+        // Directory uploads inherently select multiple files.
+        if self.ctx.multiple || self.ctx.directory {
             attrs.set_bool(HtmlAttr::Multiple, true);
         }
         if !self.ctx.accept.is_empty() {
@@ -1439,8 +1519,8 @@ drop zone activity. The adapter populates the live region text from
 
 | Callback      | ars-ui                    | Ark UI         | Notes                               |
 | ------------- | ------------------------- | -------------- | ----------------------------------- |
-| File accepted | `Bindable` reactivity     | `onFileAccept` | Equivalent via binding              |
-| File changed  | `Bindable` reactivity     | `onFileChange` | Equivalent via binding              |
+| File accepted | `on_files_change`         | `onFileAccept` | Fired with the updated queue        |
+| File changed  | `on_files_change`         | `onFileChange` | Fired on add/drop/remove/clear      |
 | File rejected | rejection list on context | `onFileReject` | ars-ui stores rejections in context |
 
 **Gaps:** None.

@@ -69,7 +69,7 @@ Dropzone button semantics, item-list semantics, item removal labels, and native 
 
 ## 7. Prop Sync and Event Mapping
 
-Controlled file-list sync flows through the writable signal and `Service::set_props`, which dispatches core `SetFiles` / `SetProps` via `Machine::on_props_changed`. `Dropzone` drag events dispatch enter/leave/over/drop machine events. `Trigger` and `Dropzone` keyboard activation forward to the hidden input. Native input change events normalize `FileList` data into core `RawFile` values before validation.
+Controlled file-list sync flows through the writable signal and `Service::set_props`, which dispatches core `SetFiles` / `SetProps` via `Machine::on_props_changed`. The reverse direction — selections, drops, removals, and clears — surfaces through the core `FilesChanged` effect, which invokes `Props::on_files_change` with the updated queue so the controlled parent can write it back. `Dropzone` drag events dispatch enter/leave/over/drop machine events (drag-and-drop stays active during uploads). `Trigger` and `Dropzone` keyboard activation forward to the hidden input, and item-level Delete/Backspace forwards to `Api::on_item_keydown`. Native input change events normalize `FileList` data into core `RawFile` values before validation.
 
 ## 8. Registration and Cleanup Contract
 

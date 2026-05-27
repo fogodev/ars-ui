@@ -39,6 +39,12 @@ AttrMap {
             ),
         ),
         (
+            Multiple,
+            Bool(
+                true,
+            ),
+        ),
+        (
             Type,
             String(
                 "file",

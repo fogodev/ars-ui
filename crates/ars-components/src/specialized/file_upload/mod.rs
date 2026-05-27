@@ -4,8 +4,8 @@ use alloc::{format, string::String, vec::Vec};
 use core::fmt::{self, Debug, Display};
 
 use ars_core::{
-    AriaAttr, AttrMap, Bindable, ComponentIds, ComponentMessages, ComponentPart, ConnectApi, Env,
-    HasId, HtmlAttr, Locale, MessageFn, PendingEffect, TransitionPlan,
+    AriaAttr, AttrMap, Bindable, Callback, ComponentIds, ComponentMessages, ComponentPart,
+    ConnectApi, Env, HasId, HtmlAttr, Locale, MessageFn, PendingEffect, TransitionPlan, no_cleanup,
 };
 use ars_interactions::{KeyboardEventData, KeyboardKey};
 
@@ -375,6 +375,13 @@ pub struct Props {
     /// Name for form submission.
     pub name: Option<String>,
 
+    /// Invoked with the updated queue when the file set changes.
+    ///
+    /// Required for controlled mode (`files: Some(...)`): the parent uses it to
+    /// sync its controlled `files` prop after a selection, drop, removal, or
+    /// clear. Fired via [`Effect::FilesChanged`].
+    pub on_files_change: Option<Callback<dyn Fn(Vec<Item>) + Send + Sync>>,
+
     /// Component instance ID.
     pub id: String,
 }
@@ -518,6 +525,23 @@ impl Props {
         self.name = Some(name.into());
         self
     }
+
+    /// Sets [`on_files_change`](Self::on_files_change).
+    #[must_use]
+    pub fn on_files_change(
+        mut self,
+        callback: impl Into<Callback<dyn Fn(Vec<Item>) + Send + Sync>>,
+    ) -> Self {
+        self.on_files_change = Some(callback.into());
+        self
+    }
+
+    /// Clears [`on_files_change`](Self::on_files_change).
+    #[must_use]
+    pub fn clear_on_files_change(mut self) -> Self {
+        self.on_files_change = None;
+        self
+    }
 }
 
 type LocaleMessageFn = dyn Fn(&Locale) -> String + Send + Sync;
@@ -639,6 +663,13 @@ pub enum Effect {
     /// Adapter announces (polite) that an upload completed.
     AnnounceUploadComplete,
 
+    /// Adapter invokes [`Props::on_files_change`] with the updated queue.
+    ///
+    /// Emitted whenever the file *set* changes (selection, drop, removal, clear)
+    /// so a controlled parent can sync its `files` prop. The new queue rides in
+    /// the effect's setup closure, not in this `Copy` marker.
+    FilesChanged,
+
     /// Adapter opens the native file picker via the hidden input.
     OpenFilePicker,
 }
@@ -667,8 +698,14 @@ impl ars_core::Machine for Machine {
 
         let next_file_id = next_id_after(files.get());
 
+        // Honor the `State::Uploading` invariant from the start: a queue seeded
+        // (controlled or default) with an uploading item must boot in `Uploading`,
+        // not `Idle`, so progress/complete/error events are not dropped by the
+        // `State::Uploading` guards before any prop sync runs.
+        let initial_state = reconciled_state(State::Idle, files.get()).unwrap_or(State::Idle);
+
         (
-            State::Idle,
+            initial_state,
             Context {
                 files,
                 rejected_files: Vec::new(),
@@ -900,6 +937,51 @@ impl ars_core::Machine for Machine {
                 },
             )),
 
+            // Drag-and-drop stays available during an active upload, mirroring
+            // `FilesSelected` (which is handled in `Uploading`). Drag is tracked via
+            // the `dragging`/`drag_counter` context flags without leaving the
+            // `Uploading` state, so the queue and `data-ars-state` stay truthful.
+            (State::Uploading, Event::DragEnter) => {
+                let first = ctx.drag_counter == 0;
+                let plan = TransitionPlan::context_only(move |context: &mut Context| {
+                    context.drag_counter = context.drag_counter.saturating_add(1);
+                    context.dragging = true;
+                });
+
+                Some(if first {
+                    plan.with_effect(PendingEffect::named(Effect::AnnounceDropzoneActive))
+                } else {
+                    plan
+                })
+            }
+
+            (State::Uploading, Event::DragLeave) => {
+                let new_counter = ctx.drag_counter.saturating_sub(1);
+                let plan = TransitionPlan::context_only(move |context: &mut Context| {
+                    context.drag_counter = new_counter;
+                    if new_counter == 0 {
+                        context.dragging = false;
+                    }
+                });
+
+                Some(if new_counter == 0 {
+                    plan.with_effect(PendingEffect::named(Effect::AnnounceDropzoneLeft))
+                } else {
+                    plan
+                })
+            }
+
+            (State::Uploading, Event::Drop(raw_files)) => Some(apply_selected_files_plan(
+                None,
+                raw_files,
+                ctx.auto_upload,
+                ctx,
+                |context: &mut Context| {
+                    context.dragging = false;
+                    context.drag_counter = 0;
+                },
+            )),
+
             (State::Idle, Event::FilesSelected(raw_files))
             | (State::Uploading, Event::FilesSelected(raw_files)) => {
                 let auto_upload = ctx.auto_upload;
@@ -937,29 +1019,54 @@ impl ars_core::Machine for Machine {
             (_, Event::RemoveFile { file_id }) => {
                 let file_id = file_id.clone();
                 let still_uploading = remove_file_updates(ctx, &file_id);
-                Some(file_queue_plan(
-                    *state,
-                    still_uploading,
-                    move |context: &mut Context| {
+                let proposed: Vec<Item> = ctx
+                    .files
+                    .get()
+                    .iter()
+                    .filter(|file| file.id != file_id)
+                    .cloned()
+                    .collect();
+                let changed = proposed.len() != ctx.files.get().len();
+                let plan =
+                    file_queue_plan(*state, still_uploading, move |context: &mut Context| {
                         remove_file_by_id(context, &file_id);
-                    },
-                ))
+                    });
+
+                Some(if changed {
+                    plan.with_effect(files_change_effect(proposed))
+                } else {
+                    plan
+                })
             }
 
-            (_, Event::ClearFiles) => Some(TransitionPlan::to(State::Idle).apply(
-                |context: &mut Context| {
-                    context.files.set(Vec::new());
+            (_, Event::ClearFiles) => {
+                let had_files = !ctx.files.get().is_empty();
+                let plan = TransitionPlan::to(State::Idle).apply(|context: &mut Context| {
+                    commit_files(context, Vec::new());
                     context.rejected_files.clear();
-                },
-            )),
+                });
+
+                Some(if had_files {
+                    plan.with_effect(files_change_effect(Vec::new()))
+                } else {
+                    plan
+                })
+            }
 
             (_, Event::RetryFile { file_id }) => {
                 let file_id = file_id.clone();
-                Some(TransitionPlan::context_only(
-                    move |context: &mut Context| {
-                        retry_file_by_id(context, &file_id);
-                    },
-                ))
+                let plan = TransitionPlan::context_only(move |context: &mut Context| {
+                    retry_file_by_id(context, &file_id);
+                });
+
+                // Mirror `FilesSelected`: when `auto_upload` is set, retrying a
+                // failed file re-queues it as `Pending` and immediately resumes
+                // uploading, so the retry control is not a silent no-op.
+                Some(if ctx.auto_upload {
+                    plan.then(Event::StartUpload)
+                } else {
+                    plan
+                })
             }
 
             (_, Event::CancelFile { file_id }) => {
@@ -1410,7 +1517,9 @@ impl Api<'_> {
             .set(HtmlAttr::TabIndex, "-1")
             .set(HtmlAttr::Class, "ars-sr-input");
 
-        if self.ctx.multiple {
+        // Directory uploads inherently select multiple files, so reflect that on
+        // the native input too.
+        if self.ctx.multiple || self.ctx.directory {
             attrs.set_bool(HtmlAttr::Multiple, true);
         }
 
@@ -1614,6 +1723,18 @@ fn format_file_size_with_locale(bytes: u64, locale: &Locale) -> String {
     format!("{number} {suffix}")
 }
 
+/// Effect that invokes [`Props::on_files_change`] with the updated queue, so a
+/// controlled parent can sync its `files` prop after a set change.
+fn files_change_effect(files: Vec<Item>) -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::FilesChanged, move |_ctx, props: &Props, _send| {
+        if let Some(callback) = &props.on_files_change {
+            callback(files);
+        }
+
+        no_cleanup()
+    })
+}
+
 fn apply_selected_files_plan(
     transition_to: Option<State>,
     raw: &[RawFile],
@@ -1630,6 +1751,13 @@ fn apply_selected_files_plan(
     let accepted_count = accepted.len();
     let rejected_count = rejected.len();
 
+    // `before` only touches drag state, so the queue is unchanged between here
+    // and `apply`; compute the full proposed list once for both the write and
+    // the `FilesChanged` callback.
+    let mut proposed = ctx.files.get().clone();
+    proposed.extend(accepted);
+    let files_changed = (accepted_count > 0).then(|| proposed.clone());
+
     let mut plan = if let Some(state) = transition_to {
         TransitionPlan::to(state)
     } else {
@@ -1642,11 +1770,7 @@ fn apply_selected_files_plan(
         context.next_file_id = next_file_id;
         context.rejected_files = rejected;
 
-        let mut current = context.files.get().clone();
-
-        current.extend(accepted);
-
-        context.files.set(current);
+        commit_files(context, proposed);
     });
 
     if accepted_count > 0 {
@@ -1659,6 +1783,10 @@ fn apply_selected_files_plan(
         plan = plan.with_effect(PendingEffect::named(Effect::AnnounceFilesRejected {
             count: rejected_count,
         }));
+    }
+
+    if let Some(files) = files_changed {
+        plan = plan.with_effect(files_change_effect(files));
     }
 
     if auto_upload {
@@ -1691,6 +1819,21 @@ fn upload_finish_plan(
     }
 }
 
+/// Writes the queue, mirroring it into the controlled value when controlled.
+///
+/// In controlled mode `Bindable::get` returns the parent's value, so a bare
+/// `set` (internal-only) would leave [`Api::files`] showing the stale list. This
+/// optimistically syncs the controlled value too, so the queue is visible
+/// immediately; the parent then confirms it via [`Event::SetFiles`] (driven by
+/// the [`Effect::FilesChanged`] callback on set changes).
+fn commit_files(context: &mut Context, files: Vec<Item>) {
+    if context.files.is_controlled() {
+        context.files.sync_controlled(Some(files.clone()));
+    }
+
+    context.files.set(files);
+}
+
 fn mark_pending_as_uploading(context: &mut Context) {
     let files = context.files.get().clone();
 
@@ -1704,7 +1847,7 @@ fn mark_pending_as_uploading(context: &mut Context) {
         })
         .collect();
 
-    context.files.set(updated);
+    commit_files(context, updated);
 }
 
 #[expect(clippy::missing_const_for_fn, reason = "f64::is_nan is not const")]
@@ -1733,7 +1876,7 @@ fn update_file_progress(context: &mut Context, file_id: &str, progress: f64) {
         })
         .collect();
 
-    context.files.set(updated);
+    commit_files(context, updated);
 }
 
 fn upload_complete_updates(ctx: &Context, file_id: &str) -> bool {
@@ -1814,15 +1957,13 @@ fn projected_files_after_cancel(ctx: &Context, file_id: &str) -> Vec<Item> {
 }
 
 fn apply_upload_complete(context: &mut Context, file_id: &str) {
-    context
-        .files
-        .set(projected_files_after_complete(context, file_id));
+    let updated = projected_files_after_complete(context, file_id);
+    commit_files(context, updated);
 }
 
 fn apply_upload_error(context: &mut Context, file_id: &str, error: &str) {
-    context
-        .files
-        .set(projected_files_after_error(context, file_id, error));
+    let updated = projected_files_after_error(context, file_id, error);
+    commit_files(context, updated);
 }
 
 fn remove_file_by_id(context: &mut Context, file_id: &str) {
@@ -1834,7 +1975,7 @@ fn remove_file_by_id(context: &mut Context, file_id: &str) {
         .cloned()
         .collect();
 
-    context.files.set(updated);
+    commit_files(context, updated);
 }
 
 fn retry_file_by_id(context: &mut Context, file_id: &str) {
@@ -1854,13 +1995,12 @@ fn retry_file_by_id(context: &mut Context, file_id: &str) {
         })
         .collect();
 
-    context.files.set(updated);
+    commit_files(context, updated);
 }
 
 fn cancel_file_by_id(context: &mut Context, file_id: &str) {
-    context
-        .files
-        .set(projected_files_after_cancel(context, file_id));
+    let updated = projected_files_after_cancel(context, file_id);
+    commit_files(context, updated);
 }
 
 /// Validate raw files against context constraints.
@@ -1877,8 +2017,12 @@ fn validate_files(
 
     let current_count = ctx.files.get().len();
 
+    // A directory upload imports a folder's contents, so it accepts many files
+    // regardless of `multiple`; only `max_files` constrains it.
+    let single_file = !ctx.multiple && !ctx.directory;
+
     for file in raw {
-        if !ctx.multiple && (current_count >= 1 || !accepted.is_empty()) {
+        if single_file && (current_count >= 1 || !accepted.is_empty()) {
             rejected.push(Rejection {
                 name: file.name.clone(),
                 size: file.size,
