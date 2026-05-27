@@ -1,0 +1,59 @@
+---
+source: crates/ars-components/src/specialized/file_upload/tests.rs
+expression: "snapshot_attrs(&api_for_state(State::Uploading).dropzone_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "dropzone",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "file-upload",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "uploading",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "upload-label",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "upload-dropzone",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "button",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

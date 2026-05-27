@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/specialized/file_upload/tests.rs
+expression: "snapshot_attrs(&api_with_props(props, ctx, State::Idle).hidden_input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "hidden-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "file-upload",
+            ),
+        ),
+        (
+            Class,
+            String(
+                "ars-sr-input",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "upload-input",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Name,
+            String(
+                "attachments",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "file",
+            ),
+        ),
+    ],
+    styles: [],
+}

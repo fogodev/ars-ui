@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/specialized/file_upload/tests.rs
+expression: "snapshot_attrs(&api_with_context(ctx, State::Idle).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-disabled",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "file-upload",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Drag and drop files here, or click to browse",
+            ),
+        ),
+    ],
+    styles: [],
+}

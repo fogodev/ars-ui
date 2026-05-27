@@ -18,11 +18,11 @@ dropzone area, a file list, and integrates with the native `<input type="file">`
 ```rust
 // crates/ars-core/src/components/file_upload.rs
 
-use crate::{Bindable, ComponentId};
+use crate::Bindable;
 use crate::machine::{Machine, TransitionPlan, ComponentIds, AttrMap};
 
 /// Represents a single file in the upload queue.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Item {
     /// Unique identifier for this file item.
     pub id: String,
@@ -81,12 +81,13 @@ impl Progress {
 pub enum RejectionReason {
     /// File type not in the accepted list.
     InvalidType,
-    /// File exceeds the maximum size.
-    TooLarge,
+    /// File exceeds the maximum size; carries the limit in effect at rejection
+    /// time so the message stays accurate if the prop later changes.
+    TooLarge { max: u64 },
     /// Adding this file would exceed the maximum count.
     TooMany,
-    /// File is smaller than the minimum size.
-    TooSmall,
+    /// File is smaller than the minimum size; carries the limit at rejection time.
+    TooSmall { min: u64 },
     /// Custom validation failed.
     CustomValidation(String),
 }
@@ -189,6 +190,15 @@ pub enum Event {
         /// The part that was blurred.
         part: &'static str,
     },
+    /// Synchronize the externally controlled file list prop.
+    SetFiles(Option<Vec<Item>>),
+    /// Synchronize output-affecting props stored in context.
+    SetProps,
+    /// Reconcile the machine state with the currently visible file queue.
+    /// Chained after `SetFiles` so the resting state tracks the queue revealed by
+    /// the sync (a freshly controlled value, or the internal value exposed when
+    /// control is released).
+    ReconcileState,
 }
 
 /// Raw file data from the browser File API, prior to validation.
@@ -235,16 +245,26 @@ pub struct Context {
     pub auto_upload: bool,
     /// Whether the dropzone is a directory upload.
     pub directory: bool,
+    /// Camera selection for mobile capture (`"user"` front, `"environment"` rear).
+    pub capture: Option<String>,
+    /// Name for form submission.
+    pub name: Option<String>,
     /// Drag-over nesting counter (for nested elements).
     pub drag_counter: u32,
+    /// Monotonic counter for the next generated file id.
+    ///
+    /// Only ever increases, so ids are never reused after files are removed —
+    /// preventing late async upload events from being applied to a different
+    /// file that happened to reuse an earlier id.
+    pub next_file_id: u64,
     /// Focused part.
     pub focused_part: Option<&'static str>,
     /// Locale for internationalized messages.
     pub locale: Locale,
     /// Resolved translatable messages.
     pub messages: Messages,
-    /// Component instance IDs.
-    pub id: ComponentId,
+    /// Component instance base id.
+    pub id: String,
     /// The id of the dropzone.
     pub dropzone_id: String,
     /// The id of the input.
@@ -290,6 +310,11 @@ pub struct Props {
     pub directory: bool,
     /// Name for form submission.
     pub name: Option<String>,
+    /// Invoked with the updated working queue when the file set changes
+    /// (selection, drop, removal, clear). An observation hook: the component owns
+    /// its working queue and this lets the parent mirror it (e.g. to persist or
+    /// to seed the controlled `files` prop). Fired via the `FilesChanged` effect.
+    pub on_files_change: Option<Callback<dyn Fn(Vec<Item>) + Send + Sync>>,
     /// Component instance ID.
     pub id: String,
 }
@@ -311,6 +336,7 @@ impl Default for Props {
             auto_upload: false,
             directory: false,
             name: None,
+            on_files_change: None,
             id: String::new(),
         }
     }
@@ -349,15 +375,34 @@ fn has_uploading_files(ctx: &Context, _props: &Props) -> bool {
 
 ```rust
 /// Validate a set of raw files against the constraints, returning accepted and rejected.
+///
+/// `next_file_id` is the machine's monotonic id counter; each accepted file
+/// consumes the next value and advances it so ids are never reused.
 fn validate_files(
     raw: &[RawFile],
     ctx: &Context,
+    next_file_id: &mut u64,
 ) -> (Vec<Item>, Vec<Rejection>) {
     let mut accepted = Vec::new();
     let mut rejected = Vec::new();
     let current_count = ctx.files.get().len();
 
+    // A directory upload imports a folder's contents, so it accepts many files
+    // regardless of `multiple`; only `max_files` constrains it.
+    let single_file = !ctx.multiple && !ctx.directory;
+
     for (i, file) in raw.iter().enumerate() {
+        // Enforce single-file mode unless `multiple`/`directory` allow more.
+        if single_file && (current_count >= 1 || !accepted.is_empty()) {
+            rejected.push(Rejection {
+                name: file.name.clone(),
+                size: file.size,
+                mime_type: file.mime_type.clone(),
+                reason: RejectionReason::TooMany,
+            });
+            continue;
+        }
+
         // Check max files
         if let Some(max) = ctx.max_files {
             if current_count + accepted.len() >= max {
@@ -372,7 +417,9 @@ fn validate_files(
         }
 
         // Check MIME type
-        if !ctx.accept.is_empty() && !mime_matches(&file.mime_type, &ctx.accept) {
+        if !ctx.accept.is_empty()
+            && !mime_matches(&file.mime_type, &file.name, &ctx.accept)
+        {
             rejected.push(Rejection {
                 name: file.name.clone(),
                 size: file.size,
@@ -389,7 +436,7 @@ fn validate_files(
                     name: file.name.clone(),
                     size: file.size,
                     mime_type: file.mime_type.clone(),
-                    reason: RejectionReason::TooLarge,
+                    reason: RejectionReason::TooLarge { max: max_size },
                 });
                 continue;
             }
@@ -401,14 +448,14 @@ fn validate_files(
                     name: file.name.clone(),
                     size: file.size,
                     mime_type: file.mime_type.clone(),
-                    reason: RejectionReason::TooSmall,
+                    reason: RejectionReason::TooSmall { min: min_size },
                 });
                 continue;
             }
         }
 
         accepted.push(Item {
-            id: generate_file_id(),
+            id: generate_file_id(next_file_id),
             name: file.name.clone(),
             size: file.size,
             mime_type: file.mime_type.clone(),
@@ -421,14 +468,70 @@ fn validate_files(
     (accepted, rejected)
 }
 
-fn mime_matches(mime: &str, patterns: &[String]) -> bool {
+/// Consumes the next monotonic file id and advances the counter, so ids are
+/// never reused after files are removed.
+fn generate_file_id(next_file_id: &mut u64) -> String {
+    let id = *next_file_id;
+    *next_file_id = next_file_id.saturating_add(1);
+    format!("file-{id}")
+}
+
+/// The next monotonic id that sits strictly above every `file-N` id in `files`.
+/// Seeds `Context::next_file_id` at init and advances it past externally
+/// supplied ids on `Event::SetFiles`.
+fn next_id_after(files: &[Item]) -> u64 {
+    files
+        .iter()
+        .filter_map(|file| file.id.strip_prefix("file-")?.parse::<u64>().ok())
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+/// Reconciles the machine state with an externally replaced file set.
+/// `State::Uploading` must hold exactly when at least one file is uploading, so
+/// a controlled queue replacement drives the resting state between Idle and
+/// Uploading. Returns `None` when no change is required (including in DragOver,
+/// whose transient drag lifecycle is left untouched).
+fn reconciled_state(current: State, files: &[Item], dragging: bool) -> Option<State> {
+    let any_uploading = files.iter().any(|f| f.status == Status::Uploading);
+    match (current, any_uploading) {
+        // Leaving Uploading is drag-aware (like `upload_finish_plan`): settle in
+        // DragOver if a drag is still active so the drag-leave path clears the
+        // flags, otherwise Idle.
+        (State::Uploading, false) => Some(finished_uploading_state(dragging)),
+        // Enter Uploading even from DragOver (keeping the drag flags) when a
+        // controlled queue begins an upload mid-drag, so upload events are
+        // processed and the Uploading drag-leave path can clear the flags.
+        (State::Idle | State::DragOver, true) => Some(State::Uploading),
+        _ => None,
+    }
+}
+
+/// Writes the working upload queue. FileUpload owns its working queue —
+/// `api.files()` and the lifecycle read it in both modes (like react-dropzone);
+/// the controlled `files` prop is a seed/sync source (init + `SetFiles`) and
+/// `on_files_change` is an observation hook (no mid-flight veto). To keep
+/// `Bindable::get` returning the working queue in controlled mode, mirror the
+/// queue into the controlled slot too. The `FilesChanged` effect reads the queue
+/// from the run-time context snapshot (after the queue drains), so an
+/// `auto_upload` selection reports the post-`StartUpload` queue.
+fn commit_files(ctx: &mut Context, files: Vec<Item>) {
+    if ctx.files.is_controlled() {
+        ctx.files.sync_controlled(Some(files.clone()));
+    }
+    ctx.files.set(files);
+}
+
+fn mime_matches(mime: &str, name: &str, patterns: &[String]) -> bool {
     patterns.iter().any(|pattern| {
         if pattern.ends_with("/*") {
             let prefix = &pattern[..pattern.len() - 1];
             mime.starts_with(prefix)
         } else if pattern.starts_with('.') {
-            // Extension-based: ".pdf", ".png"
-            mime.ends_with(pattern) || mime_from_extension(pattern).map_or(false, |m| m == mime)
+            // Match the full dotted suffix, case-insensitively, so compound
+            // extensions like `.tar.gz` match `archive.tar.gz`.
+            name.to_ascii_lowercase().ends_with(&pattern.to_ascii_lowercase())
         } else {
             mime == pattern
         }
@@ -459,8 +562,13 @@ impl ars_core::Machine for Machine {
         let ids = ComponentIds::from_id(&props.id);
         let locale = env.locale.clone();
         let messages = messages.clone();
+        let next_file_id = next_id_after(files.get());
+        // Honor the `State::Uploading` invariant from the start: a seeded queue
+        // with an uploading item boots in `Uploading`, not `Idle`.
+        let initial_state =
+            reconciled_state(State::Idle, files.get(), false).unwrap_or(State::Idle);
 
-        (State::Idle, Context {
+        (initial_state, Context {
             files,
             rejected_files: Vec::new(),
             dragging: false,
@@ -474,7 +582,10 @@ impl ars_core::Machine for Machine {
             max_files: props.max_files,
             auto_upload: props.auto_upload,
             directory: props.directory,
+            capture: props.capture.clone(),
+            name: props.name.clone(),
             drag_counter: 0,
+            next_file_id,
             focused_part: None,
             locale,
             messages,
@@ -535,28 +646,82 @@ impl ars_core::Machine for Machine {
             }
 
             (State::DragOver, Event::DragLeave) => {
-                // Decrement counter; only leave DragOver when counter hits 0
-                Some(TransitionPlan::context_only(|ctx| {
-                    ctx.drag_counter = ctx.drag_counter.saturating_sub(1);
-                    if ctx.drag_counter == 0 {
-                        ctx.dragging = false;
-                    }
-                }))
-                // Note: actual state change to Idle happens in a follow-up check.
-                // For simplicity, we handle this in the transition:
+                // Decrement the nesting counter; only leave DragOver at 0. On the
+                // transition to Idle, announce that the dropzone is no longer
+                // active (assertive) via the `announce-dropzone-left` effect
+                // (`messages.drop_zone_left`).
+                let new_counter = ctx.drag_counter.saturating_sub(1);
+                if new_counter == 0 {
+                    Some(TransitionPlan::to(State::Idle)
+                        .apply(|ctx| {
+                            ctx.drag_counter = 0;
+                            ctx.dragging = false;
+                        })
+                        .with_named_effect("announce-dropzone-left", |ctx, _props, _send| {
+                            use_platform_effects().announce(&(ctx.messages.drop_zone_left)(&ctx.locale));
+                            no_cleanup()
+                        }))
+                } else {
+                    Some(TransitionPlan::context_only(move |ctx| {
+                        ctx.drag_counter = new_counter;
+                    }))
+                }
             }
 
             (State::DragOver, Event::Drop(raw_files)) => {
+                // Validate up front so the accepted/rejected counts can drive the
+                // `announce-files-added` / `announce-files-rejected` effects, and
+                // the accepted set drives `files-changed`. `commit_files` syncs the
+                // controlled value so `api.files()` reflects the drop. A drop tags
+                // `announce-files-added` as `from_drop` (assertive live region per
+                // §4.2); a picker selection leaves it polite (§3.3).
                 let raw = raw_files.clone();
                 Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
                     ctx.dragging = false;
                     ctx.drag_counter = 0;
-                    let (accepted, rejected) = validate_files(&raw, ctx);
+                    let mut next_file_id = ctx.next_file_id;
+                    let (accepted, rejected) = validate_files(&raw, ctx, &mut next_file_id);
+                    ctx.next_file_id = next_file_id;
                     ctx.rejected_files = rejected;
                     let mut current = ctx.files.get().clone();
                     current.extend(accepted);
-                    ctx.files.set(current);
-                }))
+                    commit_files(ctx, current);
+                })) // + announce-files-added/rejected{count} + files-changed{queue}
+            }
+
+            // Drag-and-drop stays available during an active upload, mirroring
+            // `FilesSelected`. Drag is tracked via `dragging`/`drag_counter` without
+            // leaving `Uploading`; the first `DragEnter` announces dropzone-active,
+            // and `DragLeave` to 0 announces dropzone-left.
+            (State::Uploading, Event::DragEnter) => {
+                let first = ctx.drag_counter == 0;
+                let plan = TransitionPlan::context_only(|ctx| {
+                    ctx.drag_counter = ctx.drag_counter.saturating_add(1);
+                    ctx.dragging = true;
+                });
+                Some(if first { plan /* + announce-dropzone-active */ } else { plan })
+            }
+            (State::Uploading, Event::DragLeave) => {
+                let new_counter = ctx.drag_counter.saturating_sub(1);
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.drag_counter = new_counter;
+                    if new_counter == 0 { ctx.dragging = false; }
+                })) // + announce-dropzone-left when new_counter == 0
+            }
+            (State::Uploading, Event::Drop(raw_files)) => {
+                // Same as the DragOver drop, but stays in `Uploading`.
+                let raw = raw_files.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.dragging = false;
+                    ctx.drag_counter = 0;
+                    let mut next_file_id = ctx.next_file_id;
+                    let (accepted, rejected) = validate_files(&raw, ctx, &mut next_file_id);
+                    ctx.next_file_id = next_file_id;
+                    ctx.rejected_files = rejected;
+                    let mut current = ctx.files.get().clone();
+                    current.extend(accepted);
+                    commit_files(ctx, current);
+                })) // + announce-files-added/rejected{count} + files-changed{queue}
             }
 
             // --- File selection via input ---
@@ -564,13 +729,17 @@ impl ars_core::Machine for Machine {
             | (State::Uploading, Event::FilesSelected(raw_files)) => {
                 let raw = raw_files.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let (accepted, rejected) = validate_files(&raw, ctx);
+                    let mut next_file_id = ctx.next_file_id;
+                    let (accepted, rejected) = validate_files(&raw, ctx, &mut next_file_id);
+                    ctx.next_file_id = next_file_id;
                     ctx.rejected_files = rejected;
                     let mut current = ctx.files.get().clone();
                     current.extend(accepted);
-                    ctx.files.set(current);
-                    // If auto_upload, chain a StartUpload event
-                }))
+                    commit_files(ctx, current);
+                    // If auto_upload AND accepted_count > 0, chain a StartUpload
+                    // event — an all-rejected selection must not start existing
+                    // pending files.
+                })) // + announce-files-added/rejected{count} + files-changed{queue}
             }
 
             // --- Upload lifecycle ---
@@ -594,7 +763,10 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx| {
                     let files = ctx.files.get().clone();
                     let updated: Vec<Item> = files.into_iter().map(|mut f| {
-                        if f.id == fid {
+                        // Only the actively uploading file accepts progress: a late
+                        // callback for a file already cancelled/failed/completed must
+                        // not mutate its terminal progress.
+                        if f.id == fid && f.status == Status::Uploading {
                             f.progress = prog;
                         }
                         f
@@ -617,7 +789,11 @@ impl ars_core::Machine for Machine {
                     ctx.files.set(updated);
                 }))
                 // The Service should check after this action whether any files
-                // are still Uploading. If none, transition to Idle.
+                // are still Uploading. If none, transition out of Uploading: to
+                // `DragOver` if a drag is still in progress (`ctx.dragging`) so the
+                // drag-leave path can clear the flags, otherwise to `Idle`. When a
+                // file that was still uploading actually completes, also emit the
+                // `announce-upload-complete` effect (polite).
             }
 
             (State::Uploading, Event::UploadError { file_id, error }) => {
@@ -638,26 +814,39 @@ impl ars_core::Machine for Machine {
 
             // --- File management ---
             (_, Event::RemoveFile { file_id }) => {
+                // `commit_files` writes the queue and, when controlled, mirrors it
+                // into the controlled value so `api.files()` reflects the change.
+                // Removing a file changes the set, so emit `FilesChanged` so a
+                // controlled parent can sync its `files` prop.
                 let fid = file_id.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     let files = ctx.files.get().clone();
                     let updated: Vec<Item> = files.into_iter()
                         .filter(|f| f.id != fid)
                         .collect();
-                    ctx.files.set(updated);
-                }))
+                    commit_files(ctx, updated);
+                })) // + files-changed{queue}
             }
 
             (_, Event::ClearFiles) => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    ctx.files.set(Vec::new());
+                // Drag-aware (like the upload-finish paths): clearing mid-drag
+                // settles in DragOver so the drag-leave path clears the flags.
+                Some(TransitionPlan::to(finished_uploading_state(ctx.dragging)).apply(|ctx| {
+                    commit_files(ctx, Vec::new());
                     ctx.rejected_files.clear();
-                }))
+                })) // + files-changed{[]}
             }
 
             (_, Event::RetryFile { file_id }) => {
+                // Reset the failed file to Pending. Mirror `FilesSelected`: when
+                // `auto_upload` is set, immediately resume uploading so the retry
+                // control is not a silent no-op — but only when this id actually
+                // identifies a failed file, so a stale/duplicate retry does not
+                // start unrelated pending files.
+                let will_retry = ctx.files.get().iter()
+                    .any(|f| &f.id == file_id && matches!(f.status, Status::Failed(_)));
                 let fid = file_id.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
+                let plan = TransitionPlan::context_only(move |ctx| {
                     let files = ctx.files.get().clone();
                     let updated: Vec<Item> = files.into_iter().map(|mut f| {
                         if f.id == fid && matches!(f.status, Status::Failed(_)) {
@@ -667,8 +856,9 @@ impl ars_core::Machine for Machine {
                         }
                         f
                     }).collect();
-                    ctx.files.set(updated);
-                }))
+                    commit_files(ctx, updated);
+                });
+                Some(if props.auto_upload && will_retry { plan.then(Event::StartUpload) } else { plan })
             }
 
             (_, Event::OpenFilePicker) => {
@@ -693,8 +883,117 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (_, Event::SetFiles(files)) => {
+                let files = files.clone();
+                // Advance the monotonic id counter past any supplied ids so later
+                // generated ids cannot collide with them, then reconcile the state
+                // via a chained `ReconcileState` once the sync has landed (so it
+                // sees the controlled value, or the internal value revealed by
+                // `sync_controlled(None)`).
+                let apply = move |ctx: &mut Context| {
+                    if let Some(files) = files {
+                        ctx.next_file_id = ctx.next_file_id.max(next_id_after(&files));
+                        ctx.files.set(files.clone());
+                        ctx.files.sync_controlled(Some(files));
+                    } else {
+                        ctx.files.sync_controlled(None);
+                    }
+                };
+                Some(TransitionPlan::context_only(apply).then(Event::ReconcileState))
+            }
+
+            (_, Event::ReconcileState) => {
+                // `State::Uploading` holds exactly when at least one file is
+                // uploading. Drive the resting state to match the currently visible
+                // queue; passing `ctx.dragging` keeps a finishing-mid-drag upload
+                // in DragOver rather than Idle.
+                reconciled_state(*state, ctx.files.get(), ctx.dragging).map(TransitionPlan::to)
+            }
+
+            (_, Event::SetProps) => {
+                // Becoming disabled/read-only while dragging would trap the machine:
+                // the disabled guard swallows the DragLeave/Drop that clears
+                // `dragging`. Clear the drag flags as part of the sync — from
+                // DragOver that returns to Idle; while Uploading (a drag started
+                // via the uploading drag-enter path) only the flags are cleared so
+                // the upload continues.
+                let becoming_inert = props.disabled || props.readonly;
+                let reset_to_idle = becoming_inert && matches!(state, State::DragOver);
+                let clear_drag = reset_to_idle
+                    || (becoming_inert && matches!(state, State::Uploading) && ctx.dragging);
+                let apply = {
+                    let disabled = props.disabled;
+                    let readonly = props.readonly;
+                    let required = props.required;
+                    let multiple = props.multiple;
+                    let accept = props.accept.clone();
+                    let max_file_size = props.max_file_size;
+                    let min_file_size = props.min_file_size;
+                    let max_files = props.max_files;
+                    let auto_upload = props.auto_upload;
+                    let directory = props.directory;
+                    let capture = props.capture.clone();
+                    let name = props.name.clone();
+
+                    move |ctx: &mut Context| {
+                        ctx.disabled = disabled;
+                        ctx.readonly = readonly;
+                        ctx.required = required;
+                        ctx.multiple = multiple;
+                        ctx.accept = accept;
+                        ctx.max_file_size = max_file_size;
+                        ctx.min_file_size = min_file_size;
+                        ctx.max_files = max_files;
+                        ctx.auto_upload = auto_upload;
+                        ctx.directory = directory;
+                        ctx.capture = capture;
+                        ctx.name = name;
+                        if clear_drag {
+                            ctx.dragging = false;
+                            ctx.drag_counter = 0;
+                        }
+                    }
+                };
+                Some(if reset_to_idle {
+                    TransitionPlan::to(State::Idle).apply(apply)
+                } else {
+                    TransitionPlan::context_only(apply)
+                })
+            }
+
             _ => None,
         }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "file_upload::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.files != new.files {
+            events.push(Event::SetFiles(new.files.clone()));
+        }
+
+        if old.disabled != new.disabled
+            || old.readonly != new.readonly
+            || old.required != new.required
+            || old.multiple != new.multiple
+            || old.accept != new.accept
+            || old.max_file_size != new.max_file_size
+            || old.min_file_size != new.min_file_size
+            || old.max_files != new.max_files
+            || old.capture != new.capture
+            || old.name != new.name
+            || old.auto_upload != new.auto_upload
+            || old.directory != new.directory
+        {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -860,11 +1159,16 @@ impl<'a> Api<'a> {
         let files = self.ctx.files.get();
         if let Some(file) = files.get(index) {
             attrs.set(HtmlAttr::Role, "listitem");
+            // Keyboard-focusable so Tab reaches items and `on_item_keydown`
+            // (Delete/Backspace removal) is usable — a plain listitem is skipped
+            // by sequential focus.
+            attrs.set(HtmlAttr::TabIndex, "0");
             attrs.set(HtmlAttr::Data("ars-state"), match file.status {
                 Status::Pending => "pending",
                 Status::Uploading => "uploading",
                 Status::Complete => "complete",
                 Status::Failed(_) => "error",
+                Status::Cancelled => "cancelled",
             });
             attrs.set(HtmlAttr::Data("ars-file-id"), &file.id);
             attrs.set(HtmlAttr::Aria(AriaAttr::Description),
@@ -904,7 +1208,14 @@ impl<'a> Api<'a> {
         if let Some(file) = files.get(index) {
             attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.remove_label)(&file.name, &self.ctx.locale));
         }
-        // Event handlers (click to remove file) are typed methods on the Api struct.
+        // The transition guard ignores `RemoveFile` while disabled/read-only, so
+        // mark the control inert to match the trigger and hidden input.
+        if self.ctx.disabled || self.ctx.readonly {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
+        // Event handlers (click to remove, Delete/Backspace keydown) are typed
+        // methods on the Api struct.
         attrs
     }
 
@@ -928,7 +1239,8 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Type, "file");
         attrs.set(HtmlAttr::TabIndex, "-1");
         attrs.set(HtmlAttr::Class, "ars-sr-input");
-        if self.ctx.multiple {
+        // Directory uploads inherently select multiple files.
+        if self.ctx.multiple || self.ctx.directory {
             attrs.set_bool(HtmlAttr::Multiple, true);
         }
         if !self.ctx.accept.is_empty() {
@@ -937,8 +1249,14 @@ impl<'a> Api<'a> {
         if self.ctx.directory {
             attrs.set(HtmlAttr::WebkitDirectory, "");
         }
-        if let Some(ref name) = self.props.name {
+        if let Some(ref capture) = self.ctx.capture {
+            attrs.set(HtmlAttr::Capture, capture);
+        }
+        if let Some(ref name) = self.ctx.name {
             attrs.set(HtmlAttr::Name, name);
+        }
+        if self.ctx.required {
+            attrs.set_bool(HtmlAttr::Required, true);
         }
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -951,11 +1269,9 @@ impl<'a> Api<'a> {
     /// Adapters can use this to display per-file error messages in the file list.
     pub fn validation_error_text(&self, rejection: &Rejection) -> String {
         match &rejection.reason {
-            RejectionReason::TooLarge => {
-                (self.ctx.messages.too_large)(
-                    self.ctx.max_file_size.unwrap_or(0),
-                    &self.ctx.locale,
-                )
+            // Use the limit captured at rejection time, not the current prop.
+            RejectionReason::TooLarge { max } => {
+                (self.ctx.messages.too_large)(*max, &self.ctx.locale)
             }
             RejectionReason::InvalidType => {
                 (self.ctx.messages.wrong_type)(&self.ctx.locale)
@@ -963,11 +1279,8 @@ impl<'a> Api<'a> {
             RejectionReason::TooMany => {
                 (self.ctx.messages.too_many_files)(&self.ctx.locale)
             }
-            RejectionReason::TooSmall => {
-                (self.ctx.messages.too_small)(
-                    self.ctx.min_file_size.unwrap_or(0),
-                    &self.ctx.locale,
-                )
+            RejectionReason::TooSmall { min } => {
+                (self.ctx.messages.too_small)(*min, &self.ctx.locale)
             }
             RejectionReason::CustomValidation(msg) => msg.clone(),
         }
@@ -992,6 +1305,20 @@ impl<'a> Api<'a> {
     /// Retry a failed upload.
     pub fn retry_file(&self, file_id: &str) {
         (self.send)(Event::RetryFile { file_id: file_id.to_string() });
+    }
+
+    /// Cancel an in-progress upload.
+    pub fn cancel_file(&self, file_id: &str) {
+        (self.send)(Event::CancelFile { file_id: file_id.to_string() });
+    }
+
+    /// Keyboard intent on the file item at `index`: Delete/Backspace removes it.
+    /// The adapter passes the item index so the core resolves the file id
+    /// without tracking per-item focus.
+    pub fn on_item_keydown(&self, index: usize, data: &KeyboardEventData) {
+        if matches!(data.key, KeyboardKey::Delete | KeyboardKey::Backspace) {
+            self.on_item_delete_trigger_click(index);
+        }
     }
 }
 
@@ -1033,35 +1360,36 @@ FileUpload
 └── HiddenInput        (native <input type="file">)
 ```
 
-| Part              | Element               | Key Attributes                                          |
-| ----------------- | --------------------- | ------------------------------------------------------- |
-| Root              | `<div>`               | `data-ars-scope`, `data-ars-part`, `aria-label`         |
-| Label             | `<label>`             | `id`, `for`                                             |
-| Dropzone          | `<div>`               | `role="button"`, `tabindex="0"`, `aria-labelledby`      |
-| Trigger           | `<button>`            | `aria-label`                                            |
-| ItemGroup         | `<ul>`                | `role="list"`, `aria-label`                             |
-| Item              | `<li>`                | `role="listitem"`, `data-ars-state`, `data-ars-file-id` |
-| ItemName          | `<span>`              | file name text                                          |
-| ItemSizeText      | `<span>`              | formatted file size                                     |
-| ItemDeleteTrigger | `<button>`            | `aria-label="Remove {filename}"`                        |
-| ItemProgress      | `<div>`               | upload progress indicator                               |
-| HiddenInput       | `<input type="file">` | `tabindex="-1"`, `multiple`, `accept`                   |
+| Part              | Element               | Key Attributes                                     |
+| ----------------- | --------------------- | -------------------------------------------------- |
+| Root              | `<div>`               | `data-ars-scope`, `data-ars-part`, `aria-label`    |
+| Label             | `<label>`             | `id`, `for`                                        |
+| Dropzone          | `<div>`               | `role="button"`, `tabindex="0"`, `aria-labelledby` |
+| Trigger           | `<button>`            | `aria-label`                                       |
+| ItemGroup         | `<ul>`                | `role="list"`, `aria-label`                        |
+| Item              | `<li>`                | `role="listitem"`, `tabindex="0"`, `data-ars-*`    |
+| ItemName          | `<span>`              | file name text                                     |
+| ItemSizeText      | `<span>`              | formatted file size                                |
+| ItemDeleteTrigger | `<button>`            | `aria-label="Remove {filename}"`                   |
+| ItemProgress      | `<div>`               | upload progress indicator                          |
+| HiddenInput       | `<input type="file">` | `tabindex="-1"`, `multiple`, `accept`              |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Attribute / Behaviour  | Element           | Value                      |
-| ---------------------- | ----------------- | -------------------------- |
-| `role="button"`        | Dropzone          | Clickable drop area        |
-| `tabindex="0"`         | Dropzone          | Keyboard focusable         |
-| `aria-labelledby`      | Dropzone          | Label ID                   |
-| `aria-disabled="true"` | Dropzone, Trigger | When disabled              |
-| `role="list"`          | ItemGroup         | Semantic list              |
-| `role="listitem"`      | Item              | Semantic list item         |
-| `aria-label`           | Trigger           | `"Choose files to upload"` |
-| `aria-label`           | ItemDeleteTrigger | `"Remove {filename}"`      |
-| `aria-label`           | ItemGroup         | `"Uploaded files"`         |
+| Attribute / Behaviour  | Element                              | Value                      |
+| ---------------------- | ------------------------------------ | -------------------------- |
+| `role="button"`        | Dropzone                             | Clickable drop area        |
+| `tabindex="0"`         | Dropzone                             | Keyboard focusable         |
+| `aria-labelledby`      | Dropzone                             | Label ID                   |
+| `aria-disabled="true"` | Dropzone, Trigger, ItemDeleteTrigger | When disabled or read-only |
+| `role="list"`          | ItemGroup                            | Semantic list              |
+| `role="listitem"`      | Item                                 | Semantic list item         |
+| `tabindex="0"`         | Item                                 | Keyboard focusable         |
+| `aria-label`           | Trigger                              | `"Choose files to upload"` |
+| `aria-label`           | ItemDeleteTrigger                    | `"Remove {filename}"`      |
+| `aria-label`           | ItemGroup                            | `"Uploaded files"`         |
 
 ### 3.2 Keyboard Interaction
 
@@ -1081,7 +1409,7 @@ The adapter MUST:
 
 1. Insert a visually-hidden `<div aria-live="assertive" aria-atomic="true">` as
    a sibling of the dropzone.
-2. On `DragEnter` transition, set its text content to `messages.drop_zone_active`.
+2. On `DragEnter` transition, set its text content to `messages.dropzone_active`.
 3. On `DragLeave` (when `drag_counter` reaches 0), set text to `messages.drop_zone_left`.
 4. On `Drop` transition, set text to `(messages.files_added)(accepted_count)`.
 5. Clear the live region text after a 3-second timeout to avoid stale announcements.
@@ -1095,6 +1423,8 @@ The adapter MUST:
 pub struct Messages {
     pub dropzone_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub dropzone_active: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub drop_zone_left: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub files_added: MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>,
     pub trigger_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub file_list_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub remove_label: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
@@ -1110,7 +1440,9 @@ impl Default for Messages {
         Self {
             dropzone_label: MessageFn::static_str("Drag and drop files here, or click to browse"),
             dropzone_active: MessageFn::static_str("Drop files to upload"),
-            trigger_label: MessageFn::static_str("Browse files"),
+            drop_zone_left: MessageFn::static_str("Drop zone is no longer active"),
+            files_added: MessageFn::new(|count, _locale| format!("{} files added", count)),
+            trigger_label: MessageFn::static_str("Choose files to upload"),
             file_list_label: MessageFn::static_str("Uploaded files"),
             remove_label: MessageFn::new(|name, _locale| format!("Remove {}", name)),
             rejection_message: MessageFn::new(|count, _locale| format!("{} files rejected", count)),
@@ -1159,7 +1491,7 @@ drop zone activity. The adapter populates the live region text from
 
 | DnD Event   | Live Region Text Source         | Default (en-US)                   |
 | ----------- | ------------------------------- | --------------------------------- |
-| `dragenter` | `messages.drop_zone_active`     | `"Drop zone is active"`           |
+| `dragenter` | `messages.dropzone_active`      | `"Drop files to upload"`          |
 | `dragleave` | `messages.drop_zone_left`       | `"Drop zone is no longer active"` |
 | `drop`      | `(messages.files_added)(count)` | `"{N} files added"`               |
 
@@ -1216,8 +1548,8 @@ drop zone activity. The adapter populates the live region text from
 
 | Callback      | ars-ui                    | Ark UI         | Notes                               |
 | ------------- | ------------------------- | -------------- | ----------------------------------- |
-| File accepted | `Bindable` reactivity     | `onFileAccept` | Equivalent via binding              |
-| File changed  | `Bindable` reactivity     | `onFileChange` | Equivalent via binding              |
+| File accepted | `on_files_change`         | `onFileAccept` | Observe the updated working queue   |
+| File changed  | `on_files_change`         | `onFileChange` | Observe add/drop/remove/clear       |
 | File rejected | rejection list on context | `onFileReject` | ars-ui stores rejections in context |
 
 **Gaps:** None.

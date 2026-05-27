@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/specialized/file_upload/tests.rs
+expression: "snapshot_attrs(&api_for_state(State::Idle).trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "file-upload",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Choose files to upload",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
