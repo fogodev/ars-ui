@@ -507,7 +507,10 @@ fn reconciled_state(current: State, files: &[Item]) -> Option<State> {
 /// In controlled mode `Bindable::get` returns the parent's value, so a bare
 /// `set` would leave `api.files()` stale; this optimistically syncs the
 /// controlled value so the queue is visible immediately, while the parent
-/// confirms it via `SetFiles` (driven by the `FilesChanged` callback).
+/// confirms it via `SetFiles` (driven by the `FilesChanged` callback). The
+/// `FilesChanged` effect reads the queue from the run-time context snapshot
+/// (taken after the event queue drains), so an `auto_upload` selection reports
+/// the post-`StartUpload` queue (Uploading), not the intermediate Pending one.
 fn commit_files(ctx: &mut Context, files: Vec<Item>) {
     if ctx.files.is_controlled() {
         ctx.files.sync_controlled(Some(files.clone()));
@@ -663,7 +666,9 @@ impl ars_core::Machine for Machine {
                 // Validate up front so the accepted/rejected counts can drive the
                 // `announce-files-added` / `announce-files-rejected` effects, and
                 // the accepted set drives `files-changed`. `commit_files` syncs the
-                // controlled value so `api.files()` reflects the drop.
+                // controlled value so `api.files()` reflects the drop. A drop tags
+                // `announce-files-added` as `from_drop` (assertive live region per
+                // §4.2); a picker selection leaves it polite (§3.3).
                 let raw = raw_files.clone();
                 Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
                     ctx.dragging = false;
@@ -776,8 +781,10 @@ impl ars_core::Machine for Machine {
                     ctx.files.set(updated);
                 }))
                 // The Service should check after this action whether any files
-                // are still Uploading. If none, transition to Idle. When a file
-                // that was still uploading actually completes, also emit the
+                // are still Uploading. If none, transition out of Uploading: to
+                // `DragOver` if a drag is still in progress (`ctx.dragging`) so the
+                // drag-leave path can clear the flags, otherwise to `Idle`. When a
+                // file that was still uploading actually completes, also emit the
                 // `announce-upload-complete` effect (polite).
             }
 
@@ -1343,19 +1350,19 @@ FileUpload
 └── HiddenInput        (native <input type="file">)
 ```
 
-| Part              | Element               | Key Attributes                                          |
-| ----------------- | --------------------- | ------------------------------------------------------- |
-| Root              | `<div>`               | `data-ars-scope`, `data-ars-part`, `aria-label`         |
-| Label             | `<label>`             | `id`, `for`                                             |
-| Dropzone          | `<div>`               | `role="button"`, `tabindex="0"`, `aria-labelledby`      |
-| Trigger           | `<button>`            | `aria-label`                                            |
-| ItemGroup         | `<ul>`                | `role="list"`, `aria-label`                             |
-| Item              | `<li>`                | `role="listitem"`, `tabindex="0"`, `data-ars-state`, `data-ars-file-id` |
-| ItemName          | `<span>`              | file name text                                          |
-| ItemSizeText      | `<span>`              | formatted file size                                     |
-| ItemDeleteTrigger | `<button>`            | `aria-label="Remove {filename}"`                        |
-| ItemProgress      | `<div>`               | upload progress indicator                               |
-| HiddenInput       | `<input type="file">` | `tabindex="-1"`, `multiple`, `accept`                   |
+| Part              | Element               | Key Attributes                                     |
+| ----------------- | --------------------- | -------------------------------------------------- |
+| Root              | `<div>`               | `data-ars-scope`, `data-ars-part`, `aria-label`    |
+| Label             | `<label>`             | `id`, `for`                                        |
+| Dropzone          | `<div>`               | `role="button"`, `tabindex="0"`, `aria-labelledby` |
+| Trigger           | `<button>`            | `aria-label`                                       |
+| ItemGroup         | `<ul>`                | `role="list"`, `aria-label`                        |
+| Item              | `<li>`                | `role="listitem"`, `tabindex="0"`, `data-ars-*`    |
+| ItemName          | `<span>`              | file name text                                     |
+| ItemSizeText      | `<span>`              | formatted file size                                |
+| ItemDeleteTrigger | `<button>`            | `aria-label="Remove {filename}"`                   |
+| ItemProgress      | `<div>`               | upload progress indicator                          |
+| HiddenInput       | `<input type="file">` | `tabindex="-1"`, `multiple`, `accept`              |
 
 ## 3. Accessibility
 

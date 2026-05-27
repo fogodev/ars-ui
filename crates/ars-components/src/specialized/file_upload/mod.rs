@@ -646,11 +646,19 @@ pub enum Effect {
     /// [`Messages::drop_zone_left`].
     AnnounceDropzoneLeft,
 
-    /// Adapter announces (polite) that files were added, via
-    /// [`Messages::files_added`] with `count`.
+    /// Adapter announces that files were added, via [`Messages::files_added`]
+    /// with `count`.
+    ///
+    /// `from_drop` selects the live region per the spec: a drop is announced in
+    /// the **assertive** drag-and-drop region (§4.2), a picker selection in the
+    /// **polite** region (§3.3).
     AnnounceFilesAdded {
         /// Number of files accepted in this selection/drop.
         count: usize,
+
+        /// Whether the files arrived via drag-and-drop (assertive) rather than
+        /// the file picker (polite).
+        from_drop: bool,
     },
 
     /// Adapter announces (polite) that files were rejected, via
@@ -849,9 +857,13 @@ impl ars_core::Machine for Machine {
                     .iter()
                     .any(|file| file.id == file_id && file.status == Status::Uploading);
                 let still_uploading = upload_complete_updates(ctx, &file_id);
-                let plan = upload_finish_plan(still_uploading, move |context: &mut Context| {
-                    apply_upload_complete(context, &file_id);
-                });
+                let plan = upload_finish_plan(
+                    still_uploading,
+                    ctx.dragging,
+                    move |context: &mut Context| {
+                        apply_upload_complete(context, &file_id);
+                    },
+                );
                 return Some(if did_complete {
                     plan.with_effect(PendingEffect::named(Effect::AnnounceUploadComplete))
                 } else {
@@ -865,6 +877,7 @@ impl ars_core::Machine for Machine {
                 let still_uploading = upload_error_updates(ctx, &file_id);
                 return Some(upload_finish_plan(
                     still_uploading,
+                    ctx.dragging,
                     move |context: &mut Context| {
                         apply_upload_error(context, &file_id, &error);
                     },
@@ -936,6 +949,7 @@ impl ars_core::Machine for Machine {
                 Some(State::Idle),
                 raw_files,
                 ctx.auto_upload,
+                true,
                 ctx,
                 |context: &mut Context| {
                     context.dragging = false;
@@ -981,6 +995,7 @@ impl ars_core::Machine for Machine {
                 None,
                 raw_files,
                 ctx.auto_upload,
+                true,
                 ctx,
                 |context: &mut Context| {
                     context.dragging = false;
@@ -995,6 +1010,7 @@ impl ars_core::Machine for Machine {
                     None,
                     raw_files,
                     auto_upload,
+                    false,
                     ctx,
                     |_| {},
                 ))
@@ -1025,21 +1041,18 @@ impl ars_core::Machine for Machine {
             (_, Event::RemoveFile { file_id }) => {
                 let file_id = file_id.clone();
                 let still_uploading = remove_file_updates(ctx, &file_id);
-                let proposed: Vec<Item> = ctx
-                    .files
-                    .get()
-                    .iter()
-                    .filter(|file| file.id != file_id)
-                    .cloned()
-                    .collect();
-                let changed = proposed.len() != ctx.files.get().len();
-                let plan =
-                    file_queue_plan(*state, still_uploading, move |context: &mut Context| {
+                let changed = ctx.files.get().iter().any(|file| file.id == file_id);
+                let plan = file_queue_plan(
+                    *state,
+                    still_uploading,
+                    ctx.dragging,
+                    move |context: &mut Context| {
                         remove_file_by_id(context, &file_id);
-                    });
+                    },
+                );
 
                 Some(if changed {
-                    plan.with_effect(files_change_effect(proposed))
+                    plan.with_effect(files_change_effect())
                 } else {
                     plan
                 })
@@ -1053,7 +1066,7 @@ impl ars_core::Machine for Machine {
                 });
 
                 Some(if had_files {
-                    plan.with_effect(files_change_effect(Vec::new()))
+                    plan.with_effect(files_change_effect())
                 } else {
                     plan
                 })
@@ -1081,6 +1094,7 @@ impl ars_core::Machine for Machine {
                 Some(file_queue_plan(
                     *state,
                     still_uploading,
+                    ctx.dragging,
                     move |context: &mut Context| {
                         cancel_file_by_id(context, &file_id);
                     },
@@ -1735,20 +1749,29 @@ fn format_file_size_with_locale(bytes: u64, locale: &Locale) -> String {
 
 /// Effect that invokes [`Props::on_files_change`] with the updated queue, so a
 /// controlled parent can sync its `files` prop after a set change.
-fn files_change_effect(files: Vec<Item>) -> PendingEffect<Machine> {
-    PendingEffect::new(Effect::FilesChanged, move |_ctx, props: &Props, _send| {
-        if let Some(callback) = &props.on_files_change {
-            callback(files);
-        }
+fn files_change_effect() -> PendingEffect<Machine> {
+    // Read the queue from the context snapshot the adapter passes at run time,
+    // which is taken *after* the event queue fully drains. This way an
+    // `auto_upload` selection reports the post-`StartUpload` queue (files marked
+    // `Uploading`) rather than the intermediate `Pending` snapshot, so a
+    // controlled parent writes back the correct state.
+    PendingEffect::new(
+        Effect::FilesChanged,
+        |ctx: &Context, props: &Props, _send| {
+            if let Some(callback) = &props.on_files_change {
+                callback(ctx.files.get().clone());
+            }
 
-        no_cleanup()
-    })
+            no_cleanup()
+        },
+    )
 }
 
 fn apply_selected_files_plan(
     transition_to: Option<State>,
     raw: &[RawFile],
     auto_upload: bool,
+    from_drop: bool,
     ctx: &Context,
     before: impl FnOnce(&mut Context) + 'static,
 ) -> TransitionPlan<Machine> {
@@ -1762,11 +1785,9 @@ fn apply_selected_files_plan(
     let rejected_count = rejected.len();
 
     // `before` only touches drag state, so the queue is unchanged between here
-    // and `apply`; compute the full proposed list once for both the write and
-    // the `FilesChanged` callback.
+    // and `apply`; build the full proposed list once.
     let mut proposed = ctx.files.get().clone();
     proposed.extend(accepted);
-    let files_changed = (accepted_count > 0).then(|| proposed.clone());
 
     let mut plan = if let Some(state) = transition_to {
         TransitionPlan::to(state)
@@ -1786,6 +1807,7 @@ fn apply_selected_files_plan(
     if accepted_count > 0 {
         plan = plan.with_effect(PendingEffect::named(Effect::AnnounceFilesAdded {
             count: accepted_count,
+            from_drop,
         }));
     }
 
@@ -1795,8 +1817,8 @@ fn apply_selected_files_plan(
         }));
     }
 
-    if let Some(files) = files_changed {
-        plan = plan.with_effect(files_change_effect(files));
+    if accepted_count > 0 {
+        plan = plan.with_effect(files_change_effect());
     }
 
     if auto_upload {
@@ -1809,10 +1831,11 @@ fn apply_selected_files_plan(
 fn file_queue_plan(
     state: State,
     still_uploading: bool,
+    dragging: bool,
     apply: impl FnOnce(&mut Context) + 'static,
 ) -> TransitionPlan<Machine> {
     if matches!(state, State::Uploading) && !still_uploading {
-        TransitionPlan::to(State::Idle).apply(apply)
+        TransitionPlan::to(finished_uploading_state(dragging)).apply(apply)
     } else {
         TransitionPlan::context_only(apply)
     }
@@ -1820,12 +1843,27 @@ fn file_queue_plan(
 
 fn upload_finish_plan(
     still_uploading: bool,
+    dragging: bool,
     apply: impl FnOnce(&mut Context) + 'static,
 ) -> TransitionPlan<Machine> {
     if still_uploading {
         TransitionPlan::context_only(apply)
     } else {
-        TransitionPlan::to(State::Idle).apply(apply)
+        TransitionPlan::to(finished_uploading_state(dragging)).apply(apply)
+    }
+}
+
+/// The resting state to enter when the last active upload finishes.
+///
+/// If a drag is still in progress, return to [`State::DragOver`] (preserving the
+/// drag flags) so the `DragOver` drag-leave/drop path can clear them — otherwise
+/// a `DragLeave` would be ignored by the `Idle` table and leave `data-ars-dragging`
+/// stuck. With no drag in progress, settle in [`State::Idle`].
+const fn finished_uploading_state(dragging: bool) -> State {
+    if dragging {
+        State::DragOver
+    } else {
+        State::Idle
     }
 }
 

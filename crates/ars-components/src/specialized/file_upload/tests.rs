@@ -1103,12 +1103,11 @@ fn file_upload_drop_during_upload_appends_files_and_stays_uploading() {
     assert_eq!(service.state(), &State::Uploading);
     assert_eq!(service.context().files.get().len(), 2);
     assert!(!service.context().dragging);
-    assert!(
-        result
-            .pending_effects
-            .iter()
-            .any(|effect| effect.name == Effect::AnnounceFilesAdded { count: 1 })
-    );
+    assert!(result.pending_effects.iter().any(|effect| effect.name
+        == Effect::AnnounceFilesAdded {
+            count: 1,
+            from_drop: true
+        }));
 }
 
 #[test]
@@ -1470,11 +1469,12 @@ fn file_upload_files_selected_announces_files_added() {
     )]));
 
     assert!(
-        result
-            .pending_effects
-            .iter()
-            .any(|effect| effect.name == Effect::AnnounceFilesAdded { count: 1 }),
-        "selecting files must announce the added count"
+        result.pending_effects.iter().any(|effect| effect.name
+            == Effect::AnnounceFilesAdded {
+                count: 1,
+                from_drop: false
+            }),
+        "selecting files must announce the added count (polite, not from drop)"
     );
 }
 
@@ -1486,11 +1486,12 @@ fn file_upload_drop_announces_files_added() {
     let result = service.send(Event::Drop(vec![raw_file("a.png", 10, "image/png")]));
 
     assert!(
-        result
-            .pending_effects
-            .iter()
-            .any(|effect| effect.name == Effect::AnnounceFilesAdded { count: 1 }),
-        "dropping files must announce the added count"
+        result.pending_effects.iter().any(|effect| effect.name
+            == Effect::AnnounceFilesAdded {
+                count: 1,
+                from_drop: true
+            }),
+        "dropping files must announce the added count (assertive, from drop)"
     );
 }
 
@@ -2177,6 +2178,67 @@ fn file_upload_rejection_message_reflects_rejection_state() {
         "image/png",
     )])));
     assert!(service.connect(&|_| {}).rejection_message().is_some());
+}
+
+#[test]
+fn file_upload_controlled_auto_upload_callback_reports_uploading_queue() {
+    let changed = Arc::new(Mutex::new(Vec::<Vec<Item>>::new()));
+    let captured = Arc::clone(&changed);
+
+    let mut service = Service::<Machine>::new(
+        Props::new()
+            .id("upload")
+            .auto_upload(true)
+            .files(Vec::new())
+            .on_files_change(move |files: Vec<Item>| {
+                captured.lock().unwrap().push(files);
+            }),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let result = service.send(Event::FilesSelected(vec![raw_file(
+        "a.png",
+        10,
+        "image/png",
+    )]));
+    assert_eq!(service.state(), &State::Uploading);
+
+    // The FilesChanged callback must report the post-StartUpload queue (Uploading),
+    // not the intermediate Pending snapshot — otherwise the parent writes back a
+    // stale queue that reverts the machine to Idle.
+    let send: StrongSend<Event> = Arc::new(|_| {});
+    for effect in result.pending_effects {
+        if effect.name == Effect::FilesChanged {
+            drop(effect.run(service.context(), service.props(), Arc::clone(&send)));
+        }
+    }
+
+    let recorded = changed.lock().unwrap();
+    let last = recorded.last().expect("on_files_change fired");
+    assert_eq!(last[0].status, Status::Uploading);
+}
+
+#[test]
+fn file_upload_upload_complete_while_dragging_returns_to_drag_over() {
+    let mut service = uploading_service("file-1");
+
+    drop(service.send(Event::DragEnter));
+    assert!(service.context().dragging);
+
+    // Last upload finishes while a drag is active: settle in DragOver (keeping
+    // the drag flags) so the drag-leave path can clear them — not Idle, which
+    // would swallow the DragLeave and strand `data-ars-dragging`.
+    let result = service.send(Event::UploadComplete {
+        file_id: "file-1".into(),
+    });
+    assert!(result.state_changed);
+    assert_eq!(service.state(), &State::DragOver);
+    assert!(service.context().dragging);
+
+    drop(service.send(Event::DragLeave));
+    assert_eq!(service.state(), &State::Idle);
+    assert!(!service.context().dragging);
 }
 
 #[test]
