@@ -375,11 +375,12 @@ pub struct Props {
     /// Name for form submission.
     pub name: Option<String>,
 
-    /// Invoked with the updated queue when the file set changes.
+    /// Invoked with the updated working queue when the file set changes
+    /// (selection, drop, removal, clear).
     ///
-    /// Required for controlled mode (`files: Some(...)`): the parent uses it to
-    /// sync its controlled `files` prop after a selection, drop, removal, or
-    /// clear. Fired via [`Effect::FilesChanged`].
+    /// An **observation** hook: the component owns its working queue, and this
+    /// lets the parent mirror it into its own state (e.g. to persist or to seed
+    /// the controlled `files` prop). Fired via [`Effect::FilesChanged`].
     pub on_files_change: Option<Callback<dyn Fn(Vec<Item>) + Send + Sync>>,
 
     /// Component instance ID.
@@ -671,11 +672,11 @@ pub enum Effect {
     /// Adapter announces (polite) that an upload completed.
     AnnounceUploadComplete,
 
-    /// Adapter invokes [`Props::on_files_change`] with the updated queue.
+    /// Adapter invokes [`Props::on_files_change`] with the updated working queue.
     ///
     /// Emitted whenever the file *set* changes (selection, drop, removal, clear)
-    /// so a controlled parent can sync its `files` prop. The new queue rides in
-    /// the effect's setup closure, not in this `Copy` marker.
+    /// so the parent can observe it. The queue is read from the run-time context
+    /// snapshot when the effect runs, not carried in this `Copy` marker.
     FilesChanged,
 
     /// Adapter opens the native file picker via the hidden input.
@@ -1876,13 +1877,18 @@ const fn finished_uploading_state(dragging: bool) -> State {
     }
 }
 
-/// Writes the queue, mirroring it into the controlled value when controlled.
+/// Writes the working upload queue.
 ///
-/// In controlled mode `Bindable::get` returns the parent's value, so a bare
-/// `set` (internal-only) would leave [`Api::files`] showing the stale list. This
-/// optimistically syncs the controlled value too, so the queue is visible
-/// immediately; the parent then confirms it via [`Event::SetFiles`] (driven by
-/// the [`Effect::FilesChanged`] callback on set changes).
+/// `FileUpload` **owns its working queue** (the in-flight upload list): `Api::files`
+/// and every lifecycle operation read it, in both controlled and uncontrolled
+/// mode — like `react-dropzone` and similar libraries. The controlled `files`
+/// prop is a *seed/sync* source (applied at `init` and on [`Event::SetFiles`]),
+/// and [`Props::on_files_change`] lets the parent observe changes; the parent
+/// does not veto an in-flight queue mid-edit.
+///
+/// To keep `Bindable::get` returning the working queue in controlled mode (where
+/// it would otherwise return the parent's seed value), this mirrors the queue
+/// into the controlled slot as well.
 fn commit_files(context: &mut Context, files: Vec<Item>) {
     if context.files.is_controlled() {
         context.files.sync_controlled(Some(files.clone()));

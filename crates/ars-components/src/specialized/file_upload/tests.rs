@@ -1565,9 +1565,10 @@ fn file_upload_controlled_selection_surfaces_files_and_fires_callback() {
         "image/png",
     )]));
 
-    // Controlled mode still surfaces the new file via the API (optimistic sync)...
+    // The component owns the working queue, so api.files() reflects the new file
+    // in controlled mode too...
     assert_eq!(service.context().files.get().len(), 2);
-    // ...and emits the FilesChanged effect so the parent can sync its prop.
+    // ...and emits FilesChanged so the parent can observe/mirror the change.
     assert!(
         result
             .pending_effects

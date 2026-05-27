@@ -309,9 +309,10 @@ pub struct Props {
     pub directory: bool,
     /// Name for form submission.
     pub name: Option<String>,
-    /// Invoked with the updated queue when the file set changes (selection,
-    /// drop, removal, clear). Required for controlled mode so the parent can sync
-    /// its `files` prop; fired via the `FilesChanged` effect.
+    /// Invoked with the updated working queue when the file set changes
+    /// (selection, drop, removal, clear). An observation hook: the component owns
+    /// its working queue and this lets the parent mirror it (e.g. to persist or
+    /// to seed the controlled `files` prop). Fired via the `FilesChanged` effect.
     pub on_files_change: Option<Callback<dyn Fn(Vec<Item>) + Send + Sync>>,
     /// Component instance ID.
     pub id: String,
@@ -506,14 +507,14 @@ fn reconciled_state(current: State, files: &[Item], dragging: bool) -> Option<St
     }
 }
 
-/// Writes the queue, mirroring it into the controlled value when controlled.
-/// In controlled mode `Bindable::get` returns the parent's value, so a bare
-/// `set` would leave `api.files()` stale; this optimistically syncs the
-/// controlled value so the queue is visible immediately, while the parent
-/// confirms it via `SetFiles` (driven by the `FilesChanged` callback). The
-/// `FilesChanged` effect reads the queue from the run-time context snapshot
-/// (taken after the event queue drains), so an `auto_upload` selection reports
-/// the post-`StartUpload` queue (Uploading), not the intermediate Pending one.
+/// Writes the working upload queue. FileUpload owns its working queue —
+/// `api.files()` and the lifecycle read it in both modes (like react-dropzone);
+/// the controlled `files` prop is a seed/sync source (init + `SetFiles`) and
+/// `on_files_change` is an observation hook (no mid-flight veto). To keep
+/// `Bindable::get` returning the working queue in controlled mode, mirror the
+/// queue into the controlled slot too. The `FilesChanged` effect reads the queue
+/// from the run-time context snapshot (after the queue drains), so an
+/// `auto_upload` selection reports the post-`StartUpload` queue.
 fn commit_files(ctx: &mut Context, files: Vec<Item>) {
     if ctx.files.is_controlled() {
         ctx.files.sync_controlled(Some(files.clone()));
@@ -1547,8 +1548,8 @@ drop zone activity. The adapter populates the live region text from
 
 | Callback      | ars-ui                    | Ark UI         | Notes                               |
 | ------------- | ------------------------- | -------------- | ----------------------------------- |
-| File accepted | `on_files_change`         | `onFileAccept` | Fired with the updated queue        |
-| File changed  | `on_files_change`         | `onFileChange` | Fired on add/drop/remove/clear      |
+| File accepted | `on_files_change`         | `onFileAccept` | Observe the updated working queue   |
+| File changed  | `on_files_change`         | `onFileChange` | Observe add/drop/remove/clear       |
 | File rejected | rejection list on context | `onFileReject` | ars-ui stores rejections in context |
 
 **Gaps:** None.
