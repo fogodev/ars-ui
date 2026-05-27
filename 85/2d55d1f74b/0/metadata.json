@@ -1,0 +1,107 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "852d55d1f74b",
+  "session_id": "019e65c0-1ef0-7333-aba7-132bcdbeccbf",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-27T02:52:30.476695Z",
+  "branch": "t3code/implement-tasks-282-283",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "c0c80035bde2",
+  "token_usage": {
+    "input_tokens": 1648256,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 86035328,
+    "output_tokens": 120259,
+    "api_call_count": 580
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "summary": {
+    "intent": "Implement GitHub issues #282 (RatingGroup) and #283 (TagGroup) as agnostic-core data-display components in ars-components, with full test coverage, mutation testing, and a reviewed PR.",
+    "outcome": "Both components were implemented with unit, snapshot, spec-conformance, proptest, and mutation gates passing. A PR (#694) was opened, rebased onto main, and a Codex review was addressed with fixes for prop-sync, pluralized labels, removal announcement payload, disabled deselect guard, and an overly broad mutation exclusion.",
+    "learnings": {
+      "repo": [
+        "Snapshot files must live in component-local `src/.../snapshots/` directories, not under `tests/snapshots/`; insta places them based on where the assertion lives",
+        "Unit/contract tests must be colocated with component code in `#[cfg(test)]` blocks inside the module file, not in detached integration test files under `crates/ars-components/tests/`",
+        "The repo requires `cargo xci-fast` (10-step gate) before every push",
+        "Mutation testing via `cargo xmutants` is a required pre-handoff gate for each new component module; parallel runs are blocked by a shared `mutants.out` lock",
+        "`cargo insta test --unreferenced=reject` is blocked by many pre-existing unreferenced snapshots across other components — cannot be used as a per-PR gate without cleanup of older fixtures",
+        "Draft PRs do not trigger CI checks; must be marked ready-for-review to get check results",
+        "Codex review is triggered by posting `@codex review` as a PR comment; the 👀 reaction signals it is actively reviewing",
+        "RatingGroup spec §2 mentioned `ItemHalf`/`ItemFull` as public `Part` variants but §1.6/§5.2 define the actual public anatomy — the §2 prose describes adapter-rendered visual substructure only",
+        "RatingGroup uses `role=radiogroup`/`role=radio` in whole-number mode and `role=slider` with `aria-value*` in half/fractional mode; fractional `step` (not just `allow_half`) triggers slider semantics",
+        "TagGroup uses a grid ARIA pattern: `role=grid` on root, `role=row` on list, `role=gridcell` on tag items",
+        "Machine `on_props_changed` / prop-sync must be implemented for controlled `Bindable` props to stay coherent when props change after initialization",
+        "TagGroup removal effects should carry an explicit payload (removed key label) rather than relying on callers to reconstruct context"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-i18n/src/number/mod.rs",
+          "line": 876,
+          "end_line": 890,
+          "finding": "The fallback percent formatter scaled values but did not append the `%` symbol; main independently fixed this before the branch landed, causing a rebase conflict that was resolved by keeping main's implementation and folding in the fractional-value regression test"
+        },
+        {
+          "path": "crates/ars-i18n/src/number/mod.rs",
+          "line": 1299,
+          "end_line": 1320,
+          "finding": "Regression test for fallback percent formatting lives here; covers both whole and fractional percent values to prevent recurrence"
+        },
+        {
+          "path": "crates/ars-components/src/data_display/rating_group/mod.rs",
+          "line": 340,
+          "end_line": 520,
+          "finding": "New RatingGroup state machine; `Bindable<f64>` value, step resolution priority: explicit finite step > allow_half (0.5) > default (1.0), disabled mode blocks all mutations including focus"
+        },
+        {
+          "path": "crates/ars-components/src/data_display/tag_group/mod.rs",
+          "line": 180,
+          "end_line": 470,
+          "finding": "New TagGroup state machine; `StaticCollection<Tag>` for items, `Bindable<BTreeSet<Key>>` for selection, no-wrap navigation, removal skips group-disabled/item-disabled/missing keys"
+        },
+        {
+          "path": ".cargo/mutants.toml",
+          "line": 52,
+          "end_line": 76,
+          "finding": "One TagGroup whole-transition-plan mutant survives only by timeout (replacing the function body makes the entire test suite time out, not fail a specific assertion); added a narrow documented exclusion. Overly broad exclusions were flagged in review and narrowed."
+        }
+      ],
+      "workflow": [
+        "Tests-first (red → green → mutation → audit) is the required delivery flow for new agnostic-core components",
+        "The post-implementation audit skill must be run before handoff and findings must be landed in the same local change",
+        "Mutation runs are sequential per workspace due to shared output lock; plan for wall-clock time when two components are under mutation testing",
+        "Spec drift found in review: adapter specs (Leptos/Dioxus) must be kept in sync with the core contract changes, including new props like `default_selected_keys`",
+        "Moving detached integration tests into module-local `#[cfg(test)]` blocks can surface pre-existing bugs (Meter/Progress percent formatting) that were hidden by test isolation"
+      ]
+    },
+    "friction": [
+      "Mutation testing for two components was extremely slow; multiple polling sessions required, and parallel runs competed for the shared `mutants.out` lock",
+      "`cargo insta test --unreferenced=reject` cannot be used as a clean per-PR snapshot gate because of many pre-existing unreferenced fixtures in other components",
+      "The broader `cargo llvm-cov test ... -- data_display` gate failed on pre-existing Meter/Progress snapshot drift unrelated to the new components, requiring a narrower per-integration-test invocation",
+      "Draft PR mode silently suppresses CI checks; had to mark ready-for-review to get check results",
+      "Codex review took many polling cycles (8+ polls over ~20 minutes) before threads appeared",
+      "Rebase conflict in `crates/ars-i18n/src/number/mod.rs` because both branches independently fixed the same percent-formatting bug with slightly different implementations",
+      "The `cargo insta test` CLI `--glob-filter` flag did not actually restrict the unreferenced scan to the specified test binary, making the flag misleading"
+    ],
+    "open_items": [
+      "Leptos and Dioxus adapter implementations for RatingGroup and TagGroup are explicitly out of scope and still unimplemented",
+      "Pre-existing unreferenced insta snapshots across other components should be cleaned up so `--unreferenced=reject` can be used as a workspace-wide gate",
+      "TagGroup `AnnounceRemoved` effect payload format should be validated against the adapter accessibility announcement API when adapters are implemented",
+      "RatingGroup half-step hit-testing geometry and pointer event coordinate math are deferred to adapter layer",
+      "Codex review response commit was created but the push was cut off at end of transcript — verify the rebased review-fix branch was force-pushed and Codex re-triggered"
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
