@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>b9iwrrkvg</task-id>
+<tool-use-id>toolu_01BXMK8biuKLRtrRgBgusZkZ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson--t3-worktrees-ars-ui-t3code-0f770319/4f81a74c-2045-4aa5-9d9e-e218924e1ac2/tasks/b9iwrrkvg.output</output-file>
+<status>completed</status>
+<summary>Background command "Run Codex poller until pass finishes" completed (exit code 0)</summary>
+</task-notification>
