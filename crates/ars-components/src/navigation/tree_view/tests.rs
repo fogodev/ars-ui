@@ -11,7 +11,7 @@ use ars_collections::{
     dnd::{CollectionDropTarget, DropPosition},
     selection,
 };
-use ars_core::{ConnectApi as _, Env, HtmlAttr, KeyboardKey, Service, StrongSend};
+use ars_core::{AriaAttr, ConnectApi as _, Env, HtmlAttr, KeyboardKey, Service, StrongSend};
 use ars_interactions::KeyboardEventData;
 use insta::assert_snapshot;
 
@@ -1543,6 +1543,181 @@ fn typeahead_matches_displayed_label_not_text_value() {
 
     drop(service.send(Event::TypeaheadSearch('a'))); // matches "Apple" label
     assert_eq!(service.context().focused_node, Some(key(1)));
+}
+
+// ----------------------------------------------------------------------------
+// Codex review regressions, round 2 (PR #695)
+// ----------------------------------------------------------------------------
+
+#[test]
+fn focus_node_ignores_non_visible_and_unknown_keys() {
+    let mut service = service(props()); // Vegetables(4) collapsed -> Carrot(5) hidden
+    assert!(!service.send(Event::FocusNode(key(5))).context_changed); // hidden
+    assert_eq!(service.context().focused_node, None);
+    assert!(!service.send(Event::FocusNode(key(999))).context_changed); // unknown
+    assert_eq!(service.context().focused_node, None);
+}
+
+#[test]
+fn asterisk_expands_lazy_siblings() {
+    let items = TreeCollection::new(vec![branch(
+        1,
+        "Root",
+        true,
+        vec![
+            leaf_with(
+                2,
+                "A",
+                TreeItem {
+                    has_children: true, // lazy branch (no loaded children)
+                    ..item("A")
+                },
+            ),
+            leaf(3, "B"),
+        ],
+    )]);
+    let service = service(props().items(items));
+    let recorder: Recorder = RefCell::new(Vec::new());
+    let send = |event| record(&recorder, event);
+    service
+        .connect(&send)
+        .on_node_keydown(&key(2), &printable('*'));
+    assert_eq!(recorder.into_inner(), &[Event::ExpandNode(key(2))]);
+}
+
+#[test]
+fn focus_on_container_initializes_active_node() {
+    // No prior focus -> first visible node.
+    let mut first = service(props());
+    drop(first.send(Event::Focus { is_keyboard: true }));
+    assert_eq!(first.context().focused_node, Some(key(1)));
+
+    // With a selection -> the (visible) selected node.
+    let mut selected = service(props().selected(selection::Set::Single(key(4))));
+    drop(selected.send(Event::Focus { is_keyboard: true }));
+    assert_eq!(selected.context().focused_node, Some(key(4)));
+
+    // Existing active node is not overridden.
+    let mut existing = service(props());
+    drop(existing.send(Event::FocusNode(key(2))));
+    drop(existing.send(Event::Focus { is_keyboard: false }));
+    assert_eq!(existing.context().focused_node, Some(key(2)));
+}
+
+#[test]
+fn switching_to_single_normalizes_multi_selection() {
+    let mut service = service(
+        props()
+            .multiple(true)
+            .selection_mode(selection::Mode::Multiple),
+    );
+    drop(service.send(Event::SelectNode(key(2))));
+    drop(service.send(Event::SelectNode(key(3))));
+
+    drop(service.set_props(props().selection_mode(selection::Mode::Single))); // tighten
+
+    let api = service.connect(&|_| {});
+    let count = [key(1), key(2), key(3), key(4), key(7)]
+        .iter()
+        .filter(|k| api.is_node_selected(k))
+        .count();
+    assert!(
+        count <= 1,
+        "single mode keeps at most one selected after switch"
+    );
+}
+
+#[test]
+fn set_props_resyncs_generated_ids_on_id_change() {
+    let mut service = service(props().id("old"));
+    assert_eq!(
+        service
+            .connect(&|_| {})
+            .branch_attrs(&key(1))
+            .get(&HtmlAttr::Id),
+        Some("old-node-i-1")
+    );
+    drop(service.set_props(props().id("new")));
+    assert_eq!(
+        service
+            .connect(&|_| {})
+            .branch_attrs(&key(1))
+            .get(&HtmlAttr::Id),
+        Some("new-node-i-1")
+    );
+}
+
+#[test]
+fn drag_handle_is_keyboard_focusable() {
+    let service = service(dnd_props());
+    assert_eq!(
+        service
+            .connect(&|_| {})
+            .drag_handle_attrs(&key(2))
+            .get(&HtmlAttr::TabIndex),
+        Some("0")
+    );
+}
+
+#[test]
+fn disabled_node_is_not_announced_draggable() {
+    let service = service(props().items(disabled_items()).dnd_enabled(true));
+    let api = service.connect(&|_| {});
+    assert!(
+        api.leaf_attrs(&key(2)) // Apple is disabled
+            .get(&HtmlAttr::Aria(AriaAttr::RoleDescription))
+            .is_none()
+    );
+    assert_eq!(
+        api.leaf_attrs(&key(7)) // Grains is enabled
+            .get(&HtmlAttr::Aria(AriaAttr::RoleDescription)),
+        Some("draggable")
+    );
+}
+
+#[test]
+fn controlled_selection_state_tracks_binding_not_optimistic() {
+    let mut service = service(
+        props()
+            .multiple(true)
+            .selection_mode(selection::Mode::Multiple)
+            .selected(selection::Set::Single(key(2))),
+    );
+    drop(service.send(Event::SelectNode(key(3)))); // optimistic; parent owns selection
+
+    let api = service.connect(&|_| {});
+    assert!(api.is_node_selected(&key(2)));
+    assert!(
+        !api.is_node_selected(&key(3)),
+        "controlled selection does not change until the parent echoes it"
+    );
+    assert_eq!(
+        &service.context().selection_state.selected_keys,
+        service.context().selected.get(),
+        "selection_state stays consistent with the controlled binding"
+    );
+}
+
+#[test]
+fn disabled_node_suppresses_href() {
+    let items = TreeCollection::new(vec![leaf_with(
+        9,
+        "Docs",
+        TreeItem {
+            disabled: true,
+            href: Some("/docs".to_string()),
+            ..TreeItem::default()
+        },
+    )]);
+    let service = service(props().items(items));
+    assert!(
+        service
+            .connect(&|_| {})
+            .leaf_attrs(&key(9))
+            .get(&HtmlAttr::Href)
+            .is_none(),
+        "a disabled node must not expose a live href"
+    );
 }
 
 // ----------------------------------------------------------------------------

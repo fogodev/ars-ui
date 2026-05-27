@@ -377,8 +377,7 @@ impl ars_core::Machine for Machine {
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     let new_state = ctx.selection_state.select(key);
-                    ctx.selected.set(new_state.selected_keys.clone());
-                    ctx.selection_state = new_state;
+                    apply_selection(ctx, new_state);
                 }))
             }
 
@@ -386,21 +385,32 @@ impl ars_core::Machine for Machine {
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     let new_state = ctx.selection_state.deselect(&key);
-                    ctx.selected.set(new_state.selected_keys.clone());
-                    ctx.selection_state = new_state;
+                    apply_selection(ctx, new_state);
                 }))
             }
 
             // Keyboard navigation arms route through `focus_plan(_, true)` (sets
             // the active descendant + focus-visible + emits
             // `Effect::ScrollFocusedIntoView`). `FocusNode` is pointer/
-            // programmatic, so it passes `false` (no keyboard focus ring).
-            Event::FocusNode(key) => Some(focus_plan(key.clone(), false)),
+            // programmatic, so it passes `false` (no keyboard focus ring) and is
+            // gated to currently-visible keys so the active descendant never
+            // dangles.
+            Event::FocusNode(key) => {
+                if !visible_keys(ctx).contains(key) { return None; }
+                Some(focus_plan(key.clone(), false))
+            }
 
+            // On container focus with no active node, initialise to the first
+            // selected visible node, else the first visible node.
             Event::Focus { is_keyboard } => {
                 let is_keyboard = *is_keyboard;
+                let initial = if ctx.focused_node.is_some() { None } else { initial_active_node(ctx) };
                 Some(TransitionPlan::to(State::Focused)
-                    .apply(move |ctx| ctx.focus_visible = is_keyboard))
+                    .apply(move |ctx| {
+                        ctx.focus_visible = is_keyboard;
+                        if let Some(key) = initial { ctx.focused_node = Some(key); }
+                    })
+                    .with_effect(PendingEffect::named(Effect::ScrollFocusedIntoView)))
             }
 
             Event::Blur => Some(TransitionPlan::to(State::Idle)
@@ -500,6 +510,7 @@ impl ars_core::Machine for Machine {
                 // Re-derive prop-backed context from the new props: data source,
                 // controlled bindings, disabled keys, and selection config.
                 let items = props.items.clone();
+                let id = props.id.clone();
                 let selected = props.selected.clone();
                 let expanded = props.expanded.clone();
                 let multiple = props.multiple;
@@ -511,10 +522,14 @@ impl ars_core::Machine for Machine {
                     .collect::<BTreeSet<Key>>();
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.items = items;
+                    ctx.ids = ComponentIds::from_id(&id); // track a changed Props::id
                     ctx.multiple = multiple;
                     ctx.selection_mode = selection_mode;
                     ctx.selected.sync_controlled(selected);
                     ctx.expanded.sync_controlled(expanded);
+                    // Normalize the (uncontrolled) selection for the new mode.
+                    let normalized = normalize_selection(ctx.selected.get().clone(), selection_mode);
+                    ctx.selected.set(normalized);
                     let mut new_state = selection::State::new(selection_mode, selection_behavior)
                         .with_disabled(disabled_keys);
                     new_state.selected_keys = ctx.selected.get().clone();
@@ -539,6 +554,7 @@ impl ars_core::Machine for Machine {
         // configuration field changes (e.g. after a reorder, or switching a
         // tree between single and multiple selection).
         if old.items != new.items
+            || old.id != new.id
             || old.selected != new.selected
             || old.expanded != new.expanded
             || old.multiple != new.multiple
@@ -560,6 +576,36 @@ enum Direction { Next, Prev }
 /// the documented shortcut enables real multi-selection.
 const fn effective_selection_mode(props: &Props) -> selection::Mode {
     if props.multiple { selection::Mode::Multiple } else { props.selection_mode }
+}
+
+/// Commit a new selection state, keeping `selection_state` consistent with what
+/// `ctx.selected.get()` reports (the controlled value when controlled), so the
+/// binding and the state machine never diverge under controlled selection.
+fn apply_selection(ctx: &mut Context, mut new_state: selection::State) {
+    ctx.selected.set(new_state.selected_keys.clone());
+    new_state.selected_keys = ctx.selected.get().clone();
+    ctx.selection_state = new_state;
+}
+
+/// The node to activate when the tree first receives focus: the first selected
+/// visible node, otherwise the first visible node.
+fn initial_active_node(ctx: &Context) -> Option<Key> {
+    let visible = visible_keys(ctx);
+    let selected = ctx.selected.get();
+    visible.iter().find(|&key| selected.contains(key)).or_else(|| visible.first()).cloned()
+}
+
+/// Reduce a selection set to one valid for `mode`: `None` clears it, `Single`
+/// keeps at most one key, `Multiple` leaves it unchanged.
+fn normalize_selection(set: selection::Set, mode: selection::Mode) -> selection::Set {
+    match mode {
+        selection::Mode::None => selection::Set::Empty,
+        selection::Mode::Single => match set.first() {
+            Some(key) => selection::Set::Single(key.clone()),
+            None => selection::Set::Empty,
+        },
+        selection::Mode::Multiple => set,
+    }
 }
 
 /// Move the focus indicator to `key` and emit the scroll-into-view intent.
@@ -904,7 +950,8 @@ impl Api<'_> {
     /// Attrs for a node's drag handle (`role="button"`, localized `aria-label`).
     pub fn drag_handle_attrs(&self, node_id: &Key) -> AttrMap {
         let mut attrs = part_only_attrs(&Part::DragHandle { node_id: Key::default() });
-        attrs.set(HtmlAttr::Role, "button");
+        // `tabindex="0"` so keyboard users can tab to the handle to start a drag.
+        attrs.set(HtmlAttr::Role, "button").set(HtmlAttr::TabIndex, "0");
         let label = self.ctx.items.get(node_id).and_then(|n| n.value.as_ref())
             .map_or("", |v| v.label.as_str());
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.drag_handle_label)(label, &self.ctx.locale));
@@ -1000,13 +1047,18 @@ impl Api<'_> {
             None => self.ctx.items.all_nodes().filter(|n| n.parent_key.is_none()).collect::<Vec<_>>(),
         };
         for sibling in siblings {
-            if sibling.has_children { (self.send)(Event::ExpandNode(sibling.key.clone())); }
+            // Include lazy branches (item-level `has_children` flag).
+            let lazy = sibling.value.as_ref().is_some_and(|v| v.has_children);
+            if sibling.has_children || lazy { (self.send)(Event::ExpandNode(sibling.key.clone())); }
         }
     }
 
-    /// The node's navigation href, if any.
+    /// The node's navigation href, if any. Suppressed for disabled nodes so a
+    /// disabled item is not actionable via native anchor navigation.
     fn node_href(&self, node_id: &Key) -> Option<&str> {
-        self.ctx.items.get(node_id).and_then(|n| n.value.as_ref()).and_then(|v| v.href.as_deref())
+        let item = self.ctx.items.get(node_id).and_then(|n| n.value.as_ref())?;
+        if item.disabled { return None; }
+        item.href.as_deref()
     }
 
     /// Apply the shared `data-ars-*` / dnd state markers for branch and leaf.
@@ -1019,7 +1071,8 @@ impl Api<'_> {
         if is_selected { attrs.set_bool(HtmlAttr::Data("ars-selected"), true); }
         if is_expanded { attrs.set_bool(HtmlAttr::Data("ars-expanded"), true); }
         if is_focused && self.ctx.focus_visible { attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true); }
-        if self.props.dnd_enabled {
+        // Disabled nodes are not draggable (`DragStart` rejects them).
+        if self.props.dnd_enabled && !disabled {
             attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), "draggable");
             if self.is_dragging(node_id) { attrs.set_bool(HtmlAttr::Data("ars-dragging"), true); }
         }
@@ -1096,7 +1149,7 @@ reorder variant (§4).
 | `BranchContent`   | `<ul>` or `<div>`                     | `role="group"`, `data-ars-scope="tree-view"`, `data-ars-part="branch-content"`, `hidden` (when collapsed)                                                                                                                                                                                            |
 | `Leaf`            | `<li>`, `<div>`, or `<a>` (when href) | `id`, `role="treeitem"`, `aria-expanded="false"` (when `has_children` is true), `aria-selected`, `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-selected`, `href` (when present)                                                                                                           |
 | `LeafText`        | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="leaf-text"`                                                                                                                                                                                                                                            |
-| `DragHandle`      | `<button>`                            | `data-ars-part="drag-handle"`, `role="button"`, `aria-label` (from `Messages::drag_handle_label`), `aria-grabbed` (while dragging). Drag-and-drop variant (§4).                                                                                                                                      |
+| `DragHandle`      | `<button>`                            | `data-ars-part="drag-handle"`, `role="button"`, `tabindex="0"`, `aria-label` (from `Messages::drag_handle_label`), `aria-grabbed` (while dragging). Drag-and-drop variant (§4).                                                                                                                      |
 | `DropIndicator`   | `<div>`                               | `data-ars-part="drop-indicator"`, `aria-hidden="true"`, `data-ars-drop-position`, `data-ars-drop-target`. Drag-and-drop variant (§4).                                                                                                                                                                |
 
 ## 3. Accessibility

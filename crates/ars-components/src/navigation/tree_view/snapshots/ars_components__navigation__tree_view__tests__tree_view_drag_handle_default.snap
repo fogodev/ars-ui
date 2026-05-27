@@ -6,3 +6,4 @@ aria-label=Drag Apple
 data-ars-part=drag-handle
 data-ars-scope=tree-view
 role=button
+tabindex=0

@@ -603,9 +603,7 @@ impl ars_core::Machine for Machine {
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     let new_state = ctx.selection_state.select(key);
-
-                    ctx.selected.set(new_state.selected_keys.clone());
-                    ctx.selection_state = new_state;
+                    apply_selection(ctx, new_state);
                 }))
             }
 
@@ -613,21 +611,39 @@ impl ars_core::Machine for Machine {
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     let new_state = ctx.selection_state.deselect(&key);
-
-                    ctx.selected.set(new_state.selected_keys.clone());
-                    ctx.selection_state = new_state;
+                    apply_selection(ctx, new_state);
                 }))
             }
 
-            // Pointer / programmatic focus: do not force the keyboard
-            // focus ring (modality is not keyboard).
-            Event::FocusNode(key) => Some(focus_plan(key.clone(), false)),
+            // Pointer / programmatic focus: do not force the keyboard focus
+            // ring (modality is not keyboard). Only focus a node that is
+            // currently visible, so the active descendant never dangles.
+            Event::FocusNode(key) => {
+                if !visible_keys(ctx).contains(key) {
+                    return None;
+                }
+                Some(focus_plan(key.clone(), false))
+            }
 
+            // When the container gains focus with no active node, initialise it
+            // to the first selected visible node, else the first visible node —
+            // so `aria-activedescendant` is populated immediately.
             Event::Focus { is_keyboard } => {
                 let is_keyboard = *is_keyboard;
+                let initial = if ctx.focused_node.is_some() {
+                    None
+                } else {
+                    initial_active_node(ctx)
+                };
                 Some(
                     TransitionPlan::to(State::Focused)
-                        .apply(move |ctx: &mut Context| ctx.focus_visible = is_keyboard),
+                        .apply(move |ctx: &mut Context| {
+                            ctx.focus_visible = is_keyboard;
+                            if let Some(key) = initial {
+                                ctx.focused_node = Some(key);
+                            }
+                        })
+                        .with_effect(PendingEffect::named(Effect::ScrollFocusedIntoView)),
                 )
             }
 
@@ -771,6 +787,7 @@ impl ars_core::Machine for Machine {
                 // source, the controlled bindings, the disabled-key set, and the
                 // selection configuration (mode/behavior/multiple).
                 let items = props.items.clone();
+                let id = props.id.clone();
                 let selected = props.selected.clone();
                 let expanded = props.expanded.clone();
                 let multiple = props.multiple;
@@ -784,13 +801,22 @@ impl ars_core::Machine for Machine {
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.items = items;
+                    // Rebuild generated ids so node ids / aria-activedescendant
+                    // track a changed `Props::id`.
+                    ctx.ids = ComponentIds::from_id(&id);
                     ctx.multiple = multiple;
                     ctx.selection_mode = selection_mode;
                     ctx.selected.sync_controlled(selected);
                     ctx.expanded.sync_controlled(expanded);
 
+                    // Normalize the (uncontrolled) selection for the new mode so a
+                    // tightened mode cannot leave more keys selected than allowed.
+                    let normalized =
+                        normalize_selection(ctx.selected.get().clone(), selection_mode);
+                    ctx.selected.set(normalized);
+
                     // Rebuild the selection machine with the new configuration,
-                    // preserving the synced selection set.
+                    // keeping its set consistent with the binding.
                     let mut new_state = selection::State::new(selection_mode, selection_behavior)
                         .with_disabled(disabled_keys);
                     new_state.selected_keys = ctx.selected.get().clone();
@@ -823,6 +849,7 @@ impl ars_core::Machine for Machine {
         // configuration field changes — e.g. after a reorder (new `items`) or
         // when switching a tree between single and multiple selection.
         if old.items != new.items
+            || old.id != new.id
             || old.selected != new.selected
             || old.expanded != new.expanded
             || old.multiple != new.multiple
@@ -946,6 +973,43 @@ const fn effective_selection_mode(props: &Props) -> selection::Mode {
         selection::Mode::Multiple
     } else {
         props.selection_mode
+    }
+}
+
+/// Commit a new selection state, keeping `selection_state` consistent with what
+/// `ctx.selected.get()` reports. For uncontrolled selection that is the value
+/// just set; for controlled selection it is the parent-owned value, so the
+/// optimistic change only takes visible effect once the parent echoes it via
+/// props (avoiding a binding-vs-state divergence under controlled selection).
+fn apply_selection(ctx: &mut Context, mut new_state: selection::State) {
+    ctx.selected.set(new_state.selected_keys.clone());
+    new_state.selected_keys = ctx.selected.get().clone();
+    ctx.selection_state = new_state;
+}
+
+/// The node to activate when the tree first receives focus: the first selected
+/// visible node, otherwise the first visible node.
+fn initial_active_node(ctx: &Context) -> Option<Key> {
+    let visible = visible_keys(ctx);
+    let selected = ctx.selected.get();
+    visible
+        .iter()
+        .find(|&key| selected.contains(key))
+        .or_else(|| visible.first())
+        .cloned()
+}
+
+/// Reduce a selection set to one valid for `mode`: `None` clears it, `Single`
+/// keeps at most one key, `Multiple` leaves it unchanged. Applied when the
+/// effective selection mode tightens at runtime.
+fn normalize_selection(set: selection::Set, mode: selection::Mode) -> selection::Set {
+    match mode {
+        selection::Mode::None => selection::Set::Empty,
+        selection::Mode::Single => match set.first() {
+            Some(key) => selection::Set::Single(key.clone()),
+            None => selection::Set::Empty,
+        },
+        selection::Mode::Multiple => set,
     }
 }
 
@@ -1459,7 +1523,9 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
-            .set(HtmlAttr::Role, "button");
+            .set(HtmlAttr::Role, "button")
+            // Keyboard users must be able to tab to the handle to start a drag.
+            .set(HtmlAttr::TabIndex, "0");
 
         let label = self
             .ctx
@@ -1629,19 +1695,27 @@ impl Api<'_> {
         };
 
         for sibling in siblings {
-            if sibling.has_children {
+            // Include lazy branches (item-level `has_children` flag), matching
+            // `ExpandAll` and `is_branch`.
+            let lazy = sibling.value.as_ref().is_some_and(|item| item.has_children);
+            if sibling.has_children || lazy {
                 (self.send)(Event::ExpandNode(sibling.key.clone()));
             }
         }
     }
 
-    /// The node's navigation href, if any.
+    /// The node's navigation href, if any. Suppressed for disabled nodes so a
+    /// disabled item is not still actionable via native anchor navigation.
     fn node_href(&self, node_id: &Key) -> Option<&str> {
-        self.ctx
+        let item = self
+            .ctx
             .items
             .get(node_id)
-            .and_then(|node| node.value.as_ref())
-            .and_then(|item| item.href.as_deref())
+            .and_then(|node| node.value.as_ref())?;
+        if item.disabled {
+            return None;
+        }
+        item.href.as_deref()
     }
 
     /// Apply the shared `data-ars-*` state markers used by branch and leaf nodes.
@@ -1672,7 +1746,9 @@ impl Api<'_> {
             attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
         }
 
-        if self.props.dnd_enabled {
+        // Disabled nodes are not draggable (`DragStart` rejects them), so do not
+        // announce them as draggable.
+        if self.props.dnd_enabled && !disabled {
             attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), "draggable");
 
             if self.is_dragging(node_id) {
