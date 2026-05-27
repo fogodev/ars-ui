@@ -1671,8 +1671,10 @@ mod tests {
 
     #[test]
     fn keyboard_helper_swaps_horizontal_arrows_for_rtl_locales() {
-        let mut env = Env::default();
-        env.locale = Locale::parse("ar").expect("ar is a valid RTL locale");
+        let env = Env {
+            locale: Locale::parse("ar").expect("ar is a valid RTL locale"),
+            ..Env::default()
+        };
         let service = Service::<Machine>::new(
             Props::new().id("tags").items(items()),
             &env,
