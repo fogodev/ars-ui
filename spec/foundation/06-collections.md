@@ -1987,6 +1987,21 @@ impl<T> TreeCollection<T> {
         }
         (visible, first_focusable, last_focusable)
     }
+
+    /// Iterate **every** node in flat DFS pre-order, including nodes inside
+    /// collapsed subtrees that `Collection::nodes` omits. The right primitive
+    /// for operations that must reach hidden nodes (e.g. "expand all", where
+    /// collapsed parents would otherwise hide their expandable descendants).
+    /// Available without a `T: Clone` bound.
+    pub fn all_nodes(&self) -> impl Iterator<Item = &Node<T>> {
+        self.all_nodes.iter()
+    }
+
+    /// Iterate **every** node key in flat DFS pre-order, including keys inside
+    /// collapsed subtrees. The key-only counterpart of `all_nodes`.
+    pub fn all_keys(&self) -> impl Iterator<Item = &Key> {
+        self.all_nodes.iter().map(|node| &node.key)
+    }
 }
 
 impl<T: Clone> Default for TreeCollection<T> {

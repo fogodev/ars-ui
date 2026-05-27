@@ -1,0 +1,7 @@
+---
+source: crates/ars-components/src/navigation/tree_view/tests.rs
+expression: "snapshot_attrs(&service(props()).connect(&|_|\n{}).branch_indicator_attrs(&key(4)))"
+---
+aria-hidden=true
+data-ars-part=branch-indicator
+data-ars-scope=tree-view

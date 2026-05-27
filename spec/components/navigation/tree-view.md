@@ -27,22 +27,33 @@ Implements the ARIA tree widget pattern with `role="tree"`, `role="treeitem"`, a
 
 ### 1.2 Events
 
-| Event                   | Payload | Description                                                  |
-| ----------------------- | ------- | ------------------------------------------------------------ |
-| `ExpandNode(String)`    | node ID | Expand a branch node.                                        |
-| `CollapseNode(String)`  | node ID | Collapse a branch node.                                      |
-| `ToggleNode(String)`    | node ID | Toggle expand/collapse of a branch.                          |
-| `SelectNode(String)`    | node ID | Add a node to the selection.                                 |
-| `DeselectNode(String)`  | node ID | Remove a node from the selection.                            |
-| `FocusNode(String)`     | node ID | Move focus indicator to a node.                              |
-| `FocusNext`             | —       | Move focus to the next visible node.                         |
-| `FocusPrev`             | —       | Move focus to the previous visible node.                     |
-| `FocusFirst`            | —       | Move focus to the first visible node.                        |
-| `FocusLast`             | —       | Move focus to the last visible node.                         |
-| `FocusParent`           | —       | Move focus to the parent of the focused node.                |
-| `Focus { is_keyboard }` | `bool`  | The tree container received focus.                           |
-| `Blur`                  | —       | The tree container lost focus.                               |
-| `TypeaheadSearch(char)` | `char`  | Jump to the next node whose label starts with the character. |
+Node identity uses the canonical `Key` enum from `ars_collections` (not `String`),
+matching every other component and the `TreeCollection` data model.
+
+| Event                            | Payload         | Description                                                         |
+| -------------------------------- | --------------- | ------------------------------------------------------------------- |
+| `ExpandNode(Key)`                | node key        | Expand a branch node.                                               |
+| `CollapseNode(Key)`              | node key        | Collapse a branch node.                                             |
+| `ToggleNode(Key)`                | node key        | Toggle expand/collapse of a branch.                                 |
+| `SelectNode(Key)`                | node key        | Add a node to the selection.                                        |
+| `DeselectNode(Key)`              | node key        | Remove a node from the selection.                                   |
+| `FocusNode(Key)`                 | node key        | Move focus indicator to a node.                                     |
+| `FocusNext`                      | —               | Move focus to the next visible node.                                |
+| `FocusPrev`                      | —               | Move focus to the previous visible node.                            |
+| `FocusFirst`                     | —               | Move focus to the first visible node.                               |
+| `FocusLast`                      | —               | Move focus to the last visible node.                                |
+| `FocusParent`                    | —               | Move focus to the parent of the focused node.                       |
+| `Focus { is_keyboard }`          | `bool`          | The tree container received focus.                                  |
+| `Blur`                           | —               | The tree container lost focus.                                      |
+| `TypeaheadSearch(char)`          | `char`          | Jump to the next node whose label starts with the character.        |
+| `ExpandAll`                      | —               | Expand every expandable node in the tree.                           |
+| `CollapseAll`                    | —               | Collapse every node in the tree.                                    |
+| `DragStart(Key)`                 | node key        | Begin a drag on a node (drag-and-drop variant, §4).                 |
+| `DragOver(CollectionDropTarget)` | resolved target | Set the drop target (adapter pointer hit-testing).                  |
+| `DragMoveNext` / `DragMovePrev`  | —               | Step the keyboard drop target through valid slots.                  |
+| `Drop`                           | —               | Confirm the drop at the current target (fires `on_reorder`).        |
+| `CancelDrag`                     | —               | Cancel the active drag.                                             |
+| `SyncProps`                      | —               | Re-sync data source + controlled bindings (via `on_props_changed`). |
 
 ### 1.3 Context
 
@@ -55,11 +66,12 @@ use ars_collections::{
 use alloc::collections::BTreeSet;
 
 /// Value type for TreeView collection items.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TreeItem {
     /// Display label for the node (used in typeahead and accessibility).
     pub label: String,
-    /// Whether this node is disabled (not selectable, skipped during navigation).
+    /// Whether this node is disabled. Disabled nodes are not selectable and
+    /// cannot be dragged; they remain focusable so their state is announced.
     pub disabled: bool,
     /// When true, the node renders an expand affordance even if no children are
     /// present in the collection yet. Essential for lazy-loaded trees where the
@@ -100,10 +112,21 @@ pub struct Context {
     pub messages: Messages,
     /// Generated element IDs for all parts.
     pub ids: ComponentIds,
+    /// The node currently being dragged, if any (drag-and-drop variant, §4).
+    pub dragging: Option<Key>,
+    /// The resolved drop target during an active drag, if any.
+    pub drop_target: Option<CollectionDropTarget>,
 }
 
 // NOTE: The local selection::Mode enum has been removed. TreeView now uses the
 // canonical `ars_collections::selection::Mode` (None/Single/Multiple).
+//
+// NOTE: `init` seeds `selection_state.selected_keys` from the resolved initial
+// `selected` binding so the two never diverge on the first select/deselect;
+// seeds the initial `expanded` set from the union of `Props::default_expanded`
+// and the collection's per-node `TreeItemConfig::default_expanded` branches; and
+// seeds `selection_state`'s disabled-key set from the nodes whose `TreeItem`
+// is `disabled` so `SelectNode` rejects them (disabled = not selectable).
 ```
 
 ### 1.4 Props
@@ -131,6 +154,11 @@ pub struct Props {
     pub selection_mode: selection::Mode,
     /// Selection behavior: Toggle (checkbox-like) or Replace (file-explorer-like).
     pub selection_behavior: selection::Behavior,
+    /// Enable the drag-and-drop reorder surface (§4).
+    pub dnd_enabled: bool,
+    /// Called when a drag-and-drop reorder completes (§4). Invoked by the
+    /// adapter on the `Effect::Reorder` named effect.
+    pub on_reorder: Option<Callback<dyn Fn(ReorderEvent) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -145,6 +173,8 @@ impl Default for Props {
             multiple: false,
             selection_mode: selection::Mode::Single,
             selection_behavior: selection::Behavior::Toggle,
+            dnd_enabled: false,
+            on_reorder: None,
         }
     }
 }
@@ -153,32 +183,34 @@ impl Default for Props {
 ### 1.5 Full Machine Implementation
 
 ```rust
-use ars_core::{TransitionPlan, PendingEffect, Bindable, AttrMap};
+use ars_core::{TransitionPlan, PendingEffect, Bindable, AttrMap, no_cleanup};
+use ars_collections::{Collection, Node, dnd::{CollectionDropTarget, DropPosition}};
 
 /// States for the `TreeView` component.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum State {
     /// The tree view is in the idle state.
+    #[default]
     Idle,
     /// The tree view is in the focused state.
     Focused,
 }
 
-/// Events for the `TreeView` component.
+/// Events for the `TreeView` component. Node identity is `Key`, not `String`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// Expand a node.
-    ExpandNode(String),
+    ExpandNode(Key),
     /// Collapse a node.
-    CollapseNode(String),
+    CollapseNode(Key),
     /// Toggle the expand/collapse state of a node.
-    ToggleNode(String),
+    ToggleNode(Key),
     /// Select a node.
-    SelectNode(String),
+    SelectNode(Key),
     /// Deselect a node.
-    DeselectNode(String),
+    DeselectNode(Key),
     /// Focus a node.
-    FocusNode(String),
+    FocusNode(Key),
     /// Move focus to the next node.
     FocusNext,
     /// Move focus to the previous node.
@@ -198,10 +230,40 @@ pub enum Event {
     Blur,
     /// Typeahead search for a node.
     TypeaheadSearch(char),
-    /// Expand all nodes in the tree.
+    /// Expand all expandable nodes in the tree.
     ExpandAll,
     /// Collapse all nodes in the tree.
     CollapseAll,
+    /// Begin a drag on a node (drag-and-drop variant, §4). Ignored unless
+    /// `Props::dnd_enabled`.
+    DragStart(Key),
+    /// Set the resolved drop target (adapter pointer hit-testing). Ignored when
+    /// no drag is active or the target is invalid (self / descendant).
+    DragOver(CollectionDropTarget),
+    /// Step the keyboard drop target to the next valid slot.
+    DragMoveNext,
+    /// Step the keyboard drop target to the previous valid slot.
+    DragMovePrev,
+    /// Confirm the drop at the current drop target (fires `Props::on_reorder`).
+    Drop,
+    /// Cancel the active drag and discard the drop target.
+    CancelDrag,
+    /// Re-sync prop-derived context (data source + controlled bindings) after
+    /// the consumer supplies new props. Emitted by `on_props_changed`.
+    SyncProps,
+}
+
+/// Typed effect intents emitted by the `TreeView` machine. The agnostic core
+/// never touches the DOM; it emits these intents for adapters to resolve.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter scrolls the active-descendant node (`Context::focused_node`)
+    /// into view. The tree uses the active-descendant pattern (root keeps
+    /// `tabindex="0"` + `aria-activedescendant`), so focus movement only
+    /// requires scrolling, not a DOM focus change.
+    ScrollFocusedIntoView,
+    /// Adapter invokes `Props::on_reorder` with the completed `ReorderEvent`.
+    Reorder,
 }
 
 /// Machine for the `TreeView` component.
@@ -214,6 +276,7 @@ impl ars_core::Machine for Machine {
     type Props   = Props;
     type Api<'a> = Api<'a>;
     type Messages = Messages;
+    type Effect = Effect;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let selected = match &props.selected {
@@ -222,12 +285,31 @@ impl ars_core::Machine for Machine {
         };
         let expanded = match &props.expanded {
             Some(v) => Bindable::controlled(v.clone()),
-            None    => Bindable::uncontrolled(props.default_expanded.clone()),
+            None => {
+                // Honor branches the collection marks expanded via
+                // `TreeItemConfig::default_expanded`, unioned with the
+                // component-level `default_expanded` prop (pit of success).
+                let mut initial = props.items.all_nodes()
+                    .filter(|node| node.is_expanded == Some(true))
+                    .map(|node| node.key.clone())
+                    .collect::<BTreeSet<Key>>();
+                initial.extend(props.default_expanded.iter().cloned());
+                Bindable::uncontrolled(initial)
+            }
         };
-        let selection_state = selection::State::new(
+        // Disabled nodes are not selectable: seed the disabled-key set so
+        // `selection::State::select` rejects them.
+        let disabled_keys = props.items.all_nodes()
+            .filter(|n| n.value.as_ref().is_some_and(|v| v.disabled))
+            .map(|n| n.key.clone())
+            .collect::<BTreeSet<Key>>();
+        // Seed the selection state machine from the resolved initial selection
+        // so it stays consistent with the `selected` binding.
+        let mut selection_state = selection::State::new(
             props.selection_mode,
             props.selection_behavior,
-        );
+        ).with_disabled(disabled_keys);
+        selection_state.selected_keys = selected.get().clone();
         let locale = env.locale.clone();
         let messages = messages.clone();
         let ids = ComponentIds::from_id(&props.id);
@@ -244,14 +326,16 @@ impl ars_core::Machine for Machine {
             locale,
             messages,
             ids,
+            dragging: None,
+            drop_target: None,
         })
     }
 
     fn transition(
-        state: &Self::State,
+        _state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
 
@@ -273,23 +357,19 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            Event::ToggleNode(id) => {
-                let is_expanded = ctx.expanded.get().contains(id.as_str());
-                let id = id.clone();
+            Event::ToggleNode(key) => {
+                let is_expanded = ctx.expanded.get().contains(key);
+                let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     let mut exp = ctx.expanded.get().clone();
-                    if is_expanded {
-                        exp.remove(&id);
-                    } else {
-                        exp.insert(id);
-                    }
+                    if is_expanded { exp.remove(&key); } else { exp.insert(key); }
                     ctx.expanded.set(exp);
                 }))
             }
 
-            Event::SelectNode(id) => {
+            Event::SelectNode(key) => {
                 if ctx.selection_mode == selection::Mode::None { return None; }
-                let key = Key::from(id);
+                let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     let new_state = ctx.selection_state.select(key);
                     ctx.selected.set(new_state.selected_keys.clone());
@@ -297,175 +377,132 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            Event::DeselectNode(id) => {
-                let key = Key::from(id);
+            Event::DeselectNode(key) => {
+                let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let new_state = ctx.selection_state.deselect(key);
+                    let new_state = ctx.selection_state.deselect(&key);
                     ctx.selected.set(new_state.selected_keys.clone());
                     ctx.selection_state = new_state;
                 }))
             }
 
-            Event::FocusNode(id) => {
-                let id = id.clone();
-                Some(TransitionPlan::to(State::Focused)
-                    .apply(move |ctx| {
-                        ctx.focused_node = Some(id);
-                    }))
-            }
+            // All focus-moving arms route through `focus_plan`, which sets the
+            // active descendant and emits `Effect::ScrollFocusedIntoView`.
+            Event::FocusNode(key) => Some(focus_plan(key.clone())),
 
             Event::Focus { is_keyboard } => {
                 let is_keyboard = *is_keyboard;
                 Some(TransitionPlan::to(State::Focused)
-                    .apply(move |ctx| {
-                        ctx.focus_visible = is_keyboard;
-                    }))
+                    .apply(move |ctx| ctx.focus_visible = is_keyboard))
             }
 
-            Event::Blur => {
-                Some(TransitionPlan::to(State::Idle)
-                    .apply(|ctx| {
-                        ctx.focus_visible = false;
-                    }))
-            }
+            Event::Blur => Some(TransitionPlan::to(State::Idle)
+                .apply(|ctx| ctx.focus_visible = false)),
 
-            // ── Navigation (via TreeCollection API) ────────────────────────
-            Event::FocusNext => {
-                // Use TreeCollection::key_after() which respects expanded state
-                // and skips structural nodes. Wraps to first node.
-                let expanded = ctx.expanded.get();
-                let visible = ctx.items.visible_keys_with_expanded(expanded);
-                let target = match &ctx.focused_node {
-                    Some(current) => {
-                        let pos = visible.iter().position(|k| k == current);
-                        pos.and_then(|p| visible.get(p + 1).or_else(|| visible.first()))
-                    }
-                    None => visible.first(),
-                };
-                target.map(|key| {
-                    let k = key.clone();
-                    TransitionPlan::to(State::Focused).apply(move |ctx| {
-                        ctx.focused_node = Some(k);
-                        ctx.focus_visible = true;
-                    })
-                })
-            }
+            // ── Navigation (logical semantics; not RTL-swapped, §3.3) ──────
+            Event::FocusNext => focus_relative(ctx, Direction::Next),
+            Event::FocusPrev => focus_relative(ctx, Direction::Prev),
+            Event::FocusFirst => visible_keys(ctx).first().cloned().map(focus_plan),
+            Event::FocusLast => visible_keys(ctx).last().cloned().map(focus_plan),
+            Event::FocusParent => ctx.focused_node.as_ref()
+                .and_then(|focused| ctx.items.get(focused))
+                .and_then(|node| node.parent_key.clone())
+                .map(focus_plan),
 
-            Event::FocusPrev => {
-                let expanded = ctx.expanded.get();
-                let visible = ctx.items.visible_keys_with_expanded(expanded);
-                let target = match &ctx.focused_node {
-                    Some(current) => {
-                        let pos = visible.iter().position(|k| k == current);
-                        pos.and_then(|p| {
-                            if p > 0 { visible.get(p - 1) }
-                            else { visible.last() }
-                        })
-                    }
-                    None => visible.last(),
-                };
-                target.map(|key| {
-                    let k = key.clone();
-                    TransitionPlan::to(State::Focused).apply(move |ctx| {
-                        ctx.focused_node = Some(k);
-                        ctx.focus_visible = true;
-                    })
-                })
-            }
-
-            Event::FocusFirst => {
-                let expanded = ctx.expanded.get();
-                let visible = ctx.items.visible_keys_with_expanded(expanded);
-                visible.first().map(|key| {
-                    let k = key.clone();
-                    TransitionPlan::to(State::Focused).apply(move |ctx| {
-                        ctx.focused_node = Some(k);
-                        ctx.focus_visible = true;
-                    })
-                })
-            }
-
-            Event::FocusLast => {
-                let expanded = ctx.expanded.get();
-                let visible = ctx.items.visible_keys_with_expanded(expanded);
-                visible.last().map(|key| {
-                    let k = key.clone();
-                    TransitionPlan::to(State::Focused).apply(move |ctx| {
-                        ctx.focused_node = Some(k);
-                        ctx.focus_visible = true;
-                    })
-                })
-            }
-
-            Event::FocusParent => {
-                // Use Node::parent_key from the TreeCollection to navigate up
-                let target = ctx.focused_node.as_ref()
-                    .and_then(|focused| ctx.items.get(focused))
-                    .and_then(|node| node.parent_key.clone());
-                target.map(|key| {
-                    TransitionPlan::to(State::Focused).apply(move |ctx| {
-                        ctx.focused_node = Some(key);
-                        ctx.focus_visible = true;
-                    })
-                })
-            }
-
-            Event::TypeaheadSearch(ch) => {
-                // Find the next visible node whose text_value starts with ch
-                // (case-insensitive), starting after the focused node.
-                let ch = ch.to_lowercase().next().unwrap_or(*ch);
-                let expanded = ctx.expanded.get();
-                let visible = ctx.items.visible_keys_with_expanded(expanded);
-                let start_pos = ctx.focused_node.as_ref()
-                    .and_then(|f| visible.iter().position(|k| k == f))
-                    .map(|p| p + 1)
-                    .unwrap_or(0);
-
-                // Search from start_pos, wrapping around
-                let target = visible.iter()
-                    .cycle()
-                    .skip(start_pos)
-                    .take(visible.len())
-                    .find(|key| {
-                        ctx.items.get(key)
-                            .and_then(|node| node.text_value.chars().next())
-                            .map(|first| first.to_lowercase().next().unwrap_or(first) == ch)
-                            .unwrap_or(false)
-                    });
-
-                target.map(|key| {
-                    let k = key.clone();
-                    TransitionPlan::to(State::Focused).apply(move |ctx| {
-                        ctx.focused_node = Some(k);
-                        ctx.focus_visible = true;
-                    })
-                })
-            }
+            Event::TypeaheadSearch(ch) => typeahead_target(ctx, *ch).map(focus_plan),
 
             // ── Expand/Collapse All ────────────────────────────────────
-            // ExpandAll — expand every expandable node
+            // ExpandAll uses `all_nodes()` (not the visible-only `nodes()`) so
+            // expandable branches hidden under collapsed parents are reached.
             Event::ExpandAll => {
-                let expandable = ctx.items.nodes()
+                let expandable = ctx.items.all_nodes()
                     .filter(|n| n.has_children)
-                    .map(|n| n.key.to_string())
+                    .map(|n| n.key.clone())
                     .collect::<Vec<_>>();
                 Some(TransitionPlan::context_only(move |ctx| {
                     let mut exp = ctx.expanded.get().clone();
-                    for key in expandable {
-                        exp.insert(key);
-                    }
+                    exp.extend(expandable);
                     ctx.expanded.set(exp);
                 }))
             }
 
-            // CollapseAll — collapse every node
-            Event::CollapseAll => {
-                Some(TransitionPlan::context_only(|ctx| {
-                    ctx.expanded.set(BTreeSet::new());
+            Event::CollapseAll => Some(TransitionPlan::context_only(|ctx| {
+                ctx.expanded.set(BTreeSet::new());
+            })),
+
+            // ── Drag and drop reorder (§4) ──────────────────────────────
+            Event::DragStart(key) => {
+                // Disabled nodes block all interaction, including drag.
+                let node = ctx.items.get(key);
+                let draggable = node.is_some_and(Node::is_focusable)
+                    && !node.and_then(|n| n.value.as_ref()).is_some_and(|v| v.disabled);
+                if !props.dnd_enabled || !draggable {
+                    return None;
+                }
+                let key = key.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.dragging = Some(key);
+                    ctx.drop_target = None;
                 }))
             }
 
-            _ => None,
+            Event::DragOver(target) => {
+                let dragging = ctx.dragging.as_ref()?;
+                if !props.dnd_enabled || !is_valid_drop(&ctx.items, dragging, target) {
+                    return None;
+                }
+                let target = target.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.drop_target = Some(target);
+                }))
+            }
+
+            Event::DragMoveNext => drag_step(ctx, props, Direction::Next),
+            Event::DragMovePrev => drag_step(ctx, props, Direction::Prev),
+
+            Event::Drop => {
+                if !props.dnd_enabled { return None; }
+                let dragging = ctx.dragging.as_ref()?;
+                let target = ctx.drop_target.as_ref()?;
+                if !is_valid_drop(&ctx.items, dragging, target) { return None; }
+                let reorder = ReorderEvent {
+                    source_path: path_to(&ctx.items, dragging),
+                    target_path: path_to(&ctx.items, &target.key),
+                    position: target.position,
+                };
+                Some(TransitionPlan::context_only(|ctx| {
+                    ctx.dragging = None;
+                    ctx.drop_target = None;
+                })
+                .with_effect(reorder_effect(reorder)))
+            }
+
+            Event::CancelDrag => {
+                if ctx.dragging.is_none() && ctx.drop_target.is_none() { return None; }
+                Some(TransitionPlan::context_only(|ctx| {
+                    ctx.dragging = None;
+                    ctx.drop_target = None;
+                }))
+            }
+
+            Event::SyncProps => {
+                // Re-derive prop-backed context from the new props.
+                let items = props.items.clone();
+                let selected = props.selected.clone();
+                let expanded = props.expanded.clone();
+                let disabled_keys = items.all_nodes()
+                    .filter(|n| n.value.as_ref().is_some_and(|v| v.disabled))
+                    .map(|n| n.key.clone())
+                    .collect::<BTreeSet<Key>>();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.items = items;
+                    ctx.selected.sync_controlled(selected);
+                    ctx.expanded.sync_controlled(expanded);
+                    let mut new_state = ctx.selection_state.clone().with_disabled(disabled_keys);
+                    new_state.selected_keys = ctx.selected.get().clone();
+                    ctx.selection_state = new_state;
+                }))
+            }
         }
     }
 
@@ -477,6 +514,131 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        // Re-sync when the data source or either controlled binding changes —
+        // e.g. after a reorder, where the consumer re-supplies `items`.
+        if old.items != new.items || old.selected != new.selected || old.expanded != new.expanded {
+            vec![Event::SyncProps]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// Direction shared by relative focus and keyboard drop-slot stepping.
+#[derive(Clone, Copy)]
+enum Direction { Next, Prev }
+
+/// Move the focus indicator to `key` and emit the scroll-into-view intent.
+fn focus_plan(key: Key) -> TransitionPlan<Machine> {
+    TransitionPlan::to(State::Focused)
+        .apply(move |ctx| { ctx.focused_node = Some(key); ctx.focus_visible = true; })
+        .with_effect(PendingEffect::named(Effect::ScrollFocusedIntoView))
+}
+
+/// Visible keys (DFS order) under the current expansion set.
+fn visible_keys(ctx: &Context) -> Vec<Key> {
+    ctx.items.visible_keys_with_expanded(ctx.expanded.get())
+}
+
+/// Relative focus target, wrapping at the ends.
+fn focus_relative(ctx: &Context, direction: Direction) -> Option<TransitionPlan<Machine>> {
+    let visible = visible_keys(ctx);
+    if visible.is_empty() { return None; }
+    let target = match ctx.focused_node.as_ref()
+        .and_then(|current| visible.iter().position(|k| k == current))
+    {
+        Some(pos) => match direction {
+            Direction::Next => visible.get(pos + 1).or_else(|| visible.first()),
+            Direction::Prev => if pos > 0 { visible.get(pos - 1) } else { visible.last() },
+        },
+        None => match direction { Direction::Next => visible.first(), Direction::Prev => visible.last() },
+    };
+    target.cloned().map(focus_plan)
+}
+
+/// Next visible node whose label starts with `ch` (case-insensitive), after the
+/// focused node, wrapping around.
+fn typeahead_target(ctx: &Context, ch: char) -> Option<Key> {
+    let needle = ch.to_lowercase().next().unwrap_or(ch);
+    let visible = visible_keys(ctx);
+    if visible.is_empty() { return None; }
+    let start = ctx.focused_node.as_ref()
+        .and_then(|f| visible.iter().position(|k| k == f))
+        .map_or(0, |p| p + 1);
+    visible.iter().cycle().skip(start).take(visible.len())
+        .find(|key| ctx.items.get(key)
+            .and_then(|n| n.text_value.chars().next())
+            .map(|c| c.to_lowercase().next().unwrap_or(c)) == Some(needle))
+        .cloned()
+}
+
+/// Ordered valid keyboard drop slots for the dragged node: for every visible
+/// node that is neither the dragged node nor a descendant of it, three slots
+/// `Before`, `On`, `After`.
+fn valid_drop_slots(ctx: &Context, dragging: &Key) -> Vec<CollectionDropTarget> {
+    let mut slots = Vec::new();
+    for key in visible_keys(ctx) {
+        if &key == dragging || is_descendant(&ctx.items, dragging, &key) { continue; }
+        for position in [DropPosition::Before, DropPosition::On, DropPosition::After] {
+            slots.push(CollectionDropTarget { key: key.clone(), position });
+        }
+    }
+    slots
+}
+
+/// Step the keyboard drop target to the next/previous valid slot.
+fn drag_step(ctx: &Context, props: &Props, direction: Direction) -> Option<TransitionPlan<Machine>> {
+    if !props.dnd_enabled { return None; }
+    let dragging = ctx.dragging.as_ref()?;
+    let slots = valid_drop_slots(ctx, dragging);
+    if slots.is_empty() { return None; }
+    let next = match ctx.drop_target.as_ref().and_then(|c| slots.iter().position(|s| s == c)) {
+        Some(pos) => match direction {
+            Direction::Next => (pos + 1) % slots.len(),
+            Direction::Prev => (pos + slots.len() - 1) % slots.len(),
+        },
+        None => match direction { Direction::Next => 0, Direction::Prev => slots.len() - 1 },
+    };
+    let target = slots[next].clone();
+    Some(TransitionPlan::context_only(move |ctx| ctx.drop_target = Some(target)))
+}
+
+/// Whether `candidate` sits below `ancestor` in the tree.
+fn is_descendant(items: &TreeCollection<TreeItem>, ancestor: &Key, candidate: &Key) -> bool {
+    let mut current = items.get(candidate).and_then(|n| n.parent_key.clone());
+    while let Some(parent) = current {
+        if &parent == ancestor { return true; }
+        current = items.get(&parent).and_then(|n| n.parent_key.clone());
+    }
+    false
+}
+
+/// A drop is valid when it is not onto the dragged node or one of its
+/// descendants (which would create a cycle).
+fn is_valid_drop(items: &TreeCollection<TreeItem>, dragging: &Key, target: &CollectionDropTarget) -> bool {
+    &target.key != dragging && !is_descendant(items, dragging, &target.key)
+}
+
+/// Path of keys from the root down to `key` (inclusive).
+fn path_to(items: &TreeCollection<TreeItem>, key: &Key) -> Vec<Key> {
+    let mut path = Vec::new();
+    let mut current = Some(key.clone());
+    while let Some(node_key) = current {
+        current = items.get(&node_key).and_then(|n| n.parent_key.clone());
+        path.push(node_key);
+    }
+    path.reverse();
+    path
+}
+
+/// Named reorder effect that invokes `Props::on_reorder`.
+fn reorder_effect(event: ReorderEvent) -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::Reorder, move |_ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_reorder { callback(event.clone()); }
+        no_cleanup()
+    })
 }
 ```
 
@@ -487,269 +649,325 @@ impl ars_core::Machine for Machine {
 #[scope = "tree-view"]
 pub enum Part {
     Root,
-    Branch { node_id: String },
-    BranchControl { node_id: String },
-    BranchIndicator { node_id: String },
+    Branch { node_id: Key },
+    BranchControl { node_id: Key },
+    BranchIndicator { node_id: Key },
     BranchText,
-    BranchContent { node_id: String },
-    Leaf { node_id: String },
+    BranchContent { node_id: Key },
+    Leaf { node_id: Key },
     LeafText,
+    /// Optional drag handle affordance for a draggable node (§4).
+    DragHandle { node_id: Key },
+    /// Visual indicator showing where a dragged node will be dropped (§4).
+    DropIndicator,
 }
 
-/// API for the `TreeView` component.
+/// API for the `TreeView` component. Node identity is `Key`. Branch/leaf
+/// elements carry a stable `id` (via [`node_dom_id`]) so the root's
+/// `aria-activedescendant` can reference the focused node.
 pub struct Api<'a> {
-    /// Current machine state.
     state: &'a State,
-    /// Current context.
     ctx:   &'a Context,
-    /// Current props.
     props: &'a Props,
-    /// Event dispatcher.
     send:  &'a dyn Fn(Event),
 }
 
-impl<'a> Api<'a> {
-    /// Check if a node is selected.
-    pub fn is_node_selected(&self, id: &str) -> bool {
-        self.ctx.selected.get().contains(&Key::from(id))
+impl Api<'_> {
+    /// Whether a node is selected.
+    pub fn is_node_selected(&self, node_id: &Key) -> bool {
+        self.ctx.selected.get().contains(node_id)
     }
 
-    /// Check if a node is expanded.
-    pub fn is_node_expanded(&self, id: &str) -> bool {
-        self.ctx.expanded.get().contains(id)
+    /// Whether a node is expanded.
+    pub fn is_node_expanded(&self, node_id: &Key) -> bool {
+        self.ctx.expanded.get().contains(node_id)
     }
 
-    /// Check if a node is focused.
-    pub fn is_node_focused(&self, id: &str) -> bool {
-        self.ctx.focused_node.as_ref().map(|k| k.as_ref()) == Some(id)
+    /// Whether a node holds the focus indicator.
+    pub fn is_node_focused(&self, node_id: &Key) -> bool {
+        self.ctx.focused_node.as_ref() == Some(node_id)
+    }
+
+    /// Whether a node is currently being dragged.
+    pub fn is_dragging(&self, node_id: &Key) -> bool {
+        self.ctx.dragging.as_ref() == Some(node_id)
+    }
+
+    /// The current resolved drop target during an active drag, if any.
+    pub const fn drop_target(&self) -> Option<&CollectionDropTarget> {
+        self.ctx.drop_target.as_ref()
     }
 
     /// Look up a node from the collection by key.
-    pub fn get_node(&self, id: &str) -> Option<&ars_collections::Node<TreeItem>> {
-        self.ctx.items.get(&Key::from(id))
+    pub fn get_node(&self, node_id: &Key) -> Option<&Node<TreeItem>> {
+        self.ctx.items.get(node_id)
     }
 
-    /// Compute (setsize, posinset) for a node from the collection.
-    /// Returns (sibling count at this level, 1-based position among siblings).
-    pub fn sibling_info(&self, id: &str) -> (u32, u32) {
-        let key = Key::from(id);
-        let node = match self.ctx.items.get(&key) { Some(n) => n, None => return (1, 1) };
-        let siblings: Vec<_> = match &node.parent_key {
-            Some(parent) => self.ctx.items.children_of(parent).collect(),
-            None => {
-                // Root-level nodes: collect all level-0 nodes
-                self.ctx.items.nodes()
-                    .filter(|n| n.parent_key.is_none())
-                    .collect()
-            }
+    /// Compute `(setsize, posinset)` — sibling count at this level and 1-based
+    /// position among siblings.
+    pub fn sibling_info(&self, node_id: &Key) -> (u32, u32) {
+        let Some(node) = self.ctx.items.get(node_id) else { return (1, 1); };
+        let siblings = match &node.parent_key {
+            Some(parent) => self.ctx.items.children_of(parent).collect::<Vec<_>>(),
+            None => self.ctx.items.all_nodes().filter(|n| n.parent_key.is_none()).collect::<Vec<_>>(),
         };
         let setsize = siblings.len() as u32;
-        let posinset = siblings.iter()
-            .position(|n| n.key == key)
-            .map(|p| p as u32 + 1)
-            .unwrap_or(1);
+        let posinset = siblings.iter().position(|n| n.key == *node_id).map_or(1, |p| p as u32 + 1);
         (setsize, posinset)
     }
 
-    /// Attrs for the tree root container (`role="tree"`).
+    /// Loading indicator text for a branch whose children are being fetched.
+    pub fn loading_label(&self) -> String {
+        (self.ctx.messages.loading_label)(&self.ctx.locale)
+    }
+
+    /// Attrs for the tree root container (`role="tree"`). Uses the
+    /// active-descendant pattern: `tabindex="0"` plus `aria-activedescendant`
+    /// pointing at the focused node's stable id.
     pub fn root_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
+        let mut attrs = part_only_attrs(&Part::Root);
         attrs.set(HtmlAttr::Role, "tree");
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
         if self.ctx.multiple {
             attrs.set(HtmlAttr::Aria(AriaAttr::MultiSelectable), "true");
         }
         if let Some(focused) = &self.ctx.focused_node {
-            attrs.set(HtmlAttr::Aria(AriaAttr::ActiveDescendant), focused);
+            attrs.set(HtmlAttr::Aria(AriaAttr::ActiveDescendant), node_dom_id(&self.ctx.ids, focused));
         }
         attrs.set(HtmlAttr::TabIndex, "0");
         attrs
     }
 
-    /// Handle focus event for the tree view root.
-    pub fn on_root_focus(&self) {
-        (self.send)(Event::Focus { is_keyboard: false });
-    }
+    /// Handle focus on the tree root.
+    pub fn on_root_focus(&self) { (self.send)(Event::Focus { is_keyboard: false }); }
 
-    /// Handle blur event for the tree view root.
-    pub fn on_root_blur(&self) {
-        (self.send)(Event::Blur);
-    }
+    /// Handle blur on the tree root.
+    pub fn on_root_blur(&self) { (self.send)(Event::Blur); }
 
-    /// Attrs for a branch node (expandable, has children).
-    ///
-    /// `node_id` — unique ID. Level, setsize, posinset, and disabled state
-    /// are derived from the `TreeCollection`.
-    ///
-    /// When the node's `has_children` flag is true, `aria-expanded` is always
-    /// emitted even if the collection currently contains no children for this
-    /// node. This is essential for lazy-loaded trees where the expand affordance
-    /// must be present before children are fetched.
-    pub fn branch_attrs(&self, node_id: &str) -> AttrMap {
-        let mut attrs = AttrMap::new();
+    /// Attrs for a branch node. `aria-expanded` is emitted when the node has
+    /// real children OR its `has_children` flag is set (lazy branches).
+    pub fn branch_attrs(&self, node_id: &Key) -> AttrMap {
+        let mut attrs = part_only_attrs(&Part::Branch { node_id: Key::default() });
+        let node = self.ctx.items.get(node_id);
         let is_expanded = self.is_node_expanded(node_id);
         let is_selected = self.is_node_selected(node_id);
         let is_focused  = self.is_node_focused(node_id);
-        let node = self.get_node(node_id);
-        let level = node.map(|n| n.level as u32 + 1).unwrap_or(1); // 1-based
+        let level = node.map_or(1, |n| n.level as u32 + 1);
         let (setsize, posinset) = self.sibling_info(node_id);
-        let disabled = node.and_then(|n| n.value.as_ref()).map(|v| v.disabled).unwrap_or(false);
-        let has_children_flag = node.and_then(|n| n.value.as_ref()).map(|v| v.has_children).unwrap_or(false);
-        let has_actual_children = node.map(|n| n.has_children).unwrap_or(false);
+        let item = node.and_then(|n| n.value.as_ref());
+        let disabled = item.is_some_and(|v| v.disabled);
+        let has_children_flag = item.is_some_and(|v| v.has_children);
+        let has_actual_children = node.is_some_and(|n| n.has_children);
+        attrs.set(HtmlAttr::Id, node_dom_id(&self.ctx.ids, node_id));
         attrs.set(HtmlAttr::Role, "treeitem");
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Branch { node_id: Default::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        // Emit aria-expanded when the node has real children OR has_children flag is set
         if has_actual_children || has_children_flag {
-            attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if is_expanded { "true" } else { "false" });
+            attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), bool_token(is_expanded));
         }
-        attrs.set(HtmlAttr::Aria(AriaAttr::Selected), if is_selected { "true" } else { "false" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::Level),   level.to_string());
+        attrs.set(HtmlAttr::Aria(AriaAttr::Selected), bool_token(is_selected));
+        attrs.set(HtmlAttr::Aria(AriaAttr::Level), level.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::SetSize), setsize.to_string());
-        attrs.set(HtmlAttr::Aria(AriaAttr::PosInSet),posinset.to_string());
-        if disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
-        if is_selected { attrs.set_bool(HtmlAttr::Data("ars-selected"), true); }
-        if is_expanded { attrs.set_bool(HtmlAttr::Data("ars-expanded"), true); }
-        if is_focused && self.ctx.focus_visible { attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true); }
+        attrs.set(HtmlAttr::Aria(AriaAttr::PosInSet), posinset.to_string());
+        self.apply_node_state(&mut attrs, disabled, is_selected, is_expanded, is_focused, node_id);
         attrs
     }
 
-    /// Attrs for the clickable control area inside a branch (the row the user activates).
-    /// When the node has an `href`, sets `HtmlAttr::Href` so the adapter renders an `<a>`
-    /// element instead of a `<div>`. The `role="treeitem"` on the parent `Branch` is preserved.
-    pub fn branch_control_attrs(&self, node_id: &str) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::BranchControl { node_id: String::new() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        if let Some(href) = self.get_node(node_id)
-            .and_then(|n| n.value.as_ref())
-            .and_then(|v| v.href.as_deref())
-        {
-            attrs.set(HtmlAttr::Href, href);
-        }
+    /// Attrs for the clickable control row inside a branch (`<a>` when href).
+    pub fn branch_control_attrs(&self, node_id: &Key) -> AttrMap {
+        let mut attrs = part_only_attrs(&Part::BranchControl { node_id: Key::default() });
+        if let Some(href) = self.node_href(node_id) { attrs.set(HtmlAttr::Href, href); }
         attrs
     }
 
-    /// Handle click event for the branch control.
-    pub fn on_branch_control_click(&self, node_id: &str) {
-        (self.send)(Event::ToggleNode(node_id.to_string()));
-        (self.send)(Event::FocusNode(node_id.to_string()));
+    /// Handle activation of a branch control: toggle expansion and focus.
+    pub fn on_branch_control_click(&self, node_id: &Key) {
+        (self.send)(Event::ToggleNode(node_id.clone()));
+        (self.send)(Event::FocusNode(node_id.clone()));
     }
 
     /// Attrs for the expand/collapse chevron indicator inside a branch.
-    pub fn branch_indicator_attrs(&self, node_id: &str) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let is_expanded = self.is_node_expanded(node_id);
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::BranchIndicator { node_id: Default::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        if is_expanded { attrs.set_bool(HtmlAttr::Data("ars-expanded"), true); }
+    pub fn branch_indicator_attrs(&self, node_id: &Key) -> AttrMap {
+        let mut attrs = part_only_attrs(&Part::BranchIndicator { node_id: Key::default() });
+        if self.is_node_expanded(node_id) { attrs.set_bool(HtmlAttr::Data("ars-expanded"), true); }
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs
     }
 
     /// Attrs for the text label inside a branch.
-    pub fn branch_text_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::BranchText.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs
-    }
-
-    /// Returns the loading indicator text for a branch node whose children are being fetched.
-    /// Used as visually hidden text inside the branch when `load_state` is `Loading`.
-    pub fn loading_label(&self) -> String {
-        (self.ctx.messages.loading_label)(&self.ctx.locale)
-    }
+    pub fn branch_text_attrs(&self) -> AttrMap { part_only_attrs(&Part::BranchText) }
 
     /// Attrs for the children container inside an expanded branch (`role="group"`).
-    pub fn branch_content_attrs(&self, node_id: &str) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let is_expanded = self.is_node_expanded(node_id);
+    pub fn branch_content_attrs(&self, node_id: &Key) -> AttrMap {
+        let mut attrs = part_only_attrs(&Part::BranchContent { node_id: Key::default() });
         attrs.set(HtmlAttr::Role, "group");
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::BranchContent { node_id: Default::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        if !is_expanded {
-            attrs.set_bool(HtmlAttr::Hidden, true);
-        }
+        if !self.is_node_expanded(node_id) { attrs.set_bool(HtmlAttr::Hidden, true); }
         attrs
     }
 
-    /// Attrs for a leaf node (no children, no expand/collapse).
-    /// Level, setsize, posinset, and disabled state are derived from the `TreeCollection`.
-    ///
-    /// When the node's `has_children` flag is true (but no actual children are
-    /// loaded), the leaf is treated as an expandable node: `aria-expanded="false"`
-    /// is set so screen readers announce the expand affordance. Once children
-    /// are loaded, the node transitions from `Leaf` to `Branch` in the adapter.
-    ///
-    /// When the node has an `href`, sets `HtmlAttr::Href` so the adapter renders
-    /// an `<a>` element instead of the default element. `role="treeitem"` is preserved.
-    pub fn leaf_attrs(&self, node_id: &str) -> AttrMap {
-        let mut attrs = AttrMap::new();
+    /// Attrs for a leaf node. When `has_children` is set, `aria-expanded` is
+    /// emitted so screen readers announce the affordance; `href` renders `<a>`.
+    pub fn leaf_attrs(&self, node_id: &Key) -> AttrMap {
+        let mut attrs = part_only_attrs(&Part::Leaf { node_id: Key::default() });
+        let node = self.ctx.items.get(node_id);
         let is_selected = self.is_node_selected(node_id);
         let is_focused  = self.is_node_focused(node_id);
-        let node = self.get_node(node_id);
-        let level = node.map(|n| n.level as u32 + 1).unwrap_or(1);
+        let is_expanded = self.is_node_expanded(node_id);
+        let level = node.map_or(1, |n| n.level as u32 + 1);
         let (setsize, posinset) = self.sibling_info(node_id);
-        let disabled = node.and_then(|n| n.value.as_ref()).map(|v| v.disabled).unwrap_or(false);
-        let has_children_flag = node.and_then(|n| n.value.as_ref()).map(|v| v.has_children).unwrap_or(false);
+        let item = node.and_then(|n| n.value.as_ref());
+        let disabled = item.is_some_and(|v| v.disabled);
+        let has_children_flag = item.is_some_and(|v| v.has_children);
+        attrs.set(HtmlAttr::Id, node_dom_id(&self.ctx.ids, node_id));
         attrs.set(HtmlAttr::Role, "treeitem");
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Leaf { node_id: Default::default() }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        // When has_children is true but no children are loaded yet, show expand affordance
         if has_children_flag {
-            let is_expanded = self.is_node_expanded(node_id);
-            attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if is_expanded { "true" } else { "false" });
+            attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), bool_token(is_expanded));
         }
-        attrs.set(HtmlAttr::Aria(AriaAttr::Selected), if is_selected { "true" } else { "false" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::Level),    level.to_string());
-        attrs.set(HtmlAttr::Aria(AriaAttr::SetSize),  setsize.to_string());
+        attrs.set(HtmlAttr::Aria(AriaAttr::Selected), bool_token(is_selected));
+        attrs.set(HtmlAttr::Aria(AriaAttr::Level), level.to_string());
+        attrs.set(HtmlAttr::Aria(AriaAttr::SetSize), setsize.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::PosInSet), posinset.to_string());
-        if disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
-        if is_selected { attrs.set_bool(HtmlAttr::Data("ars-selected"), true); }
-        if is_focused && self.ctx.focus_visible { attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true); }
-        // When href is present, the adapter renders this as an <a> element
-        if let Some(href) = node
-            .and_then(|n| n.value.as_ref())
-            .and_then(|v| v.href.as_deref())
-        {
-            attrs.set(HtmlAttr::Href, href);
-        }
+        self.apply_node_state(&mut attrs, disabled, is_selected, is_expanded, is_focused, node_id);
+        if let Some(href) = self.node_href(node_id) { attrs.set(HtmlAttr::Href, href); }
         attrs
     }
 
-    /// Handle click event for the leaf node.
-    pub fn on_leaf_click(&self, node_id: &str) {
-        (self.send)(Event::SelectNode(node_id.to_string()));
-        (self.send)(Event::FocusNode(node_id.to_string()));
+    /// Handle activation of a leaf node: select and focus.
+    pub fn on_leaf_click(&self, node_id: &Key) {
+        (self.send)(Event::SelectNode(node_id.clone()));
+        (self.send)(Event::FocusNode(node_id.clone()));
     }
 
     /// Attrs for the text label inside a leaf node.
-    pub fn leaf_text_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::LeafText.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
+    pub fn leaf_text_attrs(&self) -> AttrMap { part_only_attrs(&Part::LeafText) }
+
+    /// Attrs for a node's drag handle (`role="button"`, localized `aria-label`).
+    pub fn drag_handle_attrs(&self, node_id: &Key) -> AttrMap {
+        let mut attrs = part_only_attrs(&Part::DragHandle { node_id: Key::default() });
+        attrs.set(HtmlAttr::Role, "button");
+        let label = self.ctx.items.get(node_id).and_then(|n| n.value.as_ref())
+            .map_or("", |v| v.label.as_str());
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.drag_handle_label)(label, &self.ctx.locale));
+        if self.is_dragging(node_id) { attrs.set(HtmlAttr::Aria(AriaAttr::Grabbed), "true"); }
         attrs
     }
 
-    /// Expand all expandable nodes in the tree.
-    pub fn expand_all(&self) {
-        (self.send)(Event::ExpandAll);
+    /// Attrs for the drop indicator at the current drop target.
+    pub fn drop_indicator_attrs(&self, target: &CollectionDropTarget) -> AttrMap {
+        let mut attrs = part_only_attrs(&Part::DropIndicator);
+        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+        attrs.set(HtmlAttr::Data("ars-drop-position"), target.position.to_string());
+        attrs.set(HtmlAttr::Data("ars-drop-target"), node_dom_id(&self.ctx.ids, &target.key));
+        attrs
     }
 
-    /// Collapse all nodes in the tree.
-    pub fn collapse_all(&self) {
-        (self.send)(Event::CollapseAll);
+    /// Map a keydown on the tree root (active descendant `node_id`) to events
+    /// per the WAI-ARIA tree pattern (§3.2). Logical, not RTL-swapped (§3.3).
+    pub fn on_node_keydown(&self, node_id: &Key, data: &KeyboardEventData) {
+        match data.key {
+            KeyboardKey::ArrowDown => (self.send)(Event::FocusNext),
+            KeyboardKey::ArrowUp => (self.send)(Event::FocusPrev),
+            KeyboardKey::Home => (self.send)(Event::FocusFirst),
+            KeyboardKey::End => (self.send)(Event::FocusLast),
+            KeyboardKey::ArrowRight => {
+                if self.is_branch(node_id) && !self.is_node_expanded(node_id) {
+                    (self.send)(Event::ExpandNode(node_id.clone()));
+                } else {
+                    (self.send)(Event::FocusNext);
+                }
+            }
+            KeyboardKey::ArrowLeft => {
+                if self.is_branch(node_id) && self.is_node_expanded(node_id) {
+                    (self.send)(Event::CollapseNode(node_id.clone()));
+                } else {
+                    (self.send)(Event::FocusParent);
+                }
+            }
+            KeyboardKey::Enter | KeyboardKey::Space => (self.send)(Event::SelectNode(node_id.clone())),
+            _ => if let Some(ch) = data.character {
+                if ch == '*' { self.expand_siblings(node_id); }
+                else if !ch.is_control() { (self.send)(Event::TypeaheadSearch(ch)); }
+            },
+        }
     }
+
+    /// Keyboard drag-and-drop protocol on a drag handle: Enter/Space pickup or
+    /// confirm, Arrow Up/Down step the target, Escape cancels.
+    pub fn on_drag_handle_keydown(&self, node_id: &Key, data: &KeyboardEventData) {
+        if !self.props.dnd_enabled { return; }
+        match data.key {
+            KeyboardKey::Enter | KeyboardKey::Space => {
+                if self.is_dragging(node_id) { (self.send)(Event::Drop); }
+                else { (self.send)(Event::DragStart(node_id.clone())); }
+            }
+            KeyboardKey::ArrowDown if self.is_dragging(node_id) => (self.send)(Event::DragMoveNext),
+            KeyboardKey::ArrowUp if self.is_dragging(node_id) => (self.send)(Event::DragMovePrev),
+            KeyboardKey::Escape if self.is_dragging(node_id) => (self.send)(Event::CancelDrag),
+            _ => {}
+        }
+    }
+
+    /// Move the focus indicator to a node.
+    pub fn focus_node(&self, node_id: &Key) { (self.send)(Event::FocusNode(node_id.clone())); }
+
+    /// Expand all expandable nodes.
+    pub fn expand_all(&self) { (self.send)(Event::ExpandAll); }
+
+    /// Collapse all nodes.
+    pub fn collapse_all(&self) { (self.send)(Event::CollapseAll); }
+
+    /// Whether the node renders as an expandable branch (real or lazy children).
+    fn is_branch(&self, node_id: &Key) -> bool {
+        self.ctx.items.get(node_id)
+            .is_some_and(|n| n.has_children || n.value.as_ref().is_some_and(|v| v.has_children))
+    }
+
+    /// Expand every expandable sibling of `node_id` (the `*` shortcut).
+    fn expand_siblings(&self, node_id: &Key) {
+        let parent = self.ctx.items.get(node_id).and_then(|n| n.parent_key.clone());
+        let siblings = match &parent {
+            Some(parent) => self.ctx.items.children_of(parent).collect::<Vec<_>>(),
+            None => self.ctx.items.all_nodes().filter(|n| n.parent_key.is_none()).collect::<Vec<_>>(),
+        };
+        for sibling in siblings {
+            if sibling.has_children { (self.send)(Event::ExpandNode(sibling.key.clone())); }
+        }
+    }
+
+    /// The node's navigation href, if any.
+    fn node_href(&self, node_id: &Key) -> Option<&str> {
+        self.ctx.items.get(node_id).and_then(|n| n.value.as_ref()).and_then(|v| v.href.as_deref())
+    }
+
+    /// Apply the shared `data-ars-*` / dnd state markers for branch and leaf.
+    fn apply_node_state(&self, attrs: &mut AttrMap, disabled: bool, is_selected: bool,
+        is_expanded: bool, is_focused: bool, node_id: &Key) {
+        if disabled {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
+        }
+        if is_selected { attrs.set_bool(HtmlAttr::Data("ars-selected"), true); }
+        if is_expanded { attrs.set_bool(HtmlAttr::Data("ars-expanded"), true); }
+        if is_focused && self.ctx.focus_visible { attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true); }
+        if self.props.dnd_enabled {
+            attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), "draggable");
+            if self.is_dragging(node_id) { attrs.set_bool(HtmlAttr::Data("ars-dragging"), true); }
+        }
+    }
+}
+
+/// `"true"`/`"false"` ARIA boolean token.
+const fn bool_token(value: bool) -> &'static str { if value { "true" } else { "false" } }
+
+/// An `AttrMap` carrying only a part's scope/part data attributes.
+fn part_only_attrs(part: &Part) -> AttrMap {
+    let mut attrs = AttrMap::new();
+    let [(scope_attr, scope_val), (part_attr, part_val)] = part.data_attrs();
+    attrs.set(scope_attr, scope_val).set(part_attr, part_val);
+    attrs
+}
+
+/// The stable DOM id for a tree node, used for `aria-activedescendant` and the
+/// node element's `id`.
+fn node_dom_id(ids: &ComponentIds, key: &Key) -> String {
+    ids.item("node", &dom_safe_key_token(key))
 }
 
 impl ConnectApi for Api<'_> {
@@ -765,6 +983,9 @@ impl ConnectApi for Api<'_> {
             Part::BranchContent { ref node_id } => self.branch_content_attrs(node_id),
             Part::Leaf { ref node_id } => self.leaf_attrs(node_id),
             Part::LeafText => self.leaf_text_attrs(),
+            Part::DragHandle { ref node_id } => self.drag_handle_attrs(node_id),
+            Part::DropIndicator => self.ctx.drop_target.as_ref()
+                .map_or_else(|| part_only_attrs(&Part::DropIndicator), |t| self.drop_indicator_attrs(t)),
         }
     }
 }
@@ -774,27 +995,36 @@ impl ConnectApi for Api<'_> {
 
 ```text
 TreeView
-└── Root                           role="tree"
-    ├── Branch                     role="treeitem" aria-expanded
+└── Root                           role="tree" tabindex="0" aria-activedescendant
+    ├── Branch                     role="treeitem" id aria-expanded
+    │   ├── DragHandle           role="button" (drag-and-drop variant, §4)
     │   ├── BranchControl        (clickable row; <a> when href present)
     │   │   ├── BranchIndicator  aria-hidden="true"
     │   │   └── BranchText
     │   └── BranchContent        role="group"
     │       └── (nested Branch or Leaf nodes)
-    └── Leaf                       role="treeitem" (aria-expanded when has_children)
-        └── LeafText             (<a> when href present)
+    ├── Leaf                       role="treeitem" id (aria-expanded when has_children)
+    │   └── LeafText             (<a> when href present)
+    └── DropIndicator            aria-hidden="true" (drag-and-drop variant, §4)
 ```
 
-| Part              | Element                               | Key Attributes                                                                                                                                                                                              |
-| ----------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Root`            | `<ul>` or `<div>`                     | `data-ars-scope="tree-view"`, `data-ars-part="root"`, `role="tree"`, `aria-multiselectable`                                                                                                                 |
-| `Branch`          | `<li>` or `<div>`                     | `role="treeitem"`, `aria-expanded` (also set when `has_children` is true with no loaded children), `aria-selected`, `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-expanded`, `data-ars-selected` |
-| `BranchControl`   | `<div>` or `<a>` (when href)          | `data-ars-scope="tree-view"`, `data-ars-part="branch-control"`, `href` (when present)                                                                                                                       |
-| `BranchIndicator` | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="branch-indicator"`, `aria-hidden="true"`, `data-ars-expanded`                                                                                                 |
-| `BranchText`      | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="branch-text"`                                                                                                                                                 |
-| `BranchContent`   | `<ul>` or `<div>`                     | `role="group"`, `data-ars-scope="tree-view"`, `data-ars-part="branch-content"`                                                                                                                              |
-| `Leaf`            | `<li>`, `<div>`, or `<a>` (when href) | `role="treeitem"`, `aria-expanded="false"` (when `has_children` is true), `aria-selected`, `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-selected`, `href` (when present)                        |
-| `LeafText`        | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="leaf-text"`                                                                                                                                                   |
+Branch and Leaf carry a stable `id` (so the root's `aria-activedescendant` can
+reference the focused node — the tree uses the active-descendant pattern). The
+`DragHandle` and `DropIndicator` parts are present only in the drag-and-drop
+reorder variant (§4).
+
+| Part              | Element                               | Key Attributes                                                                                                                                                                                                                                                                                       |
+| ----------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Root`            | `<ul>` or `<div>`                     | `data-ars-scope="tree-view"`, `data-ars-part="root"`, `role="tree"`, `tabindex="0"`, `aria-multiselectable` (when `multiple`), `aria-activedescendant` (when focused)                                                                                                                                |
+| `Branch`          | `<li>` or `<div>`                     | `id`, `role="treeitem"`, `aria-expanded` (also set when `has_children` is true with no loaded children), `aria-selected`, `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-expanded`, `data-ars-selected`, `data-ars-focus-visible`, `aria-roledescription="draggable"` (when `dnd_enabled`) |
+| `BranchControl`   | `<div>` or `<a>` (when href)          | `data-ars-scope="tree-view"`, `data-ars-part="branch-control"`, `href` (when present)                                                                                                                                                                                                                |
+| `BranchIndicator` | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="branch-indicator"`, `aria-hidden="true"`, `data-ars-expanded`                                                                                                                                                                                          |
+| `BranchText`      | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="branch-text"`                                                                                                                                                                                                                                          |
+| `BranchContent`   | `<ul>` or `<div>`                     | `role="group"`, `data-ars-scope="tree-view"`, `data-ars-part="branch-content"`, `hidden` (when collapsed)                                                                                                                                                                                            |
+| `Leaf`            | `<li>`, `<div>`, or `<a>` (when href) | `id`, `role="treeitem"`, `aria-expanded="false"` (when `has_children` is true), `aria-selected`, `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-selected`, `href` (when present)                                                                                                           |
+| `LeafText`        | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="leaf-text"`                                                                                                                                                                                                                                            |
+| `DragHandle`      | `<button>`                            | `data-ars-part="drag-handle"`, `role="button"`, `aria-label` (from `Messages::drag_handle_label`), `aria-grabbed` (while dragging). Drag-and-drop variant (§4).                                                                                                                                      |
+| `DropIndicator`   | `<div>`                               | `data-ars-part="drop-indicator"`, `aria-hidden="true"`, `data-ars-drop-position`, `data-ars-drop-target`. Drag-and-drop variant (§4).                                                                                                                                                                |
 
 ## 3. Accessibility
 
@@ -863,7 +1093,14 @@ This matches the WAI-ARIA `TreeView` pattern, where ArrowRight/ArrowLeft map to 
 
 ### 3.5 Scroll Into View
 
-When focus moves to an off-screen tree item, the adapter scrolls it into view using `element.scrollIntoView({ block: 'nearest', inline: 'nearest' })`. For nested scrollable containers, the adapter must walk up the DOM and call `scrollIntoView` on the closest scrollable ancestor only. On iOS Safari, where programmatic focus doesn't trigger scroll, the adapter must explicitly call `scrollIntoView` after `element.focus()`. Smooth scrolling is avoided for keyboard navigation to prevent timing conflicts.
+The tree uses the active-descendant pattern: DOM focus stays on the `Root`
+(`tabindex="0"`), and `aria-activedescendant` points at the focused node's id.
+When focus moves, the agnostic core emits the `Effect::ScrollFocusedIntoView`
+intent (on every focus-moving transition — `FocusNode`, `FocusNext`/`Prev`/
+`First`/`Last`/`Parent`, and `TypeaheadSearch`); it never moves DOM focus or
+scrolls itself.
+
+The adapter resolves that intent: it scrolls the active-descendant element into view using `element.scrollIntoView({ block: 'nearest', inline: 'nearest' })`. For nested scrollable containers, the adapter must walk up the DOM and call `scrollIntoView` on the closest scrollable ancestor only. On iOS Safari, where programmatic focus doesn't trigger scroll, the adapter must explicitly call `scrollIntoView`. Smooth scrolling is avoided for keyboard navigation to prevent timing conflicts.
 
 ### 3.6 Expand/Collapse Keyboard Navigation Race Conditions
 
@@ -886,18 +1123,27 @@ Rapid keyboard interactions on `TreeView` nodes can cause race conditions betwee
 
 ```rust
 /// Locale-specific labels for the TreeView component.
-#[derive(Clone, Debug)]
+///
+/// Derives `PartialEq` because `Context` derives `PartialEq` and holds a
+/// `Messages` (the framework requires `Context: PartialEq`).
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Loading indicator text for branches whose children are being fetched
     /// (default: "Loading…"). Rendered as visually hidden text and announced
     /// via `aria-live="polite"`.
     pub loading_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Accessible label template for a node's drag handle, called with the
+    /// node's label (default: `"Drag {label}"`). Used by `drag_handle_attrs`.
+    pub drag_handle_label: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
     fn default() -> Self {
         Self {
             loading_label: MessageFn::static_str("Loading\u{2026}"),
+            drag_handle_label: MessageFn::new(|label: &str, _locale: &Locale| {
+                format!("Drag {label}")
+            }),
         }
     }
 }
@@ -905,39 +1151,58 @@ impl Default for Messages {
 impl ComponentMessages for Messages {}
 ```
 
-> **Drag and Drop Reorder**: When `dnd_enabled: true` is set, TreeView integrates with `DraggableCollection<T>` and `DroppableCollection<T>` from `06-collections.md` §7. This adds optional `drag::Handle` and `drop::Indicator` anatomy parts. TreeView supports both `CollectionDndEvent::Reorder` (reordering siblings) and `CollectionDndEvent::Move` (reparenting nodes by dropping onto a parent item with `drop::Position::On`).
+> **Drag and Drop Reorder**: When `dnd_enabled: true` is set, TreeView surfaces the agnostic drag-and-drop reorder logic — the `DragHandle` and `DropIndicator` anatomy parts (canonical bare names, per `06-collections.md` §10.8 and the listbox/gridlist/table specs), the drag-state events, valid drop-slot enumeration, cycle-free drop validation, and `ReorderEvent` path computation. It reports completion through `Props::on_reorder` driven by the named `Effect::Reorder`. Dropping **between** siblings uses `DropPosition::Before`/`After`; dropping **onto** a node to reparent uses `DropPosition::On`. The collection-level `DraggableCollection<T>` / `DroppableCollection<T>` trait impls (which bundle the live `selection::State`), pointer hit-testing, the 500 ms hover-expand timer, and `use_drag`/`use_drop` DOM wiring are **adapter** concerns (tracked by the TreeView Leptos/Dioxus adapter tasks), not part of this agnostic core.
 
 ### 4.2 Drag-Reorder Behavior
 
-When drag-and-drop reorder is enabled (`dnd_enabled: true`), the following behaviors apply:
+When drag-and-drop reorder is enabled (`dnd_enabled: true`), the following behaviors apply. The
+**agnostic core** owns the data-model logic (slot enumeration, validity, paths, attrs, keyboard
+protocol); pointer hit-testing and the hover-expand timer are **adapter**-resolved.
 
-- **Drag handle**: Each tree item renders an optional drag handle affordance (the `drag::Handle` anatomy part). The handle is the grab target; the entire row is not draggable by default to avoid conflicts with text selection.
-- **Hover-expand**: When dragging over a collapsed tree node, the node automatically expands after a 500ms hover delay. This allows users to drop items into nested levels without manually expanding first.
-- **Drop target indication**: Valid drop zones are visually highlighted during drag. Three drop positions are supported:
-  - `Before` — insert before the target node (horizontal line above)
-  - `After` — insert after the target node (horizontal line below)
-  - `Child` — insert as a child of the target node (target node background highlight)
-- **Drop position detection**: The drop position is determined by the pointer's vertical position within the target row: top 25% = `Before`, bottom 25% = `After`, middle 50% = `Child`.
-- **Keyboard drag**: Full keyboard support for reordering:
-  - `Enter` or `Space` on a focused drag handle to pick up the item
-  - Arrow keys to move the item through valid drop positions
-  - `Enter` to confirm the drop
-  - `Escape` to cancel and return the item to its original position
-- **Reorder callback**: `on_reorder: Callback<ReorderEvent>` fires when a drop is completed.
+- **Drag handle**: Each tree item renders an optional drag handle affordance (the `DragHandle`
+  anatomy part). The handle is the grab target; the entire row is not draggable by default to
+  avoid conflicts with text selection. `drag_handle_attrs` emits `role="button"` and a localized
+  `aria-label` from `Messages::drag_handle_label`, plus `aria-grabbed="true"` while dragging.
+- **Hover-expand** (adapter): When the pointer dwells over a collapsed node during a drag, the
+  adapter expands it after a 500 ms hover delay by sending `ExpandNode`. The agnostic core has no
+  timer.
+- **Drop target indication**: The `DropIndicator` part marks the current drop slot with
+  `data-ars-drop-position` (`before` / `on` / `after`) and `data-ars-drop-target` (the target
+  node's id). Three drop positions are supported:
+  - `DropPosition::Before` — insert before the target node (horizontal line above)
+  - `DropPosition::After` — insert after the target node (horizontal line below)
+  - `DropPosition::On` — reparent as a child of the target node (target background highlight)
+- **Drop position detection** (adapter): The adapter maps the pointer's vertical position within
+  the target row — top 25% = `Before`, bottom 25% = `After`, middle 50% = `On` — to a
+  `CollectionDropTarget` and sends `DragOver`.
+- **Keyboard drag** (agnostic core, via `on_drag_handle_keydown`):
+  - `Enter` / `Space` on a focused drag handle picks up the item (`DragStart`).
+  - Arrow Up/Down step the item through the valid drop slots (`DragMovePrev` / `DragMoveNext`).
+  - `Enter` confirms the drop (`Drop`).
+  - `Escape` cancels and discards the drop target (`CancelDrag`).
+- **Drop validity**: The core rejects dropping a node onto itself or any of its descendants
+  (cycle prevention) in both `DragOver` and `Drop`.
+- **Reorder callback**: `Props::on_reorder: Option<Callback<ReorderEvent>>` fires when a drop is
+  completed. The core never mutates `ctx.items`; the consumer applies the reorder to its data
+  source and re-supplies props (pure-notification, like Tabs).
 
 ```rust
-/// Event emitted when a tree item is reordered via drag-and-drop.
-#[derive(Clone, Debug, PartialEq)]
+/// Event emitted when a tree node is reordered via drag-and-drop.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReorderEvent {
-    /// Path of the dragged item (sequence of keys from root to item).
+    /// Path of the dragged node (sequence of keys from root to node).
     pub source_path: Vec<Key>,
     /// Path of the drop target.
     pub target_path: Vec<Key>,
-    /// Where relative to the target the item was dropped.
+    /// Where relative to the target the node was dropped.
     pub position: DropPosition,
 }
 
-// `DropPosition` — defined in `06-collections.md`
+// `DropPosition` and `CollectionDropTarget` — defined in `ars_collections::dnd`
+// (`06-collections.md` §10). Reconciliation: `CollectionDndEvent::Reorder`/`Move`
+// is the low-level *collection* contract (flat `keys` + a single `target`);
+// `ReorderEvent` is the TreeView *component* surface (hierarchical root→node
+// paths). The adapter maps between them.
 ```
 
 ## 5. Variant: Lazy Loading
@@ -1123,17 +1388,17 @@ branch control or leaf when `renaming_key == Some(key)`. It replaces the text di
 rename and is pre-filled with the node's current `label` value.
 
 ```rust,no_check
-/// Added to Part enum.
-NodeRenameInput { node_id: String },
+/// Added to Part enum (node identity is `Key`, consistent with the core).
+NodeRenameInput { node_id: Key },
 ```
 
 ```rust
 /// Attrs for the inline rename input.
 /// Rendered only when `renaming_key == Some(key)` for this node.
-pub fn node_rename_input_attrs(&self, node_id: &str) -> AttrMap {
+pub fn node_rename_input_attrs(&self, node_id: &Key) -> AttrMap {
     let mut attrs = AttrMap::new();
     let [(scope_attr, scope_val), (part_attr, part_val)] =
-        Part::NodeRenameInput { node_id: Default::default() }.data_attrs();
+        Part::NodeRenameInput { node_id: Key::default() }.data_attrs();
     attrs.set(scope_attr, scope_val);
     attrs.set(part_attr, part_val);
     let label = self.get_node(node_id)
@@ -1150,35 +1415,34 @@ pub fn node_rename_input_attrs(&self, node_id: &str) -> AttrMap {
 }
 
 /// Handle keydown events on the rename input.
-pub fn on_rename_input_keydown(&self, node_id: &str, key_code: &str, current_value: &str) {
+pub fn on_rename_input_keydown(&self, node_id: &Key, key_code: &str, current_value: &str) {
     match key_code {
         "Enter" => {
             (self.send)(Event::RenameCommit {
-                key: Key::from(node_id),
+                key: node_id.clone(),
                 new_name: current_value.to_string(),
             });
         }
         "Escape" => {
-            (self.send)(Event::RenameCancel(Key::from(node_id)));
+            (self.send)(Event::RenameCancel(node_id.clone()));
         }
         _ => {}
     }
 }
 
 /// Handle blur on the rename input — commits the rename if still active.
-pub fn on_rename_input_blur(&self, node_id: &str, current_value: &str) {
-    let key = Key::from(node_id);
-    if self.ctx.renaming_key.as_ref() == Some(&key) {
+pub fn on_rename_input_blur(&self, node_id: &Key, current_value: &str) {
+    if self.ctx.renaming_key.as_ref() == Some(node_id) {
         (self.send)(Event::RenameCommit {
-            key,
+            key: node_id.clone(),
             new_name: current_value.to_string(),
         });
     }
 }
 
 /// Check if a node is currently being renamed.
-pub fn is_renaming(&self, node_id: &str) -> bool {
-    self.ctx.renaming_key.as_ref().map(|k| k.as_ref()) == Some(node_id)
+pub fn is_renaming(&self, node_id: &Key) -> bool {
+    self.ctx.renaming_key.as_ref() == Some(node_id)
 }
 ```
 

@@ -25,3 +25,6 @@ pub mod tabs;
 
 /// Navigation menu component — menubar navigation with delayed submenu content.
 pub mod navigation_menu;
+
+/// Tree view component — hierarchical, keyboard-navigable tree (WAI-ARIA tree).
+pub mod tree_view;

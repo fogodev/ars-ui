@@ -139,7 +139,7 @@ The canonical entry-prompt:
 | **Unit tests** (inline `#[cfg(test)]`) | Logic + edge cases on the named acceptance criteria | List every public API + every edge case the spec describes; cross-reference with the test list |
 | **Snapshot tests** (insta) | `AttrMap` / chunk-output shape regressions | Check coverage of every anatomy part and every output-affecting prop / state / context branch |
 | **Property tests** (proptest) | Invariant violations across the input space | Check that invariants are non-trivial (roundtrip, idempotence, no-adjacent-X, etc.) and the input strategy is broad enough to actually exercise edge locales / multi-byte / large inputs |
-| **Mutation tests** (`cargo xmutants`) | Tests that *exist* but don't actually constrain behavior | Run `cargo xmutants -p <crate> -f <file>` and triage every `MISSED`; this is mandatory for every new or materially changed framework-agnostic component. Prefer `cargo xmutants` over bare `cargo mutants` — it applies the same per-crate `--features` profile as Nightly CI (for example `ars-components/i18n`) so snapshot and i18n-gated tests match CI. |
+| **Mutation tests** (`cargo xmutants`) | Tests that *exist* but don't actually constrain behavior | **Not run as part of this audit.** Owned by the Nightly CI `mutation-testing` job; `MISSED` mutants are triaged in a follow-up, never as a pre-PR gate. Use the coverage report + breadth audit to judge test quality here. |
 | **Doc tests** | Public-API examples broken by future changes | Check `///` blocks for at least one `# Examples` block on the canonical entry point |
 | **Spec-conformance tests** | Anatomy drift between spec and impl | Check `crates/ars-components/tests/spec_conformance/*.rs` for an entry covering the new component's `Part` enum and public API/attribute contract; this is mandatory for every new framework-agnostic component |
 | **Code coverage** (cargo llvm-cov + xtask wasm path) | Unreachable / under-tested code; threshold drift | Use the right command for the crate (see "Procedure" below) — bare `cargo llvm-cov` does **not** measure adapter wasm code paths. Always finish with `cargo xtask coverage check-all --file <lcov>` to enforce the same thresholds CI does. |
@@ -191,29 +191,13 @@ The canonical entry-prompt:
 
    **Not measured by either path:** `ars-derive` (proc-macro, runs in the compiler — exercised indirectly via `crates/ars-core/tests/derive_contract.rs`). Don't expect coverage numbers here.
 
-2. **Mutation testing.** Run:
-   ```bash
-   cargo xmutants -p <crate> -f <file>
-   ```
-   For framework-agnostic component work in `ars-components`, run this against the component's source file, usually:
-   ```bash
-   cargo xmutants -p ars-components -f crates/ars-components/src/<category>/<component>/mod.rs
-   ```
-   Use the actual file path for single-file modules. Prefer `cargo xmutants` over bare `cargo mutants` — the xtask wrapper applies the Nightly CI feature profile (for example `ars-components/i18n`) so local runs do not fail on snapshot or i18n-gated code paths that plain `cargo mutants` misses.
-
-   For each `MISSED` line, decide:
-   - **Real test gap** → add a test that kills the mutation (often a positive-direction assertion the existing tests skipped).
-   - **Equivalent mutation** → add a regex to `.cargo/mutants.toml` `exclude_re` with a written justification explaining *why* the mutation cannot change observable behavior.
-   - **Defensive code that's truly unreachable** → consider deleting the code. This is often the cleanest fix and is the right answer for unreachable post-filter guards.
+2. **Mutation testing — NOT a gate here.** Do **not** run `cargo xmutants` as part of this audit, and do not block handoff on a clean local mutation run. Mutation coverage is owned by the Nightly CI `mutation-testing` job; surviving (`MISSED`) mutants it reports are triaged in a dedicated follow-up (add a killing test, or add a justified `.cargo/mutants.toml` `exclude_re` for a true equivalent mutation), not during initial delivery. Lean on the coverage report (step 1) and the breadth audit (step 3) to judge test quality instead. (A voluntary local mutation pass is allowed but never required.)
 
 3. **Test-type breadth audit.** Walk the table above. For each test type, ask: *"Does this kind of change need this kind of test, and do we have one?"* Examples:
    - New framework-agnostic component with an anatomy table → spec-conformance test required
-   - New or materially changed framework-agnostic component → targeted `cargo xmutants` run required before handoff
    - New public function → doc test with `# Examples` required
    - New invariants on a computation pipeline → proptest invariants strongly recommended
    - New `AttrMap` helpers → snapshot tests for each branch required
-
-The targeted `cargo xmutants` run is a pre-PR implementation/audit requirement. After the PR is opened, agents **MUST NOT** rerun mutation tests during Codex review rounds unless the user explicitly asks for another mutation run.
 
 4. **Cumulative assessment.** Present the before/after metrics in a table:
 
@@ -231,7 +215,7 @@ A list of gaps with concrete reproducers (specific test inputs that trigger the 
 
 #### Anti-pattern: chasing 100% line coverage
 
-The goal is **not** "100% line coverage at any cost". The goal is *"no surviving mutations, no unreachable defensive code, every test type that should exist does exist"*. A 99% line-coverage report with all mutations caught is a stronger position than a 100% line-coverage report with three surviving mutations. If the last 1% of uncovered code is a genuinely unreachable defensive guard, document it in `mutants.toml` and move on.
+The goal is **not** "100% line coverage at any cost". The goal is *"strong, behavior-constraining tests with no unreachable defensive code, and every test type that should exist does exist"*. A 99% line-coverage report whose tests make positive-direction assertions is stronger than a 100% report full of assertion-free walks. If the last 1% of uncovered code is a genuinely unreachable defensive guard, leave it. (Mutation testing — the eventual measure of whether tests *constrain* behavior — is owned by Nightly CI, not this audit.)
 
 ---
 
@@ -261,8 +245,7 @@ cargo test -p xtask --test spec_corpus_compile_snippets
 # 6. Snapshot orphan check
 cargo insta test --workspace --features <relevant> --unreferenced=reject
 
-# 7. Mutation re-run (must be 0 missed)
-cargo xmutants -p <crate> -f <file>
+# 7. (Mutation testing is NOT run here — it is Nightly-CI-driven.)
 
 # 8. Coverage thresholds — uses the same gate CI enforces. The recipe
 #    depends on which crate the change touches: native-only changes can
@@ -288,7 +271,7 @@ the loop, not a substitute for the full poll/triage/fix cycle.
 - **Deferring** any finding ("we can fix that in a follow-up"). This is the rule the user set explicitly. Breaking it makes the audit ceremonial.
 - **Loading the user with options mid-phase.** Make a clear best-outcome recommendation. Only escalate to `AskUserQuestion` when there's a genuine judgment call the user must make (e.g., behavior choices with real tradeoffs, not implementation details).
 - **Skipping rounds of Phase 2** because the first round was clean. The second round nearly always finds something the first ignored.
-- **Treating coverage % as the goal.** The goal is mutation-killed and breadth-complete, not a number.
+- **Treating coverage % as the goal.** The goal is behavior-constraining tests and breadth-complete coverage, not a number.
 - **Inventing cosmetic edits** the audits didn't surface. If a phase doesn't find a real finding, don't fabricate one — say "this round found nothing" and proceed.
 - **Re-running tests after every micro-edit** during a phase. Land a batch of related findings, then verify, then move on.
 - **Forgetting to update the named-tests file** when a new test exposes a real bug fixed in the same phase. The fix and the test land together.
