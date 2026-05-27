@@ -43,6 +43,20 @@ fn snapshot_attrs(attrs: &AttrMap) -> String {
     format!("{attrs:#?}")
 }
 
+fn key_event(key: KeyboardKey) -> KeyboardEventData {
+    KeyboardEventData {
+        key,
+        character: None,
+        code: String::new(),
+        repeat: false,
+        shift_key: false,
+        ctrl_key: false,
+        alt_key: false,
+        meta_key: false,
+        is_composing: false,
+    }
+}
+
 fn api_for_state(state: State) -> super::Api<'static> {
     let props = Box::leak(Box::new(test_props()));
 
@@ -980,6 +994,27 @@ fn file_upload_set_files_reconciles_idle_to_uploading_when_files_uploading() {
 }
 
 #[test]
+fn file_upload_set_files_none_reconciles_state_to_visible_queue() {
+    // `init` always starts in `Idle`, so a queue seeded with an uploading file is
+    // momentarily inconsistent. A `SetFiles(None)` sync must reconcile the state
+    // against the now-visible (internal) queue — not silently stay in `Idle`.
+    let mut service = Service::<Machine>::new(
+        Props::new()
+            .id("upload")
+            .default_files(vec![item("file-1", "a.png", Status::Uploading)]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    assert_eq!(service.state(), &State::Idle);
+
+    let result = service.send(Event::SetFiles(None));
+
+    assert!(result.state_changed);
+    assert_eq!(service.state(), &State::Uploading);
+}
+
+#[test]
 fn file_upload_generated_ids_do_not_reuse_after_removal() {
     let mut service = Service::<Machine>::new(
         Props::new().id("upload").multiple(true),
@@ -1110,6 +1145,277 @@ fn file_upload_progress_ignored_for_non_uploading_file() {
         .expect("uploading file remains in the queue")
         .clone();
     assert!((uploading.progress - 0.4).abs() < f64::EPSILON);
+}
+
+#[test]
+fn file_upload_item_delete_trigger_disabled_when_inert() {
+    let readonly = Props::new()
+        .id("upload")
+        .readonly(true)
+        .default_files(vec![item("file-1", "a.png", Status::Pending)]);
+    let disabled = Props::new()
+        .id("upload")
+        .disabled(true)
+        .default_files(vec![item("file-1", "a.png", Status::Pending)]);
+
+    for props in [readonly, disabled] {
+        let (_, ctx) = Machine::init(&props, &Env::default(), &Messages::default());
+        let attrs = api_with_props(props, ctx, State::Idle).item_delete_trigger_attrs(0);
+
+        assert_eq!(
+            attrs.get(&HtmlAttr::Disabled),
+            Some("true"),
+            "delete trigger must be disabled when the component is inert"
+        );
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)),
+            Some("true"),
+            "delete trigger must be aria-disabled when the component is inert"
+        );
+    }
+}
+
+#[test]
+fn file_upload_item_delete_trigger_enabled_by_default() {
+    let props =
+        Props::new()
+            .id("upload")
+            .default_files(vec![item("file-1", "a.png", Status::Pending)]);
+    let (_, ctx) = Machine::init(&props, &Env::default(), &Messages::default());
+    let attrs = api_with_props(props, ctx, State::Idle).item_delete_trigger_attrs(0);
+
+    assert_eq!(attrs.get(&HtmlAttr::Disabled), None);
+    assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), None);
+}
+
+#[test]
+fn file_upload_item_keydown_delete_removes_focused_file() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::clone(&events);
+    let send_event = move |event| captured.lock().unwrap().push(event);
+
+    let service = Service::<Machine>::new(
+        Props::new().id("upload").multiple(true).default_files(vec![
+            item("file-1", "a.png", Status::Pending),
+            item("file-2", "b.png", Status::Pending),
+        ]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    service
+        .connect(&send_event)
+        .on_item_keydown(1, &key_event(KeyboardKey::Delete));
+
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![Event::RemoveFile {
+            file_id: "file-2".into()
+        }]
+    );
+}
+
+#[test]
+fn file_upload_item_keydown_backspace_removes_focused_file() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::clone(&events);
+    let send_event = move |event| captured.lock().unwrap().push(event);
+
+    let service = Service::<Machine>::new(
+        Props::new().id("upload").multiple(true).default_files(vec![
+            item("file-1", "a.png", Status::Pending),
+            item("file-2", "b.png", Status::Pending),
+        ]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    service
+        .connect(&send_event)
+        .on_item_keydown(0, &key_event(KeyboardKey::Backspace));
+
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![Event::RemoveFile {
+            file_id: "file-1".into()
+        }]
+    );
+}
+
+#[test]
+fn file_upload_item_keydown_other_key_is_ignored() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::clone(&events);
+    let send_event = move |event| captured.lock().unwrap().push(event);
+
+    let service = Service::<Machine>::new(
+        Props::new()
+            .id("upload")
+            .default_files(vec![item("file-1", "a.png", Status::Pending)]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    service
+        .connect(&send_event)
+        .on_item_keydown(0, &key_event(KeyboardKey::Enter));
+
+    assert!(events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn file_upload_accept_compound_extension_matches() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").accept(vec![".tar.gz".into()]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "archive.tar.gz",
+        100,
+        "application/gzip",
+    )])));
+
+    assert_eq!(
+        service.context().files.get().len(),
+        1,
+        "a compound extension like .tar.gz must match archive.tar.gz"
+    );
+}
+
+#[test]
+fn file_upload_accept_compound_extension_rejects_mismatch() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").accept(vec![".tar.gz".into()]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "photo.png",
+        100,
+        "image/png",
+    )])));
+
+    assert!(service.context().files.get().is_empty());
+}
+
+#[test]
+fn file_upload_drag_leave_to_idle_announces_dropzone_left() {
+    let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+    drop(service.send(Event::DragEnter));
+    let result = service.send(Event::DragLeave);
+
+    assert_eq!(service.state(), &State::Idle);
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::AnnounceDropzoneLeft),
+        "leaving the dropzone must emit AnnounceDropzoneLeft"
+    );
+}
+
+#[test]
+fn file_upload_nested_drag_leave_does_not_announce_dropzone_left() {
+    let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+    drop(service.send(Event::DragEnter));
+    drop(service.send(Event::DragEnter));
+    let result = service.send(Event::DragLeave);
+
+    assert_eq!(service.state(), &State::DragOver);
+    assert!(
+        !result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::AnnounceDropzoneLeft),
+        "a nested drag-leave that stays in DragOver must not announce"
+    );
+}
+
+#[test]
+fn file_upload_files_selected_announces_files_added() {
+    let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+    let result = service.send(Event::FilesSelected(vec![raw_file(
+        "a.png",
+        10,
+        "image/png",
+    )]));
+
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::AnnounceFilesAdded { count: 1 }),
+        "selecting files must announce the added count"
+    );
+}
+
+#[test]
+fn file_upload_drop_announces_files_added() {
+    let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+    drop(service.send(Event::DragEnter));
+    let result = service.send(Event::Drop(vec![raw_file("a.png", 10, "image/png")]));
+
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::AnnounceFilesAdded { count: 1 }),
+        "dropping files must announce the added count"
+    );
+}
+
+#[test]
+fn file_upload_rejected_files_announce_rejection_not_addition() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").max_file_size(50),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    let result = service.send(Event::FilesSelected(vec![raw_file(
+        "big.png",
+        100,
+        "image/png",
+    )]));
+
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::AnnounceFilesRejected { count: 1 }),
+        "rejected files must announce the rejected count"
+    );
+    assert!(
+        !result
+            .pending_effects
+            .iter()
+            .any(|effect| matches!(effect.name, Effect::AnnounceFilesAdded { .. })),
+        "no files were accepted, so no addition should be announced"
+    );
+}
+
+#[test]
+fn file_upload_upload_complete_announces_completion() {
+    let mut service = uploading_service("file-1");
+
+    let result = service.send(Event::UploadComplete {
+        file_id: "file-1".into(),
+    });
+
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::AnnounceUploadComplete),
+        "completing an upload must announce completion"
+    );
 }
 
 #[test]

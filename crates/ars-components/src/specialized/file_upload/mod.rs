@@ -224,6 +224,14 @@ pub enum Event {
 
     /// Synchronize output-affecting props stored in context.
     SetProps,
+
+    /// Reconcile the machine state with the currently visible file queue.
+    ///
+    /// Chained after [`Event::SetFiles`] so the resting state (`Idle` vs
+    /// `Uploading`) tracks the queue revealed by the sync — whether that is a
+    /// freshly controlled value or the internal value exposed when control is
+    /// released.
+    ReconcileState,
 }
 
 /// Raw file data from the browser File API, prior to validation.
@@ -599,10 +607,37 @@ impl Default for Messages {
 impl ComponentMessages for Messages {}
 
 /// Typed effect intents emitted by the file upload machine.
+///
+/// Announcement variants drive the accessible live regions described in the
+/// spec (§3.3, §4.2). On each, the adapter resolves the user-facing text from
+/// the corresponding [`Messages`] field — using the carried `count` for the
+/// pluralized add/reject messages — and writes it to the live region.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Effect {
-    /// Adapter announces that the dropzone is active.
+    /// Adapter announces (assertive) that the dropzone became active, via
+    /// [`Messages::dropzone_active`].
     AnnounceDropzoneActive,
+
+    /// Adapter announces (assertive) that the dropzone is no longer active, via
+    /// [`Messages::drop_zone_left`].
+    AnnounceDropzoneLeft,
+
+    /// Adapter announces (polite) that files were added, via
+    /// [`Messages::files_added`] with `count`.
+    AnnounceFilesAdded {
+        /// Number of files accepted in this selection/drop.
+        count: usize,
+    },
+
+    /// Adapter announces (polite) that files were rejected, via
+    /// [`Messages::rejection_message`] with `count`.
+    AnnounceFilesRejected {
+        /// Number of files rejected in this selection/drop.
+        count: usize,
+    },
+
+    /// Adapter announces (polite) that an upload completed.
+    AnnounceUploadComplete,
 
     /// Adapter opens the native file picker via the hidden input.
     OpenFilePicker,
@@ -674,14 +709,6 @@ impl ars_core::Machine for Machine {
             Event::SetFiles(files) => {
                 let files = files.clone();
 
-                // An externally replaced queue must reconcile the machine state:
-                // a controlled parent can drop the last uploading file (or add a
-                // new uploading one), and the state must follow so `is_uploading`
-                // and `data-ars-state` stay truthful.
-                let target = files
-                    .as_deref()
-                    .and_then(|files| reconciled_state(*state, files));
-
                 let apply = move |context: &mut Context| {
                     if let Some(files) = files {
                         context.next_file_id = context.next_file_id.max(next_id_after(&files));
@@ -692,10 +719,19 @@ impl ars_core::Machine for Machine {
                     }
                 };
 
-                return Some(match target {
-                    Some(state) => TransitionPlan::to(state).apply(apply),
-                    None => TransitionPlan::context_only(apply),
-                });
+                // Reconcile after the sync lands: chaining `ReconcileState` lets
+                // the same path handle both a freshly controlled value and the
+                // internal value revealed when control is released (`None`), which
+                // is not visible until `sync_controlled` runs.
+                return Some(TransitionPlan::context_only(apply).then(Event::ReconcileState));
+            }
+
+            Event::ReconcileState => {
+                // `State::Uploading` must hold exactly when at least one file is
+                // uploading. Drive the resting state between `Idle` and
+                // `Uploading` to match the currently visible queue; `DragOver`'s
+                // transient drag lifecycle is left untouched.
+                return reconciled_state(*state, ctx.files.get()).map(TransitionPlan::to);
             }
 
             Event::SetProps => {
@@ -761,13 +797,23 @@ impl ars_core::Machine for Machine {
 
             Event::UploadComplete { file_id } if matches!(state, State::Uploading) => {
                 let file_id = file_id.clone();
+                // Only announce when this event actually completes a file that
+                // was still uploading (a late duplicate for a terminal file is a
+                // no-op and must stay silent).
+                let did_complete = ctx
+                    .files
+                    .get()
+                    .iter()
+                    .any(|file| file.id == file_id && file.status == Status::Uploading);
                 let still_uploading = upload_complete_updates(ctx, &file_id);
-                return Some(upload_finish_plan(
-                    still_uploading,
-                    move |context: &mut Context| {
-                        apply_upload_complete(context, &file_id);
-                    },
-                ));
+                let plan = upload_finish_plan(still_uploading, move |context: &mut Context| {
+                    apply_upload_complete(context, &file_id);
+                });
+                return Some(if did_complete {
+                    plan.with_effect(PendingEffect::named(Effect::AnnounceUploadComplete))
+                } else {
+                    plan
+                });
             }
 
             Event::UploadError { file_id, error } if matches!(state, State::Uploading) => {
@@ -827,10 +873,12 @@ impl ars_core::Machine for Machine {
 
                 if new_counter == 0 {
                     Some(
-                        TransitionPlan::to(State::Idle).apply(|context: &mut Context| {
-                            context.drag_counter = 0;
-                            context.dragging = false;
-                        }),
+                        TransitionPlan::to(State::Idle)
+                            .apply(|context: &mut Context| {
+                                context.drag_counter = 0;
+                                context.dragging = false;
+                            })
+                            .with_effect(PendingEffect::named(Effect::AnnounceDropzoneLeft)),
                     )
                 } else {
                     Some(TransitionPlan::context_only(
@@ -841,24 +889,27 @@ impl ars_core::Machine for Machine {
                 }
             }
 
-            (State::DragOver, Event::Drop(raw_files)) => {
-                let raw = raw_files.clone();
-                Some(apply_selected_files_plan(
-                    Some(State::Idle),
-                    raw,
-                    ctx.auto_upload,
-                    |context: &mut Context| {
-                        context.dragging = false;
-                        context.drag_counter = 0;
-                    },
-                ))
-            }
+            (State::DragOver, Event::Drop(raw_files)) => Some(apply_selected_files_plan(
+                Some(State::Idle),
+                raw_files,
+                ctx.auto_upload,
+                ctx,
+                |context: &mut Context| {
+                    context.dragging = false;
+                    context.drag_counter = 0;
+                },
+            )),
 
             (State::Idle, Event::FilesSelected(raw_files))
             | (State::Uploading, Event::FilesSelected(raw_files)) => {
-                let raw = raw_files.clone();
                 let auto_upload = ctx.auto_upload;
-                Some(apply_selected_files_plan(None, raw, auto_upload, |_| {}))
+                Some(apply_selected_files_plan(
+                    None,
+                    raw_files,
+                    auto_upload,
+                    ctx,
+                    |_| {},
+                ))
             }
 
             (State::Idle, Event::StartUpload) => {
@@ -1321,6 +1372,15 @@ impl Api<'_> {
             );
         }
 
+        // The transition guard ignores `RemoveFile` while disabled/read-only, so
+        // the delete control must read as inert too — matching the trigger and
+        // hidden input — rather than a focusable button that silently does nothing.
+        if self.ctx.disabled || self.ctx.readonly {
+            attrs
+                .set_bool(HtmlAttr::Disabled, true)
+                .set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
+
         attrs
     }
 
@@ -1452,6 +1512,17 @@ impl Api<'_> {
         }
     }
 
+    /// Dispatches keyboard intent on the file item at `index`.
+    ///
+    /// Per the spec keyboard contract, <kbd>Delete</kbd>/<kbd>Backspace</kbd> on
+    /// a focused file item removes that file. The adapter passes the item's index
+    /// so the core can resolve the file id without tracking per-item focus.
+    pub fn on_item_keydown(&self, index: usize, data: &KeyboardEventData) {
+        if matches!(data.key, KeyboardKey::Delete | KeyboardKey::Backspace) {
+            self.on_item_delete_trigger_click(index);
+        }
+    }
+
     const fn state_token(&self) -> &'static str {
         match self.state {
             State::Idle => "idle",
@@ -1545,10 +1616,20 @@ fn format_file_size_with_locale(bytes: u64, locale: &Locale) -> String {
 
 fn apply_selected_files_plan(
     transition_to: Option<State>,
-    raw: Vec<RawFile>,
+    raw: &[RawFile],
     auto_upload: bool,
+    ctx: &Context,
     before: impl FnOnce(&mut Context) + 'static,
 ) -> TransitionPlan<Machine> {
+    // Validate up front (the `before` hook only touches drag state, never the
+    // fields validation reads) so the accepted/rejected counts are known when
+    // the announcement effects are attached — effects are fixed before `apply`
+    // runs.
+    let mut next_file_id = ctx.next_file_id;
+    let (accepted, rejected) = validate_files(raw, ctx, &mut next_file_id);
+    let accepted_count = accepted.len();
+    let rejected_count = rejected.len();
+
     let mut plan = if let Some(state) = transition_to {
         TransitionPlan::to(state)
     } else {
@@ -1557,10 +1638,6 @@ fn apply_selected_files_plan(
 
     plan = plan.apply(move |context: &mut Context| {
         before(context);
-
-        let mut next_file_id = context.next_file_id;
-
-        let (accepted, rejected) = validate_files(&raw, context, &mut next_file_id);
 
         context.next_file_id = next_file_id;
         context.rejected_files = rejected;
@@ -1571,6 +1648,18 @@ fn apply_selected_files_plan(
 
         context.files.set(current);
     });
+
+    if accepted_count > 0 {
+        plan = plan.with_effect(PendingEffect::named(Effect::AnnounceFilesAdded {
+            count: accepted_count,
+        }));
+    }
+
+    if rejected_count > 0 {
+        plan = plan.with_effect(PendingEffect::named(Effect::AnnounceFilesRejected {
+            count: rejected_count,
+        }));
+    }
 
     if auto_upload {
         plan = plan.then(Event::StartUpload);
@@ -1886,13 +1975,13 @@ fn next_id_after(files: &[Item]) -> u64 {
         .saturating_add(1)
 }
 
-/// Reconciles the machine state with an externally replaced file set.
+/// Reconciles the machine state with the currently visible file set.
 ///
 /// `State::Uploading` must hold exactly when at least one file is uploading, so
-/// a controlled queue replacement that adds or removes the last uploading file
-/// drives the resting state between [`State::Idle`] and [`State::Uploading`].
-/// Returns `None` when no state change is required (including while in
-/// [`State::DragOver`], whose transient drag lifecycle is left untouched).
+/// when [`Event::ReconcileState`] runs after a [`Event::SetFiles`] sync it drives
+/// the resting state between [`State::Idle`] and [`State::Uploading`] to match
+/// the visible queue. Returns `None` when no state change is required (including
+/// while in [`State::DragOver`], whose transient drag lifecycle is left untouched).
 fn reconciled_state(current: State, files: &[Item]) -> Option<State> {
     let any_uploading = files.iter().any(|file| file.status == Status::Uploading);
 
@@ -1932,11 +2021,17 @@ fn normalize_mime_type(mime_type: &str) -> String {
 }
 
 fn file_name_has_extension(name: &str, extension: &str) -> bool {
-    let Some(actual_extension) = name.rsplit_once('.').map(|(_, ext)| ext) else {
+    if extension.is_empty() {
         return false;
-    };
+    }
 
-    !actual_extension.is_empty() && actual_extension.eq_ignore_ascii_case(extension)
+    // Match the full dotted suffix so compound extensions (e.g. `.tar.gz`) match
+    // `archive.tar.gz`, not just the segment after the final dot. Browser
+    // `accept` extension tokens are matched case-insensitively against the
+    // filename suffix.
+    let suffix = format!(".{}", extension.to_ascii_lowercase());
+
+    name.to_ascii_lowercase().ends_with(&suffix)
 }
 
 #[cfg(test)]

@@ -193,6 +193,11 @@ pub enum Event {
     SetFiles(Option<Vec<Item>>),
     /// Synchronize output-affecting props stored in context.
     SetProps,
+    /// Reconcile the machine state with the currently visible file queue.
+    /// Chained after `SetFiles` so the resting state tracks the queue revealed by
+    /// the sync (a freshly controlled value, or the internal value exposed when
+    /// control is released).
+    ReconcileState,
 }
 
 /// Raw file data from the browser File API, prior to validation.
@@ -481,7 +486,9 @@ fn mime_matches(mime: &str, name: &str, patterns: &[String]) -> bool {
             let prefix = &pattern[..pattern.len() - 1];
             mime.starts_with(prefix)
         } else if pattern.starts_with('.') {
-            name.ends_with(pattern)
+            // Match the full dotted suffix, case-insensitively, so compound
+            // extensions like `.tar.gz` match `archive.tar.gz`.
+            name.to_ascii_lowercase().ends_with(&pattern.to_ascii_lowercase())
         } else {
             mime == pattern
         }
@@ -592,18 +599,32 @@ impl ars_core::Machine for Machine {
             }
 
             (State::DragOver, Event::DragLeave) => {
-                // Decrement counter; only leave DragOver when counter hits 0
-                Some(TransitionPlan::context_only(|ctx| {
-                    ctx.drag_counter = ctx.drag_counter.saturating_sub(1);
-                    if ctx.drag_counter == 0 {
-                        ctx.dragging = false;
-                    }
-                }))
-                // Note: actual state change to Idle happens in a follow-up check.
-                // For simplicity, we handle this in the transition:
+                // Decrement the nesting counter; only leave DragOver at 0. On the
+                // transition to Idle, announce that the dropzone is no longer
+                // active (assertive) via the `announce-dropzone-left` effect
+                // (`messages.drop_zone_left`).
+                let new_counter = ctx.drag_counter.saturating_sub(1);
+                if new_counter == 0 {
+                    Some(TransitionPlan::to(State::Idle)
+                        .apply(|ctx| {
+                            ctx.drag_counter = 0;
+                            ctx.dragging = false;
+                        })
+                        .with_named_effect("announce-dropzone-left", |ctx, _props, _send| {
+                            use_platform_effects().announce(&(ctx.messages.drop_zone_left)(&ctx.locale));
+                            no_cleanup()
+                        }))
+                } else {
+                    Some(TransitionPlan::context_only(move |ctx| {
+                        ctx.drag_counter = new_counter;
+                    }))
+                }
             }
 
             (State::DragOver, Event::Drop(raw_files)) => {
+                // Validate up front so the accepted/rejected counts can drive the
+                // `announce-files-added` / `announce-files-rejected` effects
+                // (polite; `messages.files_added` / `messages.rejection_message`).
                 let raw = raw_files.clone();
                 Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
                     ctx.dragging = false;
@@ -615,7 +636,7 @@ impl ars_core::Machine for Machine {
                     let mut current = ctx.files.get().clone();
                     current.extend(accepted);
                     ctx.files.set(current);
-                }))
+                })) // + announce-files-added{count} / announce-files-rejected{count}
             }
 
             // --- File selection via input ---
@@ -630,8 +651,8 @@ impl ars_core::Machine for Machine {
                     let mut current = ctx.files.get().clone();
                     current.extend(accepted);
                     ctx.files.set(current);
-                    // If auto_upload, chain a StartUpload event
-                }))
+                    // If auto_upload, chain a StartUpload event.
+                })) // + announce-files-added{count} / announce-files-rejected{count}
             }
 
             // --- Upload lifecycle ---
@@ -681,7 +702,9 @@ impl ars_core::Machine for Machine {
                     ctx.files.set(updated);
                 }))
                 // The Service should check after this action whether any files
-                // are still Uploading. If none, transition to Idle.
+                // are still Uploading. If none, transition to Idle. When a file
+                // that was still uploading actually completes, also emit the
+                // `announce-upload-complete` effect (polite).
             }
 
             (State::Uploading, Event::UploadError { file_id, error }) => {
@@ -759,15 +782,11 @@ impl ars_core::Machine for Machine {
 
             (_, Event::SetFiles(files)) => {
                 let files = files.clone();
-                // A controlled queue replacement must reconcile the machine state:
-                // `State::Uploading` holds exactly when at least one file is
-                // uploading, so dropping (or adding) the last uploading file drives
-                // the resting state between Idle and Uploading. `DragOver` is left
-                // untouched. The monotonic id counter is advanced past any supplied
-                // ids so later generated ids cannot collide with them.
-                let target = files
-                    .as_deref()
-                    .and_then(|files| reconciled_state(*state, files));
+                // Advance the monotonic id counter past any supplied ids so later
+                // generated ids cannot collide with them, then reconcile the state
+                // via a chained `ReconcileState` once the sync has landed (so it
+                // sees the controlled value, or the internal value revealed by
+                // `sync_controlled(None)`).
                 let apply = move |ctx: &mut Context| {
                     if let Some(files) = files {
                         ctx.next_file_id = ctx.next_file_id.max(next_id_after(&files));
@@ -777,10 +796,14 @@ impl ars_core::Machine for Machine {
                         ctx.files.sync_controlled(None);
                     }
                 };
-                Some(match target {
-                    Some(state) => TransitionPlan::to(state).apply(apply),
-                    None => TransitionPlan::context_only(apply),
-                })
+                Some(TransitionPlan::context_only(apply).then(Event::ReconcileState))
+            }
+
+            (_, Event::ReconcileState) => {
+                // `State::Uploading` holds exactly when at least one file is
+                // uploading. Drive the resting state between Idle and Uploading to
+                // match the currently visible queue; `DragOver` is left untouched.
+                reconciled_state(*state, ctx.files.get()).map(TransitionPlan::to)
             }
 
             (_, Event::SetProps) => {
@@ -1073,7 +1096,14 @@ impl<'a> Api<'a> {
         if let Some(file) = files.get(index) {
             attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.remove_label)(&file.name, &self.ctx.locale));
         }
-        // Event handlers (click to remove file) are typed methods on the Api struct.
+        // The transition guard ignores `RemoveFile` while disabled/read-only, so
+        // mark the control inert to match the trigger and hidden input.
+        if self.ctx.disabled || self.ctx.readonly {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
+        // Event handlers (click to remove, Delete/Backspace keydown) are typed
+        // methods on the Api struct.
         attrs
     }
 
@@ -1173,6 +1203,15 @@ impl<'a> Api<'a> {
     pub fn cancel_file(&self, file_id: &str) {
         (self.send)(Event::CancelFile { file_id: file_id.to_string() });
     }
+
+    /// Keyboard intent on the file item at `index`: Delete/Backspace removes it.
+    /// The adapter passes the item index so the core resolves the file id
+    /// without tracking per-item focus.
+    pub fn on_item_keydown(&self, index: usize, data: &KeyboardEventData) {
+        if matches!(data.key, KeyboardKey::Delete | KeyboardKey::Backspace) {
+            self.on_item_delete_trigger_click(index);
+        }
+    }
 }
 
 impl ConnectApi for Api<'_> {
@@ -1231,17 +1270,17 @@ FileUpload
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Attribute / Behaviour  | Element           | Value                      |
-| ---------------------- | ----------------- | -------------------------- |
-| `role="button"`        | Dropzone          | Clickable drop area        |
-| `tabindex="0"`         | Dropzone          | Keyboard focusable         |
-| `aria-labelledby`      | Dropzone          | Label ID                   |
-| `aria-disabled="true"` | Dropzone, Trigger | When disabled              |
-| `role="list"`          | ItemGroup         | Semantic list              |
-| `role="listitem"`      | Item              | Semantic list item         |
-| `aria-label`           | Trigger           | `"Choose files to upload"` |
-| `aria-label`           | ItemDeleteTrigger | `"Remove {filename}"`      |
-| `aria-label`           | ItemGroup         | `"Uploaded files"`         |
+| Attribute / Behaviour  | Element                              | Value                      |
+| ---------------------- | ------------------------------------ | -------------------------- |
+| `role="button"`        | Dropzone                             | Clickable drop area        |
+| `tabindex="0"`         | Dropzone                             | Keyboard focusable         |
+| `aria-labelledby`      | Dropzone                             | Label ID                   |
+| `aria-disabled="true"` | Dropzone, Trigger, ItemDeleteTrigger | When disabled or read-only |
+| `role="list"`          | ItemGroup                            | Semantic list              |
+| `role="listitem"`      | Item                                 | Semantic list item         |
+| `aria-label`           | Trigger                              | `"Choose files to upload"` |
+| `aria-label`           | ItemDeleteTrigger                    | `"Remove {filename}"`      |
+| `aria-label`           | ItemGroup                            | `"Uploaded files"`         |
 
 ### 3.2 Keyboard Interaction
 
