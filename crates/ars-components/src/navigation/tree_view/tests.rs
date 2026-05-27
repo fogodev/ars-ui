@@ -691,11 +691,8 @@ fn keydown_arrow_right_expands_collapsed_branch_else_enters() {
         dispatch_key(&service, &key(1), &keyboard(KeyboardKey::ArrowRight)),
         &[Event::FocusNext]
     );
-    // A leaf -> enter (no expand).
-    assert_eq!(
-        dispatch_key(&service, &key(7), &keyboard(KeyboardKey::ArrowRight)),
-        &[Event::FocusNext]
-    );
+    // A leaf -> inert (nothing to expand or enter; WAI-ARIA tree pattern).
+    assert!(dispatch_key(&service, &key(7), &keyboard(KeyboardKey::ArrowRight)).is_empty());
 }
 
 #[test]
@@ -720,16 +717,34 @@ fn keydown_arrow_left_collapses_expanded_branch_else_moves_to_parent() {
 }
 
 #[test]
-fn keydown_enter_and_space_select() {
-    let service = service(props());
+fn keydown_enter_selects_and_space_toggles() {
+    let multi = || {
+        service(
+            props()
+                .multiple(true)
+                .selection_mode(selection::Mode::Multiple),
+        )
+    };
 
+    // Enter always selects.
     assert_eq!(
-        dispatch_key(&service, &key(2), &keyboard(KeyboardKey::Enter)),
+        dispatch_key(&multi(), &key(2), &keyboard(KeyboardKey::Enter)),
         &[Event::SelectNode(key(2))]
     );
+
+    // Space on an unselected node selects it.
+    assert_eq!(
+        dispatch_key(&multi(), &key(2), &keyboard(KeyboardKey::Space)),
+        &[Event::SelectNode(key(2))]
+    );
+
+    // Space on an already-selected node deselects it (toggle contract).
+    let mut service = multi();
+    drop(service.send(Event::SelectNode(key(2))));
+    assert!(service.connect(&|_| {}).is_node_selected(&key(2)));
     assert_eq!(
         dispatch_key(&service, &key(2), &keyboard(KeyboardKey::Space)),
-        &[Event::SelectNode(key(2))]
+        &[Event::DeselectNode(key(2))]
     );
 }
 
@@ -1129,14 +1144,37 @@ fn focus_next_and_prev_without_prior_focus() {
 }
 
 #[test]
-fn focus_next_when_focused_node_is_hidden_starts_from_first() {
+fn collapsing_ancestor_clamps_focus_to_that_ancestor() {
+    // Focus a descendant, then collapse its parent: focus must move up to the
+    // now-collapsed ancestor so aria-activedescendant stays on a rendered node.
     let mut service = service(props());
 
     drop(service.send(Event::FocusNode(key(2)))); // Apple (under Fruits)
-    drop(service.send(Event::CollapseNode(key(1)))); // hide Apple
-    drop(service.send(Event::FocusNext)); // focused node no longer visible
+    drop(service.send(Event::CollapseNode(key(1)))); // hides Apple
 
-    assert_eq!(service.context().focused_node, Some(key(1)));
+    assert_eq!(service.context().focused_node, Some(key(1))); // clamped to Fruits
+
+    // And navigation proceeds correctly from the clamped position.
+    drop(service.send(Event::FocusNext));
+    assert_eq!(service.context().focused_node, Some(key(4))); // Vegetables
+}
+
+#[test]
+fn collapse_all_clamps_focus_to_root_ancestor() {
+    let mut service = service(props());
+    drop(service.send(Event::FocusNode(key(3)))); // Banana (under Fruits)
+    drop(service.send(Event::CollapseAll));
+    assert_eq!(service.context().focused_node, Some(key(1))); // Fruits (root)
+}
+
+#[test]
+fn sync_props_clears_focus_when_focused_node_removed() {
+    let mut service = service(props());
+    drop(service.send(Event::FocusNode(key(7)))); // Grains
+    // New collection without Grains.
+    let trimmed = TreeCollection::new(vec![branch(1, "Fruits", true, vec![leaf(2, "Apple")])]);
+    drop(service.set_props(props().items(trimmed)));
+    assert_eq!(service.context().focused_node, None);
 }
 
 #[test]
@@ -1318,7 +1356,7 @@ fn valid_drop_slots_exclude_self_and_descendants() {
 fn focus_visible_marker_only_on_the_focused_node() {
     let mut service = service(props());
 
-    drop(service.send(Event::FocusNode(key(1)))); // focus_visible = true
+    drop(service.send(Event::FocusFirst)); // keyboard nav -> focus_visible = true, node 1
 
     let api = service.connect(&|_| {});
 
@@ -1340,7 +1378,7 @@ fn focus_visible_marker_only_on_the_focused_node() {
 fn focus_visible_marker_cleared_after_blur() {
     let mut service = service(props());
 
-    drop(service.send(Event::FocusNode(key(1))));
+    drop(service.send(Event::FocusFirst)); // keyboard focus on node 1
     drop(service.send(Event::Blur)); // focus_visible = false, focused_node retained
 
     assert!(
@@ -1350,6 +1388,27 @@ fn focus_visible_marker_cleared_after_blur() {
             .get(&HtmlAttr::Data("ars-focus-visible"))
             .is_none(),
         "focus-visible requires BOTH focused and focus_visible"
+    );
+}
+
+#[test]
+fn pointer_focus_does_not_set_focus_visible() {
+    // FocusNode (used by on_leaf_click / on_branch_control_click and the public
+    // focus_node API) is pointer/programmatic — it must not render the keyboard
+    // focus ring.
+    let mut service = service(props());
+
+    drop(service.send(Event::FocusNode(key(1))));
+
+    assert_eq!(service.context().focused_node, Some(key(1)));
+    assert!(!service.context().focus_visible);
+    assert!(
+        service
+            .connect(&|_| {})
+            .branch_attrs(&key(1))
+            .get(&HtmlAttr::Data("ars-focus-visible"))
+            .is_none(),
+        "pointer/programmatic focus must not show keyboard focus styling"
     );
 }
 
@@ -1383,6 +1442,107 @@ fn api_debug_impl_renders() {
     let api = service.connect(&|_| {});
 
     assert!(format!("{api:?}").contains("Api"));
+}
+
+// ----------------------------------------------------------------------------
+// Codex review regressions (PR #695)
+// ----------------------------------------------------------------------------
+
+#[test]
+fn multiple_prop_enables_real_multi_selection() {
+    // Props::multiple(true) alone (selection_mode left at default Single) must
+    // enable real multi-selection, not just aria-multiselectable.
+    let mut service = service(props().multiple(true));
+    drop(service.send(Event::SelectNode(key(2))));
+    drop(service.send(Event::SelectNode(key(3))));
+
+    let api = service.connect(&|_| {});
+    assert!(api.is_node_selected(&key(2)));
+    assert!(
+        api.is_node_selected(&key(3)),
+        "multiple=true must allow more than one selected node"
+    );
+}
+
+#[test]
+fn set_props_switch_to_multiple_reconfigures_selection() {
+    let mut service = service(props()); // single mode
+    drop(service.send(Event::SelectNode(key(2))));
+
+    drop(service.set_props(props().multiple(true))); // switch to multiple
+    drop(service.send(Event::SelectNode(key(3))));
+
+    let api = service.connect(&|_| {});
+    assert!(
+        api.is_node_selected(&key(2)) && api.is_node_selected(&key(3)),
+        "after switching to multiple at runtime, both nodes stay selected"
+    );
+}
+
+#[test]
+fn set_props_switch_to_none_stops_selection() {
+    let mut service = service(props().selected(selection::Set::Single(key(2))));
+    drop(
+        service.set_props(
+            props()
+                .selected(selection::Set::Single(key(2)))
+                .selection_mode(selection::Mode::None),
+        ),
+    );
+    // In None mode further selection is rejected.
+    let result = service.send(Event::SelectNode(key(3)));
+    assert!(!result.context_changed);
+    assert!(!service.connect(&|_| {}).is_node_selected(&key(3)));
+}
+
+#[test]
+fn expand_all_expands_lazy_branches() {
+    // A node with the has_children flag but no loaded children is a lazy
+    // branch; ExpandAll must expand it so consumers can trigger lazy loading.
+    let items = TreeCollection::new(vec![leaf_with(
+        9,
+        "Lazy",
+        TreeItem {
+            has_children: true,
+            ..item("Lazy")
+        },
+    )]);
+    let mut service = service(props().items(items));
+    drop(service.send(Event::ExpandAll));
+    assert!(service.context().expanded.get().contains(&key(9)));
+}
+
+#[test]
+fn drag_over_rejects_unknown_target_key() {
+    let mut service = service(dnd_props());
+    drop(service.send(Event::DragStart(key(2))));
+    let result = service.send(Event::DragOver(CollectionDropTarget {
+        key: key(999), // not a node in the collection
+        position: DropPosition::On,
+    }));
+    assert!(!result.context_changed);
+    assert!(service.context().drop_target.is_none());
+}
+
+#[test]
+fn typeahead_matches_displayed_label_not_text_value() {
+    // text_value differs from the displayed label; typing the label's first
+    // letter must focus the node.
+    let labeled = TreeItemConfig {
+        key: key(1),
+        text_value: "zzz".to_string(),
+        value: TreeItem {
+            label: "Apple".to_string(),
+            ..TreeItem::default()
+        },
+        children: Vec::new(),
+        default_expanded: false,
+    };
+    let items = TreeCollection::new(vec![labeled, leaf(2, "Banana")]);
+    let mut service = service(props().items(items));
+
+    drop(service.send(Event::TypeaheadSearch('a'))); // matches "Apple" label
+    assert_eq!(service.context().focused_node, Some(key(1)));
 }
 
 // ----------------------------------------------------------------------------
@@ -1438,7 +1598,7 @@ fn branch_snapshots() {
 
     let mut focused = service(props());
 
-    drop(focused.send(Event::FocusNode(key(1))));
+    drop(focused.send(Event::FocusFirst)); // keyboard focus on node 1 -> focus-visible
 
     assert_snapshot!(
         "tree_view_branch_focus_visible",

@@ -513,12 +513,14 @@ impl ars_core::Machine for Machine {
             .map(|node| node.key.clone())
             .collect::<BTreeSet<Key>>();
 
+        // `multiple = true` upgrades the effective mode to `Multiple`.
+        let selection_mode = effective_selection_mode(props);
+
         // Seed the selection state machine from the resolved initial selection
         // so it stays consistent with the `selected` binding on the first
         // `SelectNode`/`DeselectNode` (the spec's split init left them diverging).
-        let mut selection_state =
-            selection::State::new(props.selection_mode, props.selection_behavior)
-                .with_disabled(disabled_keys);
+        let mut selection_state = selection::State::new(selection_mode, props.selection_behavior)
+            .with_disabled(disabled_keys);
 
         selection_state.selected_keys = selected.get().clone();
 
@@ -532,7 +534,7 @@ impl ars_core::Machine for Machine {
                 focused_node: None,
                 focus_visible: false,
                 multiple: props.multiple,
-                selection_mode: props.selection_mode,
+                selection_mode,
                 typeahead_buffer: String::new(),
                 locale: env.locale.clone(),
                 messages: messages.clone(),
@@ -569,6 +571,10 @@ impl ars_core::Machine for Machine {
                     expanded.remove(&key);
 
                     ctx.expanded.set(expanded);
+                    // The focused node may now be hidden under the collapsed
+                    // branch; keep `aria-activedescendant` pointing at a
+                    // rendered element.
+                    clamp_focus_to_visible(ctx);
                 }))
             }
 
@@ -585,6 +591,7 @@ impl ars_core::Machine for Machine {
                     }
 
                     ctx.expanded.set(expanded);
+                    clamp_focus_to_visible(ctx);
                 }))
             }
 
@@ -612,7 +619,9 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            Event::FocusNode(key) => Some(focus_plan(key.clone())),
+            // Pointer / programmatic focus: do not force the keyboard
+            // focus ring (modality is not keyboard).
+            Event::FocusNode(key) => Some(focus_plan(key.clone(), false)),
 
             Event::Focus { is_keyboard } => {
                 let is_keyboard = *is_keyboard;
@@ -631,24 +640,38 @@ impl ars_core::Machine for Machine {
 
             Event::FocusPrev => focus_relative(ctx, Direction::Prev),
 
-            Event::FocusFirst => visible_keys(ctx).first().cloned().map(focus_plan),
+            Event::FocusFirst => visible_keys(ctx)
+                .first()
+                .cloned()
+                .map(|key| focus_plan(key, true)),
 
-            Event::FocusLast => visible_keys(ctx).last().cloned().map(focus_plan),
+            Event::FocusLast => visible_keys(ctx)
+                .last()
+                .cloned()
+                .map(|key| focus_plan(key, true)),
 
             Event::FocusParent => ctx
                 .focused_node
                 .as_ref()
                 .and_then(|focused| ctx.items.get(focused))
                 .and_then(|node| node.parent_key.clone())
-                .map(focus_plan),
+                .map(|key| focus_plan(key, true)),
 
-            Event::TypeaheadSearch(ch) => typeahead_target(ctx, *ch).map(focus_plan),
+            Event::TypeaheadSearch(ch) => {
+                typeahead_target(ctx, *ch).map(|key| focus_plan(key, true))
+            }
 
             Event::ExpandAll => {
+                // Include lazy branches (the item-level `has_children` flag) so
+                // bulk expansion can trigger consumer lazy-loading, matching how
+                // `branch_attrs`/`leaf_attrs` treat the flag as expandable.
                 let expandable = ctx
                     .items
                     .all_nodes()
-                    .filter(|node| node.has_children)
+                    .filter(|node| {
+                        node.has_children
+                            || node.value.as_ref().is_some_and(|item| item.has_children)
+                    })
                     .map(|node| node.key.clone())
                     .collect::<Vec<_>>();
 
@@ -663,6 +686,7 @@ impl ars_core::Machine for Machine {
 
             Event::CollapseAll => Some(TransitionPlan::context_only(|ctx: &mut Context| {
                 ctx.expanded.set(BTreeSet::new());
+                clamp_focus_to_visible(ctx);
             })),
 
             // ── Drag and drop reorder ───────────────────────────────────
@@ -744,10 +768,14 @@ impl ars_core::Machine for Machine {
 
             Event::SyncProps => {
                 // Re-derive prop-backed context from the new props: the data
-                // source, the controlled bindings, and the disabled-key set.
+                // source, the controlled bindings, the disabled-key set, and the
+                // selection configuration (mode/behavior/multiple).
                 let items = props.items.clone();
                 let selected = props.selected.clone();
                 let expanded = props.expanded.clone();
+                let multiple = props.multiple;
+                let selection_mode = effective_selection_mode(props);
+                let selection_behavior = props.selection_behavior;
                 let disabled_keys = items
                     .all_nodes()
                     .filter(|node| node.value.as_ref().is_some_and(|item| item.disabled))
@@ -756,14 +784,21 @@ impl ars_core::Machine for Machine {
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.items = items;
+                    ctx.multiple = multiple;
+                    ctx.selection_mode = selection_mode;
                     ctx.selected.sync_controlled(selected);
                     ctx.expanded.sync_controlled(expanded);
 
-                    let mut new_state = ctx.selection_state.clone().with_disabled(disabled_keys);
-
+                    // Rebuild the selection machine with the new configuration,
+                    // preserving the synced selection set.
+                    let mut new_state = selection::State::new(selection_mode, selection_behavior)
+                        .with_disabled(disabled_keys);
                     new_state.selected_keys = ctx.selected.get().clone();
-
                     ctx.selection_state = new_state;
+
+                    // A removed/relocated focused node must not leave a dangling
+                    // active descendant.
+                    clamp_focus_to_visible(ctx);
                 }))
             }
         }
@@ -784,9 +819,16 @@ impl ars_core::Machine for Machine {
     }
 
     fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
-        // Re-sync when the data source or either controlled binding changes —
-        // e.g. after a reorder, where the consumer re-supplies `items`.
-        if old.items != new.items || old.selected != new.selected || old.expanded != new.expanded {
+        // Re-sync when the data source, a controlled binding, or any selection
+        // configuration field changes — e.g. after a reorder (new `items`) or
+        // when switching a tree between single and multiple selection.
+        if old.items != new.items
+            || old.selected != new.selected
+            || old.expanded != new.expanded
+            || old.multiple != new.multiple
+            || old.selection_mode != new.selection_mode
+            || old.selection_behavior != new.selection_behavior
+        {
             vec![Event::SyncProps]
         } else {
             Vec::new()
@@ -802,12 +844,15 @@ enum Direction {
 }
 
 /// Build a focus transition that moves the indicator to `key` and emits the
-/// scroll-into-view intent.
-fn focus_plan(key: Key) -> TransitionPlan<Machine> {
+/// scroll-into-view intent. `keyboard` carries the focus modality:
+/// keyboard-driven navigation sets `focus_visible` so adapters render the
+/// keyboard focus ring, while pointer/programmatic focus (`FocusNode`) leaves
+/// it cleared so a mouse/touch activation does not show keyboard styling.
+fn focus_plan(key: Key, keyboard: bool) -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Focused)
         .apply(move |ctx: &mut Context| {
             ctx.focused_node = Some(key);
-            ctx.focus_visible = true;
+            ctx.focus_visible = keyboard;
         })
         .with_effect(PendingEffect::named(Effect::ScrollFocusedIntoView))
 }
@@ -845,7 +890,7 @@ fn focus_relative(ctx: &Context, direction: Direction) -> Option<TransitionPlan<
         }
     };
 
-    target.cloned().map(focus_plan)
+    target.cloned().map(|key| focus_plan(key, true))
 }
 
 /// Find the next visible node whose label starts with `ch` (case-insensitive),
@@ -873,11 +918,68 @@ fn typeahead_target(ctx: &Context, ch: char) -> Option<Key> {
         .find(|key| {
             ctx.items
                 .get(key)
-                .and_then(|node| node.text_value.chars().next())
+                .and_then(|node| node_search_text(node).chars().next())
                 .map(|first| first.to_lowercase().next().unwrap_or(first))
                 == Some(needle)
         })
         .cloned()
+}
+
+/// Text a node is matched against during typeahead: the displayed
+/// [`TreeItem::label`] when present, falling back to the collection's
+/// `text_value`. The label is what the user sees, so typing its first letter
+/// must match even when a consumer's `text_value` differs from the label.
+fn node_search_text(node: &Node<TreeItem>) -> &str {
+    node.value
+        .as_ref()
+        .map(|item| item.label.as_str())
+        .filter(|label| !label.is_empty())
+        .unwrap_or(node.text_value.as_str())
+}
+
+/// The selection mode actually used by the machine. The documented
+/// `Props::multiple(true)` shortcut upgrades the mode to `Multiple` so that
+/// multi-selection (not just `aria-multiselectable`) actually works without the
+/// caller also having to set `selection_mode(Multiple)`.
+const fn effective_selection_mode(props: &Props) -> selection::Mode {
+    if props.multiple {
+        selection::Mode::Multiple
+    } else {
+        props.selection_mode
+    }
+}
+
+/// After an expansion or data-source change, keep `focused_node` pointing at a
+/// rendered (visible) node. If the focused node became hidden under a collapsed
+/// ancestor, move focus to its nearest visible ancestor; if it was removed
+/// entirely (no visible ancestor), clear it. This prevents `root_attrs` from
+/// emitting `aria-activedescendant` for an element adapters no longer render.
+fn clamp_focus_to_visible(ctx: &mut Context) {
+    let Some(focused) = ctx.focused_node.clone() else {
+        return;
+    };
+
+    let visible = visible_keys(ctx);
+    if visible.contains(&focused) {
+        return;
+    }
+
+    let mut current = ctx
+        .items
+        .get(&focused)
+        .and_then(|node| node.parent_key.clone());
+    while let Some(ancestor) = current {
+        if visible.contains(&ancestor) {
+            ctx.focused_node = Some(ancestor);
+            return;
+        }
+        current = ctx
+            .items
+            .get(&ancestor)
+            .and_then(|node| node.parent_key.clone());
+    }
+
+    ctx.focused_node = None;
 }
 
 /// The ordered list of valid keyboard drop slots for the dragged node.
@@ -965,14 +1067,18 @@ fn is_descendant(items: &TreeCollection<TreeItem>, ancestor: &Key, candidate: &K
     false
 }
 
-/// Whether dropping the dragged node at `target` is valid: never onto itself or
-/// any of its descendants (which would create a cycle).
+/// Whether dropping the dragged node at `target` is valid: the target must be a
+/// real node in the collection (adapters can send stale/unknown keys during
+/// pointer hit-testing), and never the dragged node itself or any of its
+/// descendants (which would create a cycle).
 fn is_valid_drop(
     items: &TreeCollection<TreeItem>,
     dragging: &Key,
     target: &CollectionDropTarget,
 ) -> bool {
-    &target.key != dragging && !is_descendant(items, dragging, &target.key)
+    items.get(&target.key).is_some()
+        && &target.key != dragging
+        && !is_descendant(items, dragging, &target.key)
 }
 
 /// The path of keys from the root down to `key` (inclusive).
@@ -1120,7 +1226,9 @@ impl Api<'_> {
             .set(part_attr, part_val)
             .set(HtmlAttr::Role, "tree");
 
-        if self.ctx.multiple {
+        // Advertise multi-selectability whenever multiple selection is actually
+        // possible (either the `multiple` shortcut or `selection_mode` Multiple).
+        if self.ctx.multiple || self.ctx.selection_mode == selection::Mode::Multiple {
             attrs.set(HtmlAttr::Aria(AriaAttr::MultiSelectable), "true");
         }
 
@@ -1404,11 +1512,15 @@ impl Api<'_> {
             KeyboardKey::End => (self.send)(Event::FocusLast),
 
             KeyboardKey::ArrowRight => {
-                // Expand a collapsed branch; otherwise enter the first child.
-                if self.is_branch(node_id) && !self.is_node_expanded(node_id) {
-                    (self.send)(Event::ExpandNode(node_id.clone()));
-                } else {
-                    (self.send)(Event::FocusNext);
+                // Branch only: expand when collapsed, else enter the first
+                // child. On a leaf there is nothing to expand or enter, so the
+                // key is inert (WAI-ARIA tree pattern).
+                if self.is_branch(node_id) {
+                    if self.is_node_expanded(node_id) {
+                        (self.send)(Event::FocusNext);
+                    } else {
+                        (self.send)(Event::ExpandNode(node_id.clone()));
+                    }
                 }
             }
 
@@ -1421,10 +1533,16 @@ impl Api<'_> {
                 }
             }
 
-            // Enter selects; Space toggles selection (selection mode/behavior
-            // determine the concrete result inside `SelectNode`).
-            KeyboardKey::Enter | KeyboardKey::Space => {
-                (self.send)(Event::SelectNode(node_id.clone()));
+            // Enter selects the focused node; Space toggles its selection
+            // (deselects when already selected) per the WAI-ARIA tree contract.
+            KeyboardKey::Enter => (self.send)(Event::SelectNode(node_id.clone())),
+
+            KeyboardKey::Space => {
+                if self.is_node_selected(node_id) {
+                    (self.send)(Event::DeselectNode(node_id.clone()));
+                } else {
+                    (self.send)(Event::SelectNode(node_id.clone()));
+                }
             }
 
             _ => {
