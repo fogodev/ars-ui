@@ -95,6 +95,8 @@ impl ComponentMessages for Messages {}
 pub struct Props {
     /// Component instance ID.
     pub id: String,
+    /// Visible label rendered by adapters through the label part.
+    pub label: Option<String>,
     /// Committed rating value.
     pub value: Option<f64>,
     /// Default rating value.
@@ -125,6 +127,7 @@ impl Default for Props {
     fn default() -> Self {
         Self {
             id: String::new(),
+            label: None,
             value: None,
             default_value: 0.0,
             count: NonZero::new(5).expect("non-zero"),
@@ -385,6 +388,10 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Control.data_attrs();
         p.set(scope_attr, scope_val);
         p.set(part_attr, part_val);
+        if self.props.label.is_some() {
+            let label_id = format!("{}-label", self.props.id);
+            p.set(HtmlAttr::Aria(AriaAttr::LabelledBy), label_id);
+        }
         // Use slider pattern for half-ratings; radio group for whole-number only
         if self.ctx.allow_half {
             p.set(HtmlAttr::Role, "slider");
@@ -400,6 +407,9 @@ impl<'a> Api<'a> {
         }
         if self.ctx.disabled {
             p.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
+        if self.ctx.readonly {
+            p.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true");
         }
         // Event handlers (mouseleave for unhover) are typed methods on the Api struct.
         p
@@ -444,7 +454,9 @@ impl<'a> Api<'a> {
             p.set(HtmlAttr::Name, name);
         }
         p.set(HtmlAttr::Value, self.ctx.value.get().to_string());
-        if self.props.required { p.set_bool(HtmlAttr::Required, true); }
+        if self.ctx.disabled {
+            p.set_bool(HtmlAttr::Disabled, true);
+        }
         if let Some(ref form) = self.props.form {
             p.set(HtmlAttr::Form, form);
         }
@@ -548,6 +560,7 @@ fn default_item_label() -> MessageFn<dyn Fn(f64, &Locale) -> String + Send + Syn
 
 | Feature                     | ars-ui                | Ark UI              | Notes                                  |
 | --------------------------- | --------------------- | ------------------- | -------------------------------------- |
+| `label`                     | `Option<String>`      | --                  | Core-owned visible label text          |
 | `value` / `default_value`   | `Option<f64>` / `f64` | `number` / `number` | Equivalent                             |
 | `count`                     | `NonZero<u32>`        | `number` (5)        | Equivalent                             |
 | `allow_half`                | `bool`                | `boolean`           | Equivalent                             |

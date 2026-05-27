@@ -31,6 +31,9 @@ pub struct Props {
     /// Component instance ID.
     pub id: String,
 
+    /// Visible label text rendered by adapters through the label part.
+    pub label: Option<String>,
+
     /// Controlled committed rating value.
     pub value: Option<f64>,
 
@@ -67,6 +70,7 @@ impl Default for Props {
     fn default() -> Self {
         Self {
             id: String::new(),
+            label: None,
             value: None,
             default_value: 0.0,
             count: NonZero::new(5).expect("rating count is non-zero"),
@@ -92,6 +96,13 @@ impl Props {
     #[must_use]
     pub fn id(mut self, id: impl Into<String>) -> Self {
         self.id = id.into();
+        self
+    }
+
+    /// Sets the visible label text rendered by adapters.
+    #[must_use]
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
         self
     }
 
@@ -433,12 +444,12 @@ impl ars_core::Machine for Machine {
         }
 
         match event {
-            Event::Rate(value) => Some(rate_plan(
+            Event::Rate(value) => rate_plan(
                 *value,
                 context,
                 props,
                 keyboard_focus_index(*value, context, props),
-            )),
+            ),
 
             Event::HoverItem(index) => {
                 let index = clamp_index(*index, context.count);
@@ -498,31 +509,31 @@ impl ars_core::Machine for Machine {
                 let value =
                     (*context.value.get() + effective_step(props)).min(max_value(context.count));
 
-                Some(rate_plan(
+                rate_plan(
                     value,
                     context,
                     props,
                     keyboard_focus_index(value, context, props),
-                ))
+                )
             }
 
             Event::DecrementRating => {
                 let value = (*context.value.get() - effective_step(props)).max(0.0);
 
-                Some(rate_plan(
+                rate_plan(
                     value,
                     context,
                     props,
                     keyboard_focus_index(value, context, props),
-                ))
+                )
             }
 
-            Event::ClearRating => Some(rate_plan(
+            Event::ClearRating => rate_plan(
                 0.0,
                 context,
                 props,
                 keyboard_focus_index(0.0, context, props),
-            )),
+            ),
 
             Event::SyncProps => unreachable!("SyncProps handled before interactivity guards"),
         }
@@ -545,6 +556,7 @@ impl ars_core::Machine for Machine {
     fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
         if old.value != new.value
             || old.id != new.id
+            || old.label != new.label
             || old.count != new.count
             || old.allow_half != new.allow_half
             || old.step != new.step
@@ -642,6 +654,13 @@ impl Api<'_> {
         let mut attrs = part_attrs(&Part::Control);
 
         attrs.set(HtmlAttr::Id, format!("{}-control", self.props.id));
+
+        if self.props.label.is_some() {
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::LabelledBy),
+                format!("{}-label", self.props.id),
+            );
+        }
 
         if self.uses_slider_pattern() {
             attrs
@@ -764,6 +783,10 @@ impl Api<'_> {
         }
 
         attrs.set(HtmlAttr::Value, self.context.value.get().to_string());
+
+        if self.context.disabled {
+            attrs.set(HtmlAttr::Disabled, "true");
+        }
 
         if let Some(form) = &self.props.form {
             attrs.set(HtmlAttr::Form, form);
@@ -918,25 +941,31 @@ fn rate_plan(
     context: &Context,
     props: &Props,
     focused_index: Option<usize>,
-) -> TransitionPlan<Machine> {
+) -> Option<TransitionPlan<Machine>> {
     let value = round_to_step(
         sanitize_value(value, context.count),
         effective_step(props),
         context.count,
     );
+    if (value - *context.value.get()).abs() < f64::EPSILON {
+        return None;
+    }
+
     let target = focused_index.map_or(State::Idle, |index| State::Focused { index });
 
-    TransitionPlan::to(target)
-        .apply(move |ctx: &mut Context| {
-            ctx.value.set(value);
-            ctx.requested_value = Some(value);
-            ctx.hovered_value = None;
+    Some(
+        TransitionPlan::to(target)
+            .apply(move |ctx: &mut Context| {
+                ctx.value.set(value);
+                ctx.requested_value = Some(value);
+                ctx.hovered_value = None;
 
-            if let Some(index) = focused_index {
-                ctx.focused_index = Some(index);
-            }
-        })
-        .with_named_effect(Effect::ValueChange, |_ctx, _props, _send| no_cleanup())
+                if let Some(index) = focused_index {
+                    ctx.focused_index = Some(index);
+                }
+            })
+            .with_named_effect(Effect::ValueChange, |_ctx, _props, _send| no_cleanup()),
+    )
 }
 
 fn keyboard_focus_index(value: f64, context: &Context, props: &Props) -> Option<usize> {
@@ -1018,6 +1047,7 @@ mod tests {
         let mut service = service(
             Props::new()
                 .id("rating")
+                .label("Rating")
                 .default_value(2.0)
                 .name("score")
                 .required(true),
@@ -1032,8 +1062,7 @@ mod tests {
         assert_eq!(control_attrs.get(&HtmlAttr::Role), Some("radiogroup"));
         assert_eq!(
             control_attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
-            None,
-            "core does not reference an optional adapter label by default"
+            Some("rating-label")
         );
         assert_eq!(
             control_attrs.get(&HtmlAttr::Aria(AriaAttr::Required)),
@@ -1089,6 +1118,21 @@ mod tests {
         drop(service.send(Event::ClearRating));
 
         assert_eq!(*service.context().value.get(), 0.0);
+
+        let unlabeled = Service::<Machine>::new(
+            Props::new().id("rating"),
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        assert_eq!(
+            unlabeled
+                .connect(&|_| {})
+                .control_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+            None,
+            "control does not reference an optional label when no label is provided"
+        );
     }
 
     #[test]
@@ -1223,6 +1267,10 @@ mod tests {
         );
         assert_eq!(
             Machine::on_props_changed(&old, &old.clone().disabled(true)),
+            vec![Event::SyncProps]
+        );
+        assert_eq!(
+            Machine::on_props_changed(&old, &old.clone().label("Rating")),
             vec![Event::SyncProps]
         );
         assert_eq!(
@@ -1371,7 +1419,13 @@ mod tests {
             Some("true")
         );
 
-        let mut disabled = service(Props::new().id("rating").default_value(2.0).disabled(true));
+        let mut disabled = service(
+            Props::new()
+                .id("rating")
+                .default_value(2.0)
+                .name("score")
+                .disabled(true),
+        );
 
         drop(disabled.send(Event::IncrementRating));
         drop(disabled.send(Event::Focus {
@@ -1393,6 +1447,13 @@ mod tests {
                 .connect(&|_| {})
                 .control_attrs()
                 .get(&HtmlAttr::Aria(AriaAttr::Disabled)),
+            Some("true")
+        );
+        assert_eq!(
+            disabled
+                .connect(&|_| {})
+                .hidden_input_attrs()
+                .get(&HtmlAttr::Disabled),
             Some("true")
         );
 
@@ -1495,14 +1556,24 @@ mod tests {
 
         assert_eq!(*service.context().value.get(), 3.0);
 
-        drop(service.send(Event::IncrementRating));
+        let result = service.send(Event::IncrementRating);
 
         assert_eq!(*service.context().value.get(), 3.0);
+        assert!(
+            result.pending_effects.is_empty(),
+            "unchanged max-bound increment is a no-op"
+        );
     }
 
     #[test]
     fn rating_group_snapshots_cover_output_branches() {
-        let whole = service(Props::new().id("rating").default_value(2.0).name("score"));
+        let whole = service(
+            Props::new()
+                .id("rating")
+                .label("Rating")
+                .default_value(2.0)
+                .name("score"),
+        );
 
         let whole_api = whole.connect(&|_| {});
 

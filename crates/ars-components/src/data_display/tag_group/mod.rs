@@ -350,7 +350,13 @@ impl ars_core::Machine for Machine {
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         if let Event::SyncProps = event {
-            let items = collection_without_keys(&props.items, &context.removed_keys);
+            let removed_keys = context
+                .removed_keys
+                .iter()
+                .filter(|key| props.items.contains_key(key))
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let items = collection_without_keys(&props.items, &removed_keys);
             let disabled = props.disabled;
             let selection_mode = props.selection_mode;
             let controlled_keys = props
@@ -371,6 +377,7 @@ impl ars_core::Machine for Machine {
             return Some(
                 TransitionPlan::to(next_state).apply(move |ctx: &mut Context| {
                     ctx.items = items;
+                    ctx.removed_keys = removed_keys;
                     ctx.disabled = disabled;
                     ctx.selection_mode = selection_mode;
                     ctx.requested_selected_keys = None;
@@ -1267,6 +1274,46 @@ mod tests {
             single.context().selected_keys.get(),
             &selected(&["gamma"]),
             "removed controlled keys stay filtered after prop sync"
+        );
+        assert!(single.context().removed_keys.contains(&key("alpha")));
+
+        let items_without_alpha = StaticCollection::new([
+            (key("beta"), "Beta".into(), item("beta", "Beta", true)),
+            (key("gamma"), "Gamma".into(), item("gamma", "Gamma", false)),
+        ]);
+
+        drop(
+            single.set_props(
+                Props::new()
+                    .id("tags")
+                    .items(items_without_alpha)
+                    .selection_mode(selection::Mode::Multiple)
+                    .selected_keys(selected(&["alpha", "gamma"])),
+            ),
+        );
+
+        assert!(
+            !single.context().removed_keys.contains(&key("alpha")),
+            "parent omission clears the removed-key tombstone"
+        );
+
+        drop(
+            single.set_props(
+                Props::new()
+                    .id("tags")
+                    .items(items())
+                    .selection_mode(selection::Mode::Multiple)
+                    .selected_keys(selected(&["alpha", "gamma"])),
+            ),
+        );
+
+        assert!(
+            single.context().items.contains_key(&key("alpha")),
+            "later parent re-add restores a previously removed tag"
+        );
+        assert_eq!(
+            single.context().selected_keys.get(),
+            &selected(&["alpha", "gamma"])
         );
 
         let disabled_selection = service(
