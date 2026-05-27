@@ -2242,6 +2242,95 @@ fn file_upload_upload_complete_while_dragging_returns_to_drag_over() {
 }
 
 #[test]
+fn file_upload_controlled_finish_while_dragging_returns_to_drag_over() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").multiple(true).files(vec![item(
+            "file-1",
+            "a.png",
+            Status::Uploading,
+        )]),
+        &Env::default(),
+        &Messages::default(),
+    );
+    assert_eq!(service.state(), &State::Uploading);
+
+    drop(service.send(Event::DragEnter));
+    assert!(service.context().dragging);
+
+    // Controlled parent replaces the queue with no uploading items mid-drag:
+    // settle in DragOver (drag flags preserved), not Idle (which would strand
+    // the drag).
+    let result = service.send(Event::SetFiles(Some(vec![item(
+        "file-1",
+        "a.png",
+        Status::Complete,
+    )])));
+    assert!(result.state_changed);
+    assert_eq!(service.state(), &State::DragOver);
+    assert!(service.context().dragging);
+
+    drop(service.send(Event::DragLeave));
+    assert_eq!(service.state(), &State::Idle);
+    assert!(!service.context().dragging);
+}
+
+#[test]
+fn file_upload_retry_targets_specific_failed_file_after_a_mismatch() {
+    // The first file does not match the retried id, exercising the id-comparison
+    // branch in the will_retry scan before reaching the matching failed file.
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").default_files(vec![
+            item("file-1", "a.png", Status::Pending),
+            Item {
+                status: Status::Failed("e".into()),
+                error: Some("e".into()),
+                ..item("file-2", "b.png", Status::Failed("e".into()))
+            },
+        ]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::RetryFile {
+        file_id: "file-2".into(),
+    }));
+
+    assert_eq!(
+        service
+            .context()
+            .files
+            .get()
+            .iter()
+            .find(|f| f.id == "file-2")
+            .unwrap()
+            .status,
+        Status::Pending
+    );
+}
+
+#[test]
+fn file_upload_retry_non_failed_file_does_not_auto_start() {
+    let mut service = Service::<Machine>::new(
+        Props::new()
+            .id("upload")
+            .auto_upload(true)
+            .default_files(vec![item("file-1", "a.png", Status::Pending)]),
+        &Env::default(),
+        &Messages::default(),
+    );
+    assert_eq!(service.state(), &State::Idle);
+
+    // Retrying a file that is not failed must not chain StartUpload, which would
+    // otherwise start unrelated pending files.
+    drop(service.send(Event::RetryFile {
+        file_id: "file-1".into(),
+    }));
+
+    assert_eq!(service.state(), &State::Idle);
+    assert_eq!(service.context().files.get()[0].status, Status::Pending);
+}
+
+#[test]
 fn file_upload_open_file_picker_emits_effect() {
     let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
 

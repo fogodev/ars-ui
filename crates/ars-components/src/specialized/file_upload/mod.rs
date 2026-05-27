@@ -710,7 +710,8 @@ impl ars_core::Machine for Machine {
         // (controlled or default) with an uploading item must boot in `Uploading`,
         // not `Idle`, so progress/complete/error events are not dropped by the
         // `State::Uploading` guards before any prop sync runs.
-        let initial_state = reconciled_state(State::Idle, files.get()).unwrap_or(State::Idle);
+        let initial_state =
+            reconciled_state(State::Idle, files.get(), false).unwrap_or(State::Idle);
 
         (
             initial_state,
@@ -776,7 +777,8 @@ impl ars_core::Machine for Machine {
                 // uploading. Drive the resting state to match the currently
                 // visible queue (including entering `Uploading` from `DragOver`
                 // when a controlled upload begins mid-drag).
-                return reconciled_state(*state, ctx.files.get()).map(TransitionPlan::to);
+                return reconciled_state(*state, ctx.files.get(), ctx.dragging)
+                    .map(TransitionPlan::to);
             }
 
             Event::SetProps => {
@@ -1073,6 +1075,13 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::RetryFile { file_id }) => {
+                // Only re-queueing an actually-failed file should resume uploading.
+                // Otherwise a stale/duplicate retry would chain `StartUpload` and
+                // move unrelated `Pending` files to `Uploading`.
+                let will_retry =
+                    ctx.files.get().iter().any(|file| {
+                        &file.id == file_id && matches!(file.status, Status::Failed(_))
+                    });
                 let file_id = file_id.clone();
                 let plan = TransitionPlan::context_only(move |context: &mut Context| {
                     retry_file_by_id(context, &file_id);
@@ -1081,7 +1090,7 @@ impl ars_core::Machine for Machine {
                 // Mirror `FilesSelected`: when `auto_upload` is set, retrying a
                 // failed file re-queues it as `Pending` and immediately resumes
                 // uploading, so the retry control is not a silent no-op.
-                Some(if ctx.auto_upload {
+                Some(if ctx.auto_upload && will_retry {
                     plan.then(Event::StartUpload)
                 } else {
                     plan
@@ -2174,11 +2183,14 @@ fn next_id_after(files: &[Item]) -> u64 {
 /// the resting state between [`State::Idle`] and [`State::Uploading`] to match
 /// the visible queue. Returns `None` when no state change is required (including
 /// while in [`State::DragOver`], whose transient drag lifecycle is left untouched).
-fn reconciled_state(current: State, files: &[Item]) -> Option<State> {
+fn reconciled_state(current: State, files: &[Item], dragging: bool) -> Option<State> {
     let any_uploading = files.iter().any(|file| file.status == Status::Uploading);
 
     match (current, any_uploading) {
-        (State::Uploading, false) => Some(State::Idle),
+        // Leaving Uploading is drag-aware (same as `upload_finish_plan`): a drop
+        // still in progress settles in `DragOver` so the drag-leave path clears
+        // the flags rather than stranding `data-ars-dragging`; otherwise `Idle`.
+        (State::Uploading, false) => Some(finished_uploading_state(dragging)),
         // A controlled queue can begin an upload while a drag is in progress.
         // Enter `Uploading` (keeping the drag flags) so progress/complete/error
         // events are processed and the `Uploading` drag-leave path can later
