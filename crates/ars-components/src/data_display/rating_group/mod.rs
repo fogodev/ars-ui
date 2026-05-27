@@ -466,9 +466,15 @@ impl ars_core::Machine for Machine {
                 ))
             }
 
-            Event::UnHover => Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
-                ctx.hovered_value = None;
-            })),
+            Event::UnHover => {
+                let target = context
+                    .focused_index
+                    .map_or(State::Idle, |index| State::Focused { index });
+
+                Some(TransitionPlan::to(target).apply(|ctx: &mut Context| {
+                    ctx.hovered_value = None;
+                }))
+            }
 
             Event::Focus { index, is_keyboard } => {
                 let index = clamp_index(*index, context.count);
@@ -635,12 +641,7 @@ impl Api<'_> {
     pub fn control_attrs(&self) -> AttrMap {
         let mut attrs = part_attrs(&Part::Control);
 
-        attrs
-            .set(HtmlAttr::Id, format!("{}-control", self.props.id))
-            .set(
-                HtmlAttr::Aria(AriaAttr::LabelledBy),
-                format!("{}-label", self.props.id),
-            );
+        attrs.set(HtmlAttr::Id, format!("{}-control", self.props.id));
 
         if self.uses_slider_pattern() {
             attrs
@@ -673,6 +674,10 @@ impl Api<'_> {
 
         if self.context.disabled {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
+
+        if self.context.readonly {
+            attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true");
         }
 
         if self.props.required {
@@ -1027,8 +1032,8 @@ mod tests {
         assert_eq!(control_attrs.get(&HtmlAttr::Role), Some("radiogroup"));
         assert_eq!(
             control_attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
-            Some("rating-label"),
-            "the visible label part names the interactive control"
+            None,
+            "core does not reference an optional adapter label by default"
         );
         assert_eq!(
             control_attrs.get(&HtmlAttr::Aria(AriaAttr::Required)),
@@ -1310,6 +1315,21 @@ mod tests {
         assert_eq!(rating.state(), &State::Hovering { index: 2 });
         assert_eq!(rating.connect(&|_| {}).display_value(), 2.5);
 
+        drop(rating.send(Event::Focus {
+            index: 1,
+            is_keyboard: true,
+        }));
+        drop(rating.send(Event::HoverItem(3)));
+        drop(rating.send(Event::UnHover));
+
+        assert_eq!(rating.state(), &State::Focused { index: 1 });
+        assert_eq!(
+            rating.context().focused_index,
+            Some(1),
+            "hover exit preserves live focus state"
+        );
+        assert_eq!(rating.connect(&|_| {}).display_value(), 2.5);
+
         let custom_step = service(Props::new().id("rating").step(1.5).default_value(1.5));
 
         assert_eq!(
@@ -1341,6 +1361,13 @@ mod tests {
                 .connect(&|_| {})
                 .root_attrs()
                 .get(&HtmlAttr::Data("ars-readonly")),
+            Some("true")
+        );
+        assert_eq!(
+            readonly
+                .connect(&|_| {})
+                .control_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ReadOnly)),
             Some("true")
         );
 

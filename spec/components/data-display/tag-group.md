@@ -58,6 +58,8 @@ pub struct Context {
     pub selection_mode: selection::Mode,
     /// Currently selected tag keys.
     pub selected_keys: Bindable<BTreeSet<Key>>,
+    /// Latest user-requested selected keys for adapter change notification.
+    pub requested_selected_keys: Option<BTreeSet<Key>>,
     /// The current locale for message resolution.
     pub locale: Locale,
     /// Resolved messages for accessibility labels.
@@ -162,6 +164,8 @@ pub enum Event {
 pub enum Effect {
     /// Announce that a tag was removed.
     AnnounceRemoved,
+    /// Notify adapters that the user requested a selection change.
+    SelectionChange,
 }
 
 /// Machine for the TagGroup.
@@ -188,6 +192,7 @@ impl ars_core::Machine for Machine {
                 Some(keys) => Bindable::controlled(keys.clone()),
                 None       => Bindable::uncontrolled(props.default_selected_keys.clone()),
             },
+            requested_selected_keys: None,
             locale,
             messages,
         })
@@ -307,9 +312,55 @@ impl ars_core::Machine for Machine {
             }
 
             // Selection events honor selection::Mode and disallow_empty_selection.
-            Event::SelectTag(key) => { /* insert or replace selected key */ }
-            Event::DeselectTag(key) => { /* remove selected key unless this would empty a required selection */ }
-            Event::ToggleTag(key) => { /* dispatch select or deselect according to current selection state */ }
+            Event::SelectTag(key) => {
+                if ctx.selection_mode == selection::Mode::None
+                    || ctx.items.iter().find(|t| t.key == *key).map_or(true, |t| t.disabled)
+                {
+                    return None;
+                }
+
+                let key = key.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    let mut selected = ctx.selected_keys.get().clone();
+                    match ctx.selection_mode {
+                        selection::Mode::None => {}
+                        selection::Mode::Single => {
+                            selected.clear();
+                            selected.insert(key);
+                        }
+                        selection::Mode::Multiple => {
+                            selected.insert(key);
+                        }
+                    }
+                    ctx.requested_selected_keys = Some(selected.clone());
+                    ctx.selected_keys.set(selected);
+                }).with_named_effect(Effect::SelectionChange, |_ctx, _props, _send| no_cleanup()))
+            }
+
+            Event::DeselectTag(key) => {
+                if ctx.selection_mode == selection::Mode::None
+                    || !ctx.selected_keys.get().contains(key)
+                    || (props.disallow_empty_selection && ctx.selected_keys.get().len() <= 1)
+                {
+                    return None;
+                }
+
+                let key = key.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    let mut selected = ctx.selected_keys.get().clone();
+                    selected.remove(&key);
+                    ctx.requested_selected_keys = Some(selected.clone());
+                    ctx.selected_keys.set(selected);
+                }).with_named_effect(Effect::SelectionChange, |_ctx, _props, _send| no_cleanup()))
+            }
+
+            Event::ToggleTag(key) => {
+                if ctx.selected_keys.get().contains(key) {
+                    Self::transition(state, &Event::DeselectTag(key.clone()), ctx, props)
+                } else {
+                    Self::transition(state, &Event::SelectTag(key.clone()), ctx, props)
+                }
+            }
         }
     }
 

@@ -353,8 +353,10 @@ impl ars_core::Machine for Machine {
             let items = collection_without_keys(&props.items, &context.removed_keys);
             let disabled = props.disabled;
             let selection_mode = props.selection_mode;
-            let selected_keys = sync_selected_keys(context, props, &items);
-            let controlled_keys = props.selected_keys.as_ref().map(|_| selected_keys.clone());
+            let controlled_keys = props
+                .selected_keys
+                .as_ref()
+                .map(|keys| filter_selection(keys, &items, props.selection_mode));
             let focused_key = context
                 .focused_key
                 .as_ref()
@@ -377,6 +379,8 @@ impl ars_core::Machine for Machine {
                     ctx.selected_keys.sync_controlled(controlled_keys.clone());
 
                     if controlled_keys.is_none() {
+                        let selected_keys =
+                            filter_selection(ctx.selected_keys.get(), &ctx.items, selection_mode);
                         ctx.selected_keys.set(selected_keys);
                     }
                 }),
@@ -968,22 +972,7 @@ fn normalize_selection(selected: &mut BTreeSet<Key>, mode: selection::Mode) {
 }
 
 fn sync_selection(bindable: &mut Bindable<BTreeSet<Key>>, selected: BTreeSet<Key>) {
-    if !bindable.is_controlled() {
-        bindable.set(selected);
-    }
-}
-
-fn sync_selected_keys(
-    context: &Context,
-    props: &Props,
-    items: &StaticCollection<Tag>,
-) -> BTreeSet<Key> {
-    let source = props
-        .selected_keys
-        .as_ref()
-        .unwrap_or_else(|| context.selected_keys.get());
-
-    filter_selection(source, items, props.selection_mode)
+    bindable.set(selected);
 }
 
 #[cfg(test)]
@@ -1374,6 +1363,22 @@ mod tests {
             service.context().selected_keys.get(),
             &selected(&["alpha"]),
             "controlled selection remains on the last prop value until the parent accepts the request"
+        );
+
+        drop(
+            service.set_props(
+                Props::new()
+                    .id("tags")
+                    .items(items())
+                    .selection_mode(selection::Mode::Multiple),
+            ),
+        );
+
+        assert!(!service.context().selected_keys.is_controlled());
+        assert_eq!(
+            service.context().selected_keys.get(),
+            &selected(&["alpha", "gamma"]),
+            "releasing controlled selection preserves the pending requested value"
         );
 
         drop(
