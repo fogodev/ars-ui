@@ -635,12 +635,7 @@ impl Api<'_> {
     pub fn control_attrs(&self) -> AttrMap {
         let mut attrs = part_attrs(&Part::Control);
 
-        attrs
-            .set(HtmlAttr::Id, format!("{}-control", self.props.id))
-            .set(
-                HtmlAttr::Aria(AriaAttr::LabelledBy),
-                format!("{}-label", self.props.id),
-            );
+        attrs.set(HtmlAttr::Id, format!("{}-control", self.props.id));
 
         if self.uses_slider_pattern() {
             attrs
@@ -673,6 +668,10 @@ impl Api<'_> {
 
         if self.context.disabled {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
+
+        if self.props.required {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
 
         attrs
@@ -951,7 +950,11 @@ fn value_to_focus_index(value: f64, count: NonZero<u32>) -> usize {
 }
 
 fn sync_props_value(context: &Context, props: &Props) -> f64 {
-    let source = props.value.unwrap_or_else(|| *context.value.get());
+    let source = props.value.unwrap_or_else(|| {
+        context
+            .requested_value
+            .unwrap_or_else(|| *context.value.get())
+    });
 
     round_to_step(
         sanitize_value(source, props.count),
@@ -1018,7 +1021,18 @@ mod tests {
 
         assert_eq!(api.display_value(), 2.0);
         assert!(api.is_item_selected(1));
-        assert_eq!(api.control_attrs().get(&HtmlAttr::Role), Some("radiogroup"));
+        let control_attrs = api.control_attrs();
+
+        assert_eq!(control_attrs.get(&HtmlAttr::Role), Some("radiogroup"));
+        assert_eq!(
+            control_attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+            None,
+            "core does not reference an optional adapter label by default"
+        );
+        assert_eq!(
+            control_attrs.get(&HtmlAttr::Aria(AriaAttr::Required)),
+            Some("true")
+        );
 
         let selected_item = api.item_attrs(1);
 
@@ -1167,6 +1181,28 @@ mod tests {
     }
 
     #[test]
+    fn controlled_release_preserves_pending_requested_value() {
+        let mut service = service(Props::new().id("rating").value(2.0));
+
+        drop(service.send(Event::Rate(4.0)));
+
+        assert_eq!(*service.context().value.get(), 2.0);
+        assert_eq!(service.context().requested_value, Some(4.0));
+
+        drop(service.set_props(Props::new().id("rating")));
+
+        assert_eq!(*service.context().value.get(), 4.0);
+        assert_eq!(service.context().requested_value, None);
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .hidden_input_attrs()
+                .get(&HtmlAttr::Value),
+            Some("4")
+        );
+    }
+
+    #[test]
     fn on_props_changed_emits_sync_props_for_context_changes() {
         let old = Props::new().id("rating").value(2.0);
 
@@ -1295,6 +1331,13 @@ mod tests {
         }));
 
         assert_eq!(readonly.context().focused_index, Some(1));
+        assert_eq!(
+            readonly
+                .connect(&|_| {})
+                .root_attrs()
+                .get(&HtmlAttr::Data("ars-readonly")),
+            Some("true")
+        );
 
         let mut disabled = service(Props::new().id("rating").default_value(2.0).disabled(true));
 
@@ -1306,6 +1349,13 @@ mod tests {
 
         assert_eq!(*disabled.context().value.get(), 2.0);
         assert_eq!(disabled.context().focused_index, None);
+        assert_eq!(
+            disabled
+                .connect(&|_| {})
+                .root_attrs()
+                .get(&HtmlAttr::Data("ars-disabled")),
+            Some("true")
+        );
         assert_eq!(
             disabled
                 .connect(&|_| {})

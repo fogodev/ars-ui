@@ -22,14 +22,6 @@ AttrMap {
         ),
         (
             Aria(
-                LabelledBy,
-            ),
-            String(
-                "rating-label",
-            ),
-        ),
-        (
-            Aria(
                 ValueMax,
             ),
             String(

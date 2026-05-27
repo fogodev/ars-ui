@@ -21,14 +21,6 @@ AttrMap {
             ),
         ),
         (
-            Aria(
-                LabelledBy,
-            ),
-            String(
-                "rating-label",
-            ),
-        ),
-        (
             Id,
             String(
                 "rating-control",
