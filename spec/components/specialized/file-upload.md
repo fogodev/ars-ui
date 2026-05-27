@@ -239,8 +239,18 @@ pub struct Context {
     pub auto_upload: bool,
     /// Whether the dropzone is a directory upload.
     pub directory: bool,
+    /// Camera selection for mobile capture (`"user"` front, `"environment"` rear).
+    pub capture: Option<String>,
+    /// Name for form submission.
+    pub name: Option<String>,
     /// Drag-over nesting counter (for nested elements).
     pub drag_counter: u32,
+    /// Monotonic counter for the next generated file id.
+    ///
+    /// Only ever increases, so ids are never reused after files are removed —
+    /// preventing late async upload events from being applied to a different
+    /// file that happened to reuse an earlier id.
+    pub next_file_id: u64,
     /// Focused part.
     pub focused_part: Option<&'static str>,
     /// Locale for internationalized messages.
@@ -353,9 +363,13 @@ fn has_uploading_files(ctx: &Context, _props: &Props) -> bool {
 
 ```rust
 /// Validate a set of raw files against the constraints, returning accepted and rejected.
+///
+/// `next_file_id` is the machine's monotonic id counter; each accepted file
+/// consumes the next value and advances it so ids are never reused.
 fn validate_files(
     raw: &[RawFile],
     ctx: &Context,
+    next_file_id: &mut u64,
 ) -> (Vec<Item>, Vec<Rejection>) {
     let mut accepted = Vec::new();
     let mut rejected = Vec::new();
@@ -414,7 +428,7 @@ fn validate_files(
         }
 
         accepted.push(Item {
-            id: generate_file_id(),
+            id: generate_file_id(next_file_id),
             name: file.name.clone(),
             size: file.size,
             mime_type: file.mime_type.clone(),
@@ -425,6 +439,40 @@ fn validate_files(
     }
 
     (accepted, rejected)
+}
+
+/// Consumes the next monotonic file id and advances the counter, so ids are
+/// never reused after files are removed.
+fn generate_file_id(next_file_id: &mut u64) -> String {
+    let id = *next_file_id;
+    *next_file_id = next_file_id.saturating_add(1);
+    format!("file-{id}")
+}
+
+/// The next monotonic id that sits strictly above every `file-N` id in `files`.
+/// Seeds `Context::next_file_id` at init and advances it past externally
+/// supplied ids on `Event::SetFiles`.
+fn next_id_after(files: &[Item]) -> u64 {
+    files
+        .iter()
+        .filter_map(|file| file.id.strip_prefix("file-")?.parse::<u64>().ok())
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+/// Reconciles the machine state with an externally replaced file set.
+/// `State::Uploading` must hold exactly when at least one file is uploading, so
+/// a controlled queue replacement drives the resting state between Idle and
+/// Uploading. Returns `None` when no change is required (including in DragOver,
+/// whose transient drag lifecycle is left untouched).
+fn reconciled_state(current: State, files: &[Item]) -> Option<State> {
+    let any_uploading = files.iter().any(|f| f.status == Status::Uploading);
+    match (current, any_uploading) {
+        (State::Uploading, false) => Some(State::Idle),
+        (State::Idle, true) => Some(State::Uploading),
+        _ => None,
+    }
 }
 
 fn mime_matches(mime: &str, name: &str, patterns: &[String]) -> bool {
@@ -464,6 +512,7 @@ impl ars_core::Machine for Machine {
         let ids = ComponentIds::from_id(&props.id);
         let locale = env.locale.clone();
         let messages = messages.clone();
+        let next_file_id = next_id_after(files.get());
 
         (State::Idle, Context {
             files,
@@ -479,7 +528,10 @@ impl ars_core::Machine for Machine {
             max_files: props.max_files,
             auto_upload: props.auto_upload,
             directory: props.directory,
+            capture: props.capture.clone(),
+            name: props.name.clone(),
             drag_counter: 0,
+            next_file_id,
             focused_part: None,
             locale,
             messages,
@@ -556,7 +608,9 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
                     ctx.dragging = false;
                     ctx.drag_counter = 0;
-                    let (accepted, rejected) = validate_files(&raw, ctx);
+                    let mut next_file_id = ctx.next_file_id;
+                    let (accepted, rejected) = validate_files(&raw, ctx, &mut next_file_id);
+                    ctx.next_file_id = next_file_id;
                     ctx.rejected_files = rejected;
                     let mut current = ctx.files.get().clone();
                     current.extend(accepted);
@@ -569,7 +623,9 @@ impl ars_core::Machine for Machine {
             | (State::Uploading, Event::FilesSelected(raw_files)) => {
                 let raw = raw_files.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let (accepted, rejected) = validate_files(&raw, ctx);
+                    let mut next_file_id = ctx.next_file_id;
+                    let (accepted, rejected) = validate_files(&raw, ctx, &mut next_file_id);
+                    ctx.next_file_id = next_file_id;
                     ctx.rejected_files = rejected;
                     let mut current = ctx.files.get().clone();
                     current.extend(accepted);
@@ -599,7 +655,10 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx| {
                     let files = ctx.files.get().clone();
                     let updated: Vec<Item> = files.into_iter().map(|mut f| {
-                        if f.id == fid {
+                        // Only the actively uploading file accepts progress: a late
+                        // callback for a file already cancelled/failed/completed must
+                        // not mutate its terminal progress.
+                        if f.id == fid && f.status == Status::Uploading {
                             f.progress = prog;
                         }
                         f
@@ -700,41 +759,76 @@ impl ars_core::Machine for Machine {
 
             (_, Event::SetFiles(files)) => {
                 let files = files.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
+                // A controlled queue replacement must reconcile the machine state:
+                // `State::Uploading` holds exactly when at least one file is
+                // uploading, so dropping (or adding) the last uploading file drives
+                // the resting state between Idle and Uploading. `DragOver` is left
+                // untouched. The monotonic id counter is advanced past any supplied
+                // ids so later generated ids cannot collide with them.
+                let target = files
+                    .as_deref()
+                    .and_then(|files| reconciled_state(*state, files));
+                let apply = move |ctx: &mut Context| {
                     if let Some(files) = files {
+                        ctx.next_file_id = ctx.next_file_id.max(next_id_after(&files));
                         ctx.files.set(files.clone());
                         ctx.files.sync_controlled(Some(files));
                     } else {
                         ctx.files.sync_controlled(None);
                     }
-                }))
+                };
+                Some(match target {
+                    Some(state) => TransitionPlan::to(state).apply(apply),
+                    None => TransitionPlan::context_only(apply),
+                })
             }
 
-            (_, Event::SetProps) => Some(TransitionPlan::context_only({
-                let disabled = props.disabled;
-                let readonly = props.readonly;
-                let required = props.required;
-                let multiple = props.multiple;
-                let accept = props.accept.clone();
-                let max_file_size = props.max_file_size;
-                let min_file_size = props.min_file_size;
-                let max_files = props.max_files;
-                let auto_upload = props.auto_upload;
-                let directory = props.directory;
+            (_, Event::SetProps) => {
+                // Becoming disabled/read-only while dragging would trap the machine:
+                // the disabled guard swallows the DragLeave/Drop that clears
+                // `dragging`, so reset to Idle and clear the drag flags as part of
+                // the sync.
+                let reset_drag = (props.disabled || props.readonly)
+                    && matches!(state, State::DragOver);
+                let apply = {
+                    let disabled = props.disabled;
+                    let readonly = props.readonly;
+                    let required = props.required;
+                    let multiple = props.multiple;
+                    let accept = props.accept.clone();
+                    let max_file_size = props.max_file_size;
+                    let min_file_size = props.min_file_size;
+                    let max_files = props.max_files;
+                    let auto_upload = props.auto_upload;
+                    let directory = props.directory;
+                    let capture = props.capture.clone();
+                    let name = props.name.clone();
 
-                move |ctx| {
-                    ctx.disabled = disabled;
-                    ctx.readonly = readonly;
-                    ctx.required = required;
-                    ctx.multiple = multiple;
-                    ctx.accept = accept;
-                    ctx.max_file_size = max_file_size;
-                    ctx.min_file_size = min_file_size;
-                    ctx.max_files = max_files;
-                    ctx.auto_upload = auto_upload;
-                    ctx.directory = directory;
-                }
-            })),
+                    move |ctx: &mut Context| {
+                        ctx.disabled = disabled;
+                        ctx.readonly = readonly;
+                        ctx.required = required;
+                        ctx.multiple = multiple;
+                        ctx.accept = accept;
+                        ctx.max_file_size = max_file_size;
+                        ctx.min_file_size = min_file_size;
+                        ctx.max_files = max_files;
+                        ctx.auto_upload = auto_upload;
+                        ctx.directory = directory;
+                        ctx.capture = capture;
+                        ctx.name = name;
+                        if reset_drag {
+                            ctx.dragging = false;
+                            ctx.drag_counter = 0;
+                        }
+                    }
+                };
+                Some(if reset_drag {
+                    TransitionPlan::to(State::Idle).apply(apply)
+                } else {
+                    TransitionPlan::context_only(apply)
+                })
+            }
 
             _ => None,
         }
@@ -760,6 +854,8 @@ impl ars_core::Machine for Machine {
             || old.max_file_size != new.max_file_size
             || old.min_file_size != new.min_file_size
             || old.max_files != new.max_files
+            || old.capture != new.capture
+            || old.name != new.name
             || old.auto_upload != new.auto_upload
             || old.directory != new.directory
         {
@@ -1010,10 +1106,10 @@ impl<'a> Api<'a> {
         if self.ctx.directory {
             attrs.set(HtmlAttr::WebkitDirectory, "");
         }
-        if let Some(ref capture) = self.props.capture {
+        if let Some(ref capture) = self.ctx.capture {
             attrs.set(HtmlAttr::Capture, capture);
         }
-        if let Some(ref name) = self.props.name {
+        if let Some(ref name) = self.ctx.name {
             attrs.set(HtmlAttr::Name, name);
         }
         if self.ctx.required {

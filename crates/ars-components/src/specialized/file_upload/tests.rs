@@ -857,6 +857,262 @@ fn file_upload_complete_ignores_cancelled_file() {
 }
 
 #[test]
+fn file_upload_on_props_changed_emits_set_props_for_capture_and_name() {
+    let base = test_props();
+
+    assert_eq!(
+        Machine::on_props_changed(
+            &base,
+            &Props {
+                capture: Some("user".into()),
+                ..base.clone()
+            },
+        ),
+        vec![Event::SetProps]
+    );
+
+    assert_eq!(
+        Machine::on_props_changed(
+            &base,
+            &Props {
+                name: Some("attachments".into()),
+                ..base.clone()
+            },
+        ),
+        vec![Event::SetProps]
+    );
+}
+
+#[test]
+fn file_upload_set_props_syncs_capture_and_name_into_context() {
+    let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+    assert_eq!(service.context().capture, None);
+    assert_eq!(service.context().name, None);
+
+    let result = service.set_props(Props {
+        capture: Some("environment".into()),
+        name: Some("avatar".into()),
+        ..service.props().clone()
+    });
+
+    assert!(result.context_changed);
+    assert_eq!(service.context().capture.as_deref(), Some("environment"));
+    assert_eq!(service.context().name.as_deref(), Some("avatar"));
+
+    let attrs = service.connect(&|_| {}).hidden_input_attrs();
+    assert_eq!(attrs.get(&HtmlAttr::Capture), Some("environment"));
+    assert_eq!(attrs.get(&HtmlAttr::Name), Some("avatar"));
+}
+
+#[test]
+fn file_upload_disabling_during_drag_over_resets_to_idle() {
+    let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+    drop(service.send(Event::DragEnter));
+    assert_eq!(service.state(), &State::DragOver);
+    assert!(service.context().dragging);
+
+    let result = service.set_props(Props {
+        disabled: true,
+        ..service.props().clone()
+    });
+
+    assert!(result.state_changed);
+    assert_eq!(service.state(), &State::Idle);
+    assert!(!service.context().dragging);
+    assert_eq!(service.context().drag_counter, 0);
+}
+
+#[test]
+fn file_upload_readonly_during_drag_over_resets_to_idle() {
+    let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+    drop(service.send(Event::DragEnter));
+    assert_eq!(service.state(), &State::DragOver);
+
+    let result = service.set_props(Props {
+        readonly: true,
+        ..service.props().clone()
+    });
+
+    assert!(result.state_changed);
+    assert_eq!(service.state(), &State::Idle);
+    assert!(!service.context().dragging);
+    assert_eq!(service.context().drag_counter, 0);
+}
+
+#[test]
+fn file_upload_set_files_reconciles_uploading_to_idle_when_no_uploading_files() {
+    let mut service = uploading_service("file-1");
+    assert_eq!(service.state(), &State::Uploading);
+
+    let result = service.send(Event::SetFiles(Some(vec![item(
+        "file-1",
+        "doc.txt",
+        Status::Complete,
+    )])));
+
+    assert!(result.state_changed);
+    assert_eq!(service.state(), &State::Idle);
+}
+
+#[test]
+fn file_upload_set_files_reconciles_idle_to_uploading_when_files_uploading() {
+    let mut service = Service::<Machine>::new(
+        Props::new()
+            .id("upload")
+            .files(vec![item("file-1", "a.png", Status::Pending)]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    assert_eq!(service.state(), &State::Idle);
+
+    let result = service.send(Event::SetFiles(Some(vec![item(
+        "file-1",
+        "a.png",
+        Status::Uploading,
+    )])));
+
+    assert!(result.state_changed);
+    assert_eq!(service.state(), &State::Uploading);
+}
+
+#[test]
+fn file_upload_generated_ids_do_not_reuse_after_removal() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").multiple(true),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "a.png",
+        10,
+        "image/png",
+    )])));
+    let first_id = service.context().files.get()[0].id.clone();
+
+    drop(service.send(Event::RemoveFile {
+        file_id: first_id.clone(),
+    }));
+    assert!(service.context().files.get().is_empty());
+
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "b.png",
+        10,
+        "image/png",
+    )])));
+    let second_id = service.context().files.get()[0].id.clone();
+
+    assert_ne!(
+        first_id, second_id,
+        "generated file id must not be reused after the previous file was removed"
+    );
+}
+
+#[test]
+fn file_upload_generated_ids_avoid_collision_with_controlled_ids() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").multiple(true),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    // Parent supplies a file in the "file-N" id namespace, then relinquishes
+    // control so the queue becomes uncontrolled again.
+    drop(service.send(Event::SetFiles(Some(vec![item(
+        "file-1",
+        "external.png",
+        Status::Complete,
+    )]))));
+    drop(service.send(Event::SetFiles(None)));
+
+    // User adds a file; the generated id must not collide with the supplied one
+    // because the monotonic counter was advanced past it on SetFiles.
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "new.png",
+        10,
+        "image/png",
+    )])));
+
+    let ids: Vec<String> = service
+        .context()
+        .files
+        .get()
+        .iter()
+        .map(|file| file.id.clone())
+        .collect();
+
+    let mut unique = ids.clone();
+    unique.sort();
+    unique.dedup();
+
+    assert_eq!(
+        ids.len(),
+        unique.len(),
+        "generated id collided with an externally supplied id: {ids:?}"
+    );
+}
+
+#[test]
+fn file_upload_progress_ignored_for_non_uploading_file() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").multiple(true).default_files(vec![
+            item("file-1", "a.png", Status::Pending),
+            item("file-2", "b.png", Status::Pending),
+        ]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::StartUpload));
+
+    // Cancel file-1 while file-2 keeps uploading (machine stays in Uploading).
+    drop(service.send(Event::CancelFile {
+        file_id: "file-1".into(),
+    }));
+    assert_eq!(service.state(), &State::Uploading);
+
+    // A late progress callback for the cancelled file must be ignored.
+    drop(service.send(Event::UploadProgress {
+        file_id: "file-1".into(),
+        progress: 0.7,
+    }));
+
+    let cancelled = service
+        .context()
+        .files
+        .get()
+        .iter()
+        .find(|file| file.id == "file-1")
+        .expect("cancelled file remains in the queue")
+        .clone();
+
+    assert_eq!(cancelled.status, Status::Cancelled);
+    assert!(
+        cancelled.progress.abs() < f64::EPSILON,
+        "progress for a non-uploading file must not advance"
+    );
+
+    // The still-uploading file continues to accept progress.
+    drop(service.send(Event::UploadProgress {
+        file_id: "file-2".into(),
+        progress: 0.4,
+    }));
+    let uploading = service
+        .context()
+        .files
+        .get()
+        .iter()
+        .find(|file| file.id == "file-2")
+        .expect("uploading file remains in the queue")
+        .clone();
+    assert!((uploading.progress - 0.4).abs() < f64::EPSILON);
+}
+
+#[test]
 fn file_upload_open_file_picker_emits_effect() {
     let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
 
