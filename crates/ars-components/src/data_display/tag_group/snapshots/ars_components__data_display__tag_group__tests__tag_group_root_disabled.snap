@@ -54,6 +54,14 @@ AttrMap {
         ),
         (
             Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Aria(
                 Relevant,
             ),
             String(

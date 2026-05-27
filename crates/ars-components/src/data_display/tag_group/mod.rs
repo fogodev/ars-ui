@@ -431,31 +431,34 @@ impl ars_core::Machine for Machine {
 
                 let next_key = next_focus_after_removal(&context.items, &key);
 
-                let next_state = if next_key.is_some() {
-                    State::Focused
-                } else {
-                    State::Idle
-                };
+                let selection_changed = context.selected_keys.get().contains(&key);
+                let mut plan = TransitionPlan::to(State::Focused)
+                    .apply(move |ctx: &mut Context| {
+                        ctx.items = collection_without(&ctx.items, &key);
+                        ctx.removed_keys.insert(key.clone());
+                        let mut selected = ctx.selected_keys.get().clone();
 
-                Some(
-                    TransitionPlan::to(next_state)
-                        .apply(move |ctx: &mut Context| {
-                            ctx.items = collection_without(&ctx.items, &key);
-                            ctx.removed_keys.insert(key.clone());
-                            let mut selected = ctx.selected_keys.get().clone();
+                        if selected.remove(&key) {
+                            ctx.requested_selected_keys = Some(selected.clone());
+                        }
 
-                            selected.remove(&key);
-                            sync_selection(&mut ctx.selected_keys, selected);
+                        sync_selection(&mut ctx.selected_keys, selected);
 
-                            ctx.focused_key = next_key;
-                            ctx.focus_visible = true;
-                            ctx.removed_announcement =
-                                Some((ctx.messages.removed_announcement)(&label, &ctx.locale));
-                        })
-                        .with_named_effect(Effect::AnnounceRemoved, |_ctx, _props, _send| {
+                        ctx.focused_key = next_key;
+                        ctx.focus_visible = true;
+                        ctx.removed_announcement =
+                            Some((ctx.messages.removed_announcement)(&label, &ctx.locale));
+                    })
+                    .with_named_effect(Effect::AnnounceRemoved, |_ctx, _props, _send| no_cleanup());
+
+                if selection_changed {
+                    plan = plan
+                        .with_named_effect(Effect::SelectionChange, |_ctx, _props, _send| {
                             no_cleanup()
-                        }),
-                )
+                        });
+                }
+
+                Some(plan)
             }
 
             Event::FocusNext => {
@@ -604,6 +607,7 @@ impl Api<'_> {
         attrs
             .set(HtmlAttr::Id, &self.props.id)
             .set(HtmlAttr::Role, "grid")
+            .set(HtmlAttr::Aria(AriaAttr::Live), "polite")
             .set(HtmlAttr::Aria(AriaAttr::Atomic), "false")
             .set(HtmlAttr::Aria(AriaAttr::Relevant), "additions removals")
             .set(
@@ -622,6 +626,17 @@ impl Api<'_> {
             attrs
                 .set_bool(HtmlAttr::Data("ars-disabled"), true)
                 .set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
+
+        if !self.context.disabled
+            && self.context.focused_key.is_none()
+            && *self.state == State::Focused
+        {
+            attrs.set(HtmlAttr::TabIndex, "0");
+
+            if self.context.focus_visible {
+                attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
+            }
         }
 
         attrs
@@ -692,6 +707,8 @@ impl Api<'_> {
             attrs
                 .set(HtmlAttr::Aria(AriaAttr::Selected), "true")
                 .set_bool(HtmlAttr::Data("ars-selected"), true);
+        } else if self.context.selection_mode != selection::Mode::None {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Selected), "false");
         }
 
         if is_focused && self.context.focus_visible {
@@ -1083,6 +1100,7 @@ mod tests {
         let root = api.root_attrs();
 
         assert_eq!(root.get(&HtmlAttr::Role), Some("grid"));
+        assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::Live)), Some("polite"));
         assert_eq!(
             root.get(&HtmlAttr::Aria(AriaAttr::Label)),
             Some("Selected tags")
@@ -1223,6 +1241,11 @@ mod tests {
         drop(single.send(Event::RemoveTag(key("alpha"))));
 
         assert_eq!(single.context().selected_keys.get(), &selected(&["gamma"]));
+        assert_eq!(
+            single.context().requested_selected_keys.as_ref(),
+            Some(&selected(&["gamma"])),
+            "removing a selected tag exposes the requested selection"
+        );
         assert!(!single.context().items.contains_key(&key("alpha")));
 
         drop(
@@ -1267,6 +1290,50 @@ mod tests {
         );
 
         assert!(none.context().selected_keys.get().is_empty());
+    }
+
+    #[test]
+    fn removing_last_selected_tag_focuses_root_and_emits_selection_change() {
+        let mut service = service(
+            Props::new()
+                .id("tags")
+                .items(StaticCollection::new([(
+                    key("alpha"),
+                    "Alpha".into(),
+                    item("alpha", "Alpha", false),
+                )]))
+                .selection_mode(selection::Mode::Single)
+                .default_selected_keys(selected(&["alpha"])),
+        );
+
+        let result = service.send(Event::RemoveTag(key("alpha")));
+
+        assert_eq!(service.state(), &State::Focused);
+        assert_eq!(service.context().focused_key, None);
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .root_attrs()
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
+        assert_eq!(
+            service.context().requested_selected_keys.as_ref(),
+            Some(&BTreeSet::new())
+        );
+        assert_eq!(result.pending_effects.len(), 2);
+        assert!(
+            result
+                .pending_effects
+                .iter()
+                .any(|effect| effect.name == Effect::AnnounceRemoved)
+        );
+        assert!(
+            result
+                .pending_effects
+                .iter()
+                .any(|effect| effect.name == Effect::SelectionChange)
+        );
     }
 
     #[test]
@@ -1341,6 +1408,23 @@ mod tests {
         drop(none.send(Event::DeselectTag(key("alpha"))));
 
         assert!(none.context().selected_keys.get().is_empty());
+
+        let selectable = service(
+            Props::new()
+                .id("tags")
+                .items(items())
+                .selection_mode(selection::Mode::Multiple)
+                .default_selected_keys(selected(&["alpha"])),
+        );
+
+        assert_eq!(
+            selectable
+                .connect(&|_| {})
+                .tag_attrs(&key("gamma"))
+                .get(&HtmlAttr::Aria(AriaAttr::Selected)),
+            Some("false"),
+            "selectable but unselected tags expose aria-selected=false"
+        );
 
         let mut disabled = service(
             Props::new()

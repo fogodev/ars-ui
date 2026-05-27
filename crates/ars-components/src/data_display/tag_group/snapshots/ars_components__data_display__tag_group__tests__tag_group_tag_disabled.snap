@@ -45,6 +45,14 @@ AttrMap {
             ),
         ),
         (
+            Aria(
+                Selected,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
             Role,
             String(
                 "gridcell",

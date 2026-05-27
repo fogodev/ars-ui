@@ -690,7 +690,11 @@ impl Api<'_> {
                 )
                 .set(
                     HtmlAttr::Aria(AriaAttr::Checked),
-                    if selected { "true" } else { "false" },
+                    if self.is_item_checked(index) {
+                        "true"
+                    } else {
+                        "false"
+                    },
                 )
                 .set(
                     HtmlAttr::TabIndex,
@@ -800,8 +804,12 @@ impl Api<'_> {
         ((index + 1) as f64 - value).abs() < f64::EPSILON
     }
 
+    fn is_item_checked(&self, index: usize) -> bool {
+        ((index + 1) as f64 - *self.context.value.get()).abs() < f64::EPSILON
+    }
+
     fn uses_slider_pattern(&self) -> bool {
-        effective_step(self.props) < 1.0
+        effective_step(self.props).fract().abs() > f64::EPSILON
     }
 }
 
@@ -942,6 +950,12 @@ mod tests {
             Some("true")
         );
         assert_eq!(selected_item.get(&HtmlAttr::TabIndex), Some("0"));
+
+        assert_eq!(
+            api.item_attrs(0).get(&HtmlAttr::Aria(AriaAttr::Checked)),
+            Some("false"),
+            "only the exact committed value is checked in a radiogroup"
+        );
 
         let unselected_item = api.item_attrs(3);
 
@@ -1126,24 +1140,24 @@ mod tests {
 
     #[test]
     fn half_mode_slider_attrs_hover_and_rounding() {
-        let mut service = service(
+        let mut rating = service(
             Props::new()
                 .id("rating")
                 .allow_half(true)
                 .default_value(1.0),
         );
 
-        drop(service.send(Event::Rate(2.26)));
+        drop(rating.send(Event::Rate(2.26)));
 
-        assert_eq!(*service.context().value.get(), 2.5);
+        assert_eq!(*rating.context().value.get(), 2.5);
 
-        let half_item = service.connect(&|_| {}).item_attrs(2);
+        let half_item = rating.connect(&|_| {}).item_attrs(2);
 
         assert_eq!(half_item.get(&HtmlAttr::Data("ars-half")), Some("true"));
 
-        drop(service.send(Event::HoverItem(3)));
+        drop(rating.send(Event::HoverItem(3)));
 
-        let api = service.connect(&|_| {});
+        let api = rating.connect(&|_| {});
 
         assert_eq!(api.display_value(), 4.0);
         assert!(api.is_item_highlighted(3));
@@ -1160,6 +1174,17 @@ mod tests {
         assert_eq!(
             control.get(&HtmlAttr::Aria(AriaAttr::ValueText)),
             Some("2.5 of 5 stars")
+        );
+
+        let custom_step = service(Props::new().id("rating").step(1.5).default_value(1.5));
+
+        assert_eq!(
+            custom_step
+                .connect(&|_| {})
+                .control_attrs()
+                .get(&HtmlAttr::Role),
+            Some("slider"),
+            "fractional custom steps use the slider pattern even above one"
         );
     }
 
