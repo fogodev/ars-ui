@@ -1,0 +1,9 @@
+Our reviews arrived, start with the @.agents/skills/waiting-for-codex-review/SKILL.md but before that, rebase with the latest main and handle the merge conflicts
+
+---
+
+We've been consistently having issues on keeping the branch coverage of ars-components above the 90% threshold, CI just failed on it again. Should we back down a bit and decrease the required minimum branch coverage for ars-components, it feels like we have a bunch of guards in place that usually will never trigger, is it like it?
+
+---
+
+Let's go with 89%
