@@ -635,7 +635,12 @@ impl Api<'_> {
     pub fn control_attrs(&self) -> AttrMap {
         let mut attrs = part_attrs(&Part::Control);
 
-        attrs.set(HtmlAttr::Id, format!("{}-control", self.props.id));
+        attrs
+            .set(HtmlAttr::Id, format!("{}-control", self.props.id))
+            .set(
+                HtmlAttr::Aria(AriaAttr::LabelledBy),
+                format!("{}-label", self.props.id),
+            );
 
         if self.uses_slider_pattern() {
             attrs
@@ -754,10 +759,6 @@ impl Api<'_> {
         }
 
         attrs.set(HtmlAttr::Value, self.context.value.get().to_string());
-
-        if self.props.required {
-            attrs.set_bool(HtmlAttr::Required, true);
-        }
 
         if let Some(form) = &self.props.form {
             attrs.set(HtmlAttr::Form, form);
@@ -1026,8 +1027,8 @@ mod tests {
         assert_eq!(control_attrs.get(&HtmlAttr::Role), Some("radiogroup"));
         assert_eq!(
             control_attrs.get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
-            None,
-            "core does not reference an optional adapter label by default"
+            Some("rating-label"),
+            "the visible label part names the interactive control"
         );
         assert_eq!(
             control_attrs.get(&HtmlAttr::Aria(AriaAttr::Required)),
@@ -1062,7 +1063,11 @@ mod tests {
         assert_eq!(input.get(&HtmlAttr::Type), Some("hidden"));
         assert_eq!(input.get(&HtmlAttr::Name), Some("score"));
         assert_eq!(input.get(&HtmlAttr::Value), Some("2"));
-        assert_eq!(input.get(&HtmlAttr::Required), Some("true"));
+        assert_eq!(
+            input.get(&HtmlAttr::Required),
+            None,
+            "hidden inputs do not participate in native required validation"
+        );
 
         drop(service.send(Event::IncrementRating));
 

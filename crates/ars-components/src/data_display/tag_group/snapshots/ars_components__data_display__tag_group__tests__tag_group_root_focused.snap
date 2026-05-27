@@ -38,6 +38,14 @@ AttrMap {
         ),
         (
             Aria(
+                MultiSelectable,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
                 Atomic,
             ),
             String(

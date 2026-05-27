@@ -398,11 +398,13 @@ impl ars_core::Machine for Machine {
 
         match event {
             Event::Focus { item, is_keyboard } => {
-                let key = item
-                    .as_ref()
-                    .filter(|key| enabled_tag(context, key).is_some())
-                    .cloned()
-                    .or_else(|| first_enabled_key(&context.items));
+                let key = match item {
+                    Some(key) => {
+                        enabled_tag(context, key)?;
+                        Some(key.clone())
+                    }
+                    None => first_enabled_key(&context.items),
+                };
 
                 let is_keyboard = *is_keyboard;
 
@@ -622,6 +624,10 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
         }
 
+        if self.context.selection_mode == selection::Mode::Multiple {
+            attrs.set(HtmlAttr::Aria(AriaAttr::MultiSelectable), "true");
+        }
+
         if self.context.disabled {
             attrs
                 .set_bool(HtmlAttr::Data("ars-disabled"), true)
@@ -657,10 +663,14 @@ impl Api<'_> {
     pub fn list_attrs(&self) -> AttrMap {
         let mut attrs = part_attrs(&Part::List);
 
-        attrs.set(HtmlAttr::Role, "row").set(
-            HtmlAttr::Aria(AriaAttr::LabelledBy),
-            format!("{}-label", self.props.id),
-        );
+        attrs.set(HtmlAttr::Role, "row");
+
+        if self.props.label.is_some() {
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::LabelledBy),
+                format!("{}-label", self.props.id),
+            );
+        }
 
         attrs
     }
@@ -958,11 +968,9 @@ fn normalize_selection(selected: &mut BTreeSet<Key>, mode: selection::Mode) {
 }
 
 fn sync_selection(bindable: &mut Bindable<BTreeSet<Key>>, selected: BTreeSet<Key>) {
-    if bindable.is_controlled() {
-        bindable.sync_controlled(Some(selected.clone()));
+    if !bindable.is_controlled() {
+        bindable.set(selected);
     }
-
-    bindable.set(selected);
 }
 
 fn sync_selected_keys(
@@ -1240,7 +1248,11 @@ mod tests {
 
         drop(single.send(Event::RemoveTag(key("alpha"))));
 
-        assert_eq!(single.context().selected_keys.get(), &selected(&["gamma"]));
+        assert_eq!(
+            single.context().selected_keys.get(),
+            &selected(&["alpha", "gamma"]),
+            "controlled selection keeps the last prop value until props sync"
+        );
         assert_eq!(
             single.context().requested_selected_keys.as_ref(),
             Some(&selected(&["gamma"])),
@@ -1254,7 +1266,7 @@ mod tests {
                     .id("tags")
                     .items(items())
                     .selection_mode(selection::Mode::Multiple)
-                    .selected_keys(selected(&["alpha", "gamma"])),
+                    .selected_keys(selected(&["gamma"])),
             ),
         );
 
@@ -1360,8 +1372,23 @@ mod tests {
         );
         assert_eq!(
             service.context().selected_keys.get(),
-            &selected(&["alpha", "gamma"]),
-            "controlled request is mirrored so adapters can inspect the requested value"
+            &selected(&["alpha"]),
+            "controlled selection remains on the last prop value until the parent accepts the request"
+        );
+
+        drop(
+            service.set_props(
+                Props::new()
+                    .id("tags")
+                    .items(items())
+                    .selection_mode(selection::Mode::Multiple)
+                    .selected_keys(selected(&["alpha", "gamma"])),
+            ),
+        );
+
+        assert_eq!(
+            service.context().selected_keys.get(),
+            &selected(&["alpha", "gamma"])
         );
     }
 
@@ -1417,6 +1444,14 @@ mod tests {
                 .default_selected_keys(selected(&["alpha"])),
         );
 
+        assert_eq!(
+            selectable
+                .connect(&|_| {})
+                .root_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::MultiSelectable)),
+            Some("true"),
+            "multiple-selection grids expose the aria multiselectable state"
+        );
         assert_eq!(
             selectable
                 .connect(&|_| {})
@@ -1515,6 +1550,17 @@ mod tests {
 
         assert_eq!(service.context().focused_key, Some(key("gamma")));
 
+        drop(service.send(Event::Focus {
+            item: Some(key("beta")),
+            is_keyboard: true,
+        }));
+
+        assert_eq!(
+            service.context().focused_key,
+            Some(key("gamma")),
+            "explicit focus requests for disabled tags are no-ops"
+        );
+
         drop(service.send(Event::FocusPrevious));
 
         assert_eq!(service.context().focused_key, Some(key("alpha")));
@@ -1582,6 +1628,11 @@ mod tests {
                 .keys()
                 .any(|item_key| item_key == &key("beta"))
         );
+        assert_eq!(
+            disabled_item.context().focused_key,
+            None,
+            "focusing a disabled tag from idle does not redirect to another tag"
+        );
 
         let empty = service(Props::new().id("tags"));
 
@@ -1590,6 +1641,11 @@ mod tests {
         assert_eq!(empty.context().focused_key, None);
         assert_eq!(api.root_attrs().get(&HtmlAttr::Role), Some("grid"));
         assert_eq!(api.list_attrs().get(&HtmlAttr::Role), Some("row"));
+        assert_eq!(
+            api.list_attrs().get(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+            None,
+            "unlabelled groups do not reference a missing label element"
+        );
     }
 
     #[test]
