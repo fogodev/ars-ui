@@ -18,6 +18,7 @@ use ars_core::{
     AriaAttr, AttrMap, Bindable, ComponentMessages, ComponentPart, ConnectApi, Env, HasId,
     HtmlAttr, Locale, MessageFn, NoEffect, TransitionPlan,
 };
+use ars_i18n::{Plural, format_plural};
 use ars_interactions::{KeyboardEventData, KeyboardKey};
 
 type ItemLabelFn = dyn Fn(f64, &Locale) -> String + Send + Sync;
@@ -188,6 +189,9 @@ pub enum Event {
     /// Commit a rating value.
     Rate(f64),
 
+    /// Synchronize props mirrored into context.
+    SyncProps,
+
     /// Pointer entered a rating item.
     HoverItem(usize),
 
@@ -260,12 +264,13 @@ pub struct Messages {
 impl Default for Messages {
     fn default() -> Self {
         Self {
-            item_label: MessageFn::new(Arc::new(|value: f64, _locale: &Locale| {
-                if (value - 1.0).abs() < f64::EPSILON {
-                    format!("{value} star")
-                } else {
-                    format!("{value} stars")
-                }
+            item_label: MessageFn::new(Arc::new(|value: f64, locale: &Locale| {
+                let value_text = value.to_string();
+                let mut labels = Plural::from_other("{value} stars");
+
+                labels.one = Some("{value} star");
+
+                format_plural(locale, value, &labels, &[("value", &value_text)])
             }) as Arc<ItemLabelFn>),
         }
     }
@@ -344,6 +349,36 @@ impl ars_core::Machine for Machine {
         context: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        if let Event::SyncProps = event {
+            let count = props.count;
+            let allow_half = props.allow_half;
+            let readonly = props.readonly;
+            let disabled = props.disabled;
+            let value = sync_props_value(context, props);
+            let controlled_value = props.value.map(|_| value);
+            let focused_index = context
+                .focused_index
+                .filter(|_| !disabled)
+                .map(|index| clamp_index(index, count));
+            let target = focused_index.map_or(State::Idle, |index| State::Focused { index });
+
+            return Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
+                ctx.value.sync_controlled(controlled_value);
+
+                if controlled_value.is_none() {
+                    ctx.value.set(value);
+                }
+
+                ctx.hovered_value = None;
+                ctx.focused_index = focused_index;
+                ctx.focus_visible = ctx.focused_index.is_some() && ctx.focus_visible;
+                ctx.count = count;
+                ctx.allow_half = allow_half;
+                ctx.readonly = readonly;
+                ctx.disabled = disabled;
+            }));
+        }
+
         if context.disabled {
             return match event {
                 Event::Blur => Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
@@ -443,6 +478,8 @@ impl ars_core::Machine for Machine {
             }
 
             Event::ClearRating => Self::transition(_state, &Event::Rate(0.0), context, props),
+
+            Event::SyncProps => unreachable!("SyncProps handled before interactivity guards"),
         }
     }
 
@@ -457,6 +494,20 @@ impl ars_core::Machine for Machine {
             context,
             props,
             send,
+        }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        if old.value != new.value
+            || old.count != new.count
+            || old.allow_half != new.allow_half
+            || old.step != new.step
+            || old.readonly != new.readonly
+            || old.disabled != new.disabled
+        {
+            vec![Event::SyncProps]
+        } else {
+            Vec::new()
         }
     }
 }
@@ -774,6 +825,16 @@ fn round_to_step(value: f64, step: f64, count: NonZero<u32>) -> f64 {
     sanitize_value((value / step).round() * step, count)
 }
 
+fn sync_props_value(context: &Context, props: &Props) -> f64 {
+    let source = props.value.unwrap_or_else(|| *context.value.get());
+
+    round_to_step(
+        sanitize_value(source, props.count),
+        effective_step(props),
+        props.count,
+    )
+}
+
 fn clamp_index(index: usize, count: NonZero<u32>) -> usize {
     index.min(count.get().saturating_sub(1) as usize)
 }
@@ -790,7 +851,7 @@ mod tests {
     use alloc::{string::String, vec::Vec};
     use core::{cell::RefCell, num::NonZero};
 
-    use ars_core::{AttrMap, Env, Service};
+    use ars_core::{AttrMap, Env, Machine as _, Service};
     use ars_interactions::{KeyboardEventData, KeyboardKey};
     use insta::assert_snapshot;
 
@@ -928,6 +989,71 @@ mod tests {
                 Event::Rate(3.0),
             ]
         );
+    }
+
+    #[test]
+    fn prop_changes_sync_controlled_value_and_context_fields() {
+        let mut service = service(Props::new().id("rating").value(2.0).name("score"));
+
+        drop(service.send(Event::Focus {
+            index: 4,
+            is_keyboard: true,
+        }));
+        drop(service.send(Event::HoverItem(4)));
+        drop(
+            service.set_props(
+                Props::new()
+                    .id("rating")
+                    .value(4.0)
+                    .name("score")
+                    .count(NonZero::new(3).expect("nonzero"))
+                    .allow_half(true)
+                    .readonly(true)
+                    .disabled(true),
+            ),
+        );
+
+        assert_eq!(service.state(), &State::Idle);
+        assert_eq!(*service.context().value.get(), 3.0);
+        assert_eq!(service.context().count.get(), 3);
+        assert!(service.context().allow_half);
+        assert!(service.context().readonly);
+        assert!(service.context().disabled);
+        assert_eq!(service.context().focused_index, None);
+        assert_eq!(service.context().hovered_value, None);
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(
+            api.control_attrs().get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("3")
+        );
+        assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some("3"));
+    }
+
+    #[test]
+    fn on_props_changed_emits_sync_props_for_context_changes() {
+        let old = Props::new().id("rating").value(2.0);
+
+        assert!(Machine::on_props_changed(&old, &old).is_empty());
+        assert_eq!(
+            Machine::on_props_changed(&old, &old.clone().value(3.0)),
+            vec![Event::SyncProps]
+        );
+        assert_eq!(
+            Machine::on_props_changed(&old, &old.clone().disabled(true)),
+            vec![Event::SyncProps]
+        );
+    }
+
+    #[test]
+    fn default_item_label_uses_plural_rules() {
+        let messages = Messages::default();
+        let locale = Env::default().locale;
+
+        assert_eq!((messages.item_label)(1.0, &locale), "1 star");
+        assert_eq!((messages.item_label)(1.5, &locale), "1.5 stars");
+        assert_eq!((messages.item_label)(-1.0, &locale), "-1 star");
     }
 
     #[test]
