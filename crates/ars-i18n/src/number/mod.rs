@@ -880,6 +880,16 @@ fn fallback_format(value: f64, formatter: &Formatter) -> String {
         output = output.replace('.', &String::from(formatter.decimal_separator));
     }
 
+    // The minimal fallback formatter intentionally omits locale-specific
+    // grouping and the currency/unit affixes that the ICU4X and web-`Intl`
+    // backends apply. The percent sign is the one affix it does append, because
+    // a percentage rendered without it (`"50"` instead of `"50%"`) is not just
+    // less precise — it changes meaning, which matters for `aria-valuetext`
+    // exposed by components such as `meter` and `progress` in no-ICU4X builds.
+    if matches!(formatter.options.style, Style::Percent) {
+        output.push('%');
+    }
+
     output
 }
 
@@ -1290,6 +1300,18 @@ mod tests {
 
         assert_eq!(formatter.format(5.2), "+005,2");
         assert_eq!(formatter.format(5.0), "+005,0");
+    }
+
+    #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]
+    #[test]
+    fn fallback_format_appends_percent_sign() {
+        let formatter = Formatter::new(&locales::en_us(), FormatOptions::default());
+
+        // `format_percent` scales the fraction by 100 and tags it `Style::Percent`;
+        // the fallback must surface the `%` so `aria-valuetext` reads "50%".
+        assert_eq!(formatter.format_percent(0.5, None), "50%");
+        assert_eq!(formatter.format_percent(0.0, None), "0%");
+        assert_eq!(formatter.format_percent(1.0, None), "100%");
     }
 
     #[cfg(not(any(feature = "icu4x", all(feature = "web-intl", target_arch = "wasm32"))))]

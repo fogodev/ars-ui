@@ -142,6 +142,10 @@ pub struct Context {
     pub is_composing: bool,
     /// Whether a Description part is rendered (gates aria-describedby).
     pub has_description: bool,
+    /// Text direction for the group. Used by `on_cell_keydown` to reverse
+    /// `ArrowLeft`/`ArrowRight` navigation in RTL locales so arrow keys move
+    /// in the visually-expected direction.
+    pub dir: Direction,
     /// Locale for internationalized messages.
     pub locale: Locale,
     /// Resolved messages for the pin input.
@@ -199,6 +203,9 @@ pub struct Props {
     /// because the workspace `Callback<dyn Fn(Args) -> Out + Send + Sync>`
     /// requires `Args: 'static`, which a borrowed `&str` cannot satisfy.
     pub on_value_complete: Option<Callback<dyn Fn(String) + Send + Sync>>,
+    /// Text direction for the group. Drives RTL-aware arrow-key navigation in
+    /// `on_cell_keydown`.
+    pub dir: Direction,
 }
 
 impl Default for Props {
@@ -222,6 +229,7 @@ impl Default for Props {
             blur_on_complete: false,
             auto_submit: false,
             on_value_complete: None,
+            dir: Direction::Ltr,
         }
     }
 }
@@ -289,6 +297,7 @@ impl ars_core::Machine for Machine {
             blur_on_complete: props.blur_on_complete,
             is_composing: false,
             has_description: false,
+            dir: props.dir,
             locale,
             messages,
             ids: ComponentIds::from_id(&props.id),
@@ -588,7 +597,10 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Label),
             (self.ctx.messages.ordinal_label)(index + 1, self.ctx.length, &self.ctx.locale));
         if self.ctx.otp { attrs.set(HtmlAttr::Autocomplete, "one-time-code"); }
-        if self.ctx.invalid { attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true"); }
+        if self.ctx.invalid {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+            attrs.set(HtmlAttr::Aria(AriaAttr::ErrorMessage), self.ctx.ids.part("error-message"));
+        }
         if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
         if self.props.readonly { attrs.set_bool(HtmlAttr::ReadOnly, true); attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true"); }
         let is_focused = self.ctx.focused_index == Some(index);
@@ -705,14 +717,15 @@ PinInput
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Property       | Element | Value                                                   |
-| -------------- | ------- | ------------------------------------------------------- |
-| `role`         | Root    | `group`                                                 |
-| `aria-label`   | Input   | "Digit {n} of {total}" (localized via `ordinal_label`)  |
-| `autocomplete` | Input   | `"one-time-code"` when `otp=true`                       |
-| `inputmode`    | Input   | `"numeric"` (Numeric), `"text"` (Alphanumeric/Password) |
-| `aria-invalid` | Input   | Present when group is invalid                           |
-| `tabindex`     | Input   | Roving: focused cell `0`, all others `-1`. When no cell is focused (initial state, post-blur), the first cell falls back to `tabindex="0"` so keyboard users can enter the group. |
+| Property            | Element | Value                                                                                                                                                                             |
+| ------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `role`              | Root    | `group`                                                                                                                                                                           |
+| `aria-label`        | Input   | "Digit {n} of {total}" (localized via `ordinal_label`)                                                                                                                            |
+| `autocomplete`      | Input   | `"one-time-code"` when `otp=true`                                                                                                                                                 |
+| `inputmode`         | Input   | `"numeric"` (Numeric), `"text"` (Alphanumeric/Password)                                                                                                                           |
+| `aria-invalid`      | Input   | Present when group is invalid                                                                                                                                                     |
+| `aria-errormessage` | Input   | Points to ErrorMessage id when group is invalid                                                                                                                                   |
+| `tabindex`          | Input   | Roving: focused cell `0`, all others `-1`. When no cell is focused (initial state, post-blur), the first cell falls back to `tabindex="0"` so keyboard users can enter the group. |
 
 ### 3.2 Keyboard Interaction
 

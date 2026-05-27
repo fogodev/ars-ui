@@ -643,6 +643,10 @@ impl Api<'_> {
 
         if self.ctx.invalid {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::ErrorMessage),
+                self.ctx.ids.part("error-message"),
+            );
         }
 
         if self.ctx.disabled {
@@ -1415,6 +1419,13 @@ mod tests {
         assert_eq!(service.context().value, "enabled");
         assert_eq!(service.context().label.as_deref(), Some("Wi-Fi"));
         assert_eq!(service.context().dir, Direction::Rtl);
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .control_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ErrorMessage)),
+            Some("wifi-error-message")
+        );
     }
 
     #[test]

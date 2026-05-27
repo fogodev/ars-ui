@@ -477,7 +477,10 @@ impl<'a> Api<'a> {
             State::Indeterminate => "mixed",
         });
         if self.ctx.required { attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true"); }
-        if self.ctx.invalid { attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true"); }
+        if self.ctx.invalid {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+            attrs.set(HtmlAttr::Aria(AriaAttr::ErrorMessage), self.ctx.ids.part("error-message"));
+        }
         if self.ctx.disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); }
         if self.ctx.readonly { attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true"); }
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
@@ -623,16 +626,17 @@ Checkbox
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Property           | Value                                    |
-| ------------------ | ---------------------------------------- |
-| Role               | `checkbox` on Control                    |
-| `aria-checked`     | `"true"` / `"false"` / `"mixed"`         |
-| `aria-required`    | Present when `required=true`             |
-| `aria-invalid`     | Present when `invalid=true`              |
-| `aria-disabled`    | Present when `disabled=true`             |
-| `aria-readonly`    | Present when `readonly=true`             |
-| `aria-labelledby`  | Points to Label id                       |
-| `aria-describedby` | Points to Description + ErrorMessage ids |
+| Property            | Value                                         |
+| ------------------- | --------------------------------------------- |
+| Role                | `checkbox` on Control                         |
+| `aria-checked`      | `"true"` / `"false"` / `"mixed"`              |
+| `aria-required`     | Present when `required=true`                  |
+| `aria-invalid`      | Present when `invalid=true`                   |
+| `aria-errormessage` | Points to ErrorMessage id when `invalid=true` |
+| `aria-disabled`     | Present when `disabled=true`                  |
+| `aria-readonly`     | Present when `readonly=true`                  |
+| `aria-labelledby`   | Points to Label id                            |
+| `aria-describedby`  | Points to Description + ErrorMessage ids      |
 
 ### 3.2 Keyboard Interaction
 

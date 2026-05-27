@@ -887,7 +887,7 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Id, self.ctx.ids.part("error-message"))
-            .set(HtmlAttr::Role, "alert");
+            .set(HtmlAttr::Aria(AriaAttr::Live), "polite");
 
         attrs
     }

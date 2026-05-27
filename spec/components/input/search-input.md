@@ -91,6 +91,11 @@ pub struct Context {
     pub focus_visible: bool,
     /// Whether the component is loading.
     pub loading: bool,
+    /// Set `true` by `Event::Change` when a `SearchDebounce` effect is
+    /// scheduled; cleared by `DebounceExpired`, `CancelDebounce`, `Clear`,
+    /// and `Submit`. Used by `RestartDebounce` to avoid scheduling a stray
+    /// timer when the `debounce` prop changes without a search in flight.
+    pub debounce_pending: bool,
     /// The name attribute for form submission.
     pub name: Option<String>,
     /// The placeholder text.
@@ -218,6 +223,7 @@ impl ars_core::Machine for Machine {
             focused: false,
             focus_visible: false,
             loading: false,
+            debounce_pending: false,
             name: props.name.clone(),
             placeholder: props.placeholder.clone(),
             is_composing: false,
@@ -380,7 +386,10 @@ impl<'a> Api<'a> {
         } else if self.ctx.invalid {
             attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), self.ctx.ids.part("error-message"));
         }
-        if self.ctx.invalid { attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true"); }
+        if self.ctx.invalid {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+            attrs.set(HtmlAttr::Aria(AriaAttr::ErrorMessage), self.ctx.ids.part("error-message"));
+        }
         if self.props.required { attrs.set_bool(HtmlAttr::Required, true); }
         if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
         if self.ctx.readonly { attrs.set_bool(HtmlAttr::ReadOnly, true); }
@@ -502,17 +511,18 @@ SearchInput
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Property           | Element       | Value                                      |
-| ------------------ | ------------- | ------------------------------------------ |
-| `role`             | Root          | `search` (landmark)                        |
-| `type`             | Input         | `"search"`                                 |
-| `aria-busy`        | Root          | Present when `loading=true`                |
-| `aria-invalid`     | Input         | Present when `invalid=true`                |
-| `required`         | Input         | Present when `required=true` (native attr) |
-| `aria-labelledby`  | Input         | Points to Label id                         |
-| `aria-describedby` | Input         | Points to Description + ErrorMessage       |
-| `aria-label`       | ClearTrigger  | From `messages.clear_label`                |
-| `aria-label`       | SubmitTrigger | From `messages.submit_label`               |
+| Property            | Element       | Value                                         |
+| ------------------- | ------------- | --------------------------------------------- |
+| `role`              | Root          | `search` (landmark)                           |
+| `type`              | Input         | `"search"`                                    |
+| `aria-busy`         | Root          | Present when `loading=true`                   |
+| `aria-invalid`      | Input         | Present when `invalid=true`                   |
+| `aria-errormessage` | Input         | Points to ErrorMessage id when `invalid=true` |
+| `required`          | Input         | Present when `required=true` (native attr)    |
+| `aria-labelledby`   | Input         | Points to Label id                            |
+| `aria-describedby`  | Input         | Points to Description + ErrorMessage          |
+| `aria-label`        | ClearTrigger  | From `messages.clear_label`                   |
+| `aria-label`        | SubmitTrigger | From `messages.submit_label`                  |
 
 ### 3.2 Keyboard Interaction
 

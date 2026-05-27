@@ -21,15 +21,17 @@ AttrMap {
             ),
         ),
         (
-            Id,
+            Aria(
+                Live,
+            ),
             String(
-                "shipping-error-message",
+                "polite",
             ),
         ),
         (
-            Role,
+            Id,
             String(
-                "alert",
+                "shipping-error-message",
             ),
         ),
     ],

@@ -22,6 +22,14 @@ AttrMap {
         ),
         (
             Aria(
+                ErrorMessage,
+            ),
+            String(
+                "name-field-error-message",
+            ),
+        ),
+        (
+            Aria(
                 Invalid,
             ),
             String(

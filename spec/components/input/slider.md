@@ -784,7 +784,10 @@ impl<'a> Api<'a> {
         }
         if self.ctx.disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); }
         if self.ctx.readonly { attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true"); }
-        if self.ctx.invalid { attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true"); }
+        if self.ctx.invalid {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+            attrs.set(HtmlAttr::Aria(AriaAttr::ErrorMessage), self.ctx.ids.part("error-message"));
+        }
         if self.ctx.has_description {
             let mut describedby_parts = Vec::new();
             describedby_parts.push(self.ctx.ids.part("description"));
@@ -1035,20 +1038,20 @@ Slider
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Property           | Element           | Value                                                         |
-| ------------------ | ----------------- | ------------------------------------------------------------- |
-| `role`             | Thumb             | `slider`                                                      |
-| `aria-valuenow`    | Thumb             | Effective current value clamped to normalized bounds          |
-| `aria-valuemin`    | Thumb             | Normalized minimum value                                      |
-| `aria-valuemax`    | Thumb             | Normalized maximum value                                      |
-| `aria-valuetext`   | Thumb             | Formatted effective value text                                |
-| `aria-orientation` | Thumb             | `"horizontal"` or `"vertical"`                                |
-| `aria-disabled`    | Thumb             | Present when `disabled=true`                                  |
-| `aria-readonly`    | Thumb             | Present when `readonly=true`                                  |
-| `aria-labelledby`  | Thumb             | Points to Label id when the Label part is rendered            |
-| `aria-errormessage`| Thumb             | Points to ErrorMessage id when `invalid=true`                 |
-| `aria-hidden`      | DraggingIndicator | `"true"` — purely decorative visual feedback during drag      |
-| `hidden`           | DraggingIndicator | Present when not dragging (indicator is invisible when idle)  |
+| Property            | Element           | Value                                                        |
+| ------------------- | ----------------- | ------------------------------------------------------------ |
+| `role`              | Thumb             | `slider`                                                     |
+| `aria-valuenow`     | Thumb             | Effective current value clamped to normalized bounds         |
+| `aria-valuemin`     | Thumb             | Normalized minimum value                                     |
+| `aria-valuemax`     | Thumb             | Normalized maximum value                                     |
+| `aria-valuetext`    | Thumb             | Formatted effective value text                               |
+| `aria-orientation`  | Thumb             | `"horizontal"` or `"vertical"`                               |
+| `aria-disabled`     | Thumb             | Present when `disabled=true`                                 |
+| `aria-readonly`     | Thumb             | Present when `readonly=true`                                 |
+| `aria-labelledby`   | Thumb             | Points to Label id when the Label part is rendered           |
+| `aria-errormessage` | Thumb             | Points to ErrorMessage id when `invalid=true`                |
+| `aria-hidden`       | DraggingIndicator | `"true"` — purely decorative visual feedback during drag     |
+| `hidden`            | DraggingIndicator | Present when not dragging (indicator is invisible when idle) |
 
 The Label part does not set `for` because the Thumb part is a non-labelable
 `div role="slider"`. The Thumb uses `aria-labelledby` when the Label part is

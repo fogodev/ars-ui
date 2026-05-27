@@ -261,8 +261,10 @@ impl ars_core::Machine for Machine {
     fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ctx = Context {
             value: match &props.value {
-                Some(v) => Bindable::controlled(v.clone()),
-                None => Bindable::uncontrolled(props.default_value.clone()),
+                Some(v) => Bindable::controlled(clamp_to_max(v.clone(), props.max_checked)),
+                None => {
+                    Bindable::uncontrolled(clamp_to_max(props.default_value.clone(), props.max_checked))
+                }
             },
             name: props.name.clone(),
             disabled: props.disabled,
@@ -324,27 +326,21 @@ impl ars_core::Machine for Machine {
                 }))
             }
             Event::SetValue(v) => {
-                let v = v.clone();
+                let max = ctx.max_checked;
+                let v = clamp_to_max(v.clone(), max);
                 Some(TransitionPlan::context_only(move |ctx| { ctx.value.set(v); }))
             }
             Event::CheckAll => {
-                let all = props.all_values.clone();
                 let max = ctx.max_checked;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    match max {
-                        Some(n) => {
-                            let truncated = all.into_iter().take(n).collect::<BTreeSet<_>>();
-                            ctx.value.set(truncated);
-                        }
-                        None => ctx.value.set(all),
-                    }
-                }))
+                let all = clamp_to_max(props.all_values.clone(), max);
+                Some(TransitionPlan::context_only(move |ctx| { ctx.value.set(all); }))
             }
             Event::UncheckAll => {
                 Some(TransitionPlan::context_only(|ctx| { ctx.value.set(BTreeSet::new()); }))
             }
             Event::Reset => {
-                let value = props.default_value.clone();
+                let max = ctx.max_checked;
+                let value = clamp_to_max(props.default_value.clone(), max);
                 Some(TransitionPlan::context_only(move |ctx| { ctx.value.set(value); }))
             }
             Event::Focus { is_keyboard } => {
@@ -378,6 +374,9 @@ impl ars_core::Machine for Machine {
                     ctx.dir = dir;
                     ctx.orientation = orientation;
                     ctx.max_checked = max_checked;
+                    // A lowered `max_checked` must re-clamp the existing set so the
+                    // group never holds more values than the new limit allows.
+                    ctx.value.set(clamp_to_max(ctx.value.get().clone(), max_checked));
                 }))
             }
             Event::SetHasDescription(has_description) => {
@@ -402,6 +401,18 @@ impl ars_core::Machine for Machine {
         send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
+    }
+}
+
+/// Truncates `values` to at most `max_checked` keys (in `Ord` order). Every
+/// value-origination path (init, `SetValue`, `CheckAll`, `Reset`) runs the
+/// incoming set through this helper so the group can never hold more than
+/// `max_checked` checked values — including the initial controlled or
+/// uncontrolled set.
+fn clamp_to_max(values: BTreeSet<Key>, max_checked: Option<usize>) -> BTreeSet<Key> {
+    match max_checked {
+        Some(max) => values.into_iter().take(max).collect(),
+        None => values,
     }
 }
 ```
