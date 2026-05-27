@@ -826,6 +826,10 @@ impl Api<'_> {
                 (self.send)(Event::RemoveTag(key.clone()));
             }
 
+            KeyboardKey::Enter | KeyboardKey::Space => {
+                (self.send)(Event::ToggleTag(key.clone()));
+            }
+
             KeyboardKey::ArrowRight if is_rtl => (self.send)(Event::FocusPrevious),
 
             KeyboardKey::ArrowRight | KeyboardKey::ArrowDown => (self.send)(Event::FocusNext),
@@ -1545,6 +1549,32 @@ mod tests {
     }
 
     #[test]
+    fn controlled_toggle_can_revert_to_prop_selection_before_sync() {
+        let mut service = service(
+            Props::new()
+                .id("tags")
+                .items(items())
+                .selection_mode(selection::Mode::Multiple)
+                .selected_keys(selected(&["alpha"])),
+        );
+
+        drop(service.send(Event::ToggleTag(key("alpha"))));
+
+        assert_eq!(
+            service.context().requested_selected_keys.as_ref(),
+            Some(&BTreeSet::new())
+        );
+
+        drop(service.send(Event::ToggleTag(key("alpha"))));
+
+        assert_eq!(
+            service.context().requested_selected_keys.as_ref(),
+            Some(&selected(&["alpha"])),
+            "a second toggle before parent sync reselects from the pending empty set"
+        );
+    }
+
+    #[test]
     fn disabled_group_removes_roving_tab_stop() {
         let service = service(Props::new().id("tags").items(items()).disabled(true));
         let api = service.connect(&|_| {});
@@ -1752,6 +1782,8 @@ mod tests {
 
         api.on_tag_keydown(&key("alpha"), &keyboard(KeyboardKey::Delete));
         api.on_tag_keydown(&key("alpha"), &keyboard(KeyboardKey::Backspace));
+        api.on_tag_keydown(&key("alpha"), &keyboard(KeyboardKey::Enter));
+        api.on_tag_keydown(&key("alpha"), &keyboard(KeyboardKey::Space));
         api.on_tag_keydown(&key("alpha"), &keyboard(KeyboardKey::ArrowRight));
         api.on_tag_keydown(&key("alpha"), &keyboard(KeyboardKey::Home));
         api.on_tag_keydown(&key("alpha"), &keyboard(KeyboardKey::End));
@@ -1761,6 +1793,8 @@ mod tests {
             vec![
                 Event::RemoveTag(key("alpha")),
                 Event::RemoveTag(key("alpha")),
+                Event::ToggleTag(key("alpha")),
+                Event::ToggleTag(key("alpha")),
                 Event::FocusNext,
                 Event::FocusFirst,
                 Event::FocusLast,

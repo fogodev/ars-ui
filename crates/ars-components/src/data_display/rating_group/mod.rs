@@ -913,7 +913,9 @@ fn rating_value_text(value: f64, count: u32, messages: &Messages, locale: &Local
 }
 
 fn effective_step(props: &Props) -> f64 {
-    if props.step.is_finite() && props.step > 0.0 {
+    if props.allow_half && (props.step - 1.0).abs() <= f64::EPSILON {
+        0.5
+    } else if props.step.is_finite() && props.step > 0.0 {
         props.step
     } else if props.allow_half {
         0.5
@@ -955,7 +957,13 @@ fn rate_plan(
         effective_step(props),
         context.count,
     );
-    if (value - *context.value.get()).abs() < f64::EPSILON {
+    let repeats_current_request = context
+        .requested_value
+        .is_some_and(|requested| (value - requested).abs() < f64::EPSILON);
+
+    if (value - *context.value.get()).abs() < f64::EPSILON
+        && (context.requested_value.is_none() || repeats_current_request)
+    {
         if context.focused_index != focused_index {
             let target = focused_index.map_or(State::Idle, |index| State::Focused { index });
 
@@ -1558,6 +1566,18 @@ mod tests {
             Some("radiogroup")
         );
 
+        let direct_half = service(Props {
+            id: String::from("rating"),
+            allow_half: true,
+            ..Props::default()
+        });
+        let direct_half_api = direct_half.connect(&|_| {});
+        assert_eq!(
+            direct_half_api.control_attrs().get(&HtmlAttr::Role),
+            Some("slider"),
+            "direct public props treat allow_half as half-step sugar when step is default"
+        );
+
         let mut near_default_step = service(
             Props::new()
                 .id("rating")
@@ -1645,6 +1665,25 @@ mod tests {
             1.0,
             "controlled value stays on the prop value until accepted"
         );
+    }
+
+    #[test]
+    fn controlled_rating_can_revert_to_prop_value_before_sync() {
+        let mut service = service(Props::new().id("rating").value(2.0));
+
+        drop(service.send(Event::Rate(3.0)));
+
+        assert_eq!(service.context().requested_value, Some(3.0));
+
+        let result = service.send(Event::Rate(2.0));
+
+        assert_eq!(service.context().requested_value, Some(2.0));
+        assert_eq!(
+            result.pending_effects.len(),
+            1,
+            "reverting to the controlled prop value still notifies the parent"
+        );
+        assert_eq!(result.pending_effects[0].name, Effect::ValueChange);
     }
 
     #[test]
