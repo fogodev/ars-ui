@@ -1192,6 +1192,56 @@ fn file_upload_hidden_input_capture_snapshot() {
 }
 
 #[test]
+fn file_upload_hidden_input_readonly_is_disabled() {
+    let props = Props::new().id("upload").readonly(true);
+    let (_, ctx) = Machine::init(&props, &Env::default(), &Messages::default());
+    let attrs = api_with_props(props, ctx, State::Idle).hidden_input_attrs();
+
+    assert_eq!(attrs.get(&HtmlAttr::Disabled), Some("true"));
+}
+
+#[test]
+fn file_upload_hidden_input_required_only_when_queue_empty() {
+    let props = Props::new()
+        .id("upload")
+        .required(true)
+        .default_files(vec![item("file-1", "a.png", Status::Pending)]);
+    let (_, ctx) = Machine::init(&props, &Env::default(), &Messages::default());
+    let attrs = api_with_props(props, ctx, State::Idle).hidden_input_attrs();
+
+    assert_eq!(attrs.get(&HtmlAttr::Required), None);
+}
+
+#[test]
+fn file_upload_progress_fraction_clamps_above_one() {
+    let fraction = Progress {
+        file_index: 0,
+        bytes_sent: 200,
+        bytes_total: 100,
+    }
+    .fraction();
+
+    assert!((fraction - 1.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn file_upload_accept_wildcard_is_case_insensitive() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").accept(vec!["Image/*".into()]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "photo.png",
+        100,
+        "image/png",
+    )])));
+
+    assert_eq!(service.context().files.get().len(), 1);
+}
+
+#[test]
 fn file_upload_hidden_input_required_snapshot() {
     let props = Props::new().id("upload").required(true);
 

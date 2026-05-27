@@ -28,6 +28,12 @@ AttrMap {
                 "Remove photo.png",
             ),
         ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
     ],
     styles: [],
 }

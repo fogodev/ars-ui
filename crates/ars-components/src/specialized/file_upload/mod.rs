@@ -70,11 +70,13 @@ impl Progress {
     /// Progress as a fraction in `[0.0, 1.0]`.
     #[must_use]
     pub fn fraction(&self) -> f64 {
-        if self.bytes_total == 0 {
+        let raw = if self.bytes_total == 0 {
             0.0
         } else {
             self.bytes_sent as f64 / self.bytes_total as f64
-        }
+        };
+
+        clamp_upload_fraction(raw)
     }
 }
 
@@ -1251,7 +1253,10 @@ impl Api<'_> {
         let [(scope_attr, scope_val), (part_attr, part_val)] =
             Part::ItemDeleteTrigger { index }.data_attrs();
 
-        attrs.set(scope_attr, scope_val).set(part_attr, part_val);
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Type, "button");
 
         if let Some(file) = self.ctx.files.get().get(index) {
             attrs.set(
@@ -1309,11 +1314,11 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Name, name);
         }
 
-        if self.ctx.required {
+        if self.ctx.required && self.ctx.files.get().is_empty() {
             attrs.set_bool(HtmlAttr::Required, true);
         }
 
-        if self.ctx.disabled {
+        if self.ctx.disabled || self.ctx.readonly {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
@@ -1447,17 +1452,39 @@ const fn item_status_token(status: &Status) -> &'static str {
     }
 }
 
-fn format_file_size_with_locale(bytes: u64, _locale: &Locale) -> String {
-    const KB: u64 = 1_024;
-    const MB: u64 = KB * 1_024;
+fn format_file_size_with_locale(bytes: u64, locale: &Locale) -> String {
+    use alloc::format;
 
-    if bytes >= MB {
-        format!("{} MB", bytes / MB)
-    } else if bytes >= KB {
-        format!("{} KB", bytes / KB)
+    use ars_i18n::number::{FormatOptions, Formatter};
+
+    const KB: f64 = 1_024.0;
+    const MB: f64 = KB * 1_024.0;
+    let bytes_f = bytes as f64;
+
+    let (value, suffix) = if bytes_f >= MB {
+        (bytes_f / MB, "MB")
+    } else if bytes_f >= KB {
+        (bytes_f / KB, "KB")
     } else {
-        format!("{bytes} bytes")
-    }
+        (bytes_f, "bytes")
+    };
+
+    let max_fraction_digits = if suffix == "bytes" || value.fract() == 0.0 {
+        0
+    } else {
+        1
+    };
+
+    let number = Formatter::new(
+        locale,
+        FormatOptions {
+            max_fraction_digits,
+            ..FormatOptions::default()
+        },
+    )
+    .format(value);
+
+    format!("{number} {suffix}")
 }
 
 fn apply_selected_files_plan(
@@ -1532,6 +1559,7 @@ fn mark_pending_as_uploading(context: &mut Context) {
     context.files.set(updated);
 }
 
+#[expect(clippy::missing_const_for_fn, reason = "f64::is_nan is not const")]
 fn clamp_upload_fraction(progress: f64) -> f64 {
     if progress.is_nan() {
         0.0
@@ -1692,17 +1720,15 @@ fn validate_files(raw: &[RawFile], ctx: &Context) -> (Vec<Item>, Vec<Rejection>)
     let current_count = ctx.files.get().len();
 
     for file in raw {
-        if !ctx.multiple {
-            if current_count >= 1 || !accepted.is_empty() {
-                rejected.push(Rejection {
-                    name: file.name.clone(),
-                    size: file.size,
-                    mime_type: file.mime_type.clone(),
-                    reason: RejectionReason::TooMany,
-                });
+        if !ctx.multiple && (current_count >= 1 || !accepted.is_empty()) {
+            rejected.push(Rejection {
+                name: file.name.clone(),
+                size: file.size,
+                mime_type: file.mime_type.clone(),
+                reason: RejectionReason::TooMany,
+            });
 
-                continue;
-            }
+            continue;
         }
 
         if let Some(max) = ctx.max_files
@@ -1786,12 +1812,14 @@ fn mime_matches(mime: &str, name: &str, patterns: &[String]) -> bool {
     let normalized = normalize_mime_type(mime);
 
     patterns.iter().any(|pattern| {
-        if pattern.ends_with("/*") {
-            let prefix = &pattern[..pattern.len() - 1];
+        let pattern = pattern.trim();
 
-            normalized.starts_with(prefix)
+        if pattern.ends_with("/*") {
+            let prefix = normalize_mime_type(&pattern[..pattern.len() - 1]);
+
+            normalized.starts_with(&prefix)
         } else if let Some(extension) = pattern.strip_prefix('.') {
-            normalized == *pattern || file_name_has_extension(name, extension)
+            normalized == normalize_mime_type(pattern) || file_name_has_extension(name, extension)
         } else {
             normalized == normalize_mime_type(pattern)
         }
