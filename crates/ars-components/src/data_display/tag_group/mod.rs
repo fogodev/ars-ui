@@ -9,8 +9,8 @@ use core::fmt::{self, Debug};
 
 use ars_collections::{Collection, CollectionItem, Key, StaticCollection, selection};
 use ars_core::{
-    AriaAttr, AttrMap, Bindable, ComponentMessages, ComponentPart, ConnectApi, Env, HasId,
-    HtmlAttr, Locale, MessageFn, TransitionPlan, no_cleanup,
+    AriaAttr, AttrMap, Bindable, ComponentMessages, ComponentPart, ConnectApi, Direction, Env,
+    HasId, HtmlAttr, Locale, MessageFn, TransitionPlan, no_cleanup,
 };
 use ars_interactions::{KeyboardEventData, KeyboardKey};
 
@@ -783,12 +783,18 @@ impl Api<'_> {
 
     /// Dispatches keyboard intent for a focused tag.
     pub fn on_tag_keydown(&self, key: &Key, data: &KeyboardEventData) {
+        let is_rtl = Direction::from(self.context.locale.direction()) == Direction::Rtl;
+
         match data.key {
             KeyboardKey::Delete | KeyboardKey::Backspace => {
                 (self.send)(Event::RemoveTag(key.clone()));
             }
 
+            KeyboardKey::ArrowRight if is_rtl => (self.send)(Event::FocusPrevious),
+
             KeyboardKey::ArrowRight | KeyboardKey::ArrowDown => (self.send)(Event::FocusNext),
+
+            KeyboardKey::ArrowLeft if is_rtl => (self.send)(Event::FocusNext),
 
             KeyboardKey::ArrowLeft | KeyboardKey::ArrowUp => (self.send)(Event::FocusPrevious),
 
@@ -1659,6 +1665,37 @@ mod tests {
                 Event::FocusNext,
                 Event::FocusFirst,
                 Event::FocusLast,
+            ]
+        );
+    }
+
+    #[test]
+    fn keyboard_helper_swaps_horizontal_arrows_for_rtl_locales() {
+        let mut env = Env::default();
+        env.locale = Locale::parse("ar").expect("ar is a valid RTL locale");
+        let service = Service::<Machine>::new(
+            Props::new().id("tags").items(items()),
+            &env,
+            &Messages::default(),
+        );
+
+        let events = RefCell::new(Vec::new());
+        let send = |event| events.borrow_mut().push(event);
+
+        let api = service.connect(&send);
+
+        api.on_tag_keydown(&key("alpha"), &keyboard(KeyboardKey::ArrowRight));
+        api.on_tag_keydown(&key("alpha"), &keyboard(KeyboardKey::ArrowLeft));
+        api.on_tag_keydown(&key("alpha"), &keyboard(KeyboardKey::ArrowDown));
+        api.on_tag_keydown(&key("alpha"), &keyboard(KeyboardKey::ArrowUp));
+
+        assert_eq!(
+            events.into_inner(),
+            vec![
+                Event::FocusPrevious,
+                Event::FocusNext,
+                Event::FocusNext,
+                Event::FocusPrevious,
             ]
         );
     }
