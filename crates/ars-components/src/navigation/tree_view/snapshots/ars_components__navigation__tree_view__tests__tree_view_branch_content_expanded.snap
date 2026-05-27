@@ -1,0 +1,7 @@
+---
+source: crates/ars-components/src/navigation/tree_view/tests.rs
+expression: "snapshot_attrs(&service(props()).connect(&|_|\n{}).branch_content_attrs(&key(1)))"
+---
+data-ars-part=branch-content
+data-ars-scope=tree-view
+role=group

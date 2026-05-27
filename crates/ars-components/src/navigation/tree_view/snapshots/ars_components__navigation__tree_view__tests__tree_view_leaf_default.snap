@@ -1,0 +1,12 @@
+---
+source: crates/ars-components/src/navigation/tree_view/tests.rs
+expression: "snapshot_attrs(&service(props()).connect(&|_| {}).leaf_attrs(&key(2)))"
+---
+aria-level=2
+aria-posinset=1
+aria-selected=false
+aria-setsize=2
+data-ars-part=leaf
+data-ars-scope=tree-view
+id=tree-node-i-2
+role=treeitem

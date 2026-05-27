@@ -1,0 +1,14 @@
+---
+source: crates/ars-components/src/navigation/tree_view/tests.rs
+expression: "snapshot_attrs(&service(props()).connect(&|_| {}).branch_attrs(&key(1)))"
+---
+aria-expanded=true
+aria-level=1
+aria-posinset=1
+aria-selected=false
+aria-setsize=3
+data-ars-expanded=true
+data-ars-part=branch
+data-ars-scope=tree-view
+id=tree-node-i-1
+role=treeitem

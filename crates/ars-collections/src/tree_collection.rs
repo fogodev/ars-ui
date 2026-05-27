@@ -172,6 +172,28 @@ impl<T> TreeCollection<T> {
 
         (visible, first_focusable, last_focusable)
     }
+
+    /// Iterate **every** node in the tree in flat DFS pre-order, including
+    /// nodes inside collapsed subtrees that [`Collection::nodes`] omits.
+    ///
+    /// Unlike [`Collection::nodes`] / [`visible_keys`](Self::visible_keys),
+    /// which yield only currently-visible nodes, this traverses the full
+    /// hierarchy. It is the right primitive for operations that must reach
+    /// hidden nodes — e.g. expanding every expandable branch ("expand all")
+    /// where collapsed parents would otherwise hide their expandable
+    /// descendants. Available without a `T: Clone` bound.
+    pub fn all_nodes(&self) -> impl Iterator<Item = &Node<T>> {
+        self.all_nodes.iter()
+    }
+
+    /// Iterate **every** node key in the tree in flat DFS pre-order, including
+    /// keys inside collapsed subtrees.
+    ///
+    /// The key-only counterpart of [`all_nodes`](Self::all_nodes); mirrors
+    /// [`visible_keys`](Self::visible_keys) but spans collapsed subtrees.
+    pub fn all_keys(&self) -> impl Iterator<Item = &Key> {
+        self.all_nodes.iter().map(|node| &node.key)
+    }
 }
 
 impl<T: Clone> Default for TreeCollection<T> {
@@ -1077,6 +1099,73 @@ mod tests {
         assert_eq!(tree.all_nodes[4].key, Key::int(5));
         assert_eq!(tree.all_nodes[5].key, Key::int(6));
         assert_eq!(tree.all_nodes[6].key, Key::int(7));
+    }
+
+    #[test]
+    fn all_keys_includes_collapsed_subtrees() {
+        let tree = sample_tree();
+
+        // Vegetables (4) is collapsed, so its children (5, 6) are hidden from
+        // `keys()`/`nodes()` but MUST appear in `all_keys()`.
+        let visible = tree.keys().cloned().collect::<Vec<_>>();
+
+        assert_eq!(
+            visible,
+            vec![
+                Key::int(1),
+                Key::int(2),
+                Key::int(3),
+                Key::int(4),
+                Key::int(7)
+            ],
+            "carrot/daikon are hidden under collapsed Vegetables"
+        );
+
+        let all = tree.all_keys().cloned().collect::<Vec<_>>();
+
+        assert_eq!(
+            all,
+            vec![
+                Key::int(1),
+                Key::int(2),
+                Key::int(3),
+                Key::int(4),
+                Key::int(5),
+                Key::int(6),
+                Key::int(7),
+            ],
+            "all_keys yields every node in DFS order regardless of expansion"
+        );
+    }
+
+    #[test]
+    fn all_nodes_iterates_every_node_in_dfs_order() {
+        let tree = sample_tree();
+
+        let keys = tree.all_nodes().map(|n| n.key.clone()).collect::<Vec<_>>();
+
+        assert_eq!(
+            keys,
+            vec![
+                Key::int(1),
+                Key::int(2),
+                Key::int(3),
+                Key::int(4),
+                Key::int(5),
+                Key::int(6),
+                Key::int(7),
+            ]
+        );
+
+        // Reaches expandable nodes hidden under a collapsed parent — the
+        // property `ExpandAll` relies on (Vegetables is collapsed but present).
+        let expandable = tree
+            .all_nodes()
+            .filter(|n| n.has_children)
+            .map(|n| n.key.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(expandable, vec![Key::int(1), Key::int(4)]);
     }
 
     #[test]
