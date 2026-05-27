@@ -527,6 +527,9 @@ impl ars_core::Machine for Machine {
         // binding and never starts in a mode-invalid shape.
         let mut selection_state = selection::State::new(selection_mode, props.selection_behavior)
             .with_disabled(disabled_keys);
+        // Disabled nodes stay focusable and typeahead-reachable (FocusOnly) while
+        // `select` still rejects them, so they cannot be selected.
+        selection_state.disabled_behavior = selection::DisabledBehavior::FocusOnly;
 
         selection_state.selected_keys = normalize_selection(selected.get().clone(), selection_mode);
 
@@ -670,10 +673,12 @@ impl ars_core::Machine for Machine {
                 )
             }
 
-            Event::Blur => Some(
-                TransitionPlan::to(State::Idle)
-                    .apply(|ctx: &mut Context| ctx.focus_visible = false),
-            ),
+            Event::Blur => Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
+                ctx.focus_visible = false;
+                // Reset typeahead so a refocus within the timeout starts a
+                // fresh search rather than appending to the old buffer.
+                ctx.typeahead = typeahead::State::default();
+            })),
 
             Event::FocusNext => focus_relative(ctx, Direction::Next),
 
@@ -747,6 +752,11 @@ impl ars_core::Machine for Machine {
 
             // ── Drag and drop reorder ───────────────────────────────────
             Event::DragStart(key) => {
+                // An in-flight drag must be dropped or cancelled before another
+                // can start, so a second pickup cannot silently retarget it.
+                if ctx.dragging.is_some() {
+                    return None;
+                }
                 // Disabled nodes block all interaction, including drag.
                 let node = ctx.items.get(key);
 
@@ -860,6 +870,7 @@ impl ars_core::Machine for Machine {
                     // binding renders a valid selection shape).
                     let mut new_state = selection::State::new(selection_mode, selection_behavior)
                         .with_disabled(disabled_keys);
+                    new_state.disabled_behavior = selection::DisabledBehavior::FocusOnly;
                     new_state.selected_keys =
                         normalize_selection(ctx.selected.get().clone(), selection_mode);
                     ctx.selection_state = new_state;
@@ -903,6 +914,7 @@ impl ars_core::Machine for Machine {
             || old.multiple != new.multiple
             || old.selection_mode != new.selection_mode
             || old.selection_behavior != new.selection_behavior
+            || old.dnd_enabled != new.dnd_enabled
         {
             vec![Event::SyncProps]
         } else {
@@ -971,17 +983,42 @@ fn focus_relative(ctx: &Context, direction: Direction) -> Option<TransitionPlan<
 /// Advance the shared typeahead matcher by one character. Delegates to the
 /// canonical [`typeahead::State`] (multi-character buffer with timeout reset and
 /// locale-aware collation/case-folding when the `i18n` feature is enabled),
-/// matching against the collection's `text_value` and skipping disabled nodes.
+/// matching against the collection's `text_value`.
+///
+/// The matcher scans the collection's own visible set, so the collection is
+/// first reconciled to the component's live `ctx.expanded` — otherwise typeahead
+/// would search the construction-time expansion and skip newly-visible children
+/// (or jump to nodes the user has since collapsed).
 fn process_typeahead(ctx: &Context, ch: char, now_ms: u64) -> (typeahead::State, Option<Key>) {
+    let items = reconciled_items(ctx);
     ctx.typeahead.process_char_with_locale(
         ch,
         now_ms,
         ctx.focused_node.as_ref(),
-        &ctx.items,
+        &items,
         &ctx.locale,
         &ctx.selection_state.disabled_keys,
         ctx.selection_state.disabled_behavior,
     )
+}
+
+/// `ctx.items` with its internal expansion reconciled to the live `ctx.expanded`
+/// set, so the collection's visible iteration matches what the tree renders.
+fn reconciled_items(ctx: &Context) -> TreeCollection<TreeItem> {
+    let expanded = ctx.expanded.get();
+    let mut items = ctx.items.clone();
+    let branch_keys = items
+        .all_nodes()
+        .filter(|node| node.has_children)
+        .map(|node| node.key.clone())
+        .collect::<Vec<_>>();
+    for key in branch_keys {
+        let want = expanded.contains(&key);
+        if items.is_expanded(&key) != want {
+            items = items.set_expanded(&key, want);
+        }
+    }
+    items
 }
 
 /// Resolve the timestamp for a typeahead keypress. Adapters that surface a real
@@ -1365,9 +1402,11 @@ impl Api<'_> {
         attrs
     }
 
-    /// Handle focus on the tree root.
-    pub fn on_root_focus(&self) {
-        (self.send)(Event::Focus { is_keyboard: false });
+    /// Handle focus on the tree root. `is_keyboard` carries the focus modality
+    /// the adapter resolved (e.g. tab vs click) so a keyboard tab-in shows the
+    /// focus ring while a pointer focus does not.
+    pub fn on_root_focus(&self, is_keyboard: bool) {
+        (self.send)(Event::Focus { is_keyboard });
     }
 
     /// Handle blur on the tree root.
@@ -1577,27 +1616,36 @@ impl Api<'_> {
         }
         .data_attrs();
 
+        let item = self
+            .ctx
+            .items
+            .get(node_id)
+            .and_then(|node| node.value.as_ref());
+        let disabled = item.is_some_and(|item| item.disabled);
+        let label = item.map_or("", |item| item.label.as_str());
+
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Role, "button")
+            .set(
+                HtmlAttr::Aria(AriaAttr::Label),
+                (self.ctx.messages.drag_handle_label)(label, &self.ctx.locale),
+            );
+
+        if disabled {
+            // A disabled node cannot be dragged (`DragStart` rejects it), so the
+            // handle is marked disabled and removed from the tab sequence rather
+            // than presenting an operable-looking control.
+            attrs
+                .set(HtmlAttr::Aria(AriaAttr::Disabled), "true")
+                .set(HtmlAttr::TabIndex, "-1");
+        } else {
             // Keyboard users must be able to tab to the handle to start a drag.
-            .set(HtmlAttr::TabIndex, "0");
-
-        let label = self
-            .ctx
-            .items
-            .get(node_id)
-            .and_then(|node| node.value.as_ref())
-            .map_or("", |item| item.label.as_str());
-
-        attrs.set(
-            HtmlAttr::Aria(AriaAttr::Label),
-            (self.ctx.messages.drag_handle_label)(label, &self.ctx.locale),
-        );
-
-        if self.is_dragging(node_id) {
-            attrs.set(HtmlAttr::Aria(AriaAttr::Grabbed), "true");
+            attrs.set(HtmlAttr::TabIndex, "0");
+            if self.is_dragging(node_id) {
+                attrs.set(HtmlAttr::Aria(AriaAttr::Grabbed), "true");
+            }
         }
 
         attrs

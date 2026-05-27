@@ -72,7 +72,8 @@ pub struct TreeItem {
     /// Display label for the node (used in typeahead and accessibility).
     pub label: String,
     /// Whether this node is disabled. Disabled nodes are not selectable and
-    /// cannot be dragged; they remain focusable so their state is announced.
+    /// cannot be dragged; they remain focusable (and typeahead-reachable) so
+    /// their state is announced. This maps to `DisabledBehavior::FocusOnly`.
     pub disabled: bool,
     /// When true, the node renders an expand affordance even if no children are
     /// present in the collection yet. Essential for lazy-loaded trees where the
@@ -315,6 +316,9 @@ impl ars_core::Machine for Machine {
             selection_mode,
             props.selection_behavior,
         ).with_disabled(disabled_keys);
+        // Disabled nodes stay focusable and typeahead-reachable (FocusOnly) while
+        // `select` still rejects them, so they cannot be selected.
+        selection_state.disabled_behavior = selection::DisabledBehavior::FocusOnly;
         selection_state.selected_keys = normalize_selection(selected.get().clone(), selection_mode);
         let locale = env.locale.clone();
         let messages = messages.clone();
@@ -428,7 +432,12 @@ impl ars_core::Machine for Machine {
             }
 
             Event::Blur => Some(TransitionPlan::to(State::Idle)
-                .apply(|ctx| ctx.focus_visible = false)),
+                .apply(|ctx| {
+                    ctx.focus_visible = false;
+                    // Reset typeahead so a refocus within the timeout starts a
+                    // fresh search rather than appending to the old buffer.
+                    ctx.typeahead = typeahead::State::default();
+                })),
 
             // ── Navigation (logical semantics; not RTL-swapped, §3.3) ──────
             Event::FocusNext => focus_relative(ctx, Direction::Next),
@@ -483,6 +492,11 @@ impl ars_core::Machine for Machine {
 
             // ── Drag and drop reorder (§4) ──────────────────────────────
             Event::DragStart(key) => {
+                // An in-flight drag must be dropped or cancelled before another
+                // can start, so a second pickup cannot silently retarget it.
+                if ctx.dragging.is_some() {
+                    return None;
+                }
                 // Disabled nodes block all interaction, including drag.
                 let node = ctx.items.get(key);
                 let draggable = node.is_some_and(Node::is_focusable)
@@ -562,6 +576,9 @@ impl ars_core::Machine for Machine {
                     ctx.selected.set(normalized);
                     let mut new_state = selection::State::new(selection_mode, selection_behavior)
                         .with_disabled(disabled_keys);
+                    // Disabled nodes stay focusable and typeahead-reachable while
+                    // `select` still rejects them (they cannot be selected).
+                    new_state.disabled_behavior = selection::DisabledBehavior::FocusOnly;
                     // Normalize even a mode-violating controlled binding for the
                     // rendered selection without mutating the parent value.
                     new_state.selected_keys =
@@ -597,6 +614,9 @@ impl ars_core::Machine for Machine {
             || old.multiple != new.multiple
             || old.selection_mode != new.selection_mode
             || old.selection_behavior != new.selection_behavior
+            // Disabling DnD at runtime must clear any in-flight drag via the
+            // SyncProps cleanup path, not leave `dragging`/`drop_target` stale.
+            || old.dnd_enabled != new.dnd_enabled
         {
             vec![Event::SyncProps]
         } else {
@@ -693,18 +713,42 @@ fn focus_relative(ctx: &Context, direction: Direction) -> Option<TransitionPlan<
 /// Advance the shared typeahead matcher by one character. Delegates to the
 /// canonical `ars_collections::typeahead::State` (multi-character buffer with
 /// timeout reset and locale-aware collation/case-folding when the `i18n`
-/// feature is enabled), matching the collection's `text_value` and skipping
-/// disabled nodes.
+/// feature is enabled), matching the collection's `text_value`. Disabled nodes
+/// stay reachable because the selection state uses `DisabledBehavior::FocusOnly`.
+///
+/// The matcher scans the collection's own visible set, so the collection is
+/// first reconciled to the component's live `ctx.expanded` — otherwise typeahead
+/// would search the construction-time expansion and skip newly-visible children
+/// (or jump to nodes the user has since collapsed).
 fn process_typeahead(ctx: &Context, ch: char, now_ms: u64) -> (typeahead::State, Option<Key>) {
+    let items = reconciled_items(ctx);
     ctx.typeahead.process_char_with_locale(
         ch,
         now_ms,
         ctx.focused_node.as_ref(),
-        &ctx.items,
+        &items,
         &ctx.locale,
         &ctx.selection_state.disabled_keys,
         ctx.selection_state.disabled_behavior,
     )
+}
+
+/// `ctx.items` with its internal expansion reconciled to the live `ctx.expanded`
+/// set, so the collection's visible iteration matches what the tree renders.
+fn reconciled_items(ctx: &Context) -> TreeCollection<TreeItem> {
+    let expanded = ctx.expanded.get();
+    let mut items = ctx.items.clone();
+    let branch_keys = items.all_nodes()
+        .filter(|node| node.has_children)
+        .map(|node| node.key.clone())
+        .collect::<Vec<_>>();
+    for key in branch_keys {
+        let want = expanded.contains(&key);
+        if items.is_expanded(&key) != want {
+            items = items.set_expanded(&key, want);
+        }
+    }
+    items
 }
 
 /// Resolve the timestamp for a typeahead keypress: the adapter-provided value
@@ -893,8 +937,10 @@ impl Api<'_> {
         attrs
     }
 
-    /// Handle focus on the tree root.
-    pub fn on_root_focus(&self) { (self.send)(Event::Focus { is_keyboard: false }); }
+    /// Handle focus on the tree root. `is_keyboard` carries the focus modality
+    /// the adapter resolved (e.g. tab vs click) so a keyboard tab-in shows the
+    /// focus ring while a pointer focus does not.
+    pub fn on_root_focus(&self, is_keyboard: bool) { (self.send)(Event::Focus { is_keyboard }); }
 
     /// Handle blur on the tree root.
     pub fn on_root_blur(&self) { (self.send)(Event::Blur); }
@@ -997,12 +1043,21 @@ impl Api<'_> {
     /// Attrs for a node's drag handle (`role="button"`, localized `aria-label`).
     pub fn drag_handle_attrs(&self, node_id: &Key) -> AttrMap {
         let mut attrs = part_only_attrs(&Part::DragHandle { node_id: Key::default() });
-        // `tabindex="0"` so keyboard users can tab to the handle to start a drag.
-        attrs.set(HtmlAttr::Role, "button").set(HtmlAttr::TabIndex, "0");
-        let label = self.ctx.items.get(node_id).and_then(|n| n.value.as_ref())
-            .map_or("", |v| v.label.as_str());
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.drag_handle_label)(label, &self.ctx.locale));
-        if self.is_dragging(node_id) { attrs.set(HtmlAttr::Aria(AriaAttr::Grabbed), "true"); }
+        let item = self.ctx.items.get(node_id).and_then(|n| n.value.as_ref());
+        let disabled = item.is_some_and(|v| v.disabled);
+        let label = item.map_or("", |v| v.label.as_str());
+        attrs.set(HtmlAttr::Role, "button")
+            .set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.drag_handle_label)(label, &self.ctx.locale));
+        if disabled {
+            // A disabled node cannot be dragged (`DragStart` rejects it), so the
+            // handle is marked disabled and removed from the tab sequence rather
+            // than presenting an operable-looking control.
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true").set(HtmlAttr::TabIndex, "-1");
+        } else {
+            // `tabindex="0"` so keyboard users can tab to the handle to start a drag.
+            attrs.set(HtmlAttr::TabIndex, "0");
+            if self.is_dragging(node_id) { attrs.set(HtmlAttr::Aria(AriaAttr::Grabbed), "true"); }
+        }
         attrs
     }
 
@@ -1215,7 +1270,7 @@ reorder variant (§4).
 | `BranchContent`   | `<ul>` or `<div>`                     | `role="group"`, `data-ars-scope="tree-view"`, `data-ars-part="branch-content"`, `hidden` (when collapsed)                                                                                                                                                                                            |
 | `Leaf`            | `<li>`, `<div>`, or `<a>` (when href) | `id`, `role="treeitem"`, `aria-expanded="false"` (when `has_children` is true), `aria-selected`, `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-selected`, `href` (when present)                                                                                                           |
 | `LeafText`        | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="leaf-text"`                                                                                                                                                                                                                                            |
-| `DragHandle`      | `<button>`                            | `data-ars-part="drag-handle"`, `role="button"`, `tabindex="0"`, `aria-label` (from `Messages::drag_handle_label`), `aria-grabbed` (while dragging). Drag-and-drop variant (§4).                                                                                                                      |
+| `DragHandle`      | `<button>`                            | `data-ars-part="drag-handle"`, `role="button"`, `tabindex="0"` (`tabindex="-1"` + `aria-disabled="true"` for a disabled node), `aria-label` (from `Messages::drag_handle_label`), `aria-grabbed` (while dragging). Drag-and-drop variant (§4).                                                       |
 | `DropIndicator`   | `<div>`                               | `data-ars-part="drop-indicator"`, `aria-hidden="true"`, `data-ars-drop-position`, `data-ars-drop-target`. Drag-and-drop variant (§4).                                                                                                                                                                |
 
 ## 3. Accessibility
@@ -1354,7 +1409,10 @@ protocol); pointer hit-testing and the hover-expand timer are **adapter**-resolv
 - **Drag handle**: Each tree item renders an optional drag handle affordance (the `DragHandle`
   anatomy part). The handle is the grab target; the entire row is not draggable by default to
   avoid conflicts with text selection. `drag_handle_attrs` emits `role="button"` and a localized
-  `aria-label` from `Messages::drag_handle_label`, plus `aria-grabbed="true"` while dragging.
+  `aria-label` from `Messages::drag_handle_label`, plus `aria-grabbed="true"` while dragging. For a
+  **disabled** node the handle is non-operable: `DragStart` rejects it, so `drag_handle_attrs` emits
+  `aria-disabled="true"` and `tabindex="-1"` (removed from the tab sequence, no `aria-grabbed`)
+  rather than presenting an operable-looking control.
 - **Hover-expand** (adapter): When the pointer dwells over a collapsed node during a drag, the
   adapter expands it after a 500 ms hover delay by sending `ExpandNode`. The agnostic core has no
   timer.
@@ -1372,6 +1430,12 @@ protocol); pointer hit-testing and the hover-expand timer are **adapter**-resolv
   - Arrow Up/Down step the item through the valid drop slots (`DragMovePrev` / `DragMoveNext`).
   - `Enter` confirms the drop (`Drop`).
   - `Escape` cancels and discards the drop target (`CancelDrag`).
+- **Single in-flight drag**: `DragStart` is rejected while a drag is already active (`ctx.dragging`
+  is set), so a second handle pickup or a stray pointer-start cannot silently retarget the source
+  node — the active drag must be confirmed (`Drop`) or cancelled (`CancelDrag`) first.
+- **Runtime disable**: Setting `dnd_enabled: false` while a drag is in flight resyncs via
+  `SyncProps`, which clears `ctx.dragging` / `ctx.drop_target` so no stale drag state lingers once
+  the feature is turned off.
 - **Drop validity**: The core rejects dropping a node onto itself or any of its descendants
   (cycle prevention) in both `DragOver` and `Drop`.
 - **Reorder callback**: `Props::on_reorder: Option<Callback<ReorderEvent>>` fires when a drop is

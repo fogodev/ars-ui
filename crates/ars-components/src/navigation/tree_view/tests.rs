@@ -640,12 +640,12 @@ fn root_focus_and_blur_dispatch_events() {
 
     let api = service.connect(&send);
 
-    api.on_root_focus();
+    api.on_root_focus(true); // keyboard tab-in
     api.on_root_blur();
 
     assert_eq!(
         recorder.borrow().as_slice(),
-        &[Event::Focus { is_keyboard: false }, Event::Blur]
+        &[Event::Focus { is_keyboard: true }, Event::Blur]
     );
 }
 
@@ -1825,6 +1825,89 @@ fn controlled_multi_selection_is_clamped_under_single_mode() {
     assert_eq!(
         count, 1,
         "single mode clamps a multi-key controlled binding"
+    );
+}
+
+// ----------------------------------------------------------------------------
+// Codex review regressions, round 4 (PR #695)
+// ----------------------------------------------------------------------------
+
+#[test]
+fn blur_resets_typeahead_buffer() {
+    let mut service = service(props());
+    drop(service.send(Event::TypeaheadSearch('g', 1)));
+    assert!(!service.context().typeahead.search.is_empty());
+    drop(service.send(Event::Blur));
+    assert!(
+        service.context().typeahead.search.is_empty(),
+        "blur clears the typeahead buffer so a refocus starts fresh"
+    );
+}
+
+#[test]
+fn keyboard_root_focus_shows_focus_visible_on_active_node() {
+    let mut service = service(props());
+    drop(service.send(Event::Focus { is_keyboard: true }));
+
+    let node = service.context().focused_node.clone().expect("active node");
+    assert_eq!(
+        service
+            .connect(&|_| {})
+            .branch_attrs(&node)
+            .get(&HtmlAttr::Data("ars-focus-visible")),
+        Some("true"),
+        "a keyboard tab-in shows the focus ring on the initialized active node"
+    );
+}
+
+#[test]
+fn typeahead_reaches_disabled_nodes() {
+    // Apple (2) is disabled but focusable; typing 'a' must still reach it
+    // (FocusOnly), even though it remains non-selectable.
+    let mut service = service(props().items(disabled_items()));
+    drop(service.send(Event::TypeaheadSearch('a', 1)));
+    assert_eq!(service.context().focused_node, Some(key(2)));
+}
+
+#[test]
+fn disabling_dnd_at_runtime_clears_active_drag() {
+    let mut service = service(dnd_props());
+    drop(service.send(Event::DragStart(key(2))));
+    assert_eq!(service.context().dragging, Some(key(2)));
+
+    drop(service.set_props(props())); // dnd_enabled = false
+    assert_eq!(service.context().dragging, None);
+    assert_eq!(service.context().drop_target, None);
+}
+
+#[test]
+fn disabled_node_drag_handle_is_not_operable() {
+    let service = service(props().items(disabled_items()).dnd_enabled(true));
+    let attrs = service.connect(&|_| {}).drag_handle_attrs(&key(2)); // Apple disabled
+    assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+    assert_eq!(attrs.get(&HtmlAttr::TabIndex), Some("-1"));
+}
+
+#[test]
+fn typeahead_respects_live_expansion_state() {
+    // Vegetables (4) starts collapsed (Carrot hidden). After expanding it via an
+    // event, typeahead must see the newly-visible Carrot (5).
+    let mut service = service(props());
+    drop(service.send(Event::ExpandNode(key(4))));
+    drop(service.send(Event::TypeaheadSearch('c', 1)));
+    assert_eq!(service.context().focused_node, Some(key(5)));
+}
+
+#[test]
+fn nested_drag_start_is_rejected() {
+    let mut service = service(dnd_props());
+    drop(service.send(Event::DragStart(key(2))));
+    let result = service.send(Event::DragStart(key(3)));
+    assert!(!result.context_changed);
+    assert_eq!(
+        service.context().dragging,
+        Some(key(2)),
+        "an in-flight drag cannot be retargeted by a second DragStart"
     );
 }
 
