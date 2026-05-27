@@ -1,0 +1,99 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "32a1ce6cb6b5",
+  "session_id": "737704b2-0d90-4bb4-bf1c-59b70e20a2e6",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-27T14:25:32.032862Z",
+  "branch": "task-267",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "208b165fb3d1",
+  "token_usage": {
+    "input_tokens": 76358,
+    "cache_creation_tokens": 2163182,
+    "cache_read_tokens": 170564128,
+    "output_tokens": 415646,
+    "api_call_count": 359
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "summary": {
+    "intent": "Implement task #267: a new TreeView agnostic-core component (+ DnD reorder variant) for the ars-ui Rust component library, including spec sync, tests, and PR submission.",
+    "outcome": "TreeView agnostic core fully implemented and merged into PR #695 with 85 unit tests, 26 snapshots, spec-conformance, proptest, 99% line/region coverage, and all 10 Codex review findings addressed.",
+    "learnings": {
+      "repo": [
+        "`TreeCollection::nodes()` iterates `visible_indices` only — returns visible nodes, not all nodes. `ExpandAll` and similar bulk-expand operations must use the new `all_nodes()`/`all_keys()` accessors to reach nodes hidden under collapsed parents.",
+        "`Key` does not implement `Borrow<str>`, so the spec's `String`-based event payloads (`ExpandNode(String)`, `.contains(id)`) were non-compilable and non-round-trippable. Project convention is `Key` throughout — integer keys round-trip correctly only that way.",
+        "`selection::State::select` already rejects disabled keys internally, but `init` must explicitly seed `selection_state.disabled_keys` from `TreeItem.disabled` flags; omitting this silently allows disabled nodes to be selected/dragged.",
+        "All input components, `navigation_menu`, and `accordion` implement `on_props_changed` to sync controlled props. Omitting it causes controlled `selected`/`expanded` updates and post-reorder re-supply to be silently dropped.",
+        "DnD primitives (`DropPosition`, `CollectionDndEvent`, `DraggableCollection`/`DroppableCollection`, `CollectionDndMessages`) live in `ars-collections::dnd`. The `DraggableCollection::selection()` required method means the traits cannot be implemented by bare `TreeCollection` — they belong to the adapter layer (tasks #366/#509) where live selection state can be bundled.",
+        "Navigation tests append to a single `tests/spec_conformance/navigation.rs` file (not split per component). New components add their anatomy test there.",
+        "`KeyboardKey` has no `Character` variant; typed characters come from `data.character: Option<char>`. The tree uses active-descendant (root `tabindex=0` + `aria-activedescendant`), not roving tabindex.",
+        "`EffectName` has a blanket impl — no manual `impl EffectName for Effect` needed. `Api` struct requires a manual `Debug` impl (same pattern as `accordion`).",
+        "`CLAUDE.md` is a symlink to `AGENTS.md`; edits must target `AGENTS.md` directly. `.agents/` and `.claude/` skill files are hardlinked (same inode), so editing either updates both.",
+        "`spec-compile-snippets` runs `syn::parse_file` per code block (syntax only, no type resolution). Variant sections gated with `rust,no_check` are excluded from compilation.",
+        "Mandatory pre-PR mutation gate removed for agnostic components — surviving mutants are now triaged when Nightly CI surfaces them, not per-task."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-collections/src/tree_collection.rs",
+          "line": 646,
+          "end_line": 646,
+          "finding": "`visible_keys` lives in the `impl<T: CollectionItem>` block. Pure-read accessors like `all_keys()`/`all_nodes()` with no trait bound belong in the separate `impl<T>` block (lines 134–175)."
+        },
+        {
+          "path": "crates/ars-collections/src/selection.rs",
+          "line": 200,
+          "end_line": 200,
+          "finding": "`State::select` already rejects keys present in `disabled_keys`. The component's `init` must seed this set from `TreeItem.disabled` flags; otherwise the guard is silently bypassed."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/accordion/mod.rs",
+          "line": 903,
+          "end_line": 903,
+          "finding": "`Api` struct requires a manual `fmt::Debug` impl (not derivable due to the PhantomData/callback fields). Pattern established here is the template for TreeView's `Api`."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/tree_view/mod.rs",
+          "line": 1,
+          "finding": "Codex review found 10 behavioral gaps post-merge: Space key should toggle (not always select); ArrowRight on a leaf node should be inert (not a no-op that still fires); `FocusNode` from pointer click should set `focus_visible: false`; `ExpandAll` must skip lazy nodes; `CollapseNode`/`CollapseAll` must clamp focus to the nearest visible ancestor; `SyncProps` must rebuild selection config (mode/behavior/multiple) and clamp stale focus; `is_valid_drop` must verify the target key exists; typeahead should match `label` (displayed text) before falling back to `text_value`."
+        }
+      ],
+      "workflow": [
+        "TDD discipline: add failing tests (red) before implementing each feature. The transcript explicitly confirms 'red' before each implementation step.",
+        "Codex review is triggered by posting `@codex review` as a PR comment. Bot signals reviewing with 👀 reaction and approval with 👍. Poll `gh api` reactions to detect state changes.",
+        "`cargo xci-fast` is the mandatory pre-push gate (10 checks including spec-conformance, snapshots, clippy, doc). Must be green before committing.",
+        "Insta snapshot workflow: first run creates `.new` files; `INSTA_UPDATE=always cargo test` + `cargo insta accept` generates and accepts all snapshots. `--unreferenced=reject` catches orphan snapshots.",
+        "Pre-commit hooks re-stage all tracked modifications, which collapses intended multi-commit splits into a single commit. Plan for this when trying to isolate policy changes from feature work.",
+        "Background `Bash` tasks with `run_in_background` return completion notifications via `task-notification` messages. The output file path in the notification is authoritative; polling `mutants.out/` incrementally also works for cargo-mutants.",
+        "When a background task is stopped (`TaskStop`), its completion notification still fires with a failed exit code — distinguish stale poller failures from actual run failures by checking which task ID notified."
+      ]
+    },
+    "friction": [
+      "Multiple stale wakeup/poller tasks from the stopped mutation run fired after the policy change, causing repeated 'Continue task #267' prompts that required manual disambiguation.",
+      "`cargo-mutants` buffers all progress output — no incremental visibility during a 36-minute run. Had to poll `mutants.out/` directory directly for interim results.",
+      "Pre-commit hook re-stages all tracked modifications, silently collapsing the intended two-commit split (feature vs. policy change) into one commit.",
+      "`CLAUDE.md` being a symlink to `AGENTS.md` was only discovered after an `Edit` on `CLAUDE.md` failed — required a `readlink` to find the real target.",
+      "Codex review 10-finding batch required a second full TDD + spec-sync + xci-fast cycle after the PR was already open, adding significant rework."
+    ],
+    "open_items": [
+      "Adapter-layer DnD (DOM pointer/geometry hit-testing, 500ms hover-expand timer, `use_drag`/`use_drop` wiring, `DraggableCollection`/`DroppableCollection` trait impls bundling live selection) deferred to task #366 (Leptos adapter) and #509 (Dioxus adapter).",
+      "Surviving mutation gate results (6 MISSED + 2 timeouts from the first run; killer tests added for all 8 but the rerun was stopped) are now deferred to Nightly CI triage per the new policy.",
+      "Lazy Loading variant (§5) and Renamable Nodes variant (§6) are `rust,no_check` gated sections in the spec — left for future tasks.",
+      "§6 rename-variant identity was aligned to `Key` in the spec but the rename-node feature itself is out of scope for this task.",
+      "The `AGENTS.md`/audit-skill policy change (removing mandatory mutation gate for agnostic components) ended up in the same commit as the TreeView feature due to hook behavior — ideally isolated in its own commit or PR."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
