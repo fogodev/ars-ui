@@ -1,0 +1,200 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "42d6d0ba9308",
+  "session_id": "019e65c0-1ef0-7333-aba7-132bcdbeccbf",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-27T01:58:11.092193Z",
+  "branch": "t3code/implement-tasks-282-283",
+  "checkpoints_count": 4,
+  "files_touched": [
+    ".cargo/mutants.toml",
+    "crates/ars-components/src/data_display/meter.rs",
+    "crates/ars-components/src/data_display/mod.rs",
+    "crates/ars-components/src/data_display/progress/mod.rs",
+    "crates/ars-components/src/data_display/rating_group/mod.rs",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_control_half.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_control_whole.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_hidden_input.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_item_disabled.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_item_half_highlighted.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_item_selected.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_label.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_root.snap",
+    "crates/ars-components/src/data_display/stat.rs",
+    "crates/ars-components/src/data_display/tag_group/mod.rs",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_label.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_list.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_remove_disabled.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_remove_enabled.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_root_disabled.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_root_focused.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_tag_disabled.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_tag_focused_selected.snap",
+    "crates/ars-components/tests/data_display_meter_stat_progress.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+    "crates/ars-components/tests/spec_conformance/data_display.rs",
+    "crates/ars-i18n/src/number/mod.rs",
+    "spec/components/data-display/rating-group.md",
+    "spec/components/data-display/tag-group.md",
+    "spec/dioxus-components/data-display/tag-group.md",
+    "spec/leptos-components/data-display/tag-group.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "8abcdaaa4545",
+  "token_usage": {
+    "input_tokens": 1300977,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 68617984,
+    "output_tokens": 97034,
+    "api_call_count": 464
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Implement GitHub issues #282 (RatingGroup) and #283 (TagGroup) as agnostic-core data-display components in ars-components, following test-driven development with full verification gates (unit, snapshot, spec conformance, proptest, mutation, coverage).",
+    "outcome": "Both components were fully implemented with colocated tests and snapshots, spec/conformance/proptest entries added, all mutation passes green, and a PR committed and pushed to GitHub. An opportunistic cleanup of pre-existing detached test files (data_display_meter_stat_progress.rs) and a real ars-i18n fallback formatter bug fix were also landed in the same commit.",
+    "learnings": {
+      "repo": [
+        "Snapshots must live under src/data_display/{component}/snapshots/ (colocated with component code), not in tests/snapshots/.",
+        "Unit tests must be colocated as #[cfg(test)] blocks inside component modules, not in detached integration test files like crates/ars-components/tests/data_display_*.rs — data_display_meter_stat_progress.rs was a pre-existing anti-pattern.",
+        "The RatingGroup spec had an inconsistency: §2 prose mentioned ItemHalf/ItemFull as public Part variants, but §1.6 and §5.2 defined the authoritative Part enum without them. Treat ItemHalf/ItemFull as adapter-rendered visual substructure and expose data-ars-half on the Item part instead.",
+        "cargo xci-fast is the required pre-push gate; cargo xmutants is the mutation gate configured via .cargo/mutants.toml which supports timeout exclusions for mutants that only die by process timeout.",
+        "cargo insta test --unreferenced=reject fails on pre-existing orphaned snapshots across other components even with --glob-filter, making the full-package gate unusable as written.",
+        "TagGroup Leptos/Dioxus adapter specs (spec/leptos-components/ and spec/dioxus-components/) were out of date — missing Label and List parts, and the default_selected_keys prop.",
+        "GitHub Project board status transitions (Todo → In Progress) must be done via gh api graphql with item-edit before beginning implementation.",
+        "The ars-i18n fallback formatter (used in unit tests) scaled percent values correctly but never appended the % symbol, causing Meter and Progress percent value-text assertions to fail silently in the detached test files.",
+        "cargo xtask spec validate checks 340 spec files and must pass after any spec edits.",
+        "Fractional step values (not 0.5, not 1.0) should trigger the slider ARIA pattern on RatingGroup Control, same as allow_half mode — the spec did not make this explicit."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-i18n/src/number/mod.rs",
+          "line": 876,
+          "end_line": 890,
+          "finding": "Fallback formatter's percent branch scaled the value but never appended '%', causing Meter/Progress value-text to be plain decimal in unit test environments. Fixed by appending the percent sign in the fallback path."
+        },
+        {
+          "path": "crates/ars-i18n/src/number/mod.rs",
+          "line": 1299,
+          "end_line": 1305,
+          "finding": "Regression test added: fallback_format_percent_includes_percent_sign verifies the fallback formatter appends % for percent-style values."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/rating_group/mod.rs",
+          "finding": "RatingGroup whole-number mode roving-tabindex bug caught by mutation testing: only the item matching the committed value should receive tabindex=0; all other items including highlighted-but-not-committed lower items must be tabindex=-1."
+        },
+        {
+          "path": ".cargo/mutants.toml",
+          "line": 52,
+          "end_line": 74,
+          "finding": "TagGroup transition-function replacement mutant only died by timeout (full crate test process exceeded cargo-mutants timeout), not by a specific test failure. Added a narrow documented exclusion rather than leaving it as a false survivor."
+        }
+      ],
+      "workflow": [
+        "TDD flow: write failing imports/test stubs first, run cargo test to confirm red, then implement production code and iterate to green before running broader gates.",
+        "Mutation testing reliably caught real logic gaps: 22 TagGroup survivors and 24 RatingGroup survivors in first passes led to targeted tests that fixed real bugs (roving tabindex, selection guards, disabled focus cleanup).",
+        "Two concurrent cargo xmutants runs share the same mutants.out lock and queue — run them sequentially to avoid lock contention.",
+        "INSTA_UPDATE=always regenerates snapshot fixtures in-place; use it after implementation is stable rather than during iteration.",
+        "Post-implementation audit (spec vs implementation diff pass) found two real drifts: fractional step slider semantics missing, and TagGroup spec sketches not reflecting the implemented selection/effect/StaticCollection contract.",
+        "Opportunistic cleanup of unrelated pre-existing issues (detached test files, formatter bug) is worth doing when the fix is small and all gates still pass — include in the same commit rather than deferring."
+      ]
+    },
+    "friction": [
+      "cargo xmutants runs are very slow (multiple 30+ minute passes per component); running successive passes to close survivors consumed most of the session wall time.",
+      "cargo insta test --unreferenced=reject is not usable as a gate for new components because pre-existing orphaned snapshots in other components cause it to fail even with --glob-filter.",
+      "The broad cargo llvm-cov test -p ars-components --text -- data_display gate was blocked by pre-existing Meter/Progress snapshot drift unrelated to the new work, requiring a narrower --test data_display_rating_tag_group invocation.",
+      "The RatingGroup spec's ItemHalf/ItemFull inconsistency required a judgement call and a spec edit; it should have been caught during spec authoring.",
+      "Multiple mutation reruns were required per component (3 for RatingGroup, 2 for TagGroup) as each pass surfaced new survivors that required test additions.",
+      "The ars-i18n fallback formatter bug was silent for a long time because the detached test file was not part of the normal module test suite — only discovered when colocating the tests."
+    ],
+    "open_items": [
+      "Pre-existing orphaned snapshots across other components cause cargo insta test --unreferenced=reject to fail package-wide; these need a separate cleanup pass.",
+      "Leptos and Dioxus adapter implementations for RatingGroup and TagGroup are explicitly out of scope for this delivery — adapter code does not exist yet.",
+      "The snapshot-reviewed label should be applied to the opened PR since new snapshot fixtures were committed.",
+      "The broader cargo llvm-cov test -p ars-components --text -- data_display gate (not the focused integration test variant) should be re-verified after the ars-i18n percent formatter fix to confirm Meter/Progress drift is fully resolved."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-27T01:57:06.696498Z",
+    "agent_lines": 3628,
+    "agent_removed": 801,
+    "human_added": 210,
+    "human_modified": 216,
+    "human_removed": 0,
+    "total_committed": 3958,
+    "total_lines_changed": 4857,
+    "agent_percentage": 91.18797611694461,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3397,
+      "agent_lines_removed": 22
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 48,
+      "user_lines_removed": 23,
+      "agent_lines_added": 3440,
+      "agent_lines_removed": 22,
+      "user_added_per_file": {
+        "crates/ars-components/tests/data_display_rating_tag_group.rs": 26,
+        "spec/dioxus-components/data-display/tag-group.md": 11,
+        "spec/leptos-components/data-display/tag-group.md": 11
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/tests/data_display_rating_tag_group.rs": 1,
+        "spec/dioxus-components/data-display/tag-group.md": 11,
+        "spec/leptos-components/data-display/tag-group.md": 11
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 26,
+      "user_lines_removed": 1,
+      "agent_lines_added": 3456,
+      "agent_lines_removed": 38,
+      "user_added_per_file": {
+        "crates/ars-components/tests/data_display_rating_tag_group.rs": 26
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/tests/data_display_rating_tag_group.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 215,
+      "user_lines_removed": 98,
+      "agent_lines_added": 3959,
+      "agent_lines_removed": 919,
+      "user_added_per_file": {
+        "crates/ars-collections/src/key.rs": 26,
+        "crates/ars-components/src/data_display/meter.rs": 1,
+        "crates/ars-components/src/data_display/progress/mod.rs": 7,
+        "crates/ars-components/src/data_display/rating_group/mod.rs": 90,
+        "crates/ars-components/src/data_display/stat.rs": 1,
+        "crates/ars-components/src/data_display/tag_group/mod.rs": 85,
+        "crates/ars-components/tests/proptest_state_machines/data_display.rs": 5
+      },
+      "user_removed_per_file": {
+        "crates/ars-collections/src/key.rs": 2,
+        "crates/ars-components/src/data_display/progress/mod.rs": 1,
+        "crates/ars-components/src/data_display/rating_group/mod.rs": 53,
+        "crates/ars-components/src/data_display/tag_group/mod.rs": 40,
+        "crates/ars-components/tests/proptest_state_machines/data_display.rs": 2
+      }
+    }
+  ]
+}

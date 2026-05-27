@@ -1,0 +1,220 @@
+Implement tasks #282 and #283
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# RatingGroup and TagGroup Agnostic Core Plan
+
+**Summary**
+
+Implement GitHub issues `#282` and `#283` as one scoped agnostic-core data-display delivery in `ars-components`, with no adapter work and no new dependencies. `#283` is unblocked because dependency `#53` is closed and Done. Before implementation, move both issues to `In Progress` on the GitHub Project board.
+
+**Scope**
+
+- Implement `RatingGroup` core from `spec/components/data-display/rating-group.md`.
+- Implement `TagGroup` core from `spec/components/data-display/tag-group.md`.
+- Add unit, snapshot, spec-conformance, proptest, coverage, mutation, and spec validation gates.
+- Keep Leptos/Dioxus adapters out of scope.
+- Do not commit, push, or open a PR until explicit user approval after local implementation and audit.
+
+**Files**
+
+- Create `crates/ars-components/src/data_display/rating_group/mod.rs`
+- Create `crates/ars-components/src/data_display/tag_group/mod.rs`
+- Modify `crates/ars-components/src/data_display/mod.rs`
+- Modify `crates/ars-components/tests/spec_conformance/data_display.rs`
+- Modify `crates/ars-components/tests/proptest_state_machines/data_display.rs`
+- Modify or create a focused integration test file, preferably `crates/ars-components/tests/data_display_rating_tag_group.rs`
+- Snapshot fixtures will be generated under each new module’s `snapshots/` directory or the integration test snapshot directory, following local insta conventions.
+- Modify `spec/components/data-display/rating-group.md` only to resolve the existing `ItemHalf` / `ItemFull` public-anatomy inconsistency if implementation confirms the intended core `Part` enum is the §1.6 / §5.2 surface.
+
+**Public API**
+
+`data_display::rating_group` will expose:
+
+- `Props`
+- `State`
+- `Event`
+- `Context`
+- `Messages`
+- `Part`
+- `Machine`
+- `Api<'a>`
+
+`RatingGroup::Part` will use the spec §1.6 public core anatomy:
+
+- `Root`
+- `Label`
+- `Control`
+- `Item { index: usize }`
+- `HiddenInput`
+
+Implementation default: treat `ItemHalf` and `ItemFull` as adapter-rendered visual substructure, not public core `Part` variants. If a half value is visible, expose `data-ars-half` on the relevant `Item`.
+
+`data_display::tag_group` will expose:
+
+- `Tag`
+- `Props`
+- `State`
+- `Event`
+- `Context`
+- `Messages`
+- `Part`
+- `Machine`
+- `Api<'a>`
+
+`TagGroup::Part` will match the spec:
+
+- `Root`
+- `Label`
+- `List`
+- `Tag { key: Key }`
+- `TagRemove { key: Key }`
+
+Use `ars_collections::{Key, StaticCollection, Collection, selection}` and existing `ars_core::{Bindable, ComponentPart, ConnectApi, AttrMap, HtmlAttr, AriaAttr, Env, Locale, MessageFn, NoEffect, TransitionPlan}` patterns.
+
+**Implementation Details**
+
+RatingGroup:
+
+- Initialize `Bindable<f64>` from `Props::value` or `default_value`.
+- Sanitize rating values to finite `0.0..=count`.
+- Resolve effective step as:
+  - `props.step` when finite and positive and not `1.0`
+  - `0.5` when `allow_half`
+  - `1.0` otherwise
+- Round committed values to the nearest effective step and clamp to range.
+- `Rate`, increment, decrement, and clear are no-ops when `readonly` or `disabled`.
+- `Focus` and `Blur` remain allowed in readonly mode; disabled mode does not focus interactive items.
+- Add typed `Api` event helpers for keyboard and pointer intent:
+  - `on_control_keydown(&KeyboardEventData)`
+  - `on_item_keydown(index, &KeyboardEventData)`
+  - `on_item_focus(index, is_keyboard)`
+  - `on_item_blur()`
+  - `on_item_hover(index)`
+  - `on_control_mouse_leave()`
+  - `on_item_rate(index)`
+- Attribute output:
+  - Whole-number mode uses `Control role="radiogroup"` and item `role="radio"`.
+  - Half/fractional mode uses `Control role="slider"` with `aria-valuemin`, `aria-valuemax`, `aria-valuenow`, `aria-valuetext`, and one focusable control.
+  - Hidden input emits `type="hidden"`, `name`, `value`, `required`, and `form` as applicable.
+
+TagGroup:
+
+- Store items as `StaticCollection<Tag>`.
+- Use `Bindable<BTreeSet<Key>>` for controlled/uncontrolled selected keys.
+- Focus defaults to first non-disabled item when entering without a key.
+- Navigation skips disabled tags and does not wrap unless the spec behavior requires wrap; based on §1.5, keep no-wrap behavior for next/previous and first/last explicit jumps.
+- Removal:
+  - No-op for group-disabled, missing, or item-disabled keys.
+  - Remove the item from `Context::items`.
+  - Remove the key from selection.
+  - Move focus to next item, else previous item, else group idle.
+  - Emit a typed effect intent for removal announcement rather than calling platform APIs from core.
+- Selection support:
+  - Add explicit selection events if needed to satisfy issue acceptance: `SelectTag(Key)`, `DeselectTag(Key)`, `ToggleTag(Key)`.
+  - Honor `selection::Mode::{None, Single, Multiple}` and `disallow_empty_selection`.
+- Attribute output:
+  - Root emits `role="grid"`, `aria-label`, `aria-relevant="additions removals"`, `aria-atomic="false"`, `data-ars-state`, disabled attributes.
+  - Label emits stable `id="{props.id}-label"`.
+  - List emits `role="row"` and `aria-labelledby`.
+  - Tag emits `role="gridcell"`, `data-ars-key`, roving `tabindex`, selected/disabled/focus-visible state.
+  - TagRemove emits `role="button"`, localized remove label, `tabindex="-1"`, disabled state.
+
+**Test Cases**
+
+Add tests first for RatingGroup:
+
+- `Part` anatomy matches spec.
+- Whole mode root/control/item attrs include `radiogroup`, `radio`, `aria-checked`, roving tabindex.
+- Half mode control emits slider attrs and value text.
+- `Rate` clamps and rounds to whole, half, and custom step values.
+- ArrowRight/ArrowUp increment; ArrowLeft/ArrowDown decrement; Home clears; End sets max.
+- Hover preview changes display/highlight without committing value.
+- Readonly blocks value changes but allows focus/blur.
+- Disabled blocks interactive changes and emits disabled attrs.
+- Count controls max and rendered item attrs.
+- Hidden input emits name/value/required/form.
+- Snapshots cover Root, Label, Control whole, Control half, Item selected, Item highlighted, Item half, Item disabled/readonly, HiddenInput.
+
+Add tests first for TagGroup:
+
+- `Part` anatomy matches spec.
+- Root/list/tag/remove attrs match grid pattern.
+- Initial roving tabindex lands on first non-disabled tag when no focus exists.
+- FocusNext/Previous/First/Last skip disabled tags.
+- Delete/Backspace helper emits remove for focused tag.
+- Remove moves focus to next, previous, then idle when empty.
+- Remove ignores disabled item and group-disabled state.
+- Single and multiple selection update selected keys and attrs.
+- `disallow_empty_selection` prevents removing the last selected key from selection state.
+- Empty collection emits stable root/list attrs and no focused tag.
+- Snapshots cover Root idle/focused/disabled, Label, List, Tag focused, Tag selected, Tag disabled, TagRemove enabled/disabled.
+
+Add proptests:
+
+- RatingGroup event sequences preserve:
+  - value always finite and `0.0..=count`
+  - rounded value aligns to effective step
+  - disabled/readonly sequences do not change committed value except allowed focus state
+  - hover value never exceeds count
+- TagGroup event sequences preserve:
+  - focused key is either `None` or present in current collection
+  - focused key is not disabled
+  - selected keys are present in current collection unless controlled props explicitly require otherwise
+  - group-disabled events do not mutate items or selection except allowed blur/focus state
+
+**Verification**
+
+Run focused checks during implementation:
+
+```bash
+cargo test -p ars-components --test data_display_rating_tag_group
+cargo test -p ars-components --test spec_conformance -- data_display
+cargo test -p ars-components --test proptest_state_machines -- data_display
+cargo insta test -p ars-components --unreferenced=reject rating_group tag_group
+cargo xtask spec validate
+```
+
+Run mutation gates before handoff:
+
+```bash
+cargo xmutants -p ars-components -f crates/ars-components/src/data_display/rating_group/mod.rs
+cargo xmutants -p ars-components -f crates/ars-components/src/data_display/tag_group/mod.rs
+```
+
+Run coverage audit:
+
+```bash
+cargo llvm-cov test -p ars-components --text -- data_display
+```
+
+Then invoke `.agents/skills/post-implementation-audit/SKILL.md` and land every finding in the same local change before presenting the result.
+
+Before any PR push after user approval:
+
+```bash
+cargo xci-fast
+```
+
+If snapshots changed, apply the `snapshot-reviewed` label after opening the PR.
+
+**Assumptions**
+
+- Combined delivery is intended because the user asked for `#282` and `#283` together.
+- `#283` is unblocked because `#53` is closed and Done.
+- Adapter behavior, DOM handles, hit testing geometry, live focus movement, and scroll/measurement stay out of scope.
+- No new dependency crate is needed.
+- The RatingGroup `ItemHalf` / `ItemFull` prose is treated as visual substructure unless implementation review proves the public `Part` enum should include those variants.
+
+---
+
+The snapshot files weren't supposed to live in the same module as the components they're testing, like we have in other categories?
+
+---
+
+Why are the unit tests for rating group in a detached file @crates/ars-components/tests/data_display_rating_tag_group.rs and not as unit tests near the code ? (And the same for this other @crates/ars-components/tests/data_display_meter_stat_progress.rs  too)
+
+---
+
+Yeah, and move from that other file too as we're on it already

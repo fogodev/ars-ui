@@ -1,0 +1,55 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "42d6d0ba9308",
+  "strategy": "manual-commit",
+  "branch": "t3code/implement-tasks-282-283",
+  "checkpoints_count": 4,
+  "files_touched": [
+    ".cargo/mutants.toml",
+    "crates/ars-components/src/data_display/meter.rs",
+    "crates/ars-components/src/data_display/mod.rs",
+    "crates/ars-components/src/data_display/progress/mod.rs",
+    "crates/ars-components/src/data_display/rating_group/mod.rs",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_control_half.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_control_whole.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_hidden_input.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_item_disabled.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_item_half_highlighted.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_item_selected.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_label.snap",
+    "crates/ars-components/src/data_display/rating_group/snapshots/ars_components__data_display__rating_group__tests__rating_group_root.snap",
+    "crates/ars-components/src/data_display/stat.rs",
+    "crates/ars-components/src/data_display/tag_group/mod.rs",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_label.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_list.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_remove_disabled.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_remove_enabled.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_root_disabled.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_root_focused.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_tag_disabled.snap",
+    "crates/ars-components/src/data_display/tag_group/snapshots/ars_components__data_display__tag_group__tests__tag_group_tag_focused_selected.snap",
+    "crates/ars-components/tests/data_display_meter_stat_progress.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+    "crates/ars-components/tests/spec_conformance/data_display.rs",
+    "crates/ars-i18n/src/number/mod.rs",
+    "spec/components/data-display/rating-group.md",
+    "spec/components/data-display/tag-group.md",
+    "spec/dioxus-components/data-display/tag-group.md",
+    "spec/leptos-components/data-display/tag-group.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/42/d6d0ba9308/0/metadata.json",
+      "transcript": "/42/d6d0ba9308/0/full.jsonl",
+      "content_hash": "/42/d6d0ba9308/0/content_hash.txt",
+      "prompt": "/42/d6d0ba9308/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1300977,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 68617984,
+    "output_tokens": 97034,
+    "api_call_count": 464
+  }
+}
