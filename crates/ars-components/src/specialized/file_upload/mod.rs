@@ -86,14 +86,22 @@ pub enum RejectionReason {
     /// File type not in the accepted list.
     InvalidType,
 
-    /// File exceeds the maximum size.
-    TooLarge,
+    /// File exceeds the maximum size, carrying the limit that was in effect at
+    /// rejection time so the message stays accurate if the prop later changes.
+    TooLarge {
+        /// The `max_file_size` (bytes) that the file exceeded.
+        max: u64,
+    },
 
     /// Adding this file would exceed the maximum count.
     TooMany,
 
-    /// File is smaller than the minimum size.
-    TooSmall,
+    /// File is smaller than the minimum size, carrying the limit in effect at
+    /// rejection time.
+    TooSmall {
+        /// The `min_file_size` (bytes) that the file fell below.
+        min: u64,
+    },
 
     /// Custom validation failed.
     CustomValidation(String),
@@ -1063,10 +1071,15 @@ impl ars_core::Machine for Machine {
 
             (_, Event::ClearFiles) => {
                 let had_files = !ctx.files.get().is_empty();
-                let plan = TransitionPlan::to(State::Idle).apply(|context: &mut Context| {
-                    commit_files(context, Vec::new());
-                    context.rejected_files.clear();
-                });
+                // Drag-aware (like the upload-finish paths): clearing mid-drag
+                // settles in DragOver so the drag-leave path clears the flags,
+                // rather than stranding `data-ars-dragging` in Idle.
+                let plan = TransitionPlan::to(finished_uploading_state(ctx.dragging)).apply(
+                    |context: &mut Context| {
+                        commit_files(context, Vec::new());
+                        context.rejected_files.clear();
+                    },
+                );
 
                 Some(if had_files {
                     plan.with_effect(files_change_effect())
@@ -1588,16 +1601,18 @@ impl Api<'_> {
     #[must_use]
     pub fn validation_error_text(&self, rejection: &Rejection) -> String {
         match &rejection.reason {
-            RejectionReason::TooLarge => {
-                (self.ctx.messages.too_large)(self.ctx.max_file_size.unwrap_or(0), &self.ctx.locale)
+            // Use the limit captured at rejection time, not the current prop
+            // (which may have been changed or cleared since).
+            RejectionReason::TooLarge { max } => {
+                (self.ctx.messages.too_large)(*max, &self.ctx.locale)
             }
 
             RejectionReason::InvalidType => (self.ctx.messages.wrong_type)(&self.ctx.locale),
 
             RejectionReason::TooMany => (self.ctx.messages.too_many_files)(&self.ctx.locale),
 
-            RejectionReason::TooSmall => {
-                (self.ctx.messages.too_small)(self.ctx.min_file_size.unwrap_or(0), &self.ctx.locale)
+            RejectionReason::TooSmall { min } => {
+                (self.ctx.messages.too_small)(*min, &self.ctx.locale)
             }
 
             RejectionReason::CustomValidation(message) => message.clone(),
@@ -1831,7 +1846,10 @@ fn apply_selected_files_plan(
         plan = plan.with_effect(files_change_effect());
     }
 
-    if auto_upload {
+    // Auto-upload is tied to a real accepted selection/drop: a zero-accept result
+    // (all rejected, or an empty/cancelled picker) must not start unrelated
+    // pending files already in the queue.
+    if auto_upload && accepted_count > 0 {
         plan = plan.then(Event::StartUpload);
     }
 
@@ -2127,7 +2145,7 @@ fn validate_files(
                 name: file.name.clone(),
                 size: file.size,
                 mime_type: file.mime_type.clone(),
-                reason: RejectionReason::TooLarge,
+                reason: RejectionReason::TooLarge { max: max_size },
             });
 
             continue;
@@ -2140,7 +2158,7 @@ fn validate_files(
                 name: file.name.clone(),
                 size: file.size,
                 mime_type: file.mime_type.clone(),
-                reason: RejectionReason::TooSmall,
+                reason: RejectionReason::TooSmall { min: min_size },
             });
 
             continue;

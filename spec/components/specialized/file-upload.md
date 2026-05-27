@@ -81,12 +81,13 @@ impl Progress {
 pub enum RejectionReason {
     /// File type not in the accepted list.
     InvalidType,
-    /// File exceeds the maximum size.
-    TooLarge,
+    /// File exceeds the maximum size; carries the limit in effect at rejection
+    /// time so the message stays accurate if the prop later changes.
+    TooLarge { max: u64 },
     /// Adding this file would exceed the maximum count.
     TooMany,
-    /// File is smaller than the minimum size.
-    TooSmall,
+    /// File is smaller than the minimum size; carries the limit at rejection time.
+    TooSmall { min: u64 },
     /// Custom validation failed.
     CustomValidation(String),
 }
@@ -435,7 +436,7 @@ fn validate_files(
                     name: file.name.clone(),
                     size: file.size,
                     mime_type: file.mime_type.clone(),
-                    reason: RejectionReason::TooLarge,
+                    reason: RejectionReason::TooLarge { max: max_size },
                 });
                 continue;
             }
@@ -447,7 +448,7 @@ fn validate_files(
                     name: file.name.clone(),
                     size: file.size,
                     mime_type: file.mime_type.clone(),
-                    reason: RejectionReason::TooSmall,
+                    reason: RejectionReason::TooSmall { min: min_size },
                 });
                 continue;
             }
@@ -735,7 +736,9 @@ impl ars_core::Machine for Machine {
                     let mut current = ctx.files.get().clone();
                     current.extend(accepted);
                     commit_files(ctx, current);
-                    // If auto_upload, chain a StartUpload event.
+                    // If auto_upload AND accepted_count > 0, chain a StartUpload
+                    // event — an all-rejected selection must not start existing
+                    // pending files.
                 })) // + announce-files-added/rejected{count} + files-changed{queue}
             }
 
@@ -826,7 +829,9 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::ClearFiles) => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                // Drag-aware (like the upload-finish paths): clearing mid-drag
+                // settles in DragOver so the drag-leave path clears the flags.
+                Some(TransitionPlan::to(finished_uploading_state(ctx.dragging)).apply(|ctx| {
                     commit_files(ctx, Vec::new());
                     ctx.rejected_files.clear();
                 })) // + files-changed{[]}
@@ -1264,11 +1269,9 @@ impl<'a> Api<'a> {
     /// Adapters can use this to display per-file error messages in the file list.
     pub fn validation_error_text(&self, rejection: &Rejection) -> String {
         match &rejection.reason {
-            RejectionReason::TooLarge => {
-                (self.ctx.messages.too_large)(
-                    self.ctx.max_file_size.unwrap_or(0),
-                    &self.ctx.locale,
-                )
+            // Use the limit captured at rejection time, not the current prop.
+            RejectionReason::TooLarge { max } => {
+                (self.ctx.messages.too_large)(*max, &self.ctx.locale)
             }
             RejectionReason::InvalidType => {
                 (self.ctx.messages.wrong_type)(&self.ctx.locale)
@@ -1276,11 +1279,8 @@ impl<'a> Api<'a> {
             RejectionReason::TooMany => {
                 (self.ctx.messages.too_many_files)(&self.ctx.locale)
             }
-            RejectionReason::TooSmall => {
-                (self.ctx.messages.too_small)(
-                    self.ctx.min_file_size.unwrap_or(0),
-                    &self.ctx.locale,
-                )
+            RejectionReason::TooSmall { min } => {
+                (self.ctx.messages.too_small)(*min, &self.ctx.locale)
             }
             RejectionReason::CustomValidation(msg) => msg.clone(),
         }

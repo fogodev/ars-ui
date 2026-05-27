@@ -601,7 +601,7 @@ fn file_upload_max_file_size_rejects_large_files() {
     assert!(service.context().files.get().is_empty());
     assert_eq!(
         service.context().rejected_files[0].reason,
-        RejectionReason::TooLarge
+        RejectionReason::TooLarge { max: 50 }
     );
 }
 
@@ -621,7 +621,7 @@ fn file_upload_min_file_size_rejects_small_files() {
 
     assert_eq!(
         service.context().rejected_files[0].reason,
-        RejectionReason::TooSmall
+        RejectionReason::TooSmall { min: 100 }
     );
 }
 
@@ -2329,6 +2329,80 @@ fn file_upload_retry_non_failed_file_does_not_auto_start() {
 
     assert_eq!(service.state(), &State::Idle);
     assert_eq!(service.context().files.get()[0].status, Status::Pending);
+}
+
+#[test]
+fn file_upload_clear_while_dragging_returns_to_drag_over() {
+    let mut service = uploading_service("file-1");
+
+    drop(service.send(Event::DragEnter));
+    assert!(service.context().dragging);
+
+    let result = service.send(Event::ClearFiles);
+    assert!(result.state_changed);
+    assert_eq!(service.state(), &State::DragOver);
+    assert!(service.context().dragging);
+    assert!(service.context().files.get().is_empty());
+
+    drop(service.send(Event::DragLeave));
+    assert_eq!(service.state(), &State::Idle);
+    assert!(!service.context().dragging);
+}
+
+#[test]
+fn file_upload_auto_upload_not_triggered_by_all_rejected_selection() {
+    let mut service = Service::<Machine>::new(
+        Props::new()
+            .id("upload")
+            .multiple(true)
+            .auto_upload(true)
+            .max_file_size(50)
+            .default_files(vec![item("file-1", "a.png", Status::Pending)]),
+        &Env::default(),
+        &Messages::default(),
+    );
+    assert_eq!(service.state(), &State::Idle);
+
+    // The selection is entirely rejected (too large), so auto-upload must not
+    // start the pre-existing pending file.
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "big.png",
+        100,
+        "image/png",
+    )])));
+
+    assert_eq!(service.state(), &State::Idle);
+    assert_eq!(service.context().files.get()[0].status, Status::Pending);
+}
+
+#[test]
+fn file_upload_validation_error_text_uses_rejection_time_limit() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").max_file_size(50),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FilesSelected(vec![raw_file(
+        "big.png",
+        100,
+        "image/png",
+    )])));
+    let rejection = service.context().rejected_files[0].clone();
+
+    // The parent clears the size limit after the rejection.
+    drop(service.set_props(Props {
+        max_file_size: None,
+        ..service.props().clone()
+    }));
+
+    // The error text must reflect the limit at rejection time (50), not the now-
+    // cleared prop (which would render "0 bytes").
+    let text = service.connect(&|_| {}).validation_error_text(&rejection);
+    assert!(
+        text.contains("50"),
+        "expected the rejection-time limit, got: {text}"
+    );
 }
 
 #[test]
