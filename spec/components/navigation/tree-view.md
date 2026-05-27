@@ -319,7 +319,10 @@ impl ars_core::Machine for Machine {
         // Disabled nodes stay focusable and typeahead-reachable (FocusOnly) while
         // `select` still rejects them, so they cannot be selected.
         selection_state.disabled_behavior = selection::DisabledBehavior::FocusOnly;
-        selection_state.selected_keys = normalize_selection(selected.get().clone(), selection_mode);
+        // Drop any disabled or unknown key from the resolved initial selection so
+        // a disabled node can never initialize as selected.
+        selection_state.selected_keys = sanitize_selection(
+            selected.get().clone(), selection_mode, &props.items, &selection_state.disabled_keys);
         let locale = env.locale.clone();
         let messages = messages.clone();
         let ids = ComponentIds::from_id(&props.id);
@@ -498,10 +501,7 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
                 // Disabled nodes block all interaction, including drag.
-                let node = ctx.items.get(key);
-                let draggable = node.is_some_and(Node::is_focusable)
-                    && !node.and_then(|n| n.value.as_ref()).is_some_and(|v| v.disabled);
-                if !props.dnd_enabled || !draggable {
+                if !props.dnd_enabled || !is_draggable(&ctx.items, key) {
                     return None;
                 }
                 let key = key.clone();
@@ -513,8 +513,14 @@ impl ars_core::Machine for Machine {
 
             Event::DragOver(target) => {
                 let dragging = ctx.dragging.as_ref()?;
-                if !props.dnd_enabled || !is_valid_drop(&ctx.items, dragging, target) {
-                    return None;
+                if !props.dnd_enabled { return None; }
+                if !is_valid_drop(&ctx.items, &visible_keys(ctx), dragging, target) {
+                    // Hovering an invalid slot (the dragged node, a descendant,
+                    // or a row hidden under a collapsed parent) drops any stale
+                    // target so a later `Drop` cannot fire against a slot the
+                    // user is no longer indicating. With no target, nothing to do.
+                    ctx.drop_target.as_ref()?;
+                    return Some(TransitionPlan::context_only(|ctx| { ctx.drop_target = None; }));
                 }
                 let target = target.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -529,7 +535,7 @@ impl ars_core::Machine for Machine {
                 if !props.dnd_enabled { return None; }
                 let dragging = ctx.dragging.as_ref()?;
                 let target = ctx.drop_target.as_ref()?;
-                if !is_valid_drop(&ctx.items, dragging, target) { return None; }
+                if !is_valid_drop(&ctx.items, &visible_keys(ctx), dragging, target) { return None; }
                 let reorder = ReorderEvent {
                     source_path: path_to(&ctx.items, dragging),
                     target_path: path_to(&ctx.items, &target.key),
@@ -560,34 +566,55 @@ impl ars_core::Machine for Machine {
                 let multiple = props.multiple;
                 let selection_mode = effective_selection_mode(props);
                 let selection_behavior = props.selection_behavior;
+                let dnd_enabled = props.dnd_enabled;
                 let disabled_keys = items.all_nodes()
                     .filter(|n| n.value.as_ref().is_some_and(|v| v.disabled))
                     .map(|n| n.key.clone())
                     .collect::<BTreeSet<Key>>();
                 Some(TransitionPlan::context_only(move |ctx| {
+                    // Whether the data source itself changed (vs. an echo of an
+                    // unrelated prop): an in-flight drag's paths are only stale
+                    // when the collection changes.
+                    let items_changed = ctx.items != items;
                     ctx.items = items;
                     ctx.ids = ComponentIds::from_id(&id); // track a changed Props::id
                     ctx.multiple = multiple;
                     ctx.selection_mode = selection_mode;
                     ctx.selected.sync_controlled(selected);
                     ctx.expanded.sync_controlled(expanded);
-                    // Normalize the (uncontrolled) selection for the new mode.
-                    let normalized = normalize_selection(ctx.selected.get().clone(), selection_mode);
+                    // Normalize for the new mode and drop keys removed from the
+                    // collection or now disabled, so a tightened mode or a data
+                    // update cannot leave a stale/non-selectable key selected.
+                    let normalized = sanitize_selection(
+                        ctx.selected.get().clone(), selection_mode, &ctx.items, &disabled_keys);
                     ctx.selected.set(normalized);
                     let mut new_state = selection::State::new(selection_mode, selection_behavior)
                         .with_disabled(disabled_keys);
                     // Disabled nodes stay focusable and typeahead-reachable while
                     // `select` still rejects them (they cannot be selected).
                     new_state.disabled_behavior = selection::DisabledBehavior::FocusOnly;
-                    // Normalize even a mode-violating controlled binding for the
+                    // Sanitize even a mode-violating controlled binding for the
                     // rendered selection without mutating the parent value.
-                    new_state.selected_keys =
-                        normalize_selection(ctx.selected.get().clone(), selection_mode);
+                    new_state.selected_keys = sanitize_selection(
+                        ctx.selected.get().clone(), selection_mode, &ctx.items, &new_state.disabled_keys);
                     ctx.selection_state = new_state;
-                    // The data source changed: discard any in-flight drag so a
-                    // later Drop cannot fire a reorder with a stale path.
-                    ctx.dragging = None;
-                    ctx.drop_target = None;
+                    // Re-validate the in-flight drag rather than always cancelling
+                    // it: a controlled-expanded parent can echo a new `expanded`
+                    // prop during a hover-expand drag, and that must not break the
+                    // reorder. Discard only when DnD is off, the collection changed
+                    // (paths now stale), or the dragged/target keys are invalid.
+                    if !dnd_enabled || items_changed {
+                        ctx.dragging = None;
+                        ctx.drop_target = None;
+                    } else if let Some(dragging) = ctx.dragging.clone() {
+                        // Items unchanged ⟹ the dragged node is still draggable;
+                        // only the drop target can be invalidated (e.g. an
+                        // `expanded` echo hid it). Drop just the stale target.
+                        let visible = visible_keys(ctx);
+                        let stale = ctx.drop_target.as_ref()
+                            .is_some_and(|t| !is_valid_drop(&ctx.items, &visible, &dragging, t));
+                        if stale { ctx.drop_target = None; }
+                    }
                     clamp_focus_to_visible(ctx);
                 }))
             }
@@ -694,7 +721,9 @@ fn visible_keys(ctx: &Context) -> Vec<Key> {
     ctx.items.visible_keys_with_expanded(ctx.expanded.get())
 }
 
-/// Relative focus target, wrapping at the ends.
+/// Relative focus target. Per the WAI-ARIA tree pattern, Down/Up move to the
+/// next/previous visible node and **do not wrap** at the ends (Home/End jump to
+/// the boundaries); a step past the last/first node is a no-op.
 fn focus_relative(ctx: &Context, direction: Direction) -> Option<TransitionPlan<Machine>> {
     let visible = visible_keys(ctx);
     if visible.is_empty() { return None; }
@@ -702,9 +731,10 @@ fn focus_relative(ctx: &Context, direction: Direction) -> Option<TransitionPlan<
         .and_then(|current| visible.iter().position(|k| k == current))
     {
         Some(pos) => match direction {
-            Direction::Next => visible.get(pos + 1).or_else(|| visible.first()),
-            Direction::Prev => if pos > 0 { visible.get(pos - 1) } else { visible.last() },
+            Direction::Next => visible.get(pos + 1),
+            Direction::Prev => pos.checked_sub(1).and_then(|prev| visible.get(prev)),
         },
+        // No prior focus: enter at the near end for the travel direction.
         None => match direction { Direction::Next => visible.first(), Direction::Prev => visible.last() },
     };
     target.cloned().map(|k| focus_plan(k, true))
@@ -809,13 +839,47 @@ fn is_descendant(items: &TreeCollection<TreeItem>, ancestor: &Key, candidate: &K
     false
 }
 
-/// A drop is valid when the target is a real node (adapters can send stale or
-/// unknown keys during pointer hit-testing) and is not the dragged node or one
-/// of its descendants (which would create a cycle).
-fn is_valid_drop(items: &TreeCollection<TreeItem>, dragging: &Key, target: &CollectionDropTarget) -> bool {
-    items.get(&target.key).is_some()
+/// A drop is valid when the target is a currently **visible** node (adapters can
+/// send stale keys for rows hidden under a collapsed parent during pointer
+/// hit-testing or virtualization) and is not the dragged node or one of its
+/// descendants (which would create a cycle). `visible` is the live visible-key
+/// set (`visible_keys`).
+fn is_valid_drop(items: &TreeCollection<TreeItem>, visible: &[Key], dragging: &Key, target: &CollectionDropTarget) -> bool {
+    visible.contains(&target.key)
         && &target.key != dragging
         && !is_descendant(items, dragging, &target.key)
+}
+
+/// Whether `key` is a node the user may pick up to drag: it exists, is
+/// focusable, and is not disabled (disabled nodes block all interaction).
+fn is_draggable(items: &TreeCollection<TreeItem>, key: &Key) -> bool {
+    let node = items.get(key);
+    node.is_some_and(Node::is_focusable)
+        && !node.and_then(|n| n.value.as_ref()).is_some_and(|i| i.disabled)
+}
+
+/// Whether `key` names a node that can be selected: it exists and is not
+/// disabled. Keeps the rendered selection free of removed or disabled keys.
+fn is_selectable_key(items: &TreeCollection<TreeItem>, disabled: &BTreeSet<Key>, key: &Key) -> bool {
+    items.get(key).is_some() && !disabled.contains(key)
+}
+
+/// Drop selection keys that cannot be selected in `items` (missing or disabled
+/// nodes), then normalize the remainder for `mode`. Applied at init and on every
+/// `SyncProps` so the rendered selection (and the uncontrolled binding) can
+/// never report a removed or disabled node as selected. The symbolic `All` and
+/// any future `#[non_exhaustive]` `Set` variant pass through unfiltered.
+fn sanitize_selection(set: selection::Set, mode: selection::Mode, items: &TreeCollection<TreeItem>, disabled: &BTreeSet<Key>) -> selection::Set {
+    let retained = match set {
+        selection::Set::Single(key) =>
+            if is_selectable_key(items, disabled, &key) { selection::Set::Single(key) } else { selection::Set::Empty },
+        selection::Set::Multiple(keys) => {
+            let kept = keys.into_iter().filter(|k| is_selectable_key(items, disabled, k)).collect::<BTreeSet<Key>>();
+            if kept.is_empty() { selection::Set::Empty } else { selection::Set::Multiple(kept) }
+        }
+        other => other,
+    };
+    normalize_selection(retained, mode)
 }
 
 /// Path of keys from the root down to `key` (inclusive).
@@ -874,6 +938,13 @@ impl Api<'_> {
     /// rendering never exposes a selection shape the current mode forbids.
     pub fn is_node_selected(&self, node_id: &Key) -> bool {
         self.ctx.selection_state.selected_keys.contains(node_id)
+    }
+
+    /// Whether a node with the given `disabled` flag can be selected: selection
+    /// must be enabled (`selection_mode != None`) and the node must be enabled.
+    /// Non-selectable nodes omit `aria-selected` per the WAI-ARIA tree pattern.
+    fn is_node_selectable(&self, disabled: bool) -> bool {
+        !disabled && !matches!(self.ctx.selection_mode, selection::Mode::None)
     }
 
     /// Whether a node is expanded.
@@ -964,7 +1035,12 @@ impl Api<'_> {
         if has_actual_children || has_children_flag {
             attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), bool_token(is_expanded));
         }
-        attrs.set(HtmlAttr::Aria(AriaAttr::Selected), bool_token(is_selected));
+        // Only selectable nodes expose `aria-selected`; a non-selectable node
+        // (selection disabled, or this node disabled) must not advertise a
+        // selection affordance (WAI-ARIA tree pattern).
+        if self.is_node_selectable(disabled) {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Selected), bool_token(is_selected));
+        }
         attrs.set(HtmlAttr::Aria(AriaAttr::Level), level.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::SetSize), setsize.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::PosInSet), posinset.to_string());
@@ -1022,7 +1098,10 @@ impl Api<'_> {
         if has_children_flag {
             attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), bool_token(is_expanded));
         }
-        attrs.set(HtmlAttr::Aria(AriaAttr::Selected), bool_token(is_selected));
+        // Only selectable nodes expose `aria-selected` (see `branch_attrs`).
+        if self.is_node_selectable(disabled) {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Selected), bool_token(is_selected));
+        }
         attrs.set(HtmlAttr::Aria(AriaAttr::Level), level.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::SetSize), setsize.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::PosInSet), posinset.to_string());
@@ -1044,14 +1123,17 @@ impl Api<'_> {
     pub fn drag_handle_attrs(&self, node_id: &Key) -> AttrMap {
         let mut attrs = part_only_attrs(&Part::DragHandle { node_id: Key::default() });
         let item = self.ctx.items.get(node_id).and_then(|n| n.value.as_ref());
-        let disabled = item.is_some_and(|v| v.disabled);
         let label = item.map_or("", |v| v.label.as_str());
+        // The handle is inert for a disabled node (`DragStart` rejects it) and
+        // whenever DnD is off (`on_drag_handle_keydown` no-ops), so a consumer
+        // that always renders handles never exposes an operable-looking control
+        // that cannot perform its announced action.
+        let inert = !self.props.dnd_enabled || item.is_some_and(|v| v.disabled);
         attrs.set(HtmlAttr::Role, "button")
             .set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.drag_handle_label)(label, &self.ctx.locale));
-        if disabled {
-            // A disabled node cannot be dragged (`DragStart` rejects it), so the
-            // handle is marked disabled and removed from the tab sequence rather
-            // than presenting an operable-looking control.
+        if inert {
+            // Marked disabled and removed from the tab sequence rather than
+            // presenting an operable-looking control.
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true").set(HtmlAttr::TabIndex, "-1");
         } else {
             // `tabindex="0"` so keyboard users can tab to the handle to start a drag.
@@ -1263,14 +1345,14 @@ reorder variant (§4).
 | Part              | Element                               | Key Attributes                                                                                                                                                                                                                                                                                       |
 | ----------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Root`            | `<ul>` or `<div>`                     | `data-ars-scope="tree-view"`, `data-ars-part="root"`, `role="tree"`, `tabindex="0"`, `aria-multiselectable` (when `multiple`), `aria-activedescendant` (when focused)                                                                                                                                |
-| `Branch`          | `<li>` or `<div>`                     | `id`, `role="treeitem"`, `aria-expanded` (also set when `has_children` is true with no loaded children), `aria-selected`, `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-expanded`, `data-ars-selected`, `data-ars-focus-visible`, `aria-roledescription="draggable"` (when `dnd_enabled`) |
+| `Branch`          | `<li>` or `<div>`                     | `id`, `role="treeitem"`, `aria-expanded` (also set when `has_children` is true with no loaded children), `aria-selected` (selectable nodes only), `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-expanded`, `data-ars-selected`, `data-ars-focus-visible`, `aria-roledescription="draggable"` (when `dnd_enabled`) |
 | `BranchControl`   | `<div>` or `<a>` (when href)          | `data-ars-scope="tree-view"`, `data-ars-part="branch-control"`, `href` (when present)                                                                                                                                                                                                                |
 | `BranchIndicator` | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="branch-indicator"`, `aria-hidden="true"`, `data-ars-expanded`                                                                                                                                                                                          |
 | `BranchText`      | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="branch-text"`                                                                                                                                                                                                                                          |
 | `BranchContent`   | `<ul>` or `<div>`                     | `role="group"`, `data-ars-scope="tree-view"`, `data-ars-part="branch-content"`, `hidden` (when collapsed)                                                                                                                                                                                            |
-| `Leaf`            | `<li>`, `<div>`, or `<a>` (when href) | `id`, `role="treeitem"`, `aria-expanded="false"` (when `has_children` is true), `aria-selected`, `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-selected`, `href` (when present)                                                                                                           |
+| `Leaf`            | `<li>`, `<div>`, or `<a>` (when href) | `id`, `role="treeitem"`, `aria-expanded="false"` (when `has_children` is true), `aria-selected` (selectable nodes only), `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-selected`, `href` (when present)                                                                                   |
 | `LeafText`        | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="leaf-text"`                                                                                                                                                                                                                                            |
-| `DragHandle`      | `<button>`                            | `data-ars-part="drag-handle"`, `role="button"`, `tabindex="0"` (`tabindex="-1"` + `aria-disabled="true"` for a disabled node), `aria-label` (from `Messages::drag_handle_label`), `aria-grabbed` (while dragging). Drag-and-drop variant (§4).                                                       |
+| `DragHandle`      | `<button>`                            | `data-ars-part="drag-handle"`, `role="button"`, `tabindex="0"` (`tabindex="-1"` + `aria-disabled="true"` when the node is disabled or DnD is off), `aria-label` (from `Messages::drag_handle_label`), `aria-grabbed` (while dragging). Drag-and-drop variant (§4).                                   |
 | `DropIndicator`   | `<div>`                               | `data-ars-part="drop-indicator"`, `aria-hidden="true"`, `data-ars-drop-position`, `data-ars-drop-target`. Drag-and-drop variant (§4).                                                                                                                                                                |
 
 ## 3. Accessibility
@@ -1284,9 +1366,9 @@ reorder variant (§4).
 | Part            | Role       | Properties                                                                                                                                                                |
 | --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Root`          | `tree`     | `aria-multiselectable="true"` when `multiple=true`                                                                                                                        |
-| `Branch`        | `treeitem` | `aria-expanded="true\|false"` (emitted when node has children or `has_children` is true), `aria-selected`, `aria-disabled`, `aria-level`, `aria-setsize`, `aria-posinset` |
+| `Branch`        | `treeitem` | `aria-expanded="true\|false"` (emitted when node has children or `has_children` is true), `aria-selected` (selectable nodes only), `aria-disabled`, `aria-level`, `aria-setsize`, `aria-posinset` |
 | `BranchContent` | `group`    | —                                                                                                                                                                         |
-| `Leaf`          | `treeitem` | `aria-selected`, `aria-disabled`, `aria-level`, `aria-setsize`, `aria-posinset`. When `has_children` is true: also `aria-expanded="false"`                                |
+| `Leaf`          | `treeitem` | `aria-selected` (selectable nodes only), `aria-disabled`, `aria-level`, `aria-setsize`, `aria-posinset`. When `has_children` is true: also `aria-expanded="false"`        |
 
 When a tree item has an `href`, the adapter renders the clickable area (`BranchControl` or
 `Leaf`) as an `<a>` element. The `role="treeitem"` on the parent `Branch`/`Leaf` container is
@@ -1310,8 +1392,8 @@ container's ID.
 
 | Key                 | Behavior                                                                                                                                  |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `ArrowDown`         | Move focus to the next visible node (skips hidden children of collapsed branches).                                                        |
-| `ArrowUp`           | Move focus to the previous visible node.                                                                                                  |
+| `ArrowDown`         | Move focus to the next visible node (skips hidden children of collapsed branches). Does **not** wrap: a no-op at the last node.            |
+| `ArrowUp`           | Move focus to the previous visible node. Does **not** wrap: a no-op at the first node.                                                    |
 | `ArrowRight`        | If focused node is a collapsed branch: expand it. If an expanded branch: move focus to first child. On a leaf: inert (no child to enter). |
 | `ArrowLeft`         | If focused node is an expanded branch: collapse it. If collapsed (or a leaf): move focus to parent.                                       |
 | `Home`              | Move focus to the first node in the tree.                                                                                                 |
@@ -1334,6 +1416,10 @@ This matches the WAI-ARIA `TreeView` pattern, where ArrowRight/ArrowLeft map to 
 ### 3.4 Selection Announcements
 
 - Selected items have `aria-selected="true"` (already present)
+- Only **selectable** nodes expose `aria-selected` at all. A node that cannot be
+  selected — because selection is disabled (`selection_mode == None`) or the node
+  itself is disabled — omits the attribute entirely rather than advertising a
+  selection affordance the user cannot operate (`Api::is_node_selectable`).
 - Selection changes are announced via focus movement to the selected node
 - For programmatic selection changes (no focus change), use LiveAnnouncer:
   `announce("{item label} selected", "polite")`
@@ -1409,10 +1495,11 @@ protocol); pointer hit-testing and the hover-expand timer are **adapter**-resolv
 - **Drag handle**: Each tree item renders an optional drag handle affordance (the `DragHandle`
   anatomy part). The handle is the grab target; the entire row is not draggable by default to
   avoid conflicts with text selection. `drag_handle_attrs` emits `role="button"` and a localized
-  `aria-label` from `Messages::drag_handle_label`, plus `aria-grabbed="true"` while dragging. For a
-  **disabled** node the handle is non-operable: `DragStart` rejects it, so `drag_handle_attrs` emits
-  `aria-disabled="true"` and `tabindex="-1"` (removed from the tab sequence, no `aria-grabbed`)
-  rather than presenting an operable-looking control.
+  `aria-label` from `Messages::drag_handle_label`, plus `aria-grabbed="true"` while dragging. The
+  handle is **inert** — `aria-disabled="true"` and `tabindex="-1"` (removed from the tab sequence,
+  no `aria-grabbed`) — for a **disabled** node (`DragStart` rejects it) and whenever DnD is off
+  (`on_drag_handle_keydown` no-ops), so a consumer that always renders handles never exposes an
+  operable-looking control that cannot perform its announced action.
 - **Hover-expand** (adapter): When the pointer dwells over a collapsed node during a drag, the
   adapter expands it after a 500 ms hover delay by sending `ExpandNode`. The agnostic core has no
   timer.
@@ -1433,11 +1520,18 @@ protocol); pointer hit-testing and the hover-expand timer are **adapter**-resolv
 - **Single in-flight drag**: `DragStart` is rejected while a drag is already active (`ctx.dragging`
   is set), so a second handle pickup or a stray pointer-start cannot silently retarget the source
   node — the active drag must be confirmed (`Drop`) or cancelled (`CancelDrag`) first.
-- **Runtime disable**: Setting `dnd_enabled: false` while a drag is in flight resyncs via
-  `SyncProps`, which clears `ctx.dragging` / `ctx.drop_target` so no stale drag state lingers once
-  the feature is turned off.
-- **Drop validity**: The core rejects dropping a node onto itself or any of its descendants
-  (cycle prevention) in both `DragOver` and `Drop`.
+- **Drag survives unrelated prop echoes**: a `SyncProps` triggered by a non-item prop change
+  (`expanded`, `selected`, `id`, selection config) does **not** cancel an in-flight drag. The core
+  re-validates instead: it discards the drag only when DnD is turned off, the item collection itself
+  changed (paths now stale), or the dragged/target keys are no longer valid (a target hidden by a
+  collapsed parent is dropped while the pickup is preserved). This keeps a controlled-expanded tree's
+  hover-expand `expanded` echo from breaking a reorder.
+- **Drop validity**: A valid drop target must be a currently **visible** node (a row hidden under a
+  collapsed parent is rejected, since pointer hit-testing can send stale keys during
+  collapse/virtualization) and never the dragged node itself or one of its descendants (cycle
+  prevention). This is enforced in both `DragOver` and `Drop`. When `DragOver` reports an **invalid**
+  target during an active drag, any previously-set `ctx.drop_target` is **cleared** so a later `Drop`
+  cannot fire against a slot the user is no longer indicating.
 - **Reorder callback**: `Props::on_reorder: Option<Callback<ReorderEvent>>` fires when a drop is
   completed. The core never mutates `ctx.items`; the consumer applies the reorder to its data
   source and re-supplies props (pure-notification, like Tabs).

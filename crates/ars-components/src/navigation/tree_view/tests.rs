@@ -419,7 +419,7 @@ fn focus_first_and_last() {
 }
 
 #[test]
-fn focus_next_skips_collapsed_children_and_wraps() {
+fn focus_next_skips_collapsed_children_and_stops_at_end() {
     let mut service = service(props());
 
     drop(service.send(Event::FocusNode(key(4)))); // Vegetables (collapsed)
@@ -428,19 +428,21 @@ fn focus_next_skips_collapsed_children_and_wraps() {
     // Carrot/Daikon are hidden; next visible after Vegetables is Grains.
     assert_eq!(service.context().focused_node, Some(key(7)));
 
-    drop(service.send(Event::FocusNext)); // wraps to first
+    // Per the WAI-ARIA tree pattern, ArrowDown does not wrap: at the last node
+    // it is a no-op (Home/End handle boundary jumps), so focus stays on Grains.
+    drop(service.send(Event::FocusNext));
 
-    assert_eq!(service.context().focused_node, Some(key(1)));
+    assert_eq!(service.context().focused_node, Some(key(7)));
 }
 
 #[test]
-fn focus_prev_wraps_to_last() {
+fn focus_prev_at_first_node_does_not_wrap() {
     let mut service = service(props());
 
     drop(service.send(Event::FocusFirst));
-    drop(service.send(Event::FocusPrev));
+    drop(service.send(Event::FocusPrev)); // ArrowUp at the first node is a no-op.
 
-    assert_eq!(service.context().focused_node, Some(key(7)));
+    assert_eq!(service.context().focused_node, Some(key(1)));
 }
 
 #[test]
@@ -1908,6 +1910,219 @@ fn nested_drag_start_is_rejected() {
         service.context().dragging,
         Some(key(2)),
         "an in-flight drag cannot be retargeted by a second DragStart"
+    );
+}
+
+// ----------------------------------------------------------------------------
+// Codex review regressions, round 5 (PR #695)
+// ----------------------------------------------------------------------------
+
+#[test]
+fn disabled_initial_selection_is_dropped() {
+    // Apple (2) is disabled; a `default_selected` containing it must not init as
+    // selected (it can never be selected via `SelectNode`).
+    let service = service(
+        props()
+            .items(disabled_items())
+            .default_selected(selection::Set::Single(key(2))),
+    );
+    let api = service.connect(&|_| {});
+    assert!(
+        !api.is_node_selected(&key(2)),
+        "a disabled node cannot initialize as selected"
+    );
+    assert!(service.context().selection_state.selected_keys.is_empty());
+}
+
+#[test]
+fn non_selectable_nodes_omit_aria_selected() {
+    // selection_mode None: no node is selectable, so none exposes aria-selected.
+    let none = service(props().selection_mode(selection::Mode::None));
+    let none_api = none.connect(&|_| {});
+    assert_eq!(
+        none_api
+            .branch_attrs(&key(1))
+            .get(&HtmlAttr::Aria(AriaAttr::Selected)),
+        None,
+        "a branch in a non-selectable tree omits aria-selected"
+    );
+    assert_eq!(
+        none_api
+            .leaf_attrs(&key(2))
+            .get(&HtmlAttr::Aria(AriaAttr::Selected)),
+        None,
+        "a leaf in a non-selectable tree omits aria-selected"
+    );
+
+    // A disabled node in a selectable tree is also non-selectable.
+    let disabled = service(props().items(disabled_items()));
+    assert_eq!(
+        disabled
+            .connect(&|_| {})
+            .leaf_attrs(&key(2))
+            .get(&HtmlAttr::Aria(AriaAttr::Selected)),
+        None,
+        "a disabled node omits aria-selected"
+    );
+
+    // A selectable, enabled node still advertises selection state.
+    assert_eq!(
+        service(props())
+            .connect(&|_| {})
+            .leaf_attrs(&key(2))
+            .get(&HtmlAttr::Aria(AriaAttr::Selected)),
+        Some("false"),
+        "a selectable enabled node still exposes aria-selected"
+    );
+}
+
+#[test]
+fn drag_over_invalid_target_clears_stale_drop_target() {
+    let mut service = service(dnd_props());
+    drop(service.send(Event::DragStart(key(2)))); // drag Apple
+    drop(service.send(Event::DragOver(CollectionDropTarget {
+        key: key(7),
+        position: DropPosition::Before,
+    })));
+    assert!(service.context().drop_target.is_some());
+
+    // Hover an invalid slot (the dragged node itself): the stale target clears.
+    let result = service.send(Event::DragOver(CollectionDropTarget {
+        key: key(2),
+        position: DropPosition::On,
+    }));
+    assert!(
+        result.context_changed,
+        "dropping the stale target is a context change"
+    );
+    assert_eq!(
+        service.context().drop_target,
+        None,
+        "hovering an invalid slot drops the stale target so Drop can't reuse it"
+    );
+}
+
+#[test]
+fn drag_handle_is_inert_when_dnd_disabled() {
+    // DnD off, but a consumer still renders a handle on an enabled node: it must
+    // not present an operable-looking control.
+    let service = service(props()); // dnd_enabled = false
+    let attrs = service.connect(&|_| {}).drag_handle_attrs(&key(2));
+    assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+    assert_eq!(attrs.get(&HtmlAttr::TabIndex), Some("-1"));
+}
+
+#[test]
+fn expansion_prop_echo_preserves_active_drag() {
+    // A controlled-expanded tree echoing a new `expanded` prop during a drag
+    // (e.g. adapter hover-expand) must not cancel the in-flight reorder.
+    let mut expanded = BTreeSet::new();
+    expanded.insert(key(1));
+    let mut service = service(dnd_props().expanded(expanded.clone()));
+    drop(service.send(Event::DragStart(key(2))));
+    assert_eq!(service.context().dragging, Some(key(2)));
+
+    expanded.insert(key(4)); // echo: also expand Vegetables; items unchanged.
+    drop(service.set_props(dnd_props().expanded(expanded)));
+    assert_eq!(
+        service.context().dragging,
+        Some(key(2)),
+        "an expanded-prop echo must preserve an in-flight drag"
+    );
+}
+
+#[test]
+fn drag_over_hidden_target_is_rejected() {
+    // Vegetables (4) is collapsed, so Carrot (5) is hidden. A pointer hit-test
+    // that sends the hidden row as a target must be rejected.
+    let mut service = service(dnd_props());
+    drop(service.send(Event::DragStart(key(7)))); // drag Grains
+    let result = service.send(Event::DragOver(CollectionDropTarget {
+        key: key(5),
+        position: DropPosition::On,
+    }));
+    assert!(!result.context_changed);
+    assert_eq!(
+        service.context().drop_target,
+        None,
+        "a target hidden under a collapsed parent is not a valid drop slot"
+    );
+}
+
+#[test]
+fn selection_drops_keys_removed_from_collection() {
+    // Select Grains (7), then supply a collection that no longer contains it.
+    let mut service = service(props());
+    drop(service.send(Event::SelectNode(key(7))));
+    assert!(service.connect(&|_| {}).is_node_selected(&key(7)));
+
+    let smaller = TreeCollection::new(vec![branch(1, "Fruits", true, vec![leaf(2, "Apple")])]);
+    drop(service.set_props(props().items(smaller)));
+
+    assert!(
+        !service.connect(&|_| {}).is_node_selected(&key(7)),
+        "a selection key removed from the collection is dropped on resync"
+    );
+    assert!(service.context().selection_state.selected_keys.is_empty());
+}
+
+#[test]
+fn multiple_selection_drops_all_removed_keys() {
+    let mut service = service(
+        props()
+            .multiple(true)
+            .selection_mode(selection::Mode::Multiple),
+    );
+    drop(service.send(Event::SelectNode(key(2))));
+    drop(service.send(Event::SelectNode(key(7))));
+    assert!(service.connect(&|_| {}).is_node_selected(&key(2)));
+    assert!(service.connect(&|_| {}).is_node_selected(&key(7)));
+
+    // New collection contains neither selected key.
+    let smaller = TreeCollection::new(vec![branch(1, "Fruits", true, vec![leaf(3, "Banana")])]);
+    drop(
+        service.set_props(
+            props()
+                .items(smaller)
+                .multiple(true)
+                .selection_mode(selection::Mode::Multiple),
+        ),
+    );
+
+    assert!(
+        service.context().selection_state.selected_keys.is_empty(),
+        "every multi-selected key removed from the collection is dropped"
+    );
+}
+
+#[test]
+fn stale_drop_target_cleared_when_echo_hides_it() {
+    // Vegetables (4) starts expanded so Carrot (5) is a visible drop slot.
+    let mut expanded = BTreeSet::new();
+    expanded.insert(key(1));
+    expanded.insert(key(4));
+    let mut service = service(dnd_props().expanded(expanded));
+    drop(service.send(Event::DragStart(key(7)))); // drag Grains
+    drop(service.send(Event::DragOver(CollectionDropTarget {
+        key: key(5),
+        position: DropPosition::Before,
+    })));
+    assert!(service.context().drop_target.is_some());
+
+    // Echo a collapse of Vegetables: Carrot (5) is no longer visible. The drag
+    // survives but the now-hidden target is dropped.
+    let collapsed: BTreeSet<Key> = [key(1)].into_iter().collect();
+    drop(service.set_props(dnd_props().expanded(collapsed)));
+
+    assert_eq!(
+        service.context().dragging,
+        Some(key(7)),
+        "the drag itself survives an expanded-prop echo"
+    );
+    assert_eq!(
+        service.context().drop_target,
+        None,
+        "a drop target hidden by the echoed collapse is dropped"
     );
 }
 

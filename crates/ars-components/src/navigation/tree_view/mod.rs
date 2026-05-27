@@ -531,7 +531,14 @@ impl ars_core::Machine for Machine {
         // `select` still rejects them, so they cannot be selected.
         selection_state.disabled_behavior = selection::DisabledBehavior::FocusOnly;
 
-        selection_state.selected_keys = normalize_selection(selected.get().clone(), selection_mode);
+        // Drop any disabled or unknown key from the resolved initial selection so
+        // a disabled node can never initialize as selected.
+        selection_state.selected_keys = sanitize_selection(
+            selected.get().clone(),
+            selection_mode,
+            &props.items,
+            &selection_state.disabled_keys,
+        );
 
         (
             State::Idle,
@@ -758,14 +765,7 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
                 // Disabled nodes block all interaction, including drag.
-                let node = ctx.items.get(key);
-
-                let draggable = node.is_some_and(Node::is_focusable)
-                    && !node
-                        .and_then(|n| n.value.as_ref())
-                        .is_some_and(|item| item.disabled);
-
-                if !props.dnd_enabled || !draggable {
+                if !props.dnd_enabled || !is_draggable(&ctx.items, key) {
                     return None;
                 }
 
@@ -779,8 +779,20 @@ impl ars_core::Machine for Machine {
             Event::DragOver(target) => {
                 let dragging = ctx.dragging.as_ref()?;
 
-                if !props.dnd_enabled || !is_valid_drop(&ctx.items, dragging, target) {
+                if !props.dnd_enabled {
                     return None;
+                }
+
+                if !is_valid_drop(&ctx.items, &visible_keys(ctx), dragging, target) {
+                    // Hovering an invalid slot (the dragged node, a descendant,
+                    // or a row hidden under a collapsed parent) must drop any
+                    // stale target so a later `Drop` cannot fire against a slot
+                    // the user is no longer indicating. With no target there is
+                    // nothing to clear.
+                    ctx.drop_target.as_ref()?;
+                    return Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                        ctx.drop_target = None;
+                    }));
                 }
 
                 let target = target.clone();
@@ -802,7 +814,7 @@ impl ars_core::Machine for Machine {
 
                 let target = ctx.drop_target.as_ref()?;
 
-                if !is_valid_drop(&ctx.items, dragging, target) {
+                if !is_valid_drop(&ctx.items, &visible_keys(ctx), dragging, target) {
                     return None;
                 }
 
@@ -843,6 +855,7 @@ impl ars_core::Machine for Machine {
                 let multiple = props.multiple;
                 let selection_mode = effective_selection_mode(props);
                 let selection_behavior = props.selection_behavior;
+                let dnd_enabled = props.dnd_enabled;
                 let disabled_keys = items
                     .all_nodes()
                     .filter(|node| node.value.as_ref().is_some_and(|item| item.disabled))
@@ -850,6 +863,10 @@ impl ars_core::Machine for Machine {
                     .collect::<BTreeSet<Key>>();
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    // Whether the data source itself changed (vs. an echo of an
+                    // unrelated prop like `expanded` or `selected`): an in-flight
+                    // drag's paths are only stale when the collection changes.
+                    let items_changed = ctx.items != items;
                     ctx.items = items;
                     // Rebuild generated ids so node ids / aria-activedescendant
                     // track a changed `Props::id`.
@@ -859,27 +876,56 @@ impl ars_core::Machine for Machine {
                     ctx.selected.sync_controlled(selected);
                     ctx.expanded.sync_controlled(expanded);
 
-                    // Normalize the (uncontrolled) selection for the new mode so a
-                    // tightened mode cannot leave more keys selected than allowed.
-                    let normalized =
-                        normalize_selection(ctx.selected.get().clone(), selection_mode);
+                    // Normalize the (uncontrolled) selection for the new mode and
+                    // drop keys removed from the collection or now disabled, so a
+                    // tightened mode or a data update cannot leave a stale or
+                    // non-selectable key selected.
+                    let normalized = sanitize_selection(
+                        ctx.selected.get().clone(),
+                        selection_mode,
+                        &ctx.items,
+                        &disabled_keys,
+                    );
                     ctx.selected.set(normalized);
 
                     // Rebuild the selection machine; its set is the binding value
-                    // normalized for the mode (so even a mode-violating controlled
-                    // binding renders a valid selection shape).
+                    // sanitized + normalized for the mode (so even a mode-violating
+                    // controlled binding renders a valid selection shape).
                     let mut new_state = selection::State::new(selection_mode, selection_behavior)
                         .with_disabled(disabled_keys);
                     new_state.disabled_behavior = selection::DisabledBehavior::FocusOnly;
-                    new_state.selected_keys =
-                        normalize_selection(ctx.selected.get().clone(), selection_mode);
+                    new_state.selected_keys = sanitize_selection(
+                        ctx.selected.get().clone(),
+                        selection_mode,
+                        &ctx.items,
+                        &new_state.disabled_keys,
+                    );
                     ctx.selection_state = new_state;
 
-                    // The data source changed: any in-flight drag refers to the
-                    // old collection, so discard it rather than letting a later
-                    // `Drop` fire a reorder with a stale source/target path.
-                    ctx.dragging = None;
-                    ctx.drop_target = None;
+                    // Re-validate the in-flight drag against the new props rather
+                    // than always cancelling it: a controlled-expanded parent can
+                    // echo a new `expanded` prop during a hover-expand drag, and
+                    // that must not break the reorder. Discard only when DnD is
+                    // off, the collection changed (paths now stale), or the
+                    // dragged/target keys are no longer valid.
+                    if !dnd_enabled || items_changed {
+                        ctx.dragging = None;
+                        ctx.drop_target = None;
+                    } else if let Some(dragging) = ctx.dragging.clone() {
+                        // Items are unchanged here, so the dragged node is still
+                        // draggable (same existence + disabled flag as at pickup);
+                        // only the drop target can be invalidated — e.g. an
+                        // `expanded` echo collapsed the parent that held it. Drop
+                        // just the target when it is no longer a valid slot.
+                        let visible = visible_keys(ctx);
+                        let stale = ctx
+                            .drop_target
+                            .as_ref()
+                            .is_some_and(|t| !is_valid_drop(&ctx.items, &visible, &dragging, t));
+                        if stale {
+                            ctx.drop_target = None;
+                        }
+                    }
 
                     // A removed/relocated focused node must not leave a dangling
                     // active descendant.
@@ -949,7 +995,10 @@ fn visible_keys(ctx: &Context) -> Vec<Key> {
     ctx.items.visible_keys_with_expanded(ctx.expanded.get())
 }
 
-/// Resolve the relative focus target, wrapping at the ends.
+/// Resolve the relative focus target. Per the WAI-ARIA tree pattern, Down/Up
+/// move to the next/previous visible node and **do not wrap** at the ends
+/// (Home/End jump to the boundaries); a step past the last/first node is a
+/// no-op.
 fn focus_relative(ctx: &Context, direction: Direction) -> Option<TransitionPlan<Machine>> {
     let visible = visible_keys(ctx);
 
@@ -961,16 +1010,11 @@ fn focus_relative(ctx: &Context, direction: Direction) -> Option<TransitionPlan<
         && let Some(pos) = visible.iter().position(|key| key == current)
     {
         match direction {
-            Direction::Next => visible.get(pos + 1).or_else(|| visible.first()),
-            Direction::Prev => {
-                if pos > 0 {
-                    visible.get(pos - 1)
-                } else {
-                    visible.last()
-                }
-            }
+            Direction::Next => visible.get(pos + 1),
+            Direction::Prev => pos.checked_sub(1).and_then(|prev| visible.get(prev)),
         }
     } else {
+        // No prior focus: enter at the near end for the travel direction.
         match direction {
             Direction::Next => visible.first(),
             Direction::Prev => visible.last(),
@@ -1223,17 +1267,77 @@ fn is_interactive_branch(items: &TreeCollection<TreeItem>, key: &Key) -> bool {
 }
 
 /// Whether dropping the dragged node at `target` is valid: the target must be a
-/// real node in the collection (adapters can send stale/unknown keys during
-/// pointer hit-testing), and never the dragged node itself or any of its
-/// descendants (which would create a cycle).
+/// currently **visible** node (adapters can send stale keys for rows hidden
+/// under a collapsed parent during pointer hit-testing or virtualization), and
+/// never the dragged node itself or any of its descendants (which would create
+/// a cycle). `visible` is the live visible-key set (`visible_keys`).
 fn is_valid_drop(
     items: &TreeCollection<TreeItem>,
+    visible: &[Key],
     dragging: &Key,
     target: &CollectionDropTarget,
 ) -> bool {
-    items.get(&target.key).is_some()
+    visible.contains(&target.key)
         && &target.key != dragging
         && !is_descendant(items, dragging, &target.key)
+}
+
+/// Whether `key` is a node the user may pick up to drag: it exists, is
+/// focusable, and is not disabled (disabled nodes block all interaction).
+fn is_draggable(items: &TreeCollection<TreeItem>, key: &Key) -> bool {
+    let node = items.get(key);
+    node.is_some_and(Node::is_focusable)
+        && !node
+            .and_then(|node| node.value.as_ref())
+            .is_some_and(|item| item.disabled)
+}
+
+/// Whether `key` names a node that can actually be selected: it exists in the
+/// collection and is not disabled. Used to keep the rendered selection free of
+/// removed or disabled keys.
+fn is_selectable_key(
+    items: &TreeCollection<TreeItem>,
+    disabled: &BTreeSet<Key>,
+    key: &Key,
+) -> bool {
+    items.get(key).is_some() && !disabled.contains(key)
+}
+
+/// Drop selection keys that cannot be selected in `items` (missing or disabled
+/// nodes), then normalize the remainder for `mode`. Applied at init and on every
+/// `SyncProps` so the rendered selection (and the uncontrolled binding) can
+/// never report a removed or disabled node as selected.
+fn sanitize_selection(
+    set: selection::Set,
+    mode: selection::Mode,
+    items: &TreeCollection<TreeItem>,
+    disabled: &BTreeSet<Key>,
+) -> selection::Set {
+    let retained = match set {
+        selection::Set::Single(key) => {
+            if is_selectable_key(items, disabled, &key) {
+                selection::Set::Single(key)
+            } else {
+                selection::Set::Empty
+            }
+        }
+        selection::Set::Multiple(keys) => {
+            let kept = keys
+                .into_iter()
+                .filter(|key| is_selectable_key(items, disabled, key))
+                .collect::<BTreeSet<Key>>();
+            if kept.is_empty() {
+                selection::Set::Empty
+            } else {
+                selection::Set::Multiple(kept)
+            }
+        }
+        // `Empty`, the symbolic `All` (never produced by TreeView), and any
+        // future `#[non_exhaustive]` variant pass through unfiltered.
+        other => other,
+    };
+
+    normalize_selection(retained, mode)
 }
 
 /// The path of keys from the root down to `key` (inclusive).
@@ -1307,6 +1411,13 @@ impl Api<'_> {
         // binding by `apply_selection`/`SyncProps`) so rendering never exposes a
         // selection shape the current mode forbids.
         self.ctx.selection_state.selected_keys.contains(node_id)
+    }
+
+    /// Whether a node with the given `disabled` flag can be selected: selection
+    /// must be enabled (`selection_mode != None`) and the node must be enabled.
+    /// Non-selectable nodes omit `aria-selected` per the WAI-ARIA tree pattern.
+    const fn is_node_selectable(&self, disabled: bool) -> bool {
+        !disabled && !matches!(self.ctx.selection_mode, selection::Mode::None)
     }
 
     /// Whether a node is expanded.
@@ -1448,8 +1559,14 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), bool_token(is_expanded));
         }
 
+        // Per the WAI-ARIA tree pattern, only selectable nodes expose
+        // `aria-selected`; a non-selectable node (selection disabled, or this
+        // node disabled) must not advertise a selection affordance.
+        if self.is_node_selectable(disabled) {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Selected), bool_token(is_selected));
+        }
+
         attrs
-            .set(HtmlAttr::Aria(AriaAttr::Selected), bool_token(is_selected))
             .set(HtmlAttr::Aria(AriaAttr::Level), level.to_string())
             .set(HtmlAttr::Aria(AriaAttr::SetSize), setsize.to_string())
             .set(HtmlAttr::Aria(AriaAttr::PosInSet), posinset.to_string());
@@ -1573,8 +1690,12 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), bool_token(is_expanded));
         }
 
+        // Only selectable nodes expose `aria-selected` (see `branch_attrs`).
+        if self.is_node_selectable(disabled) {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Selected), bool_token(is_selected));
+        }
+
         attrs
-            .set(HtmlAttr::Aria(AriaAttr::Selected), bool_token(is_selected))
             .set(HtmlAttr::Aria(AriaAttr::Level), level.to_string())
             .set(HtmlAttr::Aria(AriaAttr::SetSize), setsize.to_string())
             .set(HtmlAttr::Aria(AriaAttr::PosInSet), posinset.to_string());
@@ -1621,8 +1742,12 @@ impl Api<'_> {
             .items
             .get(node_id)
             .and_then(|node| node.value.as_ref());
-        let disabled = item.is_some_and(|item| item.disabled);
         let label = item.map_or("", |item| item.label.as_str());
+        // The handle is inert for a disabled node (`DragStart` rejects it) and
+        // whenever DnD is off (`on_drag_handle_keydown` no-ops), so a consumer
+        // that always renders handles never exposes an operable-looking control
+        // that cannot perform its announced action.
+        let inert = !self.props.dnd_enabled || item.is_some_and(|item| item.disabled);
 
         attrs
             .set(scope_attr, scope_val)
@@ -1633,10 +1758,9 @@ impl Api<'_> {
                 (self.ctx.messages.drag_handle_label)(label, &self.ctx.locale),
             );
 
-        if disabled {
-            // A disabled node cannot be dragged (`DragStart` rejects it), so the
-            // handle is marked disabled and removed from the tab sequence rather
-            // than presenting an operable-looking control.
+        if inert {
+            // Marked disabled and removed from the tab sequence rather than
+            // presenting an operable-looking control.
             attrs
                 .set(HtmlAttr::Aria(AriaAttr::Disabled), "true")
                 .set(HtmlAttr::TabIndex, "-1");

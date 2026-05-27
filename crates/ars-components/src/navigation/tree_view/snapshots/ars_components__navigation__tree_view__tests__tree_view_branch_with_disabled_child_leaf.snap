@@ -5,7 +5,6 @@ expression: "snapshot_attrs(&disabled.connect(&|_| {}).leaf_attrs(&key(2)))"
 aria-disabled=true
 aria-level=2
 aria-posinset=1
-aria-selected=false
 aria-setsize=1
 data-ars-disabled=true
 data-ars-part=leaf
