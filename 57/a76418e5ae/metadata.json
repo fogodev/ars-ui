@@ -1,0 +1,59 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "57a76418e5ae",
+  "strategy": "manual-commit",
+  "branch": "task-267",
+  "checkpoints_count": 6,
+  "files_touched": [
+    ".agents/skills/post-implementation-audit/SKILL.md",
+    "crates/ars-collections/src/tree_collection.rs",
+    "crates/ars-components/src/navigation/mod.rs",
+    "crates/ars-components/src/navigation/tree_view/mod.rs",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_collapsed.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_content_collapsed_hidden.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_content_expanded.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_control_href.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_control_plain.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_dnd_enabled.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_expanded.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_focus_visible.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_indicator_collapsed.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_indicator_expanded.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_selected.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_text.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_branch_with_disabled_child_leaf.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_drag_handle_default.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_drag_handle_grabbed.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_drop_indicator_after.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_drop_indicator_before.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_drop_indicator_on.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_leaf_default.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_leaf_has_children_flag.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_leaf_href.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_leaf_selected.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_leaf_text.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_root_active_descendant.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_root_default.snap",
+    "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_root_multiselectable.snap",
+    "crates/ars-components/src/navigation/tree_view/tests.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation.rs",
+    "crates/ars-components/tests/spec_conformance/navigation.rs",
+    "spec/components/navigation/tree-view.md",
+    "spec/foundation/06-collections.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/57/a76418e5ae/0/metadata.json",
+      "transcript": "/57/a76418e5ae/0/full.jsonl",
+      "content_hash": "/57/a76418e5ae/0/content_hash.txt",
+      "prompt": "/57/a76418e5ae/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 68211,
+    "cache_creation_tokens": 1403879,
+    "cache_read_tokens": 108271720,
+    "output_tokens": 349702,
+    "api_call_count": 270
+  }
+}
