@@ -1,0 +1,114 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d66c9a7e9ece",
+  "session_id": "4f81a74c-2045-4aa5-9d9e-e218924e1ac2",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-27T01:19:20.068528Z",
+  "branch": "t3code/0f770319",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/specialized/file_upload/tests.rs",
+    "crates/ars-components/src/specialized/file_upload/mod.rs",
+    "spec/components/specialized/file-upload.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-7[1m]",
+  "turn_id": "0b911430e40e",
+  "token_usage": {
+    "input_tokens": 30096,
+    "cache_creation_tokens": 354303,
+    "cache_read_tokens": 17111372,
+    "output_tokens": 95513,
+    "api_call_count": 93
+  },
+  "summary": {
+    "intent": "Address 6 Codex review findings on the file_upload component in PR #693, applying TDD fixes and syncing the spec.",
+    "outcome": "5 of 6 findings were fixed with new tests (all green), clippy clean, 3626 tests passing, spec synced; finding 6 was disputed (spec contradicts Codex's premise) and left unresolved pending user decision, then committed and pushed.",
+    "learnings": {
+      "repo": [
+        "The `ars-components` test suite has 7 pre-existing failures in `data_display::progress` and `data_display::meter` under the default feature set due to i18n percent-formatting; they pass under `--features i18n` (CI profile).",
+        "The Service's `context_changed` flag is set on any `plan.apply` closure execution with no PartialEq comparison — firing SetProps always signals a context change.",
+        "The Leptos adapter increments `context_version` on `context_changed`, which is how adapters detect state mutations.",
+        "The spec's anatomy (§2) places Trigger and Dropzone as siblings under FileUpload, not nested — Codex's finding 6 premise contradicted this.",
+        "Spec §1.7 is illustrative pseudo-code referencing functions like `generate_file_id()`, `use_platform_effects()`, `trigger_click_on_element()` that don't match the real API.",
+        "Tests construct Context via `Machine::init(&props, ...)`, never by literal struct construction — adding Context fields is safe without updating tests.",
+        "Adapters are not yet implemented (core-only PR #301); adapter-level concerns like DOM bubbling belong in future adapter tasks.",
+        "`cargo xtask spec validate` checks 340 spec files for conformance; must pass with no snapshot drift after spec edits."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/specialized/file_upload/mod.rs",
+          "line": 911,
+          "end_line": 911,
+          "finding": "`on_props_changed` was not including `capture`/`name` in change detection, and `hidden_input_attrs` read from `props` instead of `ctx`, causing stale hidden input attributes after prop updates."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/file_upload/mod.rs",
+          "line": 738,
+          "end_line": 738,
+          "finding": "`SetProps` did not reset DragOver state when the component became disabled/readonly mid-drag, leaving the machine stuck."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/file_upload/mod.rs",
+          "line": 661,
+          "end_line": 661,
+          "finding": "`SetFiles` mutated `ctx.files` but never reconciled `state`, leaving machine stuck in Uploading state when a new file set had no uploading items."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/file_upload/mod.rs",
+          "line": 1805,
+          "end_line": 1805,
+          "finding": "`generate_file_id` reused IDs after file removal; fixed by adding a monotonic `next_file_id` counter to Context, seeded from existing files in `init` and bumped on each new ID assignment."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/file_upload/mod.rs",
+          "line": 1580,
+          "end_line": 1580,
+          "finding": "`update_file_progress` updated any file matching `file_id` regardless of status; fixed by guarding on `Status::Uploading`."
+        }
+      ],
+      "workflow": [
+        "TDD red→green cycle was enforced: new tests were written and confirmed failing (compile errors) before any implementation.",
+        "Stashing changes to confirm pre-existing failures is a reliable way to distinguish regressions from baseline failures.",
+        "When Codex review findings contradict the spec, the correct resolution is to surface the disagreement to the user rather than implementing a fix that violates the spec contract.",
+        "Spec sync is a required contract: every behavioral change to the core must also update the corresponding spec file.",
+        "Coverage annotation (`^0` markers) should be checked to verify new branches are exercised, distinguishing new uncovered paths from pre-existing defensive ones."
+      ]
+    },
+    "friction": [
+      "One new test had a flawed premise: after `SetFiles(Some(...))` makes the Bindable controlled, `RemoveFile` only updates `internal` so `get()` still returns the controlled value — the test had to be redesigned to use the uncontrolled path.",
+      "A clippy warning about passing a `Copy` type (`State`) by reference required a two-step fix (signature + call site deref).",
+      "The spec's §1.7 is pseudo-code that doesn't compile or match the real API, making it an unreliable reference for implementation decisions.",
+      "Line numbers in the spec file shifted after early edits, requiring re-reads before each subsequent spec edit."
+    ],
+    "open_items": [
+      "Finding 6 (nested Trigger-in-Dropzone causing double OpenFilePicker dispatch) is unresolved — disputed as contradicting the spec's sibling anatomy; if a future adapter renders Trigger inside Dropzone, the fix belongs in that adapter via `stopPropagation`.",
+      "Adapter implementations for file_upload are not yet written (deferred to a post-PR #301 task); DOM-level concerns like click bubbling will need to be revisited there.",
+      "The two pre-existing uncovered branch markers (`^0`) in `file_upload/mod.rs` — the `UploadProgress` guard-false case and the `strip_prefix('file-')`-None case — are defensive paths with no tests; low priority but noted."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-27T01:18:47.625594Z",
+    "agent_lines": 504,
+    "agent_removed": 57,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 504,
+    "total_lines_changed": 561,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 6,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 6
+      }
+    }
+  ]
+}
