@@ -926,8 +926,12 @@ fn arb_tree_view_event() -> impl Strategy<Value = tree_view::Event> {
         Just(tree_view::Event::FocusParent),
         any::<bool>().prop_map(|is_keyboard| tree_view::Event::Focus { is_keyboard }),
         Just(tree_view::Event::Blur),
-        prop_oneof![Just('a'), Just('b'), Just('d'), Just('z')]
-            .prop_map(tree_view::Event::TypeaheadSearch),
+        (
+            prop_oneof![Just('a'), Just('b'), Just('d'), Just('z')],
+            0u64..4000
+        )
+            .prop_map(|(ch, now_ms)| tree_view::Event::TypeaheadSearch(ch, now_ms)),
+        Just(tree_view::Event::ClearTypeahead),
         Just(tree_view::Event::ExpandAll),
         Just(tree_view::Event::CollapseAll),
         tv_key().prop_map(tree_view::Event::DragStart),

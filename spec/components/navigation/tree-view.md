@@ -45,7 +45,8 @@ matching every other component and the `TreeCollection` data model.
 | `FocusParent`                    | —               | Move focus to the parent of the focused node.                       |
 | `Focus { is_keyboard }`          | `bool`          | The tree container received focus.                                  |
 | `Blur`                           | —               | The tree container lost focus.                                      |
-| `TypeaheadSearch(char)`          | `char`          | Jump to the next node whose label starts with the character.        |
+| `TypeaheadSearch(char, u64)`     | char + now_ms   | Append a char to the typeahead buffer and jump to the next match.   |
+| `ClearTypeahead`                 | —               | Reset the typeahead buffer.                                         |
 | `ExpandAll`                      | —               | Expand every expandable node in the tree.                           |
 | `CollapseAll`                    | —               | Collapse every node in the tree.                                    |
 | `DragStart(Key)`                 | node key        | Begin a drag on a node (drag-and-drop variant, §4).                 |
@@ -104,8 +105,8 @@ pub struct Context {
     pub multiple: bool,
     /// Controls which nodes can be selected (canonical `ars_collections::selection::Mode`).
     pub selection_mode: selection::Mode,
-    /// Typeahead buffer (for multi-character typeahead, cleared after timeout).
-    pub typeahead_buffer: String,
+    /// Shared multi-character, locale-aware typeahead state (`ars_collections::typeahead::State`).
+    pub typeahead: typeahead::State,
     /// Resolved locale for i18n.
     pub locale: Locale,
     /// Resolved translatable messages.
@@ -228,8 +229,11 @@ pub enum Event {
     },
     /// Blur the tree view.
     Blur,
-    /// Typeahead search for a node.
-    TypeaheadSearch(char),
+    /// Append a char to the typeahead buffer and jump to the next match.
+    /// `u64` is the adapter-provided current time (ms) for timeout reset.
+    TypeaheadSearch(char, u64),
+    /// Reset the typeahead buffer.
+    ClearTypeahead,
     /// Expand all expandable nodes in the tree.
     ExpandAll,
     /// Collapse all nodes in the tree.
@@ -311,7 +315,7 @@ impl ars_core::Machine for Machine {
             selection_mode,
             props.selection_behavior,
         ).with_disabled(disabled_keys);
-        selection_state.selected_keys = selected.get().clone();
+        selection_state.selected_keys = normalize_selection(selected.get().clone(), selection_mode);
         let locale = env.locale.clone();
         let messages = messages.clone();
         let ids = ComponentIds::from_id(&props.id);
@@ -324,7 +328,7 @@ impl ars_core::Machine for Machine {
             focus_visible: false,
             multiple: props.multiple,
             selection_mode,
-            typeahead_buffer: String::new(),
+            typeahead: typeahead::State::default(),
             locale,
             messages,
             ids,
@@ -341,16 +345,20 @@ impl ars_core::Machine for Machine {
     ) -> Option<TransitionPlan<Self>> {
         match event {
 
-            Event::ExpandNode(id) => {
-                let id = id.clone();
+            // Expand/collapse/toggle act only on a real, enabled, expandable
+            // branch — never a leaf, disabled node, or stale/unknown key.
+            Event::ExpandNode(key) => {
+                if !is_interactive_branch(&ctx.items, key) { return None; }
+                let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     let mut exp = ctx.expanded.get().clone();
-                    exp.insert(id);
+                    exp.insert(key);
                     ctx.expanded.set(exp);
                 }))
             }
 
             Event::CollapseNode(key) => {
+                if !is_interactive_branch(&ctx.items, key) { return None; }
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     let mut exp = ctx.expanded.get().clone();
@@ -362,6 +370,7 @@ impl ars_core::Machine for Machine {
             }
 
             Event::ToggleNode(key) => {
+                if !is_interactive_branch(&ctx.items, key) { return None; }
                 let is_expanded = ctx.expanded.get().contains(key);
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -373,7 +382,12 @@ impl ars_core::Machine for Machine {
             }
 
             Event::SelectNode(key) => {
-                if ctx.selection_mode == selection::Mode::None { return None; }
+                // Ignore in non-selectable mode or for a stale/unknown key.
+                if ctx.selection_mode == selection::Mode::None
+                    || !ctx.items.get(key).is_some_and(Node::is_focusable)
+                {
+                    return None;
+                }
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
                     let new_state = ctx.selection_state.select(key);
@@ -426,7 +440,23 @@ impl ars_core::Machine for Machine {
                 .and_then(|node| node.parent_key.clone())
                 .map(|k| focus_plan(k, true)),
 
-            Event::TypeaheadSearch(ch) => typeahead_target(ctx, *ch).map(|k| focus_plan(k, true)),
+            Event::TypeaheadSearch(ch, now_ms) => {
+                let (typeahead, found) = process_typeahead(ctx, *ch, *now_ms);
+                Some(match found {
+                    Some(key) => TransitionPlan::to(State::Focused)
+                        .apply(move |ctx| {
+                            ctx.typeahead = typeahead;
+                            ctx.focused_node = Some(key);
+                            ctx.focus_visible = true;
+                        })
+                        .with_effect(PendingEffect::named(Effect::ScrollFocusedIntoView)),
+                    None => TransitionPlan::context_only(move |ctx| { ctx.typeahead = typeahead; }),
+                })
+            }
+
+            Event::ClearTypeahead => Some(TransitionPlan::context_only(|ctx| {
+                ctx.typeahead = typeahead::State::default();
+            })),
 
             // ── Expand/Collapse All ────────────────────────────────────
             // ExpandAll uses `all_nodes()` (not the visible-only `nodes()`) so
@@ -532,8 +562,15 @@ impl ars_core::Machine for Machine {
                     ctx.selected.set(normalized);
                     let mut new_state = selection::State::new(selection_mode, selection_behavior)
                         .with_disabled(disabled_keys);
-                    new_state.selected_keys = ctx.selected.get().clone();
+                    // Normalize even a mode-violating controlled binding for the
+                    // rendered selection without mutating the parent value.
+                    new_state.selected_keys =
+                        normalize_selection(ctx.selected.get().clone(), selection_mode);
                     ctx.selection_state = new_state;
+                    // The data source changed: discard any in-flight drag so a
+                    // later Drop cannot fire a reorder with a stale path.
+                    ctx.dragging = None;
+                    ctx.drop_target = None;
                     clamp_focus_to_visible(ctx);
                 }))
             }
@@ -578,12 +615,13 @@ const fn effective_selection_mode(props: &Props) -> selection::Mode {
     if props.multiple { selection::Mode::Multiple } else { props.selection_mode }
 }
 
-/// Commit a new selection state, keeping `selection_state` consistent with what
-/// `ctx.selected.get()` reports (the controlled value when controlled), so the
-/// binding and the state machine never diverge under controlled selection.
+/// Commit a new selection state. `selection_state.selected_keys` is the
+/// authoritative rendered selection: consistent with the binding (controlled or
+/// not) and normalized for the mode, so controlled selection never diverges and
+/// a mode-violating binding is clamped for rendering without mutating it.
 fn apply_selection(ctx: &mut Context, mut new_state: selection::State) {
     ctx.selected.set(new_state.selected_keys.clone());
-    new_state.selected_keys = ctx.selected.get().clone();
+    new_state.selected_keys = normalize_selection(ctx.selected.get().clone(), ctx.selection_mode);
     ctx.selection_state = new_state;
 }
 
@@ -591,7 +629,7 @@ fn apply_selection(ctx: &mut Context, mut new_state: selection::State) {
 /// visible node, otherwise the first visible node.
 fn initial_active_node(ctx: &Context) -> Option<Key> {
     let visible = visible_keys(ctx);
-    let selected = ctx.selected.get();
+    let selected = &ctx.selection_state.selected_keys;
     visible.iter().find(|&key| selected.contains(key)).or_else(|| visible.first()).cloned()
 }
 
@@ -652,30 +690,28 @@ fn focus_relative(ctx: &Context, direction: Direction) -> Option<TransitionPlan<
     target.cloned().map(|k| focus_plan(k, true))
 }
 
-/// Next visible node whose label starts with `ch` (case-insensitive), after the
-/// focused node, wrapping around.
-fn typeahead_target(ctx: &Context, ch: char) -> Option<Key> {
-    let needle = ch.to_lowercase().next().unwrap_or(ch);
-    let visible = visible_keys(ctx);
-    if visible.is_empty() { return None; }
-    let start = ctx.focused_node.as_ref()
-        .and_then(|f| visible.iter().position(|k| k == f))
-        .map_or(0, |p| p + 1);
-    visible.iter().cycle().skip(start).take(visible.len())
-        .find(|key| ctx.items.get(key)
-            .and_then(|n| node_search_text(n).chars().next())
-            .map(|c| c.to_lowercase().next().unwrap_or(c)) == Some(needle))
-        .cloned()
+/// Advance the shared typeahead matcher by one character. Delegates to the
+/// canonical `ars_collections::typeahead::State` (multi-character buffer with
+/// timeout reset and locale-aware collation/case-folding when the `i18n`
+/// feature is enabled), matching the collection's `text_value` and skipping
+/// disabled nodes.
+fn process_typeahead(ctx: &Context, ch: char, now_ms: u64) -> (typeahead::State, Option<Key>) {
+    ctx.typeahead.process_char_with_locale(
+        ch,
+        now_ms,
+        ctx.focused_node.as_ref(),
+        &ctx.items,
+        &ctx.locale,
+        &ctx.selection_state.disabled_keys,
+        ctx.selection_state.disabled_behavior,
+    )
 }
 
-/// Text a node is matched against during typeahead: the displayed
-/// `TreeItem::label` when present, else the collection's `text_value`. The
-/// label is what the user sees, so typing its first letter must match.
-fn node_search_text(node: &Node<TreeItem>) -> &str {
-    node.value.as_ref()
-        .map(|item| item.label.as_str())
-        .filter(|label| !label.is_empty())
-        .unwrap_or(node.text_value.as_str())
+/// Resolve the timestamp for a typeahead keypress: the adapter-provided value
+/// when present, else the host clock (std), else a monotonic bump of the last
+/// keypress so the buffer never spuriously resets.
+fn typeahead_time(now_ms: Option<u64>, state: &typeahead::State) -> u64 {
+    now_ms.unwrap_or_else(|| current_time_ms().unwrap_or(state.last_key_time_ms.saturating_add(1)))
 }
 
 /// Ordered valid keyboard drop slots for the dragged node: for every visible
@@ -707,6 +743,16 @@ fn drag_step(ctx: &Context, props: &Props, direction: Direction) -> Option<Trans
     };
     let target = slots[next].clone();
     Some(TransitionPlan::context_only(move |ctx| ctx.drop_target = Some(target)))
+}
+
+/// Whether expand/collapse may act on `key`: it exists, is an expandable branch
+/// (real children or the lazy `has_children` flag), and is not disabled.
+fn is_interactive_branch(items: &TreeCollection<TreeItem>, key: &Key) -> bool {
+    items.get(key).is_some_and(|node| {
+        let item = node.value.as_ref();
+        let expandable = node.has_children || item.is_some_and(|i| i.has_children);
+        expandable && !item.is_some_and(|i| i.disabled)
+    })
 }
 
 /// Whether `candidate` sits below `ancestor` in the tree.
@@ -780,9 +826,10 @@ pub struct Api<'a> {
 }
 
 impl Api<'_> {
-    /// Whether a node is selected.
+    /// Whether a node is selected. Reads the mode-normalized selection state so
+    /// rendering never exposes a selection shape the current mode forbids.
     pub fn is_node_selected(&self, node_id: &Key) -> bool {
-        self.ctx.selected.get().contains(node_id)
+        self.ctx.selection_state.selected_keys.contains(node_id)
     }
 
     /// Whether a node is expanded.
@@ -970,20 +1017,32 @@ impl Api<'_> {
 
     /// Map a keydown on the tree root (active descendant `node_id`) to events
     /// per the WAI-ARIA tree pattern (§3.2). Logical, not RTL-swapped (§3.3).
+    /// Uses a host/fallback clock for typeahead timing; `on_node_keydown_at`
+    /// takes an explicit adapter clock.
     pub fn on_node_keydown(&self, node_id: &Key, data: &KeyboardEventData) {
+        self.on_node_keydown_impl(node_id, data, None);
+    }
+
+    /// `on_node_keydown` with an explicit `now_ms` for typeahead timing.
+    pub fn on_node_keydown_at(&self, node_id: &Key, data: &KeyboardEventData, now_ms: u64) {
+        self.on_node_keydown_impl(node_id, data, Some(now_ms));
+    }
+
+    fn on_node_keydown_impl(&self, node_id: &Key, data: &KeyboardEventData, now_ms: Option<u64>) {
         match data.key {
             KeyboardKey::ArrowDown => (self.send)(Event::FocusNext),
             KeyboardKey::ArrowUp => (self.send)(Event::FocusPrev),
             KeyboardKey::Home => (self.send)(Event::FocusFirst),
             KeyboardKey::End => (self.send)(Event::FocusLast),
             KeyboardKey::ArrowRight => {
-                // Branch only: expand when collapsed, else enter the first child.
-                // On a leaf the key is inert (WAI-ARIA tree pattern).
+                // Branch only. Collapsed -> expand. Expanded with loaded children
+                // -> enter first child. A leaf, or an expanded lazy branch with no
+                // rendered children, is inert (WAI-ARIA tree pattern).
                 if self.is_branch(node_id) {
-                    if self.is_node_expanded(node_id) {
-                        (self.send)(Event::FocusNext);
-                    } else {
+                    if !self.is_node_expanded(node_id) {
                         (self.send)(Event::ExpandNode(node_id.clone()));
+                    } else if self.has_loaded_children(node_id) {
+                        (self.send)(Event::FocusNext);
                     }
                 }
             }
@@ -1003,7 +1062,9 @@ impl Api<'_> {
             },
             _ => if let Some(ch) = data.character {
                 if ch == '*' { self.expand_siblings(node_id); }
-                else if !ch.is_control() { (self.send)(Event::TypeaheadSearch(ch)); }
+                else if !ch.is_control() {
+                    (self.send)(Event::TypeaheadSearch(ch, typeahead_time(now_ms, &self.ctx.typeahead)));
+                }
             },
         }
     }
@@ -1037,6 +1098,11 @@ impl Api<'_> {
     fn is_branch(&self, node_id: &Key) -> bool {
         self.ctx.items.get(node_id)
             .is_some_and(|n| n.has_children || n.value.as_ref().is_some_and(|v| v.has_children))
+    }
+
+    /// Whether the node has children actually loaded (vs only the lazy flag).
+    fn has_loaded_children(&self, node_id: &Key) -> bool {
+        self.ctx.items.get(node_id).is_some_and(|n| n.has_children)
     }
 
     /// Expand every expandable sibling of `node_id` (the `*` shortcut).

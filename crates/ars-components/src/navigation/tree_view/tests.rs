@@ -498,7 +498,7 @@ fn focus_sets_focus_visible_and_blur_clears_it() {
 fn typeahead_jumps_to_matching_node_case_insensitive() {
     let mut service = service(props());
 
-    drop(service.send(Event::TypeaheadSearch('g'))); // Grains
+    drop(service.send(Event::TypeaheadSearch('g', 1))); // Grains
 
     assert_eq!(service.context().focused_node, Some(key(7)));
 }
@@ -508,7 +508,7 @@ fn typeahead_searches_after_focused_and_wraps() {
     let mut service = service(props());
 
     drop(service.send(Event::FocusNode(key(1)))); // Fruits
-    drop(service.send(Event::TypeaheadSearch('b'))); // Banana (after Fruits)
+    drop(service.send(Event::TypeaheadSearch('b', 1))); // Banana (after Fruits)
 
     assert_eq!(service.context().focused_node, Some(key(3)));
 }
@@ -518,23 +518,30 @@ fn typeahead_no_match_keeps_focus() {
     let mut service = service(props());
 
     drop(service.send(Event::FocusNode(key(1))));
+    drop(service.send(Event::TypeaheadSearch('z', 1))); // no match
 
-    let result = service.send(Event::TypeaheadSearch('z'));
-
-    assert!(!result.state_changed && !result.context_changed);
+    // The buffer updates, but focus does not move.
     assert_eq!(service.context().focused_node, Some(key(1)));
 }
 
 #[test]
 fn typeahead_skips_nodes_hidden_under_collapsed_parents() {
     // Carrot (5) is hidden under collapsed Vegetables; typing 'c' must not jump
-    // to it.
+    // to it (the shared matcher only scans visible nodes).
     let mut service = service(props());
 
-    let result = service.send(Event::TypeaheadSearch('c'));
+    drop(service.send(Event::TypeaheadSearch('c', 1)));
 
-    assert!(!result.context_changed);
     assert_eq!(service.context().focused_node, None);
+}
+
+#[test]
+fn typeahead_clear_resets_buffer() {
+    let mut service = service(props());
+    drop(service.send(Event::TypeaheadSearch('g', 1)));
+    assert!(!service.context().typeahead.search.is_empty());
+    drop(service.send(Event::ClearTypeahead));
+    assert!(service.context().typeahead.search.is_empty());
 }
 
 // ----------------------------------------------------------------------------
@@ -752,9 +759,10 @@ fn keydown_enter_selects_and_space_toggles() {
 fn keydown_printable_triggers_typeahead() {
     let service = service(props());
 
-    assert_eq!(
-        dispatch_key(&service, &key(1), &printable('b')),
-        &[Event::TypeaheadSearch('b')]
+    let events = dispatch_key(&service, &key(1), &printable('b'));
+    assert!(
+        matches!(events.as_slice(), [Event::TypeaheadSearch('b', now_ms)] if *now_ms > 0),
+        "printable key dispatches TypeaheadSearch with a clock timestamp: {events:?}"
     );
 }
 
@@ -1122,10 +1130,11 @@ fn drop_ignored_when_dnd_disabled() {
 }
 
 #[test]
-fn typeahead_on_empty_tree_is_noop() {
+fn typeahead_on_empty_tree_does_not_focus() {
     let mut service = empty_service();
 
-    assert!(!service.send(Event::TypeaheadSearch('a')).context_changed);
+    drop(service.send(Event::TypeaheadSearch('a', 1)));
+    assert_eq!(service.context().focused_node, None);
 }
 
 #[test]
@@ -1329,7 +1338,7 @@ fn typeahead_starts_strictly_after_focused_node() {
     let mut service = service(props().items(items));
 
     drop(service.send(Event::FocusNode(key(1)))); // Apple
-    drop(service.send(Event::TypeaheadSearch('a')));
+    drop(service.send(Event::TypeaheadSearch('a', 1)));
 
     assert_eq!(service.context().focused_node, Some(key(2))); // Avocado, not Apple
 }
@@ -1525,23 +1534,20 @@ fn drag_over_rejects_unknown_target_key() {
 }
 
 #[test]
-fn typeahead_matches_displayed_label_not_text_value() {
-    // text_value differs from the displayed label; typing the label's first
-    // letter must focus the node.
-    let labeled = TreeItemConfig {
+fn typeahead_matches_collection_text_value() {
+    // Typeahead uses the canonical shared matcher, which searches the
+    // collection's `text_value` (the node's designated searchable text).
+    let searchable = TreeItemConfig {
         key: key(1),
-        text_value: "zzz".to_string(),
-        value: TreeItem {
-            label: "Apple".to_string(),
-            ..TreeItem::default()
-        },
+        text_value: "Apricot".to_string(),
+        value: item("Apricot"),
         children: Vec::new(),
         default_expanded: false,
     };
-    let items = TreeCollection::new(vec![labeled, leaf(2, "Banana")]);
+    let items = TreeCollection::new(vec![searchable, leaf(2, "Banana")]);
     let mut service = service(props().items(items));
 
-    drop(service.send(Event::TypeaheadSearch('a'))); // matches "Apple" label
+    drop(service.send(Event::TypeaheadSearch('a', 1))); // matches "Apricot"
     assert_eq!(service.context().focused_node, Some(key(1)));
 }
 
@@ -1717,6 +1723,108 @@ fn disabled_node_suppresses_href() {
             .get(&HtmlAttr::Href)
             .is_none(),
         "a disabled node must not expose a live href"
+    );
+}
+
+// ----------------------------------------------------------------------------
+// Codex review regressions, round 3 (PR #695)
+// ----------------------------------------------------------------------------
+
+fn disabled_branch_tree() -> TreeCollection<TreeItem> {
+    TreeCollection::new(vec![TreeItemConfig {
+        key: key(1),
+        text_value: "Fruits".to_string(),
+        value: TreeItem {
+            disabled: true,
+            ..item("Fruits")
+        },
+        children: vec![leaf(2, "Apple")],
+        default_expanded: false,
+    }])
+}
+
+#[test]
+fn disabled_branch_cannot_be_toggled_or_expanded() {
+    let mut service = service(props().items(disabled_branch_tree()));
+    assert!(!service.send(Event::ToggleNode(key(1))).context_changed);
+    assert!(!service.send(Event::ExpandNode(key(1))).context_changed);
+    assert!(!service.context().expanded.get().contains(&key(1)));
+}
+
+#[test]
+fn expand_events_reject_leaves_and_unknown_keys() {
+    let mut service = service(props());
+    assert!(!service.send(Event::ExpandNode(key(2))).context_changed); // Apple is a leaf
+    assert!(!service.send(Event::ToggleNode(key(2))).context_changed);
+    assert!(!service.send(Event::ExpandNode(key(999))).context_changed); // unknown
+    assert!(!service.context().expanded.get().contains(&key(2)));
+    assert!(!service.context().expanded.get().contains(&key(999)));
+}
+
+#[test]
+fn select_node_rejects_unknown_keys() {
+    let mut service = service(props());
+    assert!(!service.send(Event::SelectNode(key(999))).context_changed);
+    assert!(!service.connect(&|_| {}).is_node_selected(&key(999)));
+}
+
+#[test]
+fn arrow_right_on_expanded_lazy_branch_is_inert() {
+    // node 9 is a lazy branch (has_children flag, no loaded children) and is
+    // expanded; there is no rendered child to enter, so ArrowRight does nothing.
+    let items = TreeCollection::new(vec![
+        leaf_with(
+            9,
+            "Lazy",
+            TreeItem {
+                has_children: true,
+                ..item("Lazy")
+            },
+        ),
+        leaf(8, "After"),
+    ]);
+    let mut expanded = BTreeSet::new();
+    expanded.insert(key(9));
+    let service = service(props().items(items).default_expanded(expanded));
+    assert!(dispatch_key(&service, &key(9), &keyboard(KeyboardKey::ArrowRight)).is_empty());
+}
+
+#[test]
+fn set_props_clears_active_drag_on_items_change() {
+    let mut service = service(dnd_props());
+    drop(service.send(Event::DragStart(key(2))));
+    drop(service.send(Event::DragOver(CollectionDropTarget {
+        key: key(7),
+        position: DropPosition::After,
+    })));
+
+    let new_items = TreeCollection::new(vec![leaf(1, "Solo")]);
+    drop(service.set_props(dnd_props().items(new_items)));
+
+    assert_eq!(service.context().dragging, None);
+    assert_eq!(service.context().drop_target, None);
+}
+
+#[test]
+fn controlled_multi_selection_is_clamped_under_single_mode() {
+    // A controlled binding that violates the mode (two keys under Single) renders
+    // a mode-valid selection without mutating the parent-owned value.
+    let mut set = BTreeSet::new();
+    set.insert(key(2));
+    set.insert(key(3));
+    let service = service(
+        props()
+            .selection_mode(selection::Mode::Single)
+            .selected(selection::Set::Multiple(set)),
+    );
+    let api = service.connect(&|_| {});
+    let count = [key(2), key(3)]
+        .iter()
+        .filter(|k| api.is_node_selected(k))
+        .count();
+    assert_eq!(
+        count, 1,
+        "single mode clamps a multi-key controlled binding"
     );
 }
 
