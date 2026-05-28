@@ -32,21 +32,21 @@ in context, not in the state discriminant, because the set of items is dynamic.
 
 ### 1.2 Events
 
-| Event                                | Payload        | Description                                                            |
-| ------------------------------------ | -------------- | ---------------------------------------------------------------------- |
-| `ExpandItem(Key)`                    | item key       | Open a specific item.                                                  |
-| `CollapseItem(Key)`                  | item key       | Close a specific item.                                                 |
-| `ToggleItem(Key)`                    | item key       | Open if closed; close if open.                                         |
-| `ExpandAll`                          | —              | Open every registered enabled item (only useful when `multiple=true`). |
-| `CollapseAll`                        | —              | Close every open enabled item; open disabled items remain open.        |
-| `Focus(Key)`                         | item key       | Record a trigger as focused.                                           |
-| `Blur`                               | —              | Clear trigger focus.                                                   |
-| `SetDirection(Direction)`            | direction      | Set the adapter-resolved text direction used by horizontal keyboard navigation. |
-| `FocusNext` / `FocusPrev`            | —              | Move focus intent to the next/previous enabled trigger.                |
-| `FocusFirst` / `FocusLast`           | —              | Move focus intent to the first/last enabled trigger.                   |
-| `SetItems(Vec<ItemRegistration>)`    | registrations  | Replace registered item keys and disabled flags in DOM order.          |
+| Event                                | Payload        | Description                                                                                                                           |
+| ------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `ExpandItem(Key)`                    | item key       | Open a specific item.                                                                                                                 |
+| `CollapseItem(Key)`                  | item key       | Close a specific item.                                                                                                                |
+| `ToggleItem(Key)`                    | item key       | Open if closed; close if open.                                                                                                        |
+| `ExpandAll`                          | —              | Open every registered enabled item (only useful when `multiple=true`).                                                                |
+| `CollapseAll`                        | —              | Close every open enabled item; open disabled items remain open.                                                                       |
+| `Focus(Key)`                         | item key       | Record a trigger as focused.                                                                                                          |
+| `Blur`                               | —              | Clear trigger focus.                                                                                                                  |
+| `SetDirection(Direction)`            | direction      | Set the adapter-resolved text direction used by horizontal keyboard navigation.                                                       |
+| `FocusNext` / `FocusPrev`            | —              | Move focus intent to the next/previous enabled trigger.                                                                               |
+| `FocusFirst` / `FocusLast`           | —              | Move focus intent to the first/last enabled trigger.                                                                                  |
+| `SetItems(Vec<ItemRegistration>)`    | registrations  | Replace registered item keys and disabled flags in DOM order.                                                                         |
 | `SyncProps`                          | —              | Synchronize prop-backed context fields after render prop changes, including controlled-mode exit and single-mode value normalization. |
-| `SyncControlledValue(BTreeSet<Key>)` | open item keys | Push a new controlled open-item set into context, entering controlled mode if needed. |
+| `SyncControlledValue(BTreeSet<Key>)` | open item keys | Push a new controlled open-item set into context, entering controlled mode if needed.                                                 |
 
 Focus-navigation events emit the typed `Effect::FocusFocusedItem` intent. Adapters execute
 that effect by focusing their framework-native item handle for `Context::focused_item`
@@ -95,7 +95,7 @@ use ars_core::{Bindable, Direction, Orientation};
 use ars_collections::Key;
 
 /// Props for the `Accordion` component.
-#[derive(Clone, Debug, PartialEq, HasId)]
+#[derive(Clone, Debug, PartialEq, Eq, HasId)]
 pub struct Props {
     /// Unique component identifier.
     pub id: String,
@@ -157,6 +157,8 @@ mount, and `unmount_on_exit` removes it again after closing.
 
 **Per-item disabled state**: To disable an individual item, include it in the `disabled_items` map in Context: `disabled_items: BTreeMap::from([(Key::String("item-2".into()), true)])`. Disabled items cannot be expanded or collapsed, and their triggers are skipped during keyboard navigation.
 
+**Single-mode initial value normalization**: `init` does not store `value`/`default_value` verbatim. Both the controlled `value` and the uncontrolled `default_value` are passed through `normalize_value_for_mode(.., props.multiple)`, which — when `multiple == false` — trims a multi-key initial set down to a single retained key (the first in `BTreeSet` order). This guarantees the single-mode invariant (at most one open item) holds from mount, even when the consumer supplies an over-broad initial set.
+
 ### 1.5 Full Machine Implementation
 
 ```rust
@@ -170,9 +172,10 @@ use alloc::collections::BTreeSet;
 /// for `Machine` trait conformance. The `Machine` trait requires `State: Clone + Debug + PartialEq`
 /// with named variants for potential future extension (e.g., an Animating state).
 /// All meaningful state lives in `Context` (the `value: Bindable<BTreeSet<Key>>`).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum State {
     /// The idle state.
+    #[default]
     Idle,
 }
 
@@ -236,7 +239,7 @@ pub enum Effect {
 pub struct Machine;
 
 /// This component has no translatable strings.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Messages;
 impl ComponentMessages for Messages {}
 
@@ -250,9 +253,15 @@ impl ars_core::Machine for Machine {
     type Api<'a> = Api<'a>;
 
     fn init(props: &Props, _env: &Env, _messages: &Messages) -> (State, Context) {
+        // Both the controlled and uncontrolled initial sets are normalized for the
+        // current mode: when `multiple == false`, a multi-key set is trimmed to a
+        // single retained key so the single-mode invariant holds from mount.
         let value = match &props.value {
-            Some(v) => Bindable::controlled(v.clone()),
-            None    => Bindable::uncontrolled(props.default_value.clone()),
+            Some(v) => Bindable::controlled(normalize_value_for_mode(v.clone(), props.multiple)),
+            None    => Bindable::uncontrolled(normalize_value_for_mode(
+                props.default_value.clone(),
+                props.multiple,
+            )),
         };
         (State::Idle, Context {
             value,
@@ -270,167 +279,84 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &Self::State,
+        _state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // Machine-level disabled guard for mutation events
+        // Every event has a dedicated arm; none silently fall through to a no-op.
+        // The mutation/focus/sync helpers below own their own disabled, registration,
+        // and no-op guards so each arm returns `None` precisely when nothing changes.
         match event {
-            Event::ExpandItem(id) | Event::CollapseItem(id) | Event::ToggleItem(id) => {
-                if ctx.disabled || *ctx.disabled_items.get(id).unwrap_or(&false) {
-                    return None;
-                }
-            }
-            _ => {}
-        }
+            Event::ExpandItem(item) => expand_item_plan(ctx, item),
 
-        match (state, event) {
+            Event::CollapseItem(item) => collapse_item_plan(ctx, item),
 
-            // ── ExpandItem ────────────────────────────────────────────────────
-            (State::Idle, Event::ExpandItem(id)) => {
-                let id = id.clone();
-                let multiple = ctx.multiple;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    let mut current = ctx.value.get().clone();
-                    if multiple {
-                        current.insert(id);
-                    } else {
-                        // Single mode: replace with the new item.
-                        current = BTreeSet::from([id]);
-                    }
-                    ctx.value.set(current);
-                }))
-            }
+            Event::ToggleItem(item) => toggle_item_plan(ctx, item),
 
-            // ── CollapseItem ──────────────────────────────────────────────────
-            // Idempotent: collapsing an already-closed item returns None (no-op).
-            // This is intentional — callers need not check open state before sending
-            // CollapseItem. The transition is a no-op rather than an error.
-            (State::Idle, Event::CollapseItem(id)) => {
-                // Guard: item is not currently open — idempotent no-op.
-                if !ctx.value.get().contains(id) {
-                    return None;
-                }
-                let id = id.clone();
-                let collapsible = ctx.collapsible;
-                let multiple    = ctx.multiple;
-                let current_len = ctx.value.get().len();
-                // Guard: in single mode with collapsible=false, do nothing when
-                //        the target item is the only open item.
-                if !multiple && !collapsible && current_len <= 1 {
-                    return None;
-                }
-                Some(TransitionPlan::context_only(move |ctx| {
-                    let mut current = ctx.value.get().clone();
-                    current.remove(&id);
-                    ctx.value.set(current);
-                }))
-            }
+            Event::ExpandAll => expand_all_plan(ctx),
 
-            // ── ToggleItem ────────────────────────────────────────────────────
-            (State::Idle, Event::ToggleItem(id)) => {
-                // Guard: disabled items return no-op instead of producing an
-                // empty transition plan (defense-in-depth; the top-level guard
-                // already covers this, but an explicit check here prevents
-                // accidental fall-through if the top guard is refactored).
-                if ctx.disabled_items.contains_key(id)
-                    && *ctx.disabled_items.get(id).unwrap_or(&false)
-                {
-                    return None;
-                }
-                let is_open = ctx.value.get().contains(id);
-                let id = id.clone();
-                if is_open {
-                    // Delegate to collapse logic: respect collapsible guard.
-                    let collapsible = ctx.collapsible;
-                    let multiple    = ctx.multiple;
-                    let current_len = ctx.value.get().len();
-                    if !multiple && !collapsible && current_len <= 1 {
-                        return None;
-                    }
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        let mut current = ctx.value.get().clone();
-                        current.remove(&id);
-                        ctx.value.set(current);
-                    }))
-                } else {
-                    let multiple = ctx.multiple;
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        let mut current = ctx.value.get().clone();
-                        if multiple {
-                            current.insert(id);
-                        } else {
-                            current = BTreeSet::from([id]);
-                        }
-                        ctx.value.set(current);
-                    }))
-                }
-            }
+            Event::CollapseAll => collapse_all_plan(ctx),
 
-            // ── ExpandAll ─────────────────────────────────────────────────────
-            // Bulk operations respect both global and per-item disabled state.
-            (State::Idle, Event::ExpandAll) => {
-                if ctx.disabled { return None; }
-                if !ctx.multiple { return None; }
-                // Filter out items that are individually disabled.
-                let expandable_items = ctx.items.iter()
-                    .filter(|id| !*ctx.disabled_items.get(*id).unwrap_or(&false))
-                    .cloned()
-                    .collect::<BTreeSet<_>>();
-                // Merge with currently open items (disabled items that are already
-                // open remain open; we just don't add new disabled items).
-                let current = ctx.value.get().clone();
-                let merged = current.union(&expandable_items).cloned().collect::<BTreeSet<_>>();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.value.set(merged);
-                }))
-            }
-
-            // ── CollapseAll ───────────────────────────────────────────────────
-            // Bulk operations respect both global and per-item disabled state.
-            (State::Idle, Event::CollapseAll) => {
-                if ctx.disabled { return None; }
-                if !ctx.multiple && !ctx.collapsible && !ctx.value.get().is_empty() {
-                    return None; // cannot collapse the last item when collapsible is false
-                }
-                // Filter out disabled items from collapsing — they remain in their
-                // current open/closed state.
-                let disabled_and_open: BTreeSet<Key> = ctx.value.get().iter()
-                    .filter(|id| *ctx.disabled_items.get(*id).unwrap_or(&false))
-                    .cloned()
-                    .collect();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    // Keep disabled items that were open; close everything else.
-                    ctx.value.set(disabled_and_open);
-                }))
-            }
-
-            // ── Focus ─────────────────────────────────────────────────────────
-            (State::Idle, Event::Focus(item)) => {
-                let item = item.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.focused_item = Some(item);
-                }))
-            }
+            Event::Focus(item) => focus_item_plan(ctx, item),
 
             // ── Blur ──────────────────────────────────────────────────────────
-            (State::Idle, Event::Blur) => {
-                Some(TransitionPlan::context_only(|ctx| {
+            // No-op when no trigger currently holds focus.
+            Event::Blur => {
+                ctx.focused_item.as_ref()?;
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
                     ctx.focused_item = None;
+                }))
+            }
+
+            // ── SetDirection ──────────────────────────────────────────────────
+            // No-op when the resolved direction is unchanged.
+            Event::SetDirection(dir) => {
+                let dir = *dir;
+                if ctx.dir == dir {
+                    return None;
+                }
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.dir = dir;
                 }))
             }
 
             // ── Focus movement ───────────────────────────────────────────────
             // Core stores the focused item key and emits a typed effect intent.
             // Adapters resolve the key to their native handle and perform DOM focus.
-            (_, Event::FocusNext | Event::FocusPrev | Event::FocusFirst | Event::FocusLast) => {
-                Some(TransitionPlan::context_only(|ctx| {
-                    ctx.focused_item = next_enabled_item(ctx);
-                }).with_effect(PendingEffect::named(Effect::FocusFocusedItem)))
+            // Next/Prev use the anchor + step model; First/Last jump to the
+            // edge of the enabled set. Each arm returns `None` when there is no
+            // distinct enabled target to move to.
+            Event::FocusNext => {
+                let current = focus_anchor(ctx)?;
+                let next = step_focus(ctx, &current, FocusStep::Next)?;
+                Some(focus_item_transition(next))
             }
 
-            _ => None,
+            Event::FocusPrev => {
+                let current = focus_anchor(ctx)?;
+                let prev = step_focus(ctx, &current, FocusStep::Prev)?;
+                Some(focus_item_transition(prev))
+            }
+
+            Event::FocusFirst => {
+                let first = enabled_items(ctx).next()?;
+                Some(focus_item_transition(first))
+            }
+
+            Event::FocusLast => {
+                let last = enabled_items(ctx).next_back()?;
+                Some(focus_item_transition(last))
+            }
+
+            // ── SetItems / SyncProps / SyncControlledValue ────────────────────
+            // Prop- and registration-sync events. Each is fully handled — none
+            // fall through to a silent no-op.
+            Event::SetItems(items) => Some(set_items_plan(items)),
+
+            Event::SyncProps => Some(sync_props_plan(ctx, props)),
+
+            Event::SyncControlledValue(value) => Some(sync_controlled_value_plan(ctx, value)),
         }
     }
 
@@ -442,6 +368,320 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+
+    /// Translate a prop change into the synchronization events the running
+    /// machine must process. Emitted in order: `SetDirection` (when `dir`
+    /// changed), `SyncProps` (when any prop-backed field changed), and
+    /// `SyncControlledValue` / `SyncProps` for the value transition.
+    ///
+    /// The value branch covers three cases:
+    /// - new props are controlled → push the new controlled set;
+    /// - new props are uncontrolled and no other prop changed → `SyncProps`
+    ///   so the machine performs the controlled → uncontrolled exit;
+    /// - new props are uncontrolled and another prop already changed → the
+    ///   `SyncProps` emitted above already handles the exit, so nothing extra.
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        let mut events = Vec::new();
+
+        let props_changed = old.multiple != new.multiple
+            || old.collapsible != new.collapsible
+            || old.disabled != new.disabled
+            || old.orientation != new.orientation
+            || old.heading_level != new.heading_level;
+
+        if old.dir != new.dir {
+            events.push(Event::SetDirection(new.dir));
+        }
+
+        if props_changed {
+            events.push(Event::SyncProps);
+        }
+
+        if old.value != new.value {
+            if let Some(new_value) = &new.value {
+                events.push(Event::SyncControlledValue(new_value.clone()));
+            } else if !props_changed {
+                // Controlled → uncontrolled exit with no other prop change:
+                // SyncProps performs the `sync_controlled(None)` handoff.
+                events.push(Event::SyncProps);
+            }
+        }
+
+        events
+    }
+}
+
+// ── Transition helpers ────────────────────────────────────────────────────────
+
+/// Direction passed to [`step_focus`] for relative focus movement.
+#[derive(Clone, Copy)]
+enum FocusStep {
+    Next,
+    Prev,
+}
+
+/// Open `item`. No-op when the root is disabled, the item is disabled, or the
+/// item is already open. In single mode the open set is replaced by `item`.
+fn expand_item_plan(ctx: &Context, item: &Key) -> Option<TransitionPlan<Machine>> {
+    if ctx.disabled || item_disabled(ctx, item) || ctx.value.get().contains(item) {
+        return None;
+    }
+    let item = item.clone();
+    let multiple = ctx.multiple;
+    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+        let mut value = ctx.value.get().clone();
+        if multiple {
+            value.insert(item);
+        } else {
+            value.clear();
+            value.insert(item);
+        }
+        ctx.value.set(value);
+    }))
+}
+
+/// Close `item`. No-op when the root/item is disabled, the item is already
+/// closed, or it is the only open item in single non-collapsible mode.
+fn collapse_item_plan(ctx: &Context, item: &Key) -> Option<TransitionPlan<Machine>> {
+    if ctx.disabled || item_disabled(ctx, item) || !ctx.value.get().contains(item) {
+        return None;
+    }
+    if !ctx.multiple && !ctx.collapsible && ctx.value.get().len() <= 1 {
+        return None;
+    }
+    let item = item.clone();
+    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+        let mut value = ctx.value.get().clone();
+        value.remove(&item);
+        ctx.value.set(value);
+    }))
+}
+
+/// Toggle `item` by delegating to [`collapse_item_plan`] when open and
+/// [`expand_item_plan`] when closed; both apply their own guards.
+fn toggle_item_plan(ctx: &Context, item: &Key) -> Option<TransitionPlan<Machine>> {
+    if ctx.value.get().contains(item) {
+        collapse_item_plan(ctx, item)
+    } else {
+        expand_item_plan(ctx, item)
+    }
+}
+
+/// Open every registered enabled item. No-op when the root is disabled, when
+/// not in `multiple` mode, or when the open set already contains all of them.
+fn expand_all_plan(ctx: &Context) -> Option<TransitionPlan<Machine>> {
+    if ctx.disabled || !ctx.multiple {
+        return None;
+    }
+    let mut next = ctx.value.get().clone();
+    let mut changed = false;
+    for item in enabled_items(ctx) {
+        changed |= next.insert(item);
+    }
+    if !changed {
+        return None;
+    }
+    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+        ctx.value.set(next);
+    }))
+}
+
+/// Close every open enabled item, retaining any open disabled item. No-op when
+/// the root is disabled, when the single non-collapsible guard forbids
+/// emptying the set, or when the resulting set equals the current one.
+fn collapse_all_plan(ctx: &Context) -> Option<TransitionPlan<Machine>> {
+    if ctx.disabled {
+        return None;
+    }
+    if !ctx.multiple && !ctx.collapsible && !ctx.value.get().is_empty() {
+        return None;
+    }
+    let next = ctx
+        .value
+        .get()
+        .iter()
+        .filter(|item| item_disabled(ctx, item))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if &next == ctx.value.get() {
+        return None;
+    }
+    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+        ctx.value.set(next);
+    }))
+}
+
+/// Record `item` as the focused trigger. No-op when the root is disabled, the
+/// item is not registered, the item is disabled, or it is already focused.
+/// Carries no focus effect — focus is already where the adapter reported it.
+fn focus_item_plan(ctx: &Context, item: &Key) -> Option<TransitionPlan<Machine>> {
+    if ctx.disabled || !registered(ctx, item) || item_disabled(ctx, item) {
+        return None;
+    }
+    if ctx.focused_item.as_ref() == Some(item) {
+        return None;
+    }
+    let item = item.clone();
+    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+        ctx.focused_item = Some(item);
+    }))
+}
+
+/// Set `focused_item` to a navigation target and emit the focus effect intent
+/// so the adapter moves DOM focus to the resolved trigger.
+fn focus_item_transition(item: Key) -> TransitionPlan<Machine> {
+    TransitionPlan::context_only(move |ctx: &mut Context| {
+        ctx.focused_item = Some(item);
+    })
+    .with_effect(PendingEffect::named(Effect::FocusFocusedItem))
+}
+
+/// Replace the registered items and disabled flags in DOM order, deduplicating
+/// by key. Clears `focused_item` if it is no longer registered or now disabled.
+fn set_items_plan(items: &[ItemRegistration]) -> TransitionPlan<Machine> {
+    let items = items.to_vec();
+    TransitionPlan::context_only(move |ctx: &mut Context| {
+        let mut seen = BTreeSet::new();
+        let mut ordered = Vec::with_capacity(items.len());
+        let mut disabled = alloc::collections::BTreeMap::new();
+        for item in &items {
+            if seen.insert(item.key.clone()) {
+                ordered.push(item.key.clone());
+                disabled.insert(item.key.clone(), item.disabled);
+            }
+        }
+        ctx.items = ordered;
+        ctx.disabled_items = disabled;
+        if ctx
+            .focused_item
+            .as_ref()
+            .is_some_and(|item| !registered(ctx, item) || item_disabled(ctx, item))
+        {
+            ctx.focused_item = None;
+        }
+    })
+}
+
+/// Synchronize prop-backed context fields after a render prop change. Updates
+/// the scalar fields, then reconciles `value`: a controlled set is pushed
+/// (normalized for the new mode); an uncontrolled machine that lost its
+/// controlled prop exits controlled mode; otherwise a single-mode downgrade
+/// normalizes the existing set. Clears focus that is now disabled.
+fn sync_props_plan(ctx: &Context, props: &Props) -> TransitionPlan<Machine> {
+    let multiple = props.multiple;
+    let collapsible = props.collapsible;
+    let disabled = props.disabled;
+    let orientation = props.orientation;
+    let heading_level = props.heading_level;
+    let controlled_value = props
+        .value
+        .clone()
+        .map(|value| normalize_value_for_mode(value, multiple));
+    let needs_value_normalize = ctx.multiple && !multiple;
+
+    TransitionPlan::context_only(move |ctx: &mut Context| {
+        ctx.multiple = multiple;
+        ctx.collapsible = collapsible;
+        ctx.disabled = disabled;
+        ctx.orientation = orientation;
+        ctx.heading_level = heading_level;
+
+        if let Some(value) = controlled_value.clone() {
+            ctx.value.sync_controlled(Some(value));
+        } else if ctx.value.is_controlled() {
+            ctx.value.sync_controlled(None);
+        } else if needs_value_normalize {
+            let normalized = normalize_value_for_mode(ctx.value.get().clone(), false);
+            ctx.value.set(normalized);
+        }
+
+        if ctx
+            .focused_item
+            .as_ref()
+            .is_some_and(|item| ctx.disabled || item_disabled(ctx, item))
+        {
+            ctx.focused_item = None;
+        }
+    })
+}
+
+/// Push a new controlled open-item set into context, entering controlled mode
+/// if the machine was uncontrolled. The set is normalized for the current mode.
+fn sync_controlled_value_plan(ctx: &Context, value: &BTreeSet<Key>) -> TransitionPlan<Machine> {
+    let value = normalize_value_for_mode(value.clone(), ctx.multiple);
+    TransitionPlan::context_only(move |ctx: &mut Context| {
+        ctx.value.sync_controlled(Some(value));
+    })
+}
+
+/// Enforce the single-mode invariant on an open-item set: when `multiple` is
+/// false and the set has more than one key, retain only the first (in
+/// `BTreeSet` order). In `multiple` mode the set is returned unchanged.
+fn normalize_value_for_mode(mut value: BTreeSet<Key>, multiple: bool) -> BTreeSet<Key> {
+    if multiple || value.len() <= 1 {
+        return value;
+    }
+    let first = value.pop_first();
+    let mut normalized = BTreeSet::new();
+    if let Some(first) = first {
+        normalized.insert(first);
+    }
+    normalized
+}
+
+/// Registered, enabled item keys in DOM order. Empty when the root is disabled.
+fn enabled_items(ctx: &Context) -> impl DoubleEndedIterator<Item = Key> + '_ {
+    ctx.items
+        .iter()
+        .filter(|item| !ctx.disabled && !item_disabled(ctx, item))
+        .cloned()
+}
+
+/// Resolve the anchor for relative focus movement: the current `focused_item`
+/// when it is still registered and enabled, otherwise the first enabled item.
+fn focus_anchor(ctx: &Context) -> Option<Key> {
+    ctx.focused_item
+        .as_ref()
+        .filter(|item| registered(ctx, item) && !item_disabled(ctx, item))
+        .cloned()
+        .or_else(|| enabled_items(ctx).next())
+}
+
+/// Step from `current` to the next/previous enabled item, wrapping at the
+/// ends. Returns `None` when there is no enabled item or the only candidate is
+/// `current` itself (so a single-item set never re-emits a focus effect).
+fn step_focus(ctx: &Context, current: &Key, step: FocusStep) -> Option<Key> {
+    let enabled = enabled_items(ctx).collect::<Vec<_>>();
+    let len = enabled.len();
+    if len == 0 {
+        return None;
+    }
+    let index = enabled.iter().position(|item| item == current).unwrap_or(0);
+    let next_index = match step {
+        FocusStep::Next => (index + 1) % len,
+        FocusStep::Prev => {
+            if index == 0 {
+                len - 1
+            } else {
+                index - 1
+            }
+        }
+    };
+    let next = enabled.get(next_index)?.clone();
+    if &next == current {
+        return None;
+    }
+    Some(next)
+}
+
+/// Whether `item` appears in the registered item list.
+fn registered(ctx: &Context, item: &Key) -> bool {
+    ctx.items.iter().any(|registered| registered == item)
+}
+
+/// Whether `item` is individually disabled (ignores the root `disabled` flag).
+fn item_disabled(ctx: &Context, item: &Key) -> bool {
+    ctx.disabled_items.get(item).copied().unwrap_or(false)
 }
 ```
 
@@ -566,6 +806,11 @@ impl<'a> Api<'a> {
             attrs.set_bool(HtmlAttr::Disabled, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
+        } else if is_open && !self.ctx.multiple && !self.ctx.collapsible {
+            // The open trigger in single non-collapsible mode cannot collapse,
+            // so it advertises `aria-disabled` (without the native `disabled`
+            // attribute, which would remove it from the tab sequence). See §3.1.
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
         if is_focused && focus_visible {
             attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
@@ -581,8 +826,14 @@ impl<'a> Api<'a> {
     }
 
     /// Handle focus event on the item trigger.
+    ///
+    /// Disabled triggers do not record focus: the handler is a no-op when the
+    /// item is globally or individually disabled, mirroring the `Focus` event
+    /// guard in `focus_item_plan`.
     pub fn on_item_trigger_focus(&self, item_key: &Key) {
-        (self.send)(Event::Focus(item_key.clone()));
+        if !self.is_item_disabled(item_key) {
+            (self.send)(Event::Focus(item_key.clone()));
+        }
     }
 
     /// Handle blur event on the item trigger.
@@ -748,11 +999,11 @@ Accordion
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Part          | Role              | Properties                                                                                   |
-| ------------- | ----------------- | -------------------------------------------------------------------------------------------- |
-| `Root`        | (none / `<div>`)  | `aria-orientation` when horizontal layout matters                                            |
+| Part          | Role              | Properties                                                                                                                                                           |
+| ------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Root`        | (none / `<div>`)  | `aria-orientation` when horizontal layout matters                                                                                                                    |
 | `ItemTrigger` | `button` (native) | `aria-expanded="true\|false"`, `aria-controls="{content-id}"`, `aria-disabled` when disabled or when the open trigger cannot collapse in single non-collapsible mode |
-| `ItemContent` | `region`          | `aria-labelledby="{trigger-id}"`, `hidden` when closed                                       |
+| `ItemContent` | `region`          | `aria-labelledby="{trigger-id}"`, `hidden` when closed                                                                                                               |
 
 ### 3.2 Keyboard Interaction
 
@@ -791,7 +1042,7 @@ When keyboard focus moves between `Accordion` triggers (or Tab triggers — see 
   previous trigger and `ArrowLeft` moves to the visually next trigger. This is the canonical
   RTL rule: in RTL horizontal layouts, ArrowRight/ArrowLeft meanings flip to match physical
   layout. The `data-ars-orientation` attribute remains `horizontal`; the direction flip is
-  handled by the keyboard handler reading `ctx.dir` (see `resolve_horizontal_key()` at line 482).
+  handled by the keyboard handler reading `ctx.dir` (see `resolve_horizontal_key()` in §1.6).
 - **Text direction**: The Root part should propagate `dir` to the DOM element so nested text
   renders correctly.
 - **No locale-specific strings** are emitted by `Accordion` itself; all visible labels are

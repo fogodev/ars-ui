@@ -75,12 +75,23 @@ impl Context {
         total_items.div_ceil(page_size.get()).max(1)
     }
 
+    /// Returns the effective one-based page, clamped into `1..=page_count`.
+    ///
+    /// `page.get()` may hold an out-of-range value when `page_count` shrinks
+    /// (especially for a controlled `Bindable`, whose `get()` returns the
+    /// unclamped parent value). This accessor is the single source of truth for
+    /// the rendered page, satisfying the §1.1 mandate that no out-of-range page
+    /// is ever exposed.
+    pub fn current_page(&self) -> u32 {
+        clamp_page(*self.page.get(), self.page_count)
+    }
+
     /// Generate the list of pages to display, inserting `None` for ellipsis.
     ///
     /// Example (page=5, page_count=10, sibling_count=1, boundary_count=1):
     ///   [Some(1), None, Some(4), Some(5), Some(6), None, Some(10)]
     pub fn page_range(&self) -> Vec<Option<u32>> {
-        page_range(*self.page.get(), self.page_count, self.sibling_count, self.boundary_count)
+        page_range(self.current_page(), self.page_count, self.sibling_count, self.boundary_count)
     }
 }
 ```
@@ -195,6 +206,7 @@ impl ars_core::Machine for Machine {
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
+    type Effect  = Effect;
     type Api<'a> = Api<'a>;
     type Messages = Messages;
 
@@ -231,56 +243,45 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        // Always navigate relative to the *clamped* current page, never the raw
+        // `page.get()` (which may be out of range — see §1.1 and `current_page`).
+        let current = ctx.current_page();
         match event {
             Event::GoToPage(p) => {
-                let target = (*p).max(1).min(ctx.page_count);
-                if *ctx.page.get() == target { return None; }
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.page.set(target);
-                }).with_effect(PendingEffect::new(Effect::PageChange, |ctx, props, _send| {
-                    if let Some(ref cb) = props.on_page_change {
-                        cb(*ctx.page.get());
-                    }
-                    no_cleanup()
-                })))
+                page_change_plan(ctx, props, clamp_page(*p, ctx.page_count))
             }
             Event::NextPage => {
-                let next = (*ctx.page.get() + 1).min(ctx.page_count);
-                if next == *ctx.page.get() { return None; }
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.page.set(next);
-                }))
+                page_change_plan(ctx, props, clamp_page(current.saturating_add(1), ctx.page_count))
             }
             Event::PrevPage => {
-                let prev = ctx.page.get().saturating_sub(1).max(1);
-                if prev == *ctx.page.get() { return None; }
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.page.set(prev);
-                }))
+                page_change_plan(ctx, props, clamp_page(current.saturating_sub(1), ctx.page_count))
             }
-            Event::GoToFirstPage => {
-                Some(TransitionPlan::context_only(|ctx| {
-                    ctx.page.set(1);
-                }))
-            }
-            Event::GoToLastPage => {
-                let last = ctx.page_count;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.page.set(last);
-                }))
-            }
+            Event::GoToFirstPage => page_change_plan(ctx, props, 1),
+            Event::GoToLastPage => page_change_plan(ctx, props, ctx.page_count),
             Event::SetPageSize(size) => {
                 let new_size  = *size;
                 let new_count = Context::compute_page_count(ctx.total_items, new_size);
-                let clamped   = (*ctx.page.get()).min(new_count).max(1);
-                Some(TransitionPlan::context_only(move |ctx| {
+                // For a controlled `page`, `page.get()` reflects only the
+                // internal value; the parent's intended page lives in
+                // `props.page`. Clamp *that* across the resize so a shrink ->
+                // expand round-trip restores the parent's page rather than the
+                // value it was temporarily clamped to.
+                let raw_current = props.page.unwrap_or(*ctx.page.get());
+                let target = clamp_page(raw_current, new_count);
+                let emit = target != current;
+                let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.page_size  = new_size;
                     ctx.page_count = new_count;
                     if ctx.page.is_controlled() {
-                        ctx.page.sync_controlled(Some(clamped));
+                        ctx.page.sync_controlled(Some(target));
                     }
-                    ctx.page.set(clamped);
-                }))
+                    ctx.page.set(target);
+                });
+                // Emit `PageChange` only when the rendered page actually moves.
+                if emit {
+                    plan = with_page_change_effect(plan, target);
+                }
+                Some(plan)
             }
             Event::SyncProps => {
                 let page_size = props.page_size;
@@ -288,9 +289,9 @@ impl ars_core::Machine for Machine {
                 let sibling_count = props.sibling_count;
                 let boundary_count = props.boundary_count;
                 let page_count = Context::compute_page_count(total_items, page_size);
-                let controlled = props.page.map(|page| page.max(1).min(page_count));
-                let target = controlled.unwrap_or_else(|| (*ctx.page.get()).max(1).min(page_count));
-                Some(TransitionPlan::context_only(move |ctx| {
+                let controlled = props.page.map(|page| clamp_page(page, page_count));
+                let target = controlled.unwrap_or_else(|| clamp_page(current, page_count));
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.page_size = page_size;
                     ctx.total_items = total_items;
                     ctx.sibling_count = sibling_count;
@@ -311,6 +312,68 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        // Re-sync context whenever any page-affecting prop changes (controlled
+        // `page`, `default_page`, `page_size`, `total_items`, or the range-shape
+        // counts). Anything else (e.g. `size`, callbacks) needs no transition.
+        if old.page != new.page
+            || old.default_page != new.default_page
+            || old.page_size != new.page_size
+            || old.total_items != new.total_items
+            || old.sibling_count != new.sibling_count
+            || old.boundary_count != new.boundary_count
+        {
+            vec![Event::SyncProps]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// Clamp a one-based page into `1..=page_count` (treating `page_count` as
+/// at least 1).
+fn clamp_page(page: u32, page_count: u32) -> u32 {
+    page.max(1).min(page_count.max(1))
+}
+
+/// Build the transition for any page-mutating event. Returns `None` (no
+/// transition, no effect) when the clamped target equals the current page, so
+/// `on_page_change` never fires for a no-op move. When the page does change,
+/// the plan carries the `PageChange` effect.
+fn page_change_plan(ctx: &Context, _props: &Props, target: u32) -> Option<TransitionPlan<Machine>> {
+    if target == ctx.current_page() {
+        return None;
+    }
+    Some(with_page_change_effect(
+        TransitionPlan::context_only(move |ctx: &mut Context| {
+            ctx.page.set(target);
+        }),
+        target,
+    ))
+}
+
+/// Attach the `PageChange` effect, firing `on_page_change(target)`.
+///
+/// The callback receives `target` — the *requested* page — not
+/// `ctx.page.get()`. For a controlled `Bindable`, `set()` updates only the
+/// internal value while `get()` keeps returning the unchanged parent value, so
+/// reading `get()` here would report the stale page. Capturing `target` keeps
+/// the callback correct for both controlled and uncontrolled bindings.
+fn with_page_change_effect(
+    mut plan: TransitionPlan<Machine>,
+    target: u32,
+) -> TransitionPlan<Machine> {
+    plan = plan.with_effect(PendingEffect::new(
+        Effect::PageChange,
+        move |_ctx: &Context, props: &Props, _send| {
+            if let Some(callback) = &props.on_page_change {
+                (callback)(target);
+            }
+            no_cleanup()
+        },
+    ));
+    plan
 }
 ```
 
