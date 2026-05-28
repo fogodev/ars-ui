@@ -1,0 +1,116 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0ff4a73080a8",
+  "session_id": "cf0f1e35-f01b-4a9b-832f-32a43e97d9d0",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-28T03:12:19.123977Z",
+  "branch": "audit-agnostic-navigation-components",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/tests/proptest_state_machines/navigation/link.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/navigation_menu.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "73f0c56dac54",
+  "token_usage": {
+    "input_tokens": 90985,
+    "cache_creation_tokens": 2416630,
+    "cache_read_tokens": 87324722,
+    "output_tokens": 296316,
+    "api_call_count": 229
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Perform a full audit of all navigation category agnostic components to close Epic #223, ensuring spec conformance, splitting monolithic test files into per-component modules, and adding missing proptests for NavigationMenu and Link.",
+    "outcome": "All 8 navigation component specs synced to their correct shipped implementations; both monolithic test files split into per-component modules mirroring the input/ pattern; TreeView §5 (Lazy Loading) and §6 (Renamable Nodes) variants fully implemented via TDD; Link and NavigationMenu proptests added; 5 clean commits pushed and PR opened with Closes #223.",
+    "learnings": {
+      "repo": [
+        "The input/ directory is the canonical blueprint for test organization: shared strategies in mod.rs, per-component siblings, root entry repoints at directory mod.rs.",
+        "Effect associated type requires Copy (via EffectName: Copy bound in ars-core) — effects cannot carry payloads like LoadChildren(Key); the key must travel via a Props Callback closure or transient Context field.",
+        "Adapter notification callbacks must use Callback<dyn Fn(...) + Send + Sync> (wraps Arc), not Rc<dyn Fn>. Rc is not Send + Sync and breaks Service/StoredValue/Signal storage. Every sibling callback (on_selection_change, on_reorder, on_expanded_change) follows this convention.",
+        "The spec snippet harness (compile_snippets.rs) only does syntax parsing via syn::parse_file — not type or borrow checking. Blocks opt out with rust,no_check. Spec edits are low-risk from a CI perspective.",
+        "cargo xci --profile fast is the comprehensive pre-push gate: fmt, check, clippy, unit, integration, adapter, spec-compile-snippets, error-variant-coverage, mutual-exclusion, snapshot-count (10 steps).",
+        "New .snap files require the snapshot-reviewed label on the PR. Use INSTA_UPDATE=always to accept, then re-run to confirm green.",
+        "proptest-regressions/ files accumulate debugging seeds from failed test runs and must be explicitly reverted before committing — they are not genuinely failing regression seeds.",
+        "TreeItem does not implement CollectionItem and has no public Node<T> constructor, so ChildrenLoaded must use Vec<TreeItemConfig<TreeItem>> as its payload and rebuild via TreeCollection::new.",
+        "NavMenu items_registered gate is intentionally permissive pre-registration: a controlled/default open_item value is allowed before the first SetItems. Proptest invariants on open_item ⊆ items must be guarded on ctx.items_registered.",
+        "Breadcrumbs is stateless (no state machine) and correctly has no proptest. The comment in navigation/mod.rs documents this.",
+        "The dominant pattern in this codebase's drift: implementations are correct and well-tested; specs drift and need to be synced to the impl, not the other way around.",
+        "cp is aliased to interactive (-i) mode on this machine; scripted file copy operations require /bin/cp."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-collections/src/tree_collection.rs",
+          "line": 20,
+          "end_line": 20,
+          "finding": "TreeItemConfig needed #[derive(Clone, PartialEq)] (gated on T) added so it can ride inside the ChildrenLoaded event variant, which requires Clone + PartialEq. The manual Debug impl is preserved to avoid a T: Debug bound."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/steps/mod.rs",
+          "line": 437,
+          "end_line": 451,
+          "finding": "NextStep from the last step was firing Effect::Complete but leaving the final step as Status::Current. The spec (steps.md:264-274) requires marking it Status::Complete. The test at L1211 (next_step_completion_preserves_current_status) was pinning the wrong behavior and was renamed/corrected."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/tree_view/mod.rs",
+          "finding": "Effect::LoadChildren must be a unit Copy variant. The branch key is captured by the effect closure, which calls Props::on_load_children(key). A transient pending_load: Option<Key> Context field was introduced first then refactored away; the Callback pattern is correct and should be the first design."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/navigation/link.rs",
+          "finding": "State::Pressed does NOT exclusively imply ctx.pressed — press can persist into State::Focused mid-press (e.g., sequence [Press, Focus{is_keyboard:false}]). Correct invariant: State::Pressed implies pressed, and State::Idle implies !pressed; the biconditional is wrong."
+        },
+        {
+          "path": "spec/components/navigation/steps.md",
+          "line": 264,
+          "end_line": 274,
+          "finding": "The spec had a self-contradiction: next_trigger_attrs disabled the Next button at the last step, making Effect::Complete unreachable via the Next button. The impl was correct (no disable). Spec fixed to remove the disable guard."
+        },
+        {
+          "path": "spec/components/navigation/navigation-menu.md",
+          "finding": "The §1.7 Part enum in the spec listed 8 variants but the impl and conformance tests had 15 (the 7 Sub* variants). The spec was significantly behind the shipped impl."
+        }
+      ],
+      "workflow": [
+        "Run drift-audit agents in parallel (grouped by file size/complexity) as background tasks, then do mechanical work (test reorg) in the foreground while agents run — maximizes throughput.",
+        "For complex variant implementations, delegate to a focused agent with full architectural constraints baked into the prompt (EffectName: Copy bound, TreeCollection public API, effect closure pattern) to avoid design errors.",
+        "Proptests earn their keep by catching over-strong invariant assertions — both Link and NavMenu proptests immediately found errors in the test assertions themselves, not the impl.",
+        "Before writing proptest invariants: read how the machine handles edge-case event sequences (e.g., Press then Focus) and understand intentional permissiveness gates (e.g., items_registered) to avoid false failures.",
+        "When splitting a multi-commit PR on a single worktree, save/restore file versions with /bin/cp to stage each commit's logical content independently, rather than needing separate branches.",
+        "Cross-check agent spec rewrites against real impl symbol names via grep before accepting — catches fabricated helper names that don't exist in the impl.",
+        "The post-implementation audit follows three phases: Phase 1 (spec/impl drift), Phase 2 (iterative anything-missing? rounds), Phase 3 (coverage). Coverage tooling surfaced two uncovered branches that needed dedicated tests."
+      ]
+    },
+    "friction": [
+      "cp aliased to interactive mode required discovering and using /bin/cp for scripted file restore operations during the multi-commit staging sequence.",
+      "proptest-regressions/state-machines.txt accumulated debugging seeds from failed invariant runs and had to be explicitly reverted — easy to accidentally commit.",
+      "The TreeView agent designed pending_load: Option<Key> as a transient Context field first, which was architecturally wrong for this codebase (Rc, not Send+Sync, inconsistent with Callback convention). Required a full refactor of impl + tests + spec after the user caught it.",
+      "LoadChildrenFn = Rc<dyn Fn(Key)> was copied verbatim from a self-contradictory spec section (§5.1 said adapter-registered, §5.4 said prop). The spec itself was the source of the wrong pattern.",
+      "Committing 5 logical commits from a single worktree with partially-shared files (tree_view.rs conformance/proptest had C1-state and C4-state) required careful save/restore choreography.",
+      "The proptest binary couldn't compile mid-session due to the NavigationMenu Locale leftover reference, blocking full proptest validation until that was fixed.",
+      "Accordion §1.5 transition block in the spec was a nearly-empty stub referencing a phantom helper next_enabled_item — the agent had to reconstruct the full transition logic from reading the impl, not from the spec."
+    ],
+    "open_items": [
+      "Leptos and Dioxus adapter implementations for TreeView §5/§6 are deferred — adapter specs updated (on_load_children prop, NodeRenameInput part mapping) but no adapter code exists yet.",
+      "Epic #223 closure is pending: PR merge + green CI + Codex review thumbs-up required before the epic is closed.",
+      "snapshot-reviewed label needs to be applied to the PR (one new .snap fixture: ars_components__navigation__tree_view__tests__tree_view_node_rename_input.snap).",
+      "Pre-existing uncovered lines in tree_view/mod.rs remain: DnD guards, on_node_keydown_at, clamp_focus ancestor-walk — none are new code from this audit.",
+      "Pre-existing MD060 table-alignment lint warnings in spec files are cosmetic and ungated but pervasive; not addressed in this PR.",
+      "waiting-for-codex-review loop needs to run to get thumbs-up before closing Epic #223."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-28T03:10:51.980283Z",
+    "agent_lines": 371,
+    "agent_removed": 0,
+    "human_added": 2,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 373,
+    "total_lines_changed": 373,
+    "agent_percentage": 99.46380697050938,
+    "metric_version": 2
+  }
+}

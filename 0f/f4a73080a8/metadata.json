@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0ff4a73080a8",
+  "strategy": "manual-commit",
+  "branch": "audit-agnostic-navigation-components",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/tests/proptest_state_machines/navigation/link.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/navigation_menu.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0f/f4a73080a8/0/metadata.json",
+      "transcript": "/0f/f4a73080a8/0/full.jsonl",
+      "content_hash": "/0f/f4a73080a8/0/content_hash.txt",
+      "prompt": "/0f/f4a73080a8/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 90985,
+    "cache_creation_tokens": 2416630,
+    "cache_read_tokens": 87324722,
+    "output_tokens": 296316,
+    "api_call_count": 229
+  }
+}
