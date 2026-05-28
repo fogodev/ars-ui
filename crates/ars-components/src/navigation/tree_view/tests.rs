@@ -3640,6 +3640,125 @@ fn children_loaded_ignored_when_parent_already_loaded() {
 }
 
 #[test]
+fn lazy_loaded_children_survive_unrelated_sync_props_echo() {
+    // `ctx.items` carries lazy-spliced children that the consumer's
+    // `Props::items` may not have echoed back. A `SyncProps` for an unrelated
+    // prop change (e.g., toggling `renamable`) must not wipe that subtree:
+    // the comparison key is the last-seen `Props::items` baseline, not
+    // `ctx.items` itself.
+    let mut service = service(lazy_props().renamable(true));
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: loaded_children(),
+    }));
+    let items_after_load = service.context().items.clone();
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+    assert!(items_after_load.get(&key(2)).is_some());
+
+    // Toggle `renamable` (true -> false); items prop stays the same.
+    let new_props = lazy_props().renamable(false);
+    let triggered = <Machine as ars_core::Machine>::on_props_changed(service.props(), &new_props);
+    assert!(triggered.contains(&Event::SyncProps));
+
+    drop(service.set_props(new_props));
+    for event in triggered {
+        drop(service.send(event));
+    }
+
+    // The lazy-loaded subtree survives the unrelated echo, and load_state
+    // for the parent is still Loaded (not reset to NotLoaded).
+    assert_eq!(&items_after_load, &service.context().items);
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+    assert!(service.context().items.get(&key(2)).is_some());
+    assert!(service.context().items.get(&key(3)).is_some());
+}
+
+#[test]
+fn rename_cancelled_when_target_node_becomes_disabled() {
+    // A consumer-driven prop update can flip a renaming node to `disabled`.
+    // The rest of the machine treats disabled nodes as blocking all
+    // interaction, so an in-flight rename must not survive the transition.
+    let mut service = service(renamable_props());
+    drop(service.send(Event::RenameStart(key(2))));
+    assert_eq!(service.context().renaming_key, Some(key(2)));
+
+    // Build a new items tree where the same key (`2`) is now disabled.
+    let disabled_items = TreeCollection::new(vec![branch(
+        1,
+        "Fruits",
+        true,
+        vec![
+            leaf_with(
+                2,
+                "Banana",
+                TreeItem {
+                    disabled: true,
+                    ..item("Banana")
+                },
+            ),
+            leaf(3, "Cherry"),
+        ],
+    )]);
+    let new_props = Props::new()
+        .id("tree")
+        .items(disabled_items)
+        .renamable(true);
+
+    let triggered = <Machine as ars_core::Machine>::on_props_changed(service.props(), &new_props);
+    assert!(triggered.contains(&Event::SyncProps));
+
+    drop(service.set_props(new_props));
+    for event in triggered {
+        drop(service.send(event));
+    }
+
+    assert_eq!(service.context().renaming_key, None);
+    assert!(!service.connect(&|_| {}).is_renaming(&key(2)));
+}
+
+#[test]
+fn load_error_ignored_when_parent_already_loaded() {
+    // A late `LoadError` arriving after the same async request has already
+    // delivered `ChildrenLoaded` must not flip an already-`Loaded` branch
+    // back to `Error`; later retries would otherwise request loading again
+    // for a populated subtree. Only an in-flight `Loading` parent accepts
+    // the failure (mirrors the `ChildrenLoaded` guard).
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1)))); // Loading
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: loaded_children(),
+    })); // Loaded
+
+    let items_after = service.context().items.clone();
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+
+    let result = service.send(Event::LoadError(key(1)));
+
+    assert!(
+        !result.context_changed,
+        "stale LoadError after success must be ignored"
+    );
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+    assert_eq!(&items_after, &service.context().items);
+}
+
+#[test]
 fn rename_input_snapshot() {
     let mut service = service(renamable_props());
 

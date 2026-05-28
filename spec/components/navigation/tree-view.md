@@ -95,7 +95,19 @@ pub struct TreeItem {
 pub struct Context {
     /// The tree collection — holds all nodes, parent-child relationships,
     /// and visible-key computation. See `06-collections.md §2.3`.
+    ///
+    /// May diverge from `items_prop` when lazy loading splices children in via
+    /// `Event::ChildrenLoaded`: the inserted subtree lives in `items` but the
+    /// consumer's `Props::items` may still be the original lazy tree until they
+    /// re-supply it.
     pub items: TreeCollection<TreeItem>,
+    /// Last-seen `Props::items` snapshot, used by `Event::SyncProps` to decide
+    /// whether the consumer actually changed the data source. Comparing the
+    /// new `Props::items` against this baseline (instead of against the
+    /// possibly-lazy-loaded `items`) lets unrelated prop echoes (e.g. toggling
+    /// `selected`/`expanded`/`renamable`) preserve children inserted via
+    /// `Event::ChildrenLoaded`.
+    pub items_prop: TreeCollection<TreeItem>,
     /// Currently selected node IDs (uses canonical `selection::Set` from `ars_collections`).
     pub selected: Bindable<selection::Set>,
     /// Full selection state machine (mode, behavior, anchor, focus, disabled keys).
@@ -1842,11 +1854,22 @@ branch/leaf element so adapters can render the loading affordance.
    `TreeCollection` cannot accumulate duplicated rows.
 5. The machine splices the children in under `parent`, rebuilds the collection,
    and reseeds `load_state` (so `parent` becomes `Loaded`).
-6. If loading fails, the consumer sends `LoadError(key)`; the machine sets
-   `load_state[key] = Error`. Re-expanding an `Error` branch retries the load
-   (the gate accepts both `NotLoaded` and `Error`), so an adapter retry
-   affordance only needs to re-dispatch `ExpandNode`/`ToggleNode` — no
-   separate retry event is required.
+6. If loading fails, the consumer sends `LoadError(key)`; the machine accepts
+   the failure only when `load_state[key] == Loading` (the in-flight guard,
+   symmetric with step 4) — a late failure arriving after a successful
+   `ChildrenLoaded` is dropped, otherwise an already-`Loaded` branch would
+   flip back to `Error`. Accepted failures set `load_state[key] = Error`.
+   Re-expanding an `Error` branch retries the load (the gate accepts both
+   `NotLoaded` and `Error`), so an adapter retry affordance only needs to
+   re-dispatch `ExpandNode`/`ToggleNode` — no separate retry event is required.
+
+**Surviving an unrelated `SyncProps`.** `Context::items` may diverge from
+`Props::items` after `ChildrenLoaded` inserts lazy children. The `SyncProps`
+arm compares the new `Props::items` against `Context::items_prop` (the
+last-seen prop snapshot) instead of against `Context::items`, so any
+unrelated prop echo — `selected`, `expanded`, `renamable`, etc. — preserves
+the lazy-loaded subtree and its `load_state`. Only a genuine consumer-driven
+data-source change replaces `items` and reseeds `load_state`.
 
 ## 6. Variant: Renamable Nodes
 
@@ -1916,6 +1939,11 @@ impl Context {
   toggle as a sync trigger; the resulting `SyncProps` arm clears `renaming_key` when the live
   `renamable` prop is `false`, so adapters do not keep rendering `NodeRenameInput` against a
   tree whose props now say renaming is off.
+- **Target node removed or disabled mid-rename**: when `SyncProps` reseeds `items`, an active
+  `renaming_key` is cleared if the target either no longer exists or now has `disabled: true`.
+  The rest of the machine treats disabled nodes as blocking all interaction (`RenameStart`,
+  expand, drag, selection), so a disabled-but-renaming target would otherwise dangle into the
+  next `Effect::Rename` on blur/Enter.
 
 ```rust,no_check
 /// Transition logic for rename events.

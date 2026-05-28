@@ -562,7 +562,20 @@ impl Props {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
     /// The tree collection — nodes, parent/child relationships, visibility.
+    ///
+    /// May diverge from [`Self::items_prop`] when lazy loading splices children
+    /// in via [`Event::ChildrenLoaded`]: the inserted subtree lives in
+    /// `items` but the consumer's `Props::items` may still be the original
+    /// lazy tree until they re-supply it.
     pub items: TreeCollection<TreeItem>,
+
+    /// Last-seen `Props::items` snapshot, used by [`Event::SyncProps`] to
+    /// decide whether the consumer actually changed the data source. Comparing
+    /// the new `Props::items` against this baseline (instead of against the
+    /// possibly-lazy-loaded [`Self::items`]) lets unrelated prop echoes (e.g.
+    /// toggling `selected`/`expanded`/`renamable`) preserve children inserted
+    /// via [`Event::ChildrenLoaded`].
+    pub items_prop: TreeCollection<TreeItem>,
 
     /// Currently selected node keys (kept in sync with `selection_state`).
     pub selected: Bindable<selection::Set>,
@@ -758,6 +771,7 @@ impl ars_core::Machine for Machine {
             State::Idle,
             Context {
                 items: props.items.clone(),
+                items_prop: props.items.clone(),
                 selected,
                 selection_state,
                 expanded,
@@ -1082,11 +1096,15 @@ impl ars_core::Machine for Machine {
                     .collect::<BTreeSet<Key>>();
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    // Whether the data source itself changed (vs. an echo of an
-                    // unrelated prop like `expanded` or `selected`): an in-flight
-                    // drag's paths are only stale when the collection changes.
-                    let items_changed = ctx.items != items;
-                    ctx.items = items;
+                    // Whether the consumer actually changed `Props::items`
+                    // (vs. an echo of an unrelated prop like `expanded` or
+                    // `selected`/`renamable`). Compare against the last-seen
+                    // `items_prop` baseline rather than `ctx.items`, since
+                    // `ctx.items` may carry lazily-spliced children that the
+                    // consumer's `Props::items` does not — comparing against
+                    // `ctx.items` here would falsely report a change on every
+                    // unrelated echo and wipe the lazy-loaded subtree.
+                    let items_changed = ctx.items_prop != items;
                     // Rebuild generated ids so node ids / aria-activedescendant
                     // track a changed `Props::id`.
                     ctx.ids = ComponentIds::from_id(&id);
@@ -1094,16 +1112,27 @@ impl ars_core::Machine for Machine {
                     // Reseed the lazy-load state from the new collection only when
                     // the data source actually changed (e.g. a consumer echoed
                     // freshly-loaded children, so a `NotLoaded` branch is now
-                    // `Loaded`). An unrelated prop echo (`selected`/`expanded`)
-                    // must not reset an in-flight `Loading`/`Error` state.
+                    // `Loaded`). An unrelated prop echo (`selected`/`expanded`/
+                    // `renamable`) must preserve `ctx.items` (and any in-flight
+                    // `Loading`/`Error` state).
                     if items_changed {
+                        ctx.items_prop = items.clone();
+                        ctx.items = items;
                         ctx.load_state = seed_load_state(&ctx.items);
-                        // A node being renamed that no longer exists cannot keep
-                        // a dangling rename target.
-                        if let Some(renaming) = ctx.renaming_key.clone()
-                            && ctx.items.get(&renaming).is_none()
-                        {
-                            ctx.renaming_key = None;
+                        // A node being renamed that no longer exists, or is now
+                        // disabled, cannot keep a live rename target — the rest
+                        // of the machine treats disabled nodes as blocking all
+                        // interaction, and a removed key has no anchor to render
+                        // `NodeRenameInput` against.
+                        if let Some(renaming) = ctx.renaming_key.clone() {
+                            let stale = ctx
+                                .items
+                                .get(&renaming)
+                                .and_then(|node| node.value.as_ref())
+                                .is_none_or(|item| item.disabled);
+                            if stale {
+                                ctx.renaming_key = None;
+                            }
                         }
                     }
 
@@ -1221,6 +1250,16 @@ impl ars_core::Machine for Machine {
             Event::LoadError(key) => {
                 // Only a tracked node can transition to `Error`.
                 ctx.items.get(key)?;
+
+                // Ignore stale failures: only accept `LoadError` while the
+                // node is in the in-flight `Loading` state, mirroring the
+                // `ChildrenLoaded` guard. Otherwise a late failure arriving
+                // after a successful load (or after a retry already
+                // resolved) would flip an already-`Loaded` branch back to
+                // `Error` and let the retry path request loading again.
+                if ctx.load_state.get(key) != Some(&NodeLoadState::Loading) {
+                    return None;
+                }
 
                 let key = key.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
