@@ -3890,6 +3890,55 @@ fn lazy_loaded_disabled_child_stays_unselectable_across_unrelated_sync_props() {
 }
 
 #[test]
+fn children_loaded_rejects_payload_with_duplicate_keys() {
+    // `TreeCollection::new` silently accepts duplicate nodes while resolving
+    // `get()` to the last occurrence only, so a lazy-load payload with a
+    // duplicated key would leave focus / selection / ARIA ids pointing at a
+    // different row than the visible duplicate. The `ChildrenLoaded` arm
+    // rejects such payloads — both keys that collide with the existing
+    // collection AND keys that duplicate each other within the payload.
+
+    // Case A: loaded child collides with a key that already exists in the
+    // tree (`key(7)` "Grains" is a root sibling in `lazy_items`).
+    let mut service_a = service(lazy_props());
+    drop(service_a.send(Event::ExpandNode(key(1))));
+
+    let result_a = service_a.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: vec![leaf(7, "Duplicate Grains")],
+    });
+
+    assert!(
+        !result_a.context_changed,
+        "ChildrenLoaded must reject a payload whose key already exists in items"
+    );
+    // Parent stays `Loading` — the delivery was rejected, not consumed, so
+    // a retry / a corrected payload can still settle the load.
+    assert_eq!(
+        service_a.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+
+    // Case B: loaded children duplicate each other within the payload.
+    let mut service_b = service(lazy_props());
+    drop(service_b.send(Event::ExpandNode(key(1))));
+
+    let result_b = service_b.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: vec![leaf(2, "Apple"), leaf(2, "Apple Twin")],
+    });
+
+    assert!(
+        !result_b.context_changed,
+        "ChildrenLoaded must reject a payload whose own keys duplicate each other"
+    );
+    assert_eq!(
+        service_b.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+}
+
+#[test]
 fn children_loaded_seeds_default_expanded_for_loaded_subtree() {
     // `TreeItemConfig::default_expanded: true` is honored at init via the
     // initial `ctx.expanded` seeding. Lazy-load deliveries must honor it

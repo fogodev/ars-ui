@@ -169,9 +169,9 @@ use alloc::collections::BTreeSet;
 // ── States ───────────────────────────────────────────────────────────────────
 
 /// Design note: `Accordion` uses a single-variant enum rather than `type State = ()`
-/// for `Machine` trait conformance. The `Machine` trait requires `State: Clone + Debug + PartialEq`
-/// with named variants for potential future extension (e.g., an Animating state).
-/// All meaningful state lives in `Context` (the `value: Bindable<BTreeSet<Key>>`).
+/// for `Machine` trait conformance — the `Machine` trait requires
+/// `State: Clone + Debug + PartialEq` with named variants. All meaningful state
+/// lives in `Context` (the `value: Bindable<BTreeSet<Key>>`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum State {
     /// The idle state.

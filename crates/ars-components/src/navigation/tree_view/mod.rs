@@ -1254,6 +1254,18 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
+                // Reject payloads that would introduce duplicate keys — either
+                // collisions with keys already present in `ctx.items` or
+                // duplicates within the loaded subtree itself.
+                // `TreeCollection::new` silently accepts duplicates while its
+                // key->index map points at only the last occurrence, so a
+                // bad lazy-load response would leave focus, selection, and
+                // ARIA ids resolving to a different row than the visible
+                // duplicate.
+                if !loaded_keys_are_unique(&ctx.items, children) {
+                    return None;
+                }
+
                 let parent = parent.clone();
                 let children = children.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -1952,6 +1964,51 @@ fn needs_lazy_load(ctx: &Context, key: &Key) -> bool {
 /// splicing `children` in as the direct children of `parent`, then rebuild a
 /// fresh [`TreeCollection`]. Uses only the public `T: Clone` collection API
 /// (`children_of`/`all_nodes`/`is_expanded`), so it does not require
+/// Returns `true` when every key in the loaded `children` forest is unique
+/// across the forest itself **and** absent from the current `items`
+/// collection. `TreeCollection::new` accepts duplicate nodes silently and
+/// resolves `get()` to the last occurrence only, so a lazy-load payload
+/// with a duplicated key would leave focus / selection / ARIA ids
+/// pointing at a different row than the visible duplicate — making it a
+/// hard-to-trace data corruption. Used as a [`Event::ChildrenLoaded`]
+/// transition-time guard before splicing.
+fn loaded_keys_are_unique(
+    items: &TreeCollection<TreeItem>,
+    children: &[TreeItemConfig<TreeItem>],
+) -> bool {
+    fn walk(
+        config: &TreeItemConfig<TreeItem>,
+        items: &TreeCollection<TreeItem>,
+        seen: &mut BTreeSet<Key>,
+    ) -> bool {
+        if items.get(&config.key).is_some() {
+            return false;
+        }
+
+        if !seen.insert(config.key.clone()) {
+            return false;
+        }
+
+        for child in &config.children {
+            if !walk(child, items, seen) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    let mut seen = BTreeSet::new();
+
+    for root in children {
+        if !walk(root, items, &mut seen) {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Walk a [`TreeItemConfig`] subtree and accumulate every key whose config
 /// asked to start expanded. Used by [`Event::ChildrenLoaded`] to merge a
 /// lazy-loaded subtree's `default_expanded` markers into the runtime
