@@ -22,7 +22,7 @@ pub fn TreeView(
     #[prop(optional, into)] expanded: Option<Signal<BTreeSet<Key>>>,
     #[prop(optional)] selection_mode: selection::Mode,
     #[prop(optional)] selection_behavior: selection::Behavior,
-    #[prop(optional)] load_children: Option<tree_view::LoadChildren>,
+    #[prop(optional, into)] on_load_children: Option<Callback<dyn Fn(Key) + Send + Sync>>,
     #[prop(optional)] renamable: bool,
     children: Children,
 ) -> impl IntoView
@@ -39,16 +39,17 @@ The adapter owns visible-node iteration, descendant registration, branch or leaf
 
 ## 4. Part Mapping
 
-| Core part / structure | Required?            | Adapter rendering target  | Ownership     | Attr source                       | Notes                                  |
-| --------------------- | -------------------- | ------------------------- | ------------- | --------------------------------- | -------------------------------------- |
-| `Root`                | required             | `<ul>` or `<div>`         | adapter-owned | `api.root_attrs()`                | owns tree role and descendant registry |
-| `Branch`              | repeated             | `<li>` or `<div>`         | adapter-owned | `api.branch_attrs(key)`           | `role="treeitem"` with expand state    |
-| `BranchControl`       | repeated             | `<div>` or `<a>`          | adapter-owned | `api.branch_control_attrs(key)`   | clickable row surface                  |
-| `BranchIndicator`     | conditional repeated | `<span>`                  | adapter-owned | `api.branch_indicator_attrs(key)` | decorative expand affordance           |
-| `BranchText`          | repeated             | `<span>`                  | adapter-owned | `api.branch_text_attrs()`         | textual label surface                  |
-| `BranchContent`       | conditional repeated | `<ul>` or `<div>`         | adapter-owned | `api.branch_content_attrs(key)`   | `role="group"`                         |
-| `Leaf`                | repeated             | `<li>`, `<div>`, or `<a>` | adapter-owned | `api.leaf_attrs(key)`             | treeitem with optional href            |
-| `LeafText`            | repeated             | `<span>`                  | adapter-owned | `api.leaf_text_attrs()`           | textual label surface                  |
+| Core part / structure | Required?            | Adapter rendering target  | Ownership     | Attr source                        | Notes                                                 |
+| --------------------- | -------------------- | ------------------------- | ------------- | ---------------------------------- | ----------------------------------------------------- |
+| `Root`                | required             | `<ul>` or `<div>`         | adapter-owned | `api.root_attrs()`                 | owns tree role and descendant registry                |
+| `Branch`              | repeated             | `<li>` or `<div>`         | adapter-owned | `api.branch_attrs(key)`            | `role="treeitem"` with expand state                   |
+| `BranchControl`       | repeated             | `<div>` or `<a>`          | adapter-owned | `api.branch_control_attrs(key)`    | clickable row surface                                 |
+| `BranchIndicator`     | conditional repeated | `<span>`                  | adapter-owned | `api.branch_indicator_attrs(key)`  | decorative expand affordance                          |
+| `BranchText`          | repeated             | `<span>`                  | adapter-owned | `api.branch_text_attrs()`          | textual label surface                                 |
+| `BranchContent`       | conditional repeated | `<ul>` or `<div>`         | adapter-owned | `api.branch_content_attrs(key)`    | `role="group"`                                        |
+| `Leaf`                | repeated             | `<li>`, `<div>`, or `<a>` | adapter-owned | `api.leaf_attrs(key)`              | treeitem with optional href                           |
+| `LeafText`            | repeated             | `<span>`                  | adapter-owned | `api.leaf_text_attrs()`            | textual label surface                                 |
+| `NodeRenameInput`     | conditional repeated | `<input type="text">`     | adapter-owned | `api.node_rename_input_attrs(key)` | shown while `api.is_renaming(key)`; renamable variant |
 
 ## 5. Attr Merge and Ownership Rules
 
@@ -64,11 +65,11 @@ The adapter owns visible-node iteration, descendant registration, branch or leaf
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                                                         | Mode       | Sync trigger              | Machine event / update path          | Visible effect                           | Notes                                            |
-| -------------------------------------------------------------------- | ---------- | ------------------------- | ------------------------------------ | ---------------------------------------- | ------------------------------------------------ |
-| `selected`                                                           | controlled | signal change after mount | selection sync event                 | updates selected attrs and announcements | no controlled/uncontrolled switching after mount |
-| `expanded`                                                           | controlled | signal change after mount | expansion sync event                 | updates visible range and branch content | expansion order stays collection-derived         |
-| `selection_mode`, `selection_behavior`, `load_children`, `renamable` | controlled | rerender with new props   | core prop rebuild plus adapter hooks | updates behavior variants                | lazy-load and rename remain explicit             |
+| Adapter prop                                                            | Mode       | Sync trigger              | Machine event / update path          | Visible effect                           | Notes                                            |
+| ----------------------------------------------------------------------- | ---------- | ------------------------- | ------------------------------------ | ---------------------------------------- | ------------------------------------------------ |
+| `selected`                                                              | controlled | signal change after mount | selection sync event                 | updates selected attrs and announcements | no controlled/uncontrolled switching after mount |
+| `expanded`                                                              | controlled | signal change after mount | expansion sync event                 | updates visible range and branch content | expansion order stays collection-derived         |
+| `selection_mode`, `selection_behavior`, `on_load_children`, `renamable` | controlled | rerender with new props   | core prop rebuild plus adapter hooks | updates behavior variants                | lazy-load and rename remain explicit             |
 
 | UI event               | Preconditions                   | Machine event / callback path          | Ordering notes                                     | Notes                                         |
 | ---------------------- | ------------------------------- | -------------------------------------- | -------------------------------------------------- | --------------------------------------------- |

@@ -11,6 +11,8 @@ fn tree_view_anatomy_matches_spec() {
     //   BranchContent / Leaf / LeafText.
     // - §4 (drag-and-drop reorder variant) layers the DragHandle and
     //   DropIndicator parts on top, appended last.
+    // - §6 (renamable variant) layers the NodeRenameInput part, declared with
+    //   the other node-text parts (after LeafText, before the DnD parts).
     assert_anatomy(
         "tree-view",
         &[
@@ -47,6 +49,12 @@ fn tree_view_anatomy_matches_spec() {
                 "leaf",
             ),
             (tree_view::Part::LeafText, "leaf-text"),
+            (
+                tree_view::Part::NodeRenameInput {
+                    node_id: Key::default(),
+                },
+                "node-rename-input",
+            ),
             (
                 tree_view::Part::DragHandle {
                     node_id: Key::default(),

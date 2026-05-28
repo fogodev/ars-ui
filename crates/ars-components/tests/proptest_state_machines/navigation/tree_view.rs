@@ -143,6 +143,30 @@ fn arb_tree_view_event() -> impl Strategy<Value = tree_view::Event> {
         Just(tree_view::Event::Drop),
         Just(tree_view::Event::CancelDrag),
         Just(tree_view::Event::SyncProps),
+        // §5 lazy loading: deliver one synthetic child config under a parent,
+        // or report a load error for a key.
+        (tv_key(), 100u64..200).prop_map(|(parent, child_key)| {
+            tree_view::Event::ChildrenLoaded {
+                parent,
+                children: vec![TreeItemConfig {
+                    key: Key::int(child_key),
+                    text_value: "Loaded".to_string(),
+                    value: tv_item("Loaded"),
+                    children: Vec::new(),
+                    default_expanded: false,
+                }],
+            }
+        }),
+        tv_key().prop_map(tree_view::Event::LoadError),
+        // §6 renamable nodes.
+        tv_key().prop_map(tree_view::Event::RenameStart),
+        (tv_key(), prop_oneof![Just("X"), Just("Renamed")]).prop_map(|(key, new_name)| {
+            tree_view::Event::RenameCommit {
+                key,
+                new_name: new_name.to_string(),
+            }
+        }),
+        tv_key().prop_map(tree_view::Event::RenameCancel),
     ]
 }
 

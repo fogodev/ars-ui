@@ -21,14 +21,14 @@
 //! and `use_drag`/`use_drop` wiring remain adapter concerns.
 
 use alloc::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     string::{String, ToString},
     vec::Vec,
 };
 use core::fmt::{self, Debug};
 
 use ars_collections::{
-    Collection, Key, Node, TreeCollection,
+    Collection, Key, Node, TreeCollection, TreeItemConfig,
     dnd::{CollectionDropTarget, DropPosition},
     selection, typeahead,
 };
@@ -66,6 +66,28 @@ pub struct TreeItem {
     pub href: Option<String>,
 }
 
+/// The lazy-load status of a node's children (spec §5.3).
+///
+/// Tracked per node in [`Context::load_state`]. A branch advertising the
+/// [`TreeItem::has_children`] affordance but with no children loaded yet starts
+/// `NotLoaded`; expanding it transitions to `Loading` and emits
+/// [`Effect::LoadChildren`]; [`Event::ChildrenLoaded`] settles it to `Loaded`
+/// while [`Event::LoadError`] settles it to `Error`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NodeLoadState {
+    /// Children are present in the collection.
+    Loaded,
+
+    /// Children are being fetched (loading indicator shown).
+    Loading,
+
+    /// Load failed — adapters may show a retry affordance.
+    Error,
+
+    /// Children have not been requested yet (initial state for lazy nodes).
+    NotLoaded,
+}
+
 /// Machine states for [`TreeView`](self).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum State {
@@ -98,10 +120,10 @@ pub enum Event {
     /// Move the focus indicator to a specific node.
     FocusNode(Key),
 
-    /// Move focus to the next visible node (wraps to the first).
+    /// Move focus to the next visible node (does not wrap).
     FocusNext,
 
-    /// Move focus to the previous visible node (wraps to the last).
+    /// Move focus to the previous visible node (does not wrap).
     FocusPrev,
 
     /// Move focus to the first visible node.
@@ -160,6 +182,44 @@ pub enum Event {
     /// `selected`/`expanded` bindings) after the consumer supplies new props.
     /// Emitted by [`Machine::on_props_changed`](ars_core::Machine::on_props_changed).
     SyncProps,
+
+    // ── Lazy loading (spec §5) ──────────────────────────────────────────
+    /// The consumer (via the adapter's lazy-load callback) delivers the
+    /// lazily-fetched children for `parent`. The machine inserts them into the
+    /// collection under `parent` and marks the parent's
+    /// [`NodeLoadState`] `Loaded`.
+    ChildrenLoaded {
+        /// The parent node key the children belong to.
+        parent: Key,
+
+        /// The fetched child configurations, inserted under `parent`.
+        children: Vec<TreeItemConfig<TreeItem>>,
+    },
+
+    /// The consumer reports that a lazy load failed for `key`; the machine marks
+    /// the node's [`NodeLoadState`] `Error` so adapters can show a retry
+    /// affordance.
+    LoadError(Key),
+
+    // ── Renamable nodes (spec §6) ───────────────────────────────────────
+    /// Begin an inline rename of a node (e.g. F2 or slow double-click). Ignored
+    /// unless [`Props::renamable`] and the node is enabled.
+    RenameStart(Key),
+
+    /// Commit the new name for a node currently being renamed. The machine
+    /// clears the rename state; the consumer persists the new name by updating
+    /// its data source and supplying new props.
+    RenameCommit {
+        /// The node being renamed.
+        key: Key,
+
+        /// The committed new name (the rename input's current value).
+        new_name: String,
+    },
+
+    /// Cancel an in-progress rename for a node (Escape or blur without change),
+    /// discarding the edit.
+    RenameCancel(Key),
 }
 
 /// Typed effect intents emitted by the [`TreeView`](self) machine.
@@ -182,6 +242,12 @@ pub enum Effect {
 
     /// Adapter invokes [`Props::on_reorder`] with the completed [`ReorderEvent`].
     Reorder,
+
+    /// Adapter invokes [`Props::on_load_children`] with the branch key whose
+    /// children must be lazily fetched. Emitted when a `NotLoaded` branch is
+    /// first expanded; the consumer eventually sends [`Event::ChildrenLoaded`]
+    /// (or [`Event::LoadError`]) back to the machine.
+    LoadChildren,
 }
 
 /// Emitted when a tree node is reordered via drag-and-drop.
@@ -208,6 +274,10 @@ pub type LoadingLabelFn = dyn Fn(&Locale) -> String + Send + Sync;
 /// node's label and the active locale.
 pub type DragHandleLabelFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
 
+/// Closure signature backing [`Messages::rename_label`]. Receives the node's
+/// current label and the active locale.
+pub type RenameLabelFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
+
 /// Localizable messages for [`TreeView`](self).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
@@ -219,6 +289,11 @@ pub struct Messages {
     /// Accessible label template for a node's drag handle, called with the
     /// node's label (default: `"Drag {label}"`).
     pub drag_handle_label: MessageFn<DragHandleLabelFn>,
+
+    /// Accessible label for the inline rename input (spec §6.7), called with the
+    /// node's current label and the resolved locale
+    /// (default: `"Rename {node_name}"`).
+    pub rename_label: MessageFn<RenameLabelFn>,
 }
 
 impl Default for Messages {
@@ -227,6 +302,9 @@ impl Default for Messages {
             loading_label: MessageFn::static_str("Loading\u{2026}"),
             drag_handle_label: MessageFn::new(|label: &str, _locale: &Locale| {
                 alloc::format!("Drag {label}")
+            }),
+            rename_label: MessageFn::new(|node_name: &str, _locale: &Locale| {
+                alloc::format!("Rename {node_name}")
             }),
         }
     }
@@ -269,6 +347,10 @@ pub struct Props {
     /// Enable the drag-and-drop reorder surface.
     pub dnd_enabled: bool,
 
+    /// When `true`, tree nodes can be renamed inline via F2 or slow
+    /// double-click (spec §6). Default: `false`.
+    pub renamable: bool,
+
     /// Called with the requested selection set whenever the user changes the
     /// selection. This is the controlled echo point: a controlled tree
     /// (`selected: Some`) updates `selected` from this callback so the rendered
@@ -283,6 +365,12 @@ pub struct Props {
 
     /// Called when a drag-and-drop reorder completes.
     pub on_reorder: Option<Callback<dyn Fn(ReorderEvent) + Send + Sync>>,
+
+    /// Called with a branch's key when it is first expanded while its children
+    /// are not yet loaded (spec §5). The app fetches the children — typically
+    /// asynchronously — and sends [`Event::ChildrenLoaded`] back, or
+    /// [`Event::LoadError`] on failure. Fired by [`Effect::LoadChildren`].
+    pub on_load_children: Option<Callback<dyn Fn(Key) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -298,9 +386,11 @@ impl Default for Props {
             selection_mode: selection::Mode::Single,
             selection_behavior: selection::Behavior::Toggle,
             dnd_enabled: false,
+            renamable: false,
             on_selection_change: None,
             on_expanded_change: None,
             on_reorder: None,
+            on_load_children: None,
         }
     }
 }
@@ -382,6 +472,13 @@ impl Props {
         self
     }
 
+    /// Sets [`renamable`](Self::renamable).
+    #[must_use]
+    pub const fn renamable(mut self, value: bool) -> Self {
+        self.renamable = value;
+        self
+    }
+
     /// Sets [`on_selection_change`](Self::on_selection_change).
     #[must_use]
     pub fn on_selection_change(
@@ -409,6 +506,16 @@ impl Props {
         callback: impl Into<Callback<dyn Fn(ReorderEvent) + Send + Sync>>,
     ) -> Self {
         self.on_reorder = Some(callback.into());
+        self
+    }
+
+    /// Sets [`on_load_children`](Self::on_load_children).
+    #[must_use]
+    pub fn on_load_children(
+        mut self,
+        callback: impl Into<Callback<dyn Fn(Key) + Send + Sync>>,
+    ) -> Self {
+        self.on_load_children = Some(callback.into());
         self
     }
 }
@@ -459,6 +566,17 @@ pub struct Context {
 
     /// The resolved drop target during an active drag, if any.
     pub drop_target: Option<CollectionDropTarget>,
+
+    /// Per-node lazy-load status (spec §5.3). Seeded at init (and reseeded on
+    /// [`Event::SyncProps`]): a branch advertising the
+    /// [`TreeItem::has_children`] affordance but with no loaded children is
+    /// `NotLoaded`; every other node is `Loaded`.
+    pub load_state: BTreeMap<Key, NodeLoadState>,
+
+    /// The node currently being renamed, if any (spec §6.3). When `Some(key)`,
+    /// the node identified by `key` renders a [`Part::NodeRenameInput`] instead
+    /// of its text label.
+    pub renaming_key: Option<Key>,
 }
 
 /// Anatomy parts exposed by the [`TreeView`](self) connect API.
@@ -503,6 +621,13 @@ pub enum Part {
 
     /// The text label inside a leaf node.
     LeafText,
+
+    /// The inline `<input type="text">` rendered in place of a node's text
+    /// label while it is being renamed (renamable variant, spec §6.5).
+    NodeRenameInput {
+        /// Node key.
+        node_id: Key,
+    },
 
     /// An optional drag handle affordance for a draggable node.
     DragHandle {
@@ -571,6 +696,7 @@ impl ars_core::Machine for Machine {
         // binding and never starts in a mode-invalid shape.
         let mut selection_state = selection::State::new(selection_mode, props.selection_behavior)
             .with_disabled(disabled_keys);
+
         // Disabled nodes stay focusable and typeahead-reachable (FocusOnly) while
         // `select` still rejects them, so they cannot be selected.
         selection_state.disabled_behavior = selection::DisabledBehavior::FocusOnly;
@@ -586,6 +712,7 @@ impl ars_core::Machine for Machine {
             &props.items,
             &selection_state.disabled_keys,
         );
+
         selected.set(sanitized.clone());
         selection_state.selected_keys = sanitized;
 
@@ -606,12 +733,14 @@ impl ars_core::Machine for Machine {
                 ids: ComponentIds::from_id(&props.id),
                 dragging: None,
                 drop_target: None,
+                load_state: seed_load_state(&props.items),
+                renaming_key: None,
             },
         )
     }
 
     fn transition(
-        _state: &State,
+        state: &State,
         event: &Event,
         ctx: &Context,
         props: &Props,
@@ -625,32 +754,50 @@ impl ars_core::Machine for Machine {
                 if !is_interactive_branch(&ctx.items, key) {
                     return None;
                 }
+
                 let mut next = ctx.expanded.get().clone();
+
                 next.insert(key.clone());
+
                 // Expanding never hides the focused node, so no focus clamp.
-                expanded_change_plan(ctx, next, false)
+                expanded_change_plan(ctx, next, false, core::slice::from_ref(key))
             }
 
             Event::CollapseNode(key) => {
                 if !is_interactive_branch(&ctx.items, key) {
                     return None;
                 }
+
                 let mut next = ctx.expanded.get().clone();
+
                 next.remove(key);
+
                 // A collapse may hide the focused node, so re-clamp focus.
-                expanded_change_plan(ctx, next, true)
+                expanded_change_plan(ctx, next, true, &[])
             }
 
             Event::ToggleNode(key) => {
                 if !is_interactive_branch(&ctx.items, key) {
                     return None;
                 }
+
                 let mut next = ctx.expanded.get().clone();
+
                 let collapsing = next.remove(key);
+
                 if !collapsing {
                     next.insert(key.clone());
                 }
-                expanded_change_plan(ctx, next, collapsing)
+
+                // A toggle that expands may trigger a lazy load; a collapse never
+                // does.
+                let expanding: &[Key] = if collapsing {
+                    &[]
+                } else {
+                    core::slice::from_ref(key)
+                };
+
+                expanded_change_plan(ctx, next, collapsing, expanding)
             }
 
             Event::SelectNode(key) => {
@@ -676,6 +823,7 @@ impl ars_core::Machine for Machine {
                 if !visible_keys(ctx).contains(key) {
                     return None;
                 }
+
                 Some(focus_plan(key.clone(), false))
             }
 
@@ -684,15 +832,18 @@ impl ars_core::Machine for Machine {
             // so `aria-activedescendant` is populated immediately.
             Event::Focus { is_keyboard } => {
                 let is_keyboard = *is_keyboard;
+
                 let initial = if ctx.focused_node.is_some() {
                     None
                 } else {
                     initial_active_node(ctx)
                 };
+
                 Some(
                     TransitionPlan::to(State::Focused)
                         .apply(move |ctx: &mut Context| {
                             ctx.focus_visible = is_keyboard;
+
                             if let Some(key) = initial {
                                 ctx.focused_node = Some(key);
                             }
@@ -732,17 +883,18 @@ impl ars_core::Machine for Machine {
             Event::TypeaheadSearch(ch, now_ms) => {
                 // Delegate to the shared locale-aware, multi-character matcher.
                 let (typeahead, found) = process_typeahead(ctx, *ch, *now_ms);
-                Some(match found {
-                    Some(key) => TransitionPlan::to(State::Focused)
+                Some(if let Some(key) = found {
+                    TransitionPlan::to(State::Focused)
                         .apply(move |ctx: &mut Context| {
                             ctx.typeahead = typeahead;
                             ctx.focused_node = Some(key);
                             ctx.focus_visible = true;
                         })
-                        .with_effect(PendingEffect::named(Effect::ScrollFocusedIntoView)),
-                    None => TransitionPlan::context_only(move |ctx: &mut Context| {
+                        .with_effect(PendingEffect::named(Effect::ScrollFocusedIntoView))
+                } else {
+                    TransitionPlan::context_only(move |ctx: &mut Context| {
                         ctx.typeahead = typeahead;
-                    }),
+                    })
                 })
             }
 
@@ -768,11 +920,16 @@ impl ars_core::Machine for Machine {
                     .collect::<Vec<_>>();
 
                 let mut next = ctx.expanded.get().clone();
-                next.extend(expandable);
-                expanded_change_plan(ctx, next, false)
+
+                next.extend(expandable.iter().cloned());
+
+                // Bulk expansion emits a single `LoadChildren` effect (for the
+                // first `NotLoaded` branch in `expandable`); the others remain
+                // `NotLoaded` until separately expanded.
+                expanded_change_plan(ctx, next, false, &expandable)
             }
 
-            Event::CollapseAll => expanded_change_plan(ctx, BTreeSet::new(), true),
+            Event::CollapseAll => expanded_change_plan(ctx, BTreeSet::new(), true, &[]),
 
             // ── Drag and drop reorder ───────────────────────────────────
             Event::DragStart(key) => {
@@ -781,6 +938,7 @@ impl ars_core::Machine for Machine {
                 if ctx.dragging.is_some() {
                     return None;
                 }
+
                 // Disabled nodes block all interaction, including drag, and a
                 // node hidden under a collapsed parent cannot be picked up from
                 // the rendered tree — so it is not a valid drag source either.
@@ -893,6 +1051,23 @@ impl ars_core::Machine for Machine {
                     // Rebuild generated ids so node ids / aria-activedescendant
                     // track a changed `Props::id`.
                     ctx.ids = ComponentIds::from_id(&id);
+
+                    // Reseed the lazy-load state from the new collection only when
+                    // the data source actually changed (e.g. a consumer echoed
+                    // freshly-loaded children, so a `NotLoaded` branch is now
+                    // `Loaded`). An unrelated prop echo (`selected`/`expanded`)
+                    // must not reset an in-flight `Loading`/`Error` state.
+                    if items_changed {
+                        ctx.load_state = seed_load_state(&ctx.items);
+                        // A node being renamed that no longer exists cannot keep
+                        // a dangling rename target.
+                        if let Some(renaming) = ctx.renaming_key.clone()
+                            && ctx.items.get(&renaming).is_none()
+                        {
+                            ctx.renaming_key = None;
+                        }
+                    }
+
                     ctx.multiple = multiple;
                     ctx.selection_mode = selection_mode;
                     ctx.selected.sync_controlled(selected);
@@ -908,6 +1083,7 @@ impl ars_core::Machine for Machine {
                         &ctx.items,
                         &disabled_keys,
                     );
+
                     ctx.selected.set(normalized);
 
                     // Rebuild the selection machine; its set is the binding value
@@ -915,6 +1091,7 @@ impl ars_core::Machine for Machine {
                     // controlled binding renders a valid selection shape).
                     let mut new_state = selection::State::new(selection_mode, selection_behavior)
                         .with_disabled(disabled_keys);
+
                     new_state.disabled_behavior = selection::DisabledBehavior::FocusOnly;
                     new_state.selected_keys = sanitize_selection(
                         ctx.selected.get().clone(),
@@ -922,6 +1099,7 @@ impl ars_core::Machine for Machine {
                         &ctx.items,
                         &new_state.disabled_keys,
                     );
+
                     ctx.selection_state = new_state;
 
                     // Re-validate the in-flight drag against the new props rather
@@ -941,11 +1119,13 @@ impl ars_core::Machine for Machine {
                         // DragStart, which rejects hidden sources), so cancel the
                         // whole drag; otherwise drop only a now-invalid target.
                         let visible = visible_keys(ctx);
+
                         if visible.contains(&dragging) {
                             // Source still rendered: drop only a now-invalid target.
                             let stale = ctx.drop_target.as_ref().is_some_and(|t| {
                                 !is_valid_drop(&ctx.items, &visible, &dragging, t)
                             });
+
                             if stale {
                                 ctx.drop_target = None;
                             }
@@ -959,6 +1139,83 @@ impl ars_core::Machine for Machine {
                     // A removed/relocated focused node must not leave a dangling
                     // active descendant.
                     clamp_focus_to_visible(ctx);
+                }))
+            }
+
+            // ── Lazy loading (spec §5) ──────────────────────────────────
+            Event::ChildrenLoaded { parent, children } => {
+                // Ignore a load arriving for a node absent from the collection
+                // (e.g. removed between request and arrival), so children are
+                // never spliced under a dangling parent.
+                ctx.items.get(parent)?;
+
+                let parent = parent.clone();
+                let children = children.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.items = insert_loaded_children(&ctx.items, &parent, &children);
+                    // Reseed so the parent (now with real children) reports
+                    // `Loaded` and the freshly-inserted children get their own
+                    // load states.
+                    ctx.load_state = seed_load_state(&ctx.items);
+                    ctx.load_state.insert(parent.clone(), NodeLoadState::Loaded);
+                }))
+            }
+
+            Event::LoadError(key) => {
+                // Only a tracked node can transition to `Error`.
+                ctx.items.get(key)?;
+
+                let key = key.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.load_state.insert(key.clone(), NodeLoadState::Error);
+                }))
+            }
+
+            // ── Renamable nodes (spec §6) ───────────────────────────────
+            Event::RenameStart(key) => {
+                // Renaming must be enabled, and a disabled node blocks all
+                // interaction including rename.
+                if !props.renamable || is_disabled_node(&ctx.items, key) {
+                    return None;
+                }
+
+                // Only a real node can be renamed, and only from a resting
+                // state (the tree is `Idle` or `Focused`).
+                if ctx.items.get(key).is_none() || !matches!(state, State::Idle | State::Focused) {
+                    return None;
+                }
+
+                let key = key.clone();
+                // Committing the previous in-flight rename (if any) is the
+                // adapter's job — it owns the live input value the spec commits
+                // with. The agnostic core cannot read that DOM value, so it
+                // simply retargets `renaming_key`; the adapter commits the
+                // outgoing input on blur as focus moves to the new one.
+                Some(
+                    TransitionPlan::to(State::Focused).apply(move |ctx: &mut Context| {
+                        ctx.renaming_key = Some(key.clone());
+                        ctx.focused_node = Some(key);
+                    }),
+                )
+            }
+
+            Event::RenameCommit { key, .. } => {
+                if ctx.renaming_key.as_ref() != Some(key) {
+                    return None;
+                }
+
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.renaming_key = None;
+                }))
+            }
+
+            Event::RenameCancel(key) => {
+                if ctx.renaming_key.as_ref() != Some(key) {
+                    return None;
+                }
+
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.renaming_key = None;
                 }))
             }
         }
@@ -1080,17 +1337,21 @@ fn process_typeahead(ctx: &Context, ch: char, now_ms: u64) -> (typeahead::State,
 fn reconciled_items(ctx: &Context) -> TreeCollection<TreeItem> {
     let expanded = ctx.expanded.get();
     let mut items = ctx.items.clone();
+
     let branch_keys = items
         .all_nodes()
         .filter(|node| node.has_children)
         .map(|node| node.key.clone())
         .collect::<Vec<_>>();
+
     for key in branch_keys {
         let want = expanded.contains(&key);
+
         if items.is_expanded(&key) != want {
             items = items.set_expanded(&key, want);
         }
     }
+
     items
 }
 
@@ -1107,6 +1368,7 @@ fn current_time_ms() -> Option<u64> {
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
         .as_millis();
+
     Some(u64::try_from(millis).unwrap_or(u64::MAX))
 }
 
@@ -1135,7 +1397,9 @@ const fn effective_selection_mode(props: &Props) -> selection::Mode {
 /// rendering without mutating the parent-owned value.
 fn apply_selection(ctx: &mut Context, mut new_state: selection::State) {
     ctx.selected.set(new_state.selected_keys.clone());
+
     new_state.selected_keys = normalize_selection(ctx.selected.get().clone(), ctx.selection_mode);
+
     ctx.selection_state = new_state;
 }
 
@@ -1151,6 +1415,7 @@ fn selection_change_plan(
     new_state: selection::State,
 ) -> Option<TransitionPlan<Machine>> {
     let next = normalize_selection(new_state.selected_keys.clone(), ctx.selection_mode);
+
     if ctx.selected.get() == &next {
         return None;
     }
@@ -1175,34 +1440,63 @@ fn selection_change_plan(
 /// focus after a collapse (a now-hidden focused node must not dangle). Same
 /// controlled/uncontrolled contract as [`selection_change_plan`]: notify via
 /// [`Effect::ExpandedChange`], commit the binding only when uncontrolled.
+///
+/// Lazy loading (spec §5): `expanding` lists the keys this event is expanding
+/// (empty for collapses). The first such key whose [`NodeLoadState`] is
+/// `NotLoaded` triggers a lazy load — it is marked `Loading` and an
+/// [`Effect::LoadChildren`] carrying that key is attached, which invokes
+/// [`Props::on_load_children`]. This fires regardless of the
+/// controlled/uncontrolled split (the load is needed before any echo can produce
+/// children) and even when the expansion set is unchanged (re-expanding a
+/// still-`NotLoaded` branch retries the load).
 fn expanded_change_plan(
     ctx: &Context,
     next: BTreeSet<Key>,
     clamp: bool,
+    expanding: &[Key],
 ) -> Option<TransitionPlan<Machine>> {
-    if ctx.expanded.get() == &next {
+    let unchanged = ctx.expanded.get() == &next;
+
+    // The first branch this event expands that still awaits a lazy load.
+    let lazy = expanding
+        .iter()
+        .find(|key| needs_lazy_load(ctx, key))
+        .cloned();
+
+    // Nothing to do when neither the expansion set nor a load needs to change.
+    if unchanged && lazy.is_none() {
         return None;
     }
 
     let effect = expanded_change_effect(next.clone());
 
-    if ctx.expanded.is_controlled() {
-        return Some(
-            TransitionPlan::new()
-                .apply(|_: &mut Context| {})
-                .with_effect(effect),
-        );
-    }
-
-    Some(
+    let mut plan = if ctx.expanded.is_controlled() {
+        TransitionPlan::new().apply(|_: &mut Context| {})
+    } else {
         TransitionPlan::context_only(move |ctx: &mut Context| {
             ctx.expanded.set(next);
             if clamp {
                 clamp_focus_to_visible(ctx);
             }
         })
-        .with_effect(effect),
-    )
+    };
+
+    // Only attach the expanded-change notification when the set actually
+    // changed; a pure lazy-load retrigger does not move the expansion set.
+    if !unchanged {
+        plan = plan.with_effect(effect);
+    }
+
+    if let Some(key) = lazy {
+        let request = key.clone();
+        plan = plan
+            .apply(move |ctx: &mut Context| {
+                ctx.load_state.insert(key.clone(), NodeLoadState::Loading);
+            })
+            .with_effect(load_children_effect(request));
+    }
+
+    Some(plan)
 }
 
 /// Named effect that invokes [`Props::on_selection_change`] with the requested
@@ -1235,11 +1529,29 @@ fn expanded_change_effect(next: BTreeSet<Key>) -> PendingEffect<Machine> {
     )
 }
 
+/// Named effect that invokes [`Props::on_load_children`] with the branch `key`
+/// whose children must be lazily fetched (spec §5). The app resolves the load
+/// and sends [`Event::ChildrenLoaded`] (or [`Event::LoadError`]) back.
+fn load_children_effect(key: Key) -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::LoadChildren,
+        move |_ctx: &Context, props: &Props, _send| {
+            if let Some(callback) = &props.on_load_children {
+                callback(key.clone());
+            }
+
+            no_cleanup()
+        },
+    )
+}
+
 /// The node to activate when the tree first receives focus: the first selected
 /// visible node, otherwise the first visible node.
 fn initial_active_node(ctx: &Context) -> Option<Key> {
     let visible = visible_keys(ctx);
+
     let selected = &ctx.selection_state.selected_keys;
+
     visible
         .iter()
         .find(|&key| selected.contains(key))
@@ -1253,10 +1565,15 @@ fn initial_active_node(ctx: &Context) -> Option<Key> {
 fn normalize_selection(set: selection::Set, mode: selection::Mode) -> selection::Set {
     match mode {
         selection::Mode::None => selection::Set::Empty,
-        selection::Mode::Single => match set.first() {
-            Some(key) => selection::Set::Single(key.clone()),
-            None => selection::Set::Empty,
-        },
+
+        selection::Mode::Single => {
+            if let Some(key) = set.first() {
+                selection::Set::Single(key.clone())
+            } else {
+                selection::Set::Empty
+            }
+        }
+
         selection::Mode::Multiple => set,
     }
 }
@@ -1280,11 +1597,14 @@ fn clamp_focus_to_visible(ctx: &mut Context) {
         .items
         .get(&focused)
         .and_then(|node| node.parent_key.clone());
+
     while let Some(ancestor) = current {
         if visible.contains(&ancestor) {
             ctx.focused_node = Some(ancestor);
+
             return;
         }
+
         current = ctx
             .items
             .get(&ancestor)
@@ -1366,7 +1686,8 @@ fn drag_step(
     }))
 }
 
-/// Whether `candidate` is `ancestor` itself or sits below it in the tree.
+/// Whether `candidate` sits below `ancestor` in the tree (a strict descendant;
+/// returns `false` when `candidate == ancestor`).
 fn is_descendant(items: &TreeCollection<TreeItem>, ancestor: &Key, candidate: &Key) -> bool {
     let mut current = items
         .get(candidate)
@@ -1389,10 +1710,93 @@ fn is_descendant(items: &TreeCollection<TreeItem>, ancestor: &Key, candidate: &K
 fn is_interactive_branch(items: &TreeCollection<TreeItem>, key: &Key) -> bool {
     items.get(key).is_some_and(|node| {
         let item = node.value.as_ref();
+
         let expandable = node.has_children || item.is_some_and(|item| item.has_children);
         let disabled = item.is_some_and(|item| item.disabled);
+
         expandable && !disabled
     })
+}
+
+/// Seed the per-node [`NodeLoadState`] map from a collection (spec §5.3). A node
+/// advertising the lazy [`TreeItem::has_children`] affordance but with no
+/// children actually loaded (`Node::has_children == false`) is `NotLoaded`;
+/// every other node is `Loaded`. Used at init and reseeded on every
+/// [`Event::SyncProps`] so a node that has since loaded children reports
+/// `Loaded` against the new collection.
+fn seed_load_state(items: &TreeCollection<TreeItem>) -> BTreeMap<Key, NodeLoadState> {
+    items
+        .all_nodes()
+        .map(|node| {
+            let lazy_unloaded =
+                !node.has_children && node.value.as_ref().is_some_and(|item| item.has_children);
+
+            let state = if lazy_unloaded {
+                NodeLoadState::NotLoaded
+            } else {
+                NodeLoadState::Loaded
+            };
+
+            (node.key.clone(), state)
+        })
+        .collect()
+}
+
+/// Whether expanding `key` should trigger a lazy load: the node's tracked
+/// [`NodeLoadState`] is `NotLoaded`. Only the first expansion of an unloaded
+/// lazy branch loads; a `Loading`/`Error`/`Loaded` node does not re-trigger.
+fn needs_lazy_load(ctx: &Context, key: &Key) -> bool {
+    ctx.load_state.get(key) == Some(&NodeLoadState::NotLoaded)
+}
+
+/// Reconstruct the full `TreeItemConfig` forest from the current collection,
+/// splicing `children` in as the direct children of `parent`, then rebuild a
+/// fresh [`TreeCollection`]. Uses only the public `T: Clone` collection API
+/// (`children_of`/`all_nodes`/`is_expanded`), so it does not require
+/// `T: CollectionItem` (which [`TreeItem`] does not implement) or any private
+/// `Node` constructor. The current expansion state of each branch is preserved
+/// via `default_expanded`.
+fn insert_loaded_children(
+    items: &TreeCollection<TreeItem>,
+    parent: &Key,
+    children: &[TreeItemConfig<TreeItem>],
+) -> TreeCollection<TreeItem> {
+    /// Rebuild the config subtree rooted at `node_key`, splicing the loaded
+    /// `children` under `parent` when reached.
+    fn config_for(
+        items: &TreeCollection<TreeItem>,
+        node_key: &Key,
+        parent: &Key,
+        children: &[TreeItemConfig<TreeItem>],
+    ) -> Option<TreeItemConfig<TreeItem>> {
+        let node = items.get(node_key)?;
+
+        let mut child_configs = items
+            .children_of(node_key)
+            .filter_map(|child| config_for(items, &child.key, parent, children))
+            .collect::<Vec<_>>();
+
+        // Splice the freshly-loaded children in under their parent.
+        if node_key == parent {
+            child_configs.extend(children.iter().cloned());
+        }
+
+        Some(TreeItemConfig {
+            key: node.key.clone(),
+            text_value: node.text_value.clone(),
+            value: node.value.clone().unwrap_or_default(),
+            children: child_configs,
+            default_expanded: items.is_expanded(node_key),
+        })
+    }
+
+    let roots = items
+        .all_nodes()
+        .filter(|node| node.parent_key.is_none())
+        .filter_map(|node| config_for(items, &node.key, parent, children))
+        .collect::<Vec<_>>();
+
+    TreeCollection::new(roots)
 }
 
 /// Whether dropping the dragged node at `target` is valid: the target must be a
@@ -1425,6 +1829,7 @@ fn is_disabled_node(items: &TreeCollection<TreeItem>, key: &Key) -> bool {
 /// focusable, and is not disabled (disabled nodes block all interaction).
 fn is_draggable(items: &TreeCollection<TreeItem>, key: &Key) -> bool {
     let node = items.get(key);
+
     node.is_some_and(Node::is_focusable)
         && !node
             .and_then(|node| node.value.as_ref())
@@ -1460,17 +1865,20 @@ fn sanitize_selection(
                 selection::Set::Empty
             }
         }
+
         selection::Set::Multiple(keys) => {
             let kept = keys
                 .into_iter()
                 .filter(|key| is_selectable_key(items, disabled, key))
                 .collect::<BTreeSet<Key>>();
+
             if kept.is_empty() {
                 selection::Set::Empty
             } else {
                 selection::Set::Multiple(kept)
             }
         }
+
         // `Set::All` is symbolic ("every item, including unloaded") and its
         // `contains` returns true for *every* key — including disabled or absent
         // ones. Resolve it to the concrete selectable keys present in the
@@ -1481,12 +1889,14 @@ fn sanitize_selection(
                 .filter(|key| !disabled.contains(key))
                 .cloned()
                 .collect::<BTreeSet<Key>>();
+
             if kept.is_empty() {
                 selection::Set::Empty
             } else {
                 selection::Set::Multiple(kept)
             }
         }
+
         // `Empty` and any future `#[non_exhaustive]` variant pass through.
         other => other,
     };
@@ -1638,6 +2048,24 @@ impl Api<'_> {
         (self.ctx.messages.loading_label)(&self.ctx.locale)
     }
 
+    /// The lazy-load status of a node's children (spec §5). Nodes absent from
+    /// the tracked map (e.g. an unknown key) report
+    /// [`NodeLoadState::Loaded`] — there is nothing pending to load.
+    #[must_use]
+    pub fn node_load_state(&self, node_id: &Key) -> NodeLoadState {
+        self.ctx
+            .load_state
+            .get(node_id)
+            .copied()
+            .unwrap_or(NodeLoadState::Loaded)
+    }
+
+    /// Whether a node's children are currently being lazily loaded.
+    #[must_use]
+    pub fn is_loading(&self, node_id: &Key) -> bool {
+        self.node_load_state(node_id) == NodeLoadState::Loading
+    }
+
     /// Attributes for the tree root container (`role="tree"`).
     #[must_use]
     pub fn root_attrs(&self) -> AttrMap {
@@ -1733,6 +2161,7 @@ impl Api<'_> {
             is_focused,
             node_id,
         );
+
         attrs
     }
 
@@ -1882,6 +2311,7 @@ impl Api<'_> {
         } else {
             (self.send)(Event::SelectNode(node_id.clone()));
         }
+
         (self.send)(Event::FocusNode(node_id.clone()));
     }
 
@@ -1895,6 +2325,75 @@ impl Api<'_> {
     #[must_use]
     pub fn leaf_text_attrs(&self) -> AttrMap {
         part_only_attrs(&Part::LeafText)
+    }
+
+    /// Whether a node is currently being renamed (spec §6.5). Adapters render
+    /// the [`Part::NodeRenameInput`] in place of the node's text label while
+    /// this is `true`.
+    #[must_use]
+    pub fn is_renaming(&self, node_id: &Key) -> bool {
+        self.ctx.renaming_key.as_ref() == Some(node_id)
+    }
+
+    /// Attributes for the inline rename `<input type="text">` (spec §6.5).
+    ///
+    /// Rendered only when [`is_renaming`](Self::is_renaming) is `true` for this
+    /// node. Pre-filled with the node's current `label`; its `aria-label` comes
+    /// from [`Messages::rename_label`] called with that label.
+    #[must_use]
+    pub fn node_rename_input_attrs(&self, node_id: &Key) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::NodeRenameInput {
+            node_id: Key::default(),
+        }
+        .data_attrs();
+
+        attrs.set(scope_attr, scope_val).set(part_attr, part_val);
+
+        let label = self
+            .get_node(node_id)
+            .and_then(|node| node.value.as_ref())
+            .map_or("", |item| item.label.as_str());
+
+        attrs
+            .set(HtmlAttr::Type, "text")
+            .set(HtmlAttr::Value, label)
+            .set(
+                HtmlAttr::Aria(AriaAttr::Label),
+                (self.ctx.messages.rename_label)(label, &self.ctx.locale),
+            );
+
+        attrs
+    }
+
+    /// Handle a keydown on the rename input (spec §6.5): `Enter` commits the
+    /// rename with `current_value`, `Escape` cancels it.
+    pub fn on_rename_input_keydown(&self, node_id: &Key, key_code: &str, current_value: &str) {
+        match key_code {
+            "Enter" => {
+                (self.send)(Event::RenameCommit {
+                    key: node_id.clone(),
+                    new_name: current_value.to_string(),
+                });
+            }
+
+            "Escape" => {
+                (self.send)(Event::RenameCancel(node_id.clone()));
+            }
+
+            _ => {}
+        }
+    }
+
+    /// Handle blur on the rename input (spec §6.5): commits the rename with
+    /// `current_value` when the node is still the active rename target.
+    pub fn on_rename_input_blur(&self, node_id: &Key, current_value: &str) {
+        if self.is_renaming(node_id) {
+            (self.send)(Event::RenameCommit {
+                key: node_id.clone(),
+                new_name: current_value.to_string(),
+            });
+        }
     }
 
     /// Attributes for a node's drag handle (drag-and-drop surface).
@@ -1911,7 +2410,9 @@ impl Api<'_> {
             .items
             .get(node_id)
             .and_then(|node| node.value.as_ref());
+
         let label = item.map_or("", |item| item.label.as_str());
+
         // The handle is inert for a disabled node (`DragStart` rejects it) and
         // whenever DnD is off (`on_drag_handle_keydown` no-ops), so a consumer
         // that always renders handles never exposes an operable-looking control
@@ -1936,6 +2437,7 @@ impl Api<'_> {
         } else {
             // Keyboard users must be able to tab to the handle to start a drag.
             attrs.set(HtmlAttr::TabIndex, "0");
+
             if self.is_dragging(node_id) {
                 attrs.set(HtmlAttr::Aria(AriaAttr::Grabbed), "true");
             }
@@ -2022,6 +2524,11 @@ impl Api<'_> {
                     (self.send)(Event::SelectNode(node_id.clone()));
                 }
             }
+
+            // F2 starts an inline rename on the focused node (spec §6.6). The
+            // machine ignores the request unless `Props::renamable` and the node
+            // is enabled, so it is safe to always dispatch.
+            KeyboardKey::F2 => (self.send)(Event::RenameStart(node_id.clone())),
 
             _ => {
                 // Ignore character input mid-IME-composition (CJK/accented text):
@@ -2129,6 +2636,7 @@ impl Api<'_> {
             // Include lazy branches (item-level `has_children` flag), matching
             // `ExpandAll` and `is_branch`.
             let lazy = sibling.value.as_ref().is_some_and(|item| item.has_children);
+
             if sibling.has_children || lazy {
                 (self.send)(Event::ExpandNode(sibling.key.clone()));
             }
@@ -2143,9 +2651,11 @@ impl Api<'_> {
             .items
             .get(node_id)
             .and_then(|node| node.value.as_ref())?;
+
         if item.disabled {
             return None;
         }
+
         item.href.as_deref()
     }
 
@@ -2177,6 +2687,15 @@ impl Api<'_> {
             attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
         }
 
+        // Lazy loading (spec §5.4): a node whose children are being fetched
+        // advertises `aria-busy` and a `data-ars-loading` styling hook so
+        // adapters can render the loading affordance / loading label.
+        if self.is_loading(node_id) {
+            attrs
+                .set(HtmlAttr::Aria(AriaAttr::Busy), "true")
+                .set_bool(HtmlAttr::Data("ars-loading"), true);
+        }
+
         // Disabled nodes are not draggable (`DragStart` rejects them), so do not
         // announce them as draggable.
         if self.props.dnd_enabled && !disabled {
@@ -2202,6 +2721,7 @@ impl ConnectApi for Api<'_> {
             Part::BranchContent { ref node_id } => self.branch_content_attrs(node_id),
             Part::Leaf { ref node_id } => self.leaf_attrs(node_id),
             Part::LeafText => self.leaf_text_attrs(),
+            Part::NodeRenameInput { ref node_id } => self.node_rename_input_attrs(node_id),
             Part::DragHandle { ref node_id } => self.drag_handle_attrs(node_id),
             Part::DropIndicator => self.ctx.drop_target.as_ref().map_or_else(
                 || part_only_attrs(&Part::DropIndicator),

@@ -30,31 +30,36 @@ Implements the ARIA tree widget pattern with `role="tree"`, `role="treeitem"`, a
 Node identity uses the canonical `Key` enum from `ars_collections` (not `String`),
 matching every other component and the `TreeCollection` data model.
 
-| Event                            | Payload         | Description                                                         |
-| -------------------------------- | --------------- | ------------------------------------------------------------------- |
-| `ExpandNode(Key)`                | node key        | Expand a branch node.                                               |
-| `CollapseNode(Key)`              | node key        | Collapse a branch node.                                             |
-| `ToggleNode(Key)`                | node key        | Toggle expand/collapse of a branch.                                 |
-| `SelectNode(Key)`                | node key        | Add a node to the selection.                                        |
-| `DeselectNode(Key)`              | node key        | Remove a node from the selection.                                   |
-| `FocusNode(Key)`                 | node key        | Move focus indicator to a node.                                     |
-| `FocusNext`                      | —               | Move focus to the next visible node.                                |
-| `FocusPrev`                      | —               | Move focus to the previous visible node.                            |
-| `FocusFirst`                     | —               | Move focus to the first visible node.                               |
-| `FocusLast`                      | —               | Move focus to the last visible node.                                |
-| `FocusParent`                    | —               | Move focus to the parent of the focused node.                       |
-| `Focus { is_keyboard }`          | `bool`          | The tree container received focus.                                  |
-| `Blur`                           | —               | The tree container lost focus.                                      |
-| `TypeaheadSearch(char, u64)`     | char + now_ms   | Append a char to the typeahead buffer and jump to the next match.   |
-| `ClearTypeahead`                 | —               | Reset the typeahead buffer.                                         |
-| `ExpandAll`                      | —               | Expand every expandable node in the tree.                           |
-| `CollapseAll`                    | —               | Collapse every node in the tree.                                    |
-| `DragStart(Key)`                 | node key        | Begin a drag on a node (drag-and-drop variant, §4).                 |
-| `DragOver(CollectionDropTarget)` | resolved target | Set the drop target (adapter pointer hit-testing).                  |
-| `DragMoveNext` / `DragMovePrev`  | —               | Step the keyboard drop target through valid slots.                  |
-| `Drop`                           | —               | Confirm the drop at the current target (fires `on_reorder`).        |
-| `CancelDrag`                     | —               | Cancel the active drag.                                             |
-| `SyncProps`                      | —               | Re-sync data source + controlled bindings (via `on_props_changed`). |
+| Event                                 | Payload         | Description                                                              |
+| ------------------------------------- | --------------- | ------------------------------------------------------------------------ |
+| `ExpandNode(Key)`                     | node key        | Expand a branch node.                                                    |
+| `CollapseNode(Key)`                   | node key        | Collapse a branch node.                                                  |
+| `ToggleNode(Key)`                     | node key        | Toggle expand/collapse of a branch.                                      |
+| `SelectNode(Key)`                     | node key        | Add a node to the selection.                                             |
+| `DeselectNode(Key)`                   | node key        | Remove a node from the selection.                                        |
+| `FocusNode(Key)`                      | node key        | Move focus indicator to a node.                                          |
+| `FocusNext`                           | —               | Move focus to the next visible node.                                     |
+| `FocusPrev`                           | —               | Move focus to the previous visible node.                                 |
+| `FocusFirst`                          | —               | Move focus to the first visible node.                                    |
+| `FocusLast`                           | —               | Move focus to the last visible node.                                     |
+| `FocusParent`                         | —               | Move focus to the parent of the focused node.                            |
+| `Focus { is_keyboard }`               | `bool`          | The tree container received focus.                                       |
+| `Blur`                                | —               | The tree container lost focus.                                           |
+| `TypeaheadSearch(char, u64)`          | char + now_ms   | Append a char to the typeahead buffer and jump to the next match.        |
+| `ClearTypeahead`                      | —               | Reset the typeahead buffer.                                              |
+| `ExpandAll`                           | —               | Expand every expandable node in the tree.                                |
+| `CollapseAll`                         | —               | Collapse every node in the tree.                                         |
+| `DragStart(Key)`                      | node key        | Begin a drag on a node (drag-and-drop variant, §4).                      |
+| `DragOver(CollectionDropTarget)`      | resolved target | Set the drop target (adapter pointer hit-testing).                       |
+| `DragMoveNext` / `DragMovePrev`       | —               | Step the keyboard drop target through valid slots.                       |
+| `Drop`                                | —               | Confirm the drop at the current target (fires `on_reorder`).             |
+| `CancelDrag`                          | —               | Cancel the active drag.                                                  |
+| `SyncProps`                           | —               | Re-sync data source + controlled bindings (via `on_props_changed`).      |
+| `ChildrenLoaded { parent, children }` | key + configs   | Splice lazily-loaded children under `parent` (lazy-loading variant, §5). |
+| `LoadError(Key)`                      | node key        | Mark a node's lazy load failed (lazy-loading variant, §5).               |
+| `RenameStart(Key)`                    | node key        | Begin an inline rename (renamable variant, §6).                          |
+| `RenameCommit { key, new_name }`      | key + string    | Commit a rename (renamable variant, §6).                                 |
+| `RenameCancel(Key)`                   | node key        | Cancel a rename, discarding the edit (renamable variant, §6).            |
 
 ### 1.3 Context
 
@@ -118,6 +123,11 @@ pub struct Context {
     pub dragging: Option<Key>,
     /// The resolved drop target during an active drag, if any.
     pub drop_target: Option<CollectionDropTarget>,
+    /// Per-node lazy-load status (lazy-loading variant, §5). Seeded at init and
+    /// reseeded on `SyncProps` when the data source changes.
+    pub load_state: BTreeMap<Key, NodeLoadState>,
+    /// The node currently being renamed, if any (renamable variant, §6).
+    pub renaming_key: Option<Key>,
 }
 
 // NOTE: The local selection::Mode enum has been removed. TreeView now uses the
@@ -126,9 +136,12 @@ pub struct Context {
 // NOTE: `init` seeds `selection_state.selected_keys` from the resolved initial
 // `selected` binding so the two never diverge on the first select/deselect;
 // seeds the initial `expanded` set from the union of `Props::default_expanded`
-// and the collection's per-node `TreeItemConfig::default_expanded` branches; and
+// and the collection's per-node `TreeItemConfig::default_expanded` branches;
 // seeds `selection_state`'s disabled-key set from the nodes whose `TreeItem`
-// is `disabled` so `SelectNode` rejects them (disabled = not selectable).
+// is `disabled` so `SelectNode` rejects them (disabled = not selectable); and
+// seeds `load_state` from the collection (a `has_children` branch with no loaded
+// children is `NotLoaded`, else `Loaded`) with `renaming_key` starting `None`
+// (§5/§6).
 ```
 
 ### 1.4 Props
@@ -158,6 +171,9 @@ pub struct Props {
     pub selection_behavior: selection::Behavior,
     /// Enable the drag-and-drop reorder surface (§4).
     pub dnd_enabled: bool,
+    /// Enable inline node rename via F2 / slow double-click (renamable variant,
+    /// §6). Default `false`.
+    pub renamable: bool,
     /// Called with the requested selection set whenever the user changes the
     /// selection (controlled echo point). A controlled tree (`selected: Some`)
     /// updates `selected` from this callback so the rendered selection tracks
@@ -171,6 +187,11 @@ pub struct Props {
     /// Called when a drag-and-drop reorder completes (§4). Invoked by the
     /// adapter on the `Effect::Reorder` named effect.
     pub on_reorder: Option<Callback<dyn Fn(ReorderEvent) + Send + Sync>>,
+    /// Called with a branch's key when it is first expanded while its children
+    /// are not yet loaded (lazy-loading variant, §5). Invoked by the adapter on
+    /// the `Effect::LoadChildren` named effect; the app fetches the children and
+    /// sends `Event::ChildrenLoaded` (or `Event::LoadError`).
+    pub on_load_children: Option<Callback<dyn Fn(Key) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -186,9 +207,11 @@ impl Default for Props {
             selection_mode: selection::Mode::Single,
             selection_behavior: selection::Behavior::Toggle,
             dnd_enabled: false,
+            renamable: false,
             on_selection_change: None,
             on_expanded_change: None,
             on_reorder: None,
+            on_load_children: None,
         }
     }
 }
@@ -279,6 +302,30 @@ pub enum Event {
     /// Re-sync prop-derived context (data source + controlled bindings) after
     /// the consumer supplies new props. Emitted by `on_props_changed`.
     SyncProps,
+    /// Consumer delivers lazily-fetched children for `parent` (lazy-loading
+    /// variant, §5). The machine splices them in under `parent` and marks it
+    /// `Loaded`.
+    ChildrenLoaded {
+        /// The parent node key.
+        parent: Key,
+        /// The loaded child configurations, inserted under `parent`.
+        children: Vec<TreeItemConfig<TreeItem>>,
+    },
+    /// Consumer reports a lazy load failed for the key (lazy-loading variant,
+    /// §5); the machine marks the node `Error`.
+    LoadError(Key),
+    /// Begin an inline rename of a node (renamable variant, §6). Ignored unless
+    /// `Props::renamable` and the node is enabled.
+    RenameStart(Key),
+    /// Commit the new name for the node being renamed (renamable variant, §6).
+    RenameCommit {
+        /// The node being renamed.
+        key: Key,
+        /// The committed new name (the rename input's current value).
+        new_name: String,
+    },
+    /// Cancel an in-progress rename, discarding the edit (renamable variant, §6).
+    RenameCancel(Key),
 }
 
 /// Typed effect intents emitted by the `TreeView` machine. The agnostic core
@@ -300,6 +347,10 @@ pub enum Effect {
     ExpandedChange,
     /// Adapter invokes `Props::on_reorder` with the completed `ReorderEvent`.
     Reorder,
+    /// Adapter invokes `Props::on_load_children` with the branch key whose
+    /// children must be lazily fetched (lazy-loading variant, §5). The key is
+    /// captured by the effect's closure (this `Copy` effect name carries none).
+    LoadChildren,
 }
 
 /// Machine for the `TreeView` component.
@@ -1013,6 +1064,9 @@ pub enum Part {
     BranchContent { node_id: Key },
     Leaf { node_id: Key },
     LeafText,
+    /// Inline `<input type="text">` rendered in place of a node's text label
+    /// while it is being renamed (renamable variant, §6).
+    NodeRenameInput { node_id: Key },
     /// Optional drag handle affordance for a draggable node (§4).
     DragHandle { node_id: Key },
     /// Visual indicator showing where a dragged node will be dropped (§4).
@@ -1426,6 +1480,7 @@ impl ConnectApi for Api<'_> {
             Part::BranchContent { ref node_id } => self.branch_content_attrs(node_id),
             Part::Leaf { ref node_id } => self.leaf_attrs(node_id),
             Part::LeafText => self.leaf_text_attrs(),
+            Part::NodeRenameInput { ref node_id } => self.node_rename_input_attrs(node_id),
             Part::DragHandle { ref node_id } => self.drag_handle_attrs(node_id),
             Part::DropIndicator => self.ctx.drop_target.as_ref()
                 .map_or_else(|| part_only_attrs(&Part::DropIndicator), |t| self.drop_indicator_attrs(t)),
@@ -1439,35 +1494,39 @@ impl ConnectApi for Api<'_> {
 ```text
 TreeView
 └── Root                           role="tree" tabindex="0" aria-activedescendant
-    ├── Branch                     role="treeitem" id aria-expanded
+    ├── Branch                     role="treeitem" id aria-expanded (aria-busy while loading)
     │   ├── DragHandle           role="button" (drag-and-drop variant, §4)
     │   ├── BranchControl        (clickable row; <a> when href present)
     │   │   ├── BranchIndicator  aria-hidden="true"
-    │   │   └── BranchText
+    │   │   ├── BranchText           (hidden while renaming; renamable variant, §6)
+    │   │   └── NodeRenameInput  <input type="text"> (shown while renaming; renamable variant, §6)
     │   └── BranchContent        role="group"
     │       └── (nested Branch or Leaf nodes)
     ├── Leaf                       role="treeitem" id (aria-expanded when has_children)
-    │   └── LeafText             (<a> when href present)
+    │   ├── LeafText             (<a> when href present; hidden while renaming)
+    │   └── NodeRenameInput      <input type="text"> (shown while renaming; renamable variant, §6)
     └── DropIndicator            aria-hidden="true" (drag-and-drop variant, §4)
 ```
 
 Branch and Leaf carry a stable `id` (so the root's `aria-activedescendant` can
 reference the focused node — the tree uses the active-descendant pattern). The
 `DragHandle` and `DropIndicator` parts are present only in the drag-and-drop
-reorder variant (§4).
+reorder variant (§4); the `NodeRenameInput` part is present only in the
+renamable variant (§6).
 
-| Part              | Element                               | Key Attributes                                                                                                                                                                                                                                                                                       |
-| ----------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Root`            | `<ul>` or `<div>`                     | `data-ars-scope="tree-view"`, `data-ars-part="root"`, `role="tree"`, `tabindex="0"`, `aria-multiselectable` (when `multiple`), `aria-activedescendant` (when focused)                                                                                                                                |
-| `Branch`          | `<li>` or `<div>`                     | `id`, `role="treeitem"`, `aria-expanded` (also set when `has_children` is true with no loaded children), `aria-selected` (selectable nodes only), `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-expanded`, `data-ars-selected`, `data-ars-focus-visible`, `aria-roledescription="draggable"` (when `dnd_enabled`) |
-| `BranchControl`   | `<div>` or `<a>` (when href)          | `data-ars-scope="tree-view"`, `data-ars-part="branch-control"`, `href` (when present)                                                                                                                                                                                                                |
-| `BranchIndicator` | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="branch-indicator"`, `aria-hidden="true"`, `data-ars-expanded`                                                                                                                                                                                          |
-| `BranchText`      | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="branch-text"`                                                                                                                                                                                                                                          |
-| `BranchContent`   | `<ul>` or `<div>`                     | `role="group"`, `data-ars-scope="tree-view"`, `data-ars-part="branch-content"`, `hidden` (when collapsed)                                                                                                                                                                                            |
-| `Leaf`            | `<li>`, `<div>`, or `<a>` (when href) | `id`, `role="treeitem"`, `aria-expanded="false"` (when `has_children` is true), `aria-selected` (selectable nodes only), `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-selected`, `href` (when present)                                                                                   |
-| `LeafText`        | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="leaf-text"`                                                                                                                                                                                                                                            |
-| `DragHandle`      | `<button>`                            | `data-ars-part="drag-handle"`, `role="button"`, `tabindex="0"` (`tabindex="-1"` + `aria-disabled="true"` when the node is disabled or DnD is off), `aria-label` (from `Messages::drag_handle_label`), `aria-grabbed` (while dragging). Drag-and-drop variant (§4).                                   |
-| `DropIndicator`   | `<div>`                               | `data-ars-part="drop-indicator"`, `aria-hidden="true"`, `data-ars-drop-position`, `data-ars-drop-target`. Drag-and-drop variant (§4).                                                                                                                                                                |
+| Part              | Element                               | Key Attributes                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Root`            | `<ul>` or `<div>`                     | `data-ars-scope="tree-view"`, `data-ars-part="root"`, `role="tree"`, `tabindex="0"`, `aria-multiselectable` (when `multiple`), `aria-activedescendant` (when focused)                                                                                                                                                                                                                            |
+| `Branch`          | `<li>` or `<div>`                     | `id`, `role="treeitem"`, `aria-expanded` (also set when `has_children` is true with no loaded children), `aria-selected` (selectable nodes only), `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-expanded`, `data-ars-selected`, `data-ars-focus-visible`, `aria-busy="true"` + `data-ars-loading` (while lazily loading, §5), `aria-roledescription="draggable"` (when `dnd_enabled`) |
+| `BranchControl`   | `<div>` or `<a>` (when href)          | `data-ars-scope="tree-view"`, `data-ars-part="branch-control"`, `href` (when present)                                                                                                                                                                                                                                                                                                            |
+| `BranchIndicator` | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="branch-indicator"`, `aria-hidden="true"`, `data-ars-expanded`                                                                                                                                                                                                                                                                                      |
+| `BranchText`      | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="branch-text"`                                                                                                                                                                                                                                                                                                                                      |
+| `BranchContent`   | `<ul>` or `<div>`                     | `role="group"`, `data-ars-scope="tree-view"`, `data-ars-part="branch-content"`, `hidden` (when collapsed)                                                                                                                                                                                                                                                                                        |
+| `Leaf`            | `<li>`, `<div>`, or `<a>` (when href) | `id`, `role="treeitem"`, `aria-expanded="false"` (when `has_children` is true), `aria-selected` (selectable nodes only), `aria-level`, `aria-setsize`, `aria-posinset`, `data-ars-selected`, `href` (when present)                                                                                                                                                                               |
+| `LeafText`        | `<span>`                              | `data-ars-scope="tree-view"`, `data-ars-part="leaf-text"`                                                                                                                                                                                                                                                                                                                                        |
+| `NodeRenameInput` | `<input type="text">`                 | `data-ars-scope="tree-view"`, `data-ars-part="node-rename-input"`, `type="text"`, `value` (node's current label), `aria-label` (from `Messages::rename_label`). Rendered only while `renaming_key == Some(key)`. Renamable variant (§6).                                                                                                                                                         |
+| `DragHandle`      | `<button>`                            | `data-ars-part="drag-handle"`, `role="button"`, `tabindex="0"` (`tabindex="-1"` + `aria-disabled="true"` when the node is disabled or DnD is off), `aria-label` (from `Messages::drag_handle_label`), `aria-grabbed` (while dragging). Drag-and-drop variant (§4).                                                                                                                               |
+| `DropIndicator`   | `<div>`                               | `data-ars-part="drop-indicator"`, `aria-hidden="true"`, `data-ars-drop-position`, `data-ars-drop-target`. Drag-and-drop variant (§4).                                                                                                                                                                                                                                                            |
 
 ## 3. Accessibility
 
@@ -1477,12 +1536,12 @@ reorder variant (§4).
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Part            | Role       | Properties                                                                                                                                                                |
-| --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Root`          | `tree`     | `aria-multiselectable="true"` when `multiple=true`                                                                                                                        |
+| Part            | Role       | Properties                                                                                                                                                                                        |
+| --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Root`          | `tree`     | `aria-multiselectable="true"` when `multiple=true`                                                                                                                                                |
 | `Branch`        | `treeitem` | `aria-expanded="true\|false"` (emitted when node has children or `has_children` is true), `aria-selected` (selectable nodes only), `aria-disabled`, `aria-level`, `aria-setsize`, `aria-posinset` |
-| `BranchContent` | `group`    | —                                                                                                                                                                         |
-| `Leaf`          | `treeitem` | `aria-selected` (selectable nodes only), `aria-disabled`, `aria-level`, `aria-setsize`, `aria-posinset`. When `has_children` is true: also `aria-expanded="false"`        |
+| `BranchContent` | `group`    | —                                                                                                                                                                                                 |
+| `Leaf`          | `treeitem` | `aria-selected` (selectable nodes only), `aria-disabled`, `aria-level`, `aria-setsize`, `aria-posinset`. When `has_children` is true: also `aria-expanded="false"`                                |
 
 When a tree item has an `href`, the adapter renders the clickable area (`BranchControl` or
 `Leaf`) as an `<a>` element. The `role="treeitem"` on the parent `Branch`/`Leaf` container is
@@ -1504,18 +1563,18 @@ container's ID.
 
 ### 3.2 Keyboard Interaction
 
-| Key                 | Behavior                                                                                                                                  |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `ArrowDown`         | Move focus to the next visible node (skips hidden children of collapsed branches). Does **not** wrap: a no-op at the last node.            |
-| `ArrowUp`           | Move focus to the previous visible node. Does **not** wrap: a no-op at the first node.                                                    |
-| `ArrowRight`        | If focused node is a collapsed branch: expand it. If an expanded branch: move focus to first child. On a leaf: inert (no child to enter). |
-| `ArrowLeft`         | If focused node is an expanded branch: collapse it. If collapsed (or a leaf): move focus to parent.                                       |
-| `Home`              | Move focus to the first node in the tree.                                                                                                 |
-| `End`               | Move focus to the last visible node in the tree.                                                                                          |
-| `Enter`             | Select the focused node (if `selection_mode != None`).                                                                                    |
-| `Space`             | Toggle selection of the focused node — deselects it when already selected (multiple mode).                                                |
-| `*` (asterisk)      | Expand all siblings of the focused node.                                                                                                  |
-| `F2`                | Start inline rename on the focused node (when `renamable` is true). See [section 6](#6-variant-renamable-nodes).                          |
+| Key                 | Behavior                                                                                                                                              |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ArrowDown`         | Move focus to the next visible node (skips hidden children of collapsed branches). Does **not** wrap: a no-op at the last node.                       |
+| `ArrowUp`           | Move focus to the previous visible node. Does **not** wrap: a no-op at the first node.                                                                |
+| `ArrowRight`        | If focused node is a collapsed branch: expand it. If an expanded branch: move focus to first child. On a leaf: inert (no child to enter).             |
+| `ArrowLeft`         | If focused node is an expanded branch: collapse it. If collapsed (or a leaf): move focus to parent.                                                   |
+| `Home`              | Move focus to the first node in the tree.                                                                                                             |
+| `End`               | Move focus to the last visible node in the tree.                                                                                                      |
+| `Enter`             | Select the focused node (if `selection_mode != None`).                                                                                                |
+| `Space`             | Toggle selection of the focused node — deselects it when already selected (multiple mode).                                                            |
+| `*` (asterisk)      | Expand all siblings of the focused node.                                                                                                              |
+| `F2`                | Start inline rename on the focused node (when `renamable` is true). See [section 6](#6-variant-renamable-nodes).                                      |
 | Printable character | Typeahead: jump to the next node whose visible label starts with the typed character. Suppressed while an IME composition is active (`is_composing`). |
 
 ### 3.3 RTL Navigation Semantics
@@ -1582,6 +1641,10 @@ pub struct Messages {
     /// Accessible label template for a node's drag handle, called with the
     /// node's label (default: `"Drag {label}"`). Used by `drag_handle_attrs`.
     pub drag_handle_label: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    /// Accessible label for the inline rename input, called with the node's
+    /// current label (default: `"Rename {node_name}"`). Used by
+    /// `node_rename_input_attrs` (renamable variant, §6).
+    pub rename_label: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
@@ -1590,6 +1653,9 @@ impl Default for Messages {
             loading_label: MessageFn::static_str("Loading\u{2026}"),
             drag_handle_label: MessageFn::new(|label: &str, _locale: &Locale| {
                 format!("Drag {label}")
+            }),
+            rename_label: MessageFn::new(|node_name: &str, _locale: &Locale| {
+                format!("Rename {node_name}")
             }),
         }
     }
@@ -1677,44 +1743,61 @@ pub struct ReorderEvent {
 
 ## 5. Variant: Lazy Loading
 
-`TreeView` supports lazy loading of child nodes for large or server-driven hierarchies. When a node is first expanded and its children are not yet loaded, the machine fires a `LoadChildren` event.
+`TreeView` supports lazy loading of child nodes for large or server-driven
+hierarchies. When a `NotLoaded` node is first expanded, the machine emits the
+typed `Effect::LoadChildren`, whose closure invokes the `Props::on_load_children`
+callback with the branch key.
+
+> **Effect firing a `Props` callback.** Lazy loading mirrors the other
+> consumer notifications (`on_selection_change`, `on_expanded_change`,
+> `on_reorder`): a typed `Effect` whose closure calls the matching `Props`
+> callback. The branch key is captured by the `Effect::LoadChildren` closure
+> (the effect _name_ carries no payload, since `Machine::Effect` must be
+> `Copy`) — no transient context field is needed.
 
 ### 5.1 Additional Props
 
 ```rust,no_check
-/// The load_children callback is registered in the adapter layer, not in Props.
-/// When provided, nodes without pre-loaded children will trigger lazy loading on expand.
-/// The adapter observes `LoadChildren(Key)` events and calls the user-provided callback.
+/// Added to the TreeView `Props`. Called with a branch's key when it is first
+/// expanded while its children are not yet loaded. The app fetches the children
+/// (typically asynchronously) and sends `Event::ChildrenLoaded` back, or
+/// `Event::LoadError` on failure. Fired by `Effect::LoadChildren`.
+pub on_load_children: Option<Callback<dyn Fn(Key) + Send + Sync>>,
 ```
 
-```rust
-/// Type alias for the lazy-load callback.
-/// The adapter calls this with the parent node's key when children need loading.
-/// The callback should eventually send a `ChildrenLoaded` event back to the machine.
-/// Uses `Rc` so the adapter can clone it into event handler closures.
-pub type LoadChildrenFn = Rc<dyn Fn(Key)>;
-```
-
-### 5.2 Additional Events
+### 5.2 Additional Effect and Events
 
 ```rust,no_check
-/// Added to TreeView Event enum.
-/// Fired when a node is expanded for the first time and has no children loaded.
-LoadChildren(Key),
-/// Fired by the consumer (via adapter callback) when lazy-loaded children arrive.
+/// Added to the TreeView `Effect` enum (typed, `Copy`).
+/// Emitted when a `NotLoaded` node is first expanded; its closure invokes
+/// `Props::on_load_children` with the branch key.
+LoadChildren,
+```
+
+```rust,no_check
+/// Added to the TreeView `Event` enum.
+/// Sent by the consumer (via the adapter callback) when lazy-loaded children
+/// arrive. `children` are `TreeItemConfig`s — the public construction type for
+/// `TreeCollection` — which the machine splices in under `parent` and rebuilds
+/// the collection from (there is no public `Node<T>` constructor, and
+/// `TreeItem` does not implement `CollectionItem`, so a config payload is the
+/// cleanest insertion path).
 ChildrenLoaded {
     /// The parent node key.
     parent: Key,
-    /// The loaded children nodes.
-    children: Vec<Node<T>>,
+    /// The loaded children configurations, inserted under `parent`.
+    children: Vec<TreeItemConfig<TreeItem>>,
 },
+/// Sent by the consumer when a lazy load fails for `key`; the machine marks the
+/// node `Error` so adapters can show a retry affordance.
+LoadError(Key),
 ```
 
 ### 5.3 Additional Node State
 
 ```rust
-/// Extended NodeState to include loading.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Per-node lazy-load status.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum NodeLoadState {
     /// Children are present in the collection.
     Loaded,
@@ -1727,16 +1810,26 @@ pub enum NodeLoadState {
 }
 ```
 
-The `tree_view::Context` tracks `load_state: BTreeMap<Key, NodeLoadState>`.
+The `tree_view::Context` tracks `load_state: BTreeMap<Key, NodeLoadState>`,
+seeded at init (and reseeded on `SyncProps` whenever the data source changes): a
+branch advertising the `TreeItem::has_children` affordance but with no children
+actually loaded is `NotLoaded`; every other node is `Loaded`. A node being
+`Loading` advertises `aria-busy="true"` and `data-ars-loading` on its
+branch/leaf element so adapters can render the loading affordance.
 
 ### 5.4 Behavior
 
 1. User expands a node whose `load_state` is `NotLoaded`.
-2. Machine transitions `load_state` to `Loading` and fires `LoadChildren(key)`.
-3. Adapter calls `load_children(key)` prop. The consumer fetches data asynchronously.
+2. The machine sets `load_state[key] = Loading` and attaches an
+   `Effect::LoadChildren` whose closure captures `key` (in addition to the
+   normal expand plan).
+3. The adapter runs the effect, which invokes `Props::on_load_children(key)`.
+   The consumer fetches data asynchronously.
 4. Consumer sends `ChildrenLoaded { parent, children }` when data arrives.
-5. Machine inserts children into the collection and transitions `load_state` to `Loaded`.
-6. If loading fails, consumer sends `LoadError(key)` and machine transitions to `Error`.
+5. The machine splices the children in under `parent`, rebuilds the collection,
+   and reseeds `load_state` (so `parent` becomes `Loaded`).
+6. If loading fails, the consumer sends `LoadError(key)`; the machine sets
+   `load_state[key] = Error`.
 
 ## 6. Variant: Renamable Nodes
 
@@ -1787,11 +1880,14 @@ impl Context {
 
 ### 6.4 Behavior
 
-- **`RenameStart(key)`**: Only allowed from `Idle` or `Focused` states. If `renamable` is
-  false or the target node is disabled, the event is ignored. If another node is currently
-  being renamed (`renaming_key` is `Some(other_key)`), that rename is committed first (fires
-  `RenameCommit` for the previous node with its current input value), then `renaming_key` is
-  set to `Some(key)`. Focus moves to the rename input.
+- **`RenameStart(key)`**: Only allowed from `Idle` or `Focused` states, and only for a real
+  node. If `renamable` is false or the target node is disabled, the event is ignored. If
+  another node is currently being renamed (`renaming_key` is `Some(other_key)`), the machine
+  simply retargets `renaming_key` to `Some(key)` and moves focus to the new input — the
+  previous rename is committed by the adapter's blur handler (`on_rename_input_blur`), which
+  fires `RenameCommit` for the outgoing input with its live DOM value as focus leaves it. The
+  agnostic core cannot read that DOM value, so the commit-previous behavior is driven by the
+  adapter rather than synthesized in the transition.
 - **`RenameCommit { key, new_name }`**: Clears `renaming_key` to `None`. The consumer is
   responsible for persisting the new name (e.g., updating the `TreeCollection` data source).
   The machine does not modify the `TreeItem.label` — the consumer updates the collection and
@@ -1804,22 +1900,17 @@ impl Context {
 /// Added to the Machine::transition match block.
 
 Event::RenameStart(key) => {
-    if !_props.renamable { return None; }
-    let node_disabled = ctx.items.get(key)
-        .and_then(|n| n.value.as_ref())
-        .map(|v| v.disabled)
-        .unwrap_or(false);
-    if node_disabled { return None; }
-    match state {
-        State::Idle | State::Focused => {
-            let key = key.clone();
-            Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                ctx.renaming_key = Some(key.clone());
-                ctx.focused_node = Some(key);
-            }))
-        }
-        _ => None,
+    if !props.renamable || is_disabled_node(&ctx.items, key) { return None; }
+    if ctx.items.get(key).is_none() || !matches!(state, State::Idle | State::Focused) {
+        return None;
     }
+    let key = key.clone();
+    // Retarget the active rename; the adapter commits the previous input on blur
+    // as focus moves to the new one (the core cannot read the DOM value).
+    Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
+        ctx.renaming_key = Some(key.clone());
+        ctx.focused_node = Some(key);
+    }))
 }
 
 Event::RenameCommit { key, .. } => {
@@ -1858,7 +1949,11 @@ branch control or leaf when `renaming_key == Some(key)`. It replaces the text di
 rename and is pre-filled with the node's current `label` value.
 
 ```rust,no_check
-/// Added to Part enum (node identity is `Key`, consistent with the core).
+/// Added to the `Part` enum, declared after `LeafText` and before the
+/// drag-and-drop parts (`DragHandle`, `DropIndicator`) so the resulting
+/// `Part::all()` anatomy order is: base parts (§2), then `NodeRenameInput`
+/// (§6), then the DnD parts (§4). Node identity is `Key`, consistent with the
+/// core; the `node_id` does not affect `data_attrs()` (only the part name).
 NodeRenameInput { node_id: Key },
 ```
 
