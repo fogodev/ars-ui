@@ -835,14 +835,24 @@ impl ars_core::Machine for Machine {
 
                 let mut next = ctx.expanded.get().clone();
 
-                let collapsing = next.remove(key);
+                // A toggle on an `Error` branch is treated as a retry rather
+                // than a collapse: the spec §5 retry path says adapter retry
+                // affordances re-dispatch `ExpandNode`/`ToggleNode`, and the
+                // default branch-control click goes through `ToggleNode`. If
+                // we collapsed on click, retrying would require collapse +
+                // re-expand instead of one click.
+                let is_error = ctx.load_state.get(key) == Some(&NodeLoadState::Error);
+                let was_expanded = next.contains(key);
+                let collapsing = was_expanded && !is_error;
 
-                if !collapsing {
+                if collapsing {
+                    next.remove(key);
+                } else {
                     next.insert(key.clone());
                 }
 
-                // A toggle that expands may trigger a lazy load; a collapse never
-                // does.
+                // A toggle that expands may trigger a lazy load; a collapse
+                // never does.
                 let expanding: &[Key] = if collapsing {
                     &[]
                 } else {
@@ -1244,6 +1254,42 @@ impl ars_core::Machine for Machine {
                     // load states.
                     ctx.load_state = seed_load_state(&ctx.items);
                     ctx.load_state.insert(parent.clone(), NodeLoadState::Loaded);
+
+                    // Recompute the selection machine's disabled-key set from
+                    // the new collection: newly-loaded children carrying
+                    // `disabled: true` must be rejected by `select` (the rest
+                    // of the machine treats disabled nodes as blocking all
+                    // interaction). Also drop any selection entry whose key
+                    // is no longer focusable, mirroring `SyncProps`.
+                    let disabled_keys = ctx
+                        .items
+                        .all_nodes()
+                        .filter(|node| node.value.as_ref().is_some_and(|item| item.disabled))
+                        .map(|node| node.key.clone())
+                        .collect::<BTreeSet<Key>>();
+                    let sanitized = sanitize_selection(
+                        ctx.selected.get().clone(),
+                        ctx.selection_mode,
+                        &ctx.items,
+                        &disabled_keys,
+                    );
+                    ctx.selected.set(sanitized.clone());
+                    ctx.selection_state.disabled_keys = disabled_keys;
+                    ctx.selection_state.selected_keys = sanitized;
+
+                    // Honor each loaded `TreeItemConfig::default_expanded`
+                    // marker — `TreeCollection::new` records it internally,
+                    // but rendering uses `ctx.expanded` (the runtime binding),
+                    // so the descendants would render collapsed without an
+                    // explicit merge. Controlled `expanded` is parent-owned
+                    // and is not touched here.
+                    if !ctx.expanded.is_controlled() {
+                        let mut expanded = ctx.expanded.get().clone();
+                        for child in &children {
+                            collect_default_expanded(child, &mut expanded);
+                        }
+                        ctx.expanded.set(expanded);
+                    }
                 }))
             }
 
@@ -1296,18 +1342,26 @@ impl ars_core::Machine for Machine {
             }
 
             Event::RenameCommit { key, new_name } => {
-                if ctx.renaming_key.as_ref() != Some(key) {
-                    return None;
-                }
+                // Reject only when no rename is active anywhere (stray
+                // commit). When a rename IS active — either for `key` or
+                // (during the retarget hand-off) for a different node — fire
+                // `Effect::Rename` so the outgoing edit reaches the consumer.
+                // Clearing `renaming_key` is gated on the key actually being
+                // the current target, so a retargeted blur commits the
+                // outgoing value without ending the new node's rename.
+                ctx.renaming_key.as_ref()?;
 
                 let event = RenameEvent {
                     key: key.clone(),
                     new_name: new_name.clone(),
                 };
+                let is_active_target = ctx.renaming_key.as_ref() == Some(key);
 
                 Some(
-                    TransitionPlan::context_only(|ctx: &mut Context| {
-                        ctx.renaming_key = None;
+                    TransitionPlan::context_only(move |ctx: &mut Context| {
+                        if is_active_target {
+                            ctx.renaming_key = None;
+                        }
                     })
                     .with_effect(rename_effect(event)),
                 )
@@ -1889,6 +1943,22 @@ fn needs_lazy_load(ctx: &Context, key: &Key) -> bool {
 /// splicing `children` in as the direct children of `parent`, then rebuild a
 /// fresh [`TreeCollection`]. Uses only the public `T: Clone` collection API
 /// (`children_of`/`all_nodes`/`is_expanded`), so it does not require
+/// Walk a [`TreeItemConfig`] subtree and accumulate every key whose config
+/// asked to start expanded. Used by [`Event::ChildrenLoaded`] to merge a
+/// lazy-loaded subtree's `default_expanded` markers into the runtime
+/// expansion binding, so descendants render expanded the way the configs
+/// requested (mirroring the init-time seeding from
+/// [`TreeItemConfig::default_expanded`]).
+fn collect_default_expanded(config: &TreeItemConfig<TreeItem>, expanded: &mut BTreeSet<Key>) {
+    if config.default_expanded {
+        expanded.insert(config.key.clone());
+    }
+
+    for child in &config.children {
+        collect_default_expanded(child, expanded);
+    }
+}
+
 /// `T: CollectionItem` (which [`TreeItem`] does not implement) or any private
 /// `Node` constructor. The current expansion state of each branch is preserved
 /// via `default_expanded`.
@@ -2524,7 +2594,13 @@ impl Api<'_> {
     /// Handle blur on the rename input (spec §6.5): commits the rename with
     /// `current_value` when the node is still the active rename target.
     pub fn on_rename_input_blur(&self, node_id: &Key, current_value: &str) {
-        if self.is_renaming(node_id) {
+        // Fire `RenameCommit` whenever any rename is in flight — including
+        // the retarget hand-off where the outgoing input's blur fires for
+        // `node_id` after `RenameStart` has already moved `renaming_key` to
+        // a different node. Without this the user's edit on the outgoing
+        // input would be silently dropped. When no rename is active anywhere,
+        // blur is a no-op (stray input event).
+        if self.ctx.renaming_key.is_some() {
             (self.send)(Event::RenameCommit {
                 key: node_id.clone(),
                 new_name: current_value.to_string(),

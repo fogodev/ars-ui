@@ -512,7 +512,19 @@ impl ars_core::Machine for Machine {
                 let target = controlled.unwrap_or_else(|| clamp_step(*ctx.step.get(), count));
                 let statuses_prop = props.statuses.clone();
                 let statuses = if statuses_prop == ctx.statuses_prop {
-                    normalized_statuses(Some(ctx.statuses.clone()), count, target)
+                    // Preserve runtime status progress across an unrelated
+                    // prop echo (`orientation`/`linear`/etc.) — including a
+                    // `Complete` status on the active step, which is the
+                    // post-last-step-completion shape per spec §1.5.
+                    // Re-normalizing would otherwise quietly flip the
+                    // completed final step back to `Current`.
+                    let preserve_complete =
+                        ctx.statuses.get(target as usize).copied() == Some(Status::Complete);
+                    let mut next = normalized_statuses(Some(ctx.statuses.clone()), count, target);
+                    if preserve_complete && let Some(slot) = next.get_mut(target as usize) {
+                        *slot = Status::Complete;
+                    }
+                    next
                 } else {
                     normalized_statuses(statuses_prop.clone(), count, target)
                 };
@@ -1237,6 +1249,34 @@ mod tests {
 
         assert_eq!(*service.context().step.get(), 3);
         assert_eq!(service.context().statuses[3], Status::Complete);
+    }
+
+    #[test]
+    fn last_step_completion_survives_unrelated_sync_props_echo() {
+        // Spec §1.5: NextStep past the last step marks `statuses[current]` as
+        // `Complete`. Any later unrelated `SyncProps` (e.g. toggling
+        // `orientation`/`linear`) must preserve that completion — otherwise
+        // re-normalizing the active index back to `Current` quietly erases
+        // the "all steps done" state.
+        let mut service = service(props().default_step(3));
+
+        drop(service.send(Event::NextStep));
+        assert_eq!(service.context().statuses[3], Status::Complete);
+
+        // Unrelated prop echo: flip `orientation`.
+        let new_props = props().default_step(3).orientation(Orientation::Vertical);
+        let triggered =
+            <Machine as ars_core::Machine>::on_props_changed(service.props(), &new_props);
+        assert!(triggered.contains(&Event::SyncProps));
+
+        drop(service.set_props(new_props));
+        for event in triggered {
+            drop(service.send(event));
+        }
+
+        // Completion survives the echo.
+        assert_eq!(service.context().statuses[3], Status::Complete);
+        assert_eq!(*service.context().step.get(), 3);
     }
 
     #[test]

@@ -1852,13 +1852,24 @@ branch/leaf element so adapters can render the loading affordance.
    stale or duplicate deliveries (e.g., a late async completion after another
    load already finished, or a double-fire from the adapter) are dropped so
    `TreeCollection` cannot accumulate duplicated rows.
-5. The machine splices the children in under `parent`, rebuilds the collection,
-   and reseeds `load_state` (so `parent` becomes `Loaded`).
+5. The machine splices the children in under `parent`, rebuilds the
+   collection, reseeds `load_state` (so `parent` becomes `Loaded`), and
+   rebuilds the selection machine's disabled-key set from the new
+   collection (`ctx.selection_state.disabled_keys`) — newly-loaded children
+   carrying `TreeItem { disabled: true }` are blocked from selection, like
+   every other disabled node. For an uncontrolled `expanded` binding, the
+   loaded subtree's `TreeItemConfig::default_expanded` markers are merged
+   into `ctx.expanded`, so descendants render expanded the way the configs
+   requested (mirroring the init-time seeding).
 6. If loading fails, the consumer sends `LoadError(key)`; the machine accepts
    the failure only when `load_state[key] == Loading` (the in-flight guard,
    symmetric with step 4) — a late failure arriving after a successful
    `ChildrenLoaded` is dropped, otherwise an already-`Loaded` branch would
    flip back to `Error`. Accepted failures set `load_state[key] = Error`.
+   Re-expanding an `Error` branch retries (the gate accepts both
+   `NotLoaded` and `Error`), and `ToggleNode` on an `Error` branch is
+   treated as a retry rather than a collapse so the default
+   branch-control click acts as a one-click retry.
    Re-expanding an `Error` branch retries the load (the gate accepts both
    `NotLoaded` and `Error`), so an adapter retry affordance only needs to
    re-dispatch `ExpandNode`/`ToggleNode` — no separate retry event is required.
@@ -1928,11 +1939,16 @@ impl Context {
   fires `RenameCommit` for the outgoing input with its live DOM value as focus leaves it. The
   agnostic core cannot read that DOM value, so the commit-previous behavior is driven by the
   adapter rather than synthesized in the transition.
-- **`RenameCommit { key, new_name }`**: Clears `renaming_key` to `None` **and** attaches
-  `Effect::Rename` whose closure invokes `Props::on_rename` with the
-  `RenameEvent { key, new_name }`, so the consumer can persist the new label (e.g., updating
-  the `TreeCollection` data source). The machine never mutates `TreeItem::label` — the
-  consumer applies the rename to its data source and re-supplies props.
+- **`RenameCommit { key, new_name }`**: Attaches `Effect::Rename` whose closure invokes
+  `Props::on_rename` with `RenameEvent { key, new_name }`, so the consumer can persist the
+  new label (e.g., updating the `TreeCollection` data source). The machine never mutates
+  `TreeItem::label` — the consumer applies the rename to its data source and re-supplies
+  props. `renaming_key` is cleared only when `key` is the currently-active target; this lets
+  the **retarget hand-off** work: when a second `RenameStart` retargets `renaming_key` to a
+  new node and the outgoing input's blur then fires `RenameCommit` for the previous key,
+  `Effect::Rename` still delivers the outgoing edit while the new node's rename continues
+  uninterrupted. The transition rejects the event entirely only when no rename is active
+  anywhere (`renaming_key == None`), so a stray blur cannot synthesize an `on_rename` call.
 - **`RenameCancel(key)`**: Clears `renaming_key` to `None`. No value change occurs and no
   callback fires. Focus returns to the tree item that was being renamed.
 - **Disabling `renamable` mid-rename**: `Machine::on_props_changed` treats a `renamable`

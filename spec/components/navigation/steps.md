@@ -296,9 +296,20 @@ impl ars_core::Machine for Machine {
                 let target = controlled.unwrap_or_else(|| (*ctx.step.get()).min(count.get().saturating_sub(1)));
                 // Preserve runtime status progress when the `statuses` prop is unchanged across
                 // an unrelated prop change; reset to the new prop only when it actually changed.
+                // Additionally preserve a `Complete` status on the active step — the
+                // post-last-step-completion shape (`NextStep` past the final step marked
+                // `statuses[current] = Complete`) must survive unrelated `SyncProps` echoes such
+                // as `orientation`/`linear` toggles, otherwise re-normalizing the active index
+                // back to `Current` would silently erase the all-steps-done state.
                 let statuses_prop = props.statuses.clone();
                 let statuses = if statuses_prop == ctx.statuses_prop {
-                    normalized_statuses(Some(ctx.statuses.clone()), count, target)
+                    let preserve_complete = ctx.statuses.get(target as usize).copied()
+                        == Some(Status::Complete);
+                    let mut next = normalized_statuses(Some(ctx.statuses.clone()), count, target);
+                    if preserve_complete && let Some(slot) = next.get_mut(target as usize) {
+                        *slot = Status::Complete;
+                    }
+                    next
                 } else {
                     normalized_statuses(statuses_prop.clone(), count, target)
                 };

@@ -3246,7 +3246,13 @@ fn rename_commit_clears_renaming_key() {
 }
 
 #[test]
-fn rename_commit_ignored_for_non_renaming_key() {
+fn rename_commit_for_outgoing_key_still_fires_effect() {
+    // During a rename retarget the outgoing input's blur fires
+    // `RenameCommit` for the previous key while `renaming_key` already
+    // points at the new node. The transition must still emit
+    // `Effect::Rename` so the outgoing edit reaches the consumer; only the
+    // `renaming_key` clear is gated on the key actually being the active
+    // target.
     let mut service = service(renamable_props());
 
     drop(service.send(Event::RenameStart(key(2))));
@@ -3256,8 +3262,35 @@ fn rename_commit_ignored_for_non_renaming_key() {
         new_name: "x".to_string(),
     });
 
-    assert!(!result.context_changed);
+    // `renaming_key` is unchanged — the new active target stays.
     assert_eq!(service.context().renaming_key, Some(key(2)));
+
+    // ...but `Effect::Rename` did fire for the committed (outgoing) key, so
+    // the consumer's `on_rename` receives the outgoing edit.
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::Rename),
+        "RenameCommit for an outgoing key still emits Effect::Rename"
+    );
+}
+
+#[test]
+fn rename_commit_no_op_when_no_rename_active() {
+    // A stray `RenameCommit` when nothing is renaming anywhere must be a
+    // pure no-op — no context change, no effect fired. Distinct from the
+    // retarget hand-off above (where a rename IS active on another key).
+    let mut service = service(renamable_props());
+
+    let result = service.send(Event::RenameCommit {
+        key: key(2),
+        new_name: "x".to_string(),
+    });
+
+    assert!(!result.context_changed);
+    assert!(result.pending_effects.is_empty());
+    assert_eq!(service.context().renaming_key, None);
 }
 
 #[test]
@@ -3756,6 +3789,179 @@ fn load_error_ignored_when_parent_already_loaded() {
         NodeLoadState::Loaded
     );
     assert_eq!(&items_after, &service.context().items);
+}
+
+#[test]
+fn children_loaded_recomputes_disabled_keys_for_loaded_disabled_child() {
+    // A lazy load can deliver children carrying `TreeItem { disabled: true }`.
+    // `ChildrenLoaded` must rebuild `selection_state.disabled_keys` from the
+    // updated collection — otherwise `SelectNode` happily admits a key whose
+    // node is now disabled (the selection machine still trusts a stale
+    // disabled set).
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: vec![
+            leaf_with(
+                2,
+                "Apple",
+                TreeItem {
+                    disabled: true,
+                    ..item("Apple")
+                },
+            ),
+            leaf(3, "Banana"),
+        ],
+    }));
+
+    // The disabled-key set now contains the newly-loaded disabled child.
+    assert!(
+        service
+            .context()
+            .selection_state
+            .disabled_keys
+            .contains(&key(2))
+    );
+
+    // SelectNode on the disabled-but-loaded child is a no-op.
+    let before = service.context().selected.get().clone();
+    drop(service.send(Event::SelectNode(key(2))));
+    assert_eq!(&before, service.context().selected.get());
+
+    // The enabled sibling can still be selected.
+    drop(service.send(Event::SelectNode(key(3))));
+    assert!(service.context().selected.get().contains(&key(3)));
+}
+
+#[test]
+fn children_loaded_seeds_default_expanded_for_loaded_subtree() {
+    // `TreeItemConfig::default_expanded: true` is honored at init via the
+    // initial `ctx.expanded` seeding. Lazy-load deliveries must honor it
+    // too — `TreeCollection::new` records the marker internally, but
+    // rendering is driven by `ctx.expanded`, so the descendant would
+    // render collapsed without an explicit merge.
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: vec![TreeItemConfig {
+            key: key(2),
+            text_value: "Apple".to_string(),
+            value: item("Apple"),
+            children: vec![leaf(20, "Apple Pie")],
+            default_expanded: true,
+        }],
+    }));
+
+    let expanded = service.context().expanded.get();
+    assert!(
+        expanded.contains(&key(2)),
+        "loaded child with default_expanded must be merged into ctx.expanded"
+    );
+    assert!(service.connect(&|_| {}).is_node_expanded(&key(2)));
+}
+
+#[test]
+fn blur_during_retarget_fires_rename_effect_for_outgoing_input() {
+    // Adapter contract: `on_rename_input_blur` fires `RenameCommit` for the
+    // outgoing input after a retarget, so the user's edit reaches
+    // `Props::on_rename` via `Effect::Rename`. The new active rename
+    // (`renaming_key = Some(other)`) is unaffected.
+    let captured: Arc<Mutex<Vec<RenameEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&captured);
+
+    let mut service = service(
+        renamable_props().on_rename(move |event: RenameEvent| sink.lock().unwrap().push(event)),
+    );
+
+    // Start renaming node 2, then retarget to node 3 — `renaming_key` is now
+    // Some(key(3)) and node 2's input is the outgoing surface.
+    drop(service.send(Event::RenameStart(key(2))));
+    drop(service.send(Event::RenameStart(key(3))));
+    assert_eq!(service.context().renaming_key, Some(key(3)));
+
+    // Adapter dispatches the outgoing input's blur — through the API to
+    // verify the gate (must fire because `renaming_key.is_some()`).
+    let sent: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+    let sent_clone = Arc::clone(&sent);
+    service
+        .connect(&move |event| sent_clone.lock().unwrap().push(event))
+        .on_rename_input_blur(&key(2), "Apricot");
+
+    let outgoing_event = sent
+        .lock()
+        .unwrap()
+        .iter()
+        .find_map(|event| match event {
+            Event::RenameCommit { key, new_name } => Some((key.clone(), new_name.clone())),
+            _ => None,
+        })
+        .expect("blur during retarget must dispatch RenameCommit for the outgoing key");
+    assert_eq!(outgoing_event, (key(2), "Apricot".to_string()));
+
+    // Replay the event through the service so the effect surface materializes.
+    let mut result = service.send(Event::RenameCommit {
+        key: key(2),
+        new_name: "Apricot".to_string(),
+    });
+
+    // Active rename target is unchanged.
+    assert_eq!(service.context().renaming_key, Some(key(3)));
+
+    // ...but Effect::Rename fired; running it delivers the outgoing edit.
+    let index = result
+        .pending_effects
+        .iter()
+        .position(|effect| effect.name == Effect::Rename)
+        .expect("retargeted RenameCommit emits Effect::Rename");
+    let effect = result.pending_effects.remove(index);
+    let noop_send: StrongSend<Event> = Arc::new(|_| {});
+    drop(effect.run(service.context(), service.props(), noop_send));
+
+    assert_eq!(
+        captured.lock().unwrap().as_slice(),
+        &[RenameEvent {
+            key: key(2),
+            new_name: "Apricot".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn toggle_node_on_error_branch_retries_load() {
+    // After a lazy load fails, the branch sits expanded with `Error` state.
+    // Adapter retry affordances re-dispatch `ToggleNode` (the default
+    // branch-control click path); the toggle must treat an `Error` branch
+    // as a retry rather than collapsing it, otherwise retrying requires a
+    // collapse + re-expand instead of one click.
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::LoadError(key(1))));
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Error
+    );
+    assert!(service.connect(&|_| {}).is_node_expanded(&key(1)));
+
+    let result = service.send(Event::ToggleNode(key(1)));
+
+    // Branch stays expanded (retry, not collapse) and re-fires LoadChildren.
+    assert!(service.connect(&|_| {}).is_node_expanded(&key(1)));
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::LoadChildren),
+        "ToggleNode on an Error branch must re-fire LoadChildren"
+    );
 }
 
 #[test]
