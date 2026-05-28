@@ -1,0 +1,108 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "03ae079f5dc5",
+  "session_id": "cf0f1e35-f01b-4a9b-832f-32a43e97d9d0",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-28T03:05:21.965728Z",
+  "branch": "audit-agnostic-navigation-components",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "spec/components/navigation/accordion.md",
+    "spec/components/navigation/link.md",
+    "spec/components/navigation/navigation-menu.md",
+    "spec/components/navigation/pagination.md",
+    "spec/components/navigation/steps.md",
+    "spec/components/navigation/tabs.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "73f0c56dac54",
+  "token_usage": {
+    "input_tokens": 90978,
+    "cache_creation_tokens": 2402515,
+    "cache_read_tokens": 83036724,
+    "output_tokens": 289370,
+    "api_call_count": 222
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Audit all navigation category agnostic components against Epic #223 spec to verify full implementation correctness, and reorganize the monolithic navigation test files into per-component modules mirroring the existing `input/` pattern.",
+    "outcome": "Completed a full 3-phase audit across 8 navigation components: split both monolithic test files into per-component modules, synced 6 stale specs to the correct shipped implementations, fixed Steps S1 behavior, implemented TreeView §5 (Lazy Loading) and §6 (Renamable Nodes) variants, added Link and NavigationMenu proptests, and refactored `LoadChildrenFn` from a dead `Rc`-based alias to a proper `Callback` prop. All 10 xci-fast CI steps passed with 2 of 5 planned commits landed.",
+    "learnings": {
+      "repo": [
+        "The `Effect` associated type has an `EffectName: Copy` constraint, which means effects cannot carry data payloads (e.g., `Effect::LoadChildren(Key)` is impossible). Transient context fields (like `pending_load`) or closure-capturing effects via `Callback` are the valid patterns.",
+        "Adapter notification callbacks must use `Callback<dyn Fn(...) + Send + Sync>` (wrapping `Arc`), not `Rc<dyn Fn(...)>`. `Rc` is not `Send + Sync` and breaks `StoredValue`/`Signal` storage in the Service layer.",
+        "The `input/` directory split is the canonical pattern for per-component test modules: shared strategies live in `mod.rs`, each component owns a `<component>.rs` sibling, root test binary repoints at `<category>/mod.rs`.",
+        "The spec snippet-compile harness (`crates/xtask/src/spec/compile_snippets.rs`) only performs syntax parsing (`syn::parse_file`), not type/borrow checking. Blocks can opt out with `rust,no_check`. Spec edits carry low CI risk.",
+        "`TreeItemConfig` is the public construction type for `TreeCollection` — `TreeItem` does not implement `CollectionItem` and there is no public `Node<T>` constructor, so runtime child insertion must go through `TreeItemConfig` and reconstruct via `TreeCollection::new`.",
+        "PropTest regression files (`proptest-regressions/state-machines.txt`) get polluted by failing test runs during test authoring; must be manually reverted before committing.",
+        "The spec was consistently *behind* the implementation across all 8 components — implementations were correct throughout; audit drift was almost entirely spec staleness, not impl bugs.",
+        "NavMenu's open-item gate is intentionally permissive before `SetItems` registration (controlled/default values open immediately); proptest invariants asserting `open_item ⊆ items` must be guarded by `items_registered`.",
+        "Link's `pressed` field can legitimately persist into `State::Focused` (e.g., after `[Press, Focus{is_keyboard:false}]`) — the invariant `pressed ⟺ State::Pressed` is wrong; correct is `State::Pressed ⟹ pressed` and `State::Idle ⟹ !pressed`."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/navigation/tree_view/mod.rs",
+          "finding": "`Effect::LoadChildren` must be a unit `Copy` variant. The key travels via `pending_load: Option<Key>` in Context (set alongside `load_state[key]=Loading`) or via closure capture in an `on_load_children: Option<Callback<dyn Fn(Key) + Send + Sync>>` prop. After the refactor, the Prop approach is the landed pattern."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/steps/mod.rs",
+          "line": 437,
+          "end_line": 451,
+          "finding": "The `NextStep` handler on the last step left status as `Current` and fired only `Effect::Complete` — spec says last step should be marked `Status::Complete`. The old test `next_step_completion_preserves_current_status` was actively asserting the wrong behavior. Fixed per user decision."
+        },
+        {
+          "path": "crates/ars-collections/src/tree_collection.rs",
+          "line": 20,
+          "finding": "`TreeItemConfig<T>` needed `#[derive(Clone, PartialEq)]` added (conditional on `T`) so it can ride in the `Clone + PartialEq` `Event` enum for the `ChildrenLoaded { children: Vec<TreeItemConfig<TreeItem>> }` payload."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/navigation/navigation_menu.rs",
+          "line": 201,
+          "finding": "A leftover `_locale_import_marker(_: Locale)` function referencing a removed import caused a compile error in the proptest binary. The `Locale` import and marker were both dead code from an earlier cleanup pass."
+        },
+        {
+          "path": "spec/components/navigation/pagination.md",
+          "finding": "Two silent-contract bugs existed in the spec: controlled `on_page_change` fired with `*ctx.page.get()` (the stale value) instead of `target`, and next/prev/first/last never routed through the callback at all. The impl was correct; both bugs were spec-only."
+        }
+      ],
+      "workflow": [
+        "When creating clean commits out of already-staged content that spans multiple logical phases, `git reset` → stage file subsets → commit is the right flow; trying to split from a fully-staged tree causes cross-phase contamination.",
+        "For test invariants in proptests, first verify the exact machine behavior under edge sequences (e.g., `[Press, Focus]`) before asserting bidirectional equivalences — one-directional implications are safer starting points.",
+        "When spec code mentions adapter-side callbacks as `pub type Fn = Rc<dyn Fn(...)>`, cross-check against the workspace's established callback convention before propagating — `Rc` is consistently the wrong choice in this codebase.",
+        "The 'best outcome' rule for spec/impl drift (sync whichever is worse to whichever is better, flag material API changes before committing) is an effective default that avoided all 'both wrong' situations in this audit.",
+        "Delegating per-component drift analysis to parallel background agents (6 agents for 6 spec files) while doing mechanical work in the foreground is an effective parallelism pattern, but all agent output must be cross-checked against actual impl symbols before trusting."
+      ]
+    },
+    "friction": [
+      "Creating clean commit slices from a fully-staged working tree required temporarily reverting C4 content (TreeView variant test additions) in C1 files and restoring them afterward — a manual and error-prone dance.",
+      "The TreeView `Effect: Copy` constraint wasn't discovered until implementation time, invalidating the initial `Effect::LoadChildren(Key)` design and requiring a full architecture pivot mid-implementation.",
+      "The spec §5.1 for TreeView was self-contradictory (§5.1 said callbacks are adapter-layer only, §5.4 step 3 said adapter calls a `load_children` prop) — required judgment to resolve.",
+      "PropTest regression file `proptest-regressions/state-machines.txt` was silently polluted by failure seeds from the invariant-authoring iteration and had to be manually caught and reverted before committing.",
+      "The `Locale` dead-code leftover in `navigation_menu.rs` wasn't caught until the TreeView subagent reported a compile error in the proptest binary — a cross-file coupling problem in a parallel workstream's file.",
+      "Iterating on proptest invariants required multiple compile/run cycles to discover that `pressed ⟺ Pressed` and `open_item ⊆ items` were both over-strong — the machine behavior is subtler than the intuitive model."
+    ],
+    "open_items": [
+      "PR not yet opened at transcript end — C1 and C2 committed, C3-C5 (impl fixes, TreeView variants, new proptests) still unstaged.",
+      "The `waiting-for-codex-review` loop needs to run after the PR is opened; Epic #223 should only be closed after merge + green CI + Codex approval.",
+      "TreeView adapter implementations (Leptos, Dioxus) for §5/§6 variants don't exist yet — the adapter specs were updated but no adapter code exists to implement `on_load_children` wiring or rename-input rendering.",
+      "MD060 table-alignment warnings in adapter spec files (`spec/leptos-components/navigation/tree-view.md`, `spec/dioxus-components/navigation/tree-view.md`) introduced by column-width changes — cosmetic and ungated but left unresolved.",
+      "TreeView `on_node_keydown_at`, `clamp_focus` ancestor-walk, and DnD guard branches remain uncovered in llvm-cov (pre-existing, not new code).",
+      "The `snapshot-reviewed` label needs to be applied to the PR for the new rename-input snapshot fixture."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-28T03:04:13.106925Z",
+    "agent_lines": 1443,
+    "agent_removed": 622,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1443,
+    "total_lines_changed": 2065,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
