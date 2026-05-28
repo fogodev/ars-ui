@@ -268,7 +268,10 @@ impl Api {
     pub fn link_attrs(&self, href: &SafeUrl) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_value), (part_attr, part_value)] = Part::Link {
-            href: SafeUrl::from_static("#"),
+            // Inert placeholder: `data_attrs()` only yields the scope/part
+            // tokens (the real href is set below). Matches the `#[part]`
+            // default and the spec anatomy so the literal stays consistent.
+            href: SafeUrl::from_static("/"),
         }
         .data_attrs();
 

@@ -436,18 +436,25 @@ impl ars_core::Machine for Machine {
 
                 if next >= ctx.count.get() {
                     return Some(
-                        TransitionPlan::context_only(|_ctx: &mut Context| {}).with_effect(
-                            PendingEffect::new(
-                                Effect::Complete,
-                                |_ctx: &Context, props: &Props, _send| {
-                                    if let Some(callback) = &props.on_complete {
-                                        (callback)();
-                                    }
+                        TransitionPlan::context_only(move |ctx: &mut Context| {
+                            // Advancing past the last step marks it `Complete`
+                            // (spec §1.5): the final step is done, leaving no
+                            // `Current` status until the consumer re-renders
+                            // completion UI driven by the `on_complete` callback.
+                            if let Some(status) = ctx.statuses.get_mut(current as usize) {
+                                *status = Status::Complete;
+                            }
+                        })
+                        .with_effect(PendingEffect::new(
+                            Effect::Complete,
+                            |_ctx: &Context, props: &Props, _send| {
+                                if let Some(callback) = &props.on_complete {
+                                    (callback)();
+                                }
 
-                                    ars_core::no_cleanup()
-                                },
-                            ),
-                        ),
+                                ars_core::no_cleanup()
+                            },
+                        )),
                     );
                 }
 
@@ -1202,13 +1209,15 @@ mod tests {
     }
 
     #[test]
-    fn next_step_completion_preserves_current_status() {
+    fn next_step_from_last_step_marks_complete_and_clears_current() {
         let mut service = service(props().default_step(3));
 
         drop(service.send(Event::NextStep));
 
+        // Advancing past the last step marks it `Complete` (spec §1.5) and
+        // leaves no `Current` status; completion UI is driven by `on_complete`.
         assert_eq!(*service.context().step.get(), 3);
-        assert_eq!(service.context().statuses[3], Status::Current);
+        assert_eq!(service.context().statuses[3], Status::Complete);
         assert_eq!(
             service
                 .context()
@@ -1216,7 +1225,7 @@ mod tests {
                 .iter()
                 .filter(|status| **status == Status::Current)
                 .count(),
-            1
+            0
         );
     }
 
