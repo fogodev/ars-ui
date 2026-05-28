@@ -48,6 +48,9 @@ pub struct Context {
     pub count: NonZero<u32>,
     /// Per-step status (indexed 0..count).
     pub statuses: Vec<Status>,
+    /// Last `statuses` prop seen by `SyncProps`, used to decide whether a prop sync should
+    /// preserve runtime status progress (prop unchanged) or reset to the new prop (prop changed).
+    pub statuses_prop: Option<Vec<Status>>,
     /// If true, users can only move forward one step at a time; skipping is disallowed.
     pub linear: bool,
     /// Visual stacking axis.
@@ -61,7 +64,7 @@ pub struct Context {
 }
 
 /// Status of a step.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Status {
     /// Step has not been visited.
     Incomplete,
@@ -201,6 +204,7 @@ impl ars_core::Machine for Machine {
             step,
             count,
             statuses,
+            statuses_prop: props.statuses.clone(),
             linear: props.linear,
             orientation: props.orientation.clone(),
             locale,
@@ -218,36 +222,8 @@ impl ars_core::Machine for Machine {
         match event {
             Event::GoToStep(target) => {
                 let target = *target;
-                let current = *ctx.step.get();
-                let count   = ctx.count.get();
-                // In linear mode, only allow advancing one step at a time or going backward,
-                // UNLESS the intermediate steps are all skippable.
-                if ctx.linear && target > current + 1 {
-                    if let Some(ref is_skippable) = props.is_step_skippable {
-                        // Check all intermediate steps are skippable.
-                        let all_skippable = (current + 1..target).all(|s| is_skippable(s));
-                        if !all_skippable { return None; }
-                    } else {
-                        return None;
-                    }
-                }
-                if target >= count { return None; }
-                if target == current { return None; }
-                Some(TransitionPlan::context_only(move |ctx| {
-                    // Mark the previous current step as Complete (if going forward).
-                    if target > current {
-                        if let Some(s) = ctx.statuses.get_mut(current as usize) {
-                            *s = Status::Complete;
-                        }
-                    }
-                    normalize_current_status(&mut ctx.statuses, target);
-                    ctx.step.set(target);
-                }).with_effect(PendingEffect::new(Effect::StepChange, |ctx, props, _send| {
-                    if let Some(ref cb) = props.on_step_change {
-                        cb(*ctx.step.get());
-                    }
-                    no_cleanup()
-                })))
+                if target >= ctx.count.get() { return None; }
+                step_change_plan(ctx, props, target)
             }
             Event::NextStep => {
                 let current = *ctx.step.get();
@@ -274,56 +250,43 @@ impl ars_core::Machine for Machine {
                     })));
                 }
 
-                Some(TransitionPlan::context_only(move |ctx| {
-                    if let Some(s) = ctx.statuses.get_mut(current as usize) {
-                        *s = Status::Complete;
-                    }
-                    normalize_current_status(&mut ctx.statuses, next);
-                    ctx.step.set(next);
-                }).with_effect(PendingEffect::new(Effect::StepChange, |ctx, props, _send| {
-                    if let Some(ref cb) = props.on_step_change {
-                        cb(*ctx.step.get());
-                    }
-                    no_cleanup()
-                })))
+                step_change_plan(ctx, props, next)
             }
             Event::PrevStep => {
                 let current = *ctx.step.get();
                 if current == 0 { return None; }
-                let prev = current - 1;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    if let Some(s) = ctx.statuses.get_mut(current as usize) {
-                        // Going backward leaves the step as Incomplete (not wiping Complete).
-                        *s = Status::Incomplete;
-                    }
-                    normalize_current_status(&mut ctx.statuses, prev);
-                    ctx.step.set(prev);
-                }).with_effect(PendingEffect::new(Effect::StepChange, |ctx, props, _send| {
-                    if let Some(ref cb) = props.on_step_change {
-                        cb(*ctx.step.get());
-                    }
-                    no_cleanup()
-                })))
+                step_change_plan(ctx, props, current - 1)
             }
             Event::CompleteStep(idx) => {
-                let idx = *idx as usize;
+                let idx = *idx;
+                // Out-of-range completion is a no-op (no transition).
+                if idx >= ctx.count.get() { return None; }
                 Some(TransitionPlan::context_only(move |ctx| {
-                    if let Some(s) = ctx.statuses.get_mut(idx) {
+                    if let Some(s) = ctx.statuses.get_mut(idx as usize) {
                         *s = Status::Complete;
                     }
                 }))
             }
             Event::SetStatus { step, status } => {
                 let step_index = *step;
-                let idx    = step_index as usize;
                 let status = status.clone();
+                // Out-of-range steps are a no-op. A controlled `step` owns the active
+                // index, so `SetStatus { Current }` (which would move the active step) is
+                // rejected — only the prop may move a controlled current step.
+                if step_index >= ctx.count.get()
+                    || (status == Status::Current && ctx.step.is_controlled())
+                {
+                    return None;
+                }
                 Some(TransitionPlan::context_only(move |ctx| {
-                    if let Some(s) = ctx.statuses.get_mut(idx) {
-                        *s = status;
-                    }
                     if status == Status::Current {
+                        if let Some(s) = ctx.statuses.get_mut(step_index as usize) {
+                            *s = status;
+                        }
                         ctx.step.set(step_index);
                         normalize_current_status(&mut ctx.statuses, step_index);
+                    } else if let Some(s) = ctx.statuses.get_mut(step_index as usize) {
+                        *s = status;
                     }
                 }))
             }
@@ -331,7 +294,25 @@ impl ars_core::Machine for Machine {
                 let count = props.count;
                 let controlled = props.step.map(|step| step.min(count.get().saturating_sub(1)));
                 let target = controlled.unwrap_or_else(|| (*ctx.step.get()).min(count.get().saturating_sub(1)));
-                let statuses = normalized_statuses(props.statuses.clone(), count, target);
+                // Preserve runtime status progress when the `statuses` prop is unchanged across
+                // an unrelated prop change; reset to the new prop only when it actually changed.
+                // Additionally preserve a `Complete` status on the active step — the
+                // post-last-step-completion shape (`NextStep` past the final step marked
+                // `statuses[current] = Complete`) must survive unrelated `SyncProps` echoes such
+                // as `orientation`/`linear` toggles, otherwise re-normalizing the active index
+                // back to `Current` would silently erase the all-steps-done state.
+                let statuses_prop = props.statuses.clone();
+                let statuses = if statuses_prop == ctx.statuses_prop {
+                    let preserve_complete = ctx.statuses.get(target as usize).copied()
+                        == Some(Status::Complete);
+                    let mut next = normalized_statuses(Some(ctx.statuses.clone()), count, target);
+                    if preserve_complete && let Some(slot) = next.get_mut(target as usize) {
+                        *slot = Status::Complete;
+                    }
+                    next
+                } else {
+                    normalized_statuses(statuses_prop.clone(), count, target)
+                };
                 let linear = props.linear;
                 let orientation = props.orientation;
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -339,6 +320,7 @@ impl ars_core::Machine for Machine {
                     ctx.step.sync_controlled(controlled);
                     ctx.step.set(target);
                     ctx.statuses = statuses;
+                    ctx.statuses_prop = statuses_prop;
                     ctx.linear = linear;
                     ctx.orientation = orientation;
                 }))
@@ -354,6 +336,71 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Event> {
+        // Re-sync context only when a prop that feeds context actually changed.
+        if old.step != new.step
+            || old.default_step != new.default_step
+            || old.count != new.count
+            || old.statuses != new.statuses
+            || old.linear != new.linear
+            || old.orientation != new.orientation
+        {
+            vec![Event::SyncProps]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// Builds the step-navigation transition shared by `GoToStep`, `NextStep`, and `PrevStep`.
+///
+/// Applies linear-mode and validation guards, then:
+///
+/// - **Uncontrolled `step`**: mutates context (marks the departed step `Complete` when moving
+///   forward, re-normalizes the `Current` status, and sets `step` to `target`) and fires
+///   `Effect::StepChange`.
+/// - **Controlled `step`**: performs **no** context mutation — the owner drives the active step
+///   via the `step` prop — and fires only `Effect::StepChange` with the requested `target`, so
+///   the consumer's `on_step_change` still receives the navigation intent.
+fn step_change_plan(ctx: &Context, props: &Props, target: u32) -> Option<TransitionPlan<Machine>> {
+    let current = *ctx.step.get();
+    if target == current || target >= ctx.count.get() { return None; }
+
+    // Validate the current step before any forward navigation.
+    if target > current {
+        if let Some(ref is_valid) = props.is_step_valid {
+            if !is_valid(current) { return None; }
+        }
+    }
+
+    // In linear mode, forward jumps of more than one step require every intermediate
+    // step to be skippable.
+    if ctx.linear && target > current + 1 {
+        let skippable = match props.is_step_skippable {
+            Some(ref is_skippable) => (current + 1..target).all(|s| is_skippable(s)),
+            None => false,
+        };
+        if !skippable { return None; }
+    }
+
+    let controlled = ctx.step.is_controlled();
+    Some(TransitionPlan::context_only(move |ctx| {
+        // Controlled trees do not mutate context here — the owner echoes the change via the prop.
+        if controlled { return; }
+        if target > current {
+            if let Some(s) = ctx.statuses.get_mut(current as usize) {
+                *s = Status::Complete;
+            }
+        }
+        normalize_current_status(&mut ctx.statuses, target);
+        ctx.step.set(target);
+    }).with_effect(PendingEffect::new(Effect::StepChange, move |_ctx, props, _send| {
+        if let Some(ref cb) = props.on_step_change {
+            cb(target);
+        }
+        no_cleanup()
+    })))
 }
 ```
 
@@ -544,23 +591,25 @@ impl<'a> Api<'a> {
     }
 
     /// Attrs for the "next step" trigger button.
+    ///
+    /// `NextTrigger` is **never** disabled — at the last step it still sends `NextStep`,
+    /// which the machine routes to completion (`Effect::Complete` / `on_complete`).
+    /// Disabling it here would make completion-via-the-Next-button impossible.
     pub fn next_trigger_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
-        let disabled = self.is_last_step();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::NextTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Type, "button");
-        if disabled {
-            attrs.set_bool(HtmlAttr::Disabled, true);
-            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
-        }
         attrs
     }
 
     /// Handle click event for the "next step" trigger button.
+    ///
+    /// Always sends `NextStep`; at the last step the machine fires `Effect::Complete`
+    /// instead of advancing.
     pub fn on_next_trigger_click(&self) {
-        if !self.is_last_step() { (self.send)(Event::NextStep); }
+        (self.send)(Event::NextStep);
     }
 
     /// Handle direct step selection.
@@ -615,8 +664,8 @@ Steps
 | `Description` | `<span>`          | `data-ars-scope="steps"`, `data-ars-part="description"`, `data-ars-index`                                                                                                            |
 | `Separator`   | `<div>`           | `data-ars-scope="steps"`, `data-ars-part="separator"`, `role="separator"`, `aria-hidden="true"`                                                                                      |
 | `Content`     | `<div>`           | `data-ars-scope="steps"`, `data-ars-part="content"`, `data-ars-index`, `hidden` when not current                                                                                     |
-| `PrevTrigger` | `<button>`        | `data-ars-scope="steps"`, `data-ars-part="prev-trigger"`, `disabled`, `data-ars-disabled`                                                                                            |
-| `NextTrigger` | `<button>`        | `data-ars-scope="steps"`, `data-ars-part="next-trigger"`, `disabled`, `data-ars-disabled`                                                                                            |
+| `PrevTrigger` | `<button>`        | `data-ars-scope="steps"`, `data-ars-part="prev-trigger"`, `disabled` + `data-ars-disabled` at the first step                                                                         |
+| `NextTrigger` | `<button>`        | `data-ars-scope="steps"`, `data-ars-part="next-trigger"` (never disabled — at the last step it sends `NextStep`, which the machine routes to completion)                             |
 
 ## 3. Accessibility
 
@@ -650,19 +699,23 @@ When interactive (tabs mode):
 ## 4. Internationalization
 
 ```rust
-#[derive(Clone, Debug)]
+/// Per-item step label template: `(current, total, locale) -> String`.
+pub type StepLabelFn = dyn Fn(usize, usize, &Locale) -> String + Send + Sync;
+
+/// `PartialEq` is required because `Context` derives `PartialEq` and embeds `Messages`.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Root label (default: "Steps")
     pub root_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Step label template (default: "Step {current} of {total}")
-    pub step_label: MessageFn<dyn Fn(usize, usize, &Locale) -> String + Send + Sync>,
+    pub step_label: MessageFn<StepLabelFn>,
 }
 
 impl Default for Messages {
     fn default() -> Self {
         Self {
             root_label: MessageFn::static_str("Steps"),
-            step_label: MessageFn::new(|current, total, _locale| format!("Step {} of {}", current, total)),
+            step_label: MessageFn::new(Arc::new(|current, total, _locale| format!("Step {} of {}", current, total)) as Arc<StepLabelFn>),
         }
     }
 }

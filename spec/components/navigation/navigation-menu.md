@@ -87,6 +87,25 @@ pub enum Event {
         /// The ID of the element to focus.
         target_id: String,
     },
+    /// Replace the registered trigger keys in DOM order. Adapters send this
+    /// after triggers mount or reorder so the machine can drive roving focus,
+    /// motion direction, and the open-item registration gate. Until the first
+    /// `SetItems`, the registry is unsynced and open is permitted optimistically.
+    SetItems(Vec<Key>),
+    /// Synchronize props-backed context fields (`orientation`, `delay_ms`,
+    /// `skip_delay_ms`, and the controlled `value`) after a props change while
+    /// the instance is uncontrolled or its scalar config changed.
+    SyncProps,
+    /// Synchronize the externally controlled open item. Emitted by
+    /// `on_props_changed` when `Props::value` changes on a controlled instance.
+    SyncControlledValue(Option<Key>),
+    /// Synchronize provider-backed locale and messages.
+    SyncMessages {
+        /// Active provider locale.
+        locale: Locale,
+        /// Localized `NavigationMenu` messages.
+        messages: Messages,
+    },
 }
 ```
 
@@ -122,6 +141,10 @@ pub struct Context {
     pub pointer_in_content: bool,
     /// Registered trigger keys in DOM order.
     pub items: Vec<Key>,
+    /// Whether adapters have synced the trigger registry at least once.
+    /// Until this is `true`, the open-item registration gate is permissive so a
+    /// controlled or default value can render before triggers register.
+    pub items_registered: bool,
     /// The key of the previously open item (for motion direction calculation).
     pub previous_item: Option<Key>,
     /// ID of the list element (for runtime direction resolution).
@@ -132,6 +155,13 @@ pub struct Context {
     pub locale: Locale,
     /// Resolved messages for accessibility labels.
     pub messages: Messages,
+    /// Pending hover-open key used by the adapter open-delay timer effect.
+    /// Set when `PointerEnter` starts an open delay and cleared on open, close,
+    /// registry sync, or controlled-value sync.
+    pub pending_open_item: Option<Key>,
+    /// Last focus target id requested through `Event::RequestFocus` or a
+    /// roving-focus transition, consumed by the `FocusTrigger` effect.
+    pub requested_focus_id: Option<String>,
 }
 ```
 
@@ -198,12 +228,39 @@ fn in_skip_delay_window(ctx: &Context, now_ms: u64) -> bool {
 }
 ```
 
-### 1.6 Full Machine Implementation
+The machine is **DOM- and timer-agnostic**: it never touches the platform or
+schedules timers directly. Instead it emits a small typed `Effect` enum and the
+adapter owns all browser work — the open/close delay timers (it sends
+`OpenTimerFired` / `CloseTimerFired` back when they fire), moving DOM focus to
+`Context::requested_focus_id`, and invoking `Props::on_value_change`. A
+`with_effect(PendingEffect::named(Effect::*))` queues an effect; a
+`cancel_effect(Effect::*)` tells the adapter to cancel an in-flight effect of
+that kind (used to cancel a stale open/close timer). This mirrors the
+typed-`Effect` + adapter-timer convention shared with Popover, Dialog, and
+Tooltip.
 
 ```rust
-use ars_core::{TransitionPlan, PendingEffect, Bindable, AttrMap};
+/// Typed effect intents emitted by the NavigationMenu machine. Adapters own the
+/// corresponding DOM/timer work; the machine only declares intent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter starts or refreshes the open-delay timer. When it fires, the
+    /// adapter sends `Event::OpenTimerFired(Context::pending_open_item)`.
+    OpenDelay,
+    /// Adapter starts or refreshes the close-delay timer. When it fires, the
+    /// adapter sends `Event::CloseTimerFired(now_ms)`.
+    CloseDelay,
+    /// Adapter moves DOM focus to `Context::requested_focus_id`.
+    FocusTrigger,
+    /// Adapter invokes `Props::on_value_change` with the new open item.
+    ValueChange,
+}
+```
+
+```rust,no_check
+use ars_core::{TransitionPlan, PendingEffect, Bindable, AttrMap, no_cleanup};
 use ars_collections::Key;
-use ars_i18n::{Orientation, Direction};
+use ars_i18n::{Orientation, Direction, Locale};
 
 // ── Machine ──────────────────────────────────────────────────────────────────
 
@@ -215,24 +272,27 @@ impl ars_core::Machine for Machine {
     type Event   = Event;
     type Context = Context;
     type Props   = Props;
-    type Api<'a> = Api<'a>;
     type Messages = Messages;
+    type Effect = Effect;
+    type Api<'a> = Api<'a>;
 
-    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let (initial_value, bindable) = match &props.value {
-            Some(v) => (v.clone(), Bindable::controlled(v.clone())),
-            None    => (props.default_value.clone(), Bindable::uncontrolled(props.default_value.clone())),
+    fn init(props: &Props, env: &Env, messages: &Messages) -> (State, Context) {
+        let initial_value = match &props.value {
+            Some(v) => v.clone(),
+            None    => props.default_value.clone(),
+        };
+        let value = match &props.value {
+            Some(v) => Bindable::controlled(v.clone()),
+            None    => Bindable::uncontrolled(props.default_value.clone()),
         };
         let initial_state = match &initial_value {
             Some(key) => State::Open { item: key.clone() },
             None      => State::Idle,
         };
-        let locale = env.locale.clone();
-        let messages = messages.clone();
         let ids = ComponentIds::from_id(&props.id);
         let list_id = ids.part("list");
         (initial_state, Context {
-            value: bindable,
+            value,
             focused_trigger: None,
             focus_visible: false,
             orientation: props.orientation,
@@ -242,323 +302,267 @@ impl ars_core::Machine for Machine {
             last_close_time: None,
             pointer_in_content: false,
             items: Vec::new(),
+            items_registered: false,
             previous_item: None,
             list_id,
             ids,
-            locale,
-            messages,
+            locale: env.locale.clone(),
+            messages: messages.clone(),
+            pending_open_item: None,
+            requested_focus_id: None,
         })
     }
 
     fn transition(
-        state: &Self::State,
-        event: &Self::Event,
-        ctx: &Self::Context,
-        props: &Self::Props,
+        state: &State,
+        event: &Event,
+        ctx: &Context,
+        props: &Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
 
             // ── Open (keyboard / programmatic) ───────────────────────────────
-            (_, Event::Open(key)) => {
-                // Guard: already open on this item.
-                if matches!(state, State::Open { item } if item == key) {
-                    return None;
-                }
-                let key = key.clone();
-                let prev = match state {
-                    State::Open { item } => Some(item.clone()),
-                    _ => None,
-                };
-                Some(TransitionPlan::to(State::Open { item: key.clone() })
-                    .apply(move |ctx| {
-                        ctx.previous_item = prev;
-                        ctx.value.set(Some(key));
-                    }))
-            }
+            // Gated on the registration check: an unregistered (or stale
+            // controlled) key cannot open a phantom panel. `open_item_plan`
+            // returns `None` when the key is unknown or already open.
+            (_, Event::Open(item)) => open_item_plan(state, ctx, item.clone()),
 
-            // ── Close ────────────────────────────────────────────────────────
-            (State::Open { .. }, Event::Close(now_ms)) => {
-                let now = *now_ms;
-                Some(TransitionPlan::to(State::Idle)
-                    .apply(move |ctx| {
-                        ctx.previous_item = ctx.value.get().clone();
-                        ctx.value.set(None);
-                        ctx.pointer_in_content = false;
-                        ctx.last_close_time = Some(now);
-                    }))
+            // ── Close / SelectLink ───────────────────────────────────────────
+            // `close_plan` cancels the open/close timers, records the close
+            // timestamp, and emits `Effect::ValueChange`.
+            (_, Event::Close(now_ms) | Event::SelectLink(now_ms))
+                if effective_open_item(state, ctx).is_some() =>
+            {
+                Some(close_plan(*now_ms))
             }
 
             // ── PointerEnter ─────────────────────────────────────────────────
-            // Hover a trigger: if within skip-delay window, open immediately;
-            // otherwise start the open delay timer.
-            (_, Event::PointerEnter(key, now_ms)) => {
-                // Guard: already open on this item.
-                if matches!(state, State::Open { item } if item == key) {
-                    return None;
+            // Hover a trigger. Re-entering the open trigger cancels a pending
+            // close. When another item is open or the skip-delay window is
+            // active, open immediately; otherwise stage `pending_open_item` and
+            // start the open-delay timer.
+            (_, Event::PointerEnter(item, now_ms)) => {
+                let rendered_open = effective_open_item(state, ctx);
+
+                if rendered_open == Some(item) {
+                    return Some(
+                        TransitionPlan::context_only(|ctx: &mut Context| {
+                            ctx.pending_open_item = None;
+                            ctx.pointer_in_content = false;
+                        })
+                        .cancel_effect(Effect::CloseDelay),
+                    );
                 }
-                let key = key.clone();
-                let now = *now_ms;
-                let prev = match state {
-                    State::Open { item } => Some(item.clone()),
-                    _ => None,
-                };
-                // When another item is already open, skip the delay (moving between triggers).
-                let already_open = matches!(state, State::Open { .. });
-                if already_open {
-                    Some(TransitionPlan::to(State::Open { item: key.clone() })
-                        .apply(move |ctx| {
-                            ctx.previous_item = prev;
-                            ctx.value.set(Some(key));
-                            ctx.pointer_in_content = false;
-                        }))
-                } else if in_skip_delay_window(ctx, now) {
-                    // Within skip-delay window: open immediately without timer.
-                    Some(TransitionPlan::to(State::Open { item: key.clone() })
-                        .apply(move |ctx| {
-                            ctx.previous_item = prev;
-                            ctx.value.set(Some(key));
-                            ctx.pointer_in_content = false;
-                        }))
+
+                if rendered_open.is_some() || in_skip_delay_window(ctx, *now_ms) {
+                    open_item_plan(state, ctx, item.clone())
+                        .map(|plan| plan.cancel_effect(Effect::CloseDelay))
                 } else {
-                    // Start open delay timer.
-                    let delay = ctx.delay_ms;
-                    Some(TransitionPlan::context_only(|_| {})
-                        .with_effect(PendingEffect::new("open-delay", move |_ctx, _props, send| {
-                            let platform = use_platform_effects();
-                            let key_clone = key.clone();
-                            let handle = platform.set_timeout(delay, Box::new(move || {
-                                send(Event::OpenTimerFired(key_clone));
-                            }));
-                            let pc = platform.clone();
-                            Box::new(move || pc.clear_timeout(handle))
-                        })))
+                    let item = item.clone();
+                    Some(
+                        TransitionPlan::context_only(move |ctx: &mut Context| {
+                            ctx.pending_open_item = Some(item);
+                        })
+                        .with_effect(PendingEffect::named(Effect::OpenDelay)),
+                    )
                 }
             }
 
-            // ── PointerLeave ─────────────────────────────────────────────────
-            // Start close delay when pointer leaves trigger (but not if pointer
-            // moves into content).
-            (State::Open { .. }, Event::PointerLeave) => {
-                Some(TransitionPlan::context_only(|_| {})
-                    .with_effect(PendingEffect::new("close-delay", |ctx, _props, send| {
-                        let platform = use_platform_effects();
-                        let delay = ctx.delay_ms;
-                        let handle = platform.set_timeout(delay, Box::new(move || {
-                            let platform_inner = use_platform_effects();
-                            send(Event::CloseTimerFired(platform_inner.now_ms()));
-                        }));
-                        let pc = platform.clone();
-                        Box::new(move || pc.clear_timeout(handle))
-                    })))
+            // ── PointerLeave / ContentPointerLeave ───────────────────────────
+            // While open, start the close-delay timer.
+            (_, Event::PointerLeave | Event::ContentPointerLeave)
+                if effective_open_item(state, ctx).is_some() =>
+            {
+                Some(
+                    TransitionPlan::context_only(|ctx: &mut Context| {
+                        ctx.pointer_in_content = false;
+                    })
+                    .with_effect(PendingEffect::named(Effect::CloseDelay)),
+                )
             }
 
-            // When idle and pointer leaves (e.g., from a trigger that hadn't opened yet),
-            // cancel any pending open effect by returning a no-op transition.
-            (State::Idle, Event::PointerLeave) => {
-                Some(TransitionPlan::context_only(|_| {}))
-            }
+            // When idle and pointer leaves a trigger that had not opened yet,
+            // clear the staged key and cancel the pending open-delay timer.
+            (State::Idle, Event::PointerLeave) => Some(
+                TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.pending_open_item = None;
+                })
+                .cancel_effect(Effect::OpenDelay),
+            ),
 
             // ── ContentPointerEnter ──────────────────────────────────────────
             // Cancel any pending close when the pointer moves into content.
-            (State::Open { .. }, Event::ContentPointerEnter) => {
-                Some(TransitionPlan::context_only(|ctx| {
+            (_, Event::ContentPointerEnter) if effective_open_item(state, ctx).is_some() => Some(
+                TransitionPlan::context_only(|ctx: &mut Context| {
                     ctx.pointer_in_content = true;
-                }))
-            }
-
-            // ── ContentPointerLeave ──────────────────────────────────────────
-            // Start close delay when pointer leaves the content area.
-            (State::Open { .. }, Event::ContentPointerLeave) => {
-                Some(TransitionPlan::context_only(|ctx| {
-                        ctx.pointer_in_content = false;
-                    })
-                    .with_effect(PendingEffect::new("close-delay", |ctx, _props, send| {
-                        let platform = use_platform_effects();
-                        let delay = ctx.delay_ms;
-                        let handle = platform.set_timeout(delay, Box::new(move || {
-                            let platform_inner = use_platform_effects();
-                            send(Event::CloseTimerFired(platform_inner.now_ms()));
-                        }));
-                        let pc = platform.clone();
-                        Box::new(move || pc.clear_timeout(handle))
-                    })))
-            }
+                })
+                .cancel_effect(Effect::CloseDelay),
+            ),
 
             // ── OpenTimerFired ───────────────────────────────────────────────
-            (State::Idle, Event::OpenTimerFired(key)) => {
-                let key = key.clone();
-                Some(TransitionPlan::to(State::Open { item: key.clone() })
-                    .apply(move |ctx| {
-                        ctx.previous_item = None;
-                        ctx.value.set(Some(key));
-                    }))
+            // Only honour the timer if it still matches the staged key.
+            (State::Idle, Event::OpenTimerFired(item)) => {
+                if ctx.pending_open_item.as_ref() != Some(item) {
+                    return None;
+                }
+                Some(
+                    open_to_plan(None, item.clone())
+                        .apply(|ctx: &mut Context| {
+                            ctx.pending_open_item = None;
+                        })
+                        .cancel_effect(Effect::OpenDelay),
+                )
             }
 
             // ── CloseTimerFired ──────────────────────────────────────────────
-            // Only close if pointer is not currently inside the content.
-            (State::Open { .. }, Event::CloseTimerFired(now_ms)) => {
+            // Only close if the pointer is not currently inside the content.
+            (_, Event::CloseTimerFired(now_ms)) if effective_open_item(state, ctx).is_some() => {
                 if ctx.pointer_in_content {
                     return None;
                 }
-                let now = *now_ms;
-                Some(TransitionPlan::to(State::Idle)
-                    .apply(move |ctx| {
-                        ctx.previous_item = ctx.value.get().clone();
-                        ctx.value.set(None);
-                        ctx.pointer_in_content = false;
-                        ctx.last_close_time = Some(now);
-                    }))
+                Some(close_plan(*now_ms).cancel_effect(Effect::CloseDelay))
             }
 
             // ── FocusTrigger ─────────────────────────────────────────────────
             (_, Event::FocusTrigger { item, is_keyboard }) => {
                 let item = item.clone();
-                let is_kb = *is_keyboard;
-                Some(TransitionPlan::context_only(move |ctx| {
+                let is_keyboard = *is_keyboard;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.focused_trigger = Some(item);
-                    ctx.focus_visible = is_kb;
+                    ctx.focus_visible = is_keyboard;
                 }))
             }
 
-            // ── FocusNext ────────────────────────────────────────────────────
-            (_, Event::FocusNext) => {
-                let items = ctx.items.clone();
-                let total = items.len();
-                if total == 0 { return None; }
-                let loop_focus = props.loop_focus;
-                let idx = ctx.focused_trigger.as_ref()
-                    .and_then(|t| items.iter().position(|i| i == t))
-                    .unwrap_or(0);
-                let next_idx = if loop_focus {
-                    (idx + 1) % total
-                } else {
-                    (idx + 1).min(total.saturating_sub(1))
-                };
-                if next_idx == idx && !loop_focus { return None; }
-                let next = items[next_idx].clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.focused_trigger = Some(next.clone());
-                        ctx.focus_visible = true;
-                    })
-                    .with_effect(PendingEffect::new("focus-trigger", move |_ctx, _props, send| {
-                        let next_id = items[next_idx].to_string();
-                        send(Event::RequestFocus { target_id: next_id });
-                        no_cleanup()
-                    })))
-            }
-
-            // ── FocusPrev ────────────────────────────────────────────────────
-            (_, Event::FocusPrev) => {
-                let items = ctx.items.clone();
-                let total = items.len();
-                if total == 0 { return None; }
-                let loop_focus = props.loop_focus;
-                let idx = ctx.focused_trigger.as_ref()
-                    .and_then(|t| items.iter().position(|i| i == t))
-                    .unwrap_or(0);
-                let prev_idx = if loop_focus {
-                    if idx == 0 { total - 1 } else { idx - 1 }
-                } else {
-                    idx.saturating_sub(1)
-                };
-                if prev_idx == idx && !loop_focus { return None; }
-                let prev = items[prev_idx].clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.focused_trigger = Some(prev.clone());
-                        ctx.focus_visible = true;
-                    })
-                    .with_effect(PendingEffect::new("focus-trigger", move |_ctx, _props, send| {
-                        let prev_id = items[prev_idx].to_string();
-                        send(Event::RequestFocus { target_id: prev_id });
-                        no_cleanup()
-                    })))
-            }
-
-            // ── FocusFirst ───────────────────────────────────────────────────
-            (_, Event::FocusFirst) => {
-                let items = ctx.items.clone();
-                let first = items.first().cloned();
-                if let Some(first) = first {
-                    let first_clone = first.clone();
-                    Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.focused_trigger = Some(first_clone.clone());
-                            ctx.focus_visible = true;
-                        })
-                        .with_effect(PendingEffect::new("focus-trigger", move |_ctx, _props, send| {
-                            send(Event::RequestFocus { target_id: first.to_string() });
-                            no_cleanup()
-                        })))
-                } else {
-                    None
-                }
-            }
-
-            // ── FocusLast ────────────────────────────────────────────────────
+            // ── Roving focus ─────────────────────────────────────────────────
+            // Each plan records the DOM-safe target id in `requested_focus_id`
+            // (via `trigger_dom_id`) and queues `Effect::FocusTrigger` so the
+            // adapter moves DOM focus.
+            (_, Event::FocusNext) => focus_by_offset_plan(ctx, props, 1),
+            (_, Event::FocusPrev) => focus_by_offset_plan(ctx, props, -1),
+            (_, Event::FocusFirst) => focus_absolute_plan(ctx, 0),
             (_, Event::FocusLast) => {
-                let items = ctx.items.clone();
-                let last = items.last().cloned();
-                if let Some(last) = last {
-                    let last_clone = last.clone();
-                    Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.focused_trigger = Some(last_clone.clone());
-                            ctx.focus_visible = true;
-                        })
-                        .with_effect(PendingEffect::new("focus-trigger", move |_ctx, _props, send| {
-                            send(Event::RequestFocus { target_id: last.to_string() });
-                            no_cleanup()
-                        })))
-                } else {
+                if ctx.items.is_empty() {
                     None
+                } else {
+                    focus_absolute_plan(ctx, ctx.items.len() - 1)
                 }
-            }
-
-            // ── SelectLink ───────────────────────────────────────────────────
-            // A link inside the content panel was activated. Close the menu.
-            (State::Open { .. }, Event::SelectLink(now_ms)) => {
-                let now = *now_ms;
-                Some(TransitionPlan::to(State::Idle)
-                    .apply(move |ctx| {
-                        ctx.previous_item = ctx.value.get().clone();
-                        ctx.value.set(None);
-                        ctx.pointer_in_content = false;
-                        ctx.last_close_time = Some(now);
-                    }))
             }
 
             // ── EscapeKey ────────────────────────────────────────────────────
-            // Close the submenu and return focus to its trigger.
-            (State::Open { item }, Event::EscapeKey(now_ms)) => {
-                let trigger_key = item.clone();
-                let now = *now_ms;
-                Some(TransitionPlan::to(State::Idle)
-                    .apply(move |ctx| {
-                        ctx.previous_item = ctx.value.get().clone();
-                        ctx.value.set(None);
-                        ctx.pointer_in_content = false;
-                        ctx.last_close_time = Some(now);
-                    })
-                    .with_effect(PendingEffect::new("focus-trigger-on-escape", move |_ctx, _props, send| {
-                        send(Event::RequestFocus { target_id: trigger_key.to_string() });
-                        no_cleanup()
-                    })))
-            }
-
-            // ── RequestFocus ─────────────────────────────────────────────────
-            (_, Event::RequestFocus { target_id }) => {
-                let target_id = target_id.clone();
-                Some(TransitionPlan::context_only(|_| {})
-                    .with_effect(PendingEffect::new("focus-element", move |_ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        platform.focus_element_by_id(&target_id);
-                        no_cleanup()
-                    })))
+            // Close the open panel and return focus to its trigger.
+            (_, Event::EscapeKey(now_ms)) => {
+                let item = effective_open_item(state, ctx)?.clone();
+                Some(
+                    close_plan(*now_ms)
+                        .apply(move |ctx: &mut Context| {
+                            ctx.focused_trigger = Some(item);
+                            ctx.focus_visible = true;
+                        })
+                        .with_effect(PendingEffect::named(Effect::FocusTrigger)),
+                )
             }
 
             // ── SetDirection ─────────────────────────────────────────────────
-            (_, Event::SetDirection(dir)) => {
+            (_, Event::SetDirection(dir)) if ctx.dir != *dir => {
                 let dir = *dir;
-                Some(TransitionPlan::context_only(move |ctx| {
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.dir = dir;
+                }))
+            }
+
+            // ── RequestFocus ─────────────────────────────────────────────────
+            // Record the target id and queue the focus effect for the adapter.
+            (_, Event::RequestFocus { target_id }) => {
+                let target_id = target_id.clone();
+                Some(
+                    TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.requested_focus_id = Some(target_id);
+                    })
+                    .with_effect(PendingEffect::named(Effect::FocusTrigger)),
+                )
+            }
+
+            // ── SetItems ─────────────────────────────────────────────────────
+            // Register the trigger keys in DOM order. If the currently open key
+            // is no longer present it is closed (with `Effect::ValueChange`).
+            // Cancels any in-flight open/close timer.
+            (_, Event::SetItems(items)) => {
+                let items = dedupe_keys(items);
+                let open_removed = ctx
+                    .value
+                    .get()
+                    .as_ref()
+                    .is_some_and(|item| !items.iter().any(|candidate| candidate == item));
+
+                let plan = if open_removed {
+                    TransitionPlan::to(State::Idle).with_effect(value_change_effect(None))
+                } else {
+                    TransitionPlan::new()
+                };
+
+                Some(
+                    plan.apply(move |ctx: &mut Context| {
+                        ctx.items = items;
+                        ctx.items_registered = true;
+                        ctx.pending_open_item = None;
+                        if let Some(focused) = &ctx.focused_trigger
+                            && !ctx.items.iter().any(|item| item == focused)
+                        {
+                            ctx.focused_trigger = None;
+                            ctx.focus_visible = false;
+                        }
+                        if open_removed {
+                            ctx.previous_item = ctx.value.get().clone();
+                            ctx.value.set(None);
+                            ctx.pointer_in_content = false;
+                        }
+                    })
+                    .cancel_effect(Effect::OpenDelay)
+                    .cancel_effect(Effect::CloseDelay),
+                )
+            }
+
+            // ── SyncProps ────────────────────────────────────────────────────
+            (_, Event::SyncProps) => {
+                let orientation = props.orientation;
+                let delay_ms = props.delay_ms;
+                let skip_delay_ms = props.skip_delay_ms;
+                let value = props.value.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.orientation = orientation;
+                    ctx.delay_ms = delay_ms;
+                    ctx.skip_delay_ms = skip_delay_ms;
+                    ctx.value.sync_controlled(value);
+                }))
+            }
+
+            // ── SyncControlledValue ──────────────────────────────────────────
+            (_, Event::SyncControlledValue(value)) => {
+                let value = value.clone();
+                let next_state = match &value {
+                    Some(item) => State::Open { item: item.clone() },
+                    None => State::Idle,
+                };
+                Some(
+                    TransitionPlan::to(next_state)
+                        .apply(move |ctx: &mut Context| {
+                            ctx.previous_item = ctx.value.get().clone();
+                            ctx.pending_open_item = None;
+                            ctx.pointer_in_content = false;
+                            ctx.value.sync_controlled(Some(value));
+                        })
+                        .cancel_effect(Effect::OpenDelay)
+                        .cancel_effect(Effect::CloseDelay),
+                )
+            }
+
+            // ── SyncMessages ─────────────────────────────────────────────────
+            (_, Event::SyncMessages { locale, messages }) => {
+                let locale = locale.clone();
+                let messages = messages.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.locale = locale;
+                    ctx.messages = messages;
                 }))
             }
 
@@ -567,15 +571,138 @@ impl ars_core::Machine for Machine {
     }
 
     fn connect<'a>(
-        state: &'a Self::State,
-        ctx: &'a Self::Context,
-        props: &'a Self::Props,
-        send: &'a dyn Fn(Self::Event),
-    ) -> Self::Api<'a> {
+        state: &'a State,
+        ctx: &'a Context,
+        props: &'a Props,
+        send: &'a dyn Fn(Event),
+    ) -> Api<'a> {
         Api { state, ctx, props, send }
     }
 }
+
+// ── Open-item registration gate and shared transition helpers ─────────────────
+
+/// Returns true when the key may open: either the registry has not synced yet,
+/// or the key is present in it. Prevents an unregistered or stale controlled key
+/// from opening a phantom panel.
+fn item_is_registered(ctx: &Context, item: &Key) -> bool {
+    !ctx.items_registered || ctx.items.iter().any(|candidate| candidate == item)
+}
+
+/// Resolves the open item that should actually render: the controlled/bindable
+/// value if registered, otherwise the state's open item if registered.
+fn effective_open_item<'a>(state: &'a State, ctx: &'a Context) -> Option<&'a Key> {
+    ctx.value
+        .get()
+        .as_ref()
+        .filter(|item| item_is_registered(ctx, item))
+        .or_else(|| state_open_item(state).filter(|item| item_is_registered(ctx, item)))
+}
+
+/// Builds an open plan, gated on registration and a no-op when already open.
+fn open_item_plan(state: &State, ctx: &Context, item: Key) -> Option<TransitionPlan<Machine>> {
+    if !item_is_registered(ctx, &item) {
+        return None;
+    }
+    if effective_open_item(state, ctx) == Some(&item) {
+        None
+    } else {
+        let previous = ctx.value.get().clone().or_else(|| state_open_item(state).cloned());
+        Some(open_to_plan(previous, item))
+    }
+}
+
+/// Transition to `Open`, recording the previous item and emitting `ValueChange`.
+fn open_to_plan(previous: Option<Key>, item: Key) -> TransitionPlan<Machine> {
+    let next_value = Some(item.clone());
+    TransitionPlan::to(State::Open { item: item.clone() })
+        .apply(move |ctx: &mut Context| {
+            ctx.previous_item = previous;
+            ctx.value.set(Some(item));
+            ctx.pointer_in_content = false;
+            ctx.pending_open_item = None;
+        })
+        .with_effect(value_change_effect(next_value))
+}
+
+/// Transition to `Idle`, cancelling timers and emitting `ValueChange(None)`.
+fn close_plan(now_ms: u64) -> TransitionPlan<Machine> {
+    TransitionPlan::to(State::Idle)
+        .apply(move |ctx: &mut Context| {
+            ctx.previous_item = ctx.value.get().clone();
+            ctx.value.set(None);
+            ctx.pointer_in_content = false;
+            ctx.pending_open_item = None;
+            ctx.last_close_time = Some(now_ms);
+        })
+        .cancel_effect(Effect::OpenDelay)
+        .cancel_effect(Effect::CloseDelay)
+        .with_effect(value_change_effect(None))
+}
+
+/// `Effect::ValueChange` carrying the new open item to `Props::on_value_change`.
+fn value_change_effect(value: Option<Key>) -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::ValueChange,
+        move |_ctx: &Context, props: &Props, _send| {
+            if let Some(callback) = &props.on_value_change {
+                callback(value.clone());
+            }
+            no_cleanup()
+        },
+    )
+}
+
+/// Roving focus by relative offset, honouring `loop_focus`.
+fn focus_by_offset_plan(ctx: &Context, props: &Props, offset: isize) -> Option<TransitionPlan<Machine>> {
+    if ctx.items.is_empty() {
+        return None;
+    }
+    let current = ctx
+        .focused_trigger
+        .as_ref()
+        .and_then(|focused| ctx.items.iter().position(|item| item == focused))
+        .unwrap_or(0);
+    let len = ctx.items.len();
+    let next = if offset.is_positive() {
+        if current + 1 >= len {
+            if props.loop_focus { 0 } else { current }
+        } else {
+            current + 1
+        }
+    } else if current == 0 {
+        if props.loop_focus { len - 1 } else { current }
+    } else {
+        current - 1
+    };
+    if next == current && !props.loop_focus {
+        None
+    } else {
+        focus_absolute_plan(ctx, next)
+    }
+}
+
+/// Roving focus to an absolute index; records the DOM-safe target id.
+fn focus_absolute_plan(ctx: &Context, index: usize) -> Option<TransitionPlan<Machine>> {
+    let item = ctx.items.get(index)?.clone();
+    let target_id = trigger_dom_id(&ctx.ids, &item);
+    Some(
+        TransitionPlan::context_only(move |ctx: &mut Context| {
+            ctx.focused_trigger = Some(item);
+            ctx.focus_visible = true;
+            ctx.requested_focus_id = Some(target_id);
+        })
+        .with_effect(PendingEffect::named(Effect::FocusTrigger)),
+    )
+}
 ```
+
+`on_props_changed` translates a controlled/config props change into the sync
+events above: a changed controlled `value` emits `SyncControlledValue`, an
+uncontrolled value change or a changed `orientation`/`delay_ms`/`skip_delay_ms`
+emits `SyncProps`, and a changed `dir` emits `SetDirection`. The adapter emits
+`SetItems` when triggers mount or reorder, and `SyncMessages` when the provider
+locale or messages change.
 
 ### 1.7 Connect / API
 
@@ -583,14 +710,36 @@ impl ars_core::Machine for Machine {
 #[derive(ComponentPart)]
 #[scope = "navigation-menu"]
 pub enum Part {
+    /// The outer navigation landmark element.
     Root,
+    /// The menubar list container.
     List,
+    /// A top-level item wrapper.
     Item { item_key: Key },
+    /// A trigger that opens associated content.
     Trigger { item_key: Key, content_id: String },
+    /// Dropdown content for a trigger.
     Content { item_key: Key },
+    /// A navigation link inside content.
     Link { active: bool },
+    /// Visual active-trigger indicator.
     Indicator,
+    /// Optional animated content viewport.
     Viewport,
+    /// Root element for a nested navigation menu inside content.
+    Sub,
+    /// Menubar list container for a nested navigation menu.
+    SubList,
+    /// Nested item wrapper.
+    SubItem { item_key: Key },
+    /// Nested trigger that opens associated nested content.
+    SubTrigger { item_key: Key, content_id: String },
+    /// Dropdown content for a nested trigger.
+    SubContent { item_key: Key },
+    /// Visual active-trigger indicator for a nested menu.
+    SubIndicator,
+    /// Optional animated content viewport for a nested menu.
+    SubViewport,
 }
 
 /// API for the NavigationMenu component.
@@ -606,19 +755,24 @@ pub struct Api<'a> {
 }
 
 impl<'a> Api<'a> {
-    /// Get the key of the currently open item, if any.
+    /// Get the key of the currently open item, if any. Gated on the
+    /// registration check so a stale controlled key reports no open item until
+    /// its trigger registers.
     pub fn open_item(&self) -> Option<&Key> {
-        self.ctx.value.get().as_ref()
+        let item = self.ctx.value.get().as_ref()?;
+        item_is_registered(self.ctx, item).then_some(item)
     }
 
     /// Check whether a specific item's content is currently showing.
     pub fn is_item_open(&self, item_key: &Key) -> bool {
-        self.ctx.value.get().as_ref() == Some(item_key)
+        self.open_item() == Some(item_key)
     }
 
     /// Compute the motion direction for content animation.
-    /// Returns `Some("from-start")`, `Some("from-end")`, `Some("to-start")`, or `Some("to-end")`.
-    /// Returns `None` if no previous item exists (first open, no animation direction).
+    /// Returns `Some("from-end")` when the current trigger is after the previous
+    /// one, `Some("from-start")` when it is before. Returns `None` when there is
+    /// no previous item (first open) or when the current and previous triggers
+    /// resolve to the same index (no direction to animate).
     fn motion_direction(&self, item_key: &Key) -> Option<&'static str> {
         let prev = self.ctx.previous_item.as_ref()?;
         let items = &self.ctx.items;
@@ -626,8 +780,10 @@ impl<'a> Api<'a> {
         let curr_idx = items.iter().position(|k| k == item_key)?;
         if curr_idx > prev_idx {
             Some("from-end")
-        } else {
+        } else if curr_idx < prev_idx {
             Some("from-start")
+        } else {
+            None
         }
     }
 
@@ -690,7 +846,7 @@ impl<'a> Api<'a> {
             Part::Trigger { item_key: Key::default(), content_id: String::new() }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, item_key.to_string());
+        attrs.set(HtmlAttr::Id, trigger_dom_id(&self.ctx.ids, item_key));
         attrs.set(HtmlAttr::Role, "menuitem");
         attrs.set(HtmlAttr::Aria(AriaAttr::HasPopup), "true");
         attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if is_open { "true" } else { "false" });
@@ -701,18 +857,20 @@ impl<'a> Api<'a> {
         if is_focused && self.ctx.focus_visible {
             attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
         }
-        // Roving tabindex: first trigger gets tabindex="0" unless another is focused.
-        let is_first = self.ctx.items.first() == Some(item_key);
-        let has_focus = self.ctx.focused_trigger.is_some();
-        let tab_index = if is_focused {
-            "0"
-        } else if !has_focus && is_first {
+        attrs.set(HtmlAttr::TabIndex, self.trigger_tab_index(item_key));
+        attrs
+    }
+
+    /// Roving tabindex: the focused trigger (or the first trigger when none is
+    /// focused) gets `"0"`; all others get `"-1"`.
+    fn trigger_tab_index(&self, item_key: &Key) -> &'static str {
+        if self.ctx.focused_trigger.as_ref() == Some(item_key)
+            || (self.ctx.focused_trigger.is_none() && self.ctx.items.first() == Some(item_key))
+        {
             "0"
         } else {
             "-1"
-        };
-        attrs.set(HtmlAttr::TabIndex, tab_index);
-        attrs
+        }
     }
 
     /// Attrs for a content panel revealed when its trigger is active.
@@ -724,7 +882,7 @@ impl<'a> Api<'a> {
             Part::Content { item_key: Key::default() }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.item("content", item_key));
+        attrs.set(HtmlAttr::Id, content_dom_id(&self.ctx.ids, item_key));
         attrs.set(HtmlAttr::Data("ars-state"), if is_open { "open" } else { "closed" });
         if let Some(motion) = self.motion_direction(item_key) {
             attrs.set(HtmlAttr::Data("ars-motion"), motion);
@@ -758,7 +916,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
-        let is_visible = matches!(self.state, State::Open { .. });
+        let is_visible = self.open_item().is_some();
         attrs.set(HtmlAttr::Data("ars-state"), if is_visible { "visible" } else { "hidden" });
         attrs
     }
@@ -769,13 +927,121 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Viewport.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Data("ars-state"), match self.state {
-            State::Open { .. } => "open",
-            State::Idle => "closed",
-        });
+        attrs.set(HtmlAttr::Data("ars-state"), if self.open_item().is_some() { "open" } else { "closed" });
         // CSS custom properties for viewport sizing are set as inline styles by the adapter.
         // --ars-viewport-width: width of the currently active content panel.
         // --ars-viewport-height: height of the currently active content panel.
+        attrs
+    }
+
+    // ── Sub-menu parts (see §5) ────────────────────────────────────────────────
+    // A `Sub` reuses the root anatomy/attrs with `sub-*` part tokens. Triggers
+    // and content share the root DOM-safe id helpers and the same open/focus
+    // semantics, scoped to a second `Machine` instance per §5.
+
+    /// Attrs for the root element of a nested navigation menu.
+    pub fn sub_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Sub.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Data("ars-orientation"), match self.ctx.orientation {
+            Orientation::Horizontal => "horizontal",
+            Orientation::Vertical   => "vertical",
+        });
+        attrs.set(HtmlAttr::Dir, match self.ctx.dir {
+            Direction::Ltr  => "ltr",
+            Direction::Rtl  => "rtl",
+            Direction::Auto => "auto",
+        });
+        attrs
+    }
+
+    /// Attrs for the menubar list container of a nested navigation menu.
+    pub fn sub_list_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::SubList.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Role, "menubar");
+        attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), match self.ctx.orientation {
+            Orientation::Horizontal => "horizontal",
+            Orientation::Vertical   => "vertical",
+        });
+        attrs
+    }
+
+    /// Attrs for a nested item wrapper.
+    pub fn sub_item_attrs(&self, _item_key: &Key) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] =
+            Part::SubItem { item_key: Key::default() }.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        attrs
+    }
+
+    /// Attrs for a nested trigger that opens/closes a nested content panel.
+    pub fn sub_trigger_attrs(&self, item_key: &Key, content_id: &str) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let is_open    = self.is_item_open(item_key);
+        let is_focused = self.ctx.focused_trigger.as_ref() == Some(item_key);
+        let [(scope_attr, scope_val), (part_attr, part_val)] =
+            Part::SubTrigger { item_key: Key::default(), content_id: String::new() }.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, trigger_dom_id(&self.ctx.ids, item_key));
+        attrs.set(HtmlAttr::Role, "menuitem");
+        attrs.set(HtmlAttr::Aria(AriaAttr::HasPopup), "true");
+        attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if is_open { "true" } else { "false" });
+        attrs.set(HtmlAttr::Data("ars-state"), if is_open { "open" } else { "closed" });
+        attrs.set(HtmlAttr::TabIndex, self.trigger_tab_index(item_key));
+        if is_open {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Controls), content_id);
+        }
+        if is_focused && self.ctx.focus_visible {
+            attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
+        }
+        attrs
+    }
+
+    /// Attrs for a nested content panel revealed when its trigger is active.
+    pub fn sub_content_attrs(&self, item_key: &Key) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let is_open = self.is_item_open(item_key);
+        let [(scope_attr, scope_val), (part_attr, part_val)] =
+            Part::SubContent { item_key: Key::default() }.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Id, content_dom_id(&self.ctx.ids, item_key));
+        attrs.set(HtmlAttr::Data("ars-state"), if is_open { "open" } else { "closed" });
+        if let Some(motion) = self.motion_direction(item_key) {
+            attrs.set(HtmlAttr::Data("ars-motion"), motion);
+        }
+        if !is_open {
+            attrs.set_bool(HtmlAttr::Hidden, true);
+        }
+        attrs
+    }
+
+    /// Attrs for the visual indicator of a nested navigation menu.
+    pub fn sub_indicator_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::SubIndicator.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+        attrs.set(HtmlAttr::Data("ars-state"), if self.open_item().is_some() { "visible" } else { "hidden" });
+        attrs
+    }
+
+    /// Attrs for the optional viewport container of a nested navigation menu.
+    pub fn sub_viewport_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::SubViewport.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Data("ars-state"), if self.open_item().is_some() { "open" } else { "closed" });
         attrs
     }
 
@@ -798,11 +1064,12 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown on a trigger.
-    pub fn on_trigger_keydown(&self, item_key: &Key, data: &KeyboardEventData) {
+    /// `now_ms` — adapter-provided timestamp from the keyboard event, forwarded
+    /// to `EscapeKey` so the machine never reaches into the platform itself.
+    pub fn on_trigger_keydown(&self, item_key: &Key, data: &KeyboardEventData, now_ms: u64) {
         let (prev_key, next_key) = match (&self.ctx.orientation, &self.ctx.dir) {
-            (Orientation::Horizontal, Direction::Ltr)  => (KeyboardKey::ArrowLeft, KeyboardKey::ArrowRight),
             (Orientation::Horizontal, Direction::Rtl)  => (KeyboardKey::ArrowRight, KeyboardKey::ArrowLeft),
-            (Orientation::Horizontal, Direction::Auto) => (KeyboardKey::ArrowLeft, KeyboardKey::ArrowRight),
+            (Orientation::Horizontal, _)               => (KeyboardKey::ArrowLeft, KeyboardKey::ArrowRight),
             (Orientation::Vertical,   _)               => (KeyboardKey::ArrowUp, KeyboardKey::ArrowDown),
         };
         if data.key == next_key {
@@ -816,16 +1083,11 @@ impl<'a> Api<'a> {
         } else if data.key == KeyboardKey::Enter || data.key == KeyboardKey::Space {
             (self.send)(Event::Open(item_key.clone()));
         } else if data.key == KeyboardKey::Escape {
-            // Adapter provides now_ms from platform.now_ms() at dispatch time.
-            let platform = use_platform_effects();
-            (self.send)(Event::EscapeKey(platform.now_ms()));
-        } else if data.key == KeyboardKey::ArrowDown
-            && self.ctx.orientation == Orientation::Horizontal {
-            // In horizontal mode, ArrowDown opens the content panel.
-            (self.send)(Event::Open(item_key.clone()));
-        } else if data.key == KeyboardKey::ArrowUp
-            && self.ctx.orientation == Orientation::Horizontal {
-            // ArrowUp in horizontal mode also opens (for symmetry with ArrowDown).
+            (self.send)(Event::EscapeKey(now_ms));
+        } else if self.ctx.orientation == Orientation::Horizontal
+            && (data.key == KeyboardKey::ArrowDown || data.key == KeyboardKey::ArrowUp)
+        {
+            // In horizontal mode, ArrowDown/ArrowUp open the content panel.
             (self.send)(Event::Open(item_key.clone()));
         }
     }
@@ -841,11 +1103,10 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown inside the content area.
-    pub fn on_content_keydown(&self, data: &KeyboardEventData) {
+    /// `now_ms` — adapter-provided timestamp from the keyboard event.
+    pub fn on_content_keydown(&self, data: &KeyboardEventData, now_ms: u64) {
         if data.key == KeyboardKey::Escape {
-            // Adapter provides now_ms from platform.now_ms() at dispatch time.
-            let platform = use_platform_effects();
-            (self.send)(Event::EscapeKey(platform.now_ms()));
+            (self.send)(Event::EscapeKey(now_ms));
         }
     }
 
@@ -860,15 +1121,58 @@ impl ConnectApi for Api<'_> {
     type Part = Part;
 
     fn part_attrs(&self, part: Part) -> AttrMap {
-        match &part {
+        match part {
             Part::Root => self.root_attrs(),
             Part::List => self.list_attrs(),
-            Part::Item { item_key } => self.item_attrs(item_key),
-            Part::Trigger { item_key, content_id } => self.trigger_attrs(item_key, content_id),
-            Part::Content { item_key } => self.content_attrs(item_key),
-            Part::Link { active } => self.link_attrs(*active),
+            Part::Item { item_key } => self.item_attrs(&item_key),
+            Part::Trigger { item_key, content_id } => self.trigger_attrs(&item_key, &content_id),
+            Part::Content { item_key } => self.content_attrs(&item_key),
+            Part::Link { active } => self.link_attrs(active),
             Part::Indicator => self.indicator_attrs(),
             Part::Viewport => self.viewport_attrs(),
+            Part::Sub => self.sub_attrs(),
+            Part::SubList => self.sub_list_attrs(),
+            Part::SubItem { item_key } => self.sub_item_attrs(&item_key),
+            Part::SubTrigger { item_key, content_id } => self.sub_trigger_attrs(&item_key, &content_id),
+            Part::SubContent { item_key } => self.sub_content_attrs(&item_key),
+            Part::SubIndicator => self.sub_indicator_attrs(),
+            Part::SubViewport => self.sub_viewport_attrs(),
+        }
+    }
+}
+
+// ── DOM-safe id helpers and registration gate ─────────────────────────────────
+
+/// Returns true when the key may be treated as open: the registry has not synced
+/// yet, or the key is present in it.
+fn item_is_registered(ctx: &Context, item: &Key) -> bool {
+    !ctx.items_registered || ctx.items.iter().any(|candidate| candidate == item)
+}
+
+/// DOM id for a trigger element, e.g. `nav-trigger-s-6d61696e`.
+fn trigger_dom_id(ids: &ComponentIds, key: &Key) -> String {
+    ids.item("trigger", &dom_safe_key_token(key))
+}
+
+/// DOM id for a content element, e.g. `nav-content-s-6d61696e`.
+fn content_dom_id(ids: &ComponentIds, key: &Key) -> String {
+    ids.item("content", &dom_safe_key_token(key))
+}
+
+/// Encodes a `Key` into a DOM-id-safe token. Integer and UUID keys map to
+/// `i-{n}` / `u-{uuid}`; string keys are hex-encoded as `s-{hex}` so arbitrary
+/// user strings can never produce an invalid or colliding DOM id.
+fn dom_safe_key_token(key: &Key) -> String {
+    match key {
+        Key::Int(value) => format!("i-{value}"),
+        #[cfg(feature = "uuid")]
+        Key::Uuid(value) => format!("u-{value}"),
+        Key::String(value) => {
+            let mut token = String::from("s-");
+            for byte in value.as_bytes() {
+                write!(token, "{byte:02x}").expect("writing to a String cannot fail");
+            }
+            token
         }
     }
 }

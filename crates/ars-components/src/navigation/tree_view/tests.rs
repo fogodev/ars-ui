@@ -7,7 +7,7 @@ use core::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
 use ars_collections::{
-    Key, TreeCollection, TreeItemConfig,
+    Collection as _, Key, TreeCollection, TreeItemConfig,
     dnd::{CollectionDropTarget, DropPosition},
     selection,
 };
@@ -16,7 +16,8 @@ use ars_interactions::KeyboardEventData;
 use insta::assert_snapshot;
 
 use super::{
-    Effect, Event, Machine, Messages, Part, Props, ReorderEvent, TreeItem, snapshot_attrs,
+    Effect, Event, Machine, Messages, NodeLoadState, Part, Props, RenameEvent, ReorderEvent,
+    TreeItem, snapshot_attrs,
 };
 
 // ----------------------------------------------------------------------------
@@ -540,9 +541,13 @@ fn typeahead_skips_nodes_hidden_under_collapsed_parents() {
 #[test]
 fn typeahead_clear_resets_buffer() {
     let mut service = service(props());
+
     drop(service.send(Event::TypeaheadSearch('g', 1)));
+
     assert!(!service.context().typeahead.search.is_empty());
+
     drop(service.send(Event::ClearTypeahead));
+
     assert!(service.context().typeahead.search.is_empty());
 }
 
@@ -749,7 +754,9 @@ fn keydown_enter_selects_and_space_toggles() {
 
     // Space on an already-selected node deselects it (toggle contract).
     let mut service = multi();
+
     drop(service.send(Event::SelectNode(key(2))));
+
     assert!(service.connect(&|_| {}).is_node_selected(&key(2)));
     assert_eq!(
         dispatch_key(&service, &key(2), &keyboard(KeyboardKey::Space)),
@@ -762,6 +769,7 @@ fn keydown_printable_triggers_typeahead() {
     let service = service(props());
 
     let events = dispatch_key(&service, &key(1), &printable('b'));
+
     assert!(
         matches!(events.as_slice(), [Event::TypeaheadSearch('b', now_ms)] if *now_ms > 0),
         "printable key dispatches TypeaheadSearch with a clock timestamp: {events:?}"
@@ -953,7 +961,6 @@ fn drag_handle_keydown_pickup_move_and_drop() {
 
     // Not dragging yet: Enter picks up.
     let recorder: Recorder = RefCell::new(Vec::new());
-
     let send = |event| record(&recorder, event);
 
     service
@@ -998,8 +1005,8 @@ fn drag_handle_keydown_while_dragging_confirms_and_cancels() {
 #[test]
 fn drag_handle_keydown_noop_when_dnd_disabled() {
     let service = service(props());
-    let recorder: Recorder = RefCell::new(Vec::new());
 
+    let recorder: Recorder = RefCell::new(Vec::new());
     let send = |event| record(&recorder, event);
 
     service
@@ -1167,24 +1174,31 @@ fn collapsing_ancestor_clamps_focus_to_that_ancestor() {
 
     // And navigation proceeds correctly from the clamped position.
     drop(service.send(Event::FocusNext));
+
     assert_eq!(service.context().focused_node, Some(key(4))); // Vegetables
 }
 
 #[test]
 fn collapse_all_clamps_focus_to_root_ancestor() {
     let mut service = service(props());
+
     drop(service.send(Event::FocusNode(key(3)))); // Banana (under Fruits)
     drop(service.send(Event::CollapseAll));
+
     assert_eq!(service.context().focused_node, Some(key(1))); // Fruits (root)
 }
 
 #[test]
 fn sync_props_clears_focus_when_focused_node_removed() {
     let mut service = service(props());
+
     drop(service.send(Event::FocusNode(key(7)))); // Grains
+
     // New collection without Grains.
     let trimmed = TreeCollection::new(vec![branch(1, "Fruits", true, vec![leaf(2, "Apple")])]);
+
     drop(service.set_props(props().items(trimmed)));
+
     assert_eq!(service.context().focused_node, None);
 }
 
@@ -1285,6 +1299,7 @@ fn asterisk_on_child_expands_child_level_siblings() {
     )]);
 
     let service = service(props().items(items));
+
     let recorder: Recorder = RefCell::new(Vec::new());
     let send = |event| record(&recorder, event);
 
@@ -1464,10 +1479,12 @@ fn multiple_prop_enables_real_multi_selection() {
     // Props::multiple(true) alone (selection_mode left at default Single) must
     // enable real multi-selection, not just aria-multiselectable.
     let mut service = service(props().multiple(true));
+
     drop(service.send(Event::SelectNode(key(2))));
     drop(service.send(Event::SelectNode(key(3))));
 
     let api = service.connect(&|_| {});
+
     assert!(api.is_node_selected(&key(2)));
     assert!(
         api.is_node_selected(&key(3)),
@@ -1478,12 +1495,13 @@ fn multiple_prop_enables_real_multi_selection() {
 #[test]
 fn set_props_switch_to_multiple_reconfigures_selection() {
     let mut service = service(props()); // single mode
-    drop(service.send(Event::SelectNode(key(2))));
 
+    drop(service.send(Event::SelectNode(key(2))));
     drop(service.set_props(props().multiple(true))); // switch to multiple
     drop(service.send(Event::SelectNode(key(3))));
 
     let api = service.connect(&|_| {});
+
     assert!(
         api.is_node_selected(&key(2)) && api.is_node_selected(&key(3)),
         "after switching to multiple at runtime, both nodes stay selected"
@@ -1493,6 +1511,7 @@ fn set_props_switch_to_multiple_reconfigures_selection() {
 #[test]
 fn set_props_switch_to_none_stops_selection() {
     let mut service = service(props().selected(selection::Set::Single(key(2))));
+
     drop(
         service.set_props(
             props()
@@ -1500,8 +1519,10 @@ fn set_props_switch_to_none_stops_selection() {
                 .selection_mode(selection::Mode::None),
         ),
     );
+
     // In None mode further selection is rejected.
     let result = service.send(Event::SelectNode(key(3)));
+
     assert!(!result.context_changed);
     assert!(!service.connect(&|_| {}).is_node_selected(&key(3)));
 }
@@ -1518,19 +1539,25 @@ fn expand_all_expands_lazy_branches() {
             ..item("Lazy")
         },
     )]);
+
     let mut service = service(props().items(items));
+
     drop(service.send(Event::ExpandAll));
+
     assert!(service.context().expanded.get().contains(&key(9)));
 }
 
 #[test]
 fn drag_over_rejects_unknown_target_key() {
     let mut service = service(dnd_props());
+
     drop(service.send(Event::DragStart(key(2))));
+
     let result = service.send(Event::DragOver(CollectionDropTarget {
         key: key(999), // not a node in the collection
         position: DropPosition::On,
     }));
+
     assert!(!result.context_changed);
     assert!(service.context().drop_target.is_none());
 }
@@ -1546,10 +1573,13 @@ fn typeahead_matches_collection_text_value() {
         children: Vec::new(),
         default_expanded: false,
     };
+
     let items = TreeCollection::new(vec![searchable, leaf(2, "Banana")]);
+
     let mut service = service(props().items(items));
 
     drop(service.send(Event::TypeaheadSearch('a', 1))); // matches "Apricot"
+
     assert_eq!(service.context().focused_node, Some(key(1)));
 }
 
@@ -1560,6 +1590,7 @@ fn typeahead_matches_collection_text_value() {
 #[test]
 fn focus_node_ignores_non_visible_and_unknown_keys() {
     let mut service = service(props()); // Vegetables(4) collapsed -> Carrot(5) hidden
+
     assert!(!service.send(Event::FocusNode(key(5))).context_changed); // hidden
     assert_eq!(service.context().focused_node, None);
     assert!(!service.send(Event::FocusNode(key(999))).context_changed); // unknown
@@ -1584,12 +1615,16 @@ fn asterisk_expands_lazy_siblings() {
             leaf(3, "B"),
         ],
     )]);
+
     let service = service(props().items(items));
+
     let recorder: Recorder = RefCell::new(Vec::new());
     let send = |event| record(&recorder, event);
+
     service
         .connect(&send)
         .on_node_keydown(&key(2), &printable('*'));
+
     assert_eq!(recorder.into_inner(), &[Event::ExpandNode(key(2))]);
 }
 
@@ -1597,18 +1632,24 @@ fn asterisk_expands_lazy_siblings() {
 fn focus_on_container_initializes_active_node() {
     // No prior focus -> first visible node.
     let mut first = service(props());
+
     drop(first.send(Event::Focus { is_keyboard: true }));
+
     assert_eq!(first.context().focused_node, Some(key(1)));
 
     // With a selection -> the (visible) selected node.
     let mut selected = service(props().selected(selection::Set::Single(key(4))));
+
     drop(selected.send(Event::Focus { is_keyboard: true }));
+
     assert_eq!(selected.context().focused_node, Some(key(4)));
 
     // Existing active node is not overridden.
     let mut existing = service(props());
+
     drop(existing.send(Event::FocusNode(key(2))));
     drop(existing.send(Event::Focus { is_keyboard: false }));
+
     assert_eq!(existing.context().focused_node, Some(key(2)));
 }
 
@@ -1619,16 +1660,18 @@ fn switching_to_single_normalizes_multi_selection() {
             .multiple(true)
             .selection_mode(selection::Mode::Multiple),
     );
+
     drop(service.send(Event::SelectNode(key(2))));
     drop(service.send(Event::SelectNode(key(3))));
-
     drop(service.set_props(props().selection_mode(selection::Mode::Single))); // tighten
 
     let api = service.connect(&|_| {});
+
     let count = [key(1), key(2), key(3), key(4), key(7)]
         .iter()
         .filter(|k| api.is_node_selected(k))
         .count();
+
     assert!(
         count <= 1,
         "single mode keeps at most one selected after switch"
@@ -1638,6 +1681,7 @@ fn switching_to_single_normalizes_multi_selection() {
 #[test]
 fn set_props_resyncs_generated_ids_on_id_change() {
     let mut service = service(props().id("old"));
+
     assert_eq!(
         service
             .connect(&|_| {})
@@ -1645,7 +1689,9 @@ fn set_props_resyncs_generated_ids_on_id_change() {
             .get(&HtmlAttr::Id),
         Some("old-node-i-1")
     );
+
     drop(service.set_props(props().id("new")));
+
     assert_eq!(
         service
             .connect(&|_| {})
@@ -1658,6 +1704,7 @@ fn set_props_resyncs_generated_ids_on_id_change() {
 #[test]
 fn drag_handle_is_keyboard_focusable() {
     let service = service(dnd_props());
+
     assert_eq!(
         service
             .connect(&|_| {})
@@ -1670,7 +1717,9 @@ fn drag_handle_is_keyboard_focusable() {
 #[test]
 fn disabled_node_is_not_announced_draggable() {
     let service = service(props().items(disabled_items()).dnd_enabled(true));
+
     let api = service.connect(&|_| {});
+
     assert!(
         api.leaf_attrs(&key(2)) // Apple is disabled
             .get(&HtmlAttr::Aria(AriaAttr::RoleDescription))
@@ -1691,9 +1740,11 @@ fn controlled_selection_state_tracks_binding_not_optimistic() {
             .selection_mode(selection::Mode::Multiple)
             .selected(selection::Set::Single(key(2))),
     );
+
     drop(service.send(Event::SelectNode(key(3)))); // optimistic; parent owns selection
 
     let api = service.connect(&|_| {});
+
     assert!(api.is_node_selected(&key(2)));
     assert!(
         !api.is_node_selected(&key(3)),
@@ -1717,7 +1768,9 @@ fn disabled_node_suppresses_href() {
             ..TreeItem::default()
         },
     )]);
+
     let service = service(props().items(items));
+
     assert!(
         service
             .connect(&|_| {})
@@ -1748,6 +1801,7 @@ fn disabled_branch_tree() -> TreeCollection<TreeItem> {
 #[test]
 fn disabled_branch_cannot_be_toggled_or_expanded() {
     let mut service = service(props().items(disabled_branch_tree()));
+
     assert!(!service.send(Event::ToggleNode(key(1))).context_changed);
     assert!(!service.send(Event::ExpandNode(key(1))).context_changed);
     assert!(!service.context().expanded.get().contains(&key(1)));
@@ -1756,6 +1810,7 @@ fn disabled_branch_cannot_be_toggled_or_expanded() {
 #[test]
 fn expand_events_reject_leaves_and_unknown_keys() {
     let mut service = service(props());
+
     assert!(!service.send(Event::ExpandNode(key(2))).context_changed); // Apple is a leaf
     assert!(!service.send(Event::ToggleNode(key(2))).context_changed);
     assert!(!service.send(Event::ExpandNode(key(999))).context_changed); // unknown
@@ -1766,6 +1821,7 @@ fn expand_events_reject_leaves_and_unknown_keys() {
 #[test]
 fn select_node_rejects_unknown_keys() {
     let mut service = service(props());
+
     assert!(!service.send(Event::SelectNode(key(999))).context_changed);
     assert!(!service.connect(&|_| {}).is_node_selected(&key(999)));
 }
@@ -1785,15 +1841,20 @@ fn arrow_right_on_expanded_lazy_branch_is_inert() {
         ),
         leaf(8, "After"),
     ]);
+
     let mut expanded = BTreeSet::new();
+
     expanded.insert(key(9));
+
     let service = service(props().items(items).default_expanded(expanded));
+
     assert!(dispatch_key(&service, &key(9), &keyboard(KeyboardKey::ArrowRight)).is_empty());
 }
 
 #[test]
 fn set_props_clears_active_drag_on_items_change() {
     let mut service = service(dnd_props());
+
     drop(service.send(Event::DragStart(key(2))));
     drop(service.send(Event::DragOver(CollectionDropTarget {
         key: key(7),
@@ -1801,6 +1862,7 @@ fn set_props_clears_active_drag_on_items_change() {
     })));
 
     let new_items = TreeCollection::new(vec![leaf(1, "Solo")]);
+
     drop(service.set_props(dnd_props().items(new_items)));
 
     assert_eq!(service.context().dragging, None);
@@ -1812,18 +1874,23 @@ fn controlled_multi_selection_is_clamped_under_single_mode() {
     // A controlled binding that violates the mode (two keys under Single) renders
     // a mode-valid selection without mutating the parent-owned value.
     let mut set = BTreeSet::new();
+
     set.insert(key(2));
     set.insert(key(3));
+
     let service = service(
         props()
             .selection_mode(selection::Mode::Single)
             .selected(selection::Set::Multiple(set)),
     );
+
     let api = service.connect(&|_| {});
+
     let count = [key(2), key(3)]
         .iter()
         .filter(|k| api.is_node_selected(k))
         .count();
+
     assert_eq!(
         count, 1,
         "single mode clamps a multi-key controlled binding"
@@ -1837,9 +1904,13 @@ fn controlled_multi_selection_is_clamped_under_single_mode() {
 #[test]
 fn blur_resets_typeahead_buffer() {
     let mut service = service(props());
+
     drop(service.send(Event::TypeaheadSearch('g', 1)));
+
     assert!(!service.context().typeahead.search.is_empty());
+
     drop(service.send(Event::Blur));
+
     assert!(
         service.context().typeahead.search.is_empty(),
         "blur clears the typeahead buffer so a refocus starts fresh"
@@ -1849,9 +1920,11 @@ fn blur_resets_typeahead_buffer() {
 #[test]
 fn keyboard_root_focus_shows_focus_visible_on_active_node() {
     let mut service = service(props());
+
     drop(service.send(Event::Focus { is_keyboard: true }));
 
     let node = service.context().focused_node.clone().expect("active node");
+
     assert_eq!(
         service
             .connect(&|_| {})
@@ -1867,17 +1940,22 @@ fn typeahead_reaches_disabled_nodes() {
     // Apple (2) is disabled but focusable; typing 'a' must still reach it
     // (FocusOnly), even though it remains non-selectable.
     let mut service = service(props().items(disabled_items()));
+
     drop(service.send(Event::TypeaheadSearch('a', 1)));
+
     assert_eq!(service.context().focused_node, Some(key(2)));
 }
 
 #[test]
 fn disabling_dnd_at_runtime_clears_active_drag() {
     let mut service = service(dnd_props());
+
     drop(service.send(Event::DragStart(key(2))));
+
     assert_eq!(service.context().dragging, Some(key(2)));
 
     drop(service.set_props(props())); // dnd_enabled = false
+
     assert_eq!(service.context().dragging, None);
     assert_eq!(service.context().drop_target, None);
 }
@@ -1885,7 +1963,9 @@ fn disabling_dnd_at_runtime_clears_active_drag() {
 #[test]
 fn disabled_node_drag_handle_is_not_operable() {
     let service = service(props().items(disabled_items()).dnd_enabled(true));
+
     let attrs = service.connect(&|_| {}).drag_handle_attrs(&key(2)); // Apple disabled
+
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
     assert_eq!(attrs.get(&HtmlAttr::TabIndex), Some("-1"));
 }
@@ -1895,16 +1975,21 @@ fn typeahead_respects_live_expansion_state() {
     // Vegetables (4) starts collapsed (Carrot hidden). After expanding it via an
     // event, typeahead must see the newly-visible Carrot (5).
     let mut service = service(props());
+
     drop(service.send(Event::ExpandNode(key(4))));
     drop(service.send(Event::TypeaheadSearch('c', 1)));
+
     assert_eq!(service.context().focused_node, Some(key(5)));
 }
 
 #[test]
 fn nested_drag_start_is_rejected() {
     let mut service = service(dnd_props());
+
     drop(service.send(Event::DragStart(key(2))));
+
     let result = service.send(Event::DragStart(key(3)));
+
     assert!(!result.context_changed);
     assert_eq!(
         service.context().dragging,
@@ -1926,7 +2011,9 @@ fn disabled_initial_selection_is_dropped() {
             .items(disabled_items())
             .default_selected(selection::Set::Single(key(2))),
     );
+
     let api = service.connect(&|_| {});
+
     assert!(
         !api.is_node_selected(&key(2)),
         "a disabled node cannot initialize as selected"
@@ -1938,7 +2025,9 @@ fn disabled_initial_selection_is_dropped() {
 fn non_selectable_nodes_omit_aria_selected() {
     // selection_mode None: no node is selectable, so none exposes aria-selected.
     let none = service(props().selection_mode(selection::Mode::None));
+
     let none_api = none.connect(&|_| {});
+
     assert_eq!(
         none_api
             .branch_attrs(&key(1))
@@ -1956,6 +2045,7 @@ fn non_selectable_nodes_omit_aria_selected() {
 
     // A disabled node in a selectable tree is also non-selectable.
     let disabled = service(props().items(disabled_items()));
+
     assert_eq!(
         disabled
             .connect(&|_| {})
@@ -1979,11 +2069,13 @@ fn non_selectable_nodes_omit_aria_selected() {
 #[test]
 fn drag_over_invalid_target_clears_stale_drop_target() {
     let mut service = service(dnd_props());
+
     drop(service.send(Event::DragStart(key(2)))); // drag Apple
     drop(service.send(Event::DragOver(CollectionDropTarget {
         key: key(7),
         position: DropPosition::Before,
     })));
+
     assert!(service.context().drop_target.is_some());
 
     // Hover an invalid slot (the dragged node itself): the stale target clears.
@@ -1991,6 +2083,7 @@ fn drag_over_invalid_target_clears_stale_drop_target() {
         key: key(2),
         position: DropPosition::On,
     }));
+
     assert!(
         result.context_changed,
         "dropping the stale target is a context change"
@@ -2007,7 +2100,9 @@ fn drag_handle_is_inert_when_dnd_disabled() {
     // DnD off, but a consumer still renders a handle on an enabled node: it must
     // not present an operable-looking control.
     let service = service(props()); // dnd_enabled = false
+
     let attrs = service.connect(&|_| {}).drag_handle_attrs(&key(2));
+
     assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
     assert_eq!(attrs.get(&HtmlAttr::TabIndex), Some("-1"));
 }
@@ -2017,13 +2112,19 @@ fn expansion_prop_echo_preserves_active_drag() {
     // A controlled-expanded tree echoing a new `expanded` prop during a drag
     // (e.g. adapter hover-expand) must not cancel the in-flight reorder.
     let mut expanded = BTreeSet::new();
+
     expanded.insert(key(1));
+
     let mut service = service(dnd_props().expanded(expanded.clone()));
+
     drop(service.send(Event::DragStart(key(2))));
+
     assert_eq!(service.context().dragging, Some(key(2)));
 
     expanded.insert(key(4)); // echo: also expand Vegetables; items unchanged.
+
     drop(service.set_props(dnd_props().expanded(expanded)));
+
     assert_eq!(
         service.context().dragging,
         Some(key(2)),
@@ -2036,11 +2137,14 @@ fn drag_over_hidden_target_is_rejected() {
     // Vegetables (4) is collapsed, so Carrot (5) is hidden. A pointer hit-test
     // that sends the hidden row as a target must be rejected.
     let mut service = service(dnd_props());
+
     drop(service.send(Event::DragStart(key(7)))); // drag Grains
+
     let result = service.send(Event::DragOver(CollectionDropTarget {
         key: key(5),
         position: DropPosition::On,
     }));
+
     assert!(!result.context_changed);
     assert_eq!(
         service.context().drop_target,
@@ -2053,10 +2157,13 @@ fn drag_over_hidden_target_is_rejected() {
 fn selection_drops_keys_removed_from_collection() {
     // Select Grains (7), then supply a collection that no longer contains it.
     let mut service = service(props());
+
     drop(service.send(Event::SelectNode(key(7))));
+
     assert!(service.connect(&|_| {}).is_node_selected(&key(7)));
 
     let smaller = TreeCollection::new(vec![branch(1, "Fruits", true, vec![leaf(2, "Apple")])]);
+
     drop(service.set_props(props().items(smaller)));
 
     assert!(
@@ -2073,13 +2180,16 @@ fn multiple_selection_drops_all_removed_keys() {
             .multiple(true)
             .selection_mode(selection::Mode::Multiple),
     );
+
     drop(service.send(Event::SelectNode(key(2))));
     drop(service.send(Event::SelectNode(key(7))));
+
     assert!(service.connect(&|_| {}).is_node_selected(&key(2)));
     assert!(service.connect(&|_| {}).is_node_selected(&key(7)));
 
     // New collection contains neither selected key.
     let smaller = TreeCollection::new(vec![branch(1, "Fruits", true, vec![leaf(3, "Banana")])]);
+
     drop(
         service.set_props(
             props()
@@ -2099,19 +2209,24 @@ fn multiple_selection_drops_all_removed_keys() {
 fn stale_drop_target_cleared_when_echo_hides_it() {
     // Vegetables (4) starts expanded so Carrot (5) is a visible drop slot.
     let mut expanded = BTreeSet::new();
+
     expanded.insert(key(1));
     expanded.insert(key(4));
+
     let mut service = service(dnd_props().expanded(expanded));
+
     drop(service.send(Event::DragStart(key(7)))); // drag Grains
     drop(service.send(Event::DragOver(CollectionDropTarget {
         key: key(5),
         position: DropPosition::Before,
     })));
+
     assert!(service.context().drop_target.is_some());
 
     // Echo a collapse of Vegetables: Carrot (5) is no longer visible. The drag
     // survives but the now-hidden target is dropped.
     let collapsed: BTreeSet<Key> = [key(1)].into_iter().collect();
+
     drop(service.set_props(dnd_props().expanded(collapsed)));
 
     assert_eq!(
@@ -2135,8 +2250,11 @@ fn typeahead_ignored_during_ime_composition() {
     // A key event with is_composing=true carries a transient IME character that
     // must not drive typeahead until composition completes.
     let service = service(props());
+
     let mut data = printable('g');
+
     data.is_composing = true;
+
     assert!(
         dispatch_key(&service, &key(1), &data).is_empty(),
         "no typeahead is dispatched while an IME composition is active"
@@ -2148,12 +2266,17 @@ fn ime_asterisk_does_not_expand_siblings() {
     // The `*` expand-siblings shortcut is also character input: suppress it mid
     // composition.
     let recorder = Recorder::default();
+
     let service = service(props());
+
     let mut data = printable('*');
+
     data.is_composing = true;
+
     service
         .connect(&|event| record(&recorder, event))
         .on_node_keydown(&key(2), &data);
+
     assert!(recorder.into_inner().is_empty());
 }
 
@@ -2166,6 +2289,7 @@ fn init_sanitizes_uncontrolled_selected_binding() {
             .items(disabled_items())
             .default_selected(selection::Set::Single(key(2))),
     );
+
     assert!(
         service.context().selected.get().is_empty(),
         "the uncontrolled selected binding is sanitized at init"
@@ -2176,7 +2300,9 @@ fn init_sanitizes_uncontrolled_selected_binding() {
 fn expand_all_skips_disabled_branches() {
     // disabled_branch_tree: node 1 is a disabled, collapsed branch.
     let mut service = service(props().items(disabled_branch_tree()));
+
     drop(service.send(Event::ExpandAll));
+
     assert!(
         !service.context().expanded.get().contains(&key(1)),
         "ExpandAll honors the disabled guard and does not expand a disabled branch"
@@ -2187,11 +2313,14 @@ fn expand_all_skips_disabled_branches() {
 fn drag_over_disabled_target_is_rejected() {
     // disabled_items: Apple (2) disabled, Grains (7) enabled. Drag 7 over 2.
     let mut service = service(props().items(disabled_items()).dnd_enabled(true));
+
     drop(service.send(Event::DragStart(key(7))));
+
     let result = service.send(Event::DragOver(CollectionDropTarget {
         key: key(2),
         position: DropPosition::On,
     }));
+
     assert!(!result.context_changed);
     assert_eq!(
         service.context().drop_target,
@@ -2211,7 +2340,9 @@ fn select_all_resolves_to_selectable_keys() {
             .selection_mode(selection::Mode::Multiple)
             .default_selected(selection::Set::All),
     );
+
     let api = service.connect(&|_| {});
+
     assert!(
         !api.is_node_selected(&key(2)),
         "All does not select the disabled node"
@@ -2227,7 +2358,9 @@ fn select_all_resolves_to_selectable_keys() {
 fn drag_start_from_hidden_node_is_rejected() {
     // Vegetables (4) is collapsed, so Carrot (5) is not in the rendered tree.
     let mut service = service(dnd_props());
+
     let result = service.send(Event::DragStart(key(5)));
+
     assert!(!result.context_changed);
     assert_eq!(
         service.context().dragging,
@@ -2266,8 +2399,11 @@ fn controlled_selection_change_notifies_without_mutating() {
         .pending_effects
         .pop()
         .expect("selection-change effect");
+
     let noop_send: StrongSend<Event> = Arc::new(|_| {});
+
     drop(effect.run(service.context(), service.props(), noop_send));
+
     assert_eq!(
         captured.lock().unwrap().as_slice(),
         &[selection::Set::Single(key(2))],
@@ -2299,9 +2435,13 @@ fn controlled_expansion_change_notifies_without_mutating() {
         .pending_effects
         .pop()
         .expect("expanded-change effect");
+
     let noop_send: StrongSend<Event> = Arc::new(|_| {});
+
     drop(effect.run(service.context(), service.props(), noop_send));
+
     let expected: BTreeSet<Key> = [key(4)].into_iter().collect();
+
     assert_eq!(captured.lock().unwrap().as_slice(), &[expected]);
 }
 
@@ -2311,6 +2451,7 @@ fn uncontrolled_changes_mutate_and_emit_effects() {
     let mut service = service(props());
 
     let result = service.send(Event::SelectNode(key(2)));
+
     assert!(service.connect(&|_| {}).is_node_selected(&key(2)));
     assert!(
         result
@@ -2321,6 +2462,7 @@ fn uncontrolled_changes_mutate_and_emit_effects() {
     );
 
     let result = service.send(Event::ExpandNode(key(4)));
+
     assert!(service.connect(&|_| {}).is_node_expanded(&key(4)));
     assert!(
         result
@@ -2334,14 +2476,19 @@ fn uncontrolled_changes_mutate_and_emit_effects() {
 fn drag_cancelled_when_source_hidden_by_echo() {
     // Fruits (1) is controlled-expanded so Apple (2) is a visible drag source.
     let mut expanded = BTreeSet::new();
+
     expanded.insert(key(1));
+
     let mut service = service(dnd_props().expanded(expanded));
+
     drop(service.send(Event::DragStart(key(2)))); // Apple
+
     assert_eq!(service.context().dragging, Some(key(2)));
 
     // Echo a collapse of Fruits: Apple (2) is no longer rendered. The whole drag
     // is cancelled, matching DragStart's hidden-source rejection.
     drop(service.set_props(dnd_props().expanded(BTreeSet::new())));
+
     assert_eq!(
         service.context().dragging,
         None,
@@ -2357,14 +2504,19 @@ fn toggle_leaf_click_deselects_already_selected_leaf() {
             .multiple(true)
             .selection_mode(selection::Mode::Multiple),
     );
+
     drop(service.send(Event::SelectNode(key(2))));
+
     assert!(service.connect(&|_| {}).is_node_selected(&key(2)));
 
     let recorder = Recorder::default();
+
     service
         .connect(&|event| record(&recorder, event))
         .on_leaf_click(&key(2));
+
     let events = recorder.into_inner();
+
     assert!(
         events.contains(&Event::DeselectNode(key(2))),
         "under toggle behavior, clicking a selected leaf deselects it"
@@ -2380,13 +2532,17 @@ fn replace_leaf_click_always_selects() {
             .selection_mode(selection::Mode::Multiple)
             .selection_behavior(selection::Behavior::Replace),
     );
+
     drop(service.send(Event::SelectNode(key(2))));
 
     let recorder = Recorder::default();
+
     service
         .connect(&|event| record(&recorder, event))
         .on_leaf_click(&key(2));
+
     let events = recorder.into_inner();
+
     assert!(
         events.contains(&Event::SelectNode(key(2))),
         "under replace behavior, a click (re)selects rather than deselecting"
@@ -2666,4 +2822,1349 @@ fn drop_indicator_snapshots() {
 
         assert_snapshot!(name, snapshot_attrs(&attrs));
     }
+}
+
+// ----------------------------------------------------------------------------
+// §5 Lazy loading
+// ----------------------------------------------------------------------------
+
+/// A tree whose branch (1, "Fruits") has the `has_children` affordance but no
+/// loaded children — the canonical `NotLoaded` lazy branch. Node 4 ("Vegetables")
+/// is a real, loaded branch.
+fn lazy_items() -> TreeCollection<TreeItem> {
+    TreeCollection::new(vec![
+        leaf_with(
+            1,
+            "Fruits",
+            TreeItem {
+                has_children: true,
+                ..item("Fruits")
+            },
+        ),
+        branch(4, "Vegetables", false, vec![leaf(5, "Carrot")]),
+        leaf(7, "Grains"),
+    ])
+}
+
+fn lazy_props() -> Props {
+    Props::new().id("tree").items(lazy_items())
+}
+
+/// Children configs delivered by a lazy load under "Fruits" (1).
+fn loaded_children() -> Vec<TreeItemConfig<TreeItem>> {
+    vec![leaf(2, "Apple"), leaf(3, "Banana")]
+}
+
+#[test]
+fn init_seeds_load_state_not_loaded_for_lazy_branch() {
+    let service = service(lazy_props());
+
+    let api = service.connect(&|_| {});
+
+    // Lazy branch (has_children flag, no real children) starts NotLoaded.
+    assert_eq!(api.node_load_state(&key(1)), NodeLoadState::NotLoaded);
+    // A real, loaded branch starts Loaded.
+    assert_eq!(api.node_load_state(&key(4)), NodeLoadState::Loaded);
+    // A plain leaf starts Loaded.
+    assert_eq!(api.node_load_state(&key(7)), NodeLoadState::Loaded);
+}
+
+#[test]
+fn expanding_lazy_branch_emits_load_children_and_marks_loading() {
+    let requested: Arc<Mutex<Vec<Key>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&requested);
+
+    let mut service =
+        service(lazy_props().on_load_children(move |key: Key| sink.lock().unwrap().push(key)));
+
+    let mut result = service.send(Event::ExpandNode(key(1)));
+
+    // The branch is marked Loading immediately.
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+    assert!(service.connect(&|_| {}).is_loading(&key(1)));
+
+    // A LoadChildren effect is emitted; running it invokes `on_load_children`
+    // with the branch key so the app can fetch the children.
+    let index = result
+        .pending_effects
+        .iter()
+        .position(|effect| effect.name == Effect::LoadChildren)
+        .expect("expanding a NotLoaded branch emits Effect::LoadChildren");
+
+    let effect = result.pending_effects.remove(index);
+
+    let noop_send: StrongSend<Event> = Arc::new(|_| {});
+
+    drop(effect.run(service.context(), service.props(), noop_send));
+
+    assert_eq!(requested.lock().unwrap().as_slice(), &[key(1)]);
+}
+
+#[test]
+fn expanding_loaded_branch_does_not_emit_load_children() {
+    let mut service = service(lazy_props());
+
+    let result = service.send(Event::ExpandNode(key(4)));
+
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .all(|effect| effect.name != Effect::LoadChildren),
+        "expanding an already-loaded branch must not trigger a lazy load"
+    );
+}
+
+#[test]
+fn toggle_lazy_branch_emits_load_children() {
+    let mut service = service(lazy_props());
+
+    let result = service.send(Event::ToggleNode(key(1)));
+
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::LoadChildren)
+    );
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+}
+
+#[test]
+fn expand_all_triggers_lazy_load_for_unloaded_branch() {
+    let mut service = service(lazy_props());
+
+    let result = service.send(Event::ExpandAll);
+
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::LoadChildren),
+        "ExpandAll triggers lazy loading for NotLoaded branches"
+    );
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+}
+
+#[test]
+fn children_loaded_inserts_and_marks_loaded() {
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1))));
+
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: loaded_children(),
+    }));
+
+    let ctx = service.context();
+    // Children are now present in the collection under "Fruits".
+    assert!(
+        ctx.items.get(&key(2)).is_some(),
+        "Apple inserted under Fruits"
+    );
+    assert!(
+        ctx.items.get(&key(3)).is_some(),
+        "Banana inserted under Fruits"
+    );
+    assert_eq!(
+        ctx.items.get(&key(2)).and_then(|n| n.parent_key.clone()),
+        Some(key(1))
+    );
+    // The parent transitions to Loaded.
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+}
+
+#[test]
+fn reexpanding_already_expanded_unloaded_branch_triggers_load() {
+    // A branch that booted expanded (via default_expanded) but lazy stays
+    // NotLoaded until the user expands it; re-sending ExpandNode (the expansion
+    // set is unchanged) still fires the lazy load.
+    let mut expanded = BTreeSet::new();
+
+    expanded.insert(key(1));
+
+    let mut service = service(lazy_props().default_expanded(expanded));
+
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::NotLoaded,
+        "a default-expanded lazy branch does not auto-load at init"
+    );
+
+    let result = service.send(Event::ExpandNode(key(1)));
+
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::LoadChildren),
+        "re-expanding an already-expanded NotLoaded branch retries the load"
+    );
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+}
+
+#[test]
+fn controlled_expansion_still_fires_lazy_load_on_first_expand() {
+    // A controlled tree does not optimistically change `expanded`, but the lazy
+    // load must still fire so children can be fetched before the echo.
+    let mut service = service(lazy_props().expanded(BTreeSet::new()));
+
+    let result = service.send(Event::ExpandNode(key(1)));
+
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::LoadChildren)
+    );
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::ExpandedChange),
+        "the expanded-change notification still fires for the controlled echo"
+    );
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+    // Controlled: the rendered expansion is unchanged until the parent echoes.
+    assert!(!service.connect(&|_| {}).is_node_expanded(&key(1)));
+}
+
+#[test]
+fn load_error_then_reexpand_retries() {
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::LoadError(key(1))));
+
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Error
+    );
+
+    // Re-expanding an `Error` branch retries the lazy load: the failed state
+    // would otherwise strand any retry affordance the adapter exposes, since
+    // there is no separate retry event. The branch flips back to `Loading`
+    // and a fresh `LoadChildren` effect fires for the consumer.
+    let result = service.send(Event::ExpandNode(key(1)));
+
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::LoadChildren),
+        "an Error branch must re-trigger LoadChildren on re-expand (retry)"
+    );
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+}
+
+#[test]
+fn loading_branch_advertises_aria_busy() {
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1))));
+
+    let api = service.connect(&|_| {});
+
+    let attrs = api.leaf_attrs(&key(1)); // node 1 is a lazy leaf-shaped branch
+
+    assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Busy)), Some("true"));
+    assert_eq!(attrs.get(&HtmlAttr::Data("ars-loading")), Some("true"));
+}
+
+#[test]
+fn children_loaded_ignored_for_unknown_parent() {
+    let mut service = service(lazy_props());
+
+    let result = service.send(Event::ChildrenLoaded {
+        parent: key(999),
+        children: loaded_children(),
+    });
+
+    assert!(
+        !result.context_changed,
+        "children for an absent parent are ignored, not spliced under a dangling key"
+    );
+}
+
+#[test]
+fn load_error_ignored_for_unknown_node() {
+    let mut service = service(lazy_props());
+
+    let result = service.send(Event::LoadError(key(999)));
+
+    assert!(!result.context_changed);
+}
+
+#[test]
+fn rename_start_ignored_for_unknown_node() {
+    let mut service = service(renamable_props());
+
+    let result = service.send(Event::RenameStart(key(999)));
+
+    assert!(!result.context_changed);
+    assert_eq!(service.context().renaming_key, None);
+}
+
+#[test]
+fn load_error_marks_error_state() {
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::LoadError(key(1))));
+
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Error
+    );
+}
+
+#[test]
+fn sync_props_reseeds_load_state() {
+    // After loading children and re-deriving props, the now-loaded branch must
+    // report Loaded (its load_state is reseeded from the new collection).
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: loaded_children(),
+    }));
+
+    // Re-derive props from the now-populated collection.
+    let new_items = service.context().items.clone();
+
+    drop(service.set_props(Props::new().id("tree").items(new_items)));
+
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+}
+
+// ----------------------------------------------------------------------------
+// §6 Renamable nodes
+// ----------------------------------------------------------------------------
+
+fn renamable_props() -> Props {
+    props().renamable(true)
+}
+
+#[test]
+fn renamable_defaults_false() {
+    assert!(!Props::new().renamable);
+    assert!(Props::new().renamable(true).renamable);
+}
+
+#[test]
+fn init_renaming_key_none() {
+    assert_eq!(service(renamable_props()).context().renaming_key, None);
+}
+
+#[test]
+fn rename_start_sets_renaming_key_when_enabled() {
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2))));
+
+    assert_eq!(service.context().renaming_key, Some(key(2)));
+    assert_eq!(service.context().focused_node, Some(key(2)));
+    assert!(service.connect(&|_| {}).is_renaming(&key(2)));
+}
+
+#[test]
+fn rename_start_ignored_when_not_renamable() {
+    let mut service = service(props()); // renamable = false
+
+    let result = service.send(Event::RenameStart(key(2)));
+
+    assert!(!result.context_changed);
+    assert_eq!(service.context().renaming_key, None);
+}
+
+#[test]
+fn rename_start_ignored_for_disabled_node() {
+    let disabled_items = TreeCollection::new(vec![branch(
+        1,
+        "Fruits",
+        true,
+        vec![leaf_with(
+            2,
+            "Apple",
+            TreeItem {
+                disabled: true,
+                ..item("Apple")
+            },
+        )],
+    )]);
+
+    let mut service = service(renamable_props().items(disabled_items));
+
+    let result = service.send(Event::RenameStart(key(2)));
+
+    assert!(!result.context_changed);
+    assert_eq!(service.context().renaming_key, None);
+}
+
+#[test]
+fn rename_commit_clears_renaming_key() {
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2))));
+    drop(service.send(Event::RenameCommit {
+        key: key(2),
+        new_name: "Apricot".to_string(),
+    }));
+
+    assert_eq!(service.context().renaming_key, None);
+}
+
+#[test]
+fn rename_commit_for_outgoing_key_still_fires_effect() {
+    // During a rename retarget the outgoing input's blur fires
+    // `RenameCommit` for the previous key while `renaming_key` already
+    // points at the new node. The transition must still emit
+    // `Effect::Rename` so the outgoing edit reaches the consumer; only the
+    // `renaming_key` clear is gated on the key actually being the active
+    // target.
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2))));
+
+    let result = service.send(Event::RenameCommit {
+        key: key(3),
+        new_name: "x".to_string(),
+    });
+
+    // `renaming_key` is unchanged — the new active target stays.
+    assert_eq!(service.context().renaming_key, Some(key(2)));
+
+    // ...but `Effect::Rename` did fire for the committed (outgoing) key, so
+    // the consumer's `on_rename` receives the outgoing edit.
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::Rename),
+        "RenameCommit for an outgoing key still emits Effect::Rename"
+    );
+}
+
+#[test]
+fn rename_commit_no_op_when_no_rename_active() {
+    // A stray `RenameCommit` when nothing is renaming anywhere must be a
+    // pure no-op — no context change, no effect fired. Distinct from the
+    // retarget hand-off above (where a rename IS active on another key).
+    let mut service = service(renamable_props());
+
+    let result = service.send(Event::RenameCommit {
+        key: key(2),
+        new_name: "x".to_string(),
+    });
+
+    assert!(!result.context_changed);
+    assert!(result.pending_effects.is_empty());
+    assert_eq!(service.context().renaming_key, None);
+}
+
+#[test]
+fn rename_cancel_clears_renaming_key() {
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2))));
+    drop(service.send(Event::RenameCancel(key(2))));
+
+    assert_eq!(service.context().renaming_key, None);
+}
+
+#[test]
+fn rename_cancel_ignored_for_non_renaming_key() {
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2))));
+
+    let result = service.send(Event::RenameCancel(key(3)));
+
+    assert!(!result.context_changed);
+    assert_eq!(service.context().renaming_key, Some(key(2)));
+}
+
+#[test]
+fn rename_start_while_renaming_commits_previous() {
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2))));
+
+    assert_eq!(service.context().renaming_key, Some(key(2)));
+
+    // Starting rename on a second node commits the first, then activates the new.
+    drop(service.send(Event::RenameStart(key(3))));
+
+    assert_eq!(
+        service.context().renaming_key,
+        Some(key(3)),
+        "the new node becomes the active rename target"
+    );
+}
+
+#[test]
+fn f2_dispatches_rename_start_on_focused_node() {
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::FocusNode(key(2))));
+
+    let recorder = Recorder::default();
+
+    service
+        .connect(&|event| record(&recorder, event))
+        .on_node_keydown(&key(2), &keyboard(KeyboardKey::F2));
+
+    assert!(
+        recorder.into_inner().contains(&Event::RenameStart(key(2))),
+        "F2 starts rename on the focused node"
+    );
+}
+
+#[test]
+fn sync_props_clears_renaming_key_when_node_removed() {
+    // Renaming a node, then a data update that removes it, must not leave a
+    // dangling rename target.
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2)))); // Apple
+
+    assert_eq!(service.context().renaming_key, Some(key(2)));
+
+    // New collection without node 2.
+    let without_apple = TreeCollection::new(vec![
+        branch(1, "Fruits", true, vec![leaf(3, "Banana")]),
+        leaf(7, "Grains"),
+    ]);
+
+    drop(service.set_props(renamable_props().items(without_apple)));
+
+    assert_eq!(
+        service.context().renaming_key,
+        None,
+        "a rename target removed by a data update is cleared"
+    );
+}
+
+#[test]
+fn sync_props_keeps_renaming_key_when_node_survives() {
+    // A data update that keeps the renaming node must preserve the rename.
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2))));
+
+    // Same shape, different instance (forces an items_changed SyncProps).
+    let same_with_extra = TreeCollection::new(vec![
+        branch(1, "Fruits", true, vec![leaf(2, "Apple"), leaf(3, "Banana")]),
+        branch(
+            4,
+            "Vegetables",
+            false,
+            vec![leaf(5, "Carrot"), leaf(6, "Daikon")],
+        ),
+        leaf(7, "Grains"),
+        leaf(8, "Extra"),
+    ]);
+
+    drop(service.set_props(renamable_props().items(same_with_extra)));
+
+    assert_eq!(
+        service.context().renaming_key,
+        Some(key(2)),
+        "a surviving rename target is preserved across a data update"
+    );
+}
+
+#[test]
+fn part_attrs_dispatches_node_rename_input() {
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2))));
+
+    let api = service.connect(&|_| {});
+
+    let attrs = api.part_attrs(Part::NodeRenameInput { node_id: key(2) });
+
+    assert_eq!(attrs.get(&HtmlAttr::Type), Some("text"));
+    assert_eq!(
+        attrs.get(&HtmlAttr::Data("ars-part")),
+        Some("node-rename-input")
+    );
+}
+
+#[test]
+fn node_rename_input_attrs_shape() {
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2)))); // Apple
+
+    let api = service.connect(&|_| {});
+
+    let attrs = api.node_rename_input_attrs(&key(2));
+
+    assert_eq!(attrs.get(&HtmlAttr::Type), Some("text"));
+    assert_eq!(attrs.get(&HtmlAttr::Value), Some("Apple"));
+    assert_eq!(
+        attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
+        Some("Rename Apple")
+    );
+}
+
+#[test]
+fn on_rename_input_keydown_enter_commits() {
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2))));
+
+    let recorder = Recorder::default();
+
+    service
+        .connect(&|event| record(&recorder, event))
+        .on_rename_input_keydown(&key(2), "Enter", "Apricot");
+
+    assert!(recorder.into_inner().contains(&Event::RenameCommit {
+        key: key(2),
+        new_name: "Apricot".to_string(),
+    }));
+}
+
+#[test]
+fn on_rename_input_keydown_escape_cancels() {
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2))));
+
+    let recorder = Recorder::default();
+
+    service
+        .connect(&|event| record(&recorder, event))
+        .on_rename_input_keydown(&key(2), "Escape", "ignored");
+
+    assert!(recorder.into_inner().contains(&Event::RenameCancel(key(2))));
+}
+
+#[test]
+fn on_rename_input_blur_commits_when_renaming() {
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2))));
+
+    let recorder = Recorder::default();
+
+    service
+        .connect(&|event| record(&recorder, event))
+        .on_rename_input_blur(&key(2), "Apricot");
+
+    assert!(recorder.into_inner().contains(&Event::RenameCommit {
+        key: key(2),
+        new_name: "Apricot".to_string(),
+    }));
+}
+
+#[test]
+fn on_rename_input_blur_noop_when_not_renaming() {
+    let service = service(renamable_props()); // no active rename
+
+    let recorder = Recorder::default();
+
+    service
+        .connect(&|event| record(&recorder, event))
+        .on_rename_input_blur(&key(2), "Apricot");
+
+    assert!(recorder.into_inner().is_empty());
+}
+
+#[test]
+fn expand_all_loads_every_lazy_branch() {
+    // Two lazy branches — `Fruits` (1) and `Beverages` (8). `ExpandAll` must
+    // fan one `LoadChildren` effect per `NotLoaded` branch and mark every one
+    // `Loading`, otherwise the bulk path strands the second branch as
+    // expanded-but-empty without ever calling `on_load_children`.
+    let items = TreeCollection::new(vec![
+        leaf_with(
+            1,
+            "Fruits",
+            TreeItem {
+                has_children: true,
+                ..item("Fruits")
+            },
+        ),
+        leaf_with(
+            8,
+            "Beverages",
+            TreeItem {
+                has_children: true,
+                ..item("Beverages")
+            },
+        ),
+        leaf(7, "Grains"),
+    ]);
+
+    let requested: Arc<Mutex<Vec<Key>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&requested);
+
+    let mut service = service(
+        Props::new()
+            .id("tree")
+            .items(items)
+            .on_load_children(move |k: Key| sink.lock().unwrap().push(k)),
+    );
+
+    let result = service.send(Event::ExpandAll);
+
+    let api = service.connect(&|_| {});
+    assert_eq!(api.node_load_state(&key(1)), NodeLoadState::Loading);
+    assert_eq!(api.node_load_state(&key(8)), NodeLoadState::Loading);
+
+    // Two `LoadChildren` effects emitted — one per lazy branch.
+    let load_effects: Vec<_> = result
+        .pending_effects
+        .into_iter()
+        .filter(|effect| effect.name == Effect::LoadChildren)
+        .collect();
+    assert_eq!(
+        load_effects.len(),
+        2,
+        "one LoadChildren effect per lazy branch"
+    );
+
+    // Running each effect invokes `on_load_children` with that branch's key.
+    let noop_send: StrongSend<Event> = Arc::new(|_| {});
+    for effect in load_effects {
+        drop(effect.run(service.context(), service.props(), Arc::clone(&noop_send)));
+    }
+
+    let mut got = requested.lock().unwrap().clone();
+    got.sort();
+    let mut want = vec![key(1), key(8)];
+    want.sort();
+    assert_eq!(got, want);
+}
+
+#[test]
+fn rename_commit_emits_rename_event_to_callback() {
+    // `RenameCommit { key, new_name }` is the only path that surfaces the
+    // edited label to the consumer. Without an `on_rename` callback fired by
+    // `Effect::Rename`, the new value would be silently discarded.
+    let captured: Arc<Mutex<Vec<RenameEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&captured);
+
+    let mut service = service(
+        renamable_props().on_rename(move |event: RenameEvent| sink.lock().unwrap().push(event)),
+    );
+
+    drop(service.send(Event::RenameStart(key(2))));
+    let mut result = service.send(Event::RenameCommit {
+        key: key(2),
+        new_name: "Apricot".to_string(),
+    });
+
+    // Renaming clears the rename_key and emits a single Rename effect.
+    assert_eq!(service.context().renaming_key, None);
+
+    let index = result
+        .pending_effects
+        .iter()
+        .position(|e| e.name == Effect::Rename)
+        .expect("RenameCommit must emit Effect::Rename");
+    let effect = result.pending_effects.remove(index);
+
+    let noop_send: StrongSend<Event> = Arc::new(|_| {});
+    drop(effect.run(service.context(), service.props(), noop_send));
+
+    assert_eq!(
+        captured.lock().unwrap().as_slice(),
+        &[RenameEvent {
+            key: key(2),
+            new_name: "Apricot".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn disabling_renamable_via_sync_props_cancels_active_rename() {
+    // Flipping `renamable` false mid-edit must cancel the active rename so
+    // adapters do not keep rendering `NodeRenameInput` against a tree whose
+    // props now say renaming is off. The gate has two parts: `on_props_changed`
+    // emits `SyncProps` on the toggle, and `SyncProps` itself clears
+    // `renaming_key` when the live prop is false.
+    let mut service = service(renamable_props());
+    drop(service.send(Event::RenameStart(key(2))));
+    assert_eq!(service.context().renaming_key, Some(key(2)));
+
+    let new_props = renamable_props().renamable(false);
+    let triggered = <Machine as ars_core::Machine>::on_props_changed(service.props(), &new_props);
+    assert!(
+        triggered.contains(&Event::SyncProps),
+        "on_props_changed must emit SyncProps when `renamable` flips"
+    );
+
+    drop(service.set_props(new_props));
+    for event in triggered {
+        drop(service.send(event));
+    }
+
+    assert_eq!(service.context().renaming_key, None);
+    assert!(!service.connect(&|_| {}).is_renaming(&key(2)));
+}
+
+#[test]
+fn children_loaded_ignored_when_parent_already_loaded() {
+    // A duplicate or late `ChildrenLoaded` delivery must not re-insert the
+    // children: `TreeCollection::new` accepts duplicate nodes, so a second
+    // insertion would leave duplicated visible rows whose `get()` only points
+    // at the last copy. Only an in-flight `Loading` parent accepts the
+    // delivery.
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1)))); // Loading
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: loaded_children(),
+    })); // Loaded
+
+    let after_first = service.context().items.clone();
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+
+    // Second delivery while the parent is already `Loaded` must be a no-op.
+    let result = service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: loaded_children(),
+    });
+
+    assert!(
+        !result.context_changed,
+        "duplicate ChildrenLoaded for a Loaded parent must be ignored"
+    );
+    assert_eq!(&after_first, &service.context().items);
+}
+
+#[test]
+fn lazy_loaded_children_survive_unrelated_sync_props_echo() {
+    // `ctx.items` carries lazy-spliced children that the consumer's
+    // `Props::items` may not have echoed back. A `SyncProps` for an unrelated
+    // prop change (e.g., toggling `renamable`) must not wipe that subtree:
+    // the comparison key is the last-seen `Props::items` baseline, not
+    // `ctx.items` itself.
+    let mut service = service(lazy_props().renamable(true));
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: loaded_children(),
+    }));
+    let items_after_load = service.context().items.clone();
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+    assert!(items_after_load.get(&key(2)).is_some());
+
+    // Toggle `renamable` (true -> false); items prop stays the same.
+    let new_props = lazy_props().renamable(false);
+    let triggered = <Machine as ars_core::Machine>::on_props_changed(service.props(), &new_props);
+    assert!(triggered.contains(&Event::SyncProps));
+
+    drop(service.set_props(new_props));
+    for event in triggered {
+        drop(service.send(event));
+    }
+
+    // The lazy-loaded subtree survives the unrelated echo, and load_state
+    // for the parent is still Loaded (not reset to NotLoaded).
+    assert_eq!(&items_after_load, &service.context().items);
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+    assert!(service.context().items.get(&key(2)).is_some());
+    assert!(service.context().items.get(&key(3)).is_some());
+}
+
+#[test]
+fn rename_cancelled_when_target_node_becomes_disabled() {
+    // A consumer-driven prop update can flip a renaming node to `disabled`.
+    // The rest of the machine treats disabled nodes as blocking all
+    // interaction, so an in-flight rename must not survive the transition.
+    let mut service = service(renamable_props());
+    drop(service.send(Event::RenameStart(key(2))));
+    assert_eq!(service.context().renaming_key, Some(key(2)));
+
+    // Build a new items tree where the same key (`2`) is now disabled.
+    let disabled_items = TreeCollection::new(vec![branch(
+        1,
+        "Fruits",
+        true,
+        vec![
+            leaf_with(
+                2,
+                "Banana",
+                TreeItem {
+                    disabled: true,
+                    ..item("Banana")
+                },
+            ),
+            leaf(3, "Cherry"),
+        ],
+    )]);
+    let new_props = Props::new()
+        .id("tree")
+        .items(disabled_items)
+        .renamable(true);
+
+    let triggered = <Machine as ars_core::Machine>::on_props_changed(service.props(), &new_props);
+    assert!(triggered.contains(&Event::SyncProps));
+
+    drop(service.set_props(new_props));
+    for event in triggered {
+        drop(service.send(event));
+    }
+
+    assert_eq!(service.context().renaming_key, None);
+    assert!(!service.connect(&|_| {}).is_renaming(&key(2)));
+}
+
+#[test]
+fn load_error_ignored_when_parent_already_loaded() {
+    // A late `LoadError` arriving after the same async request has already
+    // delivered `ChildrenLoaded` must not flip an already-`Loaded` branch
+    // back to `Error`; later retries would otherwise request loading again
+    // for a populated subtree. Only an in-flight `Loading` parent accepts
+    // the failure (mirrors the `ChildrenLoaded` guard).
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1)))); // Loading
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: loaded_children(),
+    })); // Loaded
+
+    let items_after = service.context().items.clone();
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+
+    let result = service.send(Event::LoadError(key(1)));
+
+    assert!(
+        !result.context_changed,
+        "stale LoadError after success must be ignored"
+    );
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+    assert_eq!(&items_after, &service.context().items);
+}
+
+#[test]
+fn children_loaded_recomputes_disabled_keys_for_loaded_disabled_child() {
+    // A lazy load can deliver children carrying `TreeItem { disabled: true }`.
+    // `ChildrenLoaded` must rebuild `selection_state.disabled_keys` from the
+    // updated collection — otherwise `SelectNode` happily admits a key whose
+    // node is now disabled (the selection machine still trusts a stale
+    // disabled set).
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: vec![
+            leaf_with(
+                2,
+                "Apple",
+                TreeItem {
+                    disabled: true,
+                    ..item("Apple")
+                },
+            ),
+            leaf(3, "Banana"),
+        ],
+    }));
+
+    // The disabled-key set now contains the newly-loaded disabled child.
+    assert!(
+        service
+            .context()
+            .selection_state
+            .disabled_keys
+            .contains(&key(2))
+    );
+
+    // SelectNode on the disabled-but-loaded child is a no-op.
+    let before = service.context().selected.get().clone();
+    drop(service.send(Event::SelectNode(key(2))));
+    assert_eq!(&before, service.context().selected.get());
+
+    // The enabled sibling can still be selected.
+    drop(service.send(Event::SelectNode(key(3))));
+    assert!(service.context().selected.get().contains(&key(3)));
+}
+
+#[test]
+fn lazy_loaded_disabled_child_stays_unselectable_across_unrelated_sync_props() {
+    // After `ChildrenLoaded` inserts a disabled child and `disabled_keys` is
+    // recomputed (R3-T1), an unrelated `SyncProps` echo that preserves
+    // `ctx.items` (the lazy subtree survives unchanged `Props::items`) must
+    // also preserve the recomputed disabled-key set — otherwise the closure
+    // would silently restore the stale `props.items`-derived set and
+    // re-admit the disabled child to `SelectNode`.
+    let mut service = service(lazy_props().renamable(true));
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: vec![leaf_with(
+            2,
+            "Apple",
+            TreeItem {
+                disabled: true,
+                ..item("Apple")
+            },
+        )],
+    }));
+    assert!(
+        service
+            .context()
+            .selection_state
+            .disabled_keys
+            .contains(&key(2))
+    );
+
+    // Trigger an unrelated SyncProps: toggle `renamable` (items prop unchanged).
+    let new_props = lazy_props().renamable(false);
+    let triggered = <Machine as ars_core::Machine>::on_props_changed(service.props(), &new_props);
+    assert!(triggered.contains(&Event::SyncProps));
+    drop(service.set_props(new_props));
+    for event in triggered {
+        drop(service.send(event));
+    }
+
+    // The disabled-key set still includes the lazily-loaded disabled child.
+    assert!(
+        service
+            .context()
+            .selection_state
+            .disabled_keys
+            .contains(&key(2))
+    );
+
+    // SelectNode on the disabled-but-loaded child remains a no-op.
+    let before = service.context().selected.get().clone();
+    drop(service.send(Event::SelectNode(key(2))));
+    assert_eq!(&before, service.context().selected.get());
+}
+
+#[test]
+fn children_loaded_rejects_payload_with_duplicate_keys() {
+    // `TreeCollection::new` silently accepts duplicate nodes while resolving
+    // `get()` to the last occurrence only, so a lazy-load payload with a
+    // duplicated key would leave focus / selection / ARIA ids pointing at a
+    // different row than the visible duplicate. The `ChildrenLoaded` arm
+    // rejects such payloads — both keys that collide with the existing
+    // collection AND keys that duplicate each other within the payload.
+
+    // Case A: loaded child collides with a key that already exists in the
+    // tree (`key(7)` "Grains" is a root sibling in `lazy_items`).
+    let mut service_a = service(lazy_props());
+    drop(service_a.send(Event::ExpandNode(key(1))));
+
+    let result_a = service_a.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: vec![leaf(7, "Duplicate Grains")],
+    });
+
+    assert!(
+        !result_a.context_changed,
+        "ChildrenLoaded must reject a payload whose key already exists in items"
+    );
+    // Parent stays `Loading` — the delivery was rejected, not consumed, so
+    // a retry / a corrected payload can still settle the load.
+    assert_eq!(
+        service_a.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+
+    // Case B: loaded children duplicate each other within the payload.
+    let mut service_b = service(lazy_props());
+    drop(service_b.send(Event::ExpandNode(key(1))));
+
+    let result_b = service_b.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: vec![leaf(2, "Apple"), leaf(2, "Apple Twin")],
+    });
+
+    assert!(
+        !result_b.context_changed,
+        "ChildrenLoaded must reject a payload whose own keys duplicate each other"
+    );
+    assert_eq!(
+        service_b.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+}
+
+#[test]
+fn children_loaded_seeds_default_expanded_for_loaded_subtree() {
+    // `TreeItemConfig::default_expanded: true` is honored at init via the
+    // initial `ctx.expanded` seeding. Lazy-load deliveries must honor it
+    // too — `TreeCollection::new` records the marker internally, but
+    // rendering is driven by `ctx.expanded`, so the descendant would
+    // render collapsed without an explicit merge.
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: vec![TreeItemConfig {
+            key: key(2),
+            text_value: "Apple".to_string(),
+            value: item("Apple"),
+            children: vec![leaf(20, "Apple Pie")],
+            default_expanded: true,
+        }],
+    }));
+
+    let expanded = service.context().expanded.get();
+    assert!(
+        expanded.contains(&key(2)),
+        "loaded child with default_expanded must be merged into ctx.expanded"
+    );
+    assert!(service.connect(&|_| {}).is_node_expanded(&key(2)));
+}
+
+#[test]
+fn blur_during_retarget_fires_rename_effect_for_outgoing_input() {
+    // Adapter contract: `on_rename_input_blur` fires `RenameCommit` for the
+    // outgoing input after a retarget, so the user's edit reaches
+    // `Props::on_rename` via `Effect::Rename`. The new active rename
+    // (`renaming_key = Some(other)`) is unaffected.
+    let captured: Arc<Mutex<Vec<RenameEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&captured);
+
+    let mut service = service(
+        renamable_props().on_rename(move |event: RenameEvent| sink.lock().unwrap().push(event)),
+    );
+
+    // Start renaming node 2, then retarget to node 3 — `renaming_key` is now
+    // Some(key(3)) and node 2's input is the outgoing surface.
+    drop(service.send(Event::RenameStart(key(2))));
+    drop(service.send(Event::RenameStart(key(3))));
+    assert_eq!(service.context().renaming_key, Some(key(3)));
+
+    // Adapter dispatches the outgoing input's blur — through the API to
+    // verify the gate (must fire because `renaming_key.is_some()`).
+    let sent: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+    let sent_clone = Arc::clone(&sent);
+    service
+        .connect(&move |event| sent_clone.lock().unwrap().push(event))
+        .on_rename_input_blur(&key(2), "Apricot");
+
+    let outgoing_event = sent
+        .lock()
+        .unwrap()
+        .iter()
+        .find_map(|event| match event {
+            Event::RenameCommit { key, new_name } => Some((key.clone(), new_name.clone())),
+            _ => None,
+        })
+        .expect("blur during retarget must dispatch RenameCommit for the outgoing key");
+    assert_eq!(outgoing_event, (key(2), "Apricot".to_string()));
+
+    // Replay the event through the service so the effect surface materializes.
+    let mut result = service.send(Event::RenameCommit {
+        key: key(2),
+        new_name: "Apricot".to_string(),
+    });
+
+    // Active rename target is unchanged.
+    assert_eq!(service.context().renaming_key, Some(key(3)));
+
+    // ...but Effect::Rename fired; running it delivers the outgoing edit.
+    let index = result
+        .pending_effects
+        .iter()
+        .position(|effect| effect.name == Effect::Rename)
+        .expect("retargeted RenameCommit emits Effect::Rename");
+    let effect = result.pending_effects.remove(index);
+    let noop_send: StrongSend<Event> = Arc::new(|_| {});
+    drop(effect.run(service.context(), service.props(), noop_send));
+
+    assert_eq!(
+        captured.lock().unwrap().as_slice(),
+        &[RenameEvent {
+            key: key(2),
+            new_name: "Apricot".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn toggle_node_on_error_branch_retries_load() {
+    // After a lazy load fails, the branch sits expanded with `Error` state.
+    // Adapter retry affordances re-dispatch `ToggleNode` (the default
+    // branch-control click path); the toggle must treat an `Error` branch
+    // as a retry rather than collapsing it, otherwise retrying requires a
+    // collapse + re-expand instead of one click.
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::LoadError(key(1))));
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Error
+    );
+    assert!(service.connect(&|_| {}).is_node_expanded(&key(1)));
+
+    let result = service.send(Event::ToggleNode(key(1)));
+
+    // Branch stays expanded (retry, not collapse) and re-fires LoadChildren.
+    assert!(service.connect(&|_| {}).is_node_expanded(&key(1)));
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+    assert!(
+        result
+            .pending_effects
+            .iter()
+            .any(|effect| effect.name == Effect::LoadChildren),
+        "ToggleNode on an Error branch must re-fire LoadChildren"
+    );
+}
+
+#[test]
+fn concurrent_lazy_loads_preserve_other_loading_states_when_one_settles() {
+    // When `ExpandAll` (or any path) fires `LoadChildren` for multiple
+    // lazy branches concurrently, settling the first via `ChildrenLoaded`
+    // must NOT reset every other still-in-flight branch's `Loading` entry
+    // back to `NotLoaded` — the later deliveries would then be rejected by
+    // the `== Loading` stale-guard against the wrongly-reset entry,
+    // leaving expanded branches empty even after their fetch completed.
+    let items = TreeCollection::new(vec![
+        leaf_with(
+            1,
+            "Fruits",
+            TreeItem {
+                has_children: true,
+                ..item("Fruits")
+            },
+        ),
+        leaf_with(
+            8,
+            "Beverages",
+            TreeItem {
+                has_children: true,
+                ..item("Beverages")
+            },
+        ),
+    ]);
+    let mut service = service(Props::new().id("tree").items(items));
+
+    drop(service.send(Event::ExpandAll));
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(8)),
+        NodeLoadState::Loading
+    );
+
+    // Settle the first lazy branch.
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: vec![leaf(2, "Apple")],
+    }));
+
+    // The other branch still reports `Loading` — its pending fetch is
+    // preserved (this is the new contract; previously it would have flipped
+    // back to `NotLoaded` because a full reseed wiped it).
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(8)),
+        NodeLoadState::Loading,
+        "settling one branch must not wipe another branch's pending Loading state"
+    );
+
+    // The later delivery for the other branch is accepted (the `== Loading`
+    // stale-guard would have rejected it if the state had been reset).
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(8),
+        children: vec![leaf(9, "Tea")],
+    }));
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(8)),
+        NodeLoadState::Loaded
+    );
+}
+
+#[test]
+fn rename_start_rejected_for_node_hidden_under_collapsed_parent() {
+    // A hidden node (under a collapsed ancestor) has no rendered `treeitem`
+    // or `NodeRenameInput`, so accepting `RenameStart` for it would set
+    // `focused_node`/`aria-activedescendant` to an id absent from the DOM.
+    // Mirrors the `FocusNode` / `DragStart` visibility guards.
+    let mut service = service(renamable_props());
+
+    // `key(5)` "Carrot" lives under "Vegetables" (key 4), which is
+    // `default_expanded: false` in `sample_items`, so its children are
+    // not visible at init.
+    let result = service.send(Event::RenameStart(key(5)));
+
+    assert!(
+        !result.context_changed,
+        "RenameStart on a hidden node must be rejected"
+    );
+    assert_eq!(service.context().renaming_key, None);
+    assert_eq!(service.context().focused_node, None);
+}
+
+#[test]
+fn rename_input_snapshot() {
+    let mut service = service(renamable_props());
+
+    drop(service.send(Event::RenameStart(key(2))));
+
+    assert_snapshot!(
+        "tree_view_node_rename_input",
+        snapshot_attrs(&service.connect(&|_| {}).node_rename_input_attrs(&key(2)))
+    );
 }

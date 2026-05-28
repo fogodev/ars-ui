@@ -436,18 +436,29 @@ impl ars_core::Machine for Machine {
 
                 if next >= ctx.count.get() {
                     return Some(
-                        TransitionPlan::context_only(|_ctx: &mut Context| {}).with_effect(
-                            PendingEffect::new(
-                                Effect::Complete,
-                                |_ctx: &Context, props: &Props, _send| {
-                                    if let Some(callback) = &props.on_complete {
-                                        (callback)();
-                                    }
+                        TransitionPlan::context_only(move |ctx: &mut Context| {
+                            // Advancing past the last step marks it `Complete`
+                            // (spec §1.5): the final step is done. The status
+                            // list is fully machine-owned (not a `Bindable`),
+                            // so this fires regardless of whether `step` is
+                            // controlled — the controlled split applies to
+                            // `step` navigation, not to status accounting,
+                            // and the consumer has no status callback to
+                            // echo `Complete` themselves.
+                            if let Some(status) = ctx.statuses.get_mut(current as usize) {
+                                *status = Status::Complete;
+                            }
+                        })
+                        .with_effect(PendingEffect::new(
+                            Effect::Complete,
+                            |_ctx: &Context, props: &Props, _send| {
+                                if let Some(callback) = &props.on_complete {
+                                    (callback)();
+                                }
 
-                                    ars_core::no_cleanup()
-                                },
-                            ),
-                        ),
+                                ars_core::no_cleanup()
+                            },
+                        )),
                     );
                 }
 
@@ -505,7 +516,19 @@ impl ars_core::Machine for Machine {
                 let target = controlled.unwrap_or_else(|| clamp_step(*ctx.step.get(), count));
                 let statuses_prop = props.statuses.clone();
                 let statuses = if statuses_prop == ctx.statuses_prop {
-                    normalized_statuses(Some(ctx.statuses.clone()), count, target)
+                    // Preserve runtime status progress across an unrelated
+                    // prop echo (`orientation`/`linear`/etc.) — including a
+                    // `Complete` status on the active step, which is the
+                    // post-last-step-completion shape per spec §1.5.
+                    // Re-normalizing would otherwise quietly flip the
+                    // completed final step back to `Current`.
+                    let preserve_complete =
+                        ctx.statuses.get(target as usize).copied() == Some(Status::Complete);
+                    let mut next = normalized_statuses(Some(ctx.statuses.clone()), count, target);
+                    if preserve_complete && let Some(slot) = next.get_mut(target as usize) {
+                        *slot = Status::Complete;
+                    }
+                    next
                 } else {
                     normalized_statuses(statuses_prop.clone(), count, target)
                 };
@@ -1202,13 +1225,15 @@ mod tests {
     }
 
     #[test]
-    fn next_step_completion_preserves_current_status() {
+    fn next_step_from_last_step_marks_complete_and_clears_current() {
         let mut service = service(props().default_step(3));
 
         drop(service.send(Event::NextStep));
 
+        // Advancing past the last step marks it `Complete` (spec §1.5) and
+        // leaves no `Current` status; completion UI is driven by `on_complete`.
         assert_eq!(*service.context().step.get(), 3);
-        assert_eq!(service.context().statuses[3], Status::Current);
+        assert_eq!(service.context().statuses[3], Status::Complete);
         assert_eq!(
             service
                 .context()
@@ -1216,7 +1241,7 @@ mod tests {
                 .iter()
                 .filter(|status| **status == Status::Current)
                 .count(),
-            1
+            0
         );
     }
 
@@ -1228,6 +1253,73 @@ mod tests {
 
         assert_eq!(*service.context().step.get(), 3);
         assert_eq!(service.context().statuses[3], Status::Complete);
+    }
+
+    #[test]
+    fn last_step_completion_survives_unrelated_sync_props_echo() {
+        // Spec §1.5: NextStep past the last step marks `statuses[current]` as
+        // `Complete`. Any later unrelated `SyncProps` (e.g. toggling
+        // `orientation`/`linear`) must preserve that completion — otherwise
+        // re-normalizing the active index back to `Current` quietly erases
+        // the "all steps done" state.
+        let mut service = service(props().default_step(3));
+
+        drop(service.send(Event::NextStep));
+        assert_eq!(service.context().statuses[3], Status::Complete);
+
+        // Unrelated prop echo: flip `orientation`.
+        let new_props = props().default_step(3).orientation(Orientation::Vertical);
+        let triggered =
+            <Machine as ars_core::Machine>::on_props_changed(service.props(), &new_props);
+        assert!(triggered.contains(&Event::SyncProps));
+
+        drop(service.set_props(new_props));
+        for event in triggered {
+            drop(service.send(event));
+        }
+
+        // Completion survives the echo.
+        assert_eq!(service.context().statuses[3], Status::Complete);
+        assert_eq!(*service.context().step.get(), 3);
+    }
+
+    #[test]
+    fn controlled_last_step_completion_marks_status_and_notifies() {
+        // The status list is machine-owned (not a `Bindable`), so the
+        // last-step completion still marks `statuses[active] = Complete`
+        // even when `step` is controlled. The controlled split applies to
+        // `step` navigation — it prevents `ctx.step.set(target)` during
+        // `step_change_plan` — but the status list has no consumer-owned
+        // echo path, so the spec-mandated post-completion `Complete`
+        // status would otherwise never be applied.
+        let completed = Arc::new(Mutex::new(0usize));
+        let completed_clone = Arc::clone(&completed);
+        let mut service = service(
+            Props::new()
+                .id("steps")
+                .count(NonZeroU32::new(4).expect("non-zero"))
+                .step(3) // controlled, sitting on the last step
+                .on_complete(move || *lock(&completed_clone) += 1),
+        );
+
+        assert_eq!(service.context().statuses[3], Status::Current);
+
+        let result = service.send(Event::NextStep);
+
+        // `statuses[active]` flips to `Complete` per spec §1.5, even in
+        // controlled-step mode.
+        assert_eq!(service.context().statuses[3], Status::Complete);
+
+        // `Effect::Complete` fires so the consumer is notified.
+        assert_eq!(result.pending_effects.len(), 1);
+        assert_eq!(result.pending_effects[0].name, Effect::Complete);
+
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        for effect in result.pending_effects {
+            drop(effect.run(service.context(), service.props(), Arc::clone(&send)));
+        }
+
+        assert_eq!(*lock(&completed), 1);
     }
 
     #[test]
