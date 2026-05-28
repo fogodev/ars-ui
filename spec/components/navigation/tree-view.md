@@ -192,6 +192,9 @@ pub struct Props {
     /// the `Effect::LoadChildren` named effect; the app fetches the children and
     /// sends `Event::ChildrenLoaded` (or `Event::LoadError`).
     pub on_load_children: Option<Callback<dyn Fn(Key) + Send + Sync>>,
+    /// Called with the committed `RenameEvent` when an inline rename ends via
+    /// Enter or blur (renamable variant, §6). Fired by `Effect::Rename`.
+    pub on_rename: Option<Callback<dyn Fn(RenameEvent) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -212,6 +215,7 @@ impl Default for Props {
             on_expanded_change: None,
             on_reorder: None,
             on_load_children: None,
+            on_rename: None,
         }
     }
 }
@@ -351,6 +355,9 @@ pub enum Effect {
     /// children must be lazily fetched (lazy-loading variant, §5). The key is
     /// captured by the effect's closure (this `Copy` effect name carries none).
     LoadChildren,
+    /// Adapter invokes `Props::on_rename` with the committed `RenameEvent`
+    /// (renamable variant, §6).
+    Rename,
 }
 
 /// Machine for the `TreeView` component.
@@ -1819,17 +1826,27 @@ branch/leaf element so adapters can render the loading affordance.
 
 ### 5.4 Behavior
 
-1. User expands a node whose `load_state` is `NotLoaded`.
-2. The machine sets `load_state[key] = Loading` and attaches an
-   `Effect::LoadChildren` whose closure captures `key` (in addition to the
-   normal expand plan).
-3. The adapter runs the effect, which invokes `Props::on_load_children(key)`.
+1. User expands one or more nodes whose `load_state` is `NotLoaded` (or
+   previously failed `Error`).
+2. The machine sets `load_state[key] = Loading` for **every** such key in the
+   expanding set and attaches a dedicated `Effect::LoadChildren` per key (each
+   effect's closure captures its own key). Bulk paths (`ExpandAll`) therefore
+   fan one load per lazy branch instead of stranding the rest as expanded but
+   empty.
+3. The adapter runs each effect, which invokes `Props::on_load_children(key)`.
    The consumer fetches data asynchronously.
-4. Consumer sends `ChildrenLoaded { parent, children }` when data arrives.
+4. Consumer sends `ChildrenLoaded { parent, children }` when data arrives. The
+   machine accepts the delivery only when `load_state[parent] == Loading`;
+   stale or duplicate deliveries (e.g., a late async completion after another
+   load already finished, or a double-fire from the adapter) are dropped so
+   `TreeCollection` cannot accumulate duplicated rows.
 5. The machine splices the children in under `parent`, rebuilds the collection,
    and reseeds `load_state` (so `parent` becomes `Loaded`).
 6. If loading fails, the consumer sends `LoadError(key)`; the machine sets
-   `load_state[key] = Error`.
+   `load_state[key] = Error`. Re-expanding an `Error` branch retries the load
+   (the gate accepts both `NotLoaded` and `Error`), so an adapter retry
+   affordance only needs to re-dispatch `ExpandNode`/`ToggleNode` — no
+   separate retry event is required.
 
 ## 6. Variant: Renamable Nodes
 
@@ -1888,12 +1905,17 @@ impl Context {
   fires `RenameCommit` for the outgoing input with its live DOM value as focus leaves it. The
   agnostic core cannot read that DOM value, so the commit-previous behavior is driven by the
   adapter rather than synthesized in the transition.
-- **`RenameCommit { key, new_name }`**: Clears `renaming_key` to `None`. The consumer is
-  responsible for persisting the new name (e.g., updating the `TreeCollection` data source).
-  The machine does not modify the `TreeItem.label` — the consumer updates the collection and
-  passes new props.
-- **`RenameCancel(key)`**: Clears `renaming_key` to `None`. No value change occurs. Focus
-  returns to the tree item that was being renamed.
+- **`RenameCommit { key, new_name }`**: Clears `renaming_key` to `None` **and** attaches
+  `Effect::Rename` whose closure invokes `Props::on_rename` with the
+  `RenameEvent { key, new_name }`, so the consumer can persist the new label (e.g., updating
+  the `TreeCollection` data source). The machine never mutates `TreeItem::label` — the
+  consumer applies the rename to its data source and re-supplies props.
+- **`RenameCancel(key)`**: Clears `renaming_key` to `None`. No value change occurs and no
+  callback fires. Focus returns to the tree item that was being renamed.
+- **Disabling `renamable` mid-rename**: `Machine::on_props_changed` treats a `renamable`
+  toggle as a sync trigger; the resulting `SyncProps` arm clears `renaming_key` when the live
+  `renamable` prop is `false`, so adapters do not keep rendering `NodeRenameInput` against a
+  tree whose props now say renaming is off.
 
 ```rust,no_check
 /// Transition logic for rename events.
@@ -1913,11 +1935,15 @@ Event::RenameStart(key) => {
     }))
 }
 
-Event::RenameCommit { key, .. } => {
+Event::RenameCommit { key, new_name } => {
     if ctx.renaming_key.as_ref() != Some(key) { return None; }
-    Some(TransitionPlan::context_only(|ctx| {
-        ctx.renaming_key = None;
-    }))
+    let event = RenameEvent { key: key.clone(), new_name: new_name.clone() };
+    Some(
+        TransitionPlan::context_only(|ctx| {
+            ctx.renaming_key = None;
+        })
+        .with_effect(rename_effect(event)),
+    )
 }
 
 Event::RenameCancel(key) => {
@@ -1925,6 +1951,17 @@ Event::RenameCancel(key) => {
     Some(TransitionPlan::context_only(|ctx| {
         ctx.renaming_key = None;
     }))
+}
+```
+
+```rust,no_check
+/// Event delivered to `Props::on_rename` via `Effect::Rename`. The consumer
+/// persists the new label against its data source; the machine never mutates
+/// `TreeItem::label` on its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenameEvent {
+    pub key: Key,
+    pub new_name: String,
 }
 ```
 

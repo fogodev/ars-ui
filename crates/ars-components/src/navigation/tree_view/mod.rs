@@ -244,10 +244,16 @@ pub enum Effect {
     Reorder,
 
     /// Adapter invokes [`Props::on_load_children`] with the branch key whose
-    /// children must be lazily fetched. Emitted when a `NotLoaded` branch is
-    /// first expanded; the consumer eventually sends [`Event::ChildrenLoaded`]
-    /// (or [`Event::LoadError`]) back to the machine.
+    /// children must be lazily fetched. Emitted when a `NotLoaded` (or
+    /// previously failed `Error`) branch is expanded; the consumer eventually
+    /// sends [`Event::ChildrenLoaded`] (or [`Event::LoadError`]) back to the
+    /// machine.
     LoadChildren,
+
+    /// Adapter invokes [`Props::on_rename`] with the committed
+    /// [`RenameEvent`] so the consumer can persist the new label (renamable
+    /// variant, spec §6).
+    Rename,
 }
 
 /// Emitted when a tree node is reordered via drag-and-drop.
@@ -265,6 +271,21 @@ pub struct ReorderEvent {
 
     /// Where, relative to the target, the node was dropped.
     pub position: DropPosition,
+}
+
+/// Emitted when an inline rename commits (renamable variant, spec §6).
+///
+/// Delivered to [`Props::on_rename`] via [`Effect::Rename`]. The consumer is
+/// responsible for persisting the new label (e.g. updating the
+/// [`TreeCollection`] data source); the machine never mutates
+/// [`TreeItem::label`] on its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenameEvent {
+    /// The node whose label was edited.
+    pub key: Key,
+
+    /// The new label value the user committed.
+    pub new_name: String,
 }
 
 /// Closure signature backing [`Messages::loading_label`].
@@ -371,6 +392,12 @@ pub struct Props {
     /// asynchronously — and sends [`Event::ChildrenLoaded`] back, or
     /// [`Event::LoadError`] on failure. Fired by [`Effect::LoadChildren`].
     pub on_load_children: Option<Callback<dyn Fn(Key) + Send + Sync>>,
+
+    /// Called with the committed [`RenameEvent`] when an inline rename ends
+    /// via Enter or blur (spec §6). The consumer persists the new label
+    /// against its data source; the machine does not mutate
+    /// [`TreeItem::label`]. Fired by [`Effect::Rename`].
+    pub on_rename: Option<Callback<dyn Fn(RenameEvent) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -391,6 +418,7 @@ impl Default for Props {
             on_expanded_change: None,
             on_reorder: None,
             on_load_children: None,
+            on_rename: None,
         }
     }
 }
@@ -516,6 +544,16 @@ impl Props {
         callback: impl Into<Callback<dyn Fn(Key) + Send + Sync>>,
     ) -> Self {
         self.on_load_children = Some(callback.into());
+        self
+    }
+
+    /// Sets [`on_rename`](Self::on_rename).
+    #[must_use]
+    pub fn on_rename(
+        mut self,
+        callback: impl Into<Callback<dyn Fn(RenameEvent) + Send + Sync>>,
+    ) -> Self {
+        self.on_rename = Some(callback.into());
         self
     }
 }
@@ -1036,6 +1074,7 @@ impl ars_core::Machine for Machine {
                 let selection_mode = effective_selection_mode(props);
                 let selection_behavior = props.selection_behavior;
                 let dnd_enabled = props.dnd_enabled;
+                let renamable = props.renamable;
                 let disabled_keys = items
                     .all_nodes()
                     .filter(|node| node.value.as_ref().is_some_and(|item| item.disabled))
@@ -1066,6 +1105,14 @@ impl ars_core::Machine for Machine {
                         {
                             ctx.renaming_key = None;
                         }
+                    }
+
+                    // Disabling `renamable` while a rename is active cancels
+                    // the in-flight edit so adapters do not keep rendering
+                    // `NodeRenameInput` against a tree whose props say
+                    // renaming is no longer allowed.
+                    if !renamable {
+                        ctx.renaming_key = None;
                     }
 
                     ctx.multiple = multiple;
@@ -1149,6 +1196,16 @@ impl ars_core::Machine for Machine {
                 // never spliced under a dangling parent.
                 ctx.items.get(parent)?;
 
+                // Ignore stale deliveries: only accept `ChildrenLoaded` while
+                // the parent is in the in-flight `Loading` state. A duplicate
+                // delivery (or a late async arrival after the parent was
+                // already populated via props or a prior load) would otherwise
+                // append the same configs again, leaving duplicated visible
+                // rows since `TreeCollection::new` does not dedupe.
+                if ctx.load_state.get(parent) != Some(&NodeLoadState::Loading) {
+                    return None;
+                }
+
                 let parent = parent.clone();
                 let children = children.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -1199,14 +1256,22 @@ impl ars_core::Machine for Machine {
                 )
             }
 
-            Event::RenameCommit { key, .. } => {
+            Event::RenameCommit { key, new_name } => {
                 if ctx.renaming_key.as_ref() != Some(key) {
                     return None;
                 }
 
-                Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                    ctx.renaming_key = None;
-                }))
+                let event = RenameEvent {
+                    key: key.clone(),
+                    new_name: new_name.clone(),
+                };
+
+                Some(
+                    TransitionPlan::context_only(|ctx: &mut Context| {
+                        ctx.renaming_key = None;
+                    })
+                    .with_effect(rename_effect(event)),
+                )
             }
 
             Event::RenameCancel(key) => {
@@ -1239,6 +1304,8 @@ impl ars_core::Machine for Machine {
         // Re-sync when the data source, a controlled binding, or any selection
         // configuration field changes — e.g. after a reorder (new `items`) or
         // when switching a tree between single and multiple selection.
+        // `renamable` toggling false must also reach `SyncProps` so an active
+        // rename on a now-non-renamable tree is cancelled, not left dangling.
         if old.items != new.items
             || old.id != new.id
             || old.selected != new.selected
@@ -1247,6 +1314,7 @@ impl ars_core::Machine for Machine {
             || old.selection_mode != new.selection_mode
             || old.selection_behavior != new.selection_behavior
             || old.dnd_enabled != new.dnd_enabled
+            || old.renamable != new.renamable
         {
             vec![Event::SyncProps]
         } else {
@@ -1442,13 +1510,15 @@ fn selection_change_plan(
 /// [`Effect::ExpandedChange`], commit the binding only when uncontrolled.
 ///
 /// Lazy loading (spec §5): `expanding` lists the keys this event is expanding
-/// (empty for collapses). The first such key whose [`NodeLoadState`] is
-/// `NotLoaded` triggers a lazy load — it is marked `Loading` and an
-/// [`Effect::LoadChildren`] carrying that key is attached, which invokes
-/// [`Props::on_load_children`]. This fires regardless of the
-/// controlled/uncontrolled split (the load is needed before any echo can produce
-/// children) and even when the expansion set is unchanged (re-expanding a
-/// still-`NotLoaded` branch retries the load).
+/// (empty for collapses). Every key in `expanding` whose [`NodeLoadState`] is
+/// `NotLoaded` (or `Error`, for retry) triggers a lazy load — each such key is
+/// marked `Loading` and a dedicated [`Effect::LoadChildren`] carrying its key
+/// is attached, which invokes [`Props::on_load_children`]. The bulk path
+/// (`ExpandAll`) therefore fans one load per lazy branch instead of stranding
+/// the rest as expanded-but-empty. Loads fire regardless of the
+/// controlled/uncontrolled split (the load is needed before any echo can
+/// produce children) and even when the expansion set is unchanged (re-expanding
+/// a still-`NotLoaded`/`Error` branch retries the load).
 fn expanded_change_plan(
     ctx: &Context,
     next: BTreeSet<Key>,
@@ -1457,14 +1527,15 @@ fn expanded_change_plan(
 ) -> Option<TransitionPlan<Machine>> {
     let unchanged = ctx.expanded.get() == &next;
 
-    // The first branch this event expands that still awaits a lazy load.
-    let lazy = expanding
+    // Every branch this event expands that still awaits a lazy load.
+    let lazy: Vec<Key> = expanding
         .iter()
-        .find(|key| needs_lazy_load(ctx, key))
-        .cloned();
+        .filter(|key| needs_lazy_load(ctx, key))
+        .cloned()
+        .collect();
 
     // Nothing to do when neither the expansion set nor a load needs to change.
-    if unchanged && lazy.is_none() {
+    if unchanged && lazy.is_empty() {
         return None;
     }
 
@@ -1487,13 +1558,16 @@ fn expanded_change_plan(
         plan = plan.with_effect(effect);
     }
 
-    if let Some(key) = lazy {
-        let request = key.clone();
-        plan = plan
-            .apply(move |ctx: &mut Context| {
+    if !lazy.is_empty() {
+        let to_mark = lazy.clone();
+        plan = plan.apply(move |ctx: &mut Context| {
+            for key in &to_mark {
                 ctx.load_state.insert(key.clone(), NodeLoadState::Loading);
-            })
-            .with_effect(load_children_effect(request));
+            }
+        });
+        for key in lazy {
+            plan = plan.with_effect(load_children_effect(key));
+        }
     }
 
     Some(plan)
@@ -1538,6 +1612,22 @@ fn load_children_effect(key: Key) -> PendingEffect<Machine> {
         move |_ctx: &Context, props: &Props, _send| {
             if let Some(callback) = &props.on_load_children {
                 callback(key.clone());
+            }
+
+            no_cleanup()
+        },
+    )
+}
+
+/// Named effect that invokes [`Props::on_rename`] with the committed
+/// [`RenameEvent`] so the consumer can persist the new label
+/// (renamable variant, spec §6).
+fn rename_effect(event: RenameEvent) -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::Rename,
+        move |_ctx: &Context, props: &Props, _send| {
+            if let Some(callback) = &props.on_rename {
+                callback(event.clone());
             }
 
             no_cleanup()
@@ -1745,8 +1835,15 @@ fn seed_load_state(items: &TreeCollection<TreeItem>) -> BTreeMap<Key, NodeLoadSt
 /// Whether expanding `key` should trigger a lazy load: the node's tracked
 /// [`NodeLoadState`] is `NotLoaded`. Only the first expansion of an unloaded
 /// lazy branch loads; a `Loading`/`Error`/`Loaded` node does not re-trigger.
+/// A branch needs a lazy load on (re-)expand when it is awaiting its first
+/// fetch (`NotLoaded`) **or** when a previous fetch failed (`Error`); the
+/// `Error` arm is what lets adapter-driven retry affordances actually retry by
+/// re-dispatching `ExpandNode`/`ToggleNode` for the failed branch.
 fn needs_lazy_load(ctx: &Context, key: &Key) -> bool {
-    ctx.load_state.get(key) == Some(&NodeLoadState::NotLoaded)
+    matches!(
+        ctx.load_state.get(key),
+        Some(NodeLoadState::NotLoaded | NodeLoadState::Error)
+    )
 }
 
 /// Reconstruct the full `TreeItemConfig` forest from the current collection,

@@ -16,8 +16,8 @@ use ars_interactions::KeyboardEventData;
 use insta::assert_snapshot;
 
 use super::{
-    Effect, Event, Machine, Messages, NodeLoadState, Part, Props, ReorderEvent, TreeItem,
-    snapshot_attrs,
+    Effect, Event, Machine, Messages, NodeLoadState, Part, Props, RenameEvent, ReorderEvent,
+    TreeItem, snapshot_attrs,
 };
 
 // ----------------------------------------------------------------------------
@@ -3065,21 +3065,22 @@ fn load_error_then_reexpand_retries() {
         NodeLoadState::Error
     );
 
-    // An Error branch does not auto-retry on a no-op, but re-expanding it does
-    // not re-trigger a load either (only NotLoaded triggers); the consumer must
-    // reset state to retry. Confirm Error is sticky across a re-expand.
+    // Re-expanding an `Error` branch retries the lazy load: the failed state
+    // would otherwise strand any retry affordance the adapter exposes, since
+    // there is no separate retry event. The branch flips back to `Loading`
+    // and a fresh `LoadChildren` effect fires for the consumer.
     let result = service.send(Event::ExpandNode(key(1)));
 
     assert!(
         result
             .pending_effects
             .iter()
-            .all(|effect| effect.name != Effect::LoadChildren),
-        "an Error branch does not silently re-trigger LoadChildren"
+            .any(|effect| effect.name == Effect::LoadChildren),
+        "an Error branch must re-trigger LoadChildren on re-expand (retry)"
     );
     assert_eq!(
         service.connect(&|_| {}).node_load_state(&key(1)),
-        NodeLoadState::Error
+        NodeLoadState::Loading
     );
 }
 
@@ -3468,6 +3469,174 @@ fn on_rename_input_blur_noop_when_not_renaming() {
         .on_rename_input_blur(&key(2), "Apricot");
 
     assert!(recorder.into_inner().is_empty());
+}
+
+#[test]
+fn expand_all_loads_every_lazy_branch() {
+    // Two lazy branches — `Fruits` (1) and `Beverages` (8). `ExpandAll` must
+    // fan one `LoadChildren` effect per `NotLoaded` branch and mark every one
+    // `Loading`, otherwise the bulk path strands the second branch as
+    // expanded-but-empty without ever calling `on_load_children`.
+    let items = TreeCollection::new(vec![
+        leaf_with(
+            1,
+            "Fruits",
+            TreeItem {
+                has_children: true,
+                ..item("Fruits")
+            },
+        ),
+        leaf_with(
+            8,
+            "Beverages",
+            TreeItem {
+                has_children: true,
+                ..item("Beverages")
+            },
+        ),
+        leaf(7, "Grains"),
+    ]);
+
+    let requested: Arc<Mutex<Vec<Key>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&requested);
+
+    let mut service = service(
+        Props::new()
+            .id("tree")
+            .items(items)
+            .on_load_children(move |k: Key| sink.lock().unwrap().push(k)),
+    );
+
+    let result = service.send(Event::ExpandAll);
+
+    let api = service.connect(&|_| {});
+    assert_eq!(api.node_load_state(&key(1)), NodeLoadState::Loading);
+    assert_eq!(api.node_load_state(&key(8)), NodeLoadState::Loading);
+
+    // Two `LoadChildren` effects emitted — one per lazy branch.
+    let load_effects: Vec<_> = result
+        .pending_effects
+        .into_iter()
+        .filter(|effect| effect.name == Effect::LoadChildren)
+        .collect();
+    assert_eq!(
+        load_effects.len(),
+        2,
+        "one LoadChildren effect per lazy branch"
+    );
+
+    // Running each effect invokes `on_load_children` with that branch's key.
+    let noop_send: StrongSend<Event> = Arc::new(|_| {});
+    for effect in load_effects {
+        drop(effect.run(service.context(), service.props(), Arc::clone(&noop_send)));
+    }
+
+    let mut got = requested.lock().unwrap().clone();
+    got.sort();
+    let mut want = vec![key(1), key(8)];
+    want.sort();
+    assert_eq!(got, want);
+}
+
+#[test]
+fn rename_commit_emits_rename_event_to_callback() {
+    // `RenameCommit { key, new_name }` is the only path that surfaces the
+    // edited label to the consumer. Without an `on_rename` callback fired by
+    // `Effect::Rename`, the new value would be silently discarded.
+    let captured: Arc<Mutex<Vec<RenameEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&captured);
+
+    let mut service = service(
+        renamable_props().on_rename(move |event: RenameEvent| sink.lock().unwrap().push(event)),
+    );
+
+    drop(service.send(Event::RenameStart(key(2))));
+    let mut result = service.send(Event::RenameCommit {
+        key: key(2),
+        new_name: "Apricot".to_string(),
+    });
+
+    // Renaming clears the rename_key and emits a single Rename effect.
+    assert_eq!(service.context().renaming_key, None);
+
+    let index = result
+        .pending_effects
+        .iter()
+        .position(|e| e.name == Effect::Rename)
+        .expect("RenameCommit must emit Effect::Rename");
+    let effect = result.pending_effects.remove(index);
+
+    let noop_send: StrongSend<Event> = Arc::new(|_| {});
+    drop(effect.run(service.context(), service.props(), noop_send));
+
+    assert_eq!(
+        captured.lock().unwrap().as_slice(),
+        &[RenameEvent {
+            key: key(2),
+            new_name: "Apricot".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn disabling_renamable_via_sync_props_cancels_active_rename() {
+    // Flipping `renamable` false mid-edit must cancel the active rename so
+    // adapters do not keep rendering `NodeRenameInput` against a tree whose
+    // props now say renaming is off. The gate has two parts: `on_props_changed`
+    // emits `SyncProps` on the toggle, and `SyncProps` itself clears
+    // `renaming_key` when the live prop is false.
+    let mut service = service(renamable_props());
+    drop(service.send(Event::RenameStart(key(2))));
+    assert_eq!(service.context().renaming_key, Some(key(2)));
+
+    let new_props = renamable_props().renamable(false);
+    let triggered = <Machine as ars_core::Machine>::on_props_changed(service.props(), &new_props);
+    assert!(
+        triggered.contains(&Event::SyncProps),
+        "on_props_changed must emit SyncProps when `renamable` flips"
+    );
+
+    drop(service.set_props(new_props));
+    for event in triggered {
+        drop(service.send(event));
+    }
+
+    assert_eq!(service.context().renaming_key, None);
+    assert!(!service.connect(&|_| {}).is_renaming(&key(2)));
+}
+
+#[test]
+fn children_loaded_ignored_when_parent_already_loaded() {
+    // A duplicate or late `ChildrenLoaded` delivery must not re-insert the
+    // children: `TreeCollection::new` accepts duplicate nodes, so a second
+    // insertion would leave duplicated visible rows whose `get()` only points
+    // at the last copy. Only an in-flight `Loading` parent accepts the
+    // delivery.
+    let mut service = service(lazy_props());
+
+    drop(service.send(Event::ExpandNode(key(1)))); // Loading
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: loaded_children(),
+    })); // Loaded
+
+    let after_first = service.context().items.clone();
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+
+    // Second delivery while the parent is already `Loaded` must be a no-op.
+    let result = service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: loaded_children(),
+    });
+
+    assert!(
+        !result.context_changed,
+        "duplicate ChildrenLoaded for a Loaded parent must be ignored"
+    );
+    assert_eq!(&after_first, &service.context().items);
 }
 
 #[test]

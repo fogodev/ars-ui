@@ -24,6 +24,7 @@ pub fn TreeView(
     #[prop(optional)] selection_behavior: selection::Behavior,
     #[prop(optional, into)] on_load_children: Option<Callback<dyn Fn(Key) + Send + Sync>>,
     #[prop(optional)] renamable: bool,
+    #[prop(optional, into)] on_rename: Option<Callback<dyn Fn(RenameEvent) + Send + Sync>>,
     children: Children,
 ) -> impl IntoView
 ```

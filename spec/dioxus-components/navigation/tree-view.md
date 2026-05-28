@@ -28,6 +28,8 @@ pub struct TreeViewProps {
     pub on_load_children: Option<Callback<dyn Fn(Key) + Send + Sync>>,
     #[props(default = false)]
     pub renamable: bool,
+    #[props(optional)]
+    pub on_rename: Option<Callback<dyn Fn(RenameEvent) + Send + Sync>>,
     pub children: Element,
 }
 
