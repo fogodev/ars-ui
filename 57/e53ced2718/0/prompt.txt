@@ -1,0 +1,119 @@
+We recently completed all agnostic components of the navigation category. Now I wanna do an full audit of them, to be able to close the Epic #223 on Github. In this audit we need to make sure that everything related to this category in the spec was properly implemented, on all navigation agnostic components. Including auditing their respective proptests and spec conformance tests, and while you're in those two, take your time to properly separate the proptests and the spec conformance tests into modules for each component, as currently we have a bloat of tests for all navigation components together in the same file.
+
+---
+
+<task-notification>
+<task-id>a5332a9a12f17de86</task-id>
+<tool-use-id>toolu_01H16JDJhtD16p9zUFkoCkEp</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-audit-agnostic-navigation-components/cf0f1e35-f01b-4a9b-832f-32a43e97d9d0/tasks/a5332a9a12f17de86.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement TreeView lazy-load + renamable variants" completed</summary>
+<result>The only clippy/compile error across all targets is the pre-existing `navigation_menu.rs` `Locale` error (a parallel workstream's incomplete file). Everything in my scope — lib, inline tests, spec_conformance — is clean.
+
+The post-implementation audit is complete. Let me give the consolidated summary.
+
+## Post-implementation audit summary
+
+**Phase 1 (spec/impl drift):** Landed spec edits so the §1 canonical contract blocks include all variant additions (matching the convention where §4 DnD parts/effects/props live in §1): `Part::NodeRenameInput` (in `Part` enum + `part_attrs`), `Effect::LoadChildren`, the 5 new `Event`s, `Context::{load_state, pending_load, renaming_key}`, `Props::renamable`, `Messages::rename_label`; updated §2 anatomy tree+table (NodeRenameInput row, `aria-busy`/`data-ars-loading`), §1.3 init NOTE, and rewrote §5/§6 to the typed-Effect+`pending_load` model with the real `ChildrenLoaded` payload and `LoadError` event.
+
+**Phase 2 (iterative "anything missing"):** Round 1 fixed adapter-spec drift (`tree_view::LoadChildren`→`LoadChildrenFn`, added NodeRenameInput part-mapping rows in both Leptos/Dioxus specs). **Round 2 found a real bug:** the lazy-load detection used a set-diff that silently failed to retry an already-expanded-but-`NotLoaded` branch — refactored `expanded_change_plan` to take an explicit `expanding: &amp;[Key]` list. Added 8 edge-case tests. Rounds 3-5 added the events-summary-table rows and confirmed two clean rounds (parity table, adapter prelude/feature-wiring out of scope — no adapter exists yet).
+
+**Phase 3 (coverage):** llvm-cov surfaced two uncovered new branches — the SyncProps "clear renaming_key when node removed" path and `part_attrs(Part::NodeRenameInput)`. Added 3 tests. tree_view/mod.rs coverage: regions 97.66%→98.12%, lines 98.24%→98.59%. All remaining uncovered lines are pre-existing (DnD guards, `on_node_keydown_at`, `clamp_focus` ancestor-walk) — none are my new code.
+
+**Verification:** lib tests 174 (tree_view) / 3929 (full) pass; spec_conformance pass; clippy lib+spec_conformance clean; docs no tree_view warnings; snapshot orphan check clean (`--features i18n`); spec validate + compile-snippets + xtask corpus all green. Only failure anywhere is the pre-existing `navigation_menu.rs` `Locale` error in a parallel workstream's file (not mine).
+
+Let me give the final report.
+
+---
+
+## Report
+
+I implemented the TreeView §5 (Lazy Loading) and §6 (Renamable Nodes) variants in the agnostic core via TDD, then ran the full three-phase post-implementation audit. All work is in this one change set.
+
+### New public API surface (`crates/ars-components/src/navigation/tree_view/mod.rs`)
+
+**§5 Lazy Loading:**
+- `pub enum NodeLoadState { Loaded, Loading, Error, NotLoaded }` — derives `Clone, Copy, Debug, PartialEq, Eq, Hash`.
+- `pub type LoadChildrenFn = alloc::rc::Rc&lt;dyn Fn(Key)&gt;` (adapter callback alias).
+- `Context.load_state: BTreeMap&lt;Key, NodeLoadState&gt;` + `Context.pending_load: Option&lt;Key&gt;`.
+- `Effect::LoadChildren` (unit variant).
+- `Event::ChildrenLoaded { parent: Key, children: Vec&lt;TreeItemConfig&lt;TreeItem&gt;&gt; }`, `Event::LoadError(Key)`.
+- `Api::node_load_state(&amp;Key) -&gt; NodeLoadState`, `Api::is_loading(&amp;Key) -&gt; bool`. Loading branches now emit `aria-busy="true"` + `data-ars-loading` (via `apply_node_state`).
+
+**§6 Renamable:**
+- `Props.renamable: bool` (default false) + `renamable(bool)` builder.
+- `Context.renaming_key: Option&lt;Key&gt;`.
+- `Event::{RenameStart(Key), RenameCommit { key, new_name: String }, RenameCancel(Key)}`.
+- `Part::NodeRenameInput { node_id: Key }` (declared between `LeafText` and `DragHandle`).
+- `Api::{node_rename_input_attrs(&amp;Key) -&gt; AttrMap, on_rename_input_keydown(&amp;Key, &amp;str, &amp;str), on_rename_input_blur(&amp;Key, &amp;str), is_renaming(&amp;Key) -&gt; bool}`.
+- `Messages.rename_label: MessageFn&lt;RenameLabelFn&gt;` (default `|node_name, _| "Rename {node_name}"`) + `pub type RenameLabelFn`.
+- F2 in `on_node_keydown_impl` dispatches `RenameStart(focused)`.
+- Doc fixes: `FocusNext`/`FocusPrev` now say "(does not wrap)"; `is_descendant` doc no longer claims "itself".
+
+### LoadChildren effect / pending_load design as built
+`Effect::LoadChildren` is a unit `Copy` effect (the `EffectName: Copy` constraint forbids `LoadChildren(Key)`). The key travels in the transient `Context.pending_load`, set alongside `load_state[key]=Loading` when an expanding branch is `NotLoaded`. Implemented inside `expanded_change_plan`, which now takes an explicit `expanding: &amp;[Key]` list (the keys the event expands) — fires for the first `NotLoaded` key, works for `ExpandNode`/`ToggleNode`/`ExpandAll`, fires for both controlled and uncontrolled, and retries on re-expand of a still-`NotLoaded` branch.
+
+### ChildrenLoaded payload choice
+`Vec&lt;TreeItemConfig&lt;TreeItem&gt;&gt;`. `TreeItem` does **not** implement `CollectionItem` (it has no key field — keys live on `Node`/`TreeItemConfig`), so the real `insert_child` (which requires `T: CollectionItem`) is unusable, and there is no public `Node&lt;T&gt;` constructor. `TreeItemConfig` is the public construction type for `TreeCollection` and carries key/text/value/children/default_expanded. I splice the loaded configs under `parent` and rebuild via `TreeCollection::new` using only the `T: Clone` public API (`all_nodes`/`children_of`/`is_expanded`) in a new private `insert_loaded_children` helper. This required adding `#[derive(Clone, PartialEq)]` to `TreeItemConfig` in `crates/ars-collections/src/tree_collection.rs:20` (conditional on `T`; the manual `Debug` is preserved) so it can ride in the `Clone + PartialEq` `Event` enum.
+
+### Tests added (`tree_view/tests.rs`, 24 new; 174 total pass)
+Lazy: init seeding, lazy/loaded/toggle/expand-all triggering, ChildrenLoaded insert+Loaded, LoadError, SyncProps reseed, re-expand retry, controlled-expand still loads, error stickiness, aria-busy, unknown-parent/node ignored, `part_attrs` dispatch. Rename: default false, init None, RenameStart guards (renamable/disabled/unknown/state), commit/cancel clear (guarded), rename-while-renaming retarget, F2 dispatch, input attrs shape + snapshot, keydown Enter/Escape, blur commit/noop, is_renaming, SyncProps clears/keeps renaming_key on node removal.
+
+### Spec edits (`spec/components/navigation/tree-view.md`)
+Rewrote §5/§6 to the typed-Effect+`pending_load` model, real `ChildrenLoaded` payload, `LoadError` event, retarget-rename behavior; promoted all variant additions into the §1 canonical `Part`/`Event`/`Effect`/`Context`/`Props`/`Messages` blocks (matching the §4 DnD convention); updated §1.2 events table, §1.3 init NOTE, §2 anatomy tree+table. Also corrected `LoadChildren`→`LoadChildrenFn` and added `NodeRenameInput` part-mapping rows in `spec/leptos-components/navigation/tree-view.md` and `spec/dioxus-components/navigation/tree-view.md`. Spec-conformance test (`tests/spec_conformance/navigation/tree_view.rs`) and proptest arbitraries (`tests/proptest_state_machines/navigation/tree_view.rs`) updated.
+
+### .snap files touched
+One new: `crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_node_rename_input.snap` (accepted via `INSTA_UPDATE=always`, re-run green). **This PR creates a `.snap` fixture, so the `snapshot-reviewed` label should be applied when the PR is opened.**
+
+### Verification results
+- `cargo test -p ars-components --lib navigation::tree_view` — 174 passed
+- `cargo test -p ars-components --test spec_conformance navigation::tree_view` — 1 passed
+- `cargo clippy -p ars-components --lib --all-features -- -D warnings` — clean (also clean on `--test spec_conformance`)
+- `cargo xtask spec validate` — 340 files, all checks passed
+- `cargo xtask spec compile-snippets` — 2174 blocks, no findings; `cargo test -p xtask --test spec_corpus_compile_snippets` passed
+- `cargo doc -p ars-components --all-features` — zero tree_view warnings
+- `cargo insta test -p ars-components --lib --features i18n --unreferenced=reject` — no unreferenced snapshots
+- Coverage: tree_view/mod.rs regions 97.66%→98.12%, lines 98.24%→98.59%; all remaining uncovered lines are pre-existing code, none new.
+
+### Judgment calls / flags
+1. **Proptest binary cannot fully compile** due to a pre-existing error in a sibling file, `tests/proptest_state_machines/navigation/navigation_menu.rs:201` (`_locale_import_marker(_: Locale)` — `Locale` not imported), owned by a parallel navigation-refactor workstream (the worktree had substantial uncommitted in-flight work despite the clean status snapshot). I verified my `tree_view.rs` proptest changes compile by a temporary, fully-reverted local patch — the binary builds with my changes once that unrelated line is fixed. I did not touch `navigation_menu.rs` or the off-limits `navigation/mod.rs`.
+2. **Commit-previous-rename behavior:** spec §6.4 says starting a rename while another is active "commits the previous with its current input value." The agnostic core can't read the live DOM value, so the machine just retargets `renaming_key`; the adapter's `on_rename_input_blur` fires `RenameCommit` for the outgoing input as focus moves. I documented this in code and updated the spec prose/transition example accordingly.
+3. **`load_state` reseed on SyncProps** only when `items_changed` (preserves in-flight `Loading`/`Error` across unrelated prop echoes); `default_expanded` lazy branches stay `NotLoaded` at init (load is user-driven), with re-expand retrying.
+4. The pre-existing MD060 table-alignment lint warnings and other-component doc-link warnings are not mine and were left untouched.
+
+No commit/push performed (awaiting your review per workflow).</result>
+<usage><total_tokens>285574</total_tokens><tool_uses>229</tool_uses><duration_ms>2216244</duration_ms></usage>
+</task-notification>
+
+---
+
+<ide_opened_file>The user opened the file /Users/ericson/Workspace/Rust/ars-ui.worktrees/audit-agnostic-navigation-components/crates/ars-components/tests/proptest_state_machines/navigation/accordion.rs in the IDE. This may or may not be related to the current task.</ide_opened_file>
+Continue from where you were
+
+---
+
+<task-notification>
+<task-id>bjon1n2s3</task-id>
+<tool-use-id>toolu_01Jeemt42qFU24RPqHczUdvQ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-audit-agnostic-navigation-components/cf0f1e35-f01b-4a9b-832f-32a43e97d9d0/tasks/bjon1n2s3.output</output-file>
+<status>completed</status>
+<summary>Background command "Run cargo xci-fast pre-push gate" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<ide_selection>The user selected the lines 98 to 98 from /Users/ericson/Workspace/Rust/ars-ui.worktrees/audit-agnostic-navigation-components/crates/ars-components/src/navigation/tree_view/mod.rs:
+pub type LoadChildrenFn = alloc::rc::Rc<dyn Fn(Key)>;
+
+This may or may not be related to the current task.</ide_selection>
+Why not use our `Callback` type here?
+
+---
+
+<task-notification>
+<task-id>bzuh4hqbf</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-audit-agnostic-navigation-components/cf0f1e35-f01b-4a9b-832f-32a43e97d9d0/tasks/bzuh4hqbf.output</output-file>
+<status>completed</status>
+<summary>Background command "Re-run cargo xci-fast after the on_load_children refactor" completed (exit code 0)</summary>
+</task-notification>

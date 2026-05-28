@@ -1,0 +1,227 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "57e53ced2718",
+  "session_id": "cf0f1e35-f01b-4a9b-832f-32a43e97d9d0",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-28T03:03:38.682607Z",
+  "branch": "audit-agnostic-navigation-components",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/accordion.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/pagination.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/steps.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/tabs.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/tree_view.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/navigation.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/accordion.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/breadcrumbs.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/link.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/mod.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/navigation_menu.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/pagination.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/steps.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/tabs.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/tree_view.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "73f0c56dac54",
+  "token_usage": {
+    "input_tokens": 90977,
+    "cache_creation_tokens": 2400599,
+    "cache_read_tokens": 82431753,
+    "output_tokens": 287364,
+    "api_call_count": 221
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Perform a full audit of the navigation category agnostic components to close Epic #223, ensuring spec conformance, complete proptest coverage, and separation of monolithic test files into per-component modules.",
+    "outcome": "The audit was completed with all gates green: test reorg landed, 6 spec files synced to the correct shipped impl, Steps S1 behavior corrected, TreeView §5/§6 variants (lazy-loading + renamable) fully implemented via TDD, new Link + NavigationMenu proptests added, and the LoadChildrenFn Rc design replaced with the workspace-standard Callback type. First commit (C1, test reorg) was landed; C2–C5 and the PR are pending.",
+    "learnings": {
+      "repo": [
+        "The `input/` directory (e.g. tests/proptest_state_machines/input/) is the canonical blueprint for per-component test layout: shared strategies in mod.rs, each component owns a <component>.rs sibling.",
+        "The `EffectName: Copy` bound on Machine::Effect prevents carrying payload in Effect variants (e.g. LoadChildren(Key) is impossible); payload must travel via transient Context fields or — better — a Callback Prop.",
+        "Adapter notification callbacks follow a strict convention: Option<Callback<dyn Fn(...) + Send + Sync>> Prop + builder, fired by the Effect closure. Rc<dyn Fn> violates the Send+Sync requirement of the Service's StoredValue/Signal storage.",
+        "The spec-snippet harness (crates/xtask/src/spec/compile_snippets.rs) does only syn::parse_file syntax validation, not type/borrow checking; blocks can opt out with rust,no_check. Spec code edits carry low breakage risk.",
+        "Spec sections labeled 'Variant:' (e.g. tree-view.md §5/§6) were intentionally out of scope for the original implementation issue (#267), which only covered §1 state machine and §2 ConnectApi.",
+        "The proptest-regressions/ file is auto-seeded on test failures and must be manually reverted if the test invariant (not the impl) was wrong — otherwise it will cause spurious reproductions on future runs.",
+        "Items marked closed in sub-issues of an Epic do not block closing the Epic itself; the Epic close is a deliberate act after merge + CI + Codex review."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/navigation/steps/mod.rs",
+          "line": 437,
+          "end_line": 451,
+          "finding": "Last-step NextStep handling: original impl left final step Current and only fired Effect::Complete. Spec says it should mark the step Complete AND fire the effect. Changed per user decision."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/steps/mod.rs",
+          "line": 1211,
+          "end_line": 1211,
+          "finding": "Test next_step_completion_preserves_current_status was pinning the old (incorrect) last-step behavior; updated alongside the impl change."
+        },
+        {
+          "path": "crates/ars-collections/src/tree_collection.rs",
+          "line": 20,
+          "end_line": 20,
+          "finding": "TreeItemConfig lacked Clone+PartialEq derives; they were required for it to ride in the Clone+PartialEq Event enum (ChildrenLoaded payload). Added as part of the TreeView §5 implementation."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/tree_view/mod.rs",
+          "finding": "LoadChildrenFn (Rc<dyn Fn(Key)>) was dead code — referenced only in its own definition. Replaced with on_load_children: Option<Callback<dyn Fn(Key) + Send + Sync>> Prop, eliminating the pending_load transient Context field entirely."
+        },
+        {
+          "path": "spec/foundation/06-collections.md",
+          "finding": "TreeItemConfig derives were stale in the foundation spec after adding Clone+PartialEq to the impl. Phase 2 audit caught this and synced it."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/navigation/link.rs",
+          "finding": "Initial invariant 'pressed iff State::Pressed' was too strong — Press then Focus leaves pressed=true in State::Focused mid-press. Correct invariant: Pressed implies pressed, Idle implies !pressed."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/navigation/navigation_menu.rs",
+          "finding": "Initial invariant 'open_item must be in registered items' failed because item_is_registered is intentionally permissive before the adapter's first SetItems call. Must be guarded on items_registered, mirroring the tabs proptest pattern."
+        }
+      ],
+      "workflow": [
+        "Dispatching 3–6 parallel drift-audit agents (one per component or component group) then doing mechanical work in the foreground dramatically compresses audit wall-clock time.",
+        "Cross-checking agent spec-sync output by grepping for referenced symbol names in the impl (not re-reading the full diff) is an efficient fidelity check against fabrication.",
+        "When proptests find counterexamples during authoring, the failure is almost always an over-strong invariant, not an impl bug — root-cause before fixing.",
+        "Commit sequencing for interleaved mechanical + feature work requires temporarily reverting files to their pre-feature state for early commits, saving full versions to /tmp, then restoring for the feature commit.",
+        "Auto-staging by hooks means git reset is required before manually building per-commit staging sets."
+      ]
+    },
+    "friction": [
+      "TreeItemConfig missing Clone+PartialEq was a blocking compile error discovered only when the ChildrenLoaded event payload was wired in; required an additive change in ars-collections.",
+      "The EffectName: Copy constraint meant Effect::LoadChildren could not carry a Key, forcing a two-step design (transient pending_load field) that was architecturally inferior and later replaced.",
+      "The initial TreeView agent copied LoadChildrenFn = Rc<dyn Fn(Key)> verbatim from a self-contradictory spec section; user review caught it, requiring a full refactor pass across impl, tests, core spec, and both adapter specs.",
+      "Git hooks auto-staged all worktree changes, requiring a full reset and manual per-commit staging dance for the 5-commit narrative.",
+      "The proptest-regressions/ file got contaminated by seeds from debugging runs on incorrect invariants and had to be identified and manually reverted.",
+      "Commit C1 (test reorg) conflicted with C4 (TreeView variants) because the reorg tree_view.rs files already contained variant additions; required reverting test files to pre-variant state, committing C1, then restoring for C4."
+    ],
+    "open_items": [
+      "Commits C2–C5 still need to be created (spec syncs, Steps S1, TreeView variants, new proptests) and pushed to GitHub.",
+      "PR targeting main with 'Closes #223' needs to be opened; the snapshot-reviewed label must be added (one new .snap fixture: tree_view_node_rename_input).",
+      "Codex review loop must run to 👍 before Epic #223 can be closed.",
+      "Epic #223 should only be closed after merge + green CI + Codex approval — not at PR creation.",
+      "Leptos and Dioxus adapter implementations for TreeView lazy-loading (Effect::LoadChildren wiring) and renamable nodes do not yet exist; specs are updated but no adapter code was written.",
+      "MD060 table-alignment lint warnings in adapter specs (leptos/dioxus tree-view.md) were left unresolved — pre-existing cosmetic issue, not a CI gate."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-28T03:02:30.342705Z",
+    "agent_lines": 1409,
+    "agent_removed": 1330,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 34,
+    "total_committed": 1409,
+    "total_lines_changed": 2773,
+    "agent_percentage": 98.7738910926794,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 5,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 5
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 710,
+      "user_lines_removed": 79,
+      "agent_lines_added": 3818,
+      "agent_lines_removed": 1955,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 10,
+        "crates/ars-collections/src/tree_collection.rs": 5,
+        "crates/ars-components/proptest-regressions/state-machines.txt": 1,
+        "crates/ars-components/src/navigation/tree_view/mod.rs": 336,
+        "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_node_rename_input.snap": 9,
+        "crates/ars-components/src/navigation/tree_view/tests.rs": 190,
+        "spec/components/navigation/tree-view.md": 155,
+        "spec/dioxus-components/navigation/tree-view.md": 2,
+        "spec/leptos-components/navigation/tree-view.md": 2
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/navigation/tree_view/mod.rs": 20,
+        "crates/ars-components/src/navigation/tree_view/tests.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/navigation/navigation_menu.rs": 9,
+        "spec/components/navigation/tree-view.md": 47,
+        "spec/dioxus-components/navigation/tree-view.md": 1,
+        "spec/leptos-components/navigation/tree-view.md": 1
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 19,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4505,
+      "agent_lines_removed": 2024,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 10,
+        "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_node_rename_input.snap": 9
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 22,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4505,
+      "agent_lines_removed": 2024,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 10,
+        "crates/ars-components/src/navigation/tree_view/mod.rs": 3,
+        "crates/ars-components/src/navigation/tree_view/snapshots/ars_components__navigation__tree_view__tests__tree_view_node_rename_input.snap": 9
+      }
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 10,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4535,
+      "agent_lines_removed": 2032,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 10
+      }
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 400,
+      "user_lines_removed": 125,
+      "agent_lines_added": 4535,
+      "agent_lines_removed": 2032,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 10,
+        "crates/ars-components/src/navigation/tree_view/mod.rs": 79,
+        "crates/ars-components/src/navigation/tree_view/tests.rs": 199,
+        "crates/ars-components/tests/proptest_state_machines/navigation/navigation_menu.rs": 2,
+        "spec/components/navigation/accordion.md": 18,
+        "spec/components/navigation/tabs.md": 4,
+        "spec/components/navigation/tree-view.md": 60,
+        "spec/dioxus-components/navigation/tree-view.md": 14,
+        "spec/leptos-components/navigation/tree-view.md": 14
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/navigation/tree_view/mod.rs": 9,
+        "crates/ars-components/src/navigation/tree_view/tests.rs": 6,
+        "spec/components/navigation/accordion.md": 18,
+        "spec/components/navigation/tabs.md": 4,
+        "spec/components/navigation/tree-view.md": 60,
+        "spec/dioxus-components/navigation/tree-view.md": 14,
+        "spec/leptos-components/navigation/tree-view.md": 14
+      }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "57e53ced2718",
+  "strategy": "manual-commit",
+  "branch": "audit-agnostic-navigation-components",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/accordion.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/pagination.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/steps.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/tabs.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/tree_view.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/navigation.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/accordion.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/breadcrumbs.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/link.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/mod.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/navigation_menu.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/pagination.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/steps.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/tabs.rs",
+    "crates/ars-components/tests/spec_conformance/navigation/tree_view.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/57/e53ced2718/0/metadata.json",
+      "transcript": "/57/e53ced2718/0/full.jsonl",
+      "content_hash": "/57/e53ced2718/0/content_hash.txt",
+      "prompt": "/57/e53ced2718/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 90977,
+    "cache_creation_tokens": 2400599,
+    "cache_read_tokens": 82431753,
+    "output_tokens": 287364,
+    "api_call_count": 221
+  }
+}
