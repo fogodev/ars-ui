@@ -435,21 +435,17 @@ impl ars_core::Machine for Machine {
                 let next = current + 1;
 
                 if next >= ctx.count.get() {
-                    let controlled = ctx.step.is_controlled();
                     return Some(
                         TransitionPlan::context_only(move |ctx: &mut Context| {
                             // Advancing past the last step marks it `Complete`
-                            // (spec §1.5): the final step is done. In
-                            // controlled-step mode the consumer owns the step
-                            // state, so we only notify (matches
-                            // `step_change_plan`'s controlled split) and let
-                            // the parent echo the completed status — the
-                            // optimistic mutation would otherwise render
-                            // `Complete` for a tick before a parent that
-                            // rejects completion echoed it back.
-                            if !controlled
-                                && let Some(status) = ctx.statuses.get_mut(current as usize)
-                            {
+                            // (spec §1.5): the final step is done. The status
+                            // list is fully machine-owned (not a `Bindable`),
+                            // so this fires regardless of whether `step` is
+                            // controlled — the controlled split applies to
+                            // `step` navigation, not to status accounting,
+                            // and the consumer has no status callback to
+                            // echo `Complete` themselves.
+                            if let Some(status) = ctx.statuses.get_mut(current as usize) {
                                 *status = Status::Complete;
                             }
                         })
@@ -1288,14 +1284,14 @@ mod tests {
     }
 
     #[test]
-    fn controlled_last_step_completion_only_notifies() {
-        // In controlled-step mode the parent owns the step state, so the
-        // last-step completion path is notify-only (matches the controlled
-        // split used by `step_change_plan`): `statuses[active]` must NOT be
-        // pre-mutated to `Complete` — the parent decides whether to echo the
-        // completed state via a next props update. Pre-mutating would
-        // briefly render the final step `Complete` before a parent that
-        // rejects completion echoed it back.
+    fn controlled_last_step_completion_marks_status_and_notifies() {
+        // The status list is machine-owned (not a `Bindable`), so the
+        // last-step completion still marks `statuses[active] = Complete`
+        // even when `step` is controlled. The controlled split applies to
+        // `step` navigation — it prevents `ctx.step.set(target)` during
+        // `step_change_plan` — but the status list has no consumer-owned
+        // echo path, so the spec-mandated post-completion `Complete`
+        // status would otherwise never be applied.
         let completed = Arc::new(Mutex::new(0usize));
         let completed_clone = Arc::clone(&completed);
         let mut service = service(
@@ -1310,10 +1306,11 @@ mod tests {
 
         let result = service.send(Event::NextStep);
 
-        // No optimistic mutation — controlled state stays pristine.
-        assert_eq!(service.context().statuses[3], Status::Current);
+        // `statuses[active]` flips to `Complete` per spec §1.5, even in
+        // controlled-step mode.
+        assert_eq!(service.context().statuses[3], Status::Complete);
 
-        // `Effect::Complete` still fires so the consumer is notified.
+        // `Effect::Complete` fires so the consumer is notified.
         assert_eq!(result.pending_effects.len(), 1);
         assert_eq!(result.pending_effects[0].name, Effect::Complete);
 

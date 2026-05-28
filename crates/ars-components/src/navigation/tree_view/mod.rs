@@ -1270,11 +1270,17 @@ impl ars_core::Machine for Machine {
                 let children = children.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.items = insert_loaded_children(&ctx.items, &parent, &children);
-                    // Reseed so the parent (now with real children) reports
-                    // `Loaded` and the freshly-inserted children get their own
-                    // load states.
-                    ctx.load_state = seed_load_state(&ctx.items);
+                    // Settle the parent and seed load_state for the
+                    // freshly-inserted subtree only. A full reseed via
+                    // `seed_load_state(&ctx.items)` would clobber other
+                    // pending `Loading`/`Error` entries — a real hazard
+                    // after `ExpandAll` fires one `LoadChildren` per lazy
+                    // branch and the first delivery settles before the
+                    // others; the later deliveries would then hit the
+                    // `== Loading` guard against a reset-to-`NotLoaded`
+                    // entry and be silently dropped.
                     ctx.load_state.insert(parent.clone(), NodeLoadState::Loaded);
+                    seed_load_state_for_loaded(&children, &mut ctx.load_state);
 
                     // Recompute the selection machine's disabled-key set from
                     // the new collection: newly-loaded children carrying
@@ -1342,9 +1348,17 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                // Only a real node can be renamed, and only from a resting
-                // state (the tree is `Idle` or `Focused`).
-                if ctx.items.get(key).is_none() || !matches!(state, State::Idle | State::Focused) {
+                // Only a real, visible node can be renamed, and only from a
+                // resting state (the tree is `Idle` or `Focused`). A node
+                // hidden under a collapsed ancestor has no rendered
+                // `treeitem` or `NodeRenameInput`, so accepting the event
+                // would set `focused_node` (and `aria-activedescendant`) to
+                // an id absent from the DOM. Mirrors the `FocusNode` /
+                // `DragStart` visibility guards.
+                if ctx.items.get(key).is_none()
+                    || !matches!(state, State::Idle | State::Focused)
+                    || !visible_keys(ctx).contains(key)
+                {
                     return None;
                 }
 
@@ -2007,6 +2021,34 @@ fn loaded_keys_are_unique(
     }
 
     true
+}
+
+/// Seed `load_state` entries for the keys in a freshly-loaded `configs`
+/// forest, leaving every other entry in `load_state` untouched. Used by
+/// [`Event::ChildrenLoaded`] instead of a full `seed_load_state` reset: a
+/// full reset would clobber other in-flight `Loading`/`Error` entries when
+/// multiple branches are lazy-loading concurrently (e.g. `ExpandAll` over
+/// several lazy branches), and the later deliveries would then be rejected
+/// by the `== Loading` guard against an entry that was silently reset to
+/// `NotLoaded`.
+///
+/// A child with the `TreeItem::has_children` affordance but no actual
+/// children in the delivered config is seeded `NotLoaded` (it itself is a
+/// lazy branch); every other newly-inserted node is `Loaded`.
+fn seed_load_state_for_loaded(
+    configs: &[TreeItemConfig<TreeItem>],
+    load_state: &mut BTreeMap<Key, NodeLoadState>,
+) {
+    for config in configs {
+        let lazy = config.value.has_children && config.children.is_empty();
+        let state = if lazy {
+            NodeLoadState::NotLoaded
+        } else {
+            NodeLoadState::Loaded
+        };
+        load_state.insert(config.key.clone(), state);
+        seed_load_state_for_loaded(&config.children, load_state);
+    }
 }
 
 /// Walk a [`TreeItemConfig`] subtree and accumulate every key whose config

@@ -4068,6 +4068,96 @@ fn toggle_node_on_error_branch_retries_load() {
 }
 
 #[test]
+fn concurrent_lazy_loads_preserve_other_loading_states_when_one_settles() {
+    // When `ExpandAll` (or any path) fires `LoadChildren` for multiple
+    // lazy branches concurrently, settling the first via `ChildrenLoaded`
+    // must NOT reset every other still-in-flight branch's `Loading` entry
+    // back to `NotLoaded` — the later deliveries would then be rejected by
+    // the `== Loading` stale-guard against the wrongly-reset entry,
+    // leaving expanded branches empty even after their fetch completed.
+    let items = TreeCollection::new(vec![
+        leaf_with(
+            1,
+            "Fruits",
+            TreeItem {
+                has_children: true,
+                ..item("Fruits")
+            },
+        ),
+        leaf_with(
+            8,
+            "Beverages",
+            TreeItem {
+                has_children: true,
+                ..item("Beverages")
+            },
+        ),
+    ]);
+    let mut service = service(Props::new().id("tree").items(items));
+
+    drop(service.send(Event::ExpandAll));
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loading
+    );
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(8)),
+        NodeLoadState::Loading
+    );
+
+    // Settle the first lazy branch.
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: vec![leaf(2, "Apple")],
+    }));
+
+    // The other branch still reports `Loading` — its pending fetch is
+    // preserved (this is the new contract; previously it would have flipped
+    // back to `NotLoaded` because a full reseed wiped it).
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(1)),
+        NodeLoadState::Loaded
+    );
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(8)),
+        NodeLoadState::Loading,
+        "settling one branch must not wipe another branch's pending Loading state"
+    );
+
+    // The later delivery for the other branch is accepted (the `== Loading`
+    // stale-guard would have rejected it if the state had been reset).
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(8),
+        children: vec![leaf(9, "Tea")],
+    }));
+    assert_eq!(
+        service.connect(&|_| {}).node_load_state(&key(8)),
+        NodeLoadState::Loaded
+    );
+}
+
+#[test]
+fn rename_start_rejected_for_node_hidden_under_collapsed_parent() {
+    // A hidden node (under a collapsed ancestor) has no rendered `treeitem`
+    // or `NodeRenameInput`, so accepting `RenameStart` for it would set
+    // `focused_node`/`aria-activedescendant` to an id absent from the DOM.
+    // Mirrors the `FocusNode` / `DragStart` visibility guards.
+    let mut service = service(renamable_props());
+
+    // `key(5)` "Carrot" lives under "Vegetables" (key 4), which is
+    // `default_expanded: false` in `sample_items`, so its children are
+    // not visible at init.
+    let result = service.send(Event::RenameStart(key(5)));
+
+    assert!(
+        !result.context_changed,
+        "RenameStart on a hidden node must be rejected"
+    );
+    assert_eq!(service.context().renaming_key, None);
+    assert_eq!(service.context().focused_node, None);
+}
+
+#[test]
 fn rename_input_snapshot() {
     let mut service = service(renamable_props());
 
