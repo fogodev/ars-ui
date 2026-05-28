@@ -14,6 +14,8 @@ use ars_core::{Direction, Orientation};
 use proptest::prelude::*;
 
 mod accordion;
+mod link;
+mod navigation_menu;
 mod pagination;
 mod steps;
 mod tabs;
