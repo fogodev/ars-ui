@@ -3836,6 +3836,60 @@ fn children_loaded_recomputes_disabled_keys_for_loaded_disabled_child() {
 }
 
 #[test]
+fn lazy_loaded_disabled_child_stays_unselectable_across_unrelated_sync_props() {
+    // After `ChildrenLoaded` inserts a disabled child and `disabled_keys` is
+    // recomputed (R3-T1), an unrelated `SyncProps` echo that preserves
+    // `ctx.items` (the lazy subtree survives unchanged `Props::items`) must
+    // also preserve the recomputed disabled-key set — otherwise the closure
+    // would silently restore the stale `props.items`-derived set and
+    // re-admit the disabled child to `SelectNode`.
+    let mut service = service(lazy_props().renamable(true));
+
+    drop(service.send(Event::ExpandNode(key(1))));
+    drop(service.send(Event::ChildrenLoaded {
+        parent: key(1),
+        children: vec![leaf_with(
+            2,
+            "Apple",
+            TreeItem {
+                disabled: true,
+                ..item("Apple")
+            },
+        )],
+    }));
+    assert!(
+        service
+            .context()
+            .selection_state
+            .disabled_keys
+            .contains(&key(2))
+    );
+
+    // Trigger an unrelated SyncProps: toggle `renamable` (items prop unchanged).
+    let new_props = lazy_props().renamable(false);
+    let triggered = <Machine as ars_core::Machine>::on_props_changed(service.props(), &new_props);
+    assert!(triggered.contains(&Event::SyncProps));
+    drop(service.set_props(new_props));
+    for event in triggered {
+        drop(service.send(event));
+    }
+
+    // The disabled-key set still includes the lazily-loaded disabled child.
+    assert!(
+        service
+            .context()
+            .selection_state
+            .disabled_keys
+            .contains(&key(2))
+    );
+
+    // SelectNode on the disabled-but-loaded child remains a no-op.
+    let before = service.context().selected.get().clone();
+    drop(service.send(Event::SelectNode(key(2))));
+    assert_eq!(&before, service.context().selected.get());
+}
+
+#[test]
 fn children_loaded_seeds_default_expanded_for_loaded_subtree() {
     // `TreeItemConfig::default_expanded: true` is honored at init via the
     // initial `ctx.expanded` seeding. Lazy-load deliveries must honor it

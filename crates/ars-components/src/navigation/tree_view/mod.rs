@@ -1099,11 +1099,6 @@ impl ars_core::Machine for Machine {
                 let selection_behavior = props.selection_behavior;
                 let dnd_enabled = props.dnd_enabled;
                 let renamable = props.renamable;
-                let disabled_keys = items
-                    .all_nodes()
-                    .filter(|node| node.value.as_ref().is_some_and(|item| item.disabled))
-                    .map(|node| node.key.clone())
-                    .collect::<BTreeSet<Key>>();
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     // Whether the consumer actually changed `Props::items`
@@ -1158,6 +1153,20 @@ impl ars_core::Machine for Machine {
                     ctx.selection_mode = selection_mode;
                     ctx.selected.sync_controlled(selected);
                     ctx.expanded.sync_controlled(expanded);
+
+                    // Recompute disabled keys from the CURRENT `ctx.items` —
+                    // not from `props.items` captured above — so an unrelated
+                    // `SyncProps` echo that preserves a lazy-loaded subtree
+                    // (`items_changed == false`) still respects any disabled
+                    // children `ChildrenLoaded` inserted. Computing from
+                    // `props.items` would silently drop those from
+                    // `selection_state.disabled_keys` on every echo.
+                    let disabled_keys = ctx
+                        .items
+                        .all_nodes()
+                        .filter(|node| node.value.as_ref().is_some_and(|item| item.disabled))
+                        .map(|node| node.key.clone())
+                        .collect::<BTreeSet<Key>>();
 
                     // Normalize the (uncontrolled) selection for the new mode and
                     // drop keys removed from the collection or now disabled, so a

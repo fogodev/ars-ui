@@ -1980,11 +1980,21 @@ Event::RenameStart(key) => {
 }
 
 Event::RenameCommit { key, new_name } => {
-    if ctx.renaming_key.as_ref() != Some(key) { return None; }
+    // Reject only when no rename is active anywhere (stray commit). When a
+    // rename IS active — either for `key` or (during the retarget hand-off,
+    // see §6.4 prose above) for a different node — emit `Effect::Rename`
+    // so the outgoing edit reaches `Props::on_rename`. The `renaming_key`
+    // clear is gated on the key actually being the current target, so a
+    // retargeted blur commits the outgoing value without ending the new
+    // node's rename.
+    ctx.renaming_key.as_ref()?;
     let event = RenameEvent { key: key.clone(), new_name: new_name.clone() };
+    let is_active_target = ctx.renaming_key.as_ref() == Some(key);
     Some(
-        TransitionPlan::context_only(|ctx| {
-            ctx.renaming_key = None;
+        TransitionPlan::context_only(move |ctx| {
+            if is_active_target {
+                ctx.renaming_key = None;
+            }
         })
         .with_effect(rename_effect(event)),
     )
