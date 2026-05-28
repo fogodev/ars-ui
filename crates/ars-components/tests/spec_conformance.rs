@@ -29,7 +29,7 @@ mod input;
 #[path = "spec_conformance/layout.rs"]
 mod layout;
 
-#[path = "spec_conformance/navigation.rs"]
+#[path = "spec_conformance/navigation/mod.rs"]
 mod navigation;
 
 #[path = "spec_conformance/overlay/mod.rs"]
