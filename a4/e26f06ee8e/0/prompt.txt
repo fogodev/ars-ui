@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>buzymq1mz</task-id>
+<tool-use-id>toolu_01WvWbKVVztXgS2Sr4Kzdm9j</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-audit-agnostic-navigation-components/cf0f1e35-f01b-4a9b-832f-32a43e97d9d0/tasks/buzymq1mz.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex review loop for PR #696" completed (exit code 0)</summary>
+</task-notification>
