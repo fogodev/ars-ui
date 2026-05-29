@@ -1199,4 +1199,79 @@ mod tests {
         assert!(matches!(events[1], Event::DragStart { .. }));
         assert!(matches!(events[2], Event::SetValue { .. }));
     }
+
+    #[test]
+    fn connect_and_guards_cover_both_arms() {
+        let all_parts = [
+            Part::Root,
+            Part::Control,
+            Part::Track,
+            Part::Range,
+            Part::Thumb,
+            Part::ValueText,
+            Part::MarkerGroup,
+            Part::Marker { value: 45.0 },
+            Part::HiddenInput,
+        ];
+
+        // Disabled + keyboard focus: aria-disabled true arms, focus-visible true arm.
+        let mut disabled = service(Props {
+            disabled: true,
+            ..Props::default()
+        });
+        drop(disabled.send(Event::Focus { is_keyboard: true }));
+        drop(disabled.send(Event::Increment)); // guarded out
+        let disabled_api = disabled.connect(&|_| {});
+        for part in &all_parts {
+            let _attrs = disabled_api.part_attrs(part.clone());
+        }
+
+        // Read-only + focus: aria-readonly true arm; drag guarded out.
+        let mut readonly = service(Props {
+            readonly: true,
+            ..Props::default()
+        });
+        drop(readonly.send(Event::Focus { is_keyboard: true }));
+        drop(readonly.send(Event::DragStart { angle: 10.0 }));
+        let readonly_api = readonly.connect(&|_| {});
+        let _readonly_root = readonly_api.root_attrs();
+        let _readonly_thumb = readonly_api.thumb_attrs();
+
+        // Dragging (state=dragging, focus-visible false).
+        let mut dragging = service(Props::default());
+        drop(dragging.send(Event::DragStart { angle: 90.0 }));
+        let dragging_api = dragging.connect(&|_| {});
+        let _dragging_root = dragging_api.root_attrs();
+        let _dragging_thumb = dragging_api.thumb_attrs();
+
+        // Idle, no flags: every false arm + state=idle.
+        let idle = service(Props::default());
+        let idle_api = idle.connect(&|_| {});
+        for part in &all_parts {
+            let _attrs = idle_api.part_attrs(part.clone());
+        }
+    }
+
+    #[test]
+    fn degenerate_step_and_range_hit_defensive_guards() {
+        // `step <= 0.0` short-circuits `snap_to_step` (returns the angle as-is).
+        let mut zero_step = service(Props {
+            step: 0.0,
+            default_value: 40.0,
+            ..Props::default()
+        });
+        drop(zero_step.send(Event::DragStart { angle: 47.0 }));
+        assert!((zero_step.connect(&|_| {}).value() - 47.0).abs() < 1e-9);
+
+        // `min == max` makes the range zero, so `wrap_value` returns `min`.
+        let mut zero_range = service(Props {
+            min: 90.0,
+            max: 90.0,
+            default_value: 90.0,
+            ..Props::default()
+        });
+        drop(zero_range.send(Event::Focus { is_keyboard: true }));
+        drop(zero_range.send(Event::Increment));
+        assert!((zero_range.connect(&|_| {}).value() - 90.0).abs() < 1e-9);
+    }
 }

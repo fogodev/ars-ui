@@ -911,4 +911,97 @@ mod tests {
         assert!(matches!(evs[0], Event::FocusNext));
         assert!(matches!(evs[1], Event::FocusPrev));
     }
+
+    #[test]
+    fn item_and_root_attrs_cover_both_arms() {
+        // Keyboard focus → focused item carries focus-visible; selected item carries selected.
+        let mut keyboard = service(Props {
+            colors: palette(),
+            value: Some(ColorValue::from_rgb(0, 0, 255)), // index 2
+            ..Props::default()
+        });
+        drop(keyboard.send(Event::Focus { is_keyboard: true }));
+        let keyboard_api = keyboard.connect(&|_| {});
+        let focused = keyboard_api
+            .focused_index()
+            .expect("focus lands on a swatch");
+        let focused_attrs = keyboard_api.item_attrs(focused);
+        assert_eq!(focused_attrs.get(&HtmlAttr::TabIndex), Some("0"));
+        assert_eq!(
+            focused_attrs.get(&HtmlAttr::Data("ars-focus-visible")),
+            Some("true")
+        );
+        // A different, non-focused, non-selected item exercises the false arms.
+        let other = (focused + 1) % palette().len();
+        let other_attrs = keyboard_api.item_attrs(other);
+        assert_eq!(other_attrs.get(&HtmlAttr::TabIndex), Some("-1"));
+        assert!(!other_attrs.contains(&HtmlAttr::Data("ars-focused")));
+
+        // Pointer focus → focused item, but focus-visible is suppressed.
+        let mut pointer = service(Props {
+            colors: palette(),
+            ..Props::default()
+        });
+        drop(pointer.send(Event::Focus { is_keyboard: false }));
+        let pointer_api = pointer.connect(&|_| {});
+        let pointer_focused = pointer_api
+            .focused_index()
+            .expect("focus lands on a swatch");
+        assert!(
+            !pointer_api
+                .item_attrs(pointer_focused)
+                .contains(&HtmlAttr::Data("ars-focus-visible"))
+        );
+
+        // Disabled root marks aria-disabled; out-of-bounds item is unselected.
+        let disabled = service(Props {
+            colors: palette(),
+            disabled: true,
+            ..Props::default()
+        });
+        let disabled_api = disabled.connect(&|_| {});
+        assert_eq!(
+            disabled_api
+                .root_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::Disabled)),
+            Some("true")
+        );
+        assert_eq!(
+            disabled_api
+                .item_attrs(999)
+                .get(&HtmlAttr::Aria(AriaAttr::Selected)),
+            Some("false")
+        );
+    }
+
+    #[test]
+    fn navigation_events_are_ignored_while_not_focused() {
+        // In `Idle`, every focus-movement event hits its `!matches!(Focused)`
+        // guard and is a no-op; `focused_index` stays `None`.
+        for event in [
+            Event::FocusNext,
+            Event::FocusPrev,
+            Event::FocusUp,
+            Event::FocusDown,
+            Event::FocusFirst,
+            Event::FocusLast,
+        ] {
+            let mut svc = service(Props {
+                colors: palette(),
+                columns: 3,
+                ..Props::default()
+            });
+            drop(svc.send(event));
+            assert_eq!(svc.connect(&|_| {}).focused_index(), None);
+        }
+
+        // Select with an out-of-bounds index leaves the value unchanged.
+        let mut oob = service(Props {
+            colors: palette(),
+            default_value: ColorValue::from_rgb(1, 2, 3),
+            ..Props::default()
+        });
+        drop(oob.send(Event::Select { index: 999 }));
+        assert_eq!(oob.connect(&|_| {}).value().to_rgb(), (1, 2, 3));
+    }
 }

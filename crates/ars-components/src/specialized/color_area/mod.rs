@@ -1082,4 +1082,52 @@ mod tests {
 
         assert!(matches!(cap.borrow()[0], Event::DragStart { .. }));
     }
+
+    #[test]
+    fn connect_and_guards_cover_both_arms() {
+        // Disabled (idle) + keyboard focus: root marks disabled, thumb marks focus-visible.
+        let mut disabled = service(Props {
+            disabled: true,
+            ..Props::default()
+        });
+        drop(disabled.send(Event::Focus { is_keyboard: true }));
+        let disabled_api = disabled.connect(&|_| {});
+        for part in [Part::Root, Part::Background, Part::Thumb, Part::HiddenInput] {
+            let _attrs = disabled_api.part_attrs(part);
+        }
+
+        // Read-only: every value-changing event is guarded out.
+        let mut readonly = service(Props {
+            readonly: true,
+            ..Props::default()
+        });
+        for event in [
+            Event::DragStart { x: 0.5, y: 0.5 },
+            Event::IncrementX { step: 0.1 },
+            Event::DecrementX { step: 0.1 },
+            Event::IncrementY { step: 0.1 },
+            Event::DecrementY { step: 0.1 },
+            Event::SetXToMin,
+            Event::SetXToMax,
+            Event::SetYToMin,
+            Event::SetYToMax,
+        ] {
+            drop(readonly.send(event));
+        }
+        let _readonly_root = readonly.connect(&|_| {}).root_attrs();
+
+        // Active drag with keyboard focus: root + thumb mark dragging/focus-visible.
+        let mut active = service(Props::default());
+        drop(active.send(Event::Focus { is_keyboard: true }));
+        drop(active.send(Event::DragStart { x: 0.5, y: 0.5 }));
+        let active_api = active.connect(&|_| {});
+        let _active_root = active_api.root_attrs();
+        let _active_thumb = active_api.thumb_attrs();
+
+        // Idle, no flags: the false arm of every conditional.
+        let idle = service(Props::default());
+        let idle_api = idle.connect(&|_| {});
+        let _idle_root = idle_api.root_attrs();
+        let _idle_thumb = idle_api.thumb_attrs();
+    }
 }

@@ -1080,4 +1080,55 @@ mod tests {
 
         let _track = red.connect(&|_| {}).track_attrs();
     }
+
+    #[test]
+    fn connect_and_guards_cover_both_arms() {
+        // Disabled (idle) + keyboard focus.
+        let mut disabled = service(Props {
+            disabled: true,
+            ..Props::default()
+        });
+        drop(disabled.send(Event::Focus { is_keyboard: true }));
+        let disabled_api = disabled.connect(&|_| {});
+        for part in [
+            Part::Root,
+            Part::Label,
+            Part::Track,
+            Part::Thumb,
+            Part::Output,
+            Part::HiddenInput,
+        ] {
+            let _attrs = disabled_api.part_attrs(part);
+        }
+
+        // Read-only: every value-changing event is guarded out.
+        let mut readonly = service(Props {
+            readonly: true,
+            ..Props::default()
+        });
+        for event in [
+            Event::DragStart { position: 0.5 },
+            Event::Increment { step: 5.0 },
+            Event::Decrement { step: 5.0 },
+            Event::SetToMin,
+            Event::SetToMax,
+        ] {
+            drop(readonly.send(event));
+        }
+        let _readonly_root = readonly.connect(&|_| {}).root_attrs();
+
+        // Active drag with keyboard focus.
+        let mut active = service(Props::default());
+        drop(active.send(Event::Focus { is_keyboard: true }));
+        drop(active.send(Event::DragStart { position: 0.5 }));
+        let active_api = active.connect(&|_| {});
+        let _active_root = active_api.root_attrs();
+        let _active_thumb = active_api.thumb_attrs();
+
+        // Idle, no flags.
+        let idle = service(Props::default());
+        let idle_api = idle.connect(&|_| {});
+        let _idle_root = idle_api.root_attrs();
+        let _idle_thumb = idle_api.thumb_attrs();
+    }
 }

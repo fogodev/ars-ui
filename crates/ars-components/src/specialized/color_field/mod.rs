@@ -64,6 +64,9 @@ pub enum Event {
 
     /// Programmatic invalid-state update.
     SetInvalid(bool),
+    /// Adapter signal that a description part is (or is no longer) rendered,
+    /// toggling whether the input's `aria-describedby` references it.
+    SetHasDescription(bool),
 
     /// Channel mode: increment by `step` (`ArrowUp`).
     Increment,
@@ -494,6 +497,13 @@ impl ars_core::Machine for Machine {
                 let inv = *inv;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.invalid = inv;
+                }))
+            }
+
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.has_description = has_description;
                 }))
             }
 
@@ -1288,5 +1298,148 @@ mod tests {
         drop(ro.send(Event::Increment));
 
         assert!((ro.connect(&|_| {}).value().unwrap().hue - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn connect_attrs_cover_both_flag_arms() {
+        // All flags ON, channel mode, focused, value + name present.
+        let mut on = service(Props {
+            channel: Some(ColorChannel::Hue),
+            value: Some(ColorValue::from_hsl(180.0, 1.0, 0.5)),
+            disabled: true,
+            readonly: true,
+            invalid: true,
+            required: true,
+            name: Some("c".to_string()),
+            ..Props::default()
+        });
+        drop(on.send(Event::Focus { is_keyboard: true })); // focused + focus_visible
+        let on_api = on.connect(&|_| {});
+        for part in [
+            Part::Root,
+            Part::Label,
+            Part::Input,
+            Part::Description,
+            Part::ErrorMessage,
+            Part::HiddenInput,
+        ] {
+            let _attrs = on_api.part_attrs(part);
+        }
+        // describedby references the error message when invalid.
+        assert!(
+            on_api
+                .input_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::DescribedBy))
+                .is_some()
+        );
+
+        // `has_description` true arm + describedby referencing the description.
+        let mut described = service(Props::default());
+        drop(described.send(Event::SetHasDescription(true)));
+        let described_input = described.connect(&|_| {}).input_attrs();
+        let describedby = described_input
+            .get(&HtmlAttr::Aria(AriaAttr::DescribedBy))
+            .expect("description is referenced");
+        assert!(describedby.contains("description"));
+
+        // All flags OFF, whole-color mode, empty value, no name.
+        let off = service(Props::default());
+        let off_api = off.connect(&|_| {});
+        for part in [
+            Part::Root,
+            Part::Label,
+            Part::Input,
+            Part::Description,
+            Part::ErrorMessage,
+            Part::HiddenInput,
+        ] {
+            let _attrs = off_api.part_attrs(part);
+        }
+        // Empty describedby is not emitted.
+        assert!(
+            !off_api
+                .input_attrs()
+                .contains(&HtmlAttr::Aria(AriaAttr::DescribedBy))
+        );
+        // Whole-color hidden input without a name omits the name attribute.
+        assert!(!off_api.hidden_input_attrs().contains(&HtmlAttr::Name));
+    }
+
+    #[test]
+    fn keydown_covers_every_key_in_both_channel_modes() {
+        let keys = [
+            KeyboardKey::ArrowUp,
+            KeyboardKey::ArrowDown,
+            KeyboardKey::PageUp,
+            KeyboardKey::PageDown,
+            KeyboardKey::Home,
+            KeyboardKey::End,
+            KeyboardKey::Enter,
+            KeyboardKey::Tab, // unhandled
+        ];
+        // Both the channel-mode (guards true) and whole-color-mode (guards false) paths.
+        for channel in [Some(ColorChannel::Hue), None] {
+            let svc = service(Props {
+                channel,
+                value: Some(ColorValue::from_hsl(10.0, 1.0, 0.5)),
+                ..Props::default()
+            });
+            let captured = core::cell::RefCell::new(Vec::new());
+            let send = |event: Event| captured.borrow_mut().push(event);
+            let api = svc.connect(&send);
+            for pressed in keys {
+                api.on_input_keydown(&key(pressed));
+            }
+        }
+        // While composing, keydown is fully suppressed (the early return).
+        let mut composing = service(Props {
+            channel: Some(ColorChannel::Hue),
+            ..Props::default()
+        });
+        drop(composing.send(Event::CompositionStart));
+        let captured = core::cell::RefCell::new(Vec::new());
+        let send = |event: Event| captured.borrow_mut().push(event);
+        composing
+            .connect(&send)
+            .on_input_keydown(&key(KeyboardKey::Enter));
+        assert!(captured.borrow().is_empty());
+    }
+
+    #[test]
+    fn channel_event_guards_cover_readonly_and_whole_color() {
+        let channel_events = [
+            Event::Increment,
+            Event::Decrement,
+            Event::IncrementLarge,
+            Event::DecrementLarge,
+            Event::IncrementToMax,
+            Event::DecrementToMin,
+        ];
+        // Read-only channel field: every channel event is guarded out.
+        let mut readonly = service(Props {
+            channel: Some(ColorChannel::Hue),
+            readonly: true,
+            value: Some(ColorValue::from_hsl(10.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+        for event in channel_events.clone() {
+            drop(readonly.send(event));
+        }
+        assert!((readonly.connect(&|_| {}).value().unwrap().hue - 10.0).abs() < 1e-9);
+
+        // Whole-color field (channel is None): the `channel.is_none()` guard trips.
+        let mut whole_color = service(Props {
+            value: Some(ColorValue::from_hsl(10.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+        for event in channel_events {
+            drop(whole_color.send(event));
+        }
+        // Commit while read-only is also guarded out.
+        let mut readonly_commit = service(Props {
+            readonly: true,
+            ..Props::default()
+        });
+        drop(readonly_commit.send(Event::Commit));
     }
 }

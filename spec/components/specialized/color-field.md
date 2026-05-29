@@ -61,6 +61,9 @@ pub enum Event {
     SetValue(ColorValue),
     /// Programmatic invalid state.
     SetInvalid(bool),
+    /// Adapter signal that a description part is (or is no longer) rendered,
+    /// toggling whether the input's `aria-describedby` references it.
+    SetHasDescription(bool),
     /// Channel mode: increment by step (ArrowUp).
     Increment,
     /// Channel mode: decrement by step (ArrowDown).
@@ -408,6 +411,14 @@ impl ars_core::Machine for Machine {
 
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.invalid = inv;
+                }))
+            }
+
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
+
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_description = has_description;
                 }))
             }
 
