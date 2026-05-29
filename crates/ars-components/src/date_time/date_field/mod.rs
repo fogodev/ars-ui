@@ -28,8 +28,8 @@ use ars_core::{
     TransitionPlan,
 };
 use ars_i18n::{
-    CalendarDate, CalendarDateFields, CalendarSystem, DateField as CalendarDateField, Era,
-    calendar::CycleOptions,
+    CalendarDate, CalendarDateFields, CalendarSystem, DateField as CalendarDateField, DateOrder,
+    Era, calendar::CycleOptions, date_order,
 };
 use ars_interactions::KeyboardEventData;
 pub use segment::{DateSegment, DateSegmentKind};
@@ -2226,26 +2226,26 @@ fn segment_order_for_locale(locale: &Locale, calendar: CalendarSystem) -> Vec<Da
         ];
     }
 
-    match (locale.language(), locale.region()) {
-        ("en", Some("US" | "FM" | "PW")) => vec![
+    // Field order comes from `ars_i18n::date_order` (CLDR via ICU4X, browser
+    // `Intl` on wasm, or a `(language, region)` fallback) so the order matches
+    // real locale data and stays consistent with `date_picker`.
+    match date_order(locale) {
+        DateOrder::MonthDayYear => vec![
             DateSegmentKind::Month,
             DateSegmentKind::Day,
             DateSegmentKind::Year,
         ],
 
-        ("ja" | "zh" | "ko", _)
-        | (_, Some("CA" | "CN" | "HU" | "JP" | "KR" | "LT" | "MN" | "TW")) => {
-            vec![
-                DateSegmentKind::Year,
-                DateSegmentKind::Month,
-                DateSegmentKind::Day,
-            ]
-        }
-
-        _ => vec![
+        DateOrder::DayMonthYear => vec![
             DateSegmentKind::Day,
             DateSegmentKind::Month,
             DateSegmentKind::Year,
+        ],
+
+        DateOrder::YearMonthDay => vec![
+            DateSegmentKind::Year,
+            DateSegmentKind::Month,
+            DateSegmentKind::Day,
         ],
     }
 }

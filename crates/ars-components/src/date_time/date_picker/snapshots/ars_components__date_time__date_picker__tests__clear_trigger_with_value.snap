@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/date_time/date_picker/tests.rs
+expression: snapshot_attrs(&api.clear_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "clear-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "date-picker",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Clear date",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "date-picker-clear-trigger",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}
