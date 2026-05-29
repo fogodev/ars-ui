@@ -1,0 +1,11 @@
+<task-notification>
+<task-id>b7a0p9fag</task-id>
+<tool-use-id>toolu_01ULKQ572e1UL1xRT647maJm</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-297-298-299/7ee91730-774d-4208-8cce-9edea0a0d747/tasks/b7a0p9fag.output</output-file>
+<status>killed</status>
+<summary>Background command "Poll Codex review state until verdict" was stopped</summary>
+</task-notification>
+
+---
+
+Coverage CI is failing
