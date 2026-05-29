@@ -1,0 +1,59 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3979c7ed64be",
+  "strategy": "manual-commit",
+  "branch": "t3code/c59961ed",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_field/mod.rs",
+    "crates/ars-components/src/date_time/date_picker/mod.rs",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__clear_trigger_empty.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__clear_trigger_with_value.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__content_open.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__control.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__description.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__error_message.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__hidden_input_empty.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__hidden_input_with_value.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_closed.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_disabled.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_invalid.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_open.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_readonly.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_required.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_with_placeholder.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_with_value.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__label.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__positioner_closed.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__positioner_open.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__root_closed.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__root_disabled.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__root_open.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__root_readonly.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__root_rtl.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__trigger_closed.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__trigger_disabled.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__trigger_open.snap",
+    "crates/ars-components/src/date_time/date_picker/tests.rs",
+    "crates/ars-components/src/date_time/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "spec/components/date-time/date-field.md",
+    "spec/components/date-time/date-picker.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/39/79c7ed64be/0/metadata.json",
+      "transcript": "/39/79c7ed64be/0/full.jsonl",
+      "content_hash": "/39/79c7ed64be/0/content_hash.txt",
+      "prompt": "/39/79c7ed64be/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 62064,
+    "cache_creation_tokens": 2952410,
+    "cache_read_tokens": 143195059,
+    "output_tokens": 450632,
+    "api_call_count": 302
+  }
+}

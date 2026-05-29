@@ -1,0 +1,140 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3979c7ed64be",
+  "session_id": "237b9b0f-3f17-4f7d-a955-e50b875d5151",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-29T00:14:30.883156Z",
+  "branch": "t3code/c59961ed",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_field/mod.rs",
+    "crates/ars-components/src/date_time/date_picker/mod.rs",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__clear_trigger_empty.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__clear_trigger_with_value.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__content_open.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__control.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__description.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__error_message.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__hidden_input_empty.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__hidden_input_with_value.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_closed.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_disabled.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_invalid.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_open.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_readonly.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_required.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_with_placeholder.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__input_with_value.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__label.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__positioner_closed.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__positioner_open.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__root_closed.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__root_disabled.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__root_open.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__root_readonly.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__root_rtl.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__trigger_closed.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__trigger_disabled.snap",
+    "crates/ars-components/src/date_time/date_picker/snapshots/ars_components__date_time__date_picker__tests__trigger_open.snap",
+    "crates/ars-components/src/date_time/date_picker/tests.rs",
+    "crates/ars-components/src/date_time/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "spec/components/date-time/date-field.md",
+    "spec/components/date-time/date-picker.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "305d6aee8083",
+  "token_usage": {
+    "input_tokens": 62064,
+    "cache_creation_tokens": 2952410,
+    "cache_read_tokens": 143195059,
+    "output_tokens": 450632,
+    "api_call_count": 302
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #289: the framework-agnostic DatePicker state machine (popover open/close, date selection, input parse/validation, value↔calendar sync, ARIA/data attrs) as a new crate module with full TDD coverage and spec sync.",
+    "outcome": "DatePicker agnostic core fully implemented at crates/ars-components/src/date_time/date_picker/ with 109 passing tests (unit, snapshot, spec-conformance, proptest), spec synced across 9 drift points, CLDR-backed locale date ordering wired via an exposed ars-i18n function, a pre-existing snapshot-count gate bug fixed, and a 4-commit PR opened closing #289.",
+    "learnings": {
+      "repo": [
+        "The Machine trait requires `type Effect: EffectName` as an associated type — string effect names and `use_platform_effects()` closures in core do not compile; focus must be adapter-driven via `PendingEffect::named(Effect::X)`, matching the Popover/Dialog convention.",
+        "CalendarDate has no PartialOrd/Ord; ordering requires `.compare(other) -> Ordering`. Field access is pub(crate); public accessors are `year() -> i32`, `month() -> u8`, `day() -> u8` (plain ints, no NonZero). `new_gregorian(i32, u8, u8) -> Result<...>`. The `nzu8` helper does not exist anywhere in the codebase.",
+        "Context for date-time components should derive only `Clone` + manual `Debug` (skip messages field) — not PartialEq — because MessageFn is not PartialEq. Calendar is the authoritative precedent.",
+        "Service::new takes its Env and Messages by reference (not by value). `send()` is #[must_use]; test code must use `drop(svc.send(...))` or bind the result.",
+        "ComponentIds has no public `base_id` field; the accessor is `ids.id()`.",
+        "`is_date_unavailable` in calendar::Props is `Option<IsDateUnavailableFn>` (a `Callback<dyn Fn(&CalendarDate)->bool + Send+Sync>`), not a bare fn pointer — must use this type when forwarding from DatePicker to calendar_props() to keep Props Clone+PartialEq.",
+        "The snapshot-count gate (`xtask/src/lint.rs` `is_component_category`) matched only hyphenated category names ('date-time') while source dirs and snapshot path segments use underscores ('date_time'), silently skipping the entire date-time and data-display categories.",
+        "ars-i18n already contained a complete private `date_order(locale) -> DateOrder` (CLDR via ICU4X, JS Intl on wasm, (language, region) fallback) at date.rs ~line 1245. DateField and DatePicker had each reimplemented only the fallback heuristic; exposing the function removed both copies.",
+        "The canonical SyncProps pattern uses `Bindable::sync_controlled(new_controlled_value)` + a `sync_props_into_ctx` helper to re-derive controlled/uncontrolled Bindables from new props while preserving uncontrolled internal state.",
+        "State (enum Open/Closed) should be the single source of truth for open state; a parallel `open: Bindable<bool>` on Context creates a divergence hazard when controlled props flip to uncontrolled — a proptest found this bug before release.",
+        "Under `default-features = false`, ars-components does not enable `ars-i18n/icu4x`; `date_order` resolves to the fallback heuristic. Under `--features i18n` it uses CLDR. Both paths agree for canonical locales, so snapshot tests are deterministic across both.",
+        "Presets (Today/Yesterday) are explicitly excluded by spec §6.2/§6.4 ('Gaps: None worth adopting'); issue test descriptions mentioning presets were author speculation, not scope."
+      ],
+      "code": [
+        {
+          "path": "xtask/src/lint.rs",
+          "finding": "is_component_category matched hyphenated category strings ('date-time', 'data-display') while filesystem paths use underscores — two whole categories silently excluded from snapshot-count enforcement. Fixed by also matching underscore variants."
+        },
+        {
+          "path": "crates/ars-i18n/src/date.rs",
+          "line": 1245,
+          "finding": "Private `date_order(locale) -> DateOrder` function already implements CLDR (icu_date_order), JS Intl (js_date_order), and (language, region) fallback paths. Made public to eliminate duplicate heuristic implementations in DateField and DatePicker."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_field/mod.rs",
+          "line": 2219,
+          "finding": "segment_order_for_locale was a hand-rolled (language, region) match with a DMY default — now replaced with a call to ars_i18n::date_order. The old version agreed with CLDR for every tested locale, so no snapshot churn occurred."
+        },
+        {
+          "path": "crates/ars-i18n/src/calendar/date.rs",
+          "finding": "CalendarDate fields are pub(crate), not public. Public API: year()->i32, month()->u8, day()->u8, compare(&Self)->Ordering, new_gregorian(i32,u8,u8)->Result. No PartialOrd/Ord, no NonZero types."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/rating_group/mod.rs",
+          "finding": "rating_group had 8 snapshots vs. a computed floor of 9 (3 parts × 3 variants). The unhighlighted item branch (item_attrs for index beyond default value) was not covered. Adding it brought it to 9/9."
+        }
+      ],
+      "workflow": [
+        "Explore agents can guess APIs plausibly but incorrectly (e.g., inventing `InputChange`/`input_text`/`Control` event names). Always verify against the actual spec and source before trusting agent-synthesized API descriptions.",
+        "Property-based testing (proptest) is essential for state machines — it found a genuine Bindable divergence bug (controlled→uncontrolled flip revealing stale internal state) that unit tests missed. Run with a meaningful case count before calling the implementation done.",
+        "The post-implementation-audit skill found three categories of non-obvious issues: spec drift in derives/type aliases, a cross-category gate bug, and coverage gaps in guard branches and ConnectApi dispatch arms. Running it surfaced real problems worth fixing.",
+        "For components with a `SyncProps` event, always call `ctx.field.set(derived_value)` to keep the Bindable's internal state in sync — otherwise a controlled→uncontrolled prop flip reveals stale internal values.",
+        "Multi-commit history (logical units: drive-by fix → i18n expose → tooling → main feature) makes PRs significantly more reviewable. Stage files explicitly per commit rather than using `git add .`.",
+        "`cargo xci-fast` is the mandatory pre-push gate; it covers fmt, check, clippy, unit, integration, adapter, spec-compile-snippets, error-variant, mutual-exclusion, and snapshot-count. Pre-existing staged changes from other sessions can cause unexpected gate failures.",
+        "When a spec says 'Spec impact: No spec change required', treat it as author expectation, not a constraint — if the spec won't compile against reality, the PR must fix both code and spec in the same change per CLAUDE.md."
+      ]
+    },
+    "friction": [
+      "Spec §1.7 had ~10 compile-blockers vs. the actual codebase (missing `type Effect`, string effects, CalendarDate field access, `nzu8` invention, no `Ord`, `ids.base_id`, fn vs Callback, by-value Service::new, missing on_props_changed/initial_effects) — required extensive pre-implementation grep/read verification before any code could be written.",
+      "A proptest found a real architectural bug (open Bindable diverging from State) mid-implementation, requiring a design pivot: removing the Bindable entirely and making State the single source of truth. This required touching transition arms, SyncProps, and several tests.",
+      "A stale staged change in pagination/mod.rs (from a prior session) broke xci-fast with a nightly-fmt failure that had nothing to do with the feature being implemented, blocking the pre-push gate.",
+      "The snapshot-count gate silently skipped two entire component categories for an indeterminate period due to the hyphen/underscore mismatch — a systematic gap in CI coverage that was only discovered when the fix exposed a pre-existing rating_group shortfall.",
+      "Shell backtick expansion broke a grep command mid-session, requiring a switch to the Grep tool and loss of one interactive step.",
+      "Session limit was hit mid-conversation, requiring a resume handoff."
+    ],
+    "open_items": [
+      "DatePicker adapter tasks (Leptos, Dioxus) are explicitly out of scope for #289 and remain as separate issues.",
+      "Pre-existing `utility/highlight` snapshot orphans block a bare `cargo insta test --unreferenced=reject` run (feature-gated tests not run in standard CI invocations) — unrelated to this PR but noted as a pre-existing CI quirk.",
+      "94 pre-existing `cargo doc` crate-wide warnings unrelated to this change remain unfixed.",
+      "The web-intl (`js_date_order`) wasm path for the newly-exposed `date_order` function is only fully validated by the nightly wasm-coverage CI group, not by `xci-fast`.",
+      "The `Event::SyncProps(_) => None` exhaustiveness arm (mod.rs:743) is genuinely unreachable by construction (SyncProps handled before the guard match) and deliberately left at 99.84% line coverage rather than using `unreachable!()` which would panic in prod.",
+      "A proper `IntlBackend::date_order(&self, locale: &Locale) -> DateOrder` trait method (surfacing locale date order through the abstraction rather than calling the free function directly) was considered but deferred — the free function approach works for now since both components call it the same way."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-29T00:13:04.343595Z",
+    "agent_lines": 5022,
+    "agent_removed": 218,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 5022,
+    "total_lines_changed": 5240,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
