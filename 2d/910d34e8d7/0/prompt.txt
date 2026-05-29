@@ -1,0 +1,187 @@
+Implement task #289
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Task #289 — Implement DatePicker agnostic core
+
+## Context
+
+GitHub issue #289 (epic #224, 8 pts) asks for the framework-agnostic `DatePicker`
+state machine: a composite that pairs a date **text input** with an embedded
+`Calendar` in a popover, owning popover open/close, date selection, input
+parsing/validation, value↔calendar sync, and ARIA/data attributes. Dependencies
+#262 (DateField) and #280 (Calendar) are merged. Adapters (Leptos/Dioxus) are
+explicitly out of scope (separate tasks); this is **unit-tested agnostic core only**.
+
+Spec: `spec/components/date-time/date-picker.md`. Shared types: `spec/shared/date-time-types.md`.
+
+The spec's `§1.7 Full Machine Implementation` was written before the core engine
+and sibling components solidified, so it contains several **compile-blockers and
+omissions** that must be fixed in code and synced back into the spec in this same
+PR (CLAUDE.md: "resolve spec/code mismatch in the same task"; the issue's
+"Spec impact: No spec change required" is the author's expectation, not a
+prohibition — the spec literally will not compile as written).
+
+## Decisions locked with the user
+
+1. **Full controlled-prop sync** — add a `SyncProps(Box<Props>)` event + implement
+   `on_props_changed` + `initial_effects`, matching Calendar/DateField/Popover.
+2. **`aria-haspopup="dialog"` on BOTH Input and Trigger** — keep it on Input (spec)
+   and add it to `trigger_attrs()` (issue's named test + Popover precedent); update
+   spec §1.8 / §3.1.
+3. **Format-pattern-aware** `format_date`/`parse_date` — derive field order +
+   separator from the `format` string (MDY / DMY / YMD), so the computed `format`
+   field and locale defaults are not dead code. Dependency-free; passes the en-US
+   `MM/dd/yyyy` test.
+
+## Spec drifts to fix (code + spec, same PR)
+
+Verified against the real sources (not training data):
+
+| # | Spec §1.7/§1.8 as written | Reality / fix |
+|---|---|---|
+| D1 | No `type Effect`; effects use string names + `use_platform_effects()`/`focus_element_by_id` closures in core | `Machine` trait requires `type Effect: EffectName`. Define a typed `Effect` enum and emit `PendingEffect::named(...)`; focus is **adapter-driven** (matches issue element/ref note + `popover`/`dialog` which use `PendingEffect::named(Effect::FocusInitial/RestoreFocus)` exclusively, never platform calls in core) |
+| D2 | `is_date_unavailable: Option<fn(&CalendarDate) -> bool>` | Calendar's prop is `Option<calendar::IsDateUnavailableFn>` (= `Callback<dyn Fn(&CalendarDate)->bool + Send+Sync>`). Reuse that type so `calendar_props()` forwards cleanly and `Props` stays `Clone+PartialEq+Debug` |
+| D3 | `CalendarDate` field access `d.month.get()`, `d.day.get()`, `d.year`; `NonZero::new(..)`; `nzu8(..)` helper | Fields are `pub(crate)`. Accessors are `year()->i32`, `month()->u8`, `day()->u8` (plain ints). `nzu8` does not exist anywhere. `new_gregorian(i32,u8,u8) -> Result<…>` |
+| D4 | `parse_date` builds `Some(CalendarDate::new_gregorian(..))` with `NonZero`+`.expect` | `new_gregorian` returns `Result`; use `CalendarDate::new_gregorian(y,m,d).ok()` |
+| D5 | min/max check via `date >= *m`, `date <= *m` | `CalendarDate` has **no** `PartialOrd`/`Ord`. Use `date.compare(m) -> Ordering` (`!= Less` / `!= Greater`) |
+| D6 | `self.ctx.ids.base_id` in `calendar_props()` | No public `base_id` field; accessor is `ids.id()` |
+| D7 | `Context` derives `#[derive(Clone, Debug, PartialEq)]` | `Messages` (holds `MessageFn`) is not `PartialEq`; trait only needs `Clone+Debug`. Mirror Calendar: `#[derive(Clone)]` + manual `Debug` (skip messages), drop `PartialEq` |
+| D8 | Machine impl omits `on_props_changed`, `initial_effects`, and a `SyncProps` event | Add all three (decision #1) |
+| D9 (tests) | `Service::new(props, Env::default(), Default::default())`; bare `svc.send(..)` | `Service::new(props, &Env, &Messages)` by ref; `send` is `#[must_use]` → `drop(svc.send(..))`; use a `date(y,m,d)` helper like Calendar tests |
+
+## Files
+
+**Create**
+- `crates/ars-components/src/date_time/date_picker/mod.rs` — machine, Props, Context,
+  State, Event, Effect, Messages, Part, Api.
+- `crates/ars-components/src/date_time/date_picker/tests.rs` — unit + snapshot tests
+  (`#[cfg(test)] mod tests;` included from `mod.rs`).
+- `crates/ars-components/src/date_time/date_picker/snapshots/` — committed `.snap` fixtures.
+
+**Modify**
+- `crates/ars-components/src/date_time/mod.rs` — add `pub mod date_picker;` (with `///` doc).
+- `crates/ars-components/tests/spec_conformance/date_time.rs` — add DatePicker anatomy test.
+- `crates/ars-components/tests/proptest_state_machines/date_time.rs` — add DatePicker proptest.
+- `spec/components/date-time/date-picker.md` — sync §1.3/§1.4/§1.7/§1.8/§3.1/§4 to the
+  fixes above (D1–D9), keeping it the authoritative contract.
+
+## Design (agnostic core)
+
+Mirror the structure of `crates/ars-components/src/date_time/calendar/mod.rs`.
+
+- **State** `enum { Closed, Open }` (derive `Clone, Debug, PartialEq, Eq`).
+- **Event** `{ Open, Close, Toggle, SelectDate{date:CalendarDate}, InputChange{value:String},
+  FocusIn, FocusOut, KeyDown{key:KeyboardKey}, SyncProps(Box<Props>) }` (+`SyncProps`, D8).
+- **Effect** (new, D1) typed enum, `#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]`:
+  `FocusCalendar` (move focus into the embedded calendar grid/content),
+  `RestoreFocusToTrigger` (Close / Escape), `RestoreFocusToInput` (SelectDate when
+  `close_on_select`). Adapter implements the actual DOM focus from the named intent.
+- **Context** — as spec §1.3 (value `Bindable<Option<CalendarDate>>`, open `Bindable<bool>`,
+  input_text, parsed_date, locale, messages, format, min, max, disabled, readonly,
+  open_on_click, is_touched, name, required, is_rtl, ids) minus `unavailable_dates`
+  (forwarded predicate makes the cache dead — confirm/drop in spec). Derive per D7.
+  Keep helper methods `formatted_value`, `parse_input`, `sync_input_text`, and the
+  free `format_date`/`parse_date` (now format-aware, decision #3, D3–D5).
+- **Props** — as spec §1.4, but `is_date_unavailable: Option<calendar::IsDateUnavailableFn>`
+  (D2). Public fields + `Default` (no builder — matches spec; builder is an adapter-era nicety).
+- **Machine**:
+  - `init`: build `value`/`open` Bindables, compute locale-default `format`, seed
+    `input_text`, `initial_state = if *open.get() { Open } else { Closed }`.
+  - `transition`: per spec §1.7 with D1/D3/D4/D5 fixes — `Open`/`FocusIn(open)` →
+    `.with_effect(PendingEffect::named(Effect::FocusCalendar))`; `Close` →
+    `RestoreFocusToTrigger`; `SelectDate` close → `RestoreFocusToInput`; `FocusOut`
+    close → no focus effect; `KeyDown` Escape/ArrowDown delegate; `disabled` guard
+    returns `None`; `readonly` blocks open/select/input. Add `SyncProps` arm: re-derive
+    controlled/uncontrolled Bindables + cached fields from new props (preserving
+    uncontrolled internal state, like Calendar), recompute target state from controlled
+    `open`, attach Focus/Restore effect only when open actually transitions.
+  - `on_props_changed` (D8): `debug_assert!` id stable; return
+    `vec![Event::SyncProps(Box::new(new.clone()))]` when `old != new`.
+  - `initial_effects` (D8): when `state == Open`, return
+    `vec![PendingEffect::named(Effect::FocusCalendar)]` (Popover precedent).
+  - `connect`: `Api { state, ctx, props, send }`.
+- **Part** (`#[derive(ComponentPart)] #[scope="date-picker"]`): `Root, Label, Control,
+  Input, Trigger, ClearTrigger, Positioner, Content, Description, ErrorMessage, HiddenInput`.
+- **Api** — all attr getters per spec §1.8 with fixes: `input_attrs` keeps
+  `aria-haspopup="dialog"`; `trigger_attrs` **adds** `aria-haspopup="dialog"` (decision #2);
+  `hidden_input_attrs` uses `d.year()/d.month()/d.day()` ISO (D3); `calendar_props()` uses
+  `ids.id()` (D6) + `IsDateUnavailableFn` (D2) + `..calendar::Props::default()`. Handlers
+  (`on_trigger_click`, `on_input_change`, `on_clear_trigger_click`, `on_input_keydown`,
+  `on_focusin`, `on_focusout`, `on_content_keydown`, `on_trigger_keydown`) and accessors
+  (`is_open`, `selected_date`, `formatted_value`, `open/close/toggle`) per spec.
+  `impl ConnectApi { type Part = Part; fn part_attrs(..) }` (matches the 2-method trait).
+- **Messages** — `trigger_label`, `clear_label`, `content_label`, `selected_date_label`
+  with `MessageFn::static_str`/`MessageFn::new`; `impl ComponentMessages`.
+
+## Out of scope (spec-authoritative)
+
+- **Presets** (issue "tests to add first" mentions Today/Yesterday): spec §6.2/§6.4
+  explicitly excludes `PresetTrigger` ("Gaps: None worth adopting"). Not implemented; no test.
+- **Live focus / positioning / outside-dismiss / scroll**: adapter concerns (issue
+  element/ref note). Core only emits named `Effect`s + stable IDs.
+
+## Test plan (TDD — tests first)
+
+Helpers mirror `calendar/tests.rs`: `date(y,m,d)`, `props()`, `service()`,
+`service_with(props)`, `snapshot_attrs(&AttrMap)`, `attr(&AttrMap, HtmlAttr)`.
+
+**Unit (state machine)** — covers spec Appendix + issue list (spec-mapped):
+initial closed; controlled `open=Some(true)` → initial Open **and** `take_initial_effects`
+yields `FocusCalendar`; toggle open/close; `Open` emits `FocusCalendar`; `Close`/`Escape`
+emit `RestoreFocusToTrigger` (issue "returns focus to trigger on close"); `SelectDate`
+updates value+input_text, closes when `close_on_select` (emits `RestoreFocusToInput`),
+stays open when `false`; `InputChange` valid parses (MDY/DMY/YMD via format), invalid
+ignored, empty clears, out-of-min/max rejected (via `compare`); `calendar_props().value`
+reflects typed value (issue "typing updates calendar selection"); `FocusIn` opens when
+`open_on_click`; `FocusOut` closes open popover (no focus effect); disabled ignores
+events; `SyncProps` re-syncs controlled value/open/disabled.
+
+**ConnectApi/ARIA** — `input_attrs` & `trigger_attrs` both have `aria-haspopup="dialog"`,
+`aria-expanded` tracks state, `aria-controls`→content id; `clear_trigger` hidden when no
+value, clears on click; `positioner`/`content` hidden/role per state; `hidden_input` ISO
+value; label `for`→input.
+
+**Snapshot (insta)** — one per Part × each output-affecting branch (~22, within the
+`min(3·states·parts,40)` budget): root {closed,open,disabled,readonly,rtl,invalid},
+label, control, input {closed,open,with-value,invalid,disabled,readonly,required,placeholder},
+trigger {closed,open,disabled}, clear_trigger {empty,with-value}, positioner {closed,open},
+content, description, error_message, hidden_input {empty,with-value}. Run
+`cargo insta test -p ars-components`, review, `cargo insta accept`, and
+`cargo insta test --unreferenced=reject` clean.
+
+**Spec-conformance** — `tests/spec_conformance/date_time.rs`: assert all 11 parts +
+scope `"date-picker"` via the existing `assert_anatomy` helper.
+
+**Proptest** — `tests/proptest_state_machines/date_time.rs`: random event/prop sequences
+preserve invariants (state ∈ {Open,Closed}; `disabled` ⇒ no transition; value↔input_text
+consistency; id stable), using `super::common::proptest_config()`.
+
+## Verification
+
+1. `cargo test -p ars-components date_time::date_picker` (unit + snapshot) — green, zero warnings.
+2. `cargo insta test -p ars-components --unreferenced=reject` — no stray/unused snaps.
+3. `cargo test -p ars-components --test spec_conformance date_picker` and
+   `--test proptest_state_machines` (default 1000 cases) — green.
+4. `cargo xtask spec validate` and a re-read of the edited spec to confirm no drift remains.
+5. After user approval: `cargo xci-fast` (~5 min) — fmt/check/clippy/unit/integration/
+   adapter/spec-compile-snippets/error-variant/mutual-exclusion/snapshot-count.
+6. Per CLAUDE.md: run `post-implementation-audit` skill before presenting; open PR with
+   `Closes #289`; add `snapshot-reviewed` label (new `.snap` files); run
+   `waiting-for-codex-review` after first push.
+
+---
+
+In the @crates/ars-components/src/date_time/date_picker/mod.rs at 
+```let pattern = match tag.as_str() {
+        "en-GB" | "de-DE" | "fr-FR" | "es-ES" | "it-IT" | "ru-RU" => "dd/MM/yyyy",
+        "ja-JP" | "zh-CN" | "zh-TW" | "ko-KR" => "yyyy/MM/dd",
+        _ => "MM/dd/yyyy",
+    };
+```
+are we properly covering all possible locales for formats? Don't our i18n stuff provide this kind of thing on a more reliable manner already?
+
+---
+
+Continue
