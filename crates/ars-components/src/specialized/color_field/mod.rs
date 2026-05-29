@@ -1,0 +1,1292 @@
+//! `ColorField` component state machine and connect API.
+//!
+//! `ColorField` is a text input for color values. In whole-color mode it parses
+//! and formats complete color strings (`#rrggbb`, `rgb(...)`, `hsl(...)`,
+//! `hsb(...)`); in channel mode it edits a single [`ColorChannel`] as an ARIA
+//! spinbutton with keyboard stepping. All color parsing, formatting, and
+//! validation is delegated to the shared color helpers in
+//! [`ars_core::color`]; the component owns only the value/edit state, the
+//! ARIA/data attributes, and IME-composition suppression.
+
+use alloc::{format, string::String, vec::Vec};
+use core::fmt::{self, Debug};
+
+use ars_core::{
+    AriaAttr, AttrMap, Bindable, ColorChannel, ColorFormat, ColorValue, ComponentIds,
+    ComponentMessages, ComponentPart, ConnectApi, Env, HtmlAttr, KeyboardKey, Locale, MessageFn,
+    NoEffect, TransitionPlan, channel_range, channel_step_default, channel_value,
+    format_color_string, parse_color_string, with_channel,
+};
+use ars_interactions::KeyboardEventData;
+
+/// Labels a single channel input (e.g. `"Hue"`).
+type ChannelLabelFn = dyn Fn(ColorChannel, &Locale) -> String + Send + Sync;
+
+/// Formats a channel value for `aria-valuetext`.
+type ChannelValueTextFn = dyn Fn(ColorChannel, f64, &Locale) -> String + Send + Sync;
+
+/// Returns the whole-color-mode `aria-label`.
+type ColorLabelFn = dyn Fn(&Locale) -> String + Send + Sync;
+
+/// Returns the parse-failure message text.
+type InvalidMessageFn = dyn Fn(&Locale) -> String + Send + Sync;
+
+/// The states for the `ColorField` component.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum State {
+    /// Input is not focused.
+    Idle,
+
+    /// Input is focused; the user may be editing text.
+    Focused,
+}
+
+/// The events for the `ColorField` component.
+#[derive(Clone, Debug)]
+pub enum Event {
+    /// Input received focus.
+    Focus {
+        /// Whether the focus was initiated by a keyboard.
+        is_keyboard: bool,
+    },
+
+    /// Input lost focus — triggers a commit.
+    Blur,
+
+    /// Raw text changed (keystroke or paste). No parsing until commit.
+    Change(String),
+
+    /// Enter key — parse and commit without leaving `Focused`.
+    Commit,
+
+    /// Programmatic value update from the parent.
+    SetValue(ColorValue),
+
+    /// Programmatic invalid-state update.
+    SetInvalid(bool),
+
+    /// Channel mode: increment by `step` (`ArrowUp`).
+    Increment,
+
+    /// Channel mode: decrement by `step` (`ArrowDown`).
+    Decrement,
+
+    /// Channel mode: increment by `large_step` (`PageUp`).
+    IncrementLarge,
+
+    /// Channel mode: decrement by `large_step` (`PageDown`).
+    DecrementLarge,
+
+    /// Channel mode: snap to max (End).
+    IncrementToMax,
+
+    /// Channel mode: snap to min (Home).
+    DecrementToMin,
+
+    /// IME composition started.
+    CompositionStart,
+
+    /// IME composition ended.
+    CompositionEnd,
+}
+
+/// The context for the `ColorField` component.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Context {
+    /// The current color value (controlled or uncontrolled). `None` when empty.
+    pub value: Bindable<Option<ColorValue>>,
+
+    /// Raw text in the input. Diverges from `value` while editing.
+    pub input_text: String,
+
+    /// If `Some`, the field edits a single channel (numeric spinbutton);
+    /// if `None`, the field accepts whole color strings.
+    pub channel: Option<ColorChannel>,
+
+    /// Display format for formatting `value` → text. Default: `Hex`.
+    pub color_format: ColorFormat,
+
+    /// Step size for channel-mode keyboard adjustment.
+    pub step: f64,
+
+    /// Large step size for channel-mode `PageUp` / `PageDown`.
+    pub large_step: f64,
+
+    /// Whether the input is focused.
+    pub focused: bool,
+
+    /// Whether focus was via keyboard (for the focus-visible ring).
+    pub focus_visible: bool,
+
+    /// Whether the component is disabled.
+    pub disabled: bool,
+
+    /// Whether the component is read-only.
+    pub readonly: bool,
+
+    /// Whether the current value is invalid.
+    pub invalid: bool,
+
+    /// Whether a value is required.
+    pub required: bool,
+
+    /// Whether IME composition is in progress.
+    pub is_composing: bool,
+
+    /// Whether a description part is rendered.
+    pub has_description: bool,
+
+    /// Form submission name.
+    pub name: Option<String>,
+
+    /// Resolved locale for message formatting.
+    pub locale: Locale,
+
+    /// Resolved translatable messages.
+    pub messages: Messages,
+
+    /// Component instance IDs.
+    pub ids: ComponentIds,
+}
+
+/// The props for the `ColorField` component.
+#[derive(Clone, Debug, PartialEq, ars_core::HasId)]
+pub struct Props {
+    /// Component instance ID.
+    pub id: String,
+
+    /// Controlled value. When `Some`, the component is controlled.
+    pub value: Option<ColorValue>,
+
+    /// Default value for uncontrolled mode.
+    pub default_value: Option<ColorValue>,
+
+    /// If `Some`, the field edits a single channel (numeric spinbutton);
+    /// if `None`, the field accepts whole color strings.
+    pub channel: Option<ColorChannel>,
+
+    /// Display format for whole-color mode. Default: `Hex`.
+    pub color_format: ColorFormat,
+
+    /// Whether the component is disabled.
+    pub disabled: bool,
+
+    /// Whether the component is read-only.
+    pub readonly: bool,
+
+    /// Whether the value is invalid (external validation).
+    pub invalid: bool,
+
+    /// Whether a value is required.
+    pub required: bool,
+
+    /// Form submission name.
+    pub name: Option<String>,
+
+    /// Step size for channel-mode keyboard adjustment.
+    /// Default: `channel_step_default(ch)` when a channel is set.
+    pub step: Option<f64>,
+
+    /// Large step size for channel-mode `PageUp` / `PageDown`. Default: `step * 10`.
+    pub large_step: Option<f64>,
+}
+
+impl Default for Props {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            value: None,
+            default_value: None,
+            channel: None,
+            color_format: ColorFormat::Hex,
+            disabled: false,
+            readonly: false,
+            invalid: false,
+            required: false,
+            name: None,
+            step: None,
+            large_step: None,
+        }
+    }
+}
+
+/// The messages for the `ColorField` component.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Messages {
+    /// Label for a channel input. Default: channel name (e.g., `"Hue"`).
+    pub channel_label: MessageFn<ChannelLabelFn>,
+
+    /// Formatted channel value for `aria-valuetext`.
+    pub channel_value_text: MessageFn<ChannelValueTextFn>,
+
+    /// Label for whole-color mode. Default: `"Color value"`.
+    pub color_label: MessageFn<ColorLabelFn>,
+
+    /// Message shown when parsing fails. Default: `"Invalid color value"`.
+    pub invalid_message: MessageFn<InvalidMessageFn>,
+}
+
+impl Default for Messages {
+    fn default() -> Self {
+        Self {
+            channel_label: MessageFn::new(|ch: ColorChannel, _locale: &Locale| format!("{ch:?}")),
+            channel_value_text: MessageFn::new(|ch: ColorChannel, val: f64, _locale: &Locale| {
+                match ch {
+                    ColorChannel::Hue => format!("{val:.0}°"),
+                    ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => {
+                        format!("{val:.0}")
+                    }
+                    _ => format!("{:.0}%", val * 100.0),
+                }
+            }),
+            color_label: MessageFn::static_str("Color value"),
+            invalid_message: MessageFn::static_str("Invalid color value"),
+        }
+    }
+}
+
+impl ComponentMessages for Messages {}
+
+/// Format a color value for display in the input.
+fn format_value(
+    color: &ColorValue,
+    channel: Option<ColorChannel>,
+    color_format: ColorFormat,
+) -> String {
+    if let Some(ch) = channel {
+        let val = channel_value(color, ch);
+
+        match ch {
+            ColorChannel::Hue | ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => {
+                format!("{val:.0}")
+            }
+            _ => format!("{:.0}", val * 100.0),
+        }
+    } else {
+        format_color_string(color, color_format)
+    }
+}
+
+/// Parse `input_text` and update `value`; reset `input_text` to the formatted
+/// value. Sets `invalid` when parsing fails.
+fn commit_input(ctx: &mut Context) {
+    if let Some(ch) = ctx.channel {
+        // Channel mode: parse as f64.
+        if let Ok(raw) = ctx.input_text.trim().parse::<f64>() {
+            let (min, max) = channel_range(ch);
+
+            let clamped = raw.clamp(min, max);
+
+            if let Some(color) = ctx.value.get() {
+                let new_color = with_channel(color, ch, clamped);
+
+                ctx.value.set(Some(new_color));
+                ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
+                ctx.invalid = false;
+            }
+        } else {
+            ctx.invalid = true;
+        }
+    } else {
+        // Whole-color mode: parse via parse_color_string.
+        if ctx.input_text.trim().is_empty() {
+            ctx.value.set(None);
+            ctx.invalid = ctx.required;
+
+            return;
+        }
+
+        if let Some(color) = parse_color_string(&ctx.input_text) {
+            ctx.value.set(Some(color));
+            ctx.input_text = format_color_string(&color, ctx.color_format);
+            ctx.invalid = false;
+        } else {
+            ctx.invalid = true;
+        }
+    }
+}
+
+/// Adjust the channel value by `delta` (positive or negative), clamped to range.
+fn adjust_channel(ctx: &mut Context, delta: f64) {
+    if let (Some(ch), Some(color)) = (ctx.channel, ctx.value.get()) {
+        let current = channel_value(color, ch);
+
+        let (min, max) = channel_range(ch);
+
+        let new_val = (current + delta).clamp(min, max);
+
+        let new_color = with_channel(color, ch, new_val);
+
+        ctx.value.set(Some(new_color));
+        ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
+        ctx.invalid = false;
+    }
+}
+
+/// Snap the channel to `min` or `max` and refresh the input text.
+fn snap_channel(ctx: &mut Context, to_max: bool) {
+    if let (Some(ch), Some(color)) = (ctx.channel, ctx.value.get()) {
+        let (min, max) = channel_range(ch);
+
+        let target = if to_max { max } else { min };
+
+        let new_color = with_channel(color, ch, target);
+
+        ctx.value.set(Some(new_color));
+        ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
+        ctx.invalid = false;
+    }
+}
+
+/// The machine for the `ColorField` component.
+#[derive(Debug)]
+pub struct Machine;
+
+impl ars_core::Machine for Machine {
+    type State = State;
+    type Event = Event;
+    type Context = Context;
+    type Props = Props;
+    type Messages = Messages;
+    type Effect = NoEffect;
+    type Api<'a> = Api<'a>;
+
+    fn init(
+        props: &Self::Props,
+        env: &Env,
+        messages: &Self::Messages,
+    ) -> (Self::State, Self::Context) {
+        let value = if let Some(v) = &props.value {
+            Bindable::controlled(Some(*v))
+        } else {
+            Bindable::uncontrolled(props.default_value)
+        };
+
+        let step = props
+            .step
+            .unwrap_or_else(|| props.channel.map_or(1.0, channel_step_default));
+
+        let large_step = props.large_step.unwrap_or(step * 10.0);
+
+        let input_text = if let Some(c) = value.get() {
+            format_value(c, props.channel, props.color_format)
+        } else {
+            String::new()
+        };
+
+        let context = Context {
+            value,
+            input_text,
+            channel: props.channel,
+            color_format: props.color_format,
+            step,
+            large_step,
+            focused: false,
+            focus_visible: false,
+            disabled: props.disabled,
+            readonly: props.readonly,
+            invalid: props.invalid,
+            required: props.required,
+            is_composing: false,
+            has_description: false,
+            name: props.name.clone(),
+            locale: env.locale.clone(),
+            messages: messages.clone(),
+            ids: ComponentIds::from_id(&props.id),
+        };
+
+        (State::Idle, context)
+    }
+
+    fn transition(
+        _state: &Self::State,
+        event: &Self::Event,
+        ctx: &Self::Context,
+        _props: &Self::Props,
+    ) -> Option<TransitionPlan<Self>> {
+        // During IME composition, suppress all keyboard shortcuts.
+        if ctx.is_composing {
+            return match event {
+                Event::CompositionEnd => Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.is_composing = false;
+                })),
+
+                Event::Change(text) => {
+                    let next_text = text.clone();
+                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.input_text = next_text;
+                    }))
+                }
+
+                _ => None,
+            };
+        }
+
+        if ctx.disabled {
+            return match event {
+                Event::Focus { is_keyboard } => {
+                    let kb = *is_keyboard;
+                    Some(
+                        TransitionPlan::to(State::Focused).apply(move |ctx: &mut Context| {
+                            ctx.focused = true;
+                            ctx.focus_visible = kb;
+                        }),
+                    )
+                }
+
+                Event::Blur => Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
+                    ctx.focused = false;
+                    ctx.focus_visible = false;
+                })),
+
+                _ => None,
+            };
+        }
+
+        match event {
+            Event::Focus { is_keyboard } => {
+                let kb = *is_keyboard;
+                Some(
+                    TransitionPlan::to(State::Focused).apply(move |ctx: &mut Context| {
+                        ctx.focused = true;
+                        ctx.focus_visible = kb;
+                    }),
+                )
+            }
+
+            Event::Blur => Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
+                commit_input(ctx);
+
+                ctx.focused = false;
+                ctx.focus_visible = false;
+            })),
+
+            Event::Change(text) => {
+                let next_text = text.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.input_text = next_text;
+                }))
+            }
+
+            Event::Commit => {
+                if ctx.readonly {
+                    return None;
+                }
+
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    commit_input(ctx);
+                }))
+            }
+
+            Event::SetValue(color) => {
+                let new_value = *color;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    if !ctx.focused {
+                        ctx.input_text = format_value(&new_value, ctx.channel, ctx.color_format);
+                    }
+
+                    ctx.value.set(Some(new_value));
+                    ctx.invalid = false;
+                }))
+            }
+
+            Event::SetInvalid(inv) => {
+                let inv = *inv;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.invalid = inv;
+                }))
+            }
+
+            Event::Increment => {
+                if ctx.readonly || ctx.channel.is_none() {
+                    return None;
+                }
+
+                let step = ctx.step;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    adjust_channel(ctx, step);
+                }))
+            }
+
+            Event::Decrement => {
+                if ctx.readonly || ctx.channel.is_none() {
+                    return None;
+                }
+
+                let step = -ctx.step;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    adjust_channel(ctx, step);
+                }))
+            }
+
+            Event::IncrementLarge => {
+                if ctx.readonly || ctx.channel.is_none() {
+                    return None;
+                }
+
+                let step = ctx.large_step;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    adjust_channel(ctx, step);
+                }))
+            }
+
+            Event::DecrementLarge => {
+                if ctx.readonly || ctx.channel.is_none() {
+                    return None;
+                }
+
+                let step = -ctx.large_step;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    adjust_channel(ctx, step);
+                }))
+            }
+
+            Event::IncrementToMax => {
+                if ctx.readonly || ctx.channel.is_none() {
+                    return None;
+                }
+
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    snap_channel(ctx, true);
+                }))
+            }
+
+            Event::DecrementToMin => {
+                if ctx.readonly || ctx.channel.is_none() {
+                    return None;
+                }
+
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    snap_channel(ctx, false);
+                }))
+            }
+
+            Event::CompositionStart => Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                ctx.is_composing = true;
+            })),
+
+            Event::CompositionEnd => Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                ctx.is_composing = false;
+            })),
+        }
+    }
+
+    fn connect<'a>(
+        state: &'a Self::State,
+        ctx: &'a Self::Context,
+        _props: &'a Self::Props,
+        send: &'a dyn Fn(Self::Event),
+    ) -> Self::Api<'a> {
+        Api { state, ctx, send }
+    }
+}
+
+/// Structural parts exposed by the `ColorField` connect API.
+#[derive(ComponentPart)]
+#[scope = "color-field"]
+pub enum Part {
+    /// Container with state/validity data attributes.
+    Root,
+
+    /// `<label>` whose `for` points at the input.
+    Label,
+
+    /// The text or spinbutton `<input>`.
+    Input,
+
+    /// Optional helper text referenced by `aria-describedby`.
+    Description,
+
+    /// Error display (`role="alert"`) referenced by `aria-describedby`.
+    ErrorMessage,
+
+    /// `type="hidden"` input that submits the hex value for forms.
+    HiddenInput,
+}
+
+/// The connect API for the `ColorField` component.
+pub struct Api<'a> {
+    state: &'a State,
+    ctx: &'a Context,
+    send: &'a dyn Fn(Event),
+}
+
+impl Debug for Api<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("color_field::Api")
+            .field("state", &self.state)
+            .field("ctx", &self.ctx)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Api<'_> {
+    /// Whether the component is currently focused.
+    #[must_use]
+    pub const fn is_focused(&self) -> bool {
+        matches!(self.state, State::Focused)
+    }
+
+    /// The current value of the component.
+    #[must_use]
+    pub fn value(&self) -> Option<&ColorValue> {
+        self.ctx.value.get().as_ref()
+    }
+
+    /// The current raw input text of the component.
+    #[must_use]
+    pub fn input_text(&self) -> &str {
+        &self.ctx.input_text
+    }
+
+    /// The attributes for the root element.
+    #[must_use]
+    pub fn root_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
+
+        attrs.set(scope_attr, scope_val).set(part_attr, part_val);
+
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
+        }
+
+        if self.ctx.readonly {
+            attrs.set_bool(HtmlAttr::Data("ars-readonly"), true);
+        }
+
+        if self.ctx.invalid {
+            attrs.set_bool(HtmlAttr::Data("ars-invalid"), true);
+        }
+
+        if self.ctx.focused {
+            attrs.set_bool(HtmlAttr::Data("ars-focused"), true);
+        }
+
+        if self.ctx.focus_visible {
+            attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
+        }
+
+        attrs
+    }
+
+    /// The attributes for the label element.
+    #[must_use]
+    pub fn label_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Label.data_attrs();
+
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Id, self.ctx.ids.part("label"))
+            .set(HtmlAttr::For, self.ctx.ids.part("input"));
+
+        attrs
+    }
+
+    /// The attributes for the input element.
+    #[must_use]
+    pub fn input_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Input.data_attrs();
+
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Id, self.ctx.ids.part("input"))
+            .set(HtmlAttr::Type, "text")
+            .set(HtmlAttr::Value, self.ctx.input_text.clone());
+
+        if let Some(ch) = self.ctx.channel {
+            // Channel mode: numeric spinbutton.
+            attrs
+                .set(HtmlAttr::Role, "spinbutton")
+                .set(HtmlAttr::InputMode, "numeric");
+
+            if let Some(color) = self.ctx.value.get() {
+                let val = channel_value(color, ch);
+                let (min, max) = channel_range(ch);
+
+                attrs
+                    .set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{val:.2}"))
+                    .set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{min:.2}"))
+                    .set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{max:.2}"))
+                    .set(
+                        HtmlAttr::Aria(AriaAttr::ValueText),
+                        (self.ctx.messages.channel_value_text)(ch, val, &self.ctx.locale),
+                    );
+            }
+
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::Label),
+                (self.ctx.messages.channel_label)(ch, &self.ctx.locale),
+            );
+        } else {
+            // Whole-color mode: standard text input.
+            attrs.set(HtmlAttr::InputMode, "text").set(
+                HtmlAttr::Aria(AriaAttr::Label),
+                (self.ctx.messages.color_label)(&self.ctx.locale),
+            );
+        }
+
+        attrs.set(
+            HtmlAttr::Aria(AriaAttr::LabelledBy),
+            self.ctx.ids.part("label"),
+        );
+
+        if self.ctx.invalid {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+        }
+
+        if self.ctx.required {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
+        }
+
+        if self.ctx.readonly {
+            attrs.set_bool(HtmlAttr::Aria(AriaAttr::ReadOnly), true);
+        }
+
+        if self.ctx.disabled {
+            attrs
+                .set_bool(HtmlAttr::Disabled, true)
+                .set_bool(HtmlAttr::Aria(AriaAttr::Disabled), true);
+        }
+
+        // describedby: description + error message
+        let mut describedby = Vec::new();
+
+        if self.ctx.has_description {
+            describedby.push(self.ctx.ids.part("description"));
+        }
+
+        if self.ctx.invalid {
+            describedby.push(self.ctx.ids.part("error-message"));
+        }
+
+        if !describedby.is_empty() {
+            attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), describedby.join(" "));
+        }
+
+        attrs
+    }
+
+    /// The attributes for the description element.
+    #[must_use]
+    pub fn description_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Description.data_attrs();
+
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Id, self.ctx.ids.part("description"));
+
+        attrs
+    }
+
+    /// Returns the error message text shown when color parsing fails.
+    ///
+    /// The adapter renders this inside the `ErrorMessage` part.
+    #[must_use]
+    pub fn invalid_message(&self) -> String {
+        (self.ctx.messages.invalid_message)(&self.ctx.locale)
+    }
+
+    /// The attributes for the error message element.
+    #[must_use]
+    pub fn error_message_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ErrorMessage.data_attrs();
+
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Id, self.ctx.ids.part("error-message"))
+            .set(HtmlAttr::Role, "alert");
+
+        attrs
+    }
+
+    /// The attributes for the hidden input element.
+    #[must_use]
+    pub fn hidden_input_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::HiddenInput.data_attrs();
+
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Type, "hidden");
+
+        if let Some(name) = &self.ctx.name {
+            attrs.set(HtmlAttr::Name, name.clone());
+        }
+
+        if let Some(color) = self.ctx.value.get() {
+            attrs.set(HtmlAttr::Value, color.to_hex(true));
+        }
+
+        attrs
+    }
+
+    // --- Event dispatch helpers ---
+
+    /// Dispatches an input focus event.
+    pub fn on_input_focus(&self, is_keyboard: bool) {
+        (self.send)(Event::Focus { is_keyboard });
+    }
+
+    /// Dispatches an input blur event.
+    pub fn on_input_blur(&self) {
+        (self.send)(Event::Blur);
+    }
+
+    /// Dispatches a raw text change.
+    pub fn on_input_change(&self, text: String) {
+        (self.send)(Event::Change(text));
+    }
+
+    /// Handles a keydown on the input element.
+    ///
+    /// Shortcuts are suppressed while an IME composition is in progress.
+    pub fn on_input_keydown(&self, data: &KeyboardEventData) {
+        if self.ctx.is_composing {
+            return;
+        }
+
+        let has_channel = self.ctx.channel.is_some();
+
+        match data.key {
+            KeyboardKey::Enter => (self.send)(Event::Commit),
+            KeyboardKey::ArrowUp if has_channel => (self.send)(Event::Increment),
+            KeyboardKey::ArrowDown if has_channel => (self.send)(Event::Decrement),
+            KeyboardKey::PageUp if has_channel => (self.send)(Event::IncrementLarge),
+            KeyboardKey::PageDown if has_channel => (self.send)(Event::DecrementLarge),
+            KeyboardKey::Home if has_channel => (self.send)(Event::DecrementToMin),
+            KeyboardKey::End if has_channel => (self.send)(Event::IncrementToMax),
+            _ => {}
+        }
+    }
+
+    /// Dispatches an IME composition-start event.
+    pub fn on_composition_start(&self) {
+        (self.send)(Event::CompositionStart);
+    }
+
+    /// Dispatches an IME composition-end event.
+    pub fn on_composition_end(&self) {
+        (self.send)(Event::CompositionEnd);
+    }
+}
+
+impl ConnectApi for Api<'_> {
+    type Part = Part;
+
+    fn part_attrs(&self, part: Part) -> AttrMap {
+        match part {
+            Part::Root => self.root_attrs(),
+            Part::Label => self.label_attrs(),
+            Part::Input => self.input_attrs(),
+            Part::Description => self.description_attrs(),
+            Part::ErrorMessage => self.error_message_attrs(),
+            Part::HiddenInput => self.hidden_input_attrs(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ars_core::{ColorValue, Service};
+    use insta::assert_snapshot;
+
+    use super::*;
+
+    fn service(mut props: Props) -> Service<Machine> {
+        if props.id.is_empty() {
+            props.id = "color-field".to_string();
+        }
+
+        Service::<Machine>::new(props, &Env::default(), &Messages::default())
+    }
+
+    fn snapshot_attrs(attrs: &AttrMap) -> String {
+        format!("{attrs:#?}")
+    }
+
+    fn key(key: KeyboardKey) -> KeyboardEventData {
+        KeyboardEventData {
+            key,
+            character: None,
+            code: String::new(),
+            shift_key: false,
+            ctrl_key: false,
+            alt_key: false,
+            meta_key: false,
+            repeat: false,
+            is_composing: false,
+        }
+    }
+
+    #[test]
+    fn whole_color_input_parses_on_commit() {
+        let mut svc = service(Props {
+            id: "fg".to_string(),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Change("#3366ff".to_string())));
+        drop(svc.send(Event::Commit));
+
+        assert_eq!(
+            svc.connect(&|_| {}).value().unwrap().to_hex(false),
+            "#3366ff"
+        );
+    }
+
+    #[test]
+    fn parses_hex_rgb_hsl_formats() {
+        for input in ["#00ff00", "rgb(0, 255, 0)", "hsl(120, 100%, 50%)"] {
+            let mut svc = service(Props::default());
+
+            drop(svc.send(Event::Change(input.to_string())));
+            drop(svc.send(Event::Commit));
+
+            let api = svc.connect(&|_| {});
+
+            assert_eq!(api.value().unwrap().to_rgb(), (0, 255, 0), "input {input}");
+            assert!(
+                !api.input_attrs()
+                    .contains(&HtmlAttr::Aria(AriaAttr::Invalid))
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_input_sets_invalid_flag_and_aria() {
+        let mut svc = service(Props::default());
+
+        drop(svc.send(Event::Change("not a color".to_string())));
+        drop(svc.send(Event::Commit));
+
+        let api = svc.connect(&|_| {});
+
+        assert_eq!(
+            api.input_attrs().get(&HtmlAttr::Aria(AriaAttr::Invalid)),
+            Some("true")
+        );
+        assert_eq!(api.invalid_message(), "Invalid color value");
+    }
+
+    #[test]
+    fn empty_required_input_is_invalid() {
+        let mut svc = service(Props {
+            required: true,
+            default_value: Some(ColorValue::from_rgb(0, 0, 0)),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Change(String::new())));
+        drop(svc.send(Event::Commit));
+
+        let api = svc.connect(&|_| {});
+
+        assert!(api.value().is_none());
+        assert_eq!(
+            api.input_attrs().get(&HtmlAttr::Aria(AriaAttr::Invalid)),
+            Some("true")
+        );
+    }
+
+    #[test]
+    fn connect_api_whole_color_input_has_text_label() {
+        let svc = service(Props::default());
+
+        let api = svc.connect(&|_| {});
+
+        let input = api.input_attrs();
+
+        assert_eq!(input.get(&HtmlAttr::InputMode), Some("text"));
+        assert_eq!(
+            input.get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("Color value")
+        );
+        assert!(!input.contains(&HtmlAttr::Role));
+    }
+
+    #[test]
+    fn channel_mode_is_spinbutton_with_value_range() {
+        let svc = service(Props {
+            channel: Some(ColorChannel::Hue),
+            default_value: Some(ColorValue::from_hsl(180.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+
+        let api = svc.connect(&|_| {});
+
+        let input = api.input_attrs();
+
+        assert_eq!(input.get(&HtmlAttr::Role), Some("spinbutton"));
+        assert_eq!(input.get(&HtmlAttr::InputMode), Some("numeric"));
+        assert_eq!(
+            input.get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("180.00")
+        );
+        assert_eq!(input.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0.00"));
+        assert_eq!(
+            input.get(&HtmlAttr::Aria(AriaAttr::ValueMax)),
+            Some("360.00")
+        );
+        assert_eq!(
+            input.get(&HtmlAttr::Aria(AriaAttr::ValueText)),
+            Some("180°")
+        );
+        assert_eq!(input.get(&HtmlAttr::Aria(AriaAttr::Label)), Some("Hue"));
+    }
+
+    #[test]
+    fn channel_mode_keyboard_steps_value() {
+        let mut svc = service(Props {
+            channel: Some(ColorChannel::Hue),
+            default_value: Some(ColorValue::from_hsl(180.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Increment));
+
+        assert_eq!(svc.connect(&|_| {}).value().unwrap().hue, 181.0);
+
+        drop(svc.send(Event::DecrementToMin));
+
+        assert_eq!(svc.connect(&|_| {}).value().unwrap().hue, 0.0);
+
+        drop(svc.send(Event::IncrementToMax));
+
+        // Hue wraps: 360 stores as 0.
+        assert_eq!(svc.connect(&|_| {}).value().unwrap().hue, 0.0);
+    }
+
+    #[test]
+    fn on_input_keydown_dispatches_channel_events() {
+        let svc = service(Props {
+            channel: Some(ColorChannel::Saturation),
+            default_value: Some(ColorValue::from_hsl(0.0, 0.5, 0.5)),
+            ..Props::default()
+        });
+
+        let captured = core::cell::RefCell::new(Vec::new());
+        let send = |event: Event| captured.borrow_mut().push(event);
+
+        let api = svc.connect(&send);
+
+        api.on_input_keydown(&key(KeyboardKey::ArrowUp));
+        api.on_input_keydown(&key(KeyboardKey::PageDown));
+        api.on_input_keydown(&key(KeyboardKey::Enter));
+
+        let events = captured.borrow();
+
+        assert!(matches!(events[0], Event::Increment));
+        assert!(matches!(events[1], Event::DecrementLarge));
+        assert!(matches!(events[2], Event::Commit));
+    }
+
+    #[test]
+    fn focus_blur_transitions_and_commits() {
+        let mut svc = service(Props::default());
+
+        drop(svc.send(Event::Focus { is_keyboard: true }));
+
+        assert_eq!(svc.state(), &State::Focused);
+
+        drop(svc.send(Event::Change("#ff0000".to_string())));
+        drop(svc.send(Event::Blur));
+
+        assert_eq!(svc.state(), &State::Idle);
+        assert_eq!(svc.connect(&|_| {}).value().unwrap().to_rgb(), (255, 0, 0));
+    }
+
+    #[test]
+    fn ime_composition_suppresses_commit() {
+        let mut svc = service(Props::default());
+
+        drop(svc.send(Event::CompositionStart));
+        // Enter during composition must not commit.
+        drop(svc.send(Event::Commit));
+        drop(svc.send(Event::Change("#abcdef".to_string())));
+
+        assert!(svc.connect(&|_| {}).value().is_none());
+
+        drop(svc.send(Event::CompositionEnd));
+        drop(svc.send(Event::Commit));
+
+        assert_eq!(
+            svc.connect(&|_| {}).value().unwrap().to_hex(false),
+            "#abcdef"
+        );
+    }
+
+    #[test]
+    fn hidden_input_submits_hex_with_name() {
+        let svc = service(Props {
+            name: Some("color".to_string()),
+            default_value: Some(ColorValue::new(0.0, 1.0, 0.5, 0.5)),
+            ..Props::default()
+        });
+
+        let hidden = svc.connect(&|_| {}).hidden_input_attrs();
+
+        assert_eq!(hidden.get(&HtmlAttr::Type), Some("hidden"));
+        assert_eq!(hidden.get(&HtmlAttr::Name), Some("color"));
+        assert_eq!(hidden.get(&HtmlAttr::Value), Some("#ff000080"));
+    }
+
+    #[test]
+    fn disabled_field_ignores_value_edits_but_tracks_focus() {
+        let mut svc = service(Props {
+            disabled: true,
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Focus { is_keyboard: false }));
+
+        assert_eq!(svc.state(), &State::Focused);
+
+        drop(svc.send(Event::Change("#ffffff".to_string())));
+        drop(svc.send(Event::Commit));
+
+        assert!(svc.connect(&|_| {}).value().is_none());
+    }
+
+    #[test]
+    fn root_focused_invalid_snapshot() {
+        let mut svc = service(Props {
+            id: "fg".to_string(),
+            invalid: true,
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Focus { is_keyboard: true }));
+
+        assert_snapshot!(
+            "color_field_root_focused_invalid",
+            snapshot_attrs(&svc.connect(&|_| {}).root_attrs())
+        );
+    }
+
+    #[test]
+    fn input_channel_mode_snapshot() {
+        let svc = service(Props {
+            id: "hue".to_string(),
+            channel: Some(ColorChannel::Hue),
+            default_value: Some(ColorValue::from_hsl(210.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+
+        assert_snapshot!(
+            "color_field_input_channel_hue",
+            snapshot_attrs(&svc.connect(&|_| {}).input_attrs())
+        );
+    }
+
+    #[test]
+    fn input_whole_color_invalid_describedby_snapshot() {
+        let svc = service(Props {
+            id: "fg".to_string(),
+            invalid: true,
+            required: true,
+            ..Props::default()
+        });
+
+        assert_snapshot!(
+            "color_field_input_whole_color_invalid",
+            snapshot_attrs(&svc.connect(&|_| {}).input_attrs())
+        );
+    }
+
+    #[test]
+    fn exhaustive_events_parts_and_helpers() {
+        // Controlled construction in channel mode exercises every event arm.
+        let mut svc = service(Props {
+            value: Some(ColorValue::from_hsl(120.0, 0.5, 0.5)),
+            channel: Some(ColorChannel::Saturation),
+            ..Props::default()
+        });
+
+        for ev in [
+            Event::Focus { is_keyboard: true },
+            Event::Increment,
+            Event::Decrement,
+            Event::IncrementLarge,
+            Event::DecrementLarge,
+            Event::IncrementToMax,
+            Event::DecrementToMin,
+            Event::SetValue(ColorValue::from_hsl(200.0, 0.3, 0.4)),
+            Event::SetInvalid(true),
+            Event::SetInvalid(false),
+            Event::Commit,
+            Event::Blur,
+        ] {
+            drop(svc.send(ev));
+        }
+
+        let api = svc.connect(&|_| {});
+
+        for p in [
+            Part::Root,
+            Part::Label,
+            Part::Input,
+            Part::Description,
+            Part::ErrorMessage,
+            Part::HiddenInput,
+        ] {
+            let _attrs = api.part_attrs(p);
+        }
+
+        let _dbg = format!("{api:?}");
+        let _focused = api.is_focused();
+        let _text = api.input_text().to_string();
+
+        // Dispatch helpers route to the right events via a capturing closure.
+        let cap = core::cell::RefCell::new(Vec::new());
+        let send = |event: Event| cap.borrow_mut().push(event);
+
+        let dapi = svc.connect(&send);
+
+        dapi.on_input_focus(false);
+        dapi.on_input_blur();
+        dapi.on_input_change("#abcdef".into());
+        dapi.on_composition_start();
+        dapi.on_composition_end();
+
+        let evs = cap.borrow();
+
+        assert!(matches!(evs[0], Event::Focus { .. }));
+        assert!(matches!(evs[1], Event::Blur));
+        assert!(matches!(evs[2], Event::Change(_)));
+        assert!(matches!(evs[3], Event::CompositionStart));
+        assert!(matches!(evs[4], Event::CompositionEnd));
+
+        // IME-composing branch: only Change / CompositionEnd are processed.
+        let mut ime = service(Props::default());
+
+        drop(ime.send(Event::CompositionStart));
+        drop(ime.send(Event::Change("rgb(1,2,3)".into())));
+        drop(ime.send(Event::Increment)); // suppressed while composing
+        drop(ime.send(Event::CompositionEnd));
+
+        assert!(!ime.connect(&|_| {}).is_focused());
+
+        // Readonly blocks Commit and channel adjustments.
+        let mut ro = service(Props {
+            readonly: true,
+            channel: Some(ColorChannel::Hue),
+            value: Some(ColorValue::from_hsl(10.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+
+        drop(ro.send(Event::Commit));
+        drop(ro.send(Event::Increment));
+
+        assert!((ro.connect(&|_| {}).value().unwrap().hue - 10.0).abs() < 1e-9);
+    }
+}

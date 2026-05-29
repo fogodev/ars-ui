@@ -31,6 +31,7 @@ use alloc::{boxed::Box, collections::VecDeque, string::String, sync::Arc, vec::V
 use core::fmt::{self, Debug};
 
 mod callback;
+pub mod color;
 pub mod companion_css;
 mod component_ids;
 mod connect;
@@ -64,6 +65,11 @@ pub use ars_i18n::{
 };
 // ── Platform-conditional smart pointers (extracted modules) ─────────
 pub use callback::{Callback, callback};
+// ── Color value types and helpers (shared by all color components) ──
+pub use color::{
+    ColorChannel, ColorFormat, ColorNameParts, ColorSpace, ColorValue, DragTarget, channel_range,
+    channel_step_default, channel_value, format_color_string, parse_color_string, with_channel,
+};
 pub use component_ids::ComponentIds;
 // ── DOM attribute / connect primitives ──────────────────────────────
 pub use connect::{

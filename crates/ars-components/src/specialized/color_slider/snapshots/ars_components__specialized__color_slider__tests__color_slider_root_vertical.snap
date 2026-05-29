@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/specialized/color_slider/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-channel",
+            ),
+            String(
+                "alpha",
+            ),
+        ),
+        (
+            Data(
+                "ars-orientation",
+            ),
+            String(
+                "vertical",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-slider",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}

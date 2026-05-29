@@ -1,0 +1,43 @@
+---
+source: crates/ars-components/src/specialized/color_area/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).hidden_input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "hidden-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-area",
+            ),
+        ),
+        (
+            Name,
+            String(
+                "swatch",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "hidden",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "#19b319",
+            ),
+        ),
+    ],
+    styles: [],
+}

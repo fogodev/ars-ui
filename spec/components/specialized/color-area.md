@@ -128,7 +128,7 @@ pub struct Props {
     /// Name attribute for the hidden form input.
     pub name: Option<String>,
     /// Fired on `Event::DragEnd` / pointer release.
-    pub on_change_end: Option<Callback<ColorValue>>,
+    pub on_change_end: Option<Callback<dyn Fn(ColorValue) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -153,17 +153,40 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
-```rust
+```rust,no_check
 /// Apply normalized (x, y) coordinates to both channels.
 fn apply_area_position(ctx: &mut Context, x: f64, y: f64) {
-    let color = ctx.value.get();
+    let color = *ctx.value.get();
     let (x_min, x_max) = channel_range(ctx.x_channel);
     let (y_min, y_max) = channel_range(ctx.y_channel);
     let x_val = x_min + x.clamp(0.0, 1.0) * (x_max - x_min);
     // y is inverted: top=max, bottom=min
     let y_val = y_max - y.clamp(0.0, 1.0) * (y_max - y_min);
-    let updated = with_channel(color, ctx.x_channel, x_val);
+    let updated = with_channel(&color, ctx.x_channel, x_val);
     ctx.value.set(with_channel(&updated, ctx.y_channel, y_val));
+}
+
+/// Typed identifier for side effects emitted by the machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Invoke `Props::on_change_end`.
+    ChangeEnd,
+}
+
+/// Build the change-end effect that invokes `Props::on_change_end`.
+///
+/// Live pointer capture and coordinate-to-value conversion are adapter
+/// concerns (see the element/ref handling note): the adapter wires its own
+/// pointermove/pointerup listeners to `Event::DragMove` / `Event::DragEnd`,
+/// exactly like `Slider`. The core registers no drag listeners — it only fires
+/// this named effect on release so the adapter can invoke the consumer callback.
+fn change_end_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_change_end {
+            callback(*ctx.value.get());
+        }
+        no_cleanup()
+    })
 }
 
 pub struct Machine;
@@ -174,6 +197,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -226,20 +250,14 @@ impl ars_core::Machine for Machine {
         }
 
         match (state, event) {
+            // The adapter resolves normalized (x, y) and drives DragMove/DragEnd
+            // from its own pointer listeners; the core only updates the value.
             (State::Idle, Event::DragStart { x, y }) => {
                 if ctx.readonly { return None; }
                 let x = *x;
                 let y = *y;
                 Some(TransitionPlan::to(State::Dragging).apply(move |ctx| {
                     apply_area_position(ctx, x, y);
-                }).with_named_effect("drag-listeners", move |_ctx, _props, send| {
-                    let platform = use_platform_effects();
-                    let send_move = send.clone();
-                    let send_up = send.clone();
-                    platform.track_pointer_drag(
-                        Box::new(move |x, y| { send_move.call_if_alive(Event::DragMove { x, y }); }),
-                        Box::new(move || { send_up.call_if_alive(Event::DragEnd); }),
-                    )
                 }))
             }
 
@@ -252,7 +270,7 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Dragging, Event::DragEnd) => {
-                Some(TransitionPlan::to(State::Idle))
+                Some(TransitionPlan::to(State::Idle).with_effect(change_end_effect()))
             }
 
             (_, Event::IncrementX { step }) => {

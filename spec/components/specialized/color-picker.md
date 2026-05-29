@@ -30,11 +30,13 @@ and includes an optional EyeDropper browser API integration.
 The internal color representation is `ColorValue` (HSL + alpha). All other spaces are
 computed on demand via conversion methods on `ColorValue`.
 
-```rust
-// crates/ars-core/src/components/color_picker.rs
-
-use crate::{Bindable, ComponentId};
-use crate::machine::{Machine, TransitionPlan, ComponentIds, AttrMap};
+```rust,no_check
+// crates/ars-core/src/color.rs
+//
+// The shared color value types live in `ars-core` (flat `color` module,
+// re-exported at the crate root) so every color component — ColorSwatch,
+// ColorField, ColorArea, ColorSlider, ColorWheel, ColorSwatchPicker, and
+// ColorPicker — consumes them as `ars_core::color::{ColorValue, ColorChannel, …}`.
 
 /// A color value stored in HSL with alpha. All other formats are computed.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -264,40 +266,37 @@ pub struct ColorNameParts {
 }
 
 impl ColorValue {
-    /// Returns localized color description parts for accessibility.
-    /// Parts include lightness ("light"/"dark"), saturation ("vivid"/"muted"),
-    /// and hue name ("blue", "red", etc.) in the given locale.
+    /// Returns English color-description parts for accessibility.
     ///
-    /// Algorithm:
-    /// 1. Convert HSL -> sRGB -> OKLCH (perceptually uniform lightness).
-    /// 2. Map OKLCH lightness to 5 levels: very dark (0-0.2), dark (0.2-0.4),
-    ///    medium/omitted (0.4-0.6), light (0.6-0.8), very light (0.8-1.0).
-    /// 3. Map OKLCH chroma: grayish (0-0.04), moderate/omitted (0.04-0.12),
-    ///    vibrant (>0.12). If lightness > 0.7 and chroma moderate -> "pale".
-    /// 4. Map OKLCH hue angle to 13 named hues: red, red-orange, orange,
-    ///    yellow-orange, yellow, yellow-green, green, cyan-green, cyan,
-    ///    cyan-blue, blue, purple, magenta.
-    /// 5. Special-case: near-zero chroma -> "gray"/"white"/"black" by lightness.
+    /// The parts are English keys (e.g. lightness `"dark"`, chroma `"vibrant"`,
+    /// hue `"blue"`); a component's `format_name` message maps and reorders them
+    /// per locale (English: `"{lightness} {chroma} {hue}"`, Italian:
+    /// `"{hue} {chroma} {lightness}"`). Keeping the keys English here decouples
+    /// `ColorValue` from any single component's `Messages`.
     ///
-    /// Returns parts so i18n can reorder (e.g., English: "{lightness} {chroma}
-    /// {hue}", Italian: "{hue} {chroma} {lightness}").
-    /// Delegate to locale-aware color naming from Messages/CLDR.
-    pub fn color_name_parts(&self, locale: &Locale, messages: &Messages) -> ColorNameParts {
-        // OKLCH classification to determine lightness_level, saturation_level, hue_bucket
-        // then delegate to messages for localized strings
-        let (lightness_level, saturation_level, hue_bucket) = self.oklch_classify();
+    /// Classification runs in OKLCH (perceptually uniform):
+    /// 1. Convert HSL -> sRGB -> OKLab -> OKLCH (Björn Ottosson's transform).
+    /// 2. Lightness -> 5 levels: very dark (0-0.2), dark (0.2-0.4),
+    ///    medium/`""` (0.4-0.6), light (0.6-0.8), very light (>=0.8).
+    /// 3. Chroma: grayish (<0.04), moderate/`""` (0.04-0.12), vibrant (>0.12).
+    ///    Moderate chroma with light lightness reads as "pale".
+    /// 4. Hue angle -> 13 named hues: red, red-orange, orange, yellow-orange,
+    ///    yellow, yellow-green, green, cyan-green, cyan, cyan-blue, blue,
+    ///    purple, magenta.
+    /// 5. Near-zero chroma collapses to "gray"/"white"/"black" by lightness.
+    pub fn color_name_parts(&self) -> ColorNameParts {
+        let (lightness, chroma, hue) = self.oklch_classify();
         ColorNameParts {
-            lightness: (messages.lightness_label)(lightness_level),
-            chroma: (messages.saturation_label)(saturation_level),
-            hue: (messages.hue_name)(hue_bucket),
+            lightness: lightness.to_string(),
+            chroma: chroma.to_string(),
+            hue: hue.to_string(),
         }
     }
 
-    /// Convenience: format as English-order string "dark vibrant blue".
-    /// Joins non-empty parts with spaces.
+    /// Convenience: format as an English-order string such as "dark vibrant blue".
+    /// Joins the non-empty parts with single spaces.
     pub fn color_name_en(&self) -> String {
-        // Fallback English-only path for tests and non-localized contexts
-        let parts = self.color_name_parts_en();
+        let parts = self.color_name_parts();
         [parts.lightness.as_str(), parts.chroma.as_str(), parts.hue.as_str()]
             .iter()
             .filter(|s| !s.is_empty())

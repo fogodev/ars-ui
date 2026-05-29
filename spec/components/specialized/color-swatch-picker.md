@@ -166,6 +166,8 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    // Selection flows through `Bindable`; no named effects are emitted.
+    type Effect = ars_core::NoEffect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -400,12 +402,13 @@ impl<'a> Api<'a> {
         } else {
             ColorValue::default()
         };
+        // `color_swatch::Messages` is supplied to the embedded swatch's
+        // `Api::new` by the adapter, not carried in `Props`.
         color_swatch::Props {
-            id: self.ctx.ids.item("swatch", index),
+            id: self.ctx.ids.item("swatch", &index),
             color,
             color_name: None,
             respect_alpha: true,
-            messages: color_swatch::ColorSwatchMessages::default(),
         }
     }
 

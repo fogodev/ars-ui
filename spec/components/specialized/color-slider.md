@@ -119,7 +119,7 @@ pub struct Props {
     /// Name attribute for the hidden form input.
     pub name: Option<String>,
     /// Fired on `Event::DragEnd` / pointer release.
-    pub on_change_end: Option<Callback<ColorValue>>,
+    pub on_change_end: Option<Callback<dyn Fn(ColorValue) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -144,13 +144,35 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
-```rust
+```rust,no_check
 /// Apply a normalized position (0..1) to the channel value.
 fn apply_slider_position(ctx: &mut Context, position: f64) {
-    let color = ctx.value.get();
+    let color = *ctx.value.get();
     let (min, max) = channel_range(ctx.channel);
     let value = min + position.clamp(0.0, 1.0) * (max - min);
-    ctx.value.set(with_channel(color, ctx.channel, value));
+    ctx.value.set(with_channel(&color, ctx.channel, value));
+}
+
+/// Typed identifier for side effects emitted by the machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Invoke `Props::on_change_end`.
+    ChangeEnd,
+}
+
+/// Build the change-end effect that invokes `Props::on_change_end`.
+///
+/// Live track measurement and pointer capture are adapter concerns: the
+/// adapter drives `Event::DragMove` / `Event::DragEnd` from its own pointer
+/// listeners (like `Slider`), so the core registers no listeners and only fires
+/// this named effect on release.
+fn change_end_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_change_end {
+            callback(*ctx.value.get());
+        }
+        no_cleanup()
+    })
 }
 
 pub struct Machine;
@@ -161,6 +183,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -213,19 +236,13 @@ impl ars_core::Machine for Machine {
         }
 
         match (state, event) {
+            // The adapter resolves the normalized position and drives
+            // DragMove/DragEnd from its own pointer listeners.
             (State::Idle, Event::DragStart { position }) => {
                 if ctx.readonly { return None; }
                 let pos = *position;
                 Some(TransitionPlan::to(State::Dragging).apply(move |ctx| {
                     apply_slider_position(ctx, pos);
-                }).with_named_effect("drag-listeners", move |_ctx, _props, send| {
-                    let platform = use_platform_effects();
-                    let send_move = send.clone();
-                    let send_up = send.clone();
-                    platform.track_pointer_drag(
-                        Box::new(move |x, y| { send_move.call_if_alive(Event::DragMove { position: x }); }),
-                        Box::new(move || { send_up.call_if_alive(Event::DragEnd); }),
-                    )
                 }))
             }
 
@@ -237,7 +254,7 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Dragging, Event::DragEnd) => {
-                Some(TransitionPlan::to(State::Idle))
+                Some(TransitionPlan::to(State::Idle).with_effect(change_end_effect()))
             }
 
             (_, Event::Increment { step }) => {

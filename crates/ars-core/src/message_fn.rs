@@ -164,6 +164,53 @@ impl<F: Fn(usize, usize, &Locale) -> String + Send + Sync + 'static> From<F>
     }
 }
 
+/// `From` impl for `MessageFn<dyn Fn(&ColorNameParts, &Locale) -> String + Send + Sync>`.
+///
+/// Used by `ColorSwatch::Messages::format_name` to assemble a localized,
+/// reordered accessible name from the English [`ColorNameParts`](crate::color::ColorNameParts).
+impl<F: Fn(&crate::color::ColorNameParts, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(&crate::color::ColorNameParts, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
+/// `From` impl for `MessageFn<dyn Fn(ColorChannel, &Locale) -> String + Send + Sync>`.
+///
+/// Used by `ColorField::Messages::channel_label` to label a single-channel input.
+impl<F: Fn(crate::color::ColorChannel, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(crate::color::ColorChannel, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
+/// `From` impl for `MessageFn<dyn Fn(ColorChannel, f64, &Locale) -> String + Send + Sync>`.
+///
+/// Used by `ColorField::Messages::channel_value_text` to format a channel value
+/// for `aria-valuetext`.
+impl<F: Fn(crate::color::ColorChannel, f64, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(crate::color::ColorChannel, f64, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
+/// `From` impl for `MessageFn<dyn Fn(f64, f64, &str, &str, &Locale) -> String + Send + Sync>`.
+///
+/// Used by `ColorArea::Messages::value_text` to format a 2D `aria-valuetext`
+/// from two channel values and their channel names.
+impl<F: Fn(f64, f64, &str, &str, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(f64, f64, &str, &str, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
 impl MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
     /// Creates a `MessageFn` from a static string, ignoring the locale parameter.
     ///

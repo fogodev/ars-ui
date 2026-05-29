@@ -138,7 +138,7 @@ pub struct Props {
     /// The name of the color wheel.
     pub name: Option<String>,
     /// Fired on `Event::DragEnd` / pointer release.
-    pub on_change_end: Option<Callback<ColorValue>>,
+    pub on_change_end: Option<Callback<dyn Fn(ColorValue) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -161,12 +161,29 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
-```rust
+```rust,no_check
 /// Apply a normalized angle (0..1) to the hue value.
 fn apply_wheel_angle(ctx: &mut Context, angle: f64) {
     let hue = (angle.clamp(0.0, 1.0) * 360.0) % 360.0;
-    let color = ctx.value.get().clone();
+    let color = *ctx.value.get();
     ctx.value.set(ColorValue { hue, ..color });
+}
+
+/// Typed identifier for side effects emitted by the machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Invoke `Props::on_change_end`.
+    ChangeEnd,
+}
+
+/// Build the change-end effect that invokes `Props::on_change_end`.
+fn change_end_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_change_end {
+            callback(*ctx.value.get());
+        }
+        no_cleanup()
+    })
 }
 
 /// The machine for the `ColorWheel` component.
@@ -178,6 +195,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -255,14 +273,7 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Dragging, Event::DragEnd) => {
-                let final_color = ctx.value.get().clone();
-                Some(TransitionPlan::to(State::Idle)
-                    .with_effect(PendingEffect::new("on-change-end", move |_ctx, props, _send| {
-                        if let Some(ref cb) = props.on_change_end {
-                            cb.call(final_color);
-                        }
-                        no_cleanup()
-                    })))
+                Some(TransitionPlan::to(State::Idle).with_effect(change_end_effect()))
             }
 
             (_, Event::Increment { step }) => {

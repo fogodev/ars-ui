@@ -1,0 +1,38 @@
+---
+source: crates/ars-components/src/specialized/color_swatch/mod.rs
+expression: snapshot_attrs(&api(&props).inner_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-alpha",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "inner",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-swatch",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Background,
+            "hsla(210, 80.0%, 50.0%, 0.40)",
+        ),
+    ],
+}

@@ -133,7 +133,7 @@ pub struct Props {
     /// The ID of the form element the component is associated with.
     pub form: Option<String>,
     /// Fired on `Event::DragEnd` / pointer release.
-    pub on_change_end: Option<Callback<f64>>,
+    pub on_change_end: Option<Callback<dyn Fn(f64) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -157,8 +157,8 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
-```rust
-use ars_core::{TransitionPlan, ComponentIds, AttrMap, Bindable};
+```rust,no_check
+use ars_core::{AttrMap, Bindable, ComponentIds, PendingEffect, TransitionPlan, no_cleanup};
 
 /// Compute angle from pointer position relative to the center of the track.
 /// Returns degrees with 0 degrees at the top (12 o'clock), increasing clockwise.
@@ -182,6 +182,23 @@ fn wrap_value(value: f64, min: f64, max: f64) -> f64 {
     ((value - min).rem_euclid(range)) + min
 }
 
+/// Typed identifier for side effects emitted by the machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Invoke `Props::on_change_end`.
+    ChangeEnd,
+}
+
+/// Build the change-end effect that invokes `Props::on_change_end`.
+fn change_end_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_change_end {
+            callback(*ctx.value.get());
+        }
+        no_cleanup()
+    })
+}
+
 /// The machine for the AngleSlider component.
 pub struct Machine;
 
@@ -191,6 +208,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -278,15 +296,8 @@ impl ars_core::Machine for Machine {
                 }))
             }
             (State::Dragging, Event::DragEnd) => {
-                let final_value = *ctx.value.get();
                 let next_state = if ctx.focused { State::Focused } else { State::Idle };
-                Some(TransitionPlan::to(next_state)
-                    .with_effect(PendingEffect::new("on-change-end", move |_ctx, props, _send| {
-                        if let Some(ref cb) = props.on_change_end {
-                            cb.call(final_value);
-                        }
-                        no_cleanup()
-                    })))
+                Some(TransitionPlan::to(next_state).with_effect(change_end_effect()))
             }
 
             // Focus lifecycle
@@ -384,9 +395,14 @@ impl ars_core::Machine for Machine {
 
 ### 1.6 Connect / API
 
-```rust
-#[derive(ComponentPart)]
-#[scope = "angle-slider"]
+The `Marker { value: f64 }` variant carries an `f64`, which is not `Eq`/`Hash`,
+so `Part` cannot use `#[derive(ComponentPart)]` (the trait requires `Eq + Hash`).
+It hand-rolls `PartialEq`/`Eq`/`Hash` comparing/hashing that field via
+[`f64::to_bits`] and a manual `ComponentPart` impl, matching the `Slider`
+convention.
+
+```rust,no_check
+#[derive(Clone, Debug)]
 pub enum Part {
     Root,
     Control,
@@ -398,6 +414,18 @@ pub enum Part {
     Marker { value: f64 },
     HiddenInput,
 }
+
+impl PartialEq for Part {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Marker { value: a }, Self::Marker { value: b }) => a.to_bits() == b.to_bits(),
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+impl Eq for Part {}
+// `Hash` hashes the discriminant plus `value.to_bits()` for `Marker`; the
+// manual `ComponentPart` impl provides `scope()`, `name()`, `all()`, `ROOT`.
 
 pub struct Api<'a> {
     state: &'a State,
