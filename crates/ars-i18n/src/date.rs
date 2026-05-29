@@ -1235,14 +1235,32 @@ fn push_date_field(
     }
 }
 
-#[derive(Clone, Copy)]
-enum DateOrder {
+/// The order of the year, month, and day fields in a locale's numeric date
+/// format.
+///
+/// Derived from real locale data where available (see [`date_order`]), falling
+/// back to a `(language, region)` heuristic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DateOrder {
+    /// Month, then day, then year — e.g. `en-US` (`MM/dd/yyyy`).
     MonthDayYear,
+    /// Day, then month, then year — e.g. `en-GB` (`dd/MM/yyyy`); the most
+    /// common order worldwide.
     DayMonthYear,
+    /// Year, then month, then day — e.g. `ja-JP` (`yyyy/MM/dd`).
     YearMonthDay,
 }
 
-fn date_order(locale: &Locale) -> DateOrder {
+/// Returns the locale's preferred order of the year, month, and day fields in a
+/// numeric date.
+///
+/// Uses real locale data when a backend is compiled in — CLDR via ICU4X (the
+/// `icu4x` feature) or the browser `Intl` API (`web-intl` on wasm) — and falls
+/// back to a `(language, region)` heuristic otherwise. This is the reliable
+/// source for date field ordering: components should call it instead of
+/// hand-maintaining per-locale tables.
+#[must_use]
+pub fn date_order(locale: &Locale) -> DateOrder {
     #[cfg(feature = "icu4x")]
     if let Some(order) = icu_date_order(locale) {
         return order;
