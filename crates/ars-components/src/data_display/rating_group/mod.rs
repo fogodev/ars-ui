@@ -1729,6 +1729,13 @@ mod tests {
             "rating_group_item_selected",
             snapshot_attrs(&whole_api.item_attrs(1))
         );
+        // Item beyond the value (5th star, value = 2.0) is not highlighted —
+        // covers the `else` branch of `item_attrs` where `data-ars-highlighted`
+        // is absent.
+        assert_snapshot!(
+            "rating_group_item_unhighlighted",
+            snapshot_attrs(&whole_api.item_attrs(4))
+        );
         assert_snapshot!(
             "rating_group_hidden_input",
             snapshot_attrs(&whole_api.hidden_input_attrs())

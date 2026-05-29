@@ -740,15 +740,22 @@ fn infer_source_component(path: &Path) -> Option<String> {
 }
 
 fn is_component_category(segment: &str) -> bool {
+    // Both the hyphenated spec form (`date-time`) and the underscored source /
+    // snapshot-file form (`date_time`) must be recognized: source directories
+    // and insta snapshot filenames use underscores, while spec paths use
+    // hyphens. Matching only the hyphenated form silently dropped the
+    // `date_time` and `data_display` categories from the snapshot-count gate.
     matches!(
         segment,
-        "input"
-            | "selection"
-            | "overlay"
-            | "navigation"
+        "data-display"
+            | "data_display"
             | "date-time"
-            | "data-display"
+            | "date_time"
+            | "input"
             | "layout"
+            | "navigation"
+            | "overlay"
+            | "selection"
             | "specialized"
             | "utility"
     )
@@ -1079,6 +1086,23 @@ mod tests {
         }
 
         fs::write(path, content).expect("write file");
+    }
+
+    #[test]
+    fn component_category_recognizes_underscore_and_hyphen_forms() {
+        // Source directories and insta snapshot filenames use underscores
+        // (`date_time`), while spec paths use hyphens (`date-time`). Both forms
+        // must be recognized so the snapshot-count gate covers the `date_time`
+        // and `data_display` categories — matching only the hyphen form
+        // silently dropped them.
+        for category in ["date_time", "data_display", "date-time", "data-display"] {
+            assert!(
+                is_component_category(category),
+                "{category} should be recognized as a component category",
+            );
+        }
+
+        assert!(!is_component_category("not_a_category"));
     }
 
     #[test]
