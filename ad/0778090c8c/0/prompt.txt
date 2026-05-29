@@ -1,0 +1,9 @@
+Implement tasks #297, #298 and #299
+
+---
+
+Let's avoid using single letters variables as much as possible
+
+---
+
+Should this _attrs here be used?
