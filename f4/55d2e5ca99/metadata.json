@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "f455d2e5ca99",
+  "strategy": "manual-commit",
+  "branch": "t3code/c59961ed",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-i18n/src/date.rs",
+    "crates/ars-i18n/src/lib.rs",
+    "spec/foundation/04-internationalization.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/f4/55d2e5ca99/0/metadata.json",
+      "transcript": "/f4/55d2e5ca99/0/full.jsonl",
+      "content_hash": "/f4/55d2e5ca99/0/content_hash.txt",
+      "prompt": "/f4/55d2e5ca99/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 62061,
+    "cache_creation_tokens": 2949392,
+    "cache_read_tokens": 140789145,
+    "output_tokens": 447742,
+    "api_call_count": 299
+  }
+}

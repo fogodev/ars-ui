@@ -1,0 +1,119 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "f455d2e5ca99",
+  "session_id": "237b9b0f-3f17-4f7d-a955-e50b875d5151",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-29T00:09:53.391328Z",
+  "branch": "t3code/c59961ed",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-i18n/src/date.rs",
+    "crates/ars-i18n/src/lib.rs",
+    "spec/foundation/04-internationalization.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "305d6aee8083",
+  "token_usage": {
+    "input_tokens": 62061,
+    "cache_creation_tokens": 2949392,
+    "cache_read_tokens": 140789145,
+    "output_tokens": 447742,
+    "api_call_count": 299
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Implement task #289: the framework-agnostic DatePicker state machine (agnostic core only, no adapters) — owning popover open/close, date selection, input parse/validation, value↔calendar sync, and ARIA/data-attrs — with full TDD test coverage and a spec sync for ~10 compile-blockers found in spec §1.7.",
+    "outcome": "DatePicker agnostic core fully implemented (107→109 tests, 27 snapshots, 100% function / 99.84% line coverage). Additionally exposed the previously-private `ars-i18n::date_order()` (CLDR/Intl/fallback-backed) and rewired both DatePicker and DateField to use it, replacing hand-maintained locale heuristics. Fixed a xtask snapshot-count gate bug silently skipping two component categories, added a missing `rating_group` snapshot, and repaired a pre-existing `pagination/mod.rs` fmt failure. All xci-fast gates passed; commits prepared for PR.",
+    "learnings": {
+      "repo": [
+        "The `Machine` trait mandates `type Effect: EffectName` — typed enum required, string effect names and `use_platform_effects()` closures in core both fail to compile and violate the adapter pattern.",
+        "Focus effects in core must use `PendingEffect::named(Effect::X)` exclusively; actual DOM focus is adapter-driven. Popover/Dialog are the canonical precedents.",
+        "`CalendarDate` has no `PartialOrd`/`Ord`; ordering must use `.compare() -> Ordering`. Fields are `pub(crate)`; accessors are `year()->i32`, `month()->u8`, `day()->u8`. `nzu8` does not exist anywhere. `new_gregorian` returns `Result`.",
+        "`IsDateUnavailableFn` (Calendar's `Callback<dyn Fn(&CalendarDate)->bool+Send+Sync>`) is the canonical callback type — `fn(&CalendarDate)->bool` is incompatible and blocks `Props: Clone+PartialEq`.",
+        "`ComponentIds` exposes `id()` accessor; there is no public `base_id` field.",
+        "`Service::new` takes `(&Env, &Messages)` by ref; `send()` is `#[must_use]` requiring `drop(svc.send(..))` in tests.",
+        "`ConnectApi` trait requires only `type Part` and `part_attrs` — two items, not more.",
+        "`Context` must derive only `Clone` with a manual `Debug` impl (skipping `messages`) because `MessageFn` is not `Debug`. Calendar is the canonical precedent; `PartialEq` on `Context` is unsound.",
+        "`ars-i18n` already contained a complete private `date_order(locale) -> DateOrder` (CLDR via ICU4X, browser `Intl` on wasm, `(language,region)` fallback cfg-selected). Both `DateField::segment_order_for_locale` and the new `DatePicker::default_format_for_locale` had independently reimplemented only the fallback heuristic.",
+        "`ars-components` depends on `ars-i18n` with `default-features=false`; `--features i18n` is required to activate the ICU4X CLDR path.",
+        "A `Bindable` whose `internal` value is never updated via `set()` exposes stale state when `sync_controlled(None)` transitions it from controlled to uncontrolled — causing `ctx.open` to diverge from `State`. The fix is to make `State` the single source of truth and remove the redundant `open` Bindable.",
+        "`xtask::is_component_category` matched hyphenated names (`date-time`, `data-display`) while source dirs and snapshot file segments use underscores — silently skipping two entire categories from the snapshot-count gate.",
+        "Proptest is run with `#[ignore]` for nightly CI by default but must be invoked explicitly during implementation to catch state-machine invariant violations.",
+        "Spec §1.7 `initial_effects` and `on_props_changed` are required by all siblings (Calendar, DateField, Popover) but were omitted from the DatePicker spec — a systematic spec-drift pattern to watch for in future component specs.",
+        "Presets (Today/Yesterday) were listed in the issue's 'tests to add' but explicitly excluded in spec §6.2/§6.4 — the issue author's expectation was not authoritative over the spec."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-i18n/src/date.rs",
+          "line": 1245,
+          "end_line": 1282,
+          "finding": "Private `date_order(locale) -> DateOrder` function with `icu_date_order` (CLDR probe-date), `js_date_order` (wasm Intl), and `fallback_date_order` (language/region heuristic, DMY default) cfg-selected. Was private; now public. The existing tests at lines ~2559-2571 cover en-US→MDY, en-CA→YMD, de-DE→DMY, ja-JP→YMD."
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "finding": "`is_component_category` matched hyphenated names (e.g. 'date-time') while dirs/snapshot file stems use underscores ('date_time'). Fixed by also accepting underscored form. A regression test was added to lock both forms."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_field/mod.rs",
+          "line": 2219,
+          "end_line": 2235,
+          "finding": "`segment_order_for_locale` previously used a hand-written `(language, region)` match with `[Day, Month, Year]` as the rest-of-world default. Refactored to call `ars_i18n::date_order(locale)` — now CLDR-accurate for all locales and guaranteed consistent with DatePicker."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "Canonical `sync_props_into_ctx` helper + `Bindable::sync_controlled` pattern for controlled/uncontrolled prop re-derivation during `SyncProps`. Both DateField and Calendar use this; DatePicker must mirror it exactly."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/rating_group/mod.rs",
+          "finding": "Had 8 snapshots vs the gate's required floor of 9 (pre-existing miss). The uncovered branch was the non-highlighted item — `item_attrs(4)` on a default 5-item, value-2.0 instance. Added as the 9th snapshot."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_picker/mod.rs",
+          "line": 743,
+          "end_line": 743,
+          "finding": "`Event::SyncProps(_) => None` exhaustiveness arm is genuinely unreachable (SyncProps handled by early-return before the disabled guard match). Identical pattern exists in Calendar. Acceptable uncovered line."
+        }
+      ],
+      "workflow": [
+        "Proptest is essential for state-machine components: it caught a real controlled→uncontrolled Bindable divergence bug that unit tests missed, and the shrunk counterexample directly identified the root cause.",
+        "LLVM coverage analysis after reaching green tests reliably surfaced real untested branches (handler methods, `part_attrs` dispatch, `parse_format` fallback, readonly guards) — worth running as a post-green step.",
+        "The post-implementation audit skill (Phase 1 spec drift → Phase 2 iterative 'anything missing' → Phase 3 coverage) is a structured checklist that caught the snapshot-count gate bug and multiple spec residual drifts that code review alone would have missed.",
+        "Multi-commit history (4 logical units: drive-by fix, i18n expose, xtask+snapshot, component impl) makes cross-crate PRs reviewable; plan the commit boundaries before staging.",
+        "Before accepting spec prose as implementation-ready, grep the actual source for every type, method, and helper it references — specs commonly drift from the codebase they document.",
+        "When adding `#[must_use]` results in tests, use `drop(svc.send(..))` — not `let _ = svc.send(..)` which suppresses the warning but reads as intentional discard of a meaningful value."
+      ]
+    },
+    "friction": [
+      "Spec §1.7 had ~10 compile-blockers (no `type Effect`, string effect names, nonexistent `nzu8`, `CalendarDate` field access instead of accessors, no `Ord`, `ids.base_id`, `fn` instead of `Callback`, by-value `Service::new`, missing `on_props_changed`/`initial_effects`) requiring extensive upfront source verification before a single line of impl could be written.",
+      "A stale staged `pagination/mod.rs` change (from a prior session, not #289) caused xci-fast to fail on nightly-fmt check — required investigation, diagnosis, and a drive-by fix before the gate would pass.",
+      "Initial `open` Bindable design diverged from `State` under proptest's controlled→uncontrolled flip scenario; required removing the Bindable entirely and refactoring the machine to use State as the single source of truth — edits spread across `init`, all transition arms, `SyncProps`, and tests.",
+      "`cargo insta accept` does not accept a `-p` flag — must run at workspace root to accept pending snapshots from a specific crate.",
+      "Closure-lifetime errors in 5 handler tests required adding `let` bindings before calling `part_attrs`; the error message does not suggest this fix clearly.",
+      "A `cd` command during the session changed the working directory, causing subsequent path-sensitive Bash commands to fail until reset.",
+      "The session hit a hard usage limit mid-implementation, requiring continuation in a new session with full context reconstruction."
+    ],
+    "open_items": [
+      "Adapter tasks (Leptos, Dioxus) for DatePicker are explicitly out of scope for #289 — separate issues per the epic.",
+      "Pre-existing `utility/highlight` snapshot orphans still block a bare `cargo insta test --unreferenced=reject` at workspace root — untouched by this PR, needs its own cleanup.",
+      "`cargo doc` produces 94 pre-existing crate-wide warnings (none from date_picker); the warning backlog should be addressed separately.",
+      "The `js_date_order` (web-intl/wasm) path in `ars-i18n::date_order` is only exercised by nightly wasm-coverage CI — no local validation path exists for the newly-public function's wasm behavior.",
+      "Adapter specs for DatePicker describe focus handling at a narrative level but do not enumerate the `Effect` enum variants — they will need updating when the Leptos/Dioxus adapter tasks are implemented.",
+      "The `unavailable_dates` cache field was dropped from `Context` (the predicate is forwarded directly); the spec §1.3 note about this decision should be expanded if the pattern becomes a design question for future composite components."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-29T00:07:55.30765Z",
+    "agent_lines": 35,
+    "agent_removed": 5,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 35,
+    "total_lines_changed": 40,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
