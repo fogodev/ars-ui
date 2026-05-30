@@ -1,0 +1,163 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8274cae7ffe3",
+  "session_id": "fc2d9242-5260-4103-9efb-393c1f9c4461",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-30T16:15:31.81044Z",
+  "branch": "integrate-cargo-crap-ci-speedup",
+  "checkpoints_count": 8,
+  "files_touched": [
+    "AGENTS.md",
+    "spec/testing/14-ci.md",
+    "xtask/src/crap.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-8[1m]",
+  "turn_id": "30dca91ebaea",
+  "token_usage": {
+    "input_tokens": 76433,
+    "cache_creation_tokens": 2609436,
+    "cache_read_tokens": 108245103,
+    "output_tokens": 354391,
+    "api_call_count": 298
+  },
+  "session_metrics": {
+    "turn_count": 21
+  },
+  "summary": {
+    "intent": "Integrate cargo-crap CRAP metric tool into xtask and CI with baseline/regression mode, and speed up CI by removing the redundant check job and rewiring the dependency graph.",
+    "outcome": "cargo-crap integrated with baseline/regression mode (--fail-regression --min 30) rather than hard-fail absolute threshold, due to ~24 Machine::transition functions with CC 31-77 that are well-tested. CI improved: check job removed, fan-out rewired from needs:[unit] to needs:[clippy], native coverage added to xci-fast. PR #700 opened. Codex found P1 bug: baseline had absolute paths making the gate a silent no-op on CI. Fix was in progress at transcript end.",
+    "learnings": {
+      "repo": [
+        "xtask uses a Step enum pattern for CI orchestration; mutants.rs is the established pattern for external tool preflight checks and cargo subcommand invocation",
+        "CLAUDE.md is a symlink to AGENTS.md, which is the canonical file",
+        "spec/testing/14-ci.md is the authoritative CI spec and must be kept in sync with ci.yml changes",
+        "ars-derive is a proc-macro intentionally unmeasured; ars-e2e is not coverage-gated; 15 crates have coverage thresholds",
+        "The codebase has ~24 Machine::transition functions (one per stateful component) with CC 31-77 that are 90-100% tested — an absolute CRAP threshold of 30 would fight the architecture permanently as new components are added",
+        "New functions under --fail-regression are categorized as new (not regressed), so future stateful components do not trigger the gate",
+        "--exclude is a silent no-op under --workspace in cargo-crap; --allow works instead",
+        "--path . emits repo-relative paths (./crates/...) while --workspace gives absolute machine paths — critical for CI portability since baseline keys on (file, function, line)",
+        "--fail-regression alone fails on any CRAP increase including sub-threshold; --min 30 narrows it to only above-threshold regressions",
+        "LLVM-22 apt install takes 1-3 min in the coverage job; dioxus-desktop-deps composite action is used by 6 jobs",
+        "The repo uses actions/cache@v5",
+        "Clippy 1.96 (released 2026-05-25) added unnecessary_option_map_or_else as deny-by-default under the suspicious group, breaking main for everyone"
+      ],
+      "code": [
+        {
+          "path": "xtask/src/ci/mod.rs",
+          "line": 743,
+          "end_line": 782,
+          "finding": "run_coverage produces merged lcov.info at repo root; cargo-crap consumes this with zero recompile"
+        },
+        {
+          "path": "crates/ars-components/src/navigation/pagination/mod.rs",
+          "line": 464,
+          "end_line": 464,
+          "finding": "Pre-existing clippy-1.96 unnecessary_option_map_or_else lint: map_or_else(|| clamp_page(...), identity) should be unwrap_or_else(|| clamp_page(...))"
+        },
+        {
+          "path": "xtask/src/coverage.rs",
+          "finding": "check_all treats packages with lines_found == 0 as SKIP (not FAIL), so a native-subset threshold list is needed to avoid false failures for wasm-only crates in native coverage runs"
+        },
+        {
+          "path": "xtask/src/crap.rs",
+          "finding": "New file: three modes (Gate/Report/UpdateBaseline), uses --path . not --workspace, --exclude (works under --path, unlike --workspace), bootstrap-if-missing baseline. Guard test verifies committed baseline has no absolute paths."
+        }
+      ],
+      "workflow": [
+        "cargo-crap --fail-regression --min 30 is the right gate for mature codebases: ignores sub-threshold churn, catches above-threshold regressions, tolerates new functions entirely",
+        "Baseline files must use relative paths for CI portability; add a guard test that reads the committed baseline file and asserts no absolute paths",
+        "Background cargo commands stall on build-dir locks when run concurrently — run one at a time and wait for completion",
+        "PIPESTATUS[0] after a pipe (cmd | tail) captures tail's exit code not the main command's — capture exit code before piping",
+        "git reset --soft HEAD~1 followed by commit --amend can accidentally bundle unrelated commits; use ORIG_HEAD or an explicit SHA to recover the lost tip",
+        "A background task notification reporting exit code 0 may reflect the shell wrapper, not the actual tool — always verify the log file"
+      ]
+    },
+    "friction": [
+      "cargo-crap --exclude is silently ignored under --workspace with no warning; had to discover via empirical testing by comparing output with and without the flag",
+      "Committed baseline had absolute /Users/ericson/... paths, making the regression gate a complete silent no-op on CI — caught only by Codex review (P1)",
+      "Stale gitignored lcov.info (1 month old) gave misleading calibration data: 481 over-threshold functions vs actual ~200 from a fresh run",
+      "Background xci-fast run stalled on build-dir lock from a concurrent cargo invocation, producing an empty output file and a false exit-0 report",
+      "PIPESTATUS masking: task notification reported exit 0, hiding a real clippy failure until the log was read directly",
+      "Accidental git reset --soft HEAD~1 bundled all cargo-crap files into an unrelated navigation-audit commit via implicit amend",
+      "Clippy 1.96 unnecessary_option_map_or_else lint broke all of main on 2026-05-25; surfaced by xci-fast pre-push gate and required an unplanned fix commit",
+      "Baseline regeneration required multiple iterations: stale lcov → workspace-absolute paths → path-relative + examples excluded"
+    ],
+    "open_items": [
+      "Branch protection: must manually remove Workspace Check required status check in GitHub settings after merge or merges will hang",
+      "Flaky ars-dom instrumented wasm test (CI Failure A) — separate triage/quarantine investigation deferred",
+      ".crap-baseline.json is 2.4 MB; could reduce with --min 15 (~10x smaller) at cost of missing single-PR jumps from far-below to above threshold",
+      "Pre-existing stale ASCII dependency graph in spec/testing/14-ci.md uses node names like core-tests that never matched real jobs — deferred as out-of-scope for this PR",
+      "kache (RUSTC_WRAPPER content-addressed Rust artifact cache) — deferred to a separate benchmark spike on its own branch",
+      "Custom CI image with LLVM-22 preinstalled — deferred",
+      "PR-native-only / nightly-full coverage split to reduce coverage job frequency on PRs — deferred",
+      "Codex P1 fix (--path . relative paths) committed but not yet pushed at transcript end; needs push and @codex review re-trigger"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-30T16:13:25.003656Z",
+    "agent_lines": 85,
+    "agent_removed": 23,
+    "human_added": 72168,
+    "human_modified": 1,
+    "human_removed": 0,
+    "total_committed": 72254,
+    "total_lines_changed": 153416,
+    "agent_percentage": 0.07039682953538093,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 54,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 54
+      }
+    }
+  ]
+}
