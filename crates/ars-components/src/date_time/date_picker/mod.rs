@@ -133,6 +133,15 @@ pub enum Effect {
     /// parent uses to reconcile after a user-driven open/close.
     OpenChange,
 
+    /// Notify the consumer that the selected value changed. Emitted whenever a
+    /// selection, accepted typed entry, or clear changes the requested value.
+    /// The adapter reads [`Context::requested_value`] (the requested date — not
+    /// `value.get()`, which a controlled bindable holds at the parent's value)
+    /// and forwards it, so a controlled-`value` parent learns which date to feed
+    /// back. Mirrors the `requested_value` + `ValueChange` convention used by
+    /// other value-bearing components (e.g. `rating_group`).
+    ValueChange,
+
     /// Move focus into the embedded calendar (its grid, falling back to the
     /// content container). Emitted when the popover opens.
     FocusCalendar,
@@ -276,6 +285,17 @@ pub struct Context {
 
     /// Last successfully parsed date from input text.
     pub parsed_date: Option<CalendarDate>,
+
+    /// The most recently requested value, carried to the adapter's
+    /// `on_value_change` wiring via [`Effect::ValueChange`].
+    ///
+    /// This is distinct from [`value`](Self::value): when `value` is controlled,
+    /// the bindable's `get()` returns the parent's committed value, so the
+    /// requested date (from a selection or accepted typed entry) would otherwise
+    /// be invisible to the parent. The adapter reads this field — not
+    /// `value.get()` — when an `Effect::ValueChange` fires. `None` represents a
+    /// requested clear.
+    pub requested_value: Option<CalendarDate>,
 
     /// Locale for formatting and parsing.
     pub locale: Locale,
@@ -580,6 +600,10 @@ fn open_change_effect() -> PendingEffect<Machine> {
     PendingEffect::named(Effect::OpenChange)
 }
 
+fn value_change_effect() -> PendingEffect<Machine> {
+    PendingEffect::named(Effect::ValueChange)
+}
+
 fn focus_calendar_effect() -> PendingEffect<Machine> {
     PendingEffect::named(Effect::FocusCalendar)
 }
@@ -676,10 +700,16 @@ impl ars_core::Machine for Machine {
             State::Closed
         };
 
+        // Seed `requested_value` with the initial committed value; it is only
+        // read by the adapter in response to an `Effect::ValueChange`, which
+        // never fires at init.
+        let requested_value = value.get().clone();
+
         let ctx = Context {
             value,
             input_text,
             parsed_date: None,
+            requested_value,
             locale,
             messages: messages.clone(),
             format,
@@ -816,17 +846,23 @@ impl ars_core::Machine for Machine {
                     State::Open
                 };
 
-                let mut plan = TransitionPlan::to(next_state).apply(move |ctx: &mut Context| {
-                    ctx.value.set(Some(date));
-                    // Derive the visible text and `parsed_date` from the value
-                    // the bindable actually exposes — for a controlled `value`
-                    // that is still the parent's value, so the display never
-                    // optimistically diverges from `selected_date()` / the
-                    // hidden input / the composed calendar props.
-                    ctx.parsed_date = ctx.value.get().clone();
-                    ctx.input_text = ctx.formatted_value();
-                    ctx.is_touched = true;
-                });
+                let mut plan = TransitionPlan::to(next_state)
+                    .apply(move |ctx: &mut Context| {
+                        // Record the requested date so the adapter can forward it
+                        // even when `value` is controlled (where `get()` returns
+                        // the parent's value).
+                        ctx.requested_value = Some(date.clone());
+                        ctx.value.set(Some(date));
+                        // Derive the visible text and `parsed_date` from the value
+                        // the bindable actually exposes — for a controlled `value`
+                        // that is still the parent's value, so the display never
+                        // optimistically diverges from `selected_date()` / the
+                        // hidden input / the composed calendar props.
+                        ctx.parsed_date = ctx.value.get().clone();
+                        ctx.input_text = ctx.formatted_value();
+                        ctx.is_touched = true;
+                    })
+                    .with_effect(value_change_effect());
 
                 if should_close {
                     plan = plan
@@ -843,39 +879,57 @@ impl ars_core::Machine for Machine {
                 }
 
                 let text = value.clone();
-                let format = ctx.format.clone();
-                let min = ctx.min.clone();
-                let max = ctx.max.clone();
-                let is_unavailable = props.is_date_unavailable.clone();
 
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.is_touched = true;
-
-                    if let Some(date) = parse_date(&text, &format) {
-                        let in_range = min
+                // Decide the committed-value outcome at plan-build time so the
+                // `ValueChange` effect is emitted exactly when the value changes.
+                //
+                // - A parseable date in range and available commits.
+                // - A parseable *complete* date that is rejected (out of range or
+                //   unavailable) clears the value, so the hidden input / calendar
+                //   never submit a stale date that contradicts the visible field.
+                // - Empty text clears.
+                // - Partial/unparseable text leaves the committed value untouched
+                //   (the user is still typing).
+                let (committed_value, value_changed): (Option<CalendarDate>, bool) =
+                    if let Some(date) = parse_date(&text, &ctx.format) {
+                        let in_range = ctx
+                            .min
                             .as_ref()
                             .is_none_or(|m| date.compare(m) != Ordering::Less)
-                            && max
+                            && ctx
+                                .max
                                 .as_ref()
                                 .is_none_or(|m| date.compare(m) != Ordering::Greater);
-
-                        // Honor the unavailable predicate so a typed date cannot
-                        // bypass a constraint the embedded calendar enforces.
-                        let available = is_unavailable
+                        let available = props
+                            .is_date_unavailable
                             .as_ref()
                             .is_none_or(|predicate| !predicate(&date));
-
                         if in_range && available {
-                            ctx.parsed_date = Some(date.clone());
-                            ctx.value.set(Some(date));
+                            (Some(date), true)
+                        } else {
+                            (None, true)
                         }
                     } else if text.is_empty() {
-                        ctx.parsed_date = None;
-                        ctx.value.set(None);
-                    }
+                        (None, true)
+                    } else {
+                        (None, false)
+                    };
 
+                let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.is_touched = true;
+                    if value_changed {
+                        ctx.parsed_date = committed_value.clone();
+                        ctx.requested_value = committed_value.clone();
+                        ctx.value.set(committed_value);
+                    }
                     ctx.input_text = text;
-                }))
+                });
+
+                if value_changed {
+                    plan = plan.with_effect(value_change_effect());
+                }
+
+                Some(plan)
             }
 
             Event::FocusIn => {
@@ -883,11 +937,11 @@ impl ars_core::Machine for Machine {
                 // blocks the explicit `Open` event — otherwise a read-only field
                 // would still become interactive on focus.
                 if *state == State::Closed && ctx.open_on_click && !ctx.readonly {
-                    Some(
-                        TransitionPlan::to(State::Open)
-                            .with_effect(open_change_effect())
-                            .with_effect(focus_calendar_effect()),
-                    )
+                    // Open the popover but DO NOT move focus into the calendar:
+                    // the user focused the input to type, so focus must stay in
+                    // the field. Only explicit trigger/ArrowDown opens (which go
+                    // through `Event::Open`) move focus into the grid.
+                    Some(TransitionPlan::to(State::Open).with_effect(open_change_effect()))
                 } else {
                     None
                 }
@@ -1121,7 +1175,11 @@ impl<'a> Api<'a> {
             )
             .set(HtmlAttr::TabIndex, "0");
 
-        if self.ctx.disabled {
+        // `readonly` blocks every opening path, so the trigger advertises that
+        // it is non-actionable (disabled + aria-disabled) rather than rendering
+        // as an enabled button that does nothing — matching the input and
+        // clear-trigger, which already expose the readonly/disabled state.
+        if self.ctx.disabled || self.ctx.readonly {
             attrs
                 .set_bool(HtmlAttr::Disabled, true)
                 .set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
@@ -1244,12 +1302,16 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Name, name);
         }
 
+        // Always the canonical ISO 8601 string (`to_iso8601` reads the date's
+        // ISO slots, not the display-calendar `year()/month()/day()` fields), so
+        // a non-Gregorian value still submits the correct calendar-independent
+        // date.
         let value = self
             .ctx
             .value
             .get()
             .as_ref()
-            .map(|date| format!("{:04}-{:02}-{:02}", date.year(), date.month(), date.day()))
+            .map(CalendarDate::to_iso8601)
             .unwrap_or_default();
 
         attrs.set(HtmlAttr::Value, value);

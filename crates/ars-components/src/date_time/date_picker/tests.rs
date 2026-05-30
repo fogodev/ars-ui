@@ -315,7 +315,7 @@ fn select_date_closes_popover_by_default() {
 }
 
 #[test]
-fn select_date_emits_restore_focus_to_input() {
+fn select_date_emits_value_change_open_change_and_restore_focus() {
     let mut svc = service();
 
     drop(svc.send(Event::Open));
@@ -324,7 +324,11 @@ fn select_date_emits_restore_focus_to_input() {
         effects(svc.send(Event::SelectDate {
             date: date(2024, 3, 15),
         })),
-        vec![Effect::OpenChange, Effect::RestoreFocusToInput],
+        vec![
+            Effect::ValueChange,
+            Effect::OpenChange,
+            Effect::RestoreFocusToInput,
+        ],
     );
 }
 
@@ -345,7 +349,8 @@ fn select_date_stays_open_when_close_on_select_false() {
     });
 
     assert_eq!(*svc.state(), State::Open);
-    assert!(result.pending_effects.is_empty());
+    // Value still changed (so ValueChange fires), but open state did not.
+    assert_eq!(effects(result), vec![Effect::ValueChange]);
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1463,6 +1468,136 @@ fn on_open_change_prop_round_trips() {
     };
 
     assert!(props.on_open_change.is_some());
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Codex review #697 (pass 2) — focus, value notify, reject, readonly, ISO
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn focus_in_open_keeps_input_focus() {
+    // Opening via the focus path must NOT move focus into the calendar — the
+    // user focused the input to type. Only `OpenChange` fires (no FocusCalendar).
+    let mut svc = service();
+
+    assert_eq!(effects(svc.send(Event::FocusIn)), vec![Effect::OpenChange]);
+    assert_eq!(*svc.state(), State::Open);
+}
+
+#[test]
+fn select_date_records_requested_value_even_when_controlled() {
+    // Controlled-and-empty value: the committed `value.get()` stays the parent's
+    // (None), but `requested_value` carries the selected date so the adapter can
+    // forward it to the parent, and `Effect::ValueChange` signals the change.
+    let mut svc = service_with(
+        Props {
+            value: Some(None),
+            ..props()
+        },
+        en_us(),
+    );
+
+    let result = svc.send(Event::SelectDate {
+        date: date(2024, 3, 15),
+    });
+
+    assert!(effects(result).contains(&Effect::ValueChange));
+    assert_eq!(*svc.context().value.get(), None);
+    assert_eq!(svc.context().requested_value, Some(date(2024, 3, 15)));
+}
+
+#[test]
+fn input_change_accepted_emits_value_change_and_records_request() {
+    let mut svc = service();
+
+    let result = svc.send(Event::InputChange {
+        value: String::from("06/20/2024"),
+    });
+
+    assert_eq!(effects(result), vec![Effect::ValueChange]);
+    assert_eq!(svc.context().requested_value, Some(date(2024, 6, 20)));
+}
+
+#[test]
+fn input_change_partial_text_emits_no_value_change() {
+    let mut svc = service();
+
+    // Incomplete entry: no committed-value change, so no ValueChange effect.
+    let result = svc.send(Event::InputChange {
+        value: String::from("06/2"),
+    });
+
+    assert!(result.pending_effects.is_empty());
+    assert_eq!(*svc.context().value.get(), None);
+}
+
+#[test]
+fn typed_rejected_complete_date_clears_prior_value() {
+    // A previously-selected value must be cleared when the user types a complete
+    // date that is rejected, so the hidden input / calendar never submit a stale
+    // date that contradicts the visible field.
+    let mut svc = service_with(
+        Props {
+            default_value: Some(date(2024, 6, 10)),
+            max: Some(date(2024, 12, 31)),
+            ..props()
+        },
+        en_us(),
+    );
+    assert_eq!(*svc.context().value.get(), Some(date(2024, 6, 10)));
+
+    let result = svc.send(Event::InputChange {
+        value: String::from("01/01/2025"),
+    });
+
+    assert_eq!(*svc.context().value.get(), None);
+    assert_eq!(svc.context().requested_value, None);
+    assert!(effects(result).contains(&Effect::ValueChange));
+    // Hidden input no longer submits the stale date.
+    let api = svc.connect(&|_| {});
+    assert_eq!(
+        attr(&api.hidden_input_attrs(), HtmlAttr::Value).as_deref(),
+        Some(""),
+    );
+}
+
+#[test]
+fn readonly_trigger_is_disabled() {
+    let svc = service_with(
+        Props {
+            readonly: true,
+            ..props()
+        },
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    assert_eq!(
+        attr(&api.trigger_attrs(), HtmlAttr::Disabled).as_deref(),
+        Some("true"),
+    );
+    assert_eq!(
+        attr(&api.trigger_attrs(), HtmlAttr::Aria(AriaAttr::Disabled)).as_deref(),
+        Some("true"),
+    );
+}
+
+#[test]
+fn hidden_input_uses_canonical_iso() {
+    let svc = service_with(
+        Props {
+            default_value: Some(date(2024, 12, 25)),
+            ..props()
+        },
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    // The hidden input must equal the date's canonical ISO 8601 string.
+    assert_eq!(
+        attr(&api.hidden_input_attrs(), HtmlAttr::Value),
+        Some(date(2024, 12, 25).to_iso8601()),
+    );
 }
 
 // ────────────────────────────────────────────────────────────────────
