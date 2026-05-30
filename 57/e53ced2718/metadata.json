@@ -2,9 +2,15 @@
   "cli_version": "0.6.1-nightly.202605070709.47a2e910",
   "checkpoint_id": "57e53ced2718",
   "strategy": "manual-commit",
-  "branch": "audit-agnostic-navigation-components",
-  "checkpoints_count": 5,
+  "branch": "integrate-cargo-crap-ci-speedup",
+  "checkpoints_count": 19,
   "files_touched": [
+    ".cargo/config.toml",
+    ".crap-baseline.json",
+    ".github/actions/install-dioxus-desktop-deps/action.yml",
+    ".github/workflows/ci.yml",
+    "AGENTS.md",
+    "crates/ars-components/src/navigation/pagination/mod.rs",
     "crates/ars-components/tests/proptest_state_machines.rs",
     "crates/ars-components/tests/proptest_state_machines/navigation.rs",
     "crates/ars-components/tests/proptest_state_machines/navigation/accordion.rs",
@@ -23,7 +29,14 @@
     "crates/ars-components/tests/spec_conformance/navigation/pagination.rs",
     "crates/ars-components/tests/spec_conformance/navigation/steps.rs",
     "crates/ars-components/tests/spec_conformance/navigation/tabs.rs",
-    "crates/ars-components/tests/spec_conformance/navigation/tree_view.rs"
+    "crates/ars-components/tests/spec_conformance/navigation/tree_view.rs",
+    "spec/testing/13-policies.md",
+    "spec/testing/14-ci.md",
+    "xtask/src/ci/mod.rs",
+    "xtask/src/coverage.rs",
+    "xtask/src/crap.rs",
+    "xtask/src/lib.rs",
+    "xtask/src/main.rs"
   ],
   "sessions": [
     {
@@ -31,13 +44,19 @@
       "transcript": "/57/e53ced2718/0/full.jsonl",
       "content_hash": "/57/e53ced2718/0/content_hash.txt",
       "prompt": "/57/e53ced2718/0/prompt.txt"
+    },
+    {
+      "metadata": "/57/e53ced2718/1/metadata.json",
+      "transcript": "/57/e53ced2718/1/full.jsonl",
+      "content_hash": "/57/e53ced2718/1/content_hash.txt",
+      "prompt": ""
     }
   ],
   "token_usage": {
-    "input_tokens": 90977,
-    "cache_creation_tokens": 2400599,
-    "cache_read_tokens": 82431753,
-    "output_tokens": 287364,
-    "api_call_count": 221
+    "input_tokens": 149525,
+    "cache_creation_tokens": 3201289,
+    "cache_read_tokens": 154316436,
+    "output_tokens": 568426,
+    "api_call_count": 455
   }
 }

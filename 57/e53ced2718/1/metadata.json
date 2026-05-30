@@ -1,0 +1,209 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "57e53ced2718",
+  "session_id": "fc2d9242-5260-4103-9efb-393c1f9c4461",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-30T05:19:28.408068Z",
+  "branch": "integrate-cargo-crap-ci-speedup",
+  "checkpoints_count": 14,
+  "files_touched": [
+    ".cargo/config.toml",
+    ".crap-baseline.json",
+    ".github/actions/install-dioxus-desktop-deps/action.yml",
+    ".github/workflows/ci.yml",
+    "AGENTS.md",
+    "crates/ars-components/src/navigation/pagination/mod.rs",
+    "spec/testing/13-policies.md",
+    "spec/testing/14-ci.md",
+    "xtask/src/ci/mod.rs",
+    "xtask/src/coverage.rs",
+    "xtask/src/crap.rs",
+    "xtask/src/lib.rs",
+    "xtask/src/main.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-8[1m]",
+  "turn_id": "1a35b4038366",
+  "token_usage": {
+    "input_tokens": 58548,
+    "cache_creation_tokens": 800690,
+    "cache_read_tokens": 71884683,
+    "output_tokens": 281062,
+    "api_call_count": 234
+  },
+  "session_metrics": {
+    "turn_count": 14
+  },
+  "summary": {
+    "intent": "Integrate cargo-crap (CRAP metric gate) into xtask CI tooling and improve CI speed by removing redundant steps and adding apt caching.",
+    "outcome": "Implemented cargo-crap in baseline/regression mode (--fail-regression --min 30), removed redundant check job, rewired CI fan-out to remove a compile stage from the critical path, added native-fast coverage to xci-fast gate, and added apt caching for LLVM-22 and dioxus desktop deps via composite action. At session end the second xci-fast validation run was still in progress and the commit/push had not yet been completed.",
+    "learnings": {
+      "repo": [
+        "CLAUDE.md is a symlink to AGENTS.md, which is the canonical file also referenced by mutants.rs.",
+        "spec/testing/14-ci.md is the authoritative CI spec and must be kept in sync with any ci.yml changes.",
+        "ars-derive is a proc-macro intentionally unmeasured and ars-e2e is not coverage-gated; both require --allow under cargo-crap --workspace rather than --exclude.",
+        "cargo-crap --exclude is a silent no-op under --workspace; --allow must be used instead (verified empirically: ars-derive showed 47 entries with --exclude, 0 with --allow).",
+        "State-machine components (Machine::transition) intrinsically have CC 30-287 and are fully tested but structurally high-complexity; 34 library functions exceed CRAP threshold 30 at 100% coverage because CRAP == CC at 100%.",
+        "check_all in coverage.rs treats packages with lines_found==0 as SKIP not FAIL, so a native-only lcov passed to the full threshold list silently skips wasm-only crates rather than failing.",
+        "CI failures had two distinct root causes: (A) flaky ars-dom instrumented wasm browser test aborting coverage runs early, and (B) a legitimate threshold regression on the PR.",
+        "Native coverage matches CI numbers for non-wasm crates (ars-components, ars-core, etc.), making native-only checks faithful for those crates specifically."
+      ],
+      "code": [
+        {
+          "path": "xtask/src/ci/mod.rs",
+          "line": 743,
+          "end_line": 782,
+          "finding": "run_coverage produces a merged lcov.info at the repo root; cargo-crap can reuse it directly with zero recompile cost."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/pagination/mod.rs",
+          "line": 464,
+          "end_line": 464,
+          "finding": "clippy 1.96 (released 2026-05-25) introduced a deny-by-default unnecessary_option_map_or_else lint; fix is to replace map_or_else(|| clamp_page(...), identity) with unwrap_or_else(|| clamp_page(...))."
+        },
+        {
+          "path": "xtask/src/coverage.rs",
+          "finding": "native_thresholds() must be derived from default_thresholds() minus wasm coverage targets minus ars-derive to prevent drift between the two threshold lists."
+        }
+      ],
+      "workflow": [
+        "cargo-crap --fail-regression alone is too noisy: it fires on any CRAP increase above epsilon even for sub-threshold functions (CC 3->5 triggers it). Pairing with --min 30 limits alerts to above-threshold regressions only.",
+        "--fail-regression treats new functions as 'new' not 'regressed' (exit 0), which scales naturally for state-machine repos that continuously add components.",
+        "Absolute CRAP threshold 30 conflicts with state-machine architectures where CRAP == CC at 100% coverage; baseline/regression mode is the correct gate for mature codebases.",
+        "GHA-only changes (apt caches, CRAP install, fan-out rewiring) cannot be validated locally and should be marked 'validates on first CI run' rather than claiming local verification.",
+        "Apt package caching via actions/cache on /var/cache/apt/archives is low-risk and additive: cache miss behaves exactly as before, cache hit seeds the apt archive. Baking it into a composite action gives all consumer jobs the benefit at once.",
+        "Background bash task exit codes can be masked when using pipes: echo after a pipe captures tail's exit code, not cargo's. Must capture ${PIPESTATUS[0]} before piping or avoid backgrounding commands with pipes."
+      ]
+    },
+    "friction": [
+      "cargo-crap --exclude silently no-ops under --workspace, discovered only after empirical testing; would have shipped a broken gate without this discovery.",
+      "Stale lcov.info (one month old) initially reported 481/9064 over-threshold functions while a fresh run showed 200, causing misleading calibration that required an extra full coverage run to resolve.",
+      "Background command exit code masking made xci-fast appear to pass (exit 0 reported) when it had actually failed at the clippy stage, requiring a second full ~15 minute gate run.",
+      "clippy 1.96 landed mid-session (2026-05-25) and immediately broke the workspace with a new deny-by-default lint on pre-existing unrelated code, requiring an unplanned fix before the PR could pass.",
+      "Build lock contention: a background instrumented coverage run locked cargo, causing foreground validation attempts to stall.",
+      "An interactive cp alias blocked a direct file copy during fresh-vs-fresh gate validation."
+    ],
+    "open_items": [
+      "Branch protection: a repo admin must drop the 'Workspace Check' required status check after this PR merges or future PRs will hang indefinitely.",
+      "Flaky ars-dom instrumented wasm browser test (Failure A) needs dedicated triage and quarantine rather than retry workarounds; deferred as a separate issue.",
+      ".crap-baseline.json is 2.4 MB (full baseline); flooring with --min 15 would shrink diffs ~10x at the cost of missing single-PR jumps from far-below to >=30 -- explicitly deferred.",
+      "Pre-existing stale ASCII job dependency graph in spec/testing/14-ci.md section 5 uses node names (e.g. core-tests) that never matched real job names; flagged but not fixed to avoid scope creep.",
+      "kache evaluation: needs a benchmark branch with cold/warm CI wall-clock numbers before an adoption decision can be made; deferred.",
+      "Custom CI image evaluation: justified only if CI setup time becomes sustained multi-job pain; deferred.",
+      "PR->native-only / nightly->full coverage split: a larger coverage speedup option that trades feedback latency for runner minutes; deferred.",
+      "Second xci-fast run was still executing at transcript end; commit and push to the PR branch had not yet been completed."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-30T05:17:29.212878Z",
+    "agent_lines": 82185,
+    "agent_removed": 162,
+    "human_added": 6136,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 88321,
+    "total_lines_changed": 90656,
+    "agent_percentage": 90.83458348040946,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 9,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 10,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 11,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 12,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 13,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 14,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
