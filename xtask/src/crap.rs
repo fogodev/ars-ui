@@ -50,11 +50,16 @@ pub const CRAP_THRESHOLD: u32 = 30;
 /// deliberate complexity increase lands.
 pub const BASELINE_PATH: &str = ".crap-baseline.json";
 
-/// Functions suppressed from the report and baseline (`--allow`). Every entry
-/// must carry a justification. Under `--workspace`, cargo-crap's `--exclude`
-/// (relative to `--path`) is a no-op; path suppression must go through `--allow`,
-/// which is honored.
-const ALLOW_GLOBS: &[&str] = &[
+/// Files skipped at walk time (`--exclude`, relative to `--path`). Honored
+/// because the gate runs under `--path .` (not `--workspace`, where `--exclude`
+/// is a no-op). Every entry must carry a justification.
+const EXCLUDE_GLOBS: &[&str] = &[
+    // Build artifacts and generated output — never first-party source.
+    "target/**",
+    // Demo/example apps are not shipped library surface; their complexity is not
+    // a maintenance-risk concern the gate should track. `--workspace` skipped
+    // them (non-member walk); `--path .` would otherwise sweep them in.
+    "examples/**",
     // `ars-derive` is a proc-macro crate: its code runs inside the compiler, so
     // `cargo-llvm-cov` never instruments it. Every function would otherwise be
     // scored at 0% coverage and dominate the baseline with noise. It is
@@ -166,9 +171,17 @@ impl From<io::Error> for Error {
 /// invoked as `cargo crap`; cargo-crap tolerates it. Split out as a pure
 /// function so the argument surface is unit-testable.
 fn build_args(options: &Options) -> Vec<String> {
+    // `--path .` (not `--workspace`) so cargo-crap emits repo-relative paths
+    // (`./crates/...`). Absolute `--workspace` paths bind the baseline to the
+    // machine that generated it (`/Users/...` locally vs `/home/runner/...` on
+    // CI), making every `(file, function, line)` key mismatch on CI — which
+    // silently turns the regression gate into a no-op. Relative paths match on
+    // any checkout. `--exclude` is honored under `--path` (it is a no-op only
+    // under `--workspace`).
     let mut args = vec![
         "crap".to_owned(),
-        "--workspace".to_owned(),
+        "--path".to_owned(),
+        ".".to_owned(),
         "--lcov".to_owned(),
         options.lcov.display().to_string(),
     ];
@@ -202,8 +215,8 @@ fn build_args(options: &Options) -> Vec<String> {
         }
     }
 
-    for glob in ALLOW_GLOBS {
-        args.push("--allow".to_owned());
+    for glob in EXCLUDE_GLOBS {
+        args.push("--exclude".to_owned());
         args.push((*glob).to_owned());
     }
 
@@ -332,12 +345,15 @@ mod tests {
     }
 
     #[test]
-    fn all_actions_start_with_crap_workspace_and_lcov() {
+    fn all_actions_use_relative_path_and_lcov_not_workspace() {
         for action in [Action::Gate, Action::Report, Action::UpdateBaseline] {
             let args = build_args(&options(action));
 
             assert_eq!(args[0], "crap");
-            assert!(has_flag(&args, "--workspace"));
+            // Portable relative paths require `--path .`, never `--workspace`
+            // (which emits machine-absolute paths and breaks the baseline on CI).
+            assert_eq!(values_after(&args, "--path"), vec!["."]);
+            assert!(!has_flag(&args, "--workspace"));
             assert_eq!(values_after(&args, "--lcov"), vec!["lcov.info"]);
         }
     }
@@ -376,25 +392,64 @@ mod tests {
     }
 
     #[test]
-    fn every_action_forwards_allow_globs() {
+    fn every_action_forwards_exclude_globs() {
         for action in [Action::Gate, Action::Report, Action::UpdateBaseline] {
             let args = build_args(&options(action));
-            let allows = values_after(&args, "--allow");
+            let excludes = values_after(&args, "--exclude");
 
-            for glob in ALLOW_GLOBS {
-                assert!(allows.contains(glob), "{action:?} missing --allow {glob}");
+            for glob in EXCLUDE_GLOBS {
+                assert!(
+                    excludes.contains(glob),
+                    "{action:?} missing --exclude {glob}"
+                );
             }
 
-            assert_eq!(allows.len(), ALLOW_GLOBS.len());
+            assert_eq!(excludes.len(), EXCLUDE_GLOBS.len());
+            // `--exclude` is honored only under `--path`; never `--allow` here.
+            assert!(!has_flag(&args, "--allow"));
         }
     }
 
     #[test]
-    fn allow_globs_suppress_unmeasured_proc_macro_crate() {
+    fn exclude_globs_skip_target_and_unmeasured_proc_macro_crate() {
         assert!(
-            ALLOW_GLOBS.contains(&"crates/ars-derive/**"),
-            "ars-derive is unmeasured by llvm-cov and must be suppressed"
+            EXCLUDE_GLOBS.contains(&"crates/ars-derive/**"),
+            "ars-derive is unmeasured by llvm-cov and must be excluded"
         );
+        assert!(
+            EXCLUDE_GLOBS.contains(&"target/**"),
+            "build artifacts must be excluded"
+        );
+    }
+
+    #[test]
+    fn committed_baseline_uses_portable_relative_paths() {
+        // Guards Codex review #700's P1: a baseline with absolute paths
+        // (`/Users/...` or `/home/runner/...`) silently no-ops the gate on CI.
+        // Every entry's `file` must be repo-relative.
+        let baseline = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(BASELINE_PATH);
+
+        let content =
+            std::fs::read_to_string(&baseline).expect("committed .crap-baseline.json must exist");
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&content).expect("baseline must be valid JSON");
+
+        let entries = parsed["entries"]
+            .as_array()
+            .expect("baseline must have an entries array");
+
+        assert!(!entries.is_empty(), "baseline must not be empty");
+
+        for entry in entries {
+            let file = entry["file"].as_str().expect("entry.file must be a string");
+            assert!(
+                !file.starts_with('/'),
+                "baseline entry has a machine-absolute path (breaks the gate on CI): {file}"
+            );
+        }
     }
 
     #[test]
