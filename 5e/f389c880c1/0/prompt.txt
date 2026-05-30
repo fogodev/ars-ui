@@ -1,0 +1,9 @@
+Implement task #279
+
+---
+
+<ide_selection>The user selected the lines 435 to 435 from /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-279/crates/ars-components/src/layout/scroll_area/mod.rs:
+const DEFAULT_HIDE_DELAY_MS: u32 = 1200;
+
+This may or may not be related to the current task.</ide_selection>
+Don't ever use a duration as a u32 of the ms. Use the proper `Duration` type instead, just like all other components

@@ -1,0 +1,156 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "5ef389c880c1",
+  "session_id": "173ea838-dc16-47bb-9a4e-a2e159509710",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-30T02:56:40.364334Z",
+  "branch": "impl-279",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/layout/mod.rs",
+    "crates/ars-components/src/layout/scroll_area/mod.rs",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_content.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_corner_square.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_root_idle.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_root_rtl.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_root_scroll_active.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_scrollbar_x_hidden.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_scrollbar_x_visible.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_scrollbar_y_visible.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_thumb_x.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_thumb_y.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_viewport_custom_label.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_viewport_custom_message.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_viewport_default.snap",
+    "crates/ars-components/src/navigation/pagination/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/layout.rs",
+    "crates/ars-components/tests/spec_conformance/layout.rs",
+    "spec/components/layout/scroll-area.md",
+    "spec/dioxus-components/layout/scroll-area.md",
+    "spec/leptos-components/layout/scroll-area.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "6861c47491f4",
+  "token_usage": {
+    "input_tokens": 39771,
+    "cache_creation_tokens": 1249406,
+    "cache_read_tokens": 49526577,
+    "output_tokens": 161748,
+    "api_call_count": 202
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #279 — the ScrollArea agnostic core component for the ars-ui Rust UI library using a state-machine architecture, following established patterns from tooltip, rating_group, and collapsible components.",
+    "outcome": "Fully implemented and merged the ScrollArea core component with state machine (Idle/Hovering/ScrollActive/ThumbDragging), spec conformance tests, proptest harnesses, and 97.48% line coverage; all 10 CI gates passed and PR was pushed closing #279.",
+    "learnings": {
+      "repo": [
+        "The agnostic core layer must never reference platform APIs (e.g., set_timeout); async/timer behavior must be expressed as named Effect intents (e.g., Effect::AutoHide) and delegated to adapters — matching the tooltip/rating_group pattern.",
+        "context_changed is set whenever an apply closure runs, not on value-diff — tests must not assume it reflects a semantic state change.",
+        "The @stable toolchain is pinned to 1.96.0 across ars-components; a single pre-existing clippy error in any file blocks all clippy runs for the entire crate.",
+        "Delay props that always have a default (like hide delay) should be plain Duration, not Option<Duration>, matching the tooltip/hover_card/avatar convention.",
+        "Local scroll_area uses Axis{X,Y} which differs from ars-dom's Axis{Horizontal,Vertical} — a cross-cutting naming inconsistency that is known and deferred.",
+        "Insta --accept is unsafe in this repo due to pre-existing i18n-gated highlight snapshots; scroll_area snapshots must be promoted with targeted per-test commands.",
+        "Prop parity between the agnostic core and both adapter specs (Leptos and Dioxus) must be explicitly maintained — newly discovered props require updates to all three spec files."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 409,
+          "end_line": 409,
+          "finding": "The else 0.0 branch in compute_thumb_metrics is unreachable due to an early return above it — justified coverage miss, no logic error."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 574,
+          "end_line": 575,
+          "finding": "AutoHide setup closure body is adapter-invoked and cannot be exercised from pure unit tests — justified coverage miss."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 594,
+          "end_line": 594,
+          "finding": "MouseEnter outside Hover mode was an uncovered branch caught during audit; covered by adding a dedicated test."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 705,
+          "end_line": 725,
+          "finding": "TrackClick for Axis::X and the cross-size branch were uncovered; covered by new targeted tests."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/pagination/mod.rs",
+          "line": 1,
+          "end_line": 1,
+          "finding": "Pre-existing clippy error (map_or_else should be unwrap_or_else) was blocking all clippy runs on the crate; fixed as a side-effect of this PR."
+        }
+      ],
+      "workflow": [
+        "context_only closures in the state machine framework require explicit `&mut Context` type annotations to compile.",
+        "Messages structs must derive PartialEq for state machine equality checks to compile.",
+        "Float equality in state machine tests requires an approx comparison helper rather than direct assert_eq!.",
+        "Background insta snapshot jobs can race; always clean up background processes before running targeted snapshot promotion commands.",
+        "A three-phase post-implementation audit (spec/impl drift, adjacent surfaces, coverage) is the established quality gate pattern for new components.",
+        "cargo xci-fast runs 10 gates and is the canonical pre-push validation command for this repo."
+      ]
+    },
+    "friction": [
+      "The original spec contained a platform set_timeout call inside the agnostic core — a design drift that required identifying and converting to the Effect intent pattern before implementation could proceed correctly.",
+      "Insta --accept is blocked by pre-existing i18n-gated snapshots, forcing manual targeted snapshot promotion per test rather than bulk acceptance.",
+      "A pre-existing clippy error in pagination/mod.rs silently blocked all clippy runs on ars-components, making it appear as though new code had lint failures.",
+      "Background snapshot promotion jobs raced with each other, requiring cleanup before results were reliable.",
+      "The scrollbar_cross_size field was computed by axis_metrics but never populated from props or events — only caught during post-implementation audit, requiring a retroactive Props builder and spec updates.",
+      "hide_delay was initially typed as u32 milliseconds instead of Duration — caught in user review after implementation was otherwise complete, requiring a full pass across impl, spec, and both adapter specs."
+    ],
+    "open_items": [
+      "Adapter implementations (Leptos and Dioxus ScrollArea components) are out of scope for this PR and must be built separately.",
+      "Local Axis{X,Y} vs ars-dom Axis{Horizontal,Vertical} naming inconsistency is a known cross-cutting refactor explicitly deferred to a future PR.",
+      "The pagination/mod.rs clippy fix was applied as a side-effect; team may prefer it isolated in its own PR for clean history.",
+      "End-to-end tests are not applicable for the agnostic core and must be added when the adapter components land."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-30T02:55:06.594854Z",
+    "agent_lines": 1952,
+    "agent_removed": 23,
+    "human_added": 363,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 2315,
+    "total_lines_changed": 2338,
+    "agent_percentage": 84.47390932420873,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 57,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2094,
+      "agent_lines_removed": 15,
+      "user_added_per_file": {
+        "crates/ars-components/src/layout/scroll_area/mod.rs": 56,
+        "crates/ars-components/tests/proptest_state_machines/layout.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 153,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2162,
+      "agent_lines_removed": 23,
+      "user_added_per_file": {
+        "crates/ars-components/src/layout/scroll_area/mod.rs": 153
+      }
+    }
+  ]
+}

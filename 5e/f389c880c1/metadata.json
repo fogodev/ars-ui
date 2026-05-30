@@ -1,0 +1,45 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "5ef389c880c1",
+  "strategy": "manual-commit",
+  "branch": "impl-279",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/layout/mod.rs",
+    "crates/ars-components/src/layout/scroll_area/mod.rs",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_content.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_corner_square.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_root_idle.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_root_rtl.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_root_scroll_active.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_scrollbar_x_hidden.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_scrollbar_x_visible.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_scrollbar_y_visible.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_thumb_x.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_thumb_y.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_viewport_custom_label.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_viewport_custom_message.snap",
+    "crates/ars-components/src/layout/scroll_area/snapshots/ars_components__layout__scroll_area__tests__scroll_area_viewport_default.snap",
+    "crates/ars-components/src/navigation/pagination/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/layout.rs",
+    "crates/ars-components/tests/spec_conformance/layout.rs",
+    "spec/components/layout/scroll-area.md",
+    "spec/dioxus-components/layout/scroll-area.md",
+    "spec/leptos-components/layout/scroll-area.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/5e/f389c880c1/0/metadata.json",
+      "transcript": "/5e/f389c880c1/0/full.jsonl",
+      "content_hash": "/5e/f389c880c1/0/content_hash.txt",
+      "prompt": "/5e/f389c880c1/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 39771,
+    "cache_creation_tokens": 1249406,
+    "cache_read_tokens": 49526577,
+    "output_tokens": 161748,
+    "api_call_count": 202
+  }
+}
