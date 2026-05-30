@@ -8,7 +8,7 @@
 use alloc::{format, string::String, sync::Arc, vec, vec::Vec};
 use core::cell::RefCell;
 
-use ars_core::{AriaAttr, AttrMap, ComponentPart, Env, HtmlAttr, SendResult, Service};
+use ars_core::{AriaAttr, AttrMap, Callback, ComponentPart, Env, HtmlAttr, SendResult, Service};
 use ars_i18n::{
     CalendarDate, Locale, StubIntlBackend,
     locales::{de_de, en_gb, en_us, ja_jp},
@@ -16,7 +16,7 @@ use ars_i18n::{
 use ars_interactions::{KeyboardEventData, KeyboardKey};
 use insta::assert_snapshot;
 
-use super::*;
+use super::{calendar, *};
 
 // ────────────────────────────────────────────────────────────────────
 // Helpers
@@ -144,7 +144,7 @@ fn default_open_starts_open() {
 }
 
 #[test]
-fn controlled_open_emits_initial_focus_calendar() {
+fn controlled_open_emits_initial_open_change_and_focus_calendar() {
     let mut svc = service_with(
         Props {
             open: Some(true),
@@ -153,7 +153,10 @@ fn controlled_open_emits_initial_focus_calendar() {
         en_us(),
     );
 
-    assert_eq!(initial_effect_names(&mut svc), vec![Effect::FocusCalendar]);
+    assert_eq!(
+        initial_effect_names(&mut svc),
+        vec![Effect::OpenChange, Effect::FocusCalendar],
+    );
 }
 
 #[test]
@@ -190,7 +193,10 @@ fn toggle_twice_closes_popover() {
 fn open_emits_focus_calendar_effect() {
     let mut svc = service();
 
-    assert_eq!(effects(svc.send(Event::Open)), vec![Effect::FocusCalendar]);
+    assert_eq!(
+        effects(svc.send(Event::Open)),
+        vec![Effect::OpenChange, Effect::FocusCalendar],
+    );
 }
 
 #[test]
@@ -212,7 +218,7 @@ fn close_emits_restore_focus_to_trigger_effect() {
 
     assert_eq!(
         effects(svc.send(Event::Close)),
-        vec![Effect::RestoreFocusToTrigger],
+        vec![Effect::OpenChange, Effect::RestoreFocusToTrigger],
     );
     assert_eq!(*svc.state(), State::Closed);
 }
@@ -252,7 +258,7 @@ fn escape_emits_restore_focus_to_trigger() {
         effects(svc.send(Event::KeyDown {
             key: KeyboardKey::Escape,
         })),
-        vec![Effect::RestoreFocusToTrigger],
+        vec![Effect::OpenChange, Effect::RestoreFocusToTrigger],
     );
 }
 
@@ -318,7 +324,7 @@ fn select_date_emits_restore_focus_to_input() {
         effects(svc.send(Event::SelectDate {
             date: date(2024, 3, 15),
         })),
-        vec![Effect::RestoreFocusToInput],
+        vec![Effect::OpenChange, Effect::RestoreFocusToInput],
     );
 }
 
@@ -528,14 +534,14 @@ fn focus_out_closes_open_popover() {
 }
 
 #[test]
-fn focus_out_does_not_emit_focus_effect() {
+fn focus_out_emits_open_change_but_no_focus_effect() {
     let mut svc = service();
 
     drop(svc.send(Event::Open));
 
-    let result = svc.send(Event::FocusOut);
-
-    assert!(result.pending_effects.is_empty());
+    // Closing on focus-out notifies the consumer of the open change but does
+    // not move focus (focus has already left the component).
+    assert_eq!(effects(svc.send(Event::FocusOut)), vec![Effect::OpenChange],);
 }
 
 #[test]
@@ -654,7 +660,10 @@ fn sync_props_controlled_open_opens_and_focuses() {
     });
 
     assert_eq!(*svc.state(), State::Open);
-    assert_eq!(effects(result), vec![Effect::FocusCalendar]);
+    assert_eq!(
+        effects(result),
+        vec![Effect::OpenChange, Effect::FocusCalendar],
+    );
 }
 
 #[test]
@@ -673,7 +682,10 @@ fn sync_props_controlled_open_closes_and_restores_focus() {
     });
 
     assert_eq!(*svc.state(), State::Closed);
-    assert_eq!(effects(result), vec![Effect::RestoreFocusToTrigger]);
+    assert_eq!(
+        effects(result),
+        vec![Effect::OpenChange, Effect::RestoreFocusToTrigger],
+    );
 }
 
 #[test]
@@ -1048,8 +1060,9 @@ fn on_trigger_keydown_arrow_down_sends_open() {
 
     let api = svc.connect(&push);
 
-    api.on_trigger_keydown(&keyboard(KeyboardKey::ArrowDown));
+    let handled = api.on_trigger_keydown(&keyboard(KeyboardKey::ArrowDown));
 
+    assert!(handled);
     assert_eq!(sent.borrow().as_slice(), &[Event::Open]);
 }
 
@@ -1132,10 +1145,14 @@ fn on_trigger_keydown_enter_sends_toggle_and_ignores_other_keys() {
 
     let api = svc.connect(&push);
 
-    api.on_trigger_keydown(&keyboard(KeyboardKey::Enter));
-    // A key with no trigger binding is a no-op (covers the `_` arm).
-    api.on_trigger_keydown(&keyboard(KeyboardKey::Escape));
+    // Enter is handled (returns true) so the adapter can suppress the native
+    // activation click and avoid a double toggle.
+    let enter_handled = api.on_trigger_keydown(&keyboard(KeyboardKey::Enter));
+    // A key with no trigger binding is not handled (covers the `_` arm).
+    let escape_handled = api.on_trigger_keydown(&keyboard(KeyboardKey::Escape));
 
+    assert!(enter_handled);
+    assert!(!escape_handled);
     assert_eq!(sent.borrow().as_slice(), &[Event::Toggle]);
 }
 
@@ -1274,6 +1291,178 @@ fn api_and_messages_debug_eq_impls() {
     assert_eq!(messages.clone(), messages);
     // Manual `Debug`.
     assert!(format!("{messages:?}").contains("Messages"));
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Codex review #697 — controlled state, guards, predicate, form buttons
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn readonly_blocks_focus_in_open() {
+    // `FocusIn` must respect `readonly` exactly as the explicit `Open` event
+    // does — a read-only field stays closed when focused.
+    let mut svc = service_with(
+        Props {
+            readonly: true,
+            ..props()
+        },
+        en_us(),
+    );
+
+    let result = svc.send(Event::FocusIn);
+
+    assert_eq!(*svc.state(), State::Closed);
+    assert!(!result.state_changed);
+}
+
+#[test]
+fn select_date_does_not_change_display_when_value_is_controlled() {
+    // Controlled-and-empty value: a calendar selection updates the internal
+    // bindable but `get()` still returns the parent value (None), so the input
+    // text, `selected_date()`, and hidden input must NOT show the new date.
+    let mut svc = service_with(
+        Props {
+            value: Some(None),
+            ..props()
+        },
+        en_us(),
+    );
+
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 3, 15),
+    }));
+
+    assert_eq!(*svc.context().value.get(), None);
+    assert_eq!(svc.context().input_text, "");
+    let api = svc.connect(&|_| {});
+    assert_eq!(api.selected_date(), None);
+    assert_eq!(
+        attr(&api.hidden_input_attrs(), HtmlAttr::Value).as_deref(),
+        Some(""),
+    );
+}
+
+#[test]
+fn input_announces_default_value_without_typing() {
+    // The selected-date announcement must be present for `default_value` (and
+    // controlled values), not only for dates typed/selected this session.
+    let svc = service_with(
+        Props {
+            default_value: Some(date(2024, 3, 15)),
+            ..props()
+        },
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    assert_eq!(
+        attr(&api.input_attrs(), HtmlAttr::Aria(AriaAttr::Description)).as_deref(),
+        Some("Selected date: 03/15/2024"),
+    );
+}
+
+#[test]
+fn sync_props_unrelated_change_preserves_typed_text() {
+    // A partial/invalid in-progress entry must survive a prop change that does
+    // not touch the value or format (here, flipping `invalid`).
+    let mut svc = service();
+
+    drop(svc.send(Event::InputChange {
+        value: String::from("03/15"),
+    }));
+    assert_eq!(svc.context().input_text, "03/15");
+    assert_eq!(*svc.context().value.get(), None);
+
+    drop(svc.set_props(Props {
+        invalid: true,
+        ..props()
+    }));
+
+    assert_eq!(svc.context().input_text, "03/15");
+}
+
+fn unavailable_after(cutoff: CalendarDate) -> calendar::IsDateUnavailableFn {
+    Callback::new_ref(move |candidate: &CalendarDate| {
+        candidate.compare(&cutoff) == Ordering::Greater
+    })
+}
+
+#[test]
+fn input_change_rejects_typed_unavailable_date() {
+    // Typed input must honor `is_date_unavailable`, so a date the calendar would
+    // refuse cannot be smuggled in by typing.
+    let mut svc = service_with(
+        Props {
+            is_date_unavailable: Some(unavailable_after(date(2024, 6, 15))),
+            ..props()
+        },
+        en_us(),
+    );
+
+    drop(svc.send(Event::InputChange {
+        value: String::from("06/20/2024"),
+    }));
+    assert_eq!(*svc.context().value.get(), None);
+
+    // An available date still commits.
+    drop(svc.send(Event::InputChange {
+        value: String::from("06/10/2024"),
+    }));
+    assert_eq!(*svc.context().value.get(), Some(date(2024, 6, 10)));
+}
+
+#[test]
+fn trigger_and_clear_trigger_are_type_button() {
+    let svc = service_with(
+        Props {
+            default_value: Some(date(2024, 3, 15)),
+            ..props()
+        },
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    assert_eq!(
+        attr(&api.trigger_attrs(), HtmlAttr::Type).as_deref(),
+        Some("button"),
+    );
+    assert_eq!(
+        attr(&api.clear_trigger_attrs(), HtmlAttr::Type).as_deref(),
+        Some("button"),
+    );
+}
+
+#[test]
+fn context_sync_input_text_reflects_value() {
+    // `Context::sync_input_text` (public per spec §1.3) forces the input text to
+    // match the current value, discarding any divergent in-progress text.
+    let mut svc = service_with(
+        Props {
+            default_value: Some(date(2024, 3, 15)),
+            ..props()
+        },
+        en_us(),
+    );
+
+    // Type over the displayed value without committing, then re-sync.
+    drop(svc.send(Event::InputChange {
+        value: String::from("nonsense"),
+    }));
+    assert_eq!(svc.context().input_text, "nonsense");
+
+    svc.context_mut().sync_input_text();
+
+    assert_eq!(svc.context().input_text, "03/15/2024");
+}
+
+#[test]
+fn on_open_change_prop_round_trips() {
+    let props = Props {
+        on_open_change: Some(Callback::new(|_open: bool| {})),
+        ..props()
+    };
+
+    assert!(props.on_open_change.is_some());
 }
 
 // ────────────────────────────────────────────────────────────────────

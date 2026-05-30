@@ -52,8 +52,8 @@ use core::{
 };
 
 use ars_core::{
-    AriaAttr, AttrMap, Bindable, ComponentIds, ComponentMessages, ComponentPart, ConnectApi, Env,
-    HtmlAttr, Locale, MessageFn, PendingEffect, TransitionPlan,
+    AriaAttr, AttrMap, Bindable, Callback, ComponentIds, ComponentMessages, ComponentPart,
+    ConnectApi, Env, HtmlAttr, Locale, MessageFn, PendingEffect, TransitionPlan,
 };
 use ars_i18n::{CalendarDate, DateOrder, date_order};
 use ars_interactions::{KeyboardEventData, KeyboardKey};
@@ -126,6 +126,13 @@ pub enum Event {
 /// operation the agnostic core cannot perform itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Effect {
+    /// Notify the consumer that the open state changed. Emitted on every
+    /// open ↔ closed transition (and on a non-closed initial mount). The
+    /// adapter reads the current open state from the connect API and invokes
+    /// [`Props::on_open_change`] with it — the channel a controlled-`open`
+    /// parent uses to reconcile after a user-driven open/close.
+    OpenChange,
+
     /// Move focus into the embedded calendar (its grid, falling back to the
     /// content container). Emitted when the popover opens.
     FocusCalendar,
@@ -216,6 +223,12 @@ pub struct Props {
     /// Number of months to display side-by-side in the calendar popover.
     /// Default: `1`. Forwarded to the embedded Calendar's `visible_months`.
     pub visible_months: usize,
+
+    /// Called whenever the open state changes. Fired by the adapter from the
+    /// [`Effect::OpenChange`] intent with the new open value. A controlled-`open`
+    /// parent uses this to reconcile its state after a user-driven open/close
+    /// (mirrors `popover`/`dialog`).
+    pub on_open_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -243,6 +256,7 @@ impl Default for Props {
             default_open: false,
             open_on_click: true,
             visible_months: 1,
+            on_open_change: None,
         }
     }
 }
@@ -562,6 +576,10 @@ pub enum Part {
 // Effect builders
 // ────────────────────────────────────────────────────────────────────
 
+fn open_change_effect() -> PendingEffect<Machine> {
+    PendingEffect::named(Effect::OpenChange)
+}
+
 fn focus_calendar_effect() -> PendingEffect<Machine> {
     PendingEffect::named(Effect::FocusCalendar)
 }
@@ -578,11 +596,18 @@ fn restore_focus_to_input_effect() -> PendingEffect<Machine> {
 ///
 /// The controlled `value` flows through its [`Bindable`] via
 /// [`Bindable::sync_controlled`] (`Some(_)` stays controlled, `None` reveals the
-/// uncontrolled internal value), then the cached scalar fields are refreshed and
-/// the input text is re-synced to the (possibly new) value. Open/closed is owned
-/// by [`State`] (the [`Event::SyncProps`] transition derives the target state
-/// from `props.open`), so there is no `open` field to refresh here.
+/// uncontrolled internal value), then the cached scalar fields are refreshed.
+/// Open/closed is owned by [`State`] (the [`Event::SyncProps`] transition derives
+/// the target state from `props.open`), so there is no `open` field to refresh
+/// here.
+///
+/// The input text is re-synced **only when the displayed value or format
+/// actually changed** — an unrelated prop change (e.g. `invalid`, `description`,
+/// `disabled`) must not clobber a partial/invalid date the user is mid-way
+/// through typing.
 fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
+    let previous_display = ctx.formatted_value();
+
     ctx.value.sync_controlled(props.value.clone());
 
     ctx.min = props.min.clone();
@@ -598,7 +623,10 @@ fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
         .clone()
         .unwrap_or_else(|| default_format_for_locale(&ctx.locale));
 
-    ctx.sync_input_text();
+    let next_display = ctx.formatted_value();
+    if next_display != previous_display {
+        ctx.input_text = next_display;
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -689,10 +717,11 @@ impl ars_core::Machine for Machine {
         _props: &Self::Props,
     ) -> Vec<PendingEffect<Self>> {
         // A picker that boots in `Open` (controlled `open` or `default_open`)
-        // never runs the open transition, so emit the focus intent the
-        // transition would have produced.
+        // never runs the open transition, so emit the intents that transition
+        // would have produced: notify the consumer of the open state, then move
+        // focus into the calendar.
         if *state == State::Open {
-            vec![focus_calendar_effect()]
+            vec![open_change_effect(), focus_calendar_effect()]
         } else {
             Vec::new()
         }
@@ -727,9 +756,13 @@ impl ars_core::Machine for Machine {
             plan = plan.apply(move |ctx: &mut Context| sync_props_into_ctx(ctx, &new_props));
 
             if opening {
-                plan = plan.with_effect(focus_calendar_effect());
+                plan = plan
+                    .with_effect(open_change_effect())
+                    .with_effect(focus_calendar_effect());
             } else if closing {
-                plan = plan.with_effect(restore_focus_to_trigger_effect());
+                plan = plan
+                    .with_effect(open_change_effect())
+                    .with_effect(restore_focus_to_trigger_effect());
             }
 
             return Some(plan);
@@ -745,7 +778,11 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                Some(TransitionPlan::to(State::Open).with_effect(focus_calendar_effect()))
+                Some(
+                    TransitionPlan::to(State::Open)
+                        .with_effect(open_change_effect())
+                        .with_effect(focus_calendar_effect()),
+                )
             }
 
             Event::Close => {
@@ -755,6 +792,7 @@ impl ars_core::Machine for Machine {
 
                 Some(
                     TransitionPlan::to(State::Closed)
+                        .with_effect(open_change_effect())
                         .with_effect(restore_focus_to_trigger_effect()),
                 )
             }
@@ -770,7 +808,6 @@ impl ars_core::Machine for Machine {
                 }
 
                 let date = date.clone();
-                let format = ctx.format.clone();
                 let should_close = props.close_on_select;
 
                 let next_state = if should_close {
@@ -780,14 +817,21 @@ impl ars_core::Machine for Machine {
                 };
 
                 let mut plan = TransitionPlan::to(next_state).apply(move |ctx: &mut Context| {
-                    ctx.input_text = format_date(&date, &format);
-                    ctx.parsed_date = Some(date.clone());
                     ctx.value.set(Some(date));
+                    // Derive the visible text and `parsed_date` from the value
+                    // the bindable actually exposes — for a controlled `value`
+                    // that is still the parent's value, so the display never
+                    // optimistically diverges from `selected_date()` / the
+                    // hidden input / the composed calendar props.
+                    ctx.parsed_date = ctx.value.get().clone();
+                    ctx.input_text = ctx.formatted_value();
                     ctx.is_touched = true;
                 });
 
                 if should_close {
-                    plan = plan.with_effect(restore_focus_to_input_effect());
+                    plan = plan
+                        .with_effect(open_change_effect())
+                        .with_effect(restore_focus_to_input_effect());
                 }
 
                 Some(plan)
@@ -802,6 +846,7 @@ impl ars_core::Machine for Machine {
                 let format = ctx.format.clone();
                 let min = ctx.min.clone();
                 let max = ctx.max.clone();
+                let is_unavailable = props.is_date_unavailable.clone();
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.is_touched = true;
@@ -814,7 +859,13 @@ impl ars_core::Machine for Machine {
                                 .as_ref()
                                 .is_none_or(|m| date.compare(m) != Ordering::Greater);
 
-                        if in_range {
+                        // Honor the unavailable predicate so a typed date cannot
+                        // bypass a constraint the embedded calendar enforces.
+                        let available = is_unavailable
+                            .as_ref()
+                            .is_none_or(|predicate| !predicate(&date));
+
+                        if in_range && available {
                             ctx.parsed_date = Some(date.clone());
                             ctx.value.set(Some(date));
                         }
@@ -828,8 +879,15 @@ impl ars_core::Machine for Machine {
             }
 
             Event::FocusIn => {
-                if *state == State::Closed && ctx.open_on_click {
-                    Some(TransitionPlan::to(State::Open).with_effect(focus_calendar_effect()))
+                // `readonly` blocks opening through the focus path just as it
+                // blocks the explicit `Open` event — otherwise a read-only field
+                // would still become interactive on focus.
+                if *state == State::Closed && ctx.open_on_click && !ctx.readonly {
+                    Some(
+                        TransitionPlan::to(State::Open)
+                            .with_effect(open_change_effect())
+                            .with_effect(focus_calendar_effect()),
+                    )
                 } else {
                     None
                 }
@@ -837,7 +895,7 @@ impl ars_core::Machine for Machine {
 
             Event::FocusOut => {
                 if *state == State::Open {
-                    Some(TransitionPlan::to(State::Closed))
+                    Some(TransitionPlan::to(State::Closed).with_effect(open_change_effect()))
                 } else {
                     None
                 }
@@ -982,7 +1040,10 @@ impl<'a> Api<'a> {
                 self.ctx.ids.part("label"),
             );
 
-        if let Some(date) = &self.ctx.parsed_date {
+        // Announce the selected date from the live value so the description is
+        // present for `default_value` and controlled values too — not only for
+        // dates typed or picked during this session (`parsed_date`).
+        if let Some(date) = self.ctx.value.get() {
             let formatted = format_date(date, &self.ctx.format);
 
             attrs.set(
@@ -1042,6 +1103,9 @@ impl<'a> Api<'a> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Id, self.ctx.ids.part("trigger"))
+            // Explicit `type="button"` so activating the trigger never submits a
+            // surrounding form (the HTML default button type is `submit`).
+            .set(HtmlAttr::Type, "button")
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.trigger_label)(&self.ctx.locale),
@@ -1076,6 +1140,9 @@ impl<'a> Api<'a> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Id, self.ctx.ids.part("clear-trigger"))
+            // Explicit `type="button"` so clearing never submits a surrounding
+            // form (the HTML default button type is `submit`).
+            .set(HtmlAttr::Type, "button")
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.clear_label)(&self.ctx.locale),
@@ -1198,13 +1265,25 @@ impl<'a> Api<'a> {
     }
 
     /// Handles a keydown on the trigger button.
-    pub fn on_trigger_keydown(&self, data: &KeyboardEventData) {
+    ///
+    /// Returns `true` when the key was handled so adapters can prevent the
+    /// follow-up native button-activation click — without this, Enter/Space
+    /// would toggle once on keydown and again on the synthesized click, leaving
+    /// the popover back in its original state (mirrors
+    /// [`collapsible::Api::on_trigger_keydown`](crate::layout::collapsible)).
+    pub fn on_trigger_keydown(&self, data: &KeyboardEventData) -> bool {
         match data.key {
-            KeyboardKey::Enter | KeyboardKey::Space => (self.send)(Event::Toggle),
+            KeyboardKey::Enter | KeyboardKey::Space => {
+                (self.send)(Event::Toggle);
+                true
+            }
 
-            KeyboardKey::ArrowDown => (self.send)(Event::Open),
+            KeyboardKey::ArrowDown => {
+                (self.send)(Event::Open);
+                true
+            }
 
-            _ => {}
+            _ => false,
         }
     }
 
