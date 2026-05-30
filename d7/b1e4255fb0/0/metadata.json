@@ -1,0 +1,128 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d7b1e4255fb0",
+  "session_id": "237b9b0f-3f17-4f7d-a955-e50b875d5151",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-30T17:50:04.912529Z",
+  "branch": "t3code/c59961ed",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "xtask/src/lint.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "f5a9af0b13ed",
+  "token_usage": {
+    "input_tokens": 88870,
+    "cache_creation_tokens": 5652803,
+    "cache_read_tokens": 319443038,
+    "output_tokens": 617759,
+    "api_call_count": 578
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement the agnostic DatePicker state machine (composite of date text input + calendar in a popover) for ars-ui, covering open/close, date selection, input parse/validation, value↔calendar sync, and ARIA/data attributes. Dependencies DateField (#262) and Calendar (#280) were already merged.",
+    "outcome": "PR #697 created and pushed to GitHub with 5 commits. The full component was implemented with 127+ tests, 28 snapshots, spec fully synced, and 3 Codex review passes addressed with fixes. Coverage at 100% function / 99.86% line. All CI checks green (the only failure was a label-timing race in the snapshot gate, resolved by re-running the job).",
+    "learnings": {
+      "repo": [
+        "The `Machine` trait requires `type Effect: EffectName` as an associated type — spec §1.7 used string effect names and `use_platform_effects()` closures in core, both of which fail to compile.",
+        "Focus effects use `PendingEffect::named(Effect::X)` exclusively in core — adapters execute DOM focus from the named intent. Never `use_platform_effects()` calls in the state machine.",
+        "`CalendarDate` has no `PartialOrd`/`Ord` — use `.compare(other) -> Ordering` for min/max checks.",
+        "`CalendarDate` fields are `pub(crate)`, accessors are `year()->i32`, `month()->u8`, `day()->u8` (plain ints, no NonZero). `nzu8` does not exist. `new_gregorian(i32, u8, u8) -> Result<...>`.",
+        "`ComponentIds` has no public `base_id` field — accessor is `ids.id()`.",
+        "`is_date_unavailable` must use `calendar::IsDateUnavailableFn` (= `Callback<dyn Fn(&CalendarDate)->bool + Send+Sync>`), not `fn(&CalendarDate) -> bool`.",
+        "`Context` convention: `#[derive(Clone)]` + manual `impl Debug` (skip message fields). Calendar omits `PartialEq` too — `Messages` holds `MessageFn` which is only `PartialEq` via Arc pointer equality.",
+        "`Service::new(props, &Env, &Messages)` takes references, not values. `send` is `#[must_use]` → use `drop(svc.send(...))`.",
+        "`sync_props_into_ctx` + `Bindable::sync_controlled` is the canonical controlled/uncontrolled re-derivation pattern. Mirrors Calendar exactly.",
+        "An `open` Bindable that mirrors State is redundant and dangerous — proptest caught a bug where a controlled→uncontrolled flip revealed stale internal value diverging from State. State must be the single source of truth; the Bindable was removed.",
+        "Value-change notification convention (from rating_group): `requested_value` context field + `Effect::ValueChange` named marker. The adapter reads `requested_value` (the requested value, hidden by `get()` in controlled mode) — no Props callback for this.",
+        "`Callback::new_ref` is required for higher-ranked lifetime predicates (`for<'a> Fn(&'a T)`). `Callback::new` infers a non-HRTB closure.",
+        "`ars-i18n` already had a complete private `date_order(locale) -> DateOrder` (CLDR via ICU4X, browser `Intl` on wasm, `(language, region)` fallback). Both DateField and DatePicker had been reimplementing only the fallback heuristic. The fix was to expose it (`pub`), not add a redundant `IntlBackend` trait method.",
+        "`is_component_category` and `is_ars_components_component` in xtask used hyphenated names (`\"date-time\"`, `\"data-display\"`) while filesystem dirs and snapshot paths use underscores. This silently skipped two entire categories from the snapshot-count gate.",
+        "The snapshot-reviewed label CI gate reads the label live via `gh pr view \"$PR_NUMBER\" --json labels`, not from the frozen event payload — re-running the job after labeling works.",
+        "`ci.yml` `pull_request:` without explicit `types:` defaults to `[opened, synchronize, reopened]` — does NOT include `labeled`, so adding the `snapshot-reviewed` label never re-triggers the check automatically."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-i18n/src/date.rs",
+          "line": 489,
+          "end_line": 489,
+          "finding": "`CalendarDate::to_iso8601()` returns canonical `YYYY-MM-DD`. Use it for hidden inputs, not `year()/month()/day()` display-calendar fields."
+        },
+        {
+          "path": "crates/ars-i18n/src/date.rs",
+          "line": 1245,
+          "end_line": 1245,
+          "finding": "Private `date_order(locale)` function with full CLDR/Intl/fallback derivation already wired — just needed `pub`. Wires ICU4X `icu_date_order` (CLDR probe-date), wasm `js_date_order` (Intl.DateTimeFormat.formatToParts), and cfg-selected `fallback_date_order`."
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "line": 814,
+          "end_line": 814,
+          "finding": "`is_ars_components_component` listed hyphenated category dirs (`\"date-time\"`, `\"data-display\"`); filesystem uses underscores, causing two entire categories to be silently excluded from the snapshot-count gate."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/rating_group/mod.rs",
+          "finding": "Canonical value-change notification pattern for controlled components: `Effect::ValueChange` named marker + `requested_value` context field. No Props callback — the adapter reads `requested_value`."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "finding": "Canonical `sync_props_into_ctx` + `Bindable::sync_controlled` pattern for controlled/uncontrolled re-derivation in `SyncProps` transitions."
+        }
+      ],
+      "workflow": [
+        "Spec code blocks only get `syn` syntax-parsed (not type/borrow checked); blocks can opt out with `rust,no_check`. Spec §1.7 can use illustrative pseudo-code as long as the contracts match reality.",
+        "`cargo insta accept` does NOT accept `-p <package>` — it processes all pending snapshots globally.",
+        "proptest is essential for Bindable-based state machines — it caught the controlled→uncontrolled open-value divergence bug that unit tests missed entirely.",
+        "The `waiting-for-codex-review` workflow loop: post `@codex review`, poll for terminal verdict (👍 or 👀-dropped), triage findings with TDD, push fix, reply inline with commit sha, resolve threads, re-trigger.",
+        "`cargo xci-fast` is the mandatory pre-push gate (fmt/check/clippy/unit/integration/spec-compile-snippets/error-variant/snapshot-count/mutual-exclusion).",
+        "Using `cd` in a Bash tool call silently shifts the working directory for all subsequent shell state — use absolute paths throughout instead.",
+        "Three-pass Codex iteration is normal: pass 1 (initial design issues), pass 2 (second-order effects from pass-1 fixes), pass 3 (cleanup/consistency). Each pass is typically smaller."
+      ]
+    },
+    "friction": [
+      "Spec §1.7 had ~10 compile-blockers requiring extensive pre-implementation verification: no `type Effect`, fabricated `nzu8`/`NonZero` helpers, `CalendarDate` field access vs accessor methods, no `Ord` on `CalendarDate`, private `base_id`, wrong `IsDateUnavailableFn` type, by-value `Service::new`, missing `on_props_changed`/`initial_effects`.",
+      "The redundant `open` Bindable bug took multiple debugging iterations — reading `Bindable`'s internal semantics, writing a fix, then discovering a deeper controlled-event divergence requiring a full redesign (remove the Bindable; State is the source of truth).",
+      "Closure lifetime errors in tests: closures as temporaries can't be captured — required `let` bindings.",
+      "`cargo insta accept` doesn't accept `-p` — discovered mid-session.",
+      "The `snapshot-reviewed` label CI race: the check always runs before the label is applied (label added after `gh pr create`), and `labeled` events don't trigger `ci.yml`. Required manual job re-run.",
+      "The `is_component_category` / `is_ars_components_component` underscore/hyphen mismatch silently skipped two whole categories — only discovered during the post-implementation audit Phase 2.",
+      "`InputChange` restructuring introduced two sequential bugs (undefined variable, then `Option<Option<_>>` type mismatch) requiring two separate fix iterations.",
+      "`Callback::new` inference failure for higher-ranked predicates — `Callback::new_ref` needed, only discoverable by checking sibling test patterns.",
+      "17 Codex review findings across 3 passes, several caused by second-order interactions from earlier fixes (e.g. controlled display inconsistency exposed by the `on_open_change` model change).",
+      "`cd` in a Bash tool call silently shifted the working directory, causing subsequent absolute-path assumptions to fail until reset."
+    ],
+    "open_items": [
+      "CI `pull_request:` trigger lacks `labeled` type — snapshot PRs always need a manual job re-run after adding the `snapshot-reviewed` label. Fix options: add `labeled` to triggers (expensive, re-runs all CI on every label change) or require a CHANGELOG entry instead.",
+      "Full `cargo xci` (not just `xci-fast`) recommended before merge — the i18n `date_order` foundation change touches the wasm `web-intl` path, which only nightly wasm-coverage CI fully validates.",
+      "Pre-existing `utility/highlight` snapshot orphans block bare `cargo insta test --unreferenced=reject` (feature-gated tests not run in default invocation).",
+      "Pre-existing 94 doc warnings in ars-components (crate-wide, none from DatePicker).",
+      "Codex pass-3 commit staged but not yet pushed at end of transcript — final push + inline replies + resolve + re-trigger pending.",
+      "DateField spec only received a brief §1.7 update — a thorough spec audit for similar drift (like the 10 found in DatePicker spec) is deferred.",
+      "Leptos/Dioxus DatePicker adapter tasks are explicitly out of scope and remain as separate follow-on work."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-30T17:46:38.439012Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 191,
+    "human_modified": 2,
+    "human_removed": 0,
+    "total_committed": 191,
+    "total_lines_changed": 198,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d7b1e4255fb0",
+  "strategy": "manual-commit",
+  "branch": "t3code/c59961ed",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "xtask/src/lint.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d7/b1e4255fb0/0/metadata.json",
+      "transcript": "/d7/b1e4255fb0/0/full.jsonl",
+      "content_hash": "/d7/b1e4255fb0/0/content_hash.txt",
+      "prompt": "/d7/b1e4255fb0/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 88870,
+    "cache_creation_tokens": 5652803,
+    "cache_read_tokens": 319443038,
+    "output_tokens": 617759,
+    "api_call_count": 578
+  }
+}
