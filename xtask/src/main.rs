@@ -3,7 +3,7 @@
 use std::{env, path::PathBuf, process, sync};
 
 use clap::{Parser, Subcommand};
-use xtask::{ci, coverage, e2e, examples, lint, manifest, mcp, mutants, spec, test};
+use xtask::{ci, coverage, crap, e2e, examples, lint, manifest, mcp, mutants, spec, test};
 
 /// ars-ui workspace task runner.
 #[derive(Parser)]
@@ -18,11 +18,11 @@ enum Command {
     /// Run CI pipeline steps locally (alias: `cargo xci`).
     ///
     /// `--profile full` (default) mirrors GitHub Actions exactly — all 20 gates,
-    /// ~25 min locally. `--profile fast` runs the curated pre-push subset
-    /// (~5 min): fmt, check, clippy, unit, integration, adapter,
-    /// spec-compile-snippets, error-variant-coverage, mutual-exclusion,
-    /// snapshot-count. Positional `steps` override the profile and run as-is,
-    /// so `cargo xci fmt check` still works.
+    /// ~25 min locally. `--profile fast` runs the curated pre-push subset: fmt,
+    /// clippy, unit, integration, adapter, spec-compile-snippets,
+    /// error-variant-coverage, mutual-exclusion, snapshot-count, and a
+    /// native-only coverage check. Positional `steps` override the profile and
+    /// run as-is, so `cargo xci fmt clippy` still works.
     Ci {
         /// Steps to run (default: every step in the selected profile).
         ///
@@ -132,6 +132,45 @@ enum Command {
         /// Override the workspace default `--features` string for this package.
         #[arg(long)]
         features: Option<String>,
+    },
+
+    /// Run the cargo-crap CRAP report locally (alias: `cargo xcrap`).
+    ///
+    /// Reads an existing lcov report (generate one with `cargo xci coverage`)
+    /// and prints functions whose complexity-vs-coverage CRAP score exceeds the
+    /// threshold. Unlike the `cargo xci crap` CI gate, this never fails the
+    /// process — it is a readable local report.
+    ///
+    /// Pass `--update-baseline` to (re)generate the committed regression
+    /// baseline from the lcov instead, e.g. after a deliberate complexity
+    /// increase or to refresh it from CI's merged `lcov.info`.
+    Crap {
+        /// Path to the lcov coverage report.
+        #[arg(long, default_value = "lcov.info")]
+        lcov: PathBuf,
+
+        /// CRAP score threshold (defaults to the gate's pinned threshold).
+        #[arg(long)]
+        threshold: Option<u32>,
+
+        /// Regenerate the committed baseline instead of printing a report.
+        #[arg(long)]
+        update_baseline: bool,
+    },
+
+    /// Run the native-only coverage gate locally (alias: `cargo xcov`).
+    ///
+    /// Instruments and checks only the crates whose CI coverage is native-only
+    /// (the agnostic library crates + xtask) — fast, and needs no wasm/clang
+    /// toolchain. This is the same check the `fast` pre-push profile runs, so it
+    /// catches agnostic-crate threshold regressions before push. Pass `--full`
+    /// to run the complete native+wasm coverage gate instead (mirrors CI;
+    /// requires the wasm toolchain + clang-22).
+    Cov {
+        /// Run the full native+wasm coverage gate (mirrors CI) instead of the
+        /// fast native-only check.
+        #[arg(long)]
+        full: bool,
     },
 }
 
@@ -733,6 +772,45 @@ fn main() {
                 output,
                 features,
             }) {
+                eprintln!("error: {e}");
+
+                process::exit(1);
+            }
+        }
+
+        // ── Crap (dev) ───────────────────────────────────────────────
+        Command::Crap {
+            lcov,
+            threshold,
+            update_baseline,
+        } => {
+            let action = if update_baseline {
+                crap::Action::UpdateBaseline
+            } else {
+                crap::Action::Report
+            };
+
+            if let Err(e) = crap::run(&crap::Options {
+                action,
+                lcov,
+                baseline: PathBuf::from(crap::BASELINE_PATH),
+                threshold: threshold.unwrap_or(crap::CRAP_THRESHOLD),
+            }) {
+                eprintln!("error: {e}");
+
+                process::exit(1);
+            }
+        }
+
+        // ── Coverage (dev) ───────────────────────────────────────────
+        Command::Cov { full } => {
+            let step = if full {
+                ci::Step::Coverage
+            } else {
+                ci::Step::CoverageNative
+            };
+
+            if let Err(e) = ci::run(vec![step], ci::Profile::Full, None) {
                 eprintln!("error: {e}");
 
                 process::exit(1);

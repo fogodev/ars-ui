@@ -4,9 +4,25 @@ description: Install the Linux system packages required by the Dioxus desktop fe
 runs:
   using: composite
   steps:
+    # Cache the downloaded .deb packages so the ~6 jobs that need the Dioxus
+    # desktop deps skip re-downloading them. Restored into a user-owned dir
+    # (actions/cache cannot read root-owned /var/cache/apt/archives); the install
+    # step seeds apt's archive from it. Bump `-v1` when the package set changes.
+    - name: Cache Dioxus desktop apt packages
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/apt-dioxus-desktop
+        key: apt-dioxus-desktop-${{ runner.os }}-v1
     - name: Install Dioxus desktop system dependencies
       shell: bash
       run: |
+        set -eux
+        cache_dir="$HOME/.cache/apt-dioxus-desktop"
+        mkdir -p "$cache_dir"
+        # On a cache hit, seed apt's archive so install reuses the cached debs
+        # instead of downloading. On a miss these copies are no-ops and the
+        # install behaves exactly as before (semantics unchanged).
+        sudo cp -n "$cache_dir"/*.deb /var/cache/apt/archives/ 2>/dev/null || true
         sudo apt-get update
         sudo apt-get install -y \
           libgtk-3-dev \
@@ -14,3 +30,7 @@ runs:
           libayatana-appindicator3-dev \
           librsvg2-dev \
           libxdo-dev
+        # Persist freshly downloaded debs to the user-owned cache dir for the
+        # post-job save.
+        sudo cp -n /var/cache/apt/archives/*.deb "$cache_dir"/ 2>/dev/null || true
+        sudo chown -R "$(id -u):$(id -g)" "$cache_dir"

@@ -48,21 +48,9 @@ jobs:
       - name: Clippy
         run: cargo xtask ci clippy
 
-  check:
-    name: Workspace Check
-    needs: [fmt]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: ./.github/actions/install-dioxus-desktop-deps
-      - name: Workspace Check
-        run: cargo xtask ci check
-
   unit:
     name: Unit Tests
-    needs: [check, clippy]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -114,7 +102,7 @@ jobs:
 
   i18n-browser:
     name: I18n Browser Tests
-    needs: [unit]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -130,7 +118,7 @@ jobs:
 
   dom-browser:
     name: DOM Browser Tests
-    needs: [unit]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -146,7 +134,7 @@ jobs:
 
   release:
     name: Release Verification
-    needs: [unit]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -159,7 +147,7 @@ jobs:
 
   mutual-exclusion:
     name: Mutual Exclusion Guard
-    needs: [check]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -170,7 +158,7 @@ jobs:
 
   integration:
     name: Integration Tests
-    needs: [unit]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -182,7 +170,7 @@ jobs:
 
   adapter:
     name: Adapter Tests
-    needs: [unit]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -195,7 +183,7 @@ jobs:
 
   adapter-parity:
     name: Adapter Parity
-    needs: [unit, adapter]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -206,7 +194,7 @@ jobs:
 
   error-variant-coverage:
     name: Error Variant Coverage
-    needs: [unit]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -217,7 +205,7 @@ jobs:
 
   coverage:
     name: Coverage
-    needs: [unit]
+    needs: [clippy]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -232,6 +220,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
       - uses: taiki-e/install-action@cargo-llvm-cov
+      # Pinned to match crap::CARGO_CRAP_VERSION; bump both together.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-crap@0.2.2
       - name: Reclaim runner disk space
         run: |
           df -h
@@ -245,12 +237,31 @@ jobs:
           docker system prune -af || true
           sudo apt-get clean
           df -h
+      # Cache the downloaded LLVM 22 .deb packages so re-runs skip the
+      # multi-hundred-MB download. Restored into a user-owned dir (actions/cache
+      # cannot read root-owned /var/cache/apt/archives); the install step seeds
+      # apt's archive from it. Bump `-v1` when the LLVM major changes.
+      - name: Cache LLVM 22 apt packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/apt-llvm22
+          key: apt-llvm22-${{ runner.os }}-v1
       - name: Install LLVM 22 for wasm coverage
         run: |
+          set -eux
+          mkdir -p ~/.cache/apt-llvm22
+          # On a cache hit, seed apt's archive so the install reuses the cached
+          # debs instead of downloading. On a miss these copies are no-ops and
+          # the install behaves exactly as before (semantics unchanged).
+          sudo cp -n ~/.cache/apt-llvm22/*.deb /var/cache/apt/archives/ 2>/dev/null || true
           wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh 22
           sudo apt-get install -y clang-22 lld-22
+          # Persist freshly downloaded debs to the user-owned cache dir for the
+          # post-job save.
+          sudo cp -n /var/cache/apt/archives/*.deb ~/.cache/apt-llvm22/ 2>/dev/null || true
+          sudo chown -R "$(id -u):$(id -g)" ~/.cache/apt-llvm22
       - name: Resolve wasm-bindgen version
         id: wasm-bindgen-version
         run: |
@@ -267,6 +278,11 @@ jobs:
       - uses: ./.github/actions/install-dioxus-desktop-deps
       - name: Coverage
         run: cargo xtask ci coverage
+      # Reuses the merged lcov.info from the coverage step (no recompile).
+      # Fails the job if any function exceeds the CRAP threshold and emits
+      # ::warning annotations for each offender.
+      - name: CRAP gate
+        run: cargo xtask ci crap
       - name: Upload coverage diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
@@ -279,6 +295,15 @@ jobs:
           if-no-files-found: ignore
       - name: Snapshot Count
         run: cargo xtask ci snapshot-count
+      # Always publish the merged lcov so the CRAP baseline can be regenerated
+      # with `cargo xcrap --update-baseline` from a real native+wasm run.
+      - name: Upload merged lcov
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-lcov
+          path: lcov.info
+          if-no-files-found: warn
       - name: Upload to Codecov
         if: always()
         uses: codecov/codecov-action@v5
@@ -289,7 +314,7 @@ jobs:
 
   feature-flags-core:
     name: Feature Flags — Core
-    needs: [unit]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -303,7 +328,7 @@ jobs:
 
   feature-flags-i18n:
     name: Feature Flags — I18n
-    needs: [unit]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -319,7 +344,7 @@ jobs:
 
   feature-flags-subsystems:
     name: Feature Flags — Subsystems
-    needs: [unit]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -335,7 +360,7 @@ jobs:
 
   feature-flags-leptos:
     name: Feature Flags — Leptos
-    needs: [unit]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -351,7 +376,7 @@ jobs:
 
   feature-flags-dioxus:
     name: Feature Flags — Dioxus
-    needs: [unit]
+    needs: [clippy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
