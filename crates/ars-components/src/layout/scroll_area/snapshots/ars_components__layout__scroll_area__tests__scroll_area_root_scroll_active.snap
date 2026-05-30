@@ -1,0 +1,9 @@
+---
+source: crates/ars-components/src/layout/scroll_area/mod.rs
+expression: "snapshot_attrs(&scroll_active.connect(&|_| {}).root_attrs())"
+---
+data-ars-overflow-x=false
+data-ars-overflow-y=true
+data-ars-part=root
+data-ars-scope=scroll-area
+data-ars-state=scroll-active

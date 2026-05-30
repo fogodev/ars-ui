@@ -20,8 +20,9 @@ pub mod scroll_area {
     pub struct ScrollAreaProps {
         pub orientation: ScrollOrientation,
         pub scrollbar_visibility: ScrollbarVisibility,
-        pub hide_delay_ms: u32,
+        pub hide_delay: Duration,
         pub min_thumb_size: f64,
+        pub scrollbar_cross_size: f64,
         pub dir: Direction,
         #[props(optional)]
         pub aria_label: Option<String>,

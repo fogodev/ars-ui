@@ -1,0 +1,9 @@
+---
+source: crates/ars-components/src/layout/scroll_area/mod.rs
+expression: snapshot_attrs(&both_api.scrollbar_y_attrs())
+---
+aria-orientation=vertical
+data-ars-part=scrollbar-y
+data-ars-scope=scroll-area
+data-ars-visible=true
+role=none

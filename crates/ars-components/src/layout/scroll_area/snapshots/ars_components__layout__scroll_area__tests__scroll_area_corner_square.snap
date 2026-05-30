@@ -1,0 +1,7 @@
+---
+source: crates/ars-components/src/layout/scroll_area/mod.rs
+expression: snapshot_attrs(&both_api.corner_square_attrs())
+---
+data-ars-part=corner-square
+data-ars-scope=scroll-area
+role=none

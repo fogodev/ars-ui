@@ -21,7 +21,7 @@ ScrollArea MUST preserve native keyboard scrolling (arrow keys, Page Up/Down, Ho
 ### 1.1 States
 
 ```rust
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum State {
     /// No active interaction.
     #[default]
@@ -38,6 +38,19 @@ pub enum State {
 ### 1.2 Events
 
 ```rust
+/// Scrollbar axis. `X` is the horizontal scrollbar, `Y` the vertical one.
+///
+/// Adapters tag pointer geometry with the axis it belongs to so the machine
+/// can route drag/track-click intents to the correct scroll offset without any
+/// DOM lookup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Axis {
+    /// The horizontal scrollbar (drives `scroll_x`).
+    X,
+    /// The vertical scrollbar (drives `scroll_y`).
+    Y,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// The viewport reported a scroll event.
@@ -110,7 +123,7 @@ pub struct Context {
     pub hovering_scrollbar: bool,
     pub scrollbar_visibility: ScrollbarVisibility,
     pub min_thumb_size: f64,
-    pub hide_delay_ms: u32,
+    pub hide_delay: Duration,
     /// Cross-axis scrollbar thickness (px). Used to shorten track_size when
     /// both scrollbars are visible (the CornerSquare occupies this space).
     pub scrollbar_cross_size: f64,
@@ -174,8 +187,14 @@ pub struct Props {
     pub scrollbar_visibility: ScrollbarVisibility,
     /// Minimum thumb size in pixels.
     pub min_thumb_size: Option<f64>,
-    /// Delay in milliseconds before scrollbar hides (Scroll mode).
-    pub hide_delay_ms: Option<u32>,
+    /// Delay before the scrollbar hides (Scroll mode). Default: `1200ms`.
+    pub hide_delay: Duration,
+    /// Cross-axis scrollbar thickness in pixels. When both scrollbars are
+    /// visible, this is subtracted from each track's length so the thumb does
+    /// not overlap the `CornerSquare`. Should match the rendered scrollbar
+    /// thickness (e.g. the `--ars-scrollbar-size` CSS custom property).
+    /// Default: `0.0` (no corner correction).
+    pub scrollbar_cross_size: Option<f64>,
     /// Accessible label for the scroll area viewport.
     pub aria_label: Option<String>,
     /// Text/layout direction. Drives RTL scrollbar placement and
@@ -190,7 +209,8 @@ impl Default for Props {
             orientation: ScrollOrientation::Vertical,
             scrollbar_visibility: ScrollbarVisibility::Auto,
             min_thumb_size: None,
-            hide_delay_ms: None,
+            hide_delay: Duration::from_millis(1200),
+            scrollbar_cross_size: None,
             aria_label: None,
             dir: None,
         }
@@ -250,6 +270,17 @@ pub fn thumb_pos_to_scroll(
 ### 1.6 Full Machine Implementation
 
 ```rust
+/// Typed side-effect intents emitted by the `ScrollArea` machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Start (or restart) the auto-hide timer in `Scroll` visibility mode.
+    ///
+    /// The adapter owns the timer: it waits `Context::hide_delay` and then
+    /// sends `Event::HideTimeout` back to the machine. The agnostic core
+    /// never schedules timers itself.
+    AutoHide,
+}
+
 pub struct Machine;
 
 impl ars_core::Machine for Machine {
@@ -258,6 +289,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -271,8 +303,8 @@ impl ars_core::Machine for Machine {
             hovering_scrollbar: false,
             scrollbar_visibility: props.scrollbar_visibility,
             min_thumb_size: props.min_thumb_size.unwrap_or(20.0),
-            hide_delay_ms: props.hide_delay_ms.unwrap_or(1200),
-            scrollbar_cross_size: 0.0,
+            hide_delay: props.hide_delay,
+            scrollbar_cross_size: props.scrollbar_cross_size.unwrap_or(0.0),
             drag_start_pointer_pos: 0.0,
             drag_start_thumb_pos: 0.0,
             drag_start_scroll_pos: 0.0,
@@ -305,17 +337,15 @@ impl ars_core::Machine for Machine {
             Event::Scroll { x, y } => {
                 let (sx, sy) = (*x, *y);
                 if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll {
-                    let delay = ctx.hide_delay_ms;
+                    // The agnostic core does not own timers. It records the
+                    // `Effect::AutoHide` intent; the adapter starts a
+                    // `ctx.hide_delay` timer and sends `Event::HideTimeout`
+                    // back when it fires. See §1.6.1.
                     Some(TransitionPlan::to(State::ScrollActive).apply(move |ctx| {
                         ctx.scroll_x = sx; ctx.scroll_y = sy;
                         ctx.scrollbar_x_visible = ctx.has_overflow_x();
                         ctx.scrollbar_y_visible = ctx.has_overflow_y();
-                    }).with_named_effect("auto-hide-scrollbar", move |_ctx, _props, send| {
-                        let platform = use_platform_effects();
-                        let handle = platform.set_timeout(delay, Box::new(move || send(Event::HideTimeout)));
-                        let pc = platform.clone();
-                        Box::new(move || pc.clear_timeout(handle))
-                    }))
+                    }).with_named_effect(Effect::AutoHide, |_ctx, _props, _send| no_cleanup()))
                 } else {
                     Some(TransitionPlan::context_only(move |ctx| {
                         ctx.scroll_x = sx; ctx.scroll_y = sy;
@@ -426,6 +456,23 @@ fn axis_metrics(ctx: &Context, axis: Axis) -> (f64, f64, f64) {
     }
 }
 ```
+
+#### 1.6.1 Adapter Contract: Auto-Hide Timer
+
+Timers are a platform concern, so the agnostic machine never calls
+`set_timeout`/`clear_timeout` itself. Instead, a `Scroll` event in
+`ScrollbarVisibility::Scroll` mode transitions to `State::ScrollActive` and emits
+the named `Effect::AutoHide` intent. The adapter is responsible for:
+
+1. Starting (or restarting) a timer for `Context::hide_delay` when it observes
+   `Effect::AutoHide`.
+2. Sending `Event::HideTimeout` back to the machine when the timer fires.
+
+The machine's `HideTimeout` handler then hides the scrollbars and returns to
+`State::Idle` (unless a thumb drag is in progress). Because each new `Scroll`
+event re-emits `Effect::AutoHide`, the adapter should treat a fresh intent as a
+"reset the timer" signal, keeping the scrollbar visible while scrolling
+continues.
 
 ### 1.7 Connect / API
 
@@ -643,7 +690,7 @@ ScrollArea
 ### 4.1 Messages
 
 ```rust
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     pub viewport_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 }
@@ -677,7 +724,11 @@ impl ComponentMessages for Messages {}
 /// - Safari/WebKit: positive values, 0 at right edge
 ///
 /// Returns normalized value in range [0, scrollWidth - clientWidth].
-fn normalize_scroll_left(raw: f64, scroll_width: f64, client_width: f64, is_rtl: bool) -> f64 {
+///
+/// Public because adapters call it to normalize the live `scrollLeft` read
+/// before sending `Event::Scroll`; the machine itself always works in the
+/// single normalized convention.
+pub fn normalize_scroll_left(raw: f64, scroll_width: f64, client_width: f64, is_rtl: bool) -> f64 {
     if !is_rtl {
         return raw;
     }
@@ -701,7 +752,7 @@ fn normalize_scroll_left(raw: f64, scroll_width: f64, client_width: f64, is_rtl:
 | Feature                   | ars-ui                           | Ark UI                  | Radix UI                | Notes                                            |
 | ------------------------- | -------------------------------- | ----------------------- | ----------------------- | ------------------------------------------------ |
 | Scrollbar visibility mode | `scrollbar_visibility` (4 modes) | --                      | `type` (4 modes)        | Same semantics, different naming                 |
-| Hide delay                | `hide_delay_ms`                  | --                      | `scrollHideDelay`       | Same feature                                     |
+| Hide delay                | `hide_delay`                     | --                      | `scrollHideDelay`       | Same feature                                     |
 | Direction (RTL)           | `dir`                            | --                      | `dir`                   | Same feature                                     |
 | CSP nonce                 | --                               | --                      | `nonce`                 | Adapter-level concern in ars-ui; not a core prop |
 | Orientation               | `orientation`                    | Scrollbar `orientation` | Scrollbar `orientation` | ars-ui sets at Root; refs set per-scrollbar      |
