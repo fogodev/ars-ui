@@ -233,6 +233,13 @@ pub struct Props {
     /// Default: `1`. Forwarded to the embedded Calendar's `visible_months`.
     pub visible_months: usize,
 
+    /// The "today" date, injected by the adapter for testability and SSR
+    /// determinism. Forwarded to the embedded Calendar's `today` so an empty
+    /// picker opens on the current month and marks the correct day. Defaults to
+    /// a fixed date (matching `calendar::Props::default().today`); adapters
+    /// inject the real today.
+    pub today: CalendarDate,
+
     /// Called whenever the open state changes. Fired by the adapter from the
     /// [`Effect::OpenChange`] intent with the new open value. A controlled-`open`
     /// parent uses this to reconcile its state after a user-driven open/close
@@ -265,6 +272,8 @@ impl Default for Props {
             default_open: false,
             open_on_click: true,
             visible_months: 1,
+            today: CalendarDate::new_gregorian(2025, 1, 1)
+                .expect("2025-01-01 is a valid Gregorian date"),
             on_open_change: None,
         }
     }
@@ -311,6 +320,9 @@ pub struct Context {
 
     /// Maximum selectable date (forwarded to Calendar).
     pub max: Option<CalendarDate>,
+
+    /// Adapter-injected "today" date, forwarded to the embedded Calendar.
+    pub today: CalendarDate,
 
     /// Disabled state.
     pub disabled: bool,
@@ -636,6 +648,7 @@ fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
 
     ctx.min = props.min.clone();
     ctx.max = props.max.clone();
+    ctx.today = props.today.clone();
     ctx.disabled = props.disabled;
     ctx.readonly = props.readonly;
     ctx.open_on_click = props.open_on_click;
@@ -715,6 +728,7 @@ impl ars_core::Machine for Machine {
             format,
             min: props.min.clone(),
             max: props.max.clone(),
+            today: props.today.clone(),
             disabled: props.disabled,
             readonly: props.readonly,
             open_on_click: props.open_on_click,
@@ -918,11 +932,27 @@ impl ars_core::Machine for Machine {
                 let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.is_touched = true;
                     if value_changed {
+                        let accepted = committed_value.is_some();
                         ctx.parsed_date = committed_value.clone();
                         ctx.requested_value = committed_value.clone();
                         ctx.value.set(committed_value);
+                        ctx.input_text = if accepted {
+                            // Reflect the bindable's value — for a controlled
+                            // `value` the parent hasn't echoed yet, this keeps the
+                            // visible field from optimistically diverging from
+                            // `selected_date()` / the hidden input / calendar
+                            // props (the typed-input analog of the `SelectDate`
+                            // behavior).
+                            ctx.formatted_value()
+                        } else {
+                            // Rejected complete date or explicit clear: keep what
+                            // the user sees in the field.
+                            text
+                        };
+                    } else {
+                        // In-progress (partial/unparseable) typing is preserved.
+                        ctx.input_text = text;
                     }
-                    ctx.input_text = text;
                 });
 
                 if value_changed {
@@ -1137,6 +1167,11 @@ impl<'a> Api<'a> {
         }
 
         if self.ctx.required {
+            // Native `required` on the visible control so the browser enforces
+            // constraint validation (ARIA alone does not), matching the
+            // text-like inputs in this crate. The hidden input is `type=hidden`
+            // and cannot participate in validation.
+            attrs.set_bool(HtmlAttr::Required, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
 
@@ -1406,6 +1441,10 @@ impl<'a> Api<'a> {
             is_date_unavailable: self.props.is_date_unavailable.clone(),
             is_rtl: self.ctx.is_rtl,
             visible_months: self.props.visible_months,
+            // Forward the adapter-injected "today" so the calendar opens on the
+            // current month and marks the correct day (otherwise it would fall
+            // back to `calendar::Props::default().today`, a fixed test date).
+            today: self.ctx.today.clone(),
             ..calendar::Props::default()
         }
     }

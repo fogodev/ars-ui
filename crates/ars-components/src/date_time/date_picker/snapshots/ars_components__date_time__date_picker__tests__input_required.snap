@@ -67,6 +67,12 @@ AttrMap {
             ),
         ),
         (
+            Required,
+            Bool(
+                true,
+            ),
+        ),
+        (
             Type,
             String(
                 "text",

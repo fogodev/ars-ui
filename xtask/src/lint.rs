@@ -812,13 +812,19 @@ fn snapshot_min_per_variant(root: &Path, component: &str, default_min: usize) ->
 }
 
 fn is_ars_components_component(root: &Path, component: &str) -> bool {
+    // These are joined as filesystem paths under `crates/ars-components/src`, so
+    // they must use the underscored source-directory names (`date_time`,
+    // `data_display`) — not the hyphenated spec forms. Using hyphens here meant
+    // the function never matched date-time / data-display machines, so
+    // `snapshot_min_per_variant` fell back to the rendered-component floor (3
+    // per variant) instead of the spec's 1-per-variant floor for those crates.
     for category in [
         "input",
         "selection",
         "overlay",
         "navigation",
-        "date-time",
-        "data-display",
+        "date_time",
+        "data_display",
         "layout",
         "specialized",
         "utility",
@@ -1103,6 +1109,30 @@ mod tests {
         }
 
         assert!(!is_component_category("not_a_category"));
+    }
+
+    #[test]
+    fn ars_components_machine_in_underscored_category_gets_one_per_variant_floor() {
+        // `is_ars_components_component` joins filesystem paths, so it must match
+        // the underscored source dirs (`date_time`, `data_display`). When it
+        // does, a machine module gets the spec's 1-per-variant snapshot floor,
+        // not the rendered-component default.
+        let root = temp_dir("floor-underscore");
+        write(
+            &root.join("crates/ars-components/src/date_time/picker/mod.rs"),
+            "pub struct Machine;\n",
+        );
+        write(
+            &root.join("crates/ars-components/src/data_display/gauge/mod.rs"),
+            "pub struct Machine;\n",
+        );
+
+        assert!(is_ars_components_component(&root, "picker"));
+        assert!(is_ars_components_component(&root, "gauge"));
+        assert_eq!(snapshot_min_per_variant(&root, "picker", 3), 1);
+        assert_eq!(snapshot_min_per_variant(&root, "gauge", 3), 1);
+        // A component that does not exist still falls back to the default floor.
+        assert_eq!(snapshot_min_per_variant(&root, "missing", 3), 3);
     }
 
     #[test]

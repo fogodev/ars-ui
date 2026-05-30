@@ -129,6 +129,8 @@ pub struct Context {
     pub min: Option<CalendarDate>,
     /// Maximum selectable date (forwarded to Calendar).
     pub max: Option<CalendarDate>,
+    /// Adapter-injected "today" date, forwarded to the embedded Calendar.
+    pub today: CalendarDate,
     /// Disabled state.
     pub disabled: bool,
     /// Read-only state.
@@ -305,6 +307,11 @@ pub struct Props {
     /// `page_behavior: PageBehavior::Single` is set on the underlying Calendar).
     /// Forwarded to the embedded Calendar component's `visible_months` prop.
     pub visible_months: usize,
+    /// The "today" date, injected by the adapter for testability/SSR. Forwarded
+    /// to the embedded Calendar's `today` so an empty picker opens on the current
+    /// month and marks the correct day. Defaults to a fixed date (matching
+    /// `calendar::Props::default().today`); adapters inject the real today.
+    pub today: CalendarDate,
     /// Called whenever the open state changes. Fired by the adapter from the
     /// [`Effect::OpenChange`] intent with the new open value; a controlled-`open`
     /// parent uses it to reconcile its state after a user-driven open/close
@@ -337,6 +344,8 @@ impl Default for Props {
             default_open: false,
             open_on_click: true,
             visible_months: 1,
+            today: CalendarDate::new_gregorian(2025, 1, 1)
+                .expect("2025-01-01 is a valid Gregorian date"),
             on_open_change: None,
         }
     }
@@ -478,6 +487,7 @@ impl ars_core::Machine for Machine {
             format,
             min: props.min.clone(),
             max: props.max.clone(),
+            today: props.today.clone(),
             disabled: props.disabled,
             readonly: props.readonly,
             open_on_click: props.open_on_click,
@@ -632,11 +642,20 @@ impl ars_core::Machine for Machine {
                 let mut plan = TransitionPlan::context_only(move |ctx| {
                     ctx.is_touched = true;
                     if value_changed {
+                        let accepted = committed_value.is_some();
                         ctx.parsed_date = committed_value.clone();
                         ctx.requested_value = committed_value.clone();
                         ctx.value.set(committed_value);
+                        // For an accepted date, reflect the bindable's value so a
+                        // controlled `value` the parent hasn't echoed yet does not
+                        // diverge from the hidden input / calendar (the typed-input
+                        // analog of `SelectDate`). A rejected complete date or
+                        // explicit clear keeps the text the user sees.
+                        ctx.input_text = if accepted { ctx.formatted_value() } else { text };
+                    } else {
+                        // In-progress (partial/unparseable) typing is preserved.
+                        ctx.input_text = text;
                     }
-                    ctx.input_text = text;
                 });
                 if value_changed {
                     plan = plan.with_effect(PendingEffect::named(Effect::ValueChange));
@@ -707,6 +726,7 @@ fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
     ctx.value.sync_controlled(props.value.clone());
     ctx.min = props.min.clone();
     ctx.max = props.max.clone();
+    ctx.today = props.today.clone();
     ctx.disabled = props.disabled;
     ctx.readonly = props.readonly;
     ctx.open_on_click = props.open_on_click;
@@ -846,6 +866,10 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true");
         }
         if self.ctx.required {
+            // Native `required` on the visible control drives browser constraint
+            // validation (ARIA alone does not); the hidden input is `type=hidden`
+            // and cannot validate.
+            attrs.set_bool(HtmlAttr::Required, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
         if self.props.invalid {
@@ -1043,8 +1067,10 @@ impl<'a> Api<'a> {
             is_date_unavailable: self.props.is_date_unavailable.clone(),
             is_rtl: self.ctx.is_rtl,
             visible_months: self.props.visible_months,
-            // `today` is left at the Calendar default; the adapter injects the
-            // real "today" when it instantiates the Calendar machine.
+            // Forward the adapter-injected "today" so the calendar opens on the
+            // current month and marks the correct day (otherwise it falls back to
+            // the fixed `calendar::Props::default().today`).
+            today: self.ctx.today.clone(),
             ..calendar::Props::default()
         }
     }
@@ -1241,7 +1267,7 @@ impl ComponentMessages for Messages {}
 The DatePicker participates in HTML form submission via a hidden `<input type="hidden">` element rendered by the `HiddenInput` part. The hidden input carries the selected date in ISO 8601 format (`YYYY-MM-DD`).
 
 - **`name` prop**: When set, the hidden input includes `name="{value}"` so the date is submitted with the form under that key.
-- **Required validation**: When `required` is `true`, the input carries `aria-required="true"`. Form validation treats an empty value as invalid.
+- **Required validation**: When `required` is `true`, the visible input carries both the native `required` attribute and `aria-required="true"`, so the browser enforces constraint validation (ARIA alone does not) and an empty value is treated as invalid.
 - **Reset**: On form reset, the adapter restores the initial value (the `default_value` from Props or `None`) and syncs the input text accordingly.
 - **`aria-describedby`**: The input's `aria-describedby` chains the Description and ErrorMessage IDs so assistive technology announces help text and validation errors.
 - **ISO value**: The hidden input's `value` is always the ISO 8601 representation of the selected date (e.g., `2024-03-15`), regardless of the display format used in the visible input.

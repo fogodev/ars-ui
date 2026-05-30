@@ -1601,6 +1601,91 @@ fn hidden_input_uses_canonical_iso() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Codex review #697 (pass 3) — required, today, typed controlled display
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn required_sets_native_required_on_input() {
+    // ARIA alone does not drive browser constraint validation; the visible
+    // input must carry the native `required` attribute too.
+    let svc = service_with(
+        Props {
+            required: true,
+            ..props()
+        },
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    assert_eq!(
+        attr(&api.input_attrs(), HtmlAttr::Required).as_deref(),
+        Some("true"),
+    );
+    assert_eq!(
+        attr(&api.input_attrs(), HtmlAttr::Aria(AriaAttr::Required)).as_deref(),
+        Some("true"),
+    );
+}
+
+#[test]
+fn calendar_props_forward_injected_today() {
+    // The adapter-injected `today` must reach the embedded calendar so an empty
+    // picker opens on the current month rather than the calendar default.
+    let svc = service_with(
+        Props {
+            today: date(2024, 6, 15),
+            ..props()
+        },
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    assert_eq!(api.calendar_props().today, date(2024, 6, 15));
+}
+
+#[test]
+fn typed_accepted_date_does_not_diverge_when_value_controlled() {
+    // Controlled-and-empty value: typing a complete, valid date records the
+    // request but the visible field reflects the bindable (still the parent's
+    // empty value), so the input never diverges from selected_date()/hidden
+    // input/calendar props before the parent echoes the change.
+    let mut svc = service_with(
+        Props {
+            value: Some(None),
+            ..props()
+        },
+        en_us(),
+    );
+
+    drop(svc.send(Event::InputChange {
+        value: String::from("06/20/2024"),
+    }));
+
+    assert_eq!(*svc.context().value.get(), None);
+    assert_eq!(svc.context().input_text, "");
+    assert_eq!(svc.context().requested_value, Some(date(2024, 6, 20)));
+    let api = svc.connect(&|_| {});
+    assert_eq!(
+        attr(&api.hidden_input_attrs(), HtmlAttr::Value).as_deref(),
+        Some(""),
+    );
+}
+
+#[test]
+fn typed_accepted_date_normalizes_display_when_uncontrolled() {
+    // Uncontrolled: the bindable holds the new value, so the field reflects the
+    // canonical formatting of the accepted date.
+    let mut svc = service();
+
+    drop(svc.send(Event::InputChange {
+        value: String::from("6/20/2024"),
+    }));
+
+    assert_eq!(*svc.context().value.get(), Some(date(2024, 6, 20)));
+    assert_eq!(svc.context().input_text, "06/20/2024");
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Snapshots — root
 // ────────────────────────────────────────────────────────────────────
 
