@@ -461,8 +461,7 @@ impl ars_core::Machine for Machine {
 
                 let new_count = Context::compute_page_count(total_items, page_size);
                 let controlled = props.page.map(|page| clamp_page(page, new_count));
-                let target = controlled
-                    .map_or_else(|| clamp_page(current, new_count), core::convert::identity);
+                let target = controlled.unwrap_or_else(|| clamp_page(current, new_count));
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.page_size = page_size;
