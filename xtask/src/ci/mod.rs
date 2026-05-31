@@ -2,7 +2,7 @@
 //!
 //! Mirrors the jobs declared in `.github/workflows/ci.yml` so that the xtask
 //! crate is the single source of truth for CI commands. Run the full pipeline
-//! with `cargo xci` or pick individual steps with `cargo xci check clippy`.
+//! with `cargo xci` or pick individual steps with `cargo xci clippy unit`.
 
 pub(crate) mod feature_matrix;
 
@@ -14,7 +14,7 @@ use std::{
     process::{self, Stdio},
 };
 
-use crate::{coverage, i18n, lint, manifest, spec, test};
+use crate::{coverage, crap, i18n, lint, manifest, spec, test};
 
 const MUTUAL_EXCLUSION_GUARD: &str = "features `icu4x` and `web-intl` are mutually exclusive";
 const LEPTOSFMT_VERSION: &str = "0.1.33";
@@ -33,9 +33,6 @@ pub enum Step {
     /// `leptosfmt --check ...`, `dx fmt --check ...`, and
     /// `cargo +nightly fmt --all --check`
     Fmt,
-
-    /// `cargo check --workspace --all-features`
-    Check,
 
     /// `cargo clippy --workspace --all-targets --all-features -- -D warnings`
     Clippy,
@@ -61,8 +58,19 @@ pub enum Step {
     /// Compare per-component test counts between adapters.
     AdapterParity,
 
-    /// Generate coverage and check per-crate thresholds.
+    /// Generate full native + wasm coverage and check per-crate thresholds.
     Coverage,
+
+    /// Generate native-only coverage and check just the crates whose CI
+    /// coverage is native-only (the agnostic library crates + xtask). Fast,
+    /// needs no wasm/clang toolchain, and is faithful to CI for exactly those
+    /// crates. The fast pre-push gate uses this; the full pipeline uses the
+    /// superset [`Step::Coverage`].
+    CoverageNative,
+
+    /// Run the cargo-crap CRAP gate over the merged `lcov.info` that
+    /// [`Step::Coverage`] produces. Must run after `Coverage`.
+    Crap,
 
     /// Enforce per-component snapshot-count policy.
     SnapshotCount,
@@ -102,12 +110,15 @@ pub enum Step {
 ///
 /// - [`Profile::Full`] mirrors the GitHub Actions CI job exactly (20 gates,
 ///   ~25 minutes locally) and is the default for backward compatibility with
-///   scripts that call `cargo xci` directly.
-/// - [`Profile::Fast`] runs the curated [`FAST_PIPELINE_ORDER`] subset
-///   (~5 minutes) intended as the routine pre-push gate. It drops the coverage
-///   recompile, the wasm browser tests, the release-profile checks, and the
-///   five `feature-matrix-*` groups — all of which are CI-only concerns that
-///   re-test what `Unit` / `Integration` / `Adapter` already covered.
+///   scripts that call `cargo xci` directly. It includes the cargo-crap CRAP
+///   gate, which runs immediately after `Coverage` and reuses its `lcov.info`.
+/// - [`Profile::Fast`] runs the curated [`FAST_PIPELINE_ORDER`] subset intended
+///   as the routine pre-push gate. It includes a native-only coverage check
+///   (no wasm/clang toolchain) to catch agnostic-crate threshold regressions
+///   early, but drops the full wasm-coverage recompile, the wasm browser tests,
+///   the release-profile checks, and the five `feature-matrix-*` groups — all
+///   CI-only concerns that re-test what `Unit` / `Integration` / `Adapter`
+///   already covered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
 pub enum Profile {
@@ -126,7 +137,6 @@ pub enum Profile {
 /// individually so progress is visible per group.
 const PIPELINE_ORDER: &[Step] = &[
     Step::Fmt,
-    Step::Check,
     Step::Clippy,
     Step::Unit,
     Step::I18nBrowser,
@@ -136,6 +146,7 @@ const PIPELINE_ORDER: &[Step] = &[
     Step::Adapter,
     Step::AdapterParity,
     Step::Coverage,
+    Step::Crap,
     Step::SnapshotCount,
     Step::SpecCompileSnippets,
     Step::ErrorVariantCoverage,
@@ -151,18 +162,21 @@ const PIPELINE_ORDER: &[Step] = &[
 /// steps are passed.
 ///
 /// Covers cross-crate / workspace-level regressions and the structural lints
-/// that gate merge, while skipping the wasm-coverage recompile, the wasm
-/// browser tests, the release-profile checks, and the five `feature-matrix-*`
-/// groups — those run in CI and rarely change the outcome of a local pre-push
-/// gate when `Unit`, `Integration`, `Adapter`, and `--all-features check`
-/// have already passed.
+/// that gate merge, plus a **native-only** coverage check
+/// ([`Step::CoverageNative`]) that catches threshold regressions in the
+/// agnostic library crates (the historical pain point) before push. It skips
+/// the full wasm-coverage recompile, the wasm browser tests, the release-profile
+/// checks, and the five `feature-matrix-*` groups — those run in CI and rarely
+/// change the outcome of a local pre-push gate when `Unit`, `Integration`,
+/// `Adapter`, and the `--all-features` clippy lint have already passed. The full
+/// [`Step::Coverage`] and the CRAP gate are skipped: they need the wasm/clang-22
+/// toolchain and the merged `lcov.info` that only the full coverage job produces.
 ///
 /// Power users who touched wasm or feature-gated code can opt the skipped
 /// steps back in positionally, e.g. `cargo xci --profile fast i18n-browser`;
 /// positional steps still override the profile.
 const FAST_PIPELINE_ORDER: &[Step] = &[
     Step::Fmt,
-    Step::Check,
     Step::Clippy,
     Step::Unit,
     Step::Integration,
@@ -171,6 +185,11 @@ const FAST_PIPELINE_ORDER: &[Step] = &[
     Step::ErrorVariantCoverage,
     Step::MutualExclusion,
     Step::SnapshotCount,
+    // Native-only coverage runs last: the cheap structural gates fail fast
+    // before paying for the instrumented rebuild. Catches threshold
+    // regressions in the agnostic library crates (ars-components etc.) before
+    // push, without the wasm/clang-22 toolchain the full coverage job needs.
+    Step::CoverageNative,
 ];
 
 /// Errors from CI operations.
@@ -209,6 +228,10 @@ pub enum Error {
     /// Spec corpus check failed (e.g. `compile-snippets` reported a Rust
     /// syntax error in a fenced code block).
     Spec(manifest::Error),
+
+    /// The cargo-crap CRAP gate failed (a threshold breach, a missing
+    /// `lcov.info`, or a missing `cargo-crap` install).
+    Crap(crap::Error),
 }
 
 impl Display for Error {
@@ -242,6 +265,8 @@ impl Display for Error {
             Self::Lint(e) => write!(f, "{e}"),
 
             Self::Spec(e) => write!(f, "{e}"),
+
+            Self::Crap(e) => write!(f, "{e}"),
         }
     }
 }
@@ -258,7 +283,7 @@ impl std::error::Error for Error {}
 /// pipeline ([`PIPELINE_ORDER`] for [`Profile::Full`], [`FAST_PIPELINE_ORDER`]
 /// for [`Profile::Fast`]). When `steps` is non-empty, the positional list
 /// runs as-is and `profile` is ignored — this preserves the existing
-/// `cargo xci fmt check` ad-hoc selection semantics.
+/// `cargo xci fmt clippy` ad-hoc selection semantics.
 ///
 /// Execution is sequential and fail-fast: the first step that fails stops the
 /// pipeline and returns its error.
@@ -272,7 +297,9 @@ pub fn run(steps: Vec<Step>, profile: Profile, message_format: Option<&str>) -> 
 
     for (i, step) in steps.iter().enumerate() {
         print_header(*step, i + 1, steps.len());
+
         run_step(*step, message_format)?;
+
         print_pass(*step);
     }
 
@@ -394,8 +421,6 @@ fn run_step(step: Step, message_format: Option<&str>) -> Result<(), Error> {
     match step {
         Step::Fmt => run_fmt(),
 
-        Step::Check => run_check(message_format),
-
         Step::Clippy => run_clippy(message_format),
 
         Step::Unit => run_unit(),
@@ -413,6 +438,10 @@ fn run_step(step: Step, message_format: Option<&str>) -> Result<(), Error> {
         Step::AdapterParity => run_adapter_parity(),
 
         Step::Coverage => run_coverage(),
+
+        Step::CoverageNative => run_coverage_native(),
+
+        Step::Crap => run_crap(),
 
         Step::SnapshotCount => run_snapshot_count(),
 
@@ -453,43 +482,6 @@ fn run_fmt() -> Result<(), Error> {
     dioxusfmt(true)?;
 
     cargo(Step::Fmt, &["+nightly", "fmt", "--all", "--check"])
-}
-
-fn run_check(message_format: Option<&str>) -> Result<(), Error> {
-    // Exclude ars-i18n: its `icu4x` and `web-intl` features are mutually
-    // exclusive, so `--all-features` would trigger a compile_error!.
-    // Instead, check ars-i18n twice — once per backend — to cover all features.
-    cargo_with_format(
-        Step::Check,
-        &[
-            "check",
-            "--workspace",
-            "--all-features",
-            "--exclude",
-            "ars-i18n",
-        ],
-        message_format,
-    )?;
-
-    let [icu4x_features, web_intl_features] = i18n::i18n_feature_lists().map_err(Error::Io)?;
-
-    for features in [&icu4x_features, &web_intl_features] {
-        cargo_with_format(
-            Step::Check,
-            &[
-                "check",
-                "-p",
-                "ars-i18n",
-                "--all-targets",
-                "--no-default-features",
-                "--features",
-                features,
-            ],
-            message_format,
-        )?;
-    }
-
-    Ok(())
 }
 
 fn run_clippy(message_format: Option<&str>) -> Result<(), Error> {
@@ -793,6 +785,63 @@ fn run_coverage() -> Result<(), Error> {
     }
 }
 
+fn run_coverage_native() -> Result<(), Error> {
+    preflight_llvm_cov()?;
+
+    preflight_nextest()?;
+
+    coverage::preflight_nightly().map_err(Error::Coverage)?;
+
+    let coverage_dir = Path::new("target").join("coverage");
+
+    fs::create_dir_all(&coverage_dir).map_err(Error::Io)?;
+
+    let lcov = coverage_dir.join("native-fast.lcov");
+
+    // Scope the instrumented run to the crates whose CI coverage is native-only
+    // (`coverage::native_thresholds`), so the local run is both fast and exactly
+    // faithful to what CI enforces for them.
+    let packages = coverage::native_coverage_packages();
+
+    let mut args = vec![
+        "+nightly",
+        "llvm-cov",
+        "nextest",
+        "--branch",
+        "--no-fail-fast",
+    ];
+
+    for package in &packages {
+        args.push("-p");
+        args.push(package);
+    }
+
+    args.push("--lcov");
+    args.push("--output-path");
+    args.push(lcov.to_str().expect("valid utf-8 path"));
+
+    cargo(Step::CoverageNative, &args)?;
+
+    match coverage::check_native(&lcov) {
+        Ok(output) => {
+            eprint!("{output}");
+            Ok(())
+        }
+
+        Err(error) => Err(Error::Coverage(error)),
+    }
+}
+
+fn run_crap() -> Result<(), Error> {
+    crap::run(&crap::Options {
+        action: crap::Action::Gate,
+        lcov: PathBuf::from("lcov.info"),
+        baseline: PathBuf::from(crap::BASELINE_PATH),
+        threshold: crap::CRAP_THRESHOLD,
+    })
+    .map_err(Error::Crap)
+}
+
 fn run_test_stage(step: Step, stage: test::Stage) -> Result<(), Error> {
     test::run_stage(stage)
         .map(|_| ())
@@ -839,6 +888,7 @@ fn cargo_with_format(step: Step, args: &[&str], message_format: Option<&str>) ->
                 full_args.push(fmt_flag.as_str());
                 inserted = true;
             }
+
             full_args.push(arg);
         }
 
@@ -1207,7 +1257,6 @@ fn preflight_nextest() -> Result<(), Error> {
 const fn step_name(step: Step) -> &'static str {
     match step {
         Step::Fmt => "fmt",
-        Step::Check => "check",
         Step::Clippy => "clippy",
         Step::Unit => "unit",
         Step::I18nBrowser => "i18n-browser",
@@ -1217,6 +1266,8 @@ const fn step_name(step: Step) -> &'static str {
         Step::Adapter => "adapter",
         Step::AdapterParity => "adapter-parity",
         Step::Coverage => "coverage",
+        Step::CoverageNative => "coverage-native",
+        Step::Crap => "crap",
         Step::SnapshotCount => "snapshot-count",
         Step::SpecCompileSnippets => "spec-compile-snippets",
         Step::ErrorVariantCoverage => "error-variant-coverage",
@@ -1284,7 +1335,7 @@ mod tests {
 
     #[test]
     fn explicit_steps_pass_through() {
-        let input = vec![Step::Check, Step::Clippy];
+        let input = vec![Step::Clippy, Step::Unit];
 
         let resolved = resolve_steps(input.clone(), Profile::Full);
 
@@ -1353,28 +1404,58 @@ mod tests {
         assert_eq!(resolved, vec![Step::Fmt]);
     }
 
+    /// Steps that legitimately appear only in the fast pipeline. `CoverageNative`
+    /// is the fast-only counterpart of the full `Coverage` step: the full
+    /// pipeline runs the native+wasm superset, so the native-only variant would
+    /// be redundant there.
+    const FAST_ONLY_STEPS: &[Step] = &[Step::CoverageNative];
+
     #[test]
-    fn fast_pipeline_is_subset_of_full_pipeline() {
-        // Defensive: every step in the fast pipeline must also exist in the
-        // full pipeline. Catches a regression where the fast list references
-        // a step that has been removed (or renamed) from the canonical list.
+    fn fast_pipeline_is_subset_of_full_pipeline_modulo_fast_only() {
+        // Defensive: every fast step must exist in the full pipeline, except the
+        // documented fast-only steps. Catches a regression where the fast list
+        // references a step that has been removed (or renamed) from the canonical
+        // list.
         for &step in FAST_PIPELINE_ORDER {
             assert!(
-                PIPELINE_ORDER.contains(&step),
-                "FAST_PIPELINE_ORDER includes {step:?} which is not in PIPELINE_ORDER",
+                PIPELINE_ORDER.contains(&step) || FAST_ONLY_STEPS.contains(&step),
+                "FAST_PIPELINE_ORDER includes {step:?} which is neither in PIPELINE_ORDER nor a documented fast-only step",
             );
         }
     }
 
     #[test]
+    fn fast_only_steps_are_absent_from_full_pipeline() {
+        // The fast-only steps must NOT be in the full pipeline — otherwise they
+        // are not fast-only and the exception above is wrong.
+        for &step in FAST_ONLY_STEPS {
+            assert!(
+                !PIPELINE_ORDER.contains(&step),
+                "{step:?} is marked fast-only but appears in PIPELINE_ORDER",
+            );
+        }
+    }
+
+    #[test]
+    fn fast_pipeline_runs_native_coverage_not_full() {
+        assert!(FAST_PIPELINE_ORDER.contains(&Step::CoverageNative));
+        assert!(!FAST_PIPELINE_ORDER.contains(&Step::Coverage));
+        // Conversely the full pipeline uses the superset, not the native variant.
+        assert!(PIPELINE_ORDER.contains(&Step::Coverage));
+        assert!(!PIPELINE_ORDER.contains(&Step::CoverageNative));
+    }
+
+    #[test]
     fn fast_pipeline_excludes_coverage_and_feature_matrix() {
-        // Guards the intent of the fast profile: the wasm-coverage recompile
-        // and the five feature-matrix groups are deliberately skipped because
-        // they are CI-only concerns that pay no marginal dividend on a
-        // pre-push gate when Unit / Integration / Adapter already ran.
-        // Catches a regression where someone reflexively re-adds them.
+        // Guards the intent of the fast profile: the wasm-coverage recompile,
+        // the CRAP gate (which needs coverage's lcov), and the five
+        // feature-matrix groups are deliberately skipped because they are
+        // CI-only concerns that pay no marginal dividend on a pre-push gate
+        // when Unit / Integration / Adapter already ran. Catches a regression
+        // where someone reflexively re-adds them.
         let banned = [
             Step::Coverage,
+            Step::Crap,
             Step::FeatureMatrix,
             Step::FeatureMatrixCore,
             Step::FeatureMatrixI18n,
@@ -1413,35 +1494,51 @@ mod tests {
         }
     }
 
-    /// Every `CiStep` variant has a non-empty name.
+    /// Every `Step` variant has a non-empty name. Iterates the clap-derived
+    /// variant list so the test stays exhaustive as variants are added or
+    /// removed without a hand-maintained mirror.
     #[test]
     fn step_name_covers_all_variants() {
-        let all = [
-            Step::Fmt,
-            Step::Check,
-            Step::Clippy,
-            Step::Unit,
-            Step::I18nBrowser,
-            Step::DomBrowser,
-            Step::Release,
-            Step::Integration,
-            Step::Adapter,
-            Step::AdapterParity,
-            Step::Coverage,
-            Step::SnapshotCount,
-            Step::ErrorVariantCoverage,
-            Step::FeatureMatrix,
-            Step::FeatureMatrixCore,
-            Step::FeatureMatrixI18n,
-            Step::FeatureMatrixSubsystems,
-            Step::FeatureMatrixLeptos,
-            Step::FeatureMatrixDioxus,
-            Step::MutualExclusion,
-        ];
+        use clap::ValueEnum as _;
 
-        for step in all {
-            assert!(!step_name(step).is_empty(), "{step:?} has empty name");
+        for step in Step::value_variants() {
+            assert!(!step_name(*step).is_empty(), "{step:?} has empty name");
         }
+    }
+
+    #[test]
+    fn crap_runs_immediately_after_coverage() {
+        // The CRAP gate consumes the merged `lcov.info` that the coverage step
+        // writes, so it must sit directly after `Coverage` in the full pipeline.
+        let coverage = PIPELINE_ORDER
+            .iter()
+            .position(|&step| step == Step::Coverage)
+            .expect("PIPELINE_ORDER contains Coverage");
+
+        let crap = PIPELINE_ORDER
+            .iter()
+            .position(|&step| step == Step::Crap)
+            .expect("PIPELINE_ORDER contains Crap");
+
+        assert_eq!(
+            crap,
+            coverage + 1,
+            "Crap must run immediately after Coverage"
+        );
+    }
+
+    #[test]
+    fn check_step_is_fully_removed() {
+        // `check` is redundant with `clippy --all-targets --all-features` and was
+        // removed from both pipelines. Guard against a reflexive re-add.
+        use clap::ValueEnum as _;
+
+        assert!(
+            Step::value_variants()
+                .iter()
+                .all(|step| step_name(*step) != "check"),
+            "the redundant `check` step must not be reintroduced"
+        );
     }
 
     #[test]
@@ -1545,12 +1642,12 @@ mod tests {
 
     #[test]
     fn format_summary_lists_all_steps() {
-        let steps = vec![Step::Fmt, Step::Check];
+        let steps = vec![Step::Fmt, Step::Crap];
 
         let summary = format_summary(&steps);
 
         assert!(summary.contains("fmt: passed"), "got: {summary}");
-        assert!(summary.contains("check: passed"), "got: {summary}");
+        assert!(summary.contains("crap: passed"), "got: {summary}");
         assert!(summary.contains("All 2 steps passed"), "got: {summary}");
     }
 

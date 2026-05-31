@@ -139,6 +139,53 @@ pub fn default_thresholds() -> Vec<CrateThreshold> {
     ]
 }
 
+/// Thresholds for the crates whose CI coverage comes **only** from the native
+/// run — i.e. every enforced crate that is not a wasm-coverage target and not
+/// the unmeasured proc-macro crate. For these crates the merged CI lcov equals
+/// the native lcov, so a host-target `cargo llvm-cov` run reproduces exactly
+/// what CI enforces. This is the set checked by the fast pre-push coverage gate
+/// (`cargo xcov` / `cargo xci coverage-native`); the wasm-measured crates
+/// (`ars-dom`, `ars-i18n`, the adapters, the framework harnesses) are
+/// deliberately excluded because a native-only run undercounts them.
+#[must_use]
+pub fn native_thresholds() -> Vec<CrateThreshold> {
+    default_thresholds()
+        .into_iter()
+        .filter(|threshold| {
+            threshold.package != "ars-derive" && !is_wasm_coverage_package(&threshold.package)
+        })
+        .collect()
+}
+
+/// Returns `true` if `package` is measured via the wasm-coverage pipeline (so a
+/// native-only run cannot reproduce its enforced threshold).
+#[must_use]
+pub fn is_wasm_coverage_package(package: &str) -> bool {
+    default_wasm_coverage_targets()
+        .iter()
+        .any(|target| target.package == package)
+}
+
+/// Package names for the native-only coverage gate, derived from
+/// [`native_thresholds`]. Passed as `-p` flags to scope the instrumented run.
+#[must_use]
+pub fn native_coverage_packages() -> Vec<String> {
+    native_thresholds()
+        .into_iter()
+        .map(|threshold| threshold.package)
+        .collect()
+}
+
+/// Check a native-only lcov against [`native_thresholds`].
+///
+/// # Errors
+///
+/// Returns [`Error`] if the lcov cannot be read or any native-measured crate is
+/// below its threshold.
+pub fn check_native(file: &Path) -> Result<String, Error> {
+    check_all(file, &native_thresholds())
+}
+
 /// Errors from coverage operations.
 #[derive(Debug)]
 pub enum Error {
@@ -1419,6 +1466,69 @@ version = "0.2.118"
             args.windows(2)
                 .any(|pair| pair == ["--features", "web-intl"])
         );
+    }
+
+    #[test]
+    fn native_thresholds_exclude_wasm_targets_and_derive() {
+        let native: Vec<String> = native_thresholds()
+            .into_iter()
+            .map(|threshold| threshold.package)
+            .collect();
+
+        // Every wasm-coverage target and the proc-macro crate must be absent —
+        // a native-only run cannot reproduce their merged thresholds.
+        for target in default_wasm_coverage_targets() {
+            assert!(
+                !native.contains(&target.package.to_owned()),
+                "{} is wasm-measured and must not be in the native gate",
+                target.package
+            );
+        }
+        assert!(!native.contains(&"ars-derive".to_owned()));
+
+        // The agnostic library crates (the pain point) MUST be enforced.
+        for expected in [
+            "ars-core",
+            "ars-components",
+            "ars-collections",
+            "ars-a11y",
+            "ars-forms",
+            "ars-interactions",
+        ] {
+            assert!(
+                native.contains(&expected.to_owned()),
+                "native gate must enforce {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn native_thresholds_are_a_strict_subset_of_default() {
+        let all = default_thresholds().len();
+        let native = native_thresholds().len();
+        let wasm = default_wasm_coverage_targets().len();
+
+        // default = native + wasm-targets + ars-derive.
+        assert_eq!(native, all - wasm - 1);
+    }
+
+    #[test]
+    fn native_packages_match_native_thresholds() {
+        let pkgs = native_coverage_packages();
+
+        let thresholds: Vec<String> = native_thresholds()
+            .into_iter()
+            .map(|threshold| threshold.package)
+            .collect();
+        assert_eq!(pkgs, thresholds);
+    }
+
+    #[test]
+    fn is_wasm_coverage_package_classifies_correctly() {
+        assert!(is_wasm_coverage_package("ars-dom"));
+        assert!(is_wasm_coverage_package("ars-leptos"));
+        assert!(!is_wasm_coverage_package("ars-components"));
+        assert!(!is_wasm_coverage_package("ars-core"));
     }
 }
 
