@@ -281,6 +281,11 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Dragging, Event::DragMove { x, y }) => {
+                // Readonly toggled mid-drag must stop further value changes
+                // (disabled is already handled by the guard above); DragEnd
+                // still terminates the drag.
+                if ctx.readonly { return None; }
+
                 let x = *x;
                 let y = *y;
                 Some(TransitionPlan::context_only(move |ctx| {

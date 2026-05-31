@@ -387,6 +387,13 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Dragging, Event::DragMove { x, y }) => {
+                // Readonly toggled mid-drag must stop further value changes
+                // (disabled is already handled by the guard above); DragEnd
+                // still terminates the drag.
+                if ctx.readonly {
+                    return None;
+                }
+
                 let (x, y) = (*x, *y);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     apply_area_position(ctx, x, y);
@@ -1189,6 +1196,30 @@ mod tests {
         let thumb = disabled.connect(&|_| {}).thumb_attrs();
         assert_eq!(thumb.get(&HtmlAttr::TabIndex), Some("-1"));
         assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+    }
+
+    #[test]
+    fn readonly_set_mid_drag_blocks_further_moves() {
+        let mut svc = service(Props::default());
+
+        drop(svc.send(Event::DragStart { x: 0.25, y: 0.25 }));
+        let after_start = *svc.connect(&|_| {}).value();
+
+        drop(svc.set_props(Props {
+            id: "color-area".to_string(),
+            readonly: true,
+            ..Props::default()
+        }));
+
+        drop(svc.send(Event::DragMove { x: 0.9, y: 0.9 }));
+        assert_eq!(
+            *svc.connect(&|_| {}).value(),
+            after_start,
+            "readonly drag must not mutate the value"
+        );
+
+        drop(svc.send(Event::DragEnd));
+        assert_eq!(svc.state(), &State::Idle);
     }
 
     #[test]

@@ -270,6 +270,11 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Dragging, Event::DragMove { position }) => {
+                // Readonly toggled mid-drag must stop further value changes
+                // (disabled is already handled by the guard above); DragEnd
+                // still terminates the drag.
+                if ctx.readonly { return None; }
+
                 let pos = *position;
                 Some(TransitionPlan::context_only(move |ctx| {
                     apply_slider_position(ctx, pos);

@@ -352,6 +352,13 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Dragging, Event::DragMove { position }) => {
+                // Readonly toggled mid-drag must stop further value changes
+                // (disabled is already handled by the guard above); DragEnd
+                // still terminates the drag.
+                if ctx.readonly {
+                    return None;
+                }
+
                 let pos = *position;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     apply_slider_position(ctx, pos);
@@ -1213,6 +1220,36 @@ mod tests {
         let thumb = disabled.connect(&|_| {}).thumb_attrs();
         assert_eq!(thumb.get(&HtmlAttr::TabIndex), Some("-1"));
         assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+    }
+
+    #[test]
+    fn readonly_set_mid_drag_blocks_further_moves() {
+        let mut svc = service(Props {
+            channel: ColorChannel::Hue,
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::DragStart { position: 0.25 }));
+        let after_start = svc.connect(&|_| {}).value().hue;
+
+        // Parent flips readonly during the drag.
+        drop(svc.set_props(Props {
+            id: "color-slider".to_string(),
+            channel: ColorChannel::Hue,
+            readonly: true,
+            ..Props::default()
+        }));
+
+        // Subsequent moves must not change the value.
+        drop(svc.send(Event::DragMove { position: 0.9 }));
+        assert!(
+            (svc.connect(&|_| {}).value().hue - after_start).abs() < 1e-9,
+            "readonly drag must not mutate the value"
+        );
+
+        // The drag still terminates cleanly.
+        drop(svc.send(Event::DragEnd));
+        assert_eq!(svc.state(), &State::Idle);
     }
 
     #[test]
