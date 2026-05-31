@@ -773,8 +773,12 @@ fn parse_hsb_args(inner: &str, has_alpha: bool) -> Option<ColorValue> {
     }
 
     let hue = parse_finite_f64(parts[0])?;
-    let saturation = parse_finite_f64(parts[1].strip_suffix('%')?.trim())? / 100.0;
-    let brightness = parse_finite_f64(parts[2].strip_suffix('%')?.trim())? / 100.0;
+    // Clamp the HSB channels to `0..=1` before the conversion so out-of-range
+    // input (e.g. `200%`) doesn't skew lightness/saturation and lose the hue.
+    let saturation =
+        (parse_finite_f64(parts[1].strip_suffix('%')?.trim())? / 100.0).clamp(0.0, 1.0);
+    let brightness =
+        (parse_finite_f64(parts[2].strip_suffix('%')?.trim())? / 100.0).clamp(0.0, 1.0);
 
     let alpha = if has_alpha {
         parse_finite_f64(parts[3])?
@@ -1246,6 +1250,25 @@ mod tests {
         assert_eq!(
             (nan.hue, nan.saturation, nan.lightness, nan.alpha),
             (0.0, 0.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn hsb_clamps_out_of_range_channels() {
+        // Out-of-range S/B must clamp to 0..=1 before conversion, preserving hue
+        // (red), not collapse to white/black.
+        let high_b = parse_color_string("hsb(0, 100%, 200%)").expect("parses");
+        assert_eq!(
+            high_b.to_rgb(),
+            (255, 0, 0),
+            "200% brightness clamps to full red"
+        );
+
+        let high_s = parse_color_string("hsb(0, 200%, 100%)").expect("parses");
+        assert_eq!(
+            high_s.to_rgb(),
+            (255, 0, 0),
+            "200% saturation clamps to full red"
         );
     }
 

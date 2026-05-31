@@ -742,13 +742,58 @@ impl Api<'_> {
 
         attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
-        // Pending color so the background hue tracks an in-progress controlled drag.
+        // Pending color so the background tracks an in-progress controlled drag.
         let color = self.ctx.value.pending();
 
+        // Dominant hue backdrop (kept for the default saturation×lightness case).
         attrs.set_style(
             CssProperty::Custom("ars-color-area-bg"),
             format!("hsl({:.0}, 100%, 50%)", color.hue),
         );
+
+        // Expose the configured axes plus the four corner colors so the adapter
+        // can render a 2D gradient that matches *any* x/y channel pair, not just
+        // the default surface. Corners are emitted in visual order (top = the
+        // y-axis maximum since y is inverted; left/right follow the RTL x flip).
+        let (x_min, x_max) = channel_range(self.ctx.x_channel);
+        let (y_min, y_max) = channel_range(self.ctx.y_channel);
+
+        let (left_x, right_x) = if self.ctx.dir == Direction::Rtl {
+            (x_max, x_min)
+        } else {
+            (x_min, x_max)
+        };
+
+        let corner = |x_value: f64, y_value: f64| {
+            let with_x = with_channel(color, self.ctx.x_channel, x_value);
+            with_channel(&with_x, self.ctx.y_channel, y_value).to_css_hsl()
+        };
+
+        attrs
+            .set(
+                HtmlAttr::Data("ars-x-channel"),
+                format!("{:?}", self.ctx.x_channel).to_lowercase(),
+            )
+            .set(
+                HtmlAttr::Data("ars-y-channel"),
+                format!("{:?}", self.ctx.y_channel).to_lowercase(),
+            )
+            .set_style(
+                CssProperty::Custom("ars-color-area-corner-tl"),
+                corner(left_x, y_max),
+            )
+            .set_style(
+                CssProperty::Custom("ars-color-area-corner-tr"),
+                corner(right_x, y_max),
+            )
+            .set_style(
+                CssProperty::Custom("ars-color-area-corner-bl"),
+                corner(left_x, y_min),
+            )
+            .set_style(
+                CssProperty::Custom("ars-color-area-corner-br"),
+                corner(right_x, y_min),
+            );
 
         attrs
     }
@@ -1200,6 +1245,43 @@ mod tests {
             (submitted.lightness - 0.3).abs() < 0.02,
             "y-axis (lightness) change lost: {}",
             submitted.lightness
+        );
+    }
+
+    #[test]
+    fn background_exposes_configured_axes_and_corners() {
+        let svc = service(Props {
+            x_channel: ColorChannel::Hue,
+            y_channel: ColorChannel::Lightness,
+            default_value: ColorValue::from_hsl(0.0, 1.0, 0.5),
+            ..Props::default()
+        });
+
+        let bg = svc.connect(&|_| {}).background_attrs();
+
+        assert_eq!(bg.get(&HtmlAttr::Data("ars-x-channel")), Some("hue"));
+        assert_eq!(bg.get(&HtmlAttr::Data("ars-y-channel")), Some("lightness"));
+
+        let corner = |name| {
+            bg.styles()
+                .iter()
+                .find(|(p, _)| *p == CssProperty::Custom(name))
+                .map(|(_, value)| value.clone())
+                .unwrap_or_default()
+        };
+        let tl = corner("ars-color-area-corner-tl");
+        let bl = corner("ars-color-area-corner-bl");
+        let tr = corner("ars-color-area-corner-tr");
+        let br = corner("ars-color-area-corner-br");
+        assert!(
+            [&tl, &bl, &tr, &br].iter().all(|c| !c.is_empty()),
+            "all corners populated"
+        );
+        // The lightness y-axis runs max (white) at top to min (black) at bottom,
+        // so the surface reflects the configured axis rather than a flat swatch.
+        assert_ne!(
+            tl, bl,
+            "y-axis (lightness) corners must differ top vs bottom"
         );
     }
 

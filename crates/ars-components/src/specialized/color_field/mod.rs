@@ -478,7 +478,7 @@ impl ars_core::Machine for Machine {
                     }));
                 }
 
-                Event::SyncValue(_) | Event::SetProps => {}
+                Event::SyncValue(_) | Event::SetProps | Event::SetHasDescription(_) => {}
 
                 _ => return None,
             }
@@ -505,7 +505,7 @@ impl ars_core::Machine for Machine {
                     }));
                 }
 
-                Event::SyncValue(_) | Event::SetProps => {}
+                Event::SyncValue(_) | Event::SetProps | Event::SetHasDescription(_) => {}
 
                 _ => return None,
             }
@@ -1729,6 +1729,25 @@ mod tests {
             before,
             "a read-only field must not accept IME composition edits"
         );
+    }
+
+    #[test]
+    fn disabled_field_still_tracks_description() {
+        // A disabled field with helper text must still wire aria-describedby.
+        let mut svc = service(Props {
+            disabled: true,
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::SetHasDescription(true)));
+
+        let describedby = svc
+            .connect(&|_| {})
+            .input_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::DescribedBy))
+            .map(ToString::to_string)
+            .expect("disabled field still references its description");
+        assert!(describedby.contains("description"));
     }
 
     #[test]

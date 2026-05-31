@@ -390,7 +390,7 @@ impl ars_core::Machine for Machine {
                     }));
                 }
 
-                Event::SyncValue(_) | Event::SetProps => {}
+                Event::SyncValue(_) | Event::SetProps | Event::SetHasDescription(_) => {}
 
                 _ => return None,
             }
@@ -417,7 +417,7 @@ impl ars_core::Machine for Machine {
                     }));
                 }
 
-                Event::SyncValue(_) | Event::SetProps => {}
+                Event::SyncValue(_) | Event::SetProps | Event::SetHasDescription(_) => {}
 
                 _ => return None,
             }
@@ -982,22 +982,22 @@ ColorField
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Attribute / Behaviour             | Element                  | Value                                                                                                          |
-| --------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `role="spinbutton"`               | Input (channel mode)     | ARIA spinbutton pattern                                                                                        |
-| `inputmode="numeric"`             | Input (channel mode)     | Numeric keyboard on mobile                                                                                     |
-| `inputmode="text"`                | Input (whole-color mode) | Text keyboard on mobile                                                                                        |
-| `aria-valuenow`                   | Input (channel mode)     | Current channel value, scaled to the visible 0-100 range for percentage channels                               |
-| `aria-valuemin` / `aria-valuemax` | Input (channel mode)     | From `channel_range(channel)`, scaled to 0-100 for percentage channels (saturation/lightness/brightness/alpha) |
-| `aria-valuetext`                  | Input (channel mode)     | Localized formatted channel value                                                                              |
-| `aria-label`                      | Input (channel mode)     | Channel name (from messages)                                                                                   |
-| `aria-labelledby`                 | Input                    | Label element ID                                                                                               |
-| `aria-invalid`                    | Input                    | `"true"` when parse failed or external invalid                                                                 |
-| `aria-required`                   | Input                    | `"true"` when required                                                                                         |
-| `aria-readonly` / `readonly`      | Input                    | When read-only (both the native attribute and `aria-readonly` are set)                                         |
-| `aria-disabled` / `disabled`      | Input                    | When disabled                                                                                                  |
-| `aria-describedby`                | Input                    | Description + ErrorMessage IDs                                                                                 |
-| `role="alert"`                    | ErrorMessage             | Live error announcement                                                                                        |
+| Attribute / Behaviour             | Element                  | Value                                                                                                                                           |
+| --------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `role="spinbutton"`               | Input (channel mode)     | ARIA spinbutton pattern                                                                                                                         |
+| `inputmode="numeric"`             | Input (channel mode)     | Numeric keyboard on mobile                                                                                                                      |
+| `inputmode="text"`                | Input (whole-color mode) | Text keyboard on mobile                                                                                                                         |
+| `aria-valuenow`                   | Input (channel mode)     | Current channel value, scaled to the visible 0-100 range for percentage channels                                                                |
+| `aria-valuemin` / `aria-valuemax` | Input (channel mode)     | From `channel_range(channel)`, scaled to 0-100 for percentage channels (saturation/lightness/brightness/alpha)                                  |
+| `aria-valuetext`                  | Input (channel mode)     | Localized formatted channel value                                                                                                               |
+| `aria-label`                      | Input (channel mode)     | Channel name (from messages)                                                                                                                    |
+| `aria-labelledby`                 | Input                    | Label element ID                                                                                                                                |
+| `aria-invalid`                    | Input                    | `"true"` when parse failed or external invalid                                                                                                  |
+| `aria-required`                   | Input                    | `"true"` when required                                                                                                                          |
+| `aria-readonly` / `readonly`      | Input                    | When read-only (both the native attribute and `aria-readonly` are set)                                                                          |
+| `aria-disabled` / `disabled`      | Input                    | When disabled                                                                                                                                   |
+| `aria-describedby`                | Input                    | Description + ErrorMessage IDs (kept in sync via `SetHasDescription`, which is honored even while the field is disabled or mid-IME-composition) |
+| `role="alert"`                    | ErrorMessage             | Live error announcement                                                                                                                         |
 
 ### 3.2 Keyboard Interaction
 

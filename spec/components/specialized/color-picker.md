@@ -507,8 +507,10 @@ fn parse_hsb_args(inner: &str, has_alpha: bool) -> Option<ColorValue> {
     let expected = if has_alpha { 4 } else { 3 };
     if parts.len() != expected { return None; }
     let h: f64 = parts[0].parse().ok()?;
-    let s: f64 = parts[1].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0;
-    let b: f64 = parts[2].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0;
+    // Clamp the HSB channels to `0..=1` before the conversion so out-of-range
+    // input (e.g. `200%`) doesn't skew lightness/saturation and lose the hue.
+    let s: f64 = (parts[1].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0).clamp(0.0, 1.0);
+    let b: f64 = (parts[2].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0).clamp(0.0, 1.0);
     let a: f64 = if has_alpha { parts[3].parse().ok()? } else { 1.0 };
     // Convert HSB -> HSL: lightness = b * (1 - s/2)
     let l = b * (1.0 - s / 2.0);

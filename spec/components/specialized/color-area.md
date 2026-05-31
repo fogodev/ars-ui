@@ -567,10 +567,37 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Background.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        // Pending color so the background hue tracks an in-progress controlled drag.
+        // Pending color so the background tracks an in-progress controlled drag.
         let color = self.ctx.value.pending();
+        // Dominant hue backdrop (kept for the default saturation×lightness case).
         let bg = format!("hsl({:.0}, 100%, 50%)", color.hue);
         attrs.set_style(CssProperty::Custom("ars-color-area-bg"), bg);
+
+        // Expose the configured axes plus the four corner colors so the adapter
+        // can render a 2D gradient that matches *any* x/y channel pair, not just
+        // the default surface. Corners are emitted in visual order (top = the
+        // y-axis maximum since y is inverted; left/right follow the RTL x flip).
+        let (x_min, x_max) = channel_range(self.ctx.x_channel);
+        let (y_min, y_max) = channel_range(self.ctx.y_channel);
+        let (left_x, right_x) = if self.ctx.dir == Direction::Rtl {
+            (x_max, x_min)
+        } else {
+            (x_min, x_max)
+        };
+        let corner = |x_value: f64, y_value: f64| {
+            let with_x = with_channel(color, self.ctx.x_channel, x_value);
+            with_channel(&with_x, self.ctx.y_channel, y_value).to_css_hsl()
+        };
+        attrs
+            .set(HtmlAttr::Data("ars-x-channel"),
+                format!("{:?}", self.ctx.x_channel).to_lowercase())
+            .set(HtmlAttr::Data("ars-y-channel"),
+                format!("{:?}", self.ctx.y_channel).to_lowercase())
+            .set_style(CssProperty::Custom("ars-color-area-corner-tl"), corner(left_x, y_max))
+            .set_style(CssProperty::Custom("ars-color-area-corner-tr"), corner(right_x, y_max))
+            .set_style(CssProperty::Custom("ars-color-area-corner-bl"), corner(left_x, y_min))
+            .set_style(CssProperty::Custom("ars-color-area-corner-br"), corner(right_x, y_min));
+
         attrs
     }
 
@@ -690,12 +717,12 @@ ColorArea
 └── HiddenInput  (optional — <input type="hidden">, form submission)
 ```
 
-| Part        | Element   | Key Attributes                                                                                                                                 |
-| ----------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-dragging`                                                                                       |
-| Background  | `<div>`   | gradient background via CSS custom property                                                                                                    |
-| Thumb       | `<div>`   | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled) |
-| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled — omitted from form submission)                                        |
+| Part        | Element   | Key Attributes                                                                                                                                                                                                               |
+| ----------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-dragging`                                                                                                                                                                     |
+| Background  | `<div>`   | hue backdrop via `--ars-color-area-bg`; `data-ars-x-channel` / `data-ars-y-channel` (lowercased channel names); four corner colors `--ars-color-area-corner-tl/tr/bl/br` for rendering a 2D surface for any x/y channel pair |
+| Thumb       | `<div>`   | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled)                                                                               |
+| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled — omitted from form submission)                                                                                                                      |
 
 ## 3. Accessibility
 
