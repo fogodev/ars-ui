@@ -465,9 +465,13 @@ impl Debug for Api<'_> {
 
 impl Api<'_> {
     /// The currently selected color.
+    ///
+    /// Reports the *pending* value so a selection is reflected consistently
+    /// (selected styling, the hidden input, and this accessor) even in controlled
+    /// mode, where the controlled prop only updates via `SyncValue`.
     #[must_use]
-    pub fn value(&self) -> &ColorValue {
-        self.ctx.value.get()
+    pub const fn value(&self) -> &ColorValue {
+        self.ctx.value.pending()
     }
 
     /// The index of the currently focused swatch, if any.
@@ -493,7 +497,7 @@ impl Api<'_> {
             return Some(index);
         }
 
-        let value = *self.ctx.value.get();
+        let value = *self.ctx.value.pending();
         let selected = self
             .ctx
             .colors
@@ -554,7 +558,7 @@ impl Api<'_> {
             .set(HtmlAttr::Role, "option");
 
         let is_selected =
-            index < self.ctx.colors.len() && self.ctx.colors[index] == *self.ctx.value.get();
+            index < self.ctx.colors.len() && self.ctx.colors[index] == *self.ctx.value.pending();
 
         attrs.set(
             HtmlAttr::Aria(AriaAttr::Selected),
@@ -616,7 +620,7 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Name, name.clone());
         }
 
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_hex(true));
 
         // A disabled control must be omitted from form submission.
         if self.ctx.disabled {
@@ -797,6 +801,41 @@ mod tests {
             Some("false")
         );
         assert_eq!(other.get(&HtmlAttr::TabIndex), Some("-1"));
+    }
+
+    #[test]
+    fn controlled_selection_reports_pending_value() {
+        // A controlled picker that selects a new swatch must report it through
+        // value(), the selected styling, and the hidden input even before the
+        // parent syncs the prop.
+        let mut svc = service(Props {
+            colors: palette(),
+            value: Some(ColorValue::from_rgb(255, 0, 0)), // red (index 0)
+            name: Some("color".to_string()),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Select { index: 2 })); // blue
+
+        let api = svc.connect(&|_| {});
+        assert_eq!(
+            api.value().to_rgb(),
+            (0, 0, 255),
+            "value() reflects the selection"
+        );
+        assert_eq!(
+            api.item_attrs(2).get(&HtmlAttr::Aria(AriaAttr::Selected)),
+            Some("true"),
+            "the newly selected item is marked selected"
+        );
+        assert_eq!(
+            api.item_attrs(0).get(&HtmlAttr::Aria(AriaAttr::Selected)),
+            Some("false")
+        );
+        assert_eq!(
+            api.hidden_input_attrs().get(&HtmlAttr::Value),
+            Some("#0000ff")
+        );
     }
 
     #[test]

@@ -415,14 +415,17 @@ impl ars_core::Machine for Machine {
             })),
 
             (_, Event::Increment) => {
-                let new_val = wrap_value(ctx.value.get() + ctx.step, ctx.min, ctx.max);
+                // Accumulate from the pending value so repeated controlled steps
+                // before a parent `SyncValue` advance instead of recomputing from
+                // the stale prop.
+                let new_val = wrap_value(ctx.value.pending() + ctx.step, ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(new_val);
                 }))
             }
 
             (_, Event::Decrement) => {
-                let new_val = wrap_value(ctx.value.get() - ctx.step, ctx.min, ctx.max);
+                let new_val = wrap_value(ctx.value.pending() - ctx.step, ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(new_val);
                 }))
@@ -438,26 +441,25 @@ impl ars_core::Machine for Machine {
             (State::Focused, Event::KeyDown { key }) => {
                 let large_step = ctx.step * 10.0;
 
+                // Accumulate relative steps from the pending value (see Increment).
+                let current = *ctx.value.pending();
+
                 let new_val = match key {
                     KeyboardKey::ArrowRight | KeyboardKey::ArrowUp => {
-                        wrap_value(ctx.value.get() + ctx.step, ctx.min, ctx.max)
+                        wrap_value(current + ctx.step, ctx.min, ctx.max)
                     }
 
                     KeyboardKey::ArrowLeft | KeyboardKey::ArrowDown => {
-                        wrap_value(ctx.value.get() - ctx.step, ctx.min, ctx.max)
+                        wrap_value(current - ctx.step, ctx.min, ctx.max)
                     }
 
                     KeyboardKey::Home => ctx.min,
 
                     KeyboardKey::End => ctx.max,
 
-                    KeyboardKey::PageUp => {
-                        wrap_value(ctx.value.get() + large_step, ctx.min, ctx.max)
-                    }
+                    KeyboardKey::PageUp => wrap_value(current + large_step, ctx.min, ctx.max),
 
-                    KeyboardKey::PageDown => {
-                        wrap_value(ctx.value.get() - large_step, ctx.min, ctx.max)
-                    }
+                    KeyboardKey::PageDown => wrap_value(current - large_step, ctx.min, ctx.max),
 
                     _ => return None,
                 };
@@ -1196,6 +1198,28 @@ mod tests {
         let thumb = disabled.connect(&|_| {}).thumb_attrs();
         assert_eq!(thumb.get(&HtmlAttr::TabIndex), Some("-1"));
         assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+    }
+
+    #[test]
+    fn controlled_keyboard_steps_accumulate_from_pending() {
+        // Controlled slider at 0°; two Increments before a parent sync must
+        // accumulate (10° -> 20°), not recompute from the stale prop each time.
+        let mut svc = service(Props {
+            value: Some(0.0),
+            step: 10.0,
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Increment));
+        drop(svc.send(Event::Increment));
+
+        // The pending value (rendered + submitted) is 20°.
+        assert_eq!(
+            svc.connect(&|_| {})
+                .thumb_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("20")
+        );
     }
 
     #[test]

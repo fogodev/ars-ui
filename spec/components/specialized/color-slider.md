@@ -159,10 +159,19 @@ impl Default for Props {
 
 ```rust,no_check
 /// Apply a normalized position (0..1) to the channel value.
+///
+/// A horizontal RTL slider renders the minimum on the right and mirrors its
+/// arrow keys, so the incoming physical position is inverted to match (dragging
+/// the left edge selects the maximum).
 fn apply_slider_position(ctx: &mut Context, position: f64) {
     let (min, max) = channel_range(ctx.channel);
-    let value = min + position.clamp(0.0, 1.0) * (max - min);
-    set_channel_value(ctx, value);
+    let clamped = position.clamp(0.0, 1.0);
+    let effective = if ctx.orientation == Orientation::Horizontal && ctx.dir == Direction::Rtl {
+        1.0 - clamped
+    } else {
+        clamped
+    };
+    set_channel_value(ctx, min + effective * (max - min));
 }
 
 /// Set the slider's channel value (in channel units) and derive the color.

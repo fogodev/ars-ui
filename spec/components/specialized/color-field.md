@@ -712,8 +712,12 @@ impl<'a> Api<'a> {
     }
 
     /// The current value of the component.
-    pub fn value(&self) -> Option<&ColorValue> {
-        self.ctx.value.get().as_ref()
+    ///
+    /// Reports the *pending* value so a committed edit is reflected consistently
+    /// (matching the displayed text, channel ARIA, and the hidden input) even in
+    /// controlled mode, where the controlled prop only updates via `SyncValue`.
+    pub const fn value(&self) -> Option<&ColorValue> {
+        self.ctx.value.pending().as_ref()
     }
 
     /// The current input text of the component.
@@ -774,7 +778,7 @@ impl<'a> Api<'a> {
                 // Channel mode: numeric spinbutton
                 attrs.set(HtmlAttr::Role, "spinbutton");
                 attrs.set(HtmlAttr::InputMode, "numeric");
-                if let Some(color) = self.ctx.value.get() {
+                if let Some(color) = self.ctx.value.pending() {
                     let val = channel_value(color, ch);
                     let (min, max) = channel_range(ch);
                     // Percentage channels display/commit as 0-100, so the spinbutton
@@ -869,7 +873,7 @@ impl<'a> Api<'a> {
         // Only submit a value when the field is valid. While invalid, the stored
         // color is the last *valid* value, which no longer matches the visible
         // input — submitting it would send a stale color.
-        if let Some(color) = (*self.ctx.value.get()).filter(|_| !self.ctx.invalid) {
+        if let Some(color) = (*self.ctx.value.pending()).filter(|_| !self.ctx.invalid) {
             attrs.set(HtmlAttr::Value, color.to_hex(true));
         }
         // A disabled control is omitted from form submission — and so is an

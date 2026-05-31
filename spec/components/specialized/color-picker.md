@@ -4,16 +4,7 @@ category: specialized
 tier: complex
 foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
-related:
-    [
-        angle-slider,
-        color-area,
-        color-field,
-        color-slider,
-        color-swatch,
-        color-swatch-picker,
-        color-wheel,
-    ]
+related: [angle-slider, color-area, color-field, color-slider, color-swatch, color-swatch-picker, color-wheel]
 references:
     ark-ui: ColorPicker
     react-aria: ColorPicker

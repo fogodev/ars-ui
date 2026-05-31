@@ -404,6 +404,15 @@ pub struct Api<'a> {
 }
 
 impl<'a> Api<'a> {
+    /// The currently selected color.
+    ///
+    /// Reports the *pending* value so a selection is reflected consistently
+    /// (selected styling, the hidden input, and this accessor) even in controlled
+    /// mode, where the controlled prop only updates via `SyncValue`.
+    pub const fn value(&self) -> &ColorValue {
+        self.ctx.value.pending()
+    }
+
     /// The index of the single roving-tabbable swatch.
     ///
     /// While a swatch is focused this is the focused index. In the idle state
@@ -420,8 +429,8 @@ impl<'a> Api<'a> {
             return Some(index);
         }
 
-        let value = self.ctx.value.get();
-        let selected = self.ctx.colors.iter().position(|c| c == value);
+        let value = *self.ctx.value.pending();
+        let selected = self.ctx.colors.iter().position(|c| *c == value);
 
         Some(selected.unwrap_or(0))
     }
@@ -465,7 +474,7 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Role, "option");
 
         let is_selected = index < self.ctx.colors.len()
-            && self.ctx.colors[index] == self.ctx.value.get();
+            && self.ctx.colors[index] == *self.ctx.value.pending();
         attrs.set(HtmlAttr::Aria(AriaAttr::Selected),
             if is_selected { "true" } else { "false" });
         if is_selected {
@@ -519,7 +528,7 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.props.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_hex(true));
         // A disabled control must be omitted from form submission.
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);

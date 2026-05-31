@@ -803,9 +803,13 @@ impl Api<'_> {
     }
 
     /// The current value of the component.
+    ///
+    /// Reports the *pending* value so a committed edit is reflected consistently
+    /// (matching the displayed text, channel ARIA, and the hidden input) even in
+    /// controlled mode, where the controlled prop only updates via `SyncValue`.
     #[must_use]
-    pub fn value(&self) -> Option<&ColorValue> {
-        self.ctx.value.get().as_ref()
+    pub const fn value(&self) -> Option<&ColorValue> {
+        self.ctx.value.pending().as_ref()
     }
 
     /// The current raw input text of the component.
@@ -879,7 +883,7 @@ impl Api<'_> {
                 .set(HtmlAttr::Role, "spinbutton")
                 .set(HtmlAttr::InputMode, "numeric");
 
-            if let Some(color) = self.ctx.value.get() {
+            if let Some(color) = self.ctx.value.pending() {
                 let val = channel_value(color, ch);
                 let (min, max) = channel_range(ch);
 
@@ -1020,7 +1024,7 @@ impl Api<'_> {
         // Only submit a value when the field is valid. While invalid, the stored
         // color is the last *valid* value, which no longer matches the visible
         // input — submitting it would send a stale color.
-        if let Some(color) = (*self.ctx.value.get()).filter(|_| !self.ctx.invalid) {
+        if let Some(color) = (*self.ctx.value.pending()).filter(|_| !self.ctx.invalid) {
             attrs.set(HtmlAttr::Value, color.to_hex(true));
         }
 
@@ -1535,6 +1539,33 @@ mod tests {
         // Whole-color mode with no value stays empty (unchanged behavior).
         let whole = service(Props::default());
         assert!(whole.connect(&|_| {}).value().is_none());
+    }
+
+    #[test]
+    fn controlled_commit_reports_pending_value() {
+        // A controlled field that commits a new color must report it consistently
+        // through value() and the hidden input, matching the displayed text, even
+        // before the parent syncs the prop.
+        let mut svc = service(Props {
+            value: Some(ColorValue::from_rgb(255, 0, 0)),
+            name: Some("color".to_string()),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Change("#0000ff".to_string())));
+        drop(svc.send(Event::Commit));
+
+        let api = svc.connect(&|_| {});
+        assert_eq!(
+            api.value().expect("value").to_rgb(),
+            (0, 0, 255),
+            "value() must report the committed (pending) color"
+        );
+        assert_eq!(
+            api.hidden_input_attrs().get(&HtmlAttr::Value),
+            Some("#0000ff"),
+            "hidden input must submit the committed color, not the stale prop"
+        );
     }
 
     #[test]

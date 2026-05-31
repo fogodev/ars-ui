@@ -172,7 +172,15 @@ impl Default for Props {
 fn apply_area_position(ctx: &mut Context, x: f64, y: f64) {
     let (x_min, x_max) = channel_range(ctx.x_channel);
     let (y_min, y_max) = channel_range(ctx.y_channel);
-    let x_val = x_min + x.clamp(0.0, 1.0) * (x_max - x_min);
+    // RTL renders the minimum x on the right and mirrors the x-axis arrows, so
+    // the incoming physical x is inverted to match (left edge selects max).
+    let x_norm = x.clamp(0.0, 1.0);
+    let x_norm = if ctx.dir == Direction::Rtl {
+        1.0 - x_norm
+    } else {
+        x_norm
+    };
+    let x_val = x_min + x_norm * (x_max - x_min);
     // y is inverted: top=max, bottom=min
     let y_val = y_max - y.clamp(0.0, 1.0) * (y_max - y_min);
 

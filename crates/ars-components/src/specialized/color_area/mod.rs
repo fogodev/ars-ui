@@ -290,7 +290,16 @@ fn apply_area_position(ctx: &mut Context, x: f64, y: f64) {
     let (x_min, x_max) = channel_range(ctx.x_channel);
     let (y_min, y_max) = channel_range(ctx.y_channel);
 
-    let x_val = x_min + x.clamp(0.0, 1.0) * (x_max - x_min);
+    // RTL renders the minimum x on the right and mirrors the x-axis arrows, so
+    // the incoming physical x is inverted to match (left edge selects max).
+    let x_norm = x.clamp(0.0, 1.0);
+    let x_norm = if ctx.dir == Direction::Rtl {
+        1.0 - x_norm
+    } else {
+        x_norm
+    };
+
+    let x_val = x_min + x_norm * (x_max - x_min);
     let y_val = y_max - y.clamp(0.0, 1.0) * (y_max - y_min);
 
     ctx.x_value = x_val;
@@ -1005,6 +1014,25 @@ mod tests {
 
         assert!(matches!(events[0], Event::IncrementX { step } if (step - 0.01).abs() < 1e-9));
         assert!(matches!(events[1], Event::IncrementY { step } if (step - 0.1).abs() < 1e-9));
+    }
+
+    #[test]
+    fn rtl_inverts_x_pointer_coordinate() {
+        // x=0.0 (physical left) selects the maximum x-channel in RTL.
+        let mut rtl = service(Props {
+            dir: Direction::Rtl,
+            ..Props::default()
+        });
+        drop(rtl.send(Event::DragStart { x: 0.0, y: 0.5 }));
+        assert!(
+            (rtl.connect(&|_| {}).value().saturation - 1.0).abs() < 1e-9,
+            "RTL x=0.0 must select the maximum saturation"
+        );
+
+        // LTR unchanged: x=0.0 -> minimum.
+        let mut ltr = service(Props::default());
+        drop(ltr.send(Event::DragStart { x: 0.0, y: 0.5 }));
+        assert!((ltr.connect(&|_| {}).value().saturation - 0.0).abs() < 1e-9);
     }
 
     #[test]

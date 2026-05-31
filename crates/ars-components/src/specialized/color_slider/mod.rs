@@ -234,12 +234,21 @@ impl Default for Messages {
 impl ComponentMessages for Messages {}
 
 /// Apply a normalized position (`0..=1`) to the channel value.
+///
+/// A horizontal RTL slider renders the minimum on the right and mirrors its
+/// arrow keys, so the incoming physical position is inverted to match (dragging
+/// the left edge selects the maximum).
 fn apply_slider_position(ctx: &mut Context, position: f64) {
     let (min, max) = channel_range(ctx.channel);
 
-    let value = min + position.clamp(0.0, 1.0) * (max - min);
+    let clamped = position.clamp(0.0, 1.0);
+    let effective = if ctx.orientation == Orientation::Horizontal && ctx.dir == Direction::Rtl {
+        1.0 - clamped
+    } else {
+        clamped
+    };
 
-    set_channel_value(ctx, value);
+    set_channel_value(ctx, min + effective * (max - min));
 }
 
 /// Set the slider's channel value (in channel units) and derive the color.
@@ -1017,6 +1026,32 @@ mod tests {
             .on_thumb_keydown(&key(KeyboardKey::ArrowUp), false);
 
         assert!(matches!(vcap.borrow()[0], Event::Increment { .. }));
+    }
+
+    #[test]
+    fn rtl_horizontal_inverts_pointer_position() {
+        // In RTL, the physical left edge (position 0.0) is the visual maximum.
+        // Use saturation (0..=1, no hue wrap) so the endpoint reads cleanly.
+        let mut rtl = service(Props {
+            channel: ColorChannel::Saturation,
+            dir: Direction::Rtl,
+            default_value: ColorValue::from_hsl(0.0, 0.0, 0.5),
+            ..Props::default()
+        });
+        drop(rtl.send(Event::DragStart { position: 0.0 }));
+        assert!(
+            (rtl.connect(&|_| {}).value().saturation - 1.0).abs() < 1e-9,
+            "RTL position 0.0 must select the maximum"
+        );
+
+        // LTR is unchanged: position 0.0 -> minimum.
+        let mut ltr = service(Props {
+            channel: ColorChannel::Saturation,
+            default_value: ColorValue::from_hsl(0.0, 1.0, 0.5),
+            ..Props::default()
+        });
+        drop(ltr.send(Event::DragStart { position: 0.0 }));
+        assert!((ltr.connect(&|_| {}).value().saturation - 0.0).abs() < 1e-9);
     }
 
     #[test]

@@ -335,13 +335,16 @@ impl ars_core::Machine for Machine {
 
             // Value adjustments
             (_, Event::Increment) => {
-                let new_val = wrap_value(ctx.value.get() + ctx.step, ctx.min, ctx.max);
+                // Accumulate from the pending value so repeated controlled steps
+                // before a parent `SyncValue` advance instead of recomputing from
+                // the stale prop.
+                let new_val = wrap_value(ctx.value.pending() + ctx.step, ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(new_val);
                 }))
             }
             (_, Event::Decrement) => {
-                let new_val = wrap_value(ctx.value.get() - ctx.step, ctx.min, ctx.max);
+                let new_val = wrap_value(ctx.value.pending() - ctx.step, ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(new_val);
                 }))
@@ -355,45 +358,25 @@ impl ars_core::Machine for Machine {
 
             // Keyboard
             (State::Focused, Event::KeyDown { key }) => {
-                match key {
+                let large_step = ctx.step * 10.0;
+                // Accumulate relative steps from the pending value (see Increment).
+                let current = *ctx.value.pending();
+                let new_val = match key {
                     KeyboardKey::ArrowRight | KeyboardKey::ArrowUp => {
-                        let new_val = wrap_value(ctx.value.get() + ctx.step, ctx.min, ctx.max);
-                        Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.value.set(new_val);
-                        }))
+                        wrap_value(current + ctx.step, ctx.min, ctx.max)
                     }
                     KeyboardKey::ArrowLeft | KeyboardKey::ArrowDown => {
-                        let new_val = wrap_value(ctx.value.get() - ctx.step, ctx.min, ctx.max);
-                        Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.value.set(new_val);
-                        }))
+                        wrap_value(current - ctx.step, ctx.min, ctx.max)
                     }
-                    KeyboardKey::Home => {
-                        Some(TransitionPlan::context_only(|ctx| {
-                            ctx.value.set(ctx.min);
-                        }))
-                    }
-                    KeyboardKey::End => {
-                        Some(TransitionPlan::context_only(|ctx| {
-                            ctx.value.set(ctx.max);
-                        }))
-                    }
-                    KeyboardKey::PageUp => {
-                        let large_step = ctx.step * 10.0;
-                        let new_val = wrap_value(ctx.value.get() + large_step, ctx.min, ctx.max);
-                        Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.value.set(new_val);
-                        }))
-                    }
-                    KeyboardKey::PageDown => {
-                        let large_step = ctx.step * 10.0;
-                        let new_val = wrap_value(ctx.value.get() - large_step, ctx.min, ctx.max);
-                        Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.value.set(new_val);
-                        }))
-                    }
-                    _ => None,
-                }
+                    KeyboardKey::Home => ctx.min,
+                    KeyboardKey::End => ctx.max,
+                    KeyboardKey::PageUp => wrap_value(current + large_step, ctx.min, ctx.max),
+                    KeyboardKey::PageDown => wrap_value(current - large_step, ctx.min, ctx.max),
+                    _ => return None,
+                };
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.value.set(new_val);
+                }))
             }
 
             _ => None,
