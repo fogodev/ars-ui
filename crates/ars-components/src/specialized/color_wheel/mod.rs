@@ -9,7 +9,7 @@
 //! pointer listeners. Circular geometry is direction-agnostic, so arrow keys are
 //! not mirrored for RTL.
 
-use alloc::{format, string::String};
+use alloc::{format, string::String, vec::Vec};
 use core::fmt::{self, Debug};
 
 use ars_core::{
@@ -82,6 +82,12 @@ pub enum Event {
 
     /// Focus left the thumb.
     Blur,
+
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 
 /// Typed identifier for side effects emitted by the `ColorWheel` machine.
@@ -211,10 +217,14 @@ fn apply_wheel_angle(ctx: &mut Context, angle: f64) {
 }
 
 /// Build the change-end effect that invokes `Props::on_change_end`.
+///
+/// Reports the *pending* value staged during the drag rather than the
+/// controlled `get()` value, which in controlled mode still holds the stale
+/// pre-drag color until the parent syncs the new value back through its prop.
 fn change_end_effect() -> PendingEffect<Machine> {
     PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
         if let Some(callback) = &props.on_change_end {
-            callback(*ctx.value.get());
+            callback(*ctx.value.pending());
         }
 
         no_cleanup()
@@ -266,9 +276,10 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // Focus/Blur always pass through regardless of disabled/readonly.
+        // Focus/Blur and parent-driven prop syncs always pass through regardless
+        // of disabled/readonly (a disabled wheel must still be re-enableable).
         match event {
             Event::Focus { is_keyboard } => {
                 let ik = *is_keyboard;
@@ -282,6 +293,30 @@ impl ars_core::Machine for Machine {
                 return Some(TransitionPlan::context_only(|ctx: &mut Context| {
                     ctx.focused = false;
                     ctx.focus_visible = false;
+                }));
+            }
+
+            Event::SyncValue(value) => {
+                let value = *value;
+                return Some(TransitionPlan::context_only(
+                    move |ctx: &mut Context| match value {
+                        Some(color) => {
+                            ctx.value.set(color);
+                            ctx.value.sync_controlled(Some(color));
+                        }
+                        None => ctx.value.sync_controlled(None),
+                    },
+                ));
+            }
+
+            Event::SetProps => {
+                let props = props.clone();
+                return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.step = props.step;
+                    ctx.large_step = props.large_step;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.dir = props.dir;
                 }));
             }
 
@@ -355,6 +390,25 @@ impl ars_core::Machine for Machine {
         }
     }
 
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_wheel::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
+    }
+
     fn connect<'a>(
         state: &'a Self::State,
         ctx: &'a Self::Context,
@@ -368,6 +422,18 @@ impl ars_core::Machine for Machine {
             send,
         }
     }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name` is omitted: it is read live from `Props` in `hidden_input_attrs`
+/// rather than cached in the context.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    (old.step - new.step).abs() > f64::EPSILON
+        || (old.large_step - new.large_step).abs() > f64::EPSILON
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.dir != new.dir
 }
 
 /// Structural parts exposed by the `ColorWheel` connect API.
@@ -528,6 +594,11 @@ impl Api<'_> {
         }
 
         attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
 
         attrs
     }
@@ -749,6 +820,85 @@ mod tests {
             svc.connect(&|_| {})
                 .thumb_attrs()
                 .contains(&HtmlAttr::Data("ars-focus-visible"))
+        );
+    }
+
+    #[test]
+    fn drag_end_reports_pending_value_for_controlled_wheel() {
+        use alloc::sync::Arc;
+        use core::sync::atomic::{AtomicU64, Ordering};
+
+        use ars_core::{StrongSend, callback};
+
+        let reported = Arc::new(AtomicU64::new(u64::MAX));
+        let sink = Arc::clone(&reported);
+        let mut svc = service(Props {
+            value: Some(ColorValue::from_hsl(0.0, 1.0, 0.5)),
+            on_change_end: Some(callback(move |color: ColorValue| {
+                sink.store(color.hue.to_bits(), Ordering::SeqCst);
+            })),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::DragStart { position: 0.5 }));
+        let mut end = svc.send(Event::DragEnd);
+
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        for effect in end.pending_effects.drain(..) {
+            drop(effect.run(svc.context(), svc.props(), Arc::clone(&send)));
+        }
+
+        let reported_hue = f64::from_bits(reported.load(Ordering::SeqCst));
+        assert!(
+            (reported_hue - 180.0).abs() < 1e-9,
+            "on_change_end must report the pending hue, got {reported_hue}"
+        );
+    }
+
+    #[test]
+    fn set_props_syncs_controlled_value_and_disabled() {
+        let mut svc = service(Props {
+            value: Some(ColorValue::from_hsl(0.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+
+        drop(svc.set_props(Props {
+            id: "color-wheel".to_string(),
+            value: Some(ColorValue::from_hsl(120.0, 1.0, 0.5)),
+            disabled: true,
+            ..Props::default()
+        }));
+
+        let api = svc.connect(&|_| {});
+        assert!((api.value().hue - 120.0).abs() < 1e-9);
+        assert!(api.root_attrs().contains(&HtmlAttr::Data("ars-disabled")));
+
+        drop(svc.set_props(Props {
+            id: "color-wheel".to_string(),
+            value: Some(ColorValue::from_hsl(120.0, 1.0, 0.5)),
+            disabled: false,
+            ..Props::default()
+        }));
+        assert!(
+            !svc.connect(&|_| {})
+                .root_attrs()
+                .contains(&HtmlAttr::Data("ars-disabled"))
+        );
+    }
+
+    #[test]
+    fn disabled_wheel_omits_hidden_input_from_submission() {
+        let svc = service(Props {
+            name: Some("hue".to_string()),
+            disabled: true,
+            ..Props::default()
+        });
+
+        assert_eq!(
+            svc.connect(&|_| {})
+                .hidden_input_attrs()
+                .get(&HtmlAttr::Disabled),
+            Some("true")
         );
     }
 

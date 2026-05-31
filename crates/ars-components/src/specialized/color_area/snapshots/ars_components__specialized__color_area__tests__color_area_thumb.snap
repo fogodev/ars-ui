@@ -49,7 +49,7 @@ AttrMap {
                 ValueText,
             ),
             String(
-                "saturation 75%, lightness 40%",
+                "light vibrant green, saturation 75%, lightness 40%",
             ),
         ),
         (

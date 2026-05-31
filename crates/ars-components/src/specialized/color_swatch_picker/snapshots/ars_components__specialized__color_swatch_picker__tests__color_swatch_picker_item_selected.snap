@@ -51,7 +51,7 @@ AttrMap {
         (
             TabIndex,
             String(
-                "-1",
+                "0",
             ),
         ),
     ],

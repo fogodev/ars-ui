@@ -79,6 +79,10 @@ pub enum Event {
     },
     /// Focus left the thumb.
     Blur,
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 ```
 
@@ -177,10 +181,14 @@ pub enum Effect {
 }
 
 /// Build the change-end effect that invokes `Props::on_change_end`.
+///
+/// Reports the *pending* value staged during the drag rather than the
+/// controlled `get()` value, which in controlled mode still holds the stale
+/// pre-drag color until the parent syncs the new value back through its prop.
 fn change_end_effect() -> PendingEffect<Machine> {
     PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
         if let Some(callback) = &props.on_change_end {
-            callback(*ctx.value.get());
+            callback(*ctx.value.pending());
         }
         no_cleanup()
     })
@@ -227,9 +235,10 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // Focus/Blur always pass through regardless of disabled/readonly.
+        // Focus/Blur and parent-driven prop syncs always pass through regardless
+        // of disabled/readonly (a disabled wheel must still be re-enableable).
         match event {
             Event::Focus { is_keyboard } => {
                 let ik = *is_keyboard;
@@ -244,16 +253,31 @@ impl ars_core::Machine for Machine {
                     ctx.focus_visible = false;
                 }));
             }
+            Event::SyncValue(value) => {
+                let value = *value;
+                return Some(TransitionPlan::context_only(move |ctx| match value {
+                    Some(color) => {
+                        ctx.value.set(color);
+                        ctx.value.sync_controlled(Some(color));
+                    }
+                    None => ctx.value.sync_controlled(None),
+                }));
+            }
+            Event::SetProps => {
+                let props = props.clone();
+                return Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.step = props.step;
+                    ctx.large_step = props.large_step;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.dir = props.dir;
+                }));
+            }
             _ => {}
         }
 
-        // Disabled blocks all value-changing events.
-        if ctx.disabled {
-            return None;
-        }
-
-        // Readonly blocks drag and value adjustments.
-        if ctx.readonly {
+        // Disabled and read-only both block value-changing events.
+        if ctx.disabled || ctx.readonly {
             return None;
         }
 
@@ -314,6 +338,25 @@ impl ars_core::Machine for Machine {
         }
     }
 
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_wheel::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
+    }
+
     fn connect<'a>(
         state: &'a Self::State,
         ctx: &'a Self::Context,
@@ -322,6 +365,18 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name` is omitted: it is read live from `Props` in `hidden_input_attrs`
+/// rather than cached in the context.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    (old.step - new.step).abs() > f64::EPSILON
+        || (old.large_step - new.large_step).abs() > f64::EPSILON
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.dir != new.dir
 }
 ```
 
@@ -412,6 +467,10 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Name, name);
         }
         attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         attrs
     }
 
@@ -466,7 +525,7 @@ ColorWheel
 | Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-readonly` |
 | Track       | `<div>`   | conic-gradient background via CSS custom property        |
 | Thumb       | `<div>`   | `role="slider"`, `aria-valuenow/min/max`, `tabindex="0"` |
-| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color)             |
+| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled -- omitted from form submission) |
 
 ## 3. Accessibility
 

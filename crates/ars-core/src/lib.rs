@@ -564,6 +564,21 @@ impl<T: BindableValue> Bindable<T> {
     pub const fn get_mut_owned(&mut self) -> &mut T {
         &mut self.internal
     }
+
+    /// Returns the internal (pending) value, ignoring any controlled override.
+    ///
+    /// Unlike [`get`](Self::get) — which returns the controlled value when the
+    /// bindable is controlled — this always returns the value staged via
+    /// [`set`](Self::set), i.e. the value the component would commit. Use this
+    /// when reporting a just-computed result to the parent (for example the
+    /// final value passed to an `on_change_end` callback at the end of a drag):
+    /// in controlled mode the parent has not yet round-tripped the new value
+    /// back through its prop, so [`get`](Self::get) would still return the stale
+    /// controlled value.
+    #[must_use]
+    pub const fn pending(&self) -> &T {
+        &self.internal
+    }
 }
 
 impl<T: BindableValue + Default> Default for Bindable<T> {
@@ -3330,6 +3345,28 @@ mod tests {
             b.get(),
             &vec![String::from("controlled"), String::from("pending")]
         );
+    }
+
+    #[test]
+    fn bindable_pending_returns_internal_value_even_when_controlled() {
+        // In controlled mode, `set` stages the internal value while `get`
+        // keeps returning the controlled prop. `pending` exposes the staged
+        // value so a just-computed result can be reported to the parent.
+        let mut b = Bindable::controlled(10_u8);
+
+        b.set(42);
+
+        assert_eq!(b.get(), &10, "get still returns the controlled value");
+        assert_eq!(
+            b.pending(),
+            &42,
+            "pending returns the staged internal value"
+        );
+
+        // Uncontrolled bindables expose the same value through both accessors.
+        let mut uncontrolled = Bindable::uncontrolled(1_u8);
+        uncontrolled.set(7);
+        assert_eq!(uncontrolled.get(), uncontrolled.pending());
     }
 
     #[test]

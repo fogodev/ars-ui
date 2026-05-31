@@ -47,7 +47,10 @@ pub enum State {
 }
 
 /// The events for the `ColorSwatchPicker` component.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// `Eq` is not derived because `SyncValue` carries a [`ColorValue`], whose
+/// `f64` channels are only `PartialEq`.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event {
     /// Focus entered the picker.
     Focus {
@@ -81,6 +84,12 @@ pub enum Event {
 
     /// Jump to the last swatch.
     FocusLast,
+
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+
+    /// Refresh cached output props (colors, layout, columns, disabled).
+    SetProps,
 }
 
 /// The context for the `ColorSwatchPicker` component.
@@ -225,13 +234,49 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled || ctx.colors.is_empty() {
+        // Parent-driven prop syncs always apply, even when disabled or empty, so
+        // the picker can be re-enabled or populated; everything else is ignored
+        // in those states.
+        let is_prop_sync = matches!(event, Event::SyncValue(_) | Event::SetProps);
+
+        if !is_prop_sync && (ctx.disabled || ctx.colors.is_empty()) {
             return None;
         }
 
         match event {
+            Event::SyncValue(value) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(
+                    move |ctx: &mut Context| match value {
+                        Some(color) => {
+                            ctx.value.set(color);
+                            ctx.value.sync_controlled(Some(color));
+                        }
+                        None => ctx.value.sync_controlled(None),
+                    },
+                ))
+            }
+
+            Event::SetProps => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.colors = props.colors.clone();
+                    ctx.layout = props.layout;
+                    ctx.columns = props.columns;
+                    ctx.disabled = props.disabled;
+
+                    // Drop focus if it now points past the (possibly shorter) list.
+                    if ctx
+                        .focused_index
+                        .is_some_and(|index| index >= ctx.colors.len())
+                    {
+                        ctx.focused_index = None;
+                    }
+                }))
+            }
+
             Event::Focus { is_keyboard } => {
                 let kb = *is_keyboard;
                 Some(
@@ -335,6 +380,25 @@ impl ars_core::Machine for Machine {
         }
     }
 
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_swatch_picker::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
+    }
+
     fn connect<'a>(
         state: &'a Self::State,
         ctx: &'a Self::Context,
@@ -348,6 +412,17 @@ impl ars_core::Machine for Machine {
             send,
         }
     }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name` is omitted: it is read live from `Props` in `hidden_input_attrs`
+/// rather than cached in the context.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.colors != new.colors
+        || old.layout != new.layout
+        || old.columns != new.columns
+        || old.disabled != new.disabled
 }
 
 /// Structural parts exposed by the `ColorSwatchPicker` connect API.
@@ -395,6 +470,33 @@ impl Api<'_> {
     #[must_use]
     pub const fn focused_index(&self) -> Option<usize> {
         self.ctx.focused_index
+    }
+
+    /// The index of the single roving-tabbable swatch.
+    ///
+    /// While a swatch is focused this is the focused index. In the idle state
+    /// (`focused_index == None`) it is the selected swatch, or the first swatch
+    /// when nothing is selected, so the picker is reachable with the Tab key
+    /// before focus has entered it. Returns `None` only when the picker is
+    /// disabled or empty (every item then stays `tabindex="-1"`).
+    #[must_use]
+    pub fn tabbable_index(&self) -> Option<usize> {
+        if self.ctx.disabled || self.ctx.colors.is_empty() {
+            return None;
+        }
+
+        if let Some(index) = self.ctx.focused_index {
+            return Some(index);
+        }
+
+        let value = *self.ctx.value.get();
+        let selected = self
+            .ctx
+            .colors
+            .iter()
+            .position(|candidate| *candidate == value);
+
+        Some(selected.unwrap_or(0))
     }
 
     const fn state_str(&self) -> &'static str {
@@ -461,8 +563,10 @@ impl Api<'_> {
 
         let is_focused = self.ctx.focused_index == Some(index);
 
-        // Roving tabindex: only the focused item is tabbable.
-        attrs.set(HtmlAttr::TabIndex, if is_focused { "0" } else { "-1" });
+        // Roving tabindex: the focused item is tabbable, or — before focus has
+        // entered — the selected/first item, so keyboard users can Tab in.
+        let is_tabbable = self.tabbable_index() == Some(index);
+        attrs.set(HtmlAttr::TabIndex, if is_tabbable { "0" } else { "-1" });
 
         if is_focused {
             attrs.set_bool(HtmlAttr::Data("ars-focused"), true);
@@ -504,6 +608,11 @@ impl Api<'_> {
         }
 
         attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
 
         attrs
     }
@@ -785,6 +894,133 @@ mod tests {
             svc.connect(&|_| {})
                 .root_attrs()
                 .get(&HtmlAttr::Aria(AriaAttr::Disabled)),
+            Some("true")
+        );
+    }
+
+    #[test]
+    fn idle_picker_is_keyboard_focusable() {
+        // Before focus enters, exactly one swatch (the selected one) must be
+        // tabbable so keyboard users can Tab into the picker.
+        let svc = service(Props {
+            colors: palette(),
+            default_value: ColorValue::from_rgb(0, 0, 255), // index 2
+            ..Props::default()
+        });
+
+        let api = svc.connect(&|_| {});
+        assert_eq!(api.focused_index(), None, "idle: no item focused yet");
+        assert_eq!(
+            api.item_attrs(2).get(&HtmlAttr::TabIndex),
+            Some("0"),
+            "selected swatch is tabbable in the idle state"
+        );
+
+        let tabbable: Vec<usize> = (0..palette().len())
+            .filter(|&index| api.item_attrs(index).get(&HtmlAttr::TabIndex) == Some("0"))
+            .collect();
+        assert_eq!(tabbable, [2], "exactly one swatch is tabbable");
+
+        // With no selection, the first swatch is the tabbable fallback.
+        let unselected = service(Props {
+            colors: palette(),
+            default_value: ColorValue::from_rgb(1, 2, 3),
+            ..Props::default()
+        });
+        assert_eq!(
+            unselected
+                .connect(&|_| {})
+                .item_attrs(0)
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
+    }
+
+    #[test]
+    fn disabled_picker_has_no_tabbable_item() {
+        let svc = service(Props {
+            colors: palette(),
+            disabled: true,
+            ..Props::default()
+        });
+
+        let api = svc.connect(&|_| {});
+        assert_eq!(api.tabbable_index(), None);
+        for index in 0..palette().len() {
+            assert_eq!(api.item_attrs(index).get(&HtmlAttr::TabIndex), Some("-1"));
+        }
+    }
+
+    #[test]
+    fn set_props_syncs_value_colors_and_disabled() {
+        let mut svc = service(Props {
+            colors: palette(),
+            value: Some(ColorValue::from_rgb(255, 0, 0)),
+            ..Props::default()
+        });
+
+        // Focus the last swatch, then shrink the palette below that index.
+        drop(svc.send(Event::Focus { is_keyboard: true }));
+        drop(svc.send(Event::FocusLast));
+        assert_eq!(svc.connect(&|_| {}).focused_index(), Some(5));
+
+        let two_colors = alloc::vec![
+            ColorValue::from_rgb(0, 0, 0),
+            ColorValue::from_rgb(255, 255, 255),
+        ];
+
+        drop(svc.set_props(Props {
+            id: "color-swatch-picker".to_string(),
+            colors: two_colors,
+            value: Some(ColorValue::from_rgb(255, 255, 255)),
+            disabled: true,
+            ..Props::default()
+        }));
+
+        let api = svc.connect(&|_| {});
+        assert_eq!(
+            api.value().to_rgb(),
+            (255, 255, 255),
+            "controlled value syncs"
+        );
+        assert_eq!(
+            api.focused_index(),
+            None,
+            "focus drops when it falls outside the new shorter list"
+        );
+        assert_eq!(
+            api.root_attrs().get(&HtmlAttr::Aria(AriaAttr::Disabled)),
+            Some("true")
+        );
+
+        // A re-enable sync takes effect through the disabled guard.
+        drop(svc.set_props(Props {
+            id: "color-swatch-picker".to_string(),
+            colors: alloc::vec![ColorValue::from_rgb(0, 0, 0)],
+            value: Some(ColorValue::from_rgb(255, 255, 255)),
+            disabled: false,
+            ..Props::default()
+        }));
+        assert!(
+            !svc.connect(&|_| {})
+                .root_attrs()
+                .contains(&HtmlAttr::Aria(AriaAttr::Disabled))
+        );
+    }
+
+    #[test]
+    fn disabled_picker_omits_hidden_input_from_submission() {
+        let svc = service(Props {
+            colors: palette(),
+            name: Some("color".to_string()),
+            disabled: true,
+            ..Props::default()
+        });
+
+        assert_eq!(
+            svc.connect(&|_| {})
+                .hidden_input_attrs()
+                .get(&HtmlAttr::Disabled),
             Some("true")
         );
     }

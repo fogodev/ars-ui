@@ -63,6 +63,10 @@ pub enum Event {
     Focus { is_keyboard: bool },
     /// Focus left the thumb.
     Blur,
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 ```
 
@@ -175,15 +179,13 @@ pub enum Effect {
 
 /// Build the change-end effect that invokes `Props::on_change_end`.
 ///
-/// Live pointer capture and coordinate-to-value conversion are adapter
-/// concerns (see the element/ref handling note): the adapter wires its own
-/// pointermove/pointerup listeners to `Event::DragMove` / `Event::DragEnd`,
-/// exactly like `Slider`. The core registers no drag listeners — it only fires
-/// this named effect on release so the adapter can invoke the consumer callback.
+/// Reports the *pending* value staged during the drag rather than the
+/// controlled `get()` value, which in controlled mode still holds the stale
+/// pre-drag color until the parent syncs the new value back through its prop.
 fn change_end_effect() -> PendingEffect<Machine> {
     PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
         if let Some(callback) = &props.on_change_end {
-            callback(*ctx.value.get());
+            callback(*ctx.value.pending());
         }
         no_cleanup()
     })
@@ -230,23 +232,25 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        // A disabled area ignores value-changing input but still tracks focus
+        // and accepts parent-driven prop syncs (so it can be re-enabled).
         if ctx.disabled {
-            return match event {
-                Event::Focus { is_keyboard } => {
-                    let kb = *is_keyboard;
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.focused = true;
-                        ctx.focus_visible = kb;
-                    }))
-                }
-                Event::Blur => Some(TransitionPlan::context_only(|ctx| {
-                    ctx.focused = false;
-                    ctx.focus_visible = false;
-                })),
-                _ => None,
-            };
+            match event {
+                Event::DragStart { .. }
+                | Event::DragMove { .. }
+                | Event::DragEnd
+                | Event::IncrementX { .. }
+                | Event::DecrementX { .. }
+                | Event::IncrementY { .. }
+                | Event::DecrementY { .. }
+                | Event::SetXToMin
+                | Event::SetXToMax
+                | Event::SetYToMin
+                | Event::SetYToMax => return None,
+                _ => {}
+            }
         }
 
         match (state, event) {
@@ -368,8 +372,51 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (_, Event::SyncValue(value)) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(move |ctx| match value {
+                    Some(color) => {
+                        ctx.value.set(color);
+                        ctx.value.sync_controlled(Some(color));
+                    }
+                    None => ctx.value.sync_controlled(None),
+                }))
+            }
+
+            (_, Event::SetProps) => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.x_channel = props.x_channel;
+                    ctx.y_channel = props.y_channel;
+                    ctx.step = props.step;
+                    ctx.large_step = props.large_step;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.dir = props.dir;
+                }))
+            }
+
             _ => None,
         }
+    }
+
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_area::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -380,6 +427,20 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name` is omitted: it is read live from `Props` in `hidden_input_attrs`
+/// rather than cached in the context.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.x_channel != new.x_channel
+        || old.y_channel != new.y_channel
+        || (old.step - new.step).abs() > f64::EPSILON
+        || (old.large_step - new.large_step).abs() > f64::EPSILON
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.dir != new.dir
 }
 ```
 
@@ -454,8 +515,9 @@ impl<'a> Api<'a> {
 
         let x_name = format!("{:?}", self.ctx.x_channel).to_lowercase();
         let y_name = format!("{:?}", self.ctx.y_channel).to_lowercase();
+        let color_name = color.color_name_en();
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueText),
-            (self.ctx.messages.value_text)(x_val, y_val, &x_name, &y_name, &self.ctx.locale));
+            (self.ctx.messages.value_text)(x_val, y_val, &x_name, &y_name, &color_name, &self.ctx.locale));
 
         let x_pct = if (x_max - x_min).abs() > f64::EPSILON {
             (x_val - x_min) / (x_max - x_min) * 100.0
@@ -487,6 +549,10 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Name, name);
         }
         attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         attrs
     }
 
@@ -539,7 +605,7 @@ ColorArea
 | Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-dragging`                       |
 | Background  | `<div>`   | gradient background via CSS custom property                                    |
 | Thumb       | `<div>`   | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex="0"` |
-| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color)                                   |
+| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled — omitted from form submission) |
 
 ## 3. Accessibility
 
@@ -579,8 +645,10 @@ pub struct Messages {
     pub label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Role description for screen readers. Default: `"2d color picker"`.
     pub role_description: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    /// Formats both channel values for aria-valuetext.
-    pub value_text: MessageFn<dyn Fn(f64, f64, &str, &str, &Locale) -> String + Send + Sync>,
+    /// Formats both channel values plus the perceptual color name for
+    /// `aria-valuetext`. Arguments: `x_value`, `y_value`, `x_channel_name`,
+    /// `y_channel_name`, `color_name`, `locale`.
+    pub value_text: MessageFn<dyn Fn(f64, f64, &str, &str, &str, &Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
@@ -588,9 +656,23 @@ impl Default for Messages {
         Self {
             label: MessageFn::static_str("Color area"),
             role_description: MessageFn::static_str("2d color picker"),
-            value_text: MessageFn::new(|x, y, x_name, y_name, _locale| {
-                format!("{} {:.0}%, {} {:.0}%", x_name, x * 100.0, y_name, y * 100.0)
-            }),
+            value_text: MessageFn::new(
+                |x_value: f64,
+                 y_value: f64,
+                 x_name: &str,
+                 y_name: &str,
+                 color_name: &str,
+                 _locale: &Locale| {
+                    format!(
+                        "{}, {} {:.0}%, {} {:.0}%",
+                        color_name,
+                        x_name,
+                        x_value * 100.0,
+                        y_name,
+                        y_value * 100.0
+                    )
+                },
+            ),
         }
     }
 }
@@ -602,7 +684,7 @@ impl ComponentMessages for Messages {}
 | ----------------------------- | -------------------------------------- | -------------------------- |
 | `color_area.label`            | `"Color area"`                         | Thumb aria-label           |
 | `color_area.role_description` | `"2d color picker"`                    | Thumb aria-roledescription |
-| `color_area.value_text`       | `"{x_channel} {x}%, {y_channel} {y}%"` | Thumb aria-valuetext       |
+| `color_area.value_text`       | `"{color_name}, {x_channel} {x}%, {y_channel} {y}%"` | Thumb aria-valuetext       |
 
 - **RTL**: x-axis gradient flips horizontally; ArrowLeft increments, ArrowRight decrements.
 - **Number formatting**: Channel values respect locale decimal separators.

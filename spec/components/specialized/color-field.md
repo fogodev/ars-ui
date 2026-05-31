@@ -80,6 +80,10 @@ pub enum Event {
     CompositionStart,
     /// IME composition ended.
     CompositionEnd,
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 ```
 
@@ -187,66 +191,89 @@ impl Default for Props {
 ### 1.5 Full Machine Implementation
 
 ```rust
+/// Whether a channel is shown and entered as a percentage (`0-100`) rather than
+/// its underlying `0..=1` fractional range.
+///
+/// Hue (degrees) and the 8-bit RGB channels are shown and entered as their raw
+/// numeric value; saturation, lightness, brightness, and alpha are shown and
+/// entered as percentages. Display formatting and commit parsing must agree on
+/// this scaling, otherwise typed percentages clamp directly into the fractional
+/// range (e.g. `50` -> `50.clamp(0, 1) == 1.0`).
+const fn channel_is_percentage(channel: ColorChannel) -> bool {
+    !matches!(
+        channel,
+        ColorChannel::Hue | ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue
+    )
+}
+
 /// Format a color value for display in the input.
 fn format_value(
     color: &ColorValue,
     channel: Option<ColorChannel>,
     color_format: ColorFormat,
 ) -> String {
-    match channel {
-        Some(ch) => {
-            let val = channel_value(color, ch);
-            match ch {
-                ColorChannel::Hue => format!("{:.0}", val),
-                ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => {
-                    format!("{:.0}", val)
-                }
-                _ => format!("{:.0}", val * 100.0),
-            }
+    if let Some(ch) = channel {
+        let val = channel_value(color, ch);
+
+        if channel_is_percentage(ch) {
+            format!("{:.0}", val * 100.0)
+        } else {
+            format!("{val:.0}")
         }
-        None => format_color_string(color, color_format),
+    } else {
+        format_color_string(color, color_format)
     }
 }
 
-/// Parse `input_text` and update `value`; reset `input_text` to formatted value.
-/// Sets `invalid` if parsing fails.
+/// Parse `input_text` and update `value`; reset `input_text` to the formatted
+/// value. Sets `invalid` when parsing fails.
 fn commit_input(ctx: &mut Context) {
-    match ctx.channel {
-        Some(ch) => {
-            // Channel mode: parse as f64.
-            match ctx.input_text.trim().parse::<f64>() {
-                Ok(raw) => {
-                    let (min, max) = channel_range(ch);
-                    let clamped = raw.clamp(min, max);
-                    if let Some(color) = ctx.value.get() {
-                        let new_color = with_channel(color, ch, clamped);
-                        ctx.value.set(Some(new_color.clone()));
-                        ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
-                        ctx.invalid = false;
-                    }
-                }
-                Err(_) => {
-                    ctx.invalid = true;
-                }
+    if let Some(ch) = ctx.channel {
+        // Channel mode: parse as f64. Reject non-finite input (`NaN`/`inf`),
+        // which `f64::parse` accepts but must not flow into a `ColorValue`.
+        if let Some(raw) = ctx
+            .input_text
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())
+        {
+            let (min, max) = channel_range(ch);
+
+            // Percentage channels are entered as 0-100 but stored as 0..=1.
+            let scaled = if channel_is_percentage(ch) {
+                raw / 100.0
+            } else {
+                raw
+            };
+
+            let clamped = scaled.clamp(min, max);
+
+            if let Some(color) = ctx.value.get() {
+                let new_color = with_channel(color, ch, clamped);
+
+                ctx.value.set(Some(new_color));
+                ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
+                ctx.invalid = false;
             }
+        } else {
+            ctx.invalid = true;
         }
-        None => {
-            // Whole-color mode: parse via parse_color_string.
-            if ctx.input_text.trim().is_empty() {
-                ctx.value.set(None);
-                ctx.invalid = ctx.required;
-                return;
-            }
-            match parse_color_string(&ctx.input_text) {
-                Some(color) => {
-                    ctx.value.set(Some(color.clone()));
-                    ctx.input_text = format_color_string(&color, ctx.color_format);
-                    ctx.invalid = false;
-                }
-                None => {
-                    ctx.invalid = true;
-                }
-            }
+    } else {
+        // Whole-color mode: parse via parse_color_string.
+        if ctx.input_text.trim().is_empty() {
+            ctx.value.set(None);
+            ctx.invalid = ctx.required;
+
+            return;
+        }
+
+        if let Some(color) = parse_color_string(&ctx.input_text) {
+            ctx.value.set(Some(color));
+            ctx.input_text = format_color_string(&color, ctx.color_format);
+            ctx.invalid = false;
+        } else {
+            ctx.invalid = true;
         }
     }
 }
@@ -321,46 +348,102 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &Self::State,
+        _state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // During IME composition, suppress all keyboard shortcuts.
+        // During IME composition, suppress all keyboard shortcuts. Parent-driven
+        // prop syncs (`SyncValue`/`SetProps`) fall through to the main match so a
+        // controlled field stays in step with its props even mid-composition.
         if ctx.is_composing {
-            return match event {
-                Event::CompositionEnd => Some(TransitionPlan::context_only(|ctx| {
-                    ctx.is_composing = false;
-                })),
-                Event::Change(text) => {
-                    let t = text.clone();
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.input_text = t;
-                    }))
+            match event {
+                Event::CompositionEnd => {
+                    return Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                        ctx.is_composing = false;
+                    }));
                 }
-                _ => None,
-            };
+
+                Event::Change(text) => {
+                    let next_text = text.clone();
+                    return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.input_text = next_text;
+                    }));
+                }
+
+                Event::SyncValue(_) | Event::SetProps => {}
+
+                _ => return None,
+            }
         }
 
+        // A disabled field tracks focus but ignores edits. Prop syncs still apply
+        // (so the field can be re-enabled), falling through to the main match.
         if ctx.disabled {
-            return match event {
+            match event {
                 Event::Focus { is_keyboard } => {
                     let kb = *is_keyboard;
-
-                    Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                        ctx.focused = true;
-                        ctx.focus_visible = kb;
-                    }))
+                    return Some(TransitionPlan::to(State::Focused).apply(
+                        move |ctx: &mut Context| {
+                            ctx.focused = true;
+                            ctx.focus_visible = kb;
+                        },
+                    ));
                 }
-                Event::Blur => Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    ctx.focused = false;
-                    ctx.focus_visible = false;
-                })),
-                _ => None,
-            };
+
+                Event::Blur => {
+                    return Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
+                        ctx.focused = false;
+                        ctx.focus_visible = false;
+                    }));
+                }
+
+                Event::SyncValue(_) | Event::SetProps => {}
+
+                _ => return None,
+            }
         }
 
         match event {
+            Event::SyncValue(value) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(
+                    move |ctx: &mut Context| match value {
+                        Some(color) => {
+                            ctx.value.set(Some(color));
+                            ctx.value.sync_controlled(Some(Some(color)));
+
+                            if !ctx.focused {
+                                ctx.input_text =
+                                    format_value(&color, ctx.channel, ctx.color_format);
+                            }
+
+                            ctx.invalid = false;
+                        }
+                        None => ctx.value.sync_controlled(None),
+                    },
+                ))
+            }
+
+            Event::SetProps => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let step = props
+                        .step
+                        .unwrap_or_else(|| props.channel.map_or(1.0, channel_step_default));
+
+                    ctx.channel = props.channel;
+                    ctx.color_format = props.color_format;
+                    ctx.step = step;
+                    ctx.large_step = props.large_step.unwrap_or(step * 10.0);
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.invalid = props.invalid;
+                    ctx.required = props.required;
+                    ctx.name = props.name.clone();
+                }))
+            }
+
             Event::Focus { is_keyboard } => {
                 let kb = *is_keyboard;
 
@@ -372,13 +455,22 @@ impl ars_core::Machine for Machine {
 
             Event::Blur => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    commit_input(ctx);
+                    // A read-only field must never mutate its value on blur.
+                    if !ctx.readonly {
+                        commit_input(ctx);
+                    }
                     ctx.focused = false;
                     ctx.focus_visible = false;
                 }))
             }
 
             Event::Change(text) => {
+                // Read-only fields ignore edits so input text cannot diverge from
+                // the committed value (and cannot be committed later on blur).
+                if ctx.readonly {
+                    return None;
+                }
+
                 let t = text.clone();
 
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -504,6 +596,25 @@ impl ars_core::Machine for Machine {
         }
     }
 
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_field::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
+    }
+
     fn connect<'a>(
         state: &'a Self::State,
         ctx: &'a Self::Context,
@@ -511,6 +622,28 @@ impl ars_core::Machine for Machine {
         send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
+    }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.channel != new.channel
+        || old.color_format != new.color_format
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.invalid != new.invalid
+        || old.required != new.required
+        || old.name != new.name
+        || option_f64_changed(old.step, new.step)
+        || option_f64_changed(old.large_step, new.large_step)
+}
+
+/// Compares two optional `f64` step values without a direct float `==`.
+fn option_f64_changed(old: Option<f64>, new: Option<f64>) -> bool {
+    match (old, new) {
+        (Some(old), Some(new)) => (old - new).abs() > f64::EPSILON,
+        (None, None) => false,
+        _ => true,
     }
 }
 ```
@@ -639,6 +772,7 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
         if self.ctx.readonly {
+            attrs.set_bool(HtmlAttr::ReadOnly, true);
             attrs.set_bool(HtmlAttr::Aria(AriaAttr::ReadOnly), true);
         }
         if self.ctx.disabled {
@@ -700,6 +834,10 @@ impl<'a> Api<'a> {
         }
         if let Some(color) = self.ctx.value.get() {
             attrs.set(HtmlAttr::Value, color.to_hex(true));
+        }
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
         }
         attrs
     }
@@ -779,10 +917,10 @@ ColorField
 | ------------ | --------- | ------------------------------------------------------------------------------------- |
 | Root         | `<div>`   | `data-ars-disabled`, `data-ars-readonly`, `data-ars-invalid`, `data-ars-focused`      |
 | Label        | `<label>` | `for` pointing to Input                                                               |
-| Input        | `<input>` | `type="text"`, `aria-labelledby`, `aria-invalid`, `aria-required`, `aria-describedby` |
+| Input        | `<input>` | `type="text"`, `aria-labelledby`, `aria-invalid`, `aria-required`, `aria-describedby`, native `readonly` (when read-only) |
 | Description  | `<div>`   | Referenced by Input `aria-describedby`                                                |
 | ErrorMessage | `<div>`   | `role="alert"`, referenced by Input `aria-describedby`                                |
-| HiddenInput  | `<input>` | `type="hidden"`, `name`, `value` (hex)                                                |
+| HiddenInput  | `<input>` | `type="hidden"`, `name`, `value` (hex), `disabled` (when disabled — omitted from form submission) |
 
 ## 3. Accessibility
 
@@ -800,7 +938,7 @@ ColorField
 | `aria-labelledby`                 | Input                    | Label element ID                               |
 | `aria-invalid`                    | Input                    | `"true"` when parse failed or external invalid |
 | `aria-required`                   | Input                    | `"true"` when required                         |
-| `aria-readonly`                   | Input                    | When read-only                                 |
+| `aria-readonly` / `readonly`      | Input                    | When read-only (both the native attribute and `aria-readonly` are set) |
 | `aria-disabled` / `disabled`      | Input                    | When disabled                                  |
 | `aria-describedby`                | Input                    | Description + ErrorMessage IDs                 |
 | `role="alert"`                    | ErrorMessage             | Live error announcement                        |

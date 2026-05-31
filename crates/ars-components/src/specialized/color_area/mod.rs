@@ -8,7 +8,7 @@
 //! (drag start) and drives [`Event::DragMove`] / [`Event::DragEnd`] from its own
 //! pointer listeners, exactly as the slider does.
 
-use alloc::{format, string::String};
+use alloc::{format, string::String, vec::Vec};
 use core::fmt::{self, Debug};
 
 use ars_core::{
@@ -25,8 +25,10 @@ type LabelFn = dyn Fn(&Locale) -> String + Send + Sync;
 /// Role description for the area thumb.
 type RoleDescriptionFn = dyn Fn(&Locale) -> String + Send + Sync;
 
-/// Formats both channel values for `aria-valuetext`.
-type ValueTextFn = dyn Fn(f64, f64, &str, &str, &Locale) -> String + Send + Sync;
+/// Formats both channel values plus the perceptual color name for
+/// `aria-valuetext`. Arguments: `x_value`, `y_value`, `x_channel_name`,
+/// `y_channel_name`, `color_name`, `locale`.
+type ValueTextFn = dyn Fn(f64, f64, &str, &str, &str, &Locale) -> String + Send + Sync;
 
 /// Consumer callback fired on drag-end / pointer release.
 type ChangeEndFn = dyn Fn(ColorValue) + Send + Sync;
@@ -109,6 +111,12 @@ pub enum Event {
 
     /// Focus left the thumb.
     Blur,
+
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 
 /// Typed identifier for side effects emitted by the `ColorArea` machine.
@@ -239,9 +247,15 @@ impl Default for Messages {
             label: MessageFn::static_str("Color area"),
             role_description: MessageFn::static_str("2d color picker"),
             value_text: MessageFn::new(
-                |x_value: f64, y_value: f64, x_name: &str, y_name: &str, _locale: &Locale| {
+                |x_value: f64,
+                 y_value: f64,
+                 x_name: &str,
+                 y_name: &str,
+                 color_name: &str,
+                 _locale: &Locale| {
                     format!(
-                        "{} {:.0}%, {} {:.0}%",
+                        "{}, {} {:.0}%, {} {:.0}%",
+                        color_name,
                         x_name,
                         x_value * 100.0,
                         y_name,
@@ -271,10 +285,14 @@ fn apply_area_position(ctx: &mut Context, x: f64, y: f64) {
 }
 
 /// Build the change-end effect that invokes `Props::on_change_end`.
+///
+/// Reports the *pending* value staged during the drag rather than the
+/// controlled `get()` value, which in controlled mode still holds the stale
+/// pre-drag color until the parent syncs the new value back through its prop.
 fn change_end_effect() -> PendingEffect<Machine> {
     PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
         if let Some(callback) = &props.on_change_end {
-            callback(*ctx.value.get());
+            callback(*ctx.value.pending());
         }
 
         no_cleanup()
@@ -328,25 +346,25 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        // A disabled area ignores value-changing input but still tracks focus
+        // and accepts parent-driven prop syncs (so it can be re-enabled).
         if ctx.disabled {
-            return match event {
-                Event::Focus { is_keyboard } => {
-                    let kb = *is_keyboard;
-                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                        ctx.focused = true;
-                        ctx.focus_visible = kb;
-                    }))
-                }
-
-                Event::Blur => Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                    ctx.focused = false;
-                    ctx.focus_visible = false;
-                })),
-
-                _ => None,
-            };
+            match event {
+                Event::DragStart { .. }
+                | Event::DragMove { .. }
+                | Event::DragEnd
+                | Event::IncrementX { .. }
+                | Event::DecrementX { .. }
+                | Event::IncrementY { .. }
+                | Event::DecrementY { .. }
+                | Event::SetXToMin
+                | Event::SetXToMax
+                | Event::SetYToMin
+                | Event::SetYToMax => return None,
+                _ => {}
+            }
         }
 
         match (state, event) {
@@ -517,8 +535,53 @@ impl ars_core::Machine for Machine {
                 ctx.focus_visible = false;
             })),
 
+            (_, Event::SyncValue(value)) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(
+                    move |ctx: &mut Context| match value {
+                        Some(color) => {
+                            ctx.value.set(color);
+                            ctx.value.sync_controlled(Some(color));
+                        }
+                        None => ctx.value.sync_controlled(None),
+                    },
+                ))
+            }
+
+            (_, Event::SetProps) => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.x_channel = props.x_channel;
+                    ctx.y_channel = props.y_channel;
+                    ctx.step = props.step;
+                    ctx.large_step = props.large_step;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.dir = props.dir;
+                }))
+            }
+
             _ => None,
         }
+    }
+
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_area::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -534,6 +597,20 @@ impl ars_core::Machine for Machine {
             send,
         }
     }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name` is omitted: it is read live from `Props` in `hidden_input_attrs`
+/// rather than cached in the context.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.x_channel != new.x_channel
+        || old.y_channel != new.y_channel
+        || (old.step - new.step).abs() > f64::EPSILON
+        || (old.large_step - new.large_step).abs() > f64::EPSILON
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.dir != new.dir
 }
 
 /// Structural parts exposed by the `ColorArea` connect API.
@@ -658,10 +735,18 @@ impl Api<'_> {
 
         let x_name = format!("{:?}", self.ctx.x_channel).to_lowercase();
         let y_name = format!("{:?}", self.ctx.y_channel).to_lowercase();
+        let color_name = color.color_name_en();
 
         attrs.set(
             HtmlAttr::Aria(AriaAttr::ValueText),
-            (self.ctx.messages.value_text)(x_val, y_val, &x_name, &y_name, &self.ctx.locale),
+            (self.ctx.messages.value_text)(
+                x_val,
+                y_val,
+                &x_name,
+                &y_name,
+                &color_name,
+                &self.ctx.locale,
+            ),
         );
 
         let x_pct = if (x_max - x_min).abs() > f64::EPSILON {
@@ -718,6 +803,11 @@ impl Api<'_> {
         }
 
         attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
 
         attrs
     }
@@ -957,6 +1047,108 @@ mod tests {
             svc.connect(&|_| {})
                 .thumb_attrs()
                 .contains(&HtmlAttr::Data("ars-focus-visible"))
+        );
+    }
+
+    #[test]
+    fn thumb_value_text_includes_perceptual_color_name() {
+        let color = ColorValue::from_hsl(120.0, 0.75, 0.4);
+        let svc = service(Props {
+            default_value: color,
+            ..Props::default()
+        });
+
+        let value_text = svc
+            .connect(&|_| {})
+            .thumb_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::ValueText))
+            .expect("value text present")
+            .to_string();
+
+        let perceptual = color.color_name_en();
+        assert!(
+            value_text.contains(&perceptual),
+            "value text '{value_text}' must include perceptual color name '{perceptual}'"
+        );
+    }
+
+    #[test]
+    fn drag_end_reports_pending_value_for_controlled_area() {
+        use alloc::sync::Arc;
+        use core::sync::atomic::{AtomicU64, Ordering};
+
+        use ars_core::{StrongSend, callback};
+
+        let reported = Arc::new(AtomicU64::new(u64::MAX));
+        let sink = Arc::clone(&reported);
+        let mut svc = service(Props {
+            // Controlled at saturation 0; a drag must report the new saturation.
+            value: Some(ColorValue::from_hsl(0.0, 0.0, 0.5)),
+            on_change_end: Some(callback(move |color: ColorValue| {
+                sink.store(color.saturation.to_bits(), Ordering::SeqCst);
+            })),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::DragStart { x: 1.0, y: 0.5 }));
+        let mut end = svc.send(Event::DragEnd);
+
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        for effect in end.pending_effects.drain(..) {
+            drop(effect.run(svc.context(), svc.props(), Arc::clone(&send)));
+        }
+
+        let reported_saturation = f64::from_bits(reported.load(Ordering::SeqCst));
+        assert!(
+            (reported_saturation - 1.0).abs() < 1e-9,
+            "on_change_end must report the pending saturation, got {reported_saturation}"
+        );
+    }
+
+    #[test]
+    fn set_props_syncs_controlled_value_and_disabled() {
+        let mut svc = service(Props {
+            value: Some(ColorValue::from_hsl(0.0, 0.2, 0.2)),
+            ..Props::default()
+        });
+
+        drop(svc.set_props(Props {
+            id: "color-area".to_string(),
+            value: Some(ColorValue::from_hsl(0.0, 0.9, 0.8)),
+            disabled: true,
+            ..Props::default()
+        }));
+
+        let api = svc.connect(&|_| {});
+        assert!((api.value().saturation - 0.9).abs() < 1e-9);
+        assert!(api.root_attrs().contains(&HtmlAttr::Data("ars-disabled")));
+
+        drop(svc.set_props(Props {
+            id: "color-area".to_string(),
+            value: Some(ColorValue::from_hsl(0.0, 0.9, 0.8)),
+            disabled: false,
+            ..Props::default()
+        }));
+        assert!(
+            !svc.connect(&|_| {})
+                .root_attrs()
+                .contains(&HtmlAttr::Data("ars-disabled"))
+        );
+    }
+
+    #[test]
+    fn disabled_area_omits_hidden_input_from_submission() {
+        let svc = service(Props {
+            name: Some("swatch".to_string()),
+            disabled: true,
+            ..Props::default()
+        });
+
+        assert_eq!(
+            svc.connect(&|_| {})
+                .hidden_input_attrs()
+                .get(&HtmlAttr::Disabled),
+            Some("true")
         );
     }
 

@@ -126,6 +126,12 @@ pub enum Event {
         /// The key that was pressed.
         key: KeyboardKey,
     },
+
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<f64>),
+
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 
 /// Typed identifier for side effects emitted by the `AngleSlider` machine.
@@ -251,10 +257,14 @@ impl Default for Messages {
 impl ComponentMessages for Messages {}
 
 /// Build the change-end effect that invokes `Props::on_change_end`.
+///
+/// Reports the *pending* value staged during the drag rather than the
+/// controlled `get()` value, which in controlled mode still holds the stale
+/// pre-drag angle until the parent syncs the new value back through its prop.
 fn change_end_effect() -> PendingEffect<Machine> {
     PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
         if let Some(callback) = &props.on_change_end {
-            callback(*ctx.value.get());
+            callback(*ctx.value.pending());
         }
 
         no_cleanup()
@@ -306,8 +316,38 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        // Parent-driven prop syncs always apply, even when disabled/readonly,
+        // so the control can be re-enabled and its controlled value updated.
+        match event {
+            Event::SyncValue(value) => {
+                let value = *value;
+                return Some(TransitionPlan::context_only(
+                    move |ctx: &mut Context| match value {
+                        Some(angle) => {
+                            ctx.value.set(angle);
+                            ctx.value.sync_controlled(Some(angle));
+                        }
+                        None => ctx.value.sync_controlled(None),
+                    },
+                ));
+            }
+
+            Event::SetProps => {
+                let props = props.clone();
+                return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.step = props.step;
+                    ctx.min = props.min;
+                    ctx.max = props.max;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                }));
+            }
+
+            _ => {}
+        }
+
         // Disabled and read-only both allow only focus/blur.
         if ctx.disabled || ctx.readonly {
             return match event {
@@ -429,6 +469,25 @@ impl ars_core::Machine for Machine {
         }
     }
 
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "angle_slider::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
+    }
+
     fn connect<'a>(
         state: &'a Self::State,
         ctx: &'a Self::Context,
@@ -442,6 +501,18 @@ impl ars_core::Machine for Machine {
             send,
         }
     }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name`/`form` are omitted: they are read live from `Props` in
+/// `hidden_input_attrs` rather than cached in the context.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    (old.step - new.step).abs() > f64::EPSILON
+        || (old.min - new.min).abs() > f64::EPSILON
+        || (old.max - new.max).abs() > f64::EPSILON
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
 }
 
 /// Structural parts exposed by the `AngleSlider` connect API.
@@ -773,6 +844,11 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Form, form.clone());
         }
 
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
+
         attrs
             .set(HtmlAttr::TabIndex, "-1")
             .set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
@@ -984,6 +1060,87 @@ mod tests {
         }
 
         assert_eq!(last.load(Ordering::SeqCst), 90);
+    }
+
+    #[test]
+    fn drag_end_reports_pending_value_for_controlled_slider() {
+        use alloc::sync::Arc;
+        use core::sync::atomic::{AtomicU32, Ordering};
+
+        use ars_core::{StrongSend, callback};
+
+        let last = Arc::new(AtomicU32::new(u32::MAX));
+        let sink = Arc::clone(&last);
+        let mut svc = service(Props {
+            value: Some(0.0),
+            step: 1.0,
+            on_change_end: Some(callback(move |degrees: f64| {
+                sink.store(degrees as u32, Ordering::SeqCst);
+            })),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::DragStart { angle: 120.0 }));
+        let mut end = svc.send(Event::DragEnd);
+
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        for effect in end.pending_effects.drain(..) {
+            drop(effect.run(svc.context(), svc.props(), Arc::clone(&send)));
+        }
+
+        // The dragged angle (120) must reach the callback, not the stale
+        // controlled value (0) that `get()` still returns.
+        assert_eq!(last.load(Ordering::SeqCst), 120);
+    }
+
+    #[test]
+    fn set_props_syncs_controlled_value_and_disabled() {
+        let mut svc = service(Props {
+            value: Some(30.0),
+            ..Props::default()
+        });
+
+        drop(svc.set_props(Props {
+            id: "angle-slider".to_string(),
+            value: Some(200.0),
+            disabled: true,
+            ..Props::default()
+        }));
+
+        let api = svc.connect(&|_| {});
+        assert!((api.value() - 200.0).abs() < 1e-9);
+        assert_eq!(
+            api.root_attrs().get(&HtmlAttr::Aria(AriaAttr::Disabled)),
+            Some("true")
+        );
+
+        drop(svc.set_props(Props {
+            id: "angle-slider".to_string(),
+            value: Some(200.0),
+            disabled: false,
+            ..Props::default()
+        }));
+        assert!(
+            !svc.connect(&|_| {})
+                .root_attrs()
+                .contains(&HtmlAttr::Aria(AriaAttr::Disabled))
+        );
+    }
+
+    #[test]
+    fn disabled_slider_omits_hidden_input_from_submission() {
+        let svc = service(Props {
+            name: Some("angle".to_string()),
+            disabled: true,
+            ..Props::default()
+        });
+
+        assert_eq!(
+            svc.connect(&|_| {})
+                .hidden_input_attrs()
+                .get(&HtmlAttr::Disabled),
+            Some("true")
+        );
     }
 
     #[test]

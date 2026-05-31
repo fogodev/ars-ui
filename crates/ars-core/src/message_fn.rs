@@ -199,12 +199,13 @@ impl<F: Fn(crate::color::ColorChannel, f64, &Locale) -> String + Send + Sync + '
     }
 }
 
-/// `From` impl for `MessageFn<dyn Fn(f64, f64, &str, &str, &Locale) -> String + Send + Sync>`.
+/// `From` impl for
+/// `MessageFn<dyn Fn(f64, f64, &str, &str, &str, &Locale) -> String + Send + Sync>`.
 ///
 /// Used by `ColorArea::Messages::value_text` to format a 2D `aria-valuetext`
-/// from two channel values and their channel names.
-impl<F: Fn(f64, f64, &str, &str, &Locale) -> String + Send + Sync + 'static> From<F>
-    for MessageFn<dyn Fn(f64, f64, &str, &str, &Locale) -> String + Send + Sync>
+/// from two channel values, their channel names, and the perceptual color name.
+impl<F: Fn(f64, f64, &str, &str, &str, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(f64, f64, &str, &str, &str, &Locale) -> String + Send + Sync>
 {
     fn from(f: F) -> Self {
         MessageFn(Arc::new(f))

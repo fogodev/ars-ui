@@ -681,6 +681,16 @@ fn strip_fn_call<'a>(input: &'a str, name: &str) -> Option<&'a str> {
         .strip_suffix(')')
 }
 
+/// Parse a finite `f64`, rejecting `NaN`/`inf`/`-inf`.
+///
+/// `str::parse::<f64>` accepts the IEEE-754 special-value spellings, which would
+/// otherwise flow into [`ColorValue`] components and surface as a debug-build
+/// panic (via the finiteness assertions in [`ColorValue::new`]) or as NaN/inf
+/// leaking into generated styles and ARIA values in release builds.
+fn parse_finite_f64(input: &str) -> Option<f64> {
+    input.parse::<f64>().ok().filter(|value| value.is_finite())
+}
+
 /// Parse `r, g, b` or `r, g, b, a` inside `rgb()` / `rgba()`.
 fn parse_rgb_args(inner: &str, has_alpha: bool) -> Option<ColorValue> {
     let parts = inner.split(',').map(str::trim).collect::<Vec<_>>();
@@ -698,7 +708,7 @@ fn parse_rgb_args(inner: &str, has_alpha: bool) -> Option<ColorValue> {
     let blue = parts[2].parse::<u8>().ok()?;
 
     let alpha = if has_alpha {
-        parts[3].parse::<f64>().ok()?
+        parse_finite_f64(parts[3])?
     } else {
         1.0
     };
@@ -722,12 +732,12 @@ fn parse_hsl_args(inner: &str, has_alpha: bool) -> Option<ColorValue> {
         return None;
     }
 
-    let hue = parts[0].parse::<f64>().ok()?;
-    let saturation = parts[1].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0;
-    let lightness = parts[2].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0;
+    let hue = parse_finite_f64(parts[0])?;
+    let saturation = parse_finite_f64(parts[1].strip_suffix('%')?.trim())? / 100.0;
+    let lightness = parse_finite_f64(parts[2].strip_suffix('%')?.trim())? / 100.0;
 
     let alpha = if has_alpha {
-        parts[3].parse::<f64>().ok()?
+        parse_finite_f64(parts[3])?
     } else {
         1.0
     };
@@ -748,9 +758,9 @@ fn parse_hsb_args(inner: &str) -> Option<ColorValue> {
         return None;
     }
 
-    let hue = parts[0].parse::<f64>().ok()?;
-    let saturation = parts[1].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0;
-    let brightness = parts[2].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0;
+    let hue = parse_finite_f64(parts[0])?;
+    let saturation = parse_finite_f64(parts[1].strip_suffix('%')?.trim())? / 100.0;
+    let brightness = parse_finite_f64(parts[2].strip_suffix('%')?.trim())? / 100.0;
 
     // Convert HSB -> HSL: lightness = brightness * (1 - saturation/2).
     let lightness = brightness * (1.0 - saturation / 2.0);
@@ -1182,5 +1192,22 @@ mod tests {
     fn parse_color_string_dispatches_hex() {
         // The `#` branch of the dispatcher delegates to `from_hex`.
         assert_eq!(parse_color_string("#00ff00").unwrap().to_rgb(), (0, 255, 0));
+    }
+
+    #[test]
+    fn parse_rejects_non_finite_components() {
+        // `f64::parse` accepts "NaN"/"inf"/"-inf", which would otherwise build a
+        // `ColorValue` with non-finite components: a debug-build panic via the
+        // `ColorValue::new` finiteness assertions, and NaN/inf leaking into
+        // generated styles and ARIA values in release builds.
+        assert_eq!(parse_color_string("hsl(NaN, 100%, 50%)"), None);
+        assert_eq!(parse_color_string("hsl(inf, 100%, 50%)"), None);
+        assert_eq!(parse_color_string("hsl(0, NaN%, 50%)"), None);
+        assert_eq!(parse_color_string("hsl(0, 100%, inf%)"), None);
+        assert_eq!(parse_color_string("hsla(0, 100%, 50%, NaN)"), None);
+        assert_eq!(parse_color_string("hsb(NaN, 100%, 100%)"), None);
+        assert_eq!(parse_color_string("hsb(0, inf%, 100%)"), None);
+        assert_eq!(parse_color_string("rgba(0, 0, 0, NaN)"), None);
+        assert_eq!(parse_color_string("rgba(0, 0, 0, inf)"), None);
     }
 }

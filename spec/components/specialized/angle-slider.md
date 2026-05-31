@@ -72,6 +72,10 @@ pub enum Event {
         /// The key that was pressed.
         key: KeyboardKey,
     },
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<f64>),
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 ```
 
@@ -190,10 +194,14 @@ pub enum Effect {
 }
 
 /// Build the change-end effect that invokes `Props::on_change_end`.
+///
+/// Reports the *pending* value staged during the drag rather than the
+/// controlled `get()` value, which in controlled mode still holds the stale
+/// pre-drag angle until the parent syncs the new value back through its prop.
 fn change_end_effect() -> PendingEffect<Machine> {
     PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
         if let Some(callback) = &props.on_change_end {
-            callback(*ctx.value.get());
+            callback(*ctx.value.pending());
         }
         no_cleanup()
     })
@@ -239,8 +247,34 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        // Parent-driven prop syncs always apply, even when disabled/readonly,
+        // so the control can be re-enabled and its controlled value updated.
+        match event {
+            Event::SyncValue(value) => {
+                let value = *value;
+                return Some(TransitionPlan::context_only(move |ctx| match value {
+                    Some(angle) => {
+                        ctx.value.set(angle);
+                        ctx.value.sync_controlled(Some(angle));
+                    }
+                    None => ctx.value.sync_controlled(None),
+                }));
+            }
+            Event::SetProps => {
+                let props = props.clone();
+                return Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.step = props.step;
+                    ctx.min = props.min;
+                    ctx.max = props.max;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                }));
+            }
+            _ => {}
+        }
+
         // Disabled blocks all except Focus/Blur.
         if ctx.disabled {
             match event {
@@ -382,6 +416,25 @@ impl ars_core::Machine for Machine {
         }
     }
 
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "angle_slider::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
+    }
+
     fn connect<'a>(
         state: &'a Self::State,
         ctx: &'a Self::Context,
@@ -390,6 +443,18 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name`/`form` are omitted: they are read live from `Props` in
+/// `hidden_input_attrs` rather than cached in the context.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    (old.step - new.step).abs() > f64::EPSILON
+        || (old.min - new.min).abs() > f64::EPSILON
+        || (old.max - new.max).abs() > f64::EPSILON
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
 }
 ```
 
@@ -597,6 +662,10 @@ impl<'a> Api<'a> {
         if let Some(ref form) = self.props.form {
             attrs.set(HtmlAttr::Form, form);
         }
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         attrs.set(HtmlAttr::TabIndex, "-1");
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs
@@ -647,7 +716,7 @@ AngleSlider
 | ValueText   | `<output>`              | `aria-live="off"`, displays formatted angle              |
 | MarkerGroup | `<div>`                 | `role="presentation"`, container for markers             |
 | Marker      | `<div>`                 | Positioned by angle via CSS custom property              |
-| HiddenInput | `<input type="hidden">` | Form submission value                                    |
+| HiddenInput | `<input type="hidden">` | Form submission value, `disabled` (when disabled -- omitted from form submission) |
 
 **9 parts total.**
 

@@ -54,6 +54,10 @@ pub enum Event {
     Focus { is_keyboard: bool },
     /// Focus left the thumb.
     Blur,
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 ```
 
@@ -162,14 +166,14 @@ pub enum Effect {
 
 /// Build the change-end effect that invokes `Props::on_change_end`.
 ///
-/// Live track measurement and pointer capture are adapter concerns: the
-/// adapter drives `Event::DragMove` / `Event::DragEnd` from its own pointer
-/// listeners (like `Slider`), so the core registers no listeners and only fires
-/// this named effect on release.
+/// Reports the *pending* value (the one staged during the drag) rather than the
+/// controlled `get()` value: in controlled mode the parent has not yet synced
+/// the new value back through its prop, so `get()` would still return the stale
+/// pre-drag color.
 fn change_end_effect() -> PendingEffect<Machine> {
     PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
         if let Some(callback) = &props.on_change_end {
-            callback(*ctx.value.get());
+            callback(*ctx.value.pending());
         }
         no_cleanup()
     })
@@ -216,23 +220,21 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        // A disabled slider ignores value-changing input but still tracks focus
+        // and accepts parent-driven prop syncs (so it can be re-enabled).
         if ctx.disabled {
-            return match event {
-                Event::Focus { is_keyboard } => {
-                    let kb = *is_keyboard;
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.focused = true;
-                        ctx.focus_visible = kb;
-                    }))
-                }
-                Event::Blur => Some(TransitionPlan::context_only(|ctx| {
-                    ctx.focused = false;
-                    ctx.focus_visible = false;
-                })),
-                _ => None,
-            };
+            match event {
+                Event::DragStart { .. }
+                | Event::DragMove { .. }
+                | Event::DragEnd
+                | Event::Increment { .. }
+                | Event::Decrement { .. }
+                | Event::SetToMin
+                | Event::SetToMax => return None,
+                _ => {}
+            }
         }
 
         match (state, event) {
@@ -312,8 +314,51 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (_, Event::SyncValue(value)) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(move |ctx| match value {
+                    Some(color) => {
+                        ctx.value.set(color);
+                        ctx.value.sync_controlled(Some(color));
+                    }
+                    None => ctx.value.sync_controlled(None),
+                }))
+            }
+
+            (_, Event::SetProps) => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.channel = props.channel;
+                    ctx.orientation = props.orientation;
+                    ctx.step = props.step;
+                    ctx.large_step = props.large_step;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.dir = props.dir;
+                }))
+            }
+
             _ => None,
         }
+    }
+
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_slider::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -324,6 +369,20 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name` is omitted: it is read live from `Props` in `hidden_input_attrs`
+/// rather than cached in the context, so a name-only change needs no resync.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.channel != new.channel
+        || old.orientation != new.orientation
+        || (old.step - new.step).abs() > f64::EPSILON
+        || (old.large_step - new.large_step).abs() > f64::EPSILON
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.dir != new.dir
 }
 ```
 
@@ -465,6 +524,10 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Name, name);
         }
         attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         attrs
     }
 
@@ -521,7 +584,7 @@ ColorSlider
 | Track       | `<div>`    | gradient background via CSS custom property                                  |
 | Thumb       | `<div>`    | `role="slider"`, `aria-valuenow/min/max`, `aria-orientation`, `tabindex="0"` |
 | Output      | `<output>` | `for` (thumb id), `aria-live="off"`                                          |
-| HiddenInput | `<input>`  | `type="hidden"`, `name`, `value` (hex color)                                 |
+| HiddenInput | `<input>`  | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled — omitted from form submission) |
 
 ## 3. Accessibility
 

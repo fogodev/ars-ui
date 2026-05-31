@@ -91,6 +91,12 @@ pub enum Event {
 
     /// IME composition ended.
     CompositionEnd,
+
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 
 /// The context for the `ColorField` component.
@@ -250,6 +256,21 @@ impl Default for Messages {
 
 impl ComponentMessages for Messages {}
 
+/// Whether a channel is presented to the user as a `0..=100` percentage of its
+/// underlying `0..=1` fractional range.
+///
+/// Hue (degrees) and the 8-bit RGB channels are shown and entered as their raw
+/// numeric value; saturation, lightness, brightness, and alpha are shown and
+/// entered as percentages. Display formatting and commit parsing must agree on
+/// this scaling, otherwise typed percentages clamp directly into the fractional
+/// range (e.g. `50` -> `50.clamp(0, 1) == 1.0`).
+const fn channel_is_percentage(channel: ColorChannel) -> bool {
+    !matches!(
+        channel,
+        ColorChannel::Hue | ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue
+    )
+}
+
 /// Format a color value for display in the input.
 fn format_value(
     color: &ColorValue,
@@ -259,11 +280,10 @@ fn format_value(
     if let Some(ch) = channel {
         let val = channel_value(color, ch);
 
-        match ch {
-            ColorChannel::Hue | ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => {
-                format!("{val:.0}")
-            }
-            _ => format!("{:.0}", val * 100.0),
+        if channel_is_percentage(ch) {
+            format!("{:.0}", val * 100.0)
+        } else {
+            format!("{val:.0}")
         }
     } else {
         format_color_string(color, color_format)
@@ -274,11 +294,25 @@ fn format_value(
 /// value. Sets `invalid` when parsing fails.
 fn commit_input(ctx: &mut Context) {
     if let Some(ch) = ctx.channel {
-        // Channel mode: parse as f64.
-        if let Ok(raw) = ctx.input_text.trim().parse::<f64>() {
+        // Channel mode: parse as f64. Reject non-finite input (`NaN`/`inf`),
+        // which `f64::parse` accepts but must not flow into a `ColorValue`.
+        if let Some(raw) = ctx
+            .input_text
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())
+        {
             let (min, max) = channel_range(ch);
 
-            let clamped = raw.clamp(min, max);
+            // Percentage channels are entered as 0-100 but stored as 0..=1.
+            let scaled = if channel_is_percentage(ch) {
+                raw / 100.0
+            } else {
+                raw
+            };
+
+            let clamped = scaled.clamp(min, max);
 
             if let Some(color) = ctx.value.get() {
                 let new_color = with_channel(color, ch, clamped);
@@ -405,48 +439,99 @@ impl ars_core::Machine for Machine {
         _state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // During IME composition, suppress all keyboard shortcuts.
+        // During IME composition, suppress all keyboard shortcuts. Parent-driven
+        // prop syncs (`SyncValue`/`SetProps`) fall through to the main match so a
+        // controlled field stays in step with its props even mid-composition.
         if ctx.is_composing {
-            return match event {
-                Event::CompositionEnd => Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                    ctx.is_composing = false;
-                })),
+            match event {
+                Event::CompositionEnd => {
+                    return Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                        ctx.is_composing = false;
+                    }));
+                }
 
                 Event::Change(text) => {
                     let next_text = text.clone();
-                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                         ctx.input_text = next_text;
-                    }))
+                    }));
                 }
 
-                _ => None,
-            };
+                Event::SyncValue(_) | Event::SetProps => {}
+
+                _ => return None,
+            }
         }
 
+        // A disabled field tracks focus but ignores edits. Prop syncs still apply
+        // (so the field can be re-enabled), falling through to the main match.
         if ctx.disabled {
-            return match event {
+            match event {
                 Event::Focus { is_keyboard } => {
                     let kb = *is_keyboard;
-                    Some(
-                        TransitionPlan::to(State::Focused).apply(move |ctx: &mut Context| {
+                    return Some(TransitionPlan::to(State::Focused).apply(
+                        move |ctx: &mut Context| {
                             ctx.focused = true;
                             ctx.focus_visible = kb;
-                        }),
-                    )
+                        },
+                    ));
                 }
 
-                Event::Blur => Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
-                    ctx.focused = false;
-                    ctx.focus_visible = false;
-                })),
+                Event::Blur => {
+                    return Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
+                        ctx.focused = false;
+                        ctx.focus_visible = false;
+                    }));
+                }
 
-                _ => None,
-            };
+                Event::SyncValue(_) | Event::SetProps => {}
+
+                _ => return None,
+            }
         }
 
         match event {
+            Event::SyncValue(value) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(
+                    move |ctx: &mut Context| match value {
+                        Some(color) => {
+                            ctx.value.set(Some(color));
+                            ctx.value.sync_controlled(Some(Some(color)));
+
+                            if !ctx.focused {
+                                ctx.input_text =
+                                    format_value(&color, ctx.channel, ctx.color_format);
+                            }
+
+                            ctx.invalid = false;
+                        }
+                        None => ctx.value.sync_controlled(None),
+                    },
+                ))
+            }
+
+            Event::SetProps => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let step = props
+                        .step
+                        .unwrap_or_else(|| props.channel.map_or(1.0, channel_step_default));
+
+                    ctx.channel = props.channel;
+                    ctx.color_format = props.color_format;
+                    ctx.step = step;
+                    ctx.large_step = props.large_step.unwrap_or(step * 10.0);
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.invalid = props.invalid;
+                    ctx.required = props.required;
+                    ctx.name = props.name.clone();
+                }))
+            }
+
             Event::Focus { is_keyboard } => {
                 let kb = *is_keyboard;
                 Some(
@@ -458,13 +543,22 @@ impl ars_core::Machine for Machine {
             }
 
             Event::Blur => Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
-                commit_input(ctx);
+                // A read-only field must never mutate its value on blur.
+                if !ctx.readonly {
+                    commit_input(ctx);
+                }
 
                 ctx.focused = false;
                 ctx.focus_visible = false;
             })),
 
             Event::Change(text) => {
+                // Read-only fields ignore edits so input text cannot diverge from
+                // the committed value (and cannot be committed later on blur).
+                if ctx.readonly {
+                    return None;
+                }
+
                 let next_text = text.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.input_text = next_text;
@@ -581,6 +675,25 @@ impl ars_core::Machine for Machine {
         }
     }
 
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_field::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
+    }
+
     fn connect<'a>(
         state: &'a Self::State,
         ctx: &'a Self::Context,
@@ -588,6 +701,28 @@ impl ars_core::Machine for Machine {
         send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, send }
+    }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.channel != new.channel
+        || old.color_format != new.color_format
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.invalid != new.invalid
+        || old.required != new.required
+        || old.name != new.name
+        || option_f64_changed(old.step, new.step)
+        || option_f64_changed(old.large_step, new.large_step)
+}
+
+/// Compares two optional `f64` step values without a direct float `==`.
+fn option_f64_changed(old: Option<f64>, new: Option<f64>) -> bool {
+    match (old, new) {
+        (Some(old), Some(new)) => (old - new).abs() > f64::EPSILON,
+        (None, None) => false,
+        _ => true,
     }
 }
 
@@ -754,7 +889,9 @@ impl Api<'_> {
         }
 
         if self.ctx.readonly {
-            attrs.set_bool(HtmlAttr::Aria(AriaAttr::ReadOnly), true);
+            attrs
+                .set_bool(HtmlAttr::ReadOnly, true)
+                .set_bool(HtmlAttr::Aria(AriaAttr::ReadOnly), true);
         }
 
         if self.ctx.disabled {
@@ -835,6 +972,11 @@ impl Api<'_> {
 
         if let Some(color) = self.ctx.value.get() {
             attrs.set(HtmlAttr::Value, color.to_hex(true));
+        }
+
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
         attrs
@@ -1165,6 +1307,135 @@ mod tests {
         drop(svc.send(Event::Commit));
 
         assert!(svc.connect(&|_| {}).value().is_none());
+    }
+
+    #[test]
+    fn percentage_channel_commit_does_not_inflate_value() {
+        // Saturation is displayed as a 0-100 percentage but stored as a 0..=1
+        // fraction. Init formats 0.5 -> "50"; focusing and blurring without an
+        // edit must commit 0.5 again, not clamp the raw "50" to the channel
+        // range (which previously yielded 1.0 / 100%).
+        let mut svc = service(Props {
+            channel: Some(ColorChannel::Saturation),
+            default_value: Some(ColorValue::from_hsl(120.0, 0.5, 0.5)),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Focus { is_keyboard: false }));
+        drop(svc.send(Event::Blur));
+
+        let saturation = svc.connect(&|_| {}).value().unwrap().saturation;
+        assert!(
+            (saturation - 0.5).abs() < 1e-9,
+            "saturation should round-trip at 0.5, got {saturation}"
+        );
+
+        // Typing a fresh percentage commits the scaled fraction.
+        drop(svc.send(Event::Change("75".to_string())));
+        drop(svc.send(Event::Commit));
+
+        let saturation = svc.connect(&|_| {}).value().unwrap().saturation;
+        assert!(
+            (saturation - 0.75).abs() < 1e-9,
+            "saturation should commit 0.75, got {saturation}"
+        );
+    }
+
+    #[test]
+    fn raw_channel_commit_is_not_scaled() {
+        // Hue is displayed and committed as raw degrees (no percentage scaling).
+        let mut svc = service(Props {
+            channel: Some(ColorChannel::Hue),
+            default_value: Some(ColorValue::from_hsl(120.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Change("210".to_string())));
+        drop(svc.send(Event::Commit));
+
+        assert_eq!(svc.connect(&|_| {}).value().unwrap().hue, 210.0);
+    }
+
+    #[test]
+    fn readonly_field_sets_native_attr_and_blocks_blur_commit() {
+        let mut svc = service(Props {
+            readonly: true,
+            default_value: Some(ColorValue::from_rgb(255, 0, 0)),
+            ..Props::default()
+        });
+
+        assert!(
+            svc.connect(&|_| {})
+                .input_attrs()
+                .contains(&HtmlAttr::ReadOnly),
+            "native readonly attribute must be set"
+        );
+
+        drop(svc.send(Event::Focus { is_keyboard: false }));
+        drop(svc.send(Event::Change("#0000ff".to_string())));
+        drop(svc.send(Event::Blur));
+
+        assert_eq!(
+            svc.connect(&|_| {}).value().unwrap().to_rgb(),
+            (255, 0, 0),
+            "a readonly field must not commit edits on blur"
+        );
+    }
+
+    #[test]
+    fn set_props_syncs_controlled_value_and_flags() {
+        let mut svc = service(Props {
+            value: Some(ColorValue::from_rgb(255, 0, 0)),
+            ..Props::default()
+        });
+
+        drop(svc.set_props(Props {
+            id: "color-field".to_string(),
+            value: Some(ColorValue::from_rgb(0, 0, 255)),
+            disabled: true,
+            ..Props::default()
+        }));
+
+        let api = svc.connect(&|_| {});
+        assert_eq!(
+            api.value().expect("controlled value present").to_rgb(),
+            (0, 0, 255),
+            "controlled value must follow the new prop"
+        );
+        assert_eq!(api.input_text(), "#0000ff", "input text reformats on sync");
+        assert!(
+            api.input_attrs().contains(&HtmlAttr::Disabled),
+            "disabled flag must sync"
+        );
+
+        drop(svc.set_props(Props {
+            id: "color-field".to_string(),
+            value: Some(ColorValue::from_rgb(0, 0, 255)),
+            disabled: false,
+            ..Props::default()
+        }));
+        assert!(
+            !svc.connect(&|_| {})
+                .input_attrs()
+                .contains(&HtmlAttr::Disabled)
+        );
+    }
+
+    #[test]
+    fn disabled_field_omits_hidden_input_from_submission() {
+        let svc = service(Props {
+            name: Some("color".to_string()),
+            default_value: Some(ColorValue::from_rgb(255, 0, 0)),
+            disabled: true,
+            ..Props::default()
+        });
+
+        assert_eq!(
+            svc.connect(&|_| {})
+                .hidden_input_attrs()
+                .get(&HtmlAttr::Disabled),
+            Some("true")
+        );
     }
 
     #[test]
