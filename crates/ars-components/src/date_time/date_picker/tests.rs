@@ -1863,6 +1863,103 @@ fn disabled_hidden_input_is_disabled() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Codex review #697 (pass 5, P5-4) — focus intent through controlled sync
+// ────────────────────────────────────────────────────────────────────
+//
+// For controlled `open`, the state change lands in `SyncProps` (the parent
+// echoes the prop), and the focus effect must reproduce the *originating* user
+// intent rather than always focusing the calendar on open / the trigger on
+// close.
+
+/// Drives a controlled-open round trip: the user event is sent (recording the
+/// request without changing `State`), then the parent echoes `open` via
+/// `set_props`, and we return the effects emitted by that reconciliation.
+fn controlled_reconcile(initial_open: bool, user_event: Event, echoed_open: bool) -> Vec<Effect> {
+    let mut svc = service_with(
+        Props {
+            open: Some(initial_open),
+            default_value: Some(date(2024, 3, 15)),
+            ..props()
+        },
+        en_us(),
+    );
+    drop(svc.send(user_event));
+    // State is unchanged by the user event under controlled open.
+    assert_eq!(*svc.state() == State::Open, initial_open);
+    effects(svc.set_props(Props {
+        open: Some(echoed_open),
+        default_value: Some(date(2024, 3, 15)),
+        ..props()
+    }))
+}
+
+#[test]
+fn controlled_focus_in_open_keeps_input_focus_through_sync() {
+    // Input-focus open then parent echoes open=true: focus must NOT move into the
+    // calendar (no FocusCalendar), unlike a trigger open.
+    let emitted = controlled_reconcile(false, Event::FocusIn, true);
+    assert!(!emitted.contains(&Effect::FocusCalendar));
+    assert!(!emitted.contains(&Effect::RestoreFocusToTrigger));
+}
+
+#[test]
+fn controlled_trigger_open_focuses_calendar_through_sync() {
+    // Trigger open then echo: focus moves into the calendar.
+    let emitted = controlled_reconcile(false, Event::Open, true);
+    assert!(emitted.contains(&Effect::FocusCalendar));
+}
+
+#[test]
+fn controlled_close_restores_trigger_through_sync() {
+    let emitted = controlled_reconcile(true, Event::Close, false);
+    assert!(emitted.contains(&Effect::RestoreFocusToTrigger));
+    assert!(!emitted.contains(&Effect::RestoreFocusToInput));
+}
+
+#[test]
+fn controlled_select_close_restores_input_through_sync() {
+    // SelectDate-close then echo close: focus restores to the INPUT, not trigger.
+    let emitted = controlled_reconcile(
+        true,
+        Event::SelectDate {
+            date: date(2024, 4, 20),
+        },
+        false,
+    );
+    assert!(emitted.contains(&Effect::RestoreFocusToInput));
+    assert!(!emitted.contains(&Effect::RestoreFocusToTrigger));
+}
+
+#[test]
+fn controlled_focus_out_close_steals_no_focus_through_sync() {
+    // FocusOut close then echo: no focus effect (focus already left the field).
+    let emitted = controlled_reconcile(true, Event::FocusOut, false);
+    assert!(!emitted.contains(&Effect::RestoreFocusToTrigger));
+    assert!(!emitted.contains(&Effect::RestoreFocusToInput));
+    assert!(!emitted.contains(&Effect::FocusCalendar));
+}
+
+#[test]
+fn programmatic_controlled_open_defaults_to_focus_calendar() {
+    // No preceding user event: a programmatic controlled open uses the
+    // per-direction default (focus the calendar).
+    let mut svc = service_with(
+        Props {
+            open: Some(false),
+            ..props()
+        },
+        en_us(),
+    );
+
+    let emitted = effects(svc.set_props(Props {
+        open: Some(true),
+        ..props()
+    }));
+
+    assert!(emitted.contains(&Effect::FocusCalendar));
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Snapshots — root
 // ────────────────────────────────────────────────────────────────────
 

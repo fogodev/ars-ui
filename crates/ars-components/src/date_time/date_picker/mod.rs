@@ -318,6 +318,13 @@ pub struct Context {
     /// fires.
     pub requested_open: bool,
 
+    /// Focus move to perform the next time an open/close lands, recorded per
+    /// user event so a controlled-`open` reconciliation (which lands the state
+    /// change in `SyncProps`, not at the user event) reproduces the originating
+    /// intent. `None` means "no pending override" — `SyncProps` then uses the
+    /// per-direction default (calendar on open, trigger on close).
+    requested_focus: Option<OpenFocus>,
+
     /// Locale for formatting and parsing.
     pub locale: Locale,
 
@@ -677,21 +684,50 @@ fn restore_focus_to_input_effect() -> PendingEffect<Machine> {
     PendingEffect::named(Effect::RestoreFocusToInput)
 }
 
+/// The focus move that should accompany an open/close once it actually lands.
+///
+/// Recorded per user event so a controlled-`open` reconciliation (which lands
+/// the state change later, in `SyncProps`) can reproduce the *originating*
+/// intent instead of always focusing the calendar on open / the trigger on
+/// close. Internal: the adapter only ever sees the resulting focus `Effect`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OpenFocus {
+    /// Move focus into the calendar (trigger / `ArrowDown` open).
+    Calendar,
+    /// Restore focus to the trigger (`Close` / Escape).
+    Trigger,
+    /// Restore focus to the input (`SelectDate` close).
+    Input,
+    /// Do not move focus (input-focus open, focus-out close).
+    None,
+}
+
+impl OpenFocus {
+    fn effect(self) -> Option<PendingEffect<Machine>> {
+        match self {
+            OpenFocus::Calendar => Some(focus_calendar_effect()),
+            OpenFocus::Trigger => Some(restore_focus_to_trigger_effect()),
+            OpenFocus::Input => Some(restore_focus_to_input_effect()),
+            OpenFocus::None => None,
+        }
+    }
+}
+
 /// Builds the plan for a user-driven request to open or close the popover.
 ///
 /// When `open` is **controlled** (`props.open.is_some()`), the [`State`] is not
-/// mutated: the request is recorded in [`Context::requested_open`] and signalled
-/// via [`Effect::OpenChange`] so the parent reconciles by updating the `open`
-/// prop. No focus effect fires, because nothing visibly changed yet. When
-/// **uncontrolled**, the `State` transitions and the supplied `focus` effect (if
-/// any) fires.
+/// mutated: the request is recorded in [`Context::requested_open`] (and the
+/// `focus` intent in `requested_focus`) and signalled via [`Effect::OpenChange`]
+/// so the parent reconciles by updating the `open` prop — the focus effect then
+/// fires from `SyncProps` once the state actually lands. When **uncontrolled**,
+/// the `State` transitions and the `focus` effect fires immediately.
 ///
 /// Returns `None` when the popover is already in the requested open state.
 fn open_request(
     state: &State,
     props: &Props,
     target_open: bool,
-    focus: Option<PendingEffect<Machine>>,
+    focus: OpenFocus,
 ) -> Option<TransitionPlan<Machine>> {
     if (*state == State::Open) == target_open {
         return None;
@@ -709,10 +745,16 @@ fn open_request(
     };
 
     plan = plan
-        .apply(move |ctx: &mut Context| ctx.requested_open = target_open)
+        .apply(move |ctx: &mut Context| {
+            ctx.requested_open = target_open;
+            if controlled {
+                // Defer the focus move to `SyncProps`, which lands the state.
+                ctx.requested_focus = Some(focus);
+            }
+        })
         .with_effect(open_change_effect());
 
-    if !controlled && let Some(focus) = focus {
+    if !controlled && let Some(focus) = focus.effect() {
         plan = plan.with_effect(focus);
     }
 
@@ -813,6 +855,7 @@ impl ars_core::Machine for Machine {
             parsed_date: None,
             requested_value,
             requested_open,
+            requested_focus: None,
             locale,
             messages: messages.clone(),
             format,
@@ -881,6 +924,12 @@ impl ars_core::Machine for Machine {
             let opening = !was_open && target.as_ref() == Some(&State::Open);
             let closing = was_open && target.as_ref() == Some(&State::Closed);
 
+            // The focus intent recorded by the user event that prompted this
+            // reconciliation (read before the apply closure consumes it). When a
+            // controlled change is purely programmatic (no preceding user event),
+            // it is `None` and the per-direction default applies.
+            let pending_focus = ctx.requested_focus;
+
             let mut plan = if let Some(next) = target {
                 TransitionPlan::to(next)
             } else {
@@ -891,17 +940,22 @@ impl ars_core::Machine for Machine {
                 if let Some(open) = new_props.open {
                     ctx.requested_open = open;
                 }
+                // Consume the pending focus intent.
+                ctx.requested_focus = None;
                 sync_props_into_ctx(ctx, &new_props);
             });
 
             // No `OpenChange` here: a controlled `open` prop change is the
             // parent's own doing, so re-notifying would double-fire (and loop
-            // against a user request that prompted the prop change). Focus still
-            // follows the actual open/close that lands at sync time.
-            if opening {
-                plan = plan.with_effect(focus_calendar_effect());
-            } else if closing {
-                plan = plan.with_effect(restore_focus_to_trigger_effect());
+            // against a user request that prompted the prop change). Focus
+            // reproduces the originating user intent (or the per-direction
+            // default for a programmatic change).
+            if opening && let Some(focus) = pending_focus.unwrap_or(OpenFocus::Calendar).effect() {
+                plan = plan.with_effect(focus);
+            } else if closing
+                && let Some(focus) = pending_focus.unwrap_or(OpenFocus::Trigger).effect()
+            {
+                plan = plan.with_effect(focus);
             }
 
             return Some(plan);
@@ -919,12 +973,10 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly {
                     return None;
                 }
-                open_request(state, props, true, Some(focus_calendar_effect()))
+                open_request(state, props, true, OpenFocus::Calendar)
             }
 
-            Event::Close => {
-                open_request(state, props, false, Some(restore_focus_to_trigger_effect()))
-            }
+            Event::Close => open_request(state, props, false, OpenFocus::Trigger),
 
             Event::Toggle => match state {
                 State::Closed => Self::transition(state, &Event::Open, ctx, props),
@@ -989,6 +1041,11 @@ impl ars_core::Machine for Machine {
                     ctx.is_touched = true;
                     if should_close {
                         ctx.requested_open = false;
+                        if !commit_close {
+                            // Controlled close: defer the focus restore to the
+                            // input until the parent echoes the close.
+                            ctx.requested_focus = Some(OpenFocus::Input);
+                        }
                     }
                 });
 
@@ -1095,13 +1152,13 @@ impl ars_core::Machine for Machine {
                 // so no focus effect is passed — only explicit trigger/ArrowDown
                 // opens move focus into the grid.
                 if *state == State::Closed && ctx.open_on_click && !ctx.readonly {
-                    open_request(state, props, true, None)
+                    open_request(state, props, true, OpenFocus::None)
                 } else {
                     None
                 }
             }
 
-            Event::FocusOut => open_request(state, props, false, None),
+            Event::FocusOut => open_request(state, props, false, OpenFocus::None),
 
             Event::KeyDown { key } => match key {
                 KeyboardKey::Escape if *state == State::Open => {
