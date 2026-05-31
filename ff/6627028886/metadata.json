@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "ff6627028886",
+  "strategy": "manual-commit",
+  "branch": "impl-297-298-299",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/specialized/angle_slider/mod.rs",
+    "crates/ars-components/src/specialized/color_area/mod.rs",
+    "crates/ars-components/src/specialized/color_field/mod.rs",
+    "crates/ars-components/src/specialized/color_slider/mod.rs",
+    "crates/ars-components/src/specialized/color_wheel/mod.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ff/6627028886/0/metadata.json",
+      "transcript": "/ff/6627028886/0/full.jsonl",
+      "content_hash": "/ff/6627028886/0/content_hash.txt",
+      "prompt": "/ff/6627028886/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 183610,
+    "cache_creation_tokens": 10427229,
+    "cache_read_tokens": 465812503,
+    "output_tokens": 869635,
+    "api_call_count": 944
+  }
+}
