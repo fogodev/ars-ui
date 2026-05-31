@@ -1,0 +1,7 @@
+---
+source: crates/ars-components/src/layout/scroll_area/mod.rs
+expression: snapshot_attrs(&both_api.thumb_x_attrs())
+---
+data-ars-part=thumb-x
+data-ars-scope=scroll-area
+role=none

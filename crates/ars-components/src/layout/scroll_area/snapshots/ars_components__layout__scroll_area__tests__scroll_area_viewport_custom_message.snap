@@ -1,0 +1,9 @@
+---
+source: crates/ars-components/src/layout/scroll_area/mod.rs
+expression: "snapshot_attrs(&custom_messages.connect(&|_| {}).viewport_attrs())"
+---
+aria-label=Contenido
+data-ars-part=viewport
+data-ars-scope=scroll-area
+role=region
+tabindex=0

@@ -3,7 +3,9 @@
 //! Each test pulls the expected anatomy from the corresponding component
 //! spec's §2 anatomy table and asserts the impl's `Part` enum matches.
 
-use ars_components::layout::{aspect_ratio, center, collapsible, frame, grid, splitter, stack};
+use ars_components::layout::{
+    aspect_ratio, center, collapsible, frame, grid, scroll_area, splitter, stack,
+};
 
 use super::helper::assert_anatomy;
 
@@ -46,6 +48,23 @@ fn collapsible_anatomy_matches_spec() {
 #[test]
 fn grid_anatomy_matches_spec() {
     assert_anatomy("grid", &[(grid::Part::Root, "root")]);
+}
+
+#[test]
+fn scroll_area_anatomy_matches_spec() {
+    assert_anatomy(
+        "scroll-area",
+        &[
+            (scroll_area::Part::Root, "root"),
+            (scroll_area::Part::Viewport, "viewport"),
+            (scroll_area::Part::Content, "content"),
+            (scroll_area::Part::ScrollbarY, "scrollbar-y"),
+            (scroll_area::Part::ThumbY, "thumb-y"),
+            (scroll_area::Part::ScrollbarX, "scrollbar-x"),
+            (scroll_area::Part::ThumbX, "thumb-x"),
+            (scroll_area::Part::CornerSquare, "corner-square"),
+        ],
+    );
 }
 
 #[test]
