@@ -656,7 +656,11 @@ impl Api<'_> {
                 .to_string(),
 
             ColorChannel::Alpha => format!(
-                "linear-gradient(to right, transparent, {})",
+                // Fade from the *same* color at alpha 0 to alpha 1, so the track
+                // previews only opacity. `transparent` is transparent black and
+                // would make non-black colors fade through gray.
+                "linear-gradient(to right, {}, {})",
+                ColorValue::new(color.hue, color.saturation, color.lightness, 0.0).to_css_hsl(),
                 ColorValue::new(color.hue, color.saturation, color.lightness, 1.0).to_css_hsl()
             ),
 
@@ -737,11 +741,17 @@ impl Api<'_> {
                 self.ctx.ids.part("label"),
             );
 
-        let pct = if (max - min).abs() > f64::EPSILON {
+        let mut pct = if (max - min).abs() > f64::EPSILON {
             (val - min) / (max - min) * 100.0
         } else {
             0.0
         };
+
+        // A horizontal RTL slider flips its axis (min on the right), matching the
+        // mirrored arrow-key handling in `on_thumb_keydown`.
+        if self.ctx.orientation == Orientation::Horizontal && self.ctx.dir == Direction::Rtl {
+            pct = 100.0 - pct;
+        }
 
         attrs
             .set_style(
@@ -1007,6 +1017,58 @@ mod tests {
             .on_thumb_keydown(&key(KeyboardKey::ArrowUp), false);
 
         assert!(matches!(vcap.borrow()[0], Event::Increment { .. }));
+    }
+
+    #[test]
+    fn rtl_horizontal_mirrors_thumb_position() {
+        let position = |dir: Direction| {
+            let svc = service(Props {
+                channel: ColorChannel::Hue,
+                dir,
+                default_value: ColorValue::from_hsl(0.0, 1.0, 0.5), // hue 0 = min
+                ..Props::default()
+            });
+            svc.connect(&|_| {})
+                .thumb_attrs()
+                .styles()
+                .iter()
+                .find(|(p, _)| *p == CssProperty::Custom("ars-color-slider-thumb-position"))
+                .map(|(_, value)| value.clone())
+                .expect("thumb position style")
+        };
+
+        // hue 0 is the minimum: LTR puts it at the left (0%), RTL at the right.
+        assert_eq!(position(Direction::Ltr), "0.0%");
+        assert_eq!(position(Direction::Rtl), "100.0%");
+    }
+
+    #[test]
+    fn alpha_track_previews_only_opacity() {
+        // A white alpha slider must fade transparent-white -> white, not through
+        // black: the zero stop is the same color at alpha 0, never `transparent`.
+        let svc = service(Props {
+            channel: ColorChannel::Alpha,
+            default_value: ColorValue::new(0.0, 0.0, 1.0, 1.0), // white
+            ..Props::default()
+        });
+
+        let bg = svc
+            .connect(&|_| {})
+            .track_attrs()
+            .styles()
+            .iter()
+            .find(|(p, _)| *p == CssProperty::Custom("ars-color-slider-track-bg"))
+            .map(|(_, value)| value.clone())
+            .expect("track bg style");
+
+        assert!(
+            !bg.contains("transparent"),
+            "must not fade through black: {bg}"
+        );
+        assert!(
+            bg.contains(", 0.00)"),
+            "zero stop must be the color at alpha 0: {bg}"
+        );
     }
 
     #[test]

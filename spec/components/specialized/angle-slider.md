@@ -484,9 +484,19 @@ pub struct Api<'a> {
 }
 
 impl<'a> Api<'a> {
-    /// Current angle value.
+    /// Current angle value (the controlled prop, when controlled).
     pub fn value(&self) -> f64 {
-        self.ctx.value.get()
+        *self.ctx.value.get()
+    }
+
+    /// The angle to render (ARIA + rotation).
+    ///
+    /// Uses the *pending* value so a controlled slider visibly and accessibly
+    /// moves during a drag / keyboard adjustment, before the parent round-trips
+    /// the new value back through `SyncValue`. In uncontrolled mode this equals
+    /// [`value`](Self::value).
+    fn display_value(&self) -> f64 {
+        *self.ctx.value.pending()
     }
 
     /// Set the angle value programmatically.
@@ -506,7 +516,7 @@ impl<'a> Api<'a> {
 
     /// Formatted value text (e.g., "45 degrees").
     pub fn formatted_value(&self) -> String {
-        (self.ctx.messages.value_text)(self.value(), &self.ctx.locale)
+        (self.ctx.messages.value_text)(self.display_value(), &self.ctx.locale)
     }
 
     pub fn root_attrs(&self) -> AttrMap {
@@ -567,15 +577,15 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Role, "slider");
         // A disabled control must stay out of the tab order.
         attrs.set(HtmlAttr::TabIndex, if self.ctx.disabled { "-1" } else { "0" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), self.value().to_string());
+        attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), self.display_value().to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), self.ctx.min.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), self.ctx.max.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), self.formatted_value());
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.label)(&self.ctx.locale));
         // CSS custom property for thumb rotation.
-        attrs.set_style(CssProperty::Custom("ars-angle-value"), format!("{}", self.value()));
+        attrs.set_style(CssProperty::Custom("ars-angle-value"), format!("{}", self.display_value()));
         attrs.set_style(CssProperty::Custom("ars-angle-thumb-rotation"),
-            format!("{}deg", self.value()));
+            format!("{}deg", self.display_value()));
         if self.ctx.disabled {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
@@ -643,7 +653,7 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.props.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_string());
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_string());
         if let Some(ref form) = self.props.form {
             attrs.set(HtmlAttr::Form, form);
         }
@@ -691,17 +701,17 @@ AngleSlider
 └── HiddenInput      (optional -- <input type="hidden">, form submission)
 ```
 
-| Part        | Element                 | Key Attributes                                           |
-| ----------- | ----------------------- | -------------------------------------------------------- |
-| Root        | `<div>`                 | `role="group"`, `data-ars-state`, `data-ars-disabled`    |
-| Control     | `<div>`                 | Wraps track and thumb                                    |
-| Track       | `<div>`                 | Circular track background                                |
-| Range       | `<div>`                 | Filled arc indicator showing current value               |
+| Part        | Element                 | Key Attributes                                                                                                           |
+| ----------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Root        | `<div>`                 | `role="group"`, `data-ars-state`, `data-ars-disabled`                                                                    |
+| Control     | `<div>`                 | Wraps track and thumb                                                                                                    |
+| Track       | `<div>`                 | Circular track background                                                                                                |
+| Range       | `<div>`                 | Filled arc indicator showing current value                                                                               |
 | Thumb       | `<div>`                 | `role="slider"`, `aria-valuenow/min/max`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled) |
-| ValueText   | `<output>`              | `aria-live="off"`, displays formatted angle              |
-| MarkerGroup | `<div>`                 | `role="presentation"`, container for markers             |
-| Marker      | `<div>`                 | Positioned by angle via CSS custom property              |
-| HiddenInput | `<input type="hidden">` | Form submission value, `disabled` (when disabled -- omitted from form submission) |
+| ValueText   | `<output>`              | `aria-live="off"`, displays formatted angle                                                                              |
+| MarkerGroup | `<div>`                 | `role="presentation"`, container for markers                                                                             |
+| Marker      | `<div>`                 | Positioned by angle via CSS custom property                                                                              |
+| HiddenInput | `<input type="hidden">` | Form submission value, `disabled` (when disabled -- omitted from form submission)                                        |
 
 **9 parts total.**
 

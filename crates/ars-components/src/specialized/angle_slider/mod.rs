@@ -633,10 +633,21 @@ impl Debug for Api<'_> {
 }
 
 impl Api<'_> {
-    /// The current angle value.
+    /// The current angle value (the controlled prop, when controlled).
     #[must_use]
     pub fn value(&self) -> f64 {
         *self.ctx.value.get()
+    }
+
+    /// The angle to render (ARIA + rotation).
+    ///
+    /// Uses the *pending* value so a controlled slider visibly and accessibly
+    /// moves during a drag / keyboard adjustment, before the parent round-trips
+    /// the new value back through `SyncValue`. In uncontrolled mode this equals
+    /// [`value`](Self::value).
+    #[must_use]
+    const fn display_value(&self) -> f64 {
+        *self.ctx.value.pending()
     }
 
     /// Sets the angle value programmatically.
@@ -659,7 +670,7 @@ impl Api<'_> {
     /// Formatted value text (e.g., `"45 degrees"`).
     #[must_use]
     pub fn formatted_value(&self) -> String {
-        (self.ctx.messages.value_text)(self.value(), &self.ctx.locale)
+        (self.ctx.messages.value_text)(self.display_value(), &self.ctx.locale)
     }
 
     const fn state_str(&self) -> &'static str {
@@ -748,7 +759,10 @@ impl Api<'_> {
                 HtmlAttr::TabIndex,
                 if self.ctx.disabled { "-1" } else { "0" },
             )
-            .set(HtmlAttr::Aria(AriaAttr::ValueNow), self.value().to_string())
+            .set(
+                HtmlAttr::Aria(AriaAttr::ValueNow),
+                self.display_value().to_string(),
+            )
             .set(HtmlAttr::Aria(AriaAttr::ValueMin), self.ctx.min.to_string())
             .set(HtmlAttr::Aria(AriaAttr::ValueMax), self.ctx.max.to_string())
             .set(HtmlAttr::Aria(AriaAttr::ValueText), self.formatted_value())
@@ -758,11 +772,11 @@ impl Api<'_> {
             )
             .set_style(
                 CssProperty::Custom("ars-angle-value"),
-                self.value().to_string(),
+                self.display_value().to_string(),
             )
             .set_style(
                 CssProperty::Custom("ars-angle-thumb-rotation"),
-                format!("{}deg", self.value()),
+                format!("{}deg", self.display_value()),
             );
 
         if self.ctx.disabled {
@@ -844,7 +858,9 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Name, name.clone());
         }
 
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_string());
+        // Pending value so the submitted angle matches the in-progress drag in
+        // controlled mode (the thumb already renders the pending value).
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_string());
 
         if let Some(form) = &self.props.form {
             attrs.set(HtmlAttr::Form, form.clone());
@@ -1180,6 +1196,27 @@ mod tests {
         let thumb = disabled.connect(&|_| {}).thumb_attrs();
         assert_eq!(thumb.get(&HtmlAttr::TabIndex), Some("-1"));
         assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+    }
+
+    #[test]
+    fn controlled_interaction_renders_pending_angle() {
+        // Controlled slider at 0°; a drag stages 90° internally. The thumb must
+        // render the pending angle even though value() still returns the prop.
+        let mut svc = service(Props {
+            value: Some(0.0),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::DragStart { angle: 90.0 }));
+
+        let api = svc.connect(&|_| {});
+        assert_eq!(
+            api.thumb_attrs().get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("90"),
+            "thumb must render the pending angle during a controlled drag"
+        );
+        // The public value() still reflects the controlled prop.
+        assert!((api.value() - 0.0).abs() < 1e-9);
     }
 
     #[test]

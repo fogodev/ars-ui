@@ -591,9 +591,14 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueText),
             (self.ctx.messages.value_text)(&x_reading, &y_reading, &color_name, &self.ctx.locale));
 
-        let x_pct = if (x_max - x_min).abs() > f64::EPSILON {
+        let mut x_pct = if (x_max - x_min).abs() > f64::EPSILON {
             (x_val - x_min) / (x_max - x_min) * 100.0
         } else { 0.0 };
+        // RTL flips the x gradient horizontally (min on the right), matching the
+        // mirrored x-axis arrow handling in `on_thumb_keydown`.
+        if self.ctx.dir == Direction::Rtl {
+            x_pct = 100.0 - x_pct;
+        }
         let y_pct = if (y_max - y_min).abs() > f64::EPSILON {
             (1.0 - (y_val - y_min) / (y_max - y_min)) * 100.0
         } else { 0.0 };
@@ -672,20 +677,20 @@ ColorArea
 └── HiddenInput  (optional — <input type="hidden">, form submission)
 ```
 
-| Part        | Element   | Key Attributes                                                                 |
-| ----------- | --------- | ------------------------------------------------------------------------------ |
-| Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-dragging`                       |
-| Background  | `<div>`   | gradient background via CSS custom property                                    |
+| Part        | Element   | Key Attributes                                                                                                                                 |
+| ----------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-dragging`                                                                                       |
+| Background  | `<div>`   | gradient background via CSS custom property                                                                                                    |
 | Thumb       | `<div>`   | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled) |
-| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled — omitted from form submission) |
+| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled — omitted from form submission)                                        |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Part  | Role          | Properties                                                                                    |
-| ----- | ------------- | --------------------------------------------------------------------------------------------- |
-| Root  | `group`       | groups area components                                                                        |
+| Part  | Role          | Properties                                                                                                                     |
+| ----- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Root  | `group`       | groups area components                                                                                                         |
 | Thumb | `application` | `aria-roledescription="2d color picker"`, `aria-valuetext`, `aria-label`, `aria-keyshortcuts`, `aria-disabled` (when disabled) |
 
 `aria-valuetext` MUST include a human-readable color name from `color_name_parts()`, not raw numeric values (e.g., `"dark vibrant blue, saturation 80%, lightness 50%"`).
@@ -741,10 +746,10 @@ impl Default for Messages {
 impl ComponentMessages for Messages {}
 ```
 
-| Key                           | Default (en-US)                        | Purpose                    |
-| ----------------------------- | -------------------------------------- | -------------------------- |
-| `color_area.label`            | `"Color area"`                         | Thumb aria-label           |
-| `color_area.role_description` | `"2d color picker"`                    | Thumb aria-roledescription |
+| Key                           | Default (en-US)                                                                                                    | Purpose                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------- |
+| `color_area.label`            | `"Color area"`                                                                                                     | Thumb aria-label           |
+| `color_area.role_description` | `"2d color picker"`                                                                                                | Thumb aria-roledescription |
 | `color_area.value_text`       | `"{color_name}, {x_reading}, {y_reading}"` (each reading is channel-aware, e.g. `"saturation 80%"` / `"hue 180°"`) | Thumb aria-valuetext       |
 
 - **RTL**: x-axis gradient flips horizontally; ArrowLeft increments, ArrowRight decrements.

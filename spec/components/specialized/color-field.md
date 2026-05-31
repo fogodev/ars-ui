@@ -872,8 +872,10 @@ impl<'a> Api<'a> {
         if let Some(color) = (*self.ctx.value.get()).filter(|_| !self.ctx.invalid) {
             attrs.set(HtmlAttr::Value, color.to_hex(true));
         }
-        // A disabled control must be omitted from form submission.
-        if self.ctx.disabled {
+        // A disabled control is omitted from form submission — and so is an
+        // invalid one, so the field round-trips as absent rather than as an
+        // empty `name=` carrying the stale last-valid color.
+        if self.ctx.disabled || self.ctx.invalid {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
         attrs
@@ -950,14 +952,14 @@ ColorField
 └── HiddenInput      (<input>)      (required — type="hidden", submits hex)
 ```
 
-| Part         | Element   | Key Attributes                                                                                                                                                        |
-| ------------ | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Root         | `<div>`   | `data-ars-disabled`, `data-ars-readonly`, `data-ars-invalid`, `data-ars-focused`                                                                                      |
-| Label        | `<label>` | `for` pointing to Input                                                                                                                                               |
-| Input        | `<input>` | `type="text"`, `aria-labelledby`, `aria-invalid`, `aria-required`, `aria-describedby`, native `readonly` (when read-only)                                             |
-| Description  | `<div>`   | Referenced by Input `aria-describedby`                                                                                                                                |
-| ErrorMessage | `<div>`   | `role="alert"`, referenced by Input `aria-describedby`                                                                                                                |
-| HiddenInput  | `<input>` | `type="hidden"`, `name`, `value` (hex; omitted while invalid so a stale last-valid color is not submitted), `disabled` (when disabled — omitted from form submission) |
+| Part         | Element   | Key Attributes                                                                                                                                                                                                                                              |
+| ------------ | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root         | `<div>`   | `data-ars-disabled`, `data-ars-readonly`, `data-ars-invalid`, `data-ars-focused`                                                                                                                                                                            |
+| Label        | `<label>` | `for` pointing to Input                                                                                                                                                                                                                                     |
+| Input        | `<input>` | `type="text"`, `aria-labelledby`, `aria-invalid`, `aria-required`, `aria-describedby`, native `readonly` (when read-only)                                                                                                                                   |
+| Description  | `<div>`   | Referenced by Input `aria-describedby`                                                                                                                                                                                                                      |
+| ErrorMessage | `<div>`   | `role="alert"`, referenced by Input `aria-describedby`                                                                                                                                                                                                      |
+| HiddenInput  | `<input>` | `type="hidden"`, `name`, `value` (hex; omitted while invalid so a stale last-valid color is not submitted), `disabled` (when disabled **or invalid** — omitted from form submission so an invalid field round-trips as absent rather than an empty `name=`) |
 
 ## 3. Accessibility
 

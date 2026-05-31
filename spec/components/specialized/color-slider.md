@@ -491,7 +491,11 @@ impl<'a> Api<'a> {
                 hsl(180,100%,50%), hsl(240,100%,50%), hsl(300,100%,50%), \
                 hsl(360,100%,50%))".to_string(),
             ColorChannel::Alpha => format!(
-                "linear-gradient(to right, transparent, {})",
+                // Fade from the *same* color at alpha 0 to alpha 1, so the track
+                // previews only opacity. `transparent` is transparent black and
+                // would make non-black colors fade through gray.
+                "linear-gradient(to right, {}, {})",
+                ColorValue::new(color.hue, color.saturation, color.lightness, 0.0).to_css_hsl(),
                 ColorValue::new(color.hue, color.saturation, color.lightness, 1.0).to_css_hsl()
             ),
             _ => {
@@ -540,7 +544,12 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), (self.ctx.messages.value_text)(&reading, &color_name, &self.ctx.locale));
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
 
-        let pct = if (max - min).abs() > f64::EPSILON { (val - min) / (max - min) * 100.0 } else { 0.0 };
+        let mut pct = if (max - min).abs() > f64::EPSILON { (val - min) / (max - min) * 100.0 } else { 0.0 };
+        // A horizontal RTL slider flips its axis (min on the right), matching the
+        // mirrored arrow-key handling in `on_thumb_keydown`.
+        if self.ctx.orientation == Orientation::Horizontal && self.ctx.dir == Direction::Rtl {
+            pct = 100.0 - pct;
+        }
         attrs.set_style(CssProperty::Custom("ars-color-slider-thumb-position"), format!("{:.1}%", pct));
         attrs.set_style(CssProperty::BackgroundColor, color.to_css_hsl());
 
@@ -622,24 +631,24 @@ ColorSlider
 └── HiddenInput   (optional — <input type="hidden">, form submission)
 ```
 
-| Part        | Element    | Key Attributes                                                               |
-| ----------- | ---------- | ---------------------------------------------------------------------------- |
-| Root        | `<div>`    | `role="group"`, `data-ars-channel`, `data-ars-orientation`                   |
-| Label       | `<label>`  | `id`, `for` (thumb id)                                                       |
-| Track       | `<div>`    | gradient background via CSS custom property                                  |
+| Part        | Element    | Key Attributes                                                                                                                               |
+| ----------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root        | `<div>`    | `role="group"`, `data-ars-channel`, `data-ars-orientation`                                                                                   |
+| Label       | `<label>`  | `id`, `for` (thumb id)                                                                                                                       |
+| Track       | `<div>`    | gradient background via CSS custom property                                                                                                  |
 | Thumb       | `<div>`    | `role="slider"`, `aria-valuenow/min/max`, `aria-orientation`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled) |
-| Output      | `<output>` | `for` (thumb id), `aria-live="off"`                                          |
-| HiddenInput | `<input>`  | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled — omitted from form submission) |
+| Output      | `<output>` | `for` (thumb id), `aria-live="off"`                                                                                                          |
+| HiddenInput | `<input>`  | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled — omitted from form submission)                                      |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Part   | Role     | Properties                                                                                                               |
-| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Root   | `group`  | groups slider components                                                                                                 |
+| Part   | Role     | Properties                                                                                                                                                |
+| ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root   | `group`  | groups slider components                                                                                                                                  |
 | Thumb  | `slider` | `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, `aria-orientation`, `aria-label`, `aria-valuetext`, `aria-labelledby`, `aria-disabled` (when disabled) |
-| Output | —        | `aria-live="off"` (prevents double-announcement with valuetext)                                                          |
+| Output | —        | `aria-live="off"` (prevents double-announcement with valuetext)                                                                                           |
 
 `aria-valuetext` MUST include a human-readable color name from `color_name_parts()`, not raw numeric values (e.g., `"hue 180°, dark vibrant blue"`).
 
@@ -685,9 +694,9 @@ impl Default for Messages {
 impl ComponentMessages for Messages {}
 ```
 
-| Key                       | Default (en-US)                  | Purpose              |
-| ------------------------- | -------------------------------- | -------------------- |
-| `color_slider.label`      | `"Color channel"` (per-instance) | Thumb aria-label     |
+| Key                       | Default (en-US)                                                    | Purpose              |
+| ------------------------- | ------------------------------------------------------------------ | -------------------- |
+| `color_slider.label`      | `"Color channel"` (per-instance)                                   | Thumb aria-label     |
 | `color_slider.value_text` | `"{reading}, {color_name}"` (e.g. `"hue 180°, dark vibrant blue"`) | Thumb aria-valuetext |
 
 - **RTL**: Horizontal slider direction flips; ArrowLeft increments, ArrowRight decrements.

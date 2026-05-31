@@ -1024,8 +1024,10 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Value, color.to_hex(true));
         }
 
-        // A disabled control must be omitted from form submission.
-        if self.ctx.disabled {
+        // A disabled control is omitted from form submission — and so is an
+        // invalid one, so the field round-trips as absent rather than as an
+        // empty `name=` carrying the stale last-valid color.
+        if self.ctx.disabled || self.ctx.invalid {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
@@ -1621,8 +1623,9 @@ mod tests {
             !hidden.contains(&HtmlAttr::Value),
             "an invalid field must not submit the last valid color"
         );
-        // The name is still present so the field round-trips as empty.
-        assert_eq!(hidden.get(&HtmlAttr::Name), Some("color"));
+        // The input is disabled while invalid, so the browser omits it from
+        // submission entirely (rather than sending an empty `name=`).
+        assert_eq!(hidden.get(&HtmlAttr::Disabled), Some("true"));
     }
 
     #[test]

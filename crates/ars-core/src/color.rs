@@ -53,19 +53,22 @@ impl ColorValue {
     /// Create a new `ColorValue` from the given hue, saturation, lightness, and alpha.
     ///
     /// Hue is wrapped into `[0, 360)`; saturation, lightness, and alpha are
-    /// clamped to `[0.0, 1.0]`.
+    /// clamped to `[0.0, 1.0]`. Non-finite inputs (`NaN`/`inf`) are coerced to
+    /// `0.0` so the result is always a valid color.
     #[must_use]
     pub fn new(hue: f64, saturation: f64, lightness: f64, alpha: f64) -> Self {
-        debug_assert!(hue.is_finite(), "hue must be finite");
-        debug_assert!(saturation.is_finite(), "saturation must be finite");
-        debug_assert!(lightness.is_finite(), "lightness must be finite");
-        debug_assert!(alpha.is_finite(), "alpha must be finite");
+        // Coerce non-finite inputs to `0.0` so the type's invariants (finite
+        // components, hue in `[0, 360)`, others in `[0, 1]`) hold in release
+        // builds too — otherwise `NaN`/`inf` would leak into generated CSS and
+        // ARIA. Parsers already reject non-finite user input; this guards the
+        // public constructor against programmatic non-finite values.
+        let finite = |value: f64| if value.is_finite() { value } else { 0.0 };
 
         Self {
-            hue: CoreFloat::rem_euclid(hue, 360.0),
-            saturation: saturation.clamp(0.0, 1.0),
-            lightness: lightness.clamp(0.0, 1.0),
-            alpha: alpha.clamp(0.0, 1.0),
+            hue: CoreFloat::rem_euclid(finite(hue), 360.0),
+            saturation: finite(saturation).clamp(0.0, 1.0),
+            lightness: finite(lightness).clamp(0.0, 1.0),
+            alpha: finite(alpha).clamp(0.0, 1.0),
         }
     }
 
@@ -1229,6 +1232,21 @@ mod tests {
     fn parse_color_string_dispatches_hex() {
         // The `#` branch of the dispatcher delegates to `from_hex`.
         assert_eq!(parse_color_string("#00ff00").unwrap().to_rgb(), (0, 255, 0));
+    }
+
+    #[test]
+    fn new_coerces_non_finite_components() {
+        // The public constructor must enforce finiteness in release builds, not
+        // just via debug assertions, so NaN/inf can't leak into CSS/ARIA.
+        let nan = ColorValue::new(f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::NAN);
+        assert!(nan.hue.is_finite());
+        assert!(nan.saturation.is_finite());
+        assert!(nan.lightness.is_finite());
+        assert!(nan.alpha.is_finite());
+        assert_eq!(
+            (nan.hue, nan.saturation, nan.lightness, nan.alpha),
+            (0.0, 0.0, 0.0, 0.0)
+        );
     }
 
     #[test]

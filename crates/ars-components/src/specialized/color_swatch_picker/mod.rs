@@ -339,7 +339,9 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                let cols = ctx.columns;
+                // `columns` is a public prop with no non-zero invariant; clamp to
+                // at least one so a row move always advances.
+                let cols = ctx.columns.max(1);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     let len = ctx.colors.len();
                     let current = ctx.focused_index.unwrap_or(0);
@@ -352,7 +354,8 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                let cols = ctx.columns;
+                // Clamp columns to at least one (see `FocusUp`).
+                let cols = ctx.columns.max(1);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     let current = ctx.focused_index.unwrap_or(0);
                     ctx.focused_index = Some((current + cols) % ctx.colors.len());
@@ -829,6 +832,26 @@ mod tests {
         api.on_keydown(&key(KeyboardKey::ArrowDown));
 
         assert!(matches!(captured.borrow()[0], Event::FocusDown));
+    }
+
+    #[test]
+    fn zero_columns_still_navigates_rows() {
+        // `columns: 0` must not freeze vertical navigation (clamped to 1).
+        let mut svc = service(Props {
+            colors: palette(),
+            columns: 0,
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Focus { is_keyboard: true }));
+        assert_eq!(svc.connect(&|_| {}).focused_index(), Some(0));
+
+        drop(svc.send(Event::FocusDown));
+        assert_eq!(
+            svc.connect(&|_| {}).focused_index(),
+            Some(1),
+            "FocusDown must advance even when columns is 0 (clamped to 1)"
+        );
     }
 
     #[test]

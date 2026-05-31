@@ -301,7 +301,9 @@ impl ars_core::Machine for Machine {
 
                 if ctx.layout != SwatchPickerLayout::Grid { return None; }
 
-                let cols = ctx.columns;
+                // `columns` is a public prop with no non-zero invariant; clamp to
+                // at least one so a row move always advances.
+                let cols = ctx.columns.max(1);
 
                 Some(TransitionPlan::context_only(move |ctx| {
                     let current = ctx.focused_index.unwrap_or(0);
@@ -315,7 +317,8 @@ impl ars_core::Machine for Machine {
 
                 if ctx.layout != SwatchPickerLayout::Grid { return None; }
 
-                let cols = ctx.columns;
+                // Clamp columns to at least one (see `FocusUp`).
+                let cols = ctx.columns.max(1);
 
                 Some(TransitionPlan::context_only(move |ctx| {
                     let current = ctx.focused_index.unwrap_or(0);

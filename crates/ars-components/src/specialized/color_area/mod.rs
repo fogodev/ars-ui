@@ -786,11 +786,17 @@ impl Api<'_> {
             (self.ctx.messages.value_text)(&x_reading, &y_reading, &color_name, &self.ctx.locale),
         );
 
-        let x_pct = if (x_max - x_min).abs() > f64::EPSILON {
+        let mut x_pct = if (x_max - x_min).abs() > f64::EPSILON {
             (x_val - x_min) / (x_max - x_min) * 100.0
         } else {
             0.0
         };
+
+        // RTL flips the x gradient horizontally (min on the right), matching the
+        // mirrored x-axis arrow handling in `on_thumb_keydown`.
+        if self.ctx.dir == Direction::Rtl {
+            x_pct = 100.0 - x_pct;
+        }
 
         let y_pct = if (y_max - y_min).abs() > f64::EPSILON {
             (1.0 - (y_val - y_min) / (y_max - y_min)) * 100.0
@@ -999,6 +1005,29 @@ mod tests {
 
         assert!(matches!(events[0], Event::IncrementX { step } if (step - 0.01).abs() < 1e-9));
         assert!(matches!(events[1], Event::IncrementY { step } if (step - 0.1).abs() < 1e-9));
+    }
+
+    #[test]
+    fn rtl_mirrors_x_thumb_position() {
+        let x_position = |dir: Direction| {
+            let svc = service(Props {
+                dir,
+                // saturation 0 (x min), lightness 1 (y max).
+                default_value: ColorValue::from_hsl(0.0, 0.0, 1.0),
+                ..Props::default()
+            });
+            svc.connect(&|_| {})
+                .thumb_attrs()
+                .styles()
+                .iter()
+                .find(|(p, _)| *p == CssProperty::Custom("ars-color-area-thumb-x"))
+                .map(|(_, value)| value.clone())
+                .expect("thumb-x style")
+        };
+
+        // x at the minimum: LTR -> left (0%), RTL -> right (100%).
+        assert_eq!(x_position(Direction::Ltr), "0.0%");
+        assert_eq!(x_position(Direction::Rtl), "100.0%");
     }
 
     #[test]
