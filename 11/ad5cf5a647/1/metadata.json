@@ -1,0 +1,126 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "11ad5cf5a647",
+  "session_id": "fec18fa9-64f8-40bd-ae52-4502f8a1b2b9",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-31T15:28:28.526299Z",
+  "branch": "t3code/c59961ed",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_picker/mod.rs",
+    "crates/ars-components/src/date_time/date_picker/tests.rs",
+    "crates/ars-i18n/src/date.rs",
+    "crates/ars-i18n/src/locale.rs",
+    "spec/components/date-time/date-picker.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-8[1m]",
+  "turn_id": "fb9443abd8be",
+  "token_usage": {
+    "input_tokens": 30432,
+    "cache_creation_tokens": 214500,
+    "cache_read_tokens": 13568020,
+    "output_tokens": 77616,
+    "api_call_count": 94
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "summary": {
+    "intent": "Address three P2 Codex review findings on PR #697 in the date_picker state machine: stale focus intents, incorrect ICU field ordering for non-Gregorian/native-digit locales, and closed pickers reopening on stale SelectDate events.",
+    "outcome": "All three findings were fixed using TDD (red-green), the spec was synced to match, all CI gates passed (cargo xci-fast, 10 gates), and changes were committed and pushed to PR #697.",
+    "learnings": {
+      "repo": [
+        "CLAUDE.md requires loading the icu4x skill before editing any ICU4X-related code in ars-i18n.",
+        "The spec (spec/components/date-time/date-picker.md) contains mirrored pseudocode of the state machine and must be kept in sync whenever state machine logic changes.",
+        "cargo xci-fast is the pre-push CI profile and validates spec snippet compilation via spec-compile-snippets gate.",
+        "Proptests are marked #[ignore] for nightly but can be run explicitly to verify invariants hold.",
+        "Zero-warnings policy is enforced — clippy must be clean on all touched crates before pushing.",
+        "state_changed is true whenever a target is set on the engine, regardless of whether the value changed — it does not indicate a semantic state transition."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/date_picker/mod.rs",
+          "line": 752,
+          "end_line": 752,
+          "finding": "open_request did not take ctx, so a vetoed controlled-open left requested_focus=Some(OpenFocus::None) permanently; subsequent programmatic opens inherited the stale marker and suppressed FocusCalendar. Fix: pass ctx and clear requested_focus on any no-op close."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_picker/mod.rs",
+          "line": 1031,
+          "end_line": 1031,
+          "finding": "SelectDate with close_on_select=false forced State::Open unconditionally, reopening already-closed pickers after outside-close/focus-out races. Fix: preserve state.clone() instead of forcing Open."
+        },
+        {
+          "path": "crates/ars-i18n/src/date.rs",
+          "line": 424,
+          "end_line": 424,
+          "finding": "date_order probe used a plain locale, so fa-IR converted to Solar Hijri calendar (probe values no longer 11/22/2006) and emitted Persian digits the parser couldn't read, causing wrong fallback to DayMonthYear. Fix: force Gregorian calendar on probe locale and normalize digits before parsing."
+        },
+        {
+          "path": "crates/ars-i18n/src/locale.rs",
+          "finding": "Added pub(crate) with_gregorian_calendar() helper that sets the u-ca-gregory Unicode extension keyword on a Locale, enabling calendar-forced probing in date_order without changing the public API."
+        },
+        {
+          "path": "crates/ars-i18n/src/number/mod.rs",
+          "finding": "normalize_digits helper already exists and handles native-digit transliteration; it just wasn't being called in numeric_field_order_from_formatted before this fix."
+        }
+      ],
+      "workflow": [
+        "Empirical probing via throwaway tests (then deleted) is the right approach before fixing ICU behavior — ICU calendar/digit output is non-obvious and locale-specific.",
+        "TDD red-green cycle was strictly followed: write failing test, confirm red, implement fix, confirm green, then clean up.",
+        "For state machine bugs, checking the engine's semantics (state_changed behavior) before writing assertions avoids false-red tests.",
+        "Spec sync should happen after all code tests are green, not before — the spec mirrors implementation and drifts otherwise."
+      ]
+    },
+    "friction": [
+      "fa-IR's Persian calendar conversion destroyed the probe date values (11/22/2006 became ۱۳۸۵/۹/۱), requiring calendar forcing — this was not anticipated from reading the code alone and needed empirical discovery.",
+      "The correct value accessor on the test API (ctx.value.get()) wasn't obvious and required inspecting the Api struct after an initial wrong assertion attempt.",
+      "state_changed=true on a no-op close was surprising and required reading engine internals (ars-core/src/lib.rs) to understand the semantics before dropping the assertion."
+    ],
+    "open_items": [
+      "Proptests are skipped by default (marked #[ignore] for nightly) — the date_picker proptest was run manually this session but is not part of the normal CI gate.",
+      "Finding #2's fix adds a gregorian-calendar forced probe path for both icu and js formatters, but the js path's behavior under non-Gregorian locales was not independently verified beyond the ICU path."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-31T15:27:52.408534Z",
+    "agent_lines": 129,
+    "agent_removed": 1,
+    "human_added": 10,
+    "human_modified": 48,
+    "human_removed": 0,
+    "total_committed": 163,
+    "total_lines_changed": 188,
+    "agent_percentage": 69.14893617021278,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 5,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 5
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 34,
+      "user_lines_removed": 24,
+      "agent_lines_added": 182,
+      "agent_lines_removed": 25,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 5,
+        "crates/ars-components/src/date_time/date_picker/tests.rs": 3,
+        "crates/ars-i18n/src/locale.rs": 2,
+        "spec/components/date-time/date-picker.md": 24
+      },
+      "user_removed_per_file": {
+        "spec/components/date-time/date-picker.md": 24
+      }
+    }
+  ]
+}
