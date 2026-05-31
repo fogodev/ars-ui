@@ -519,8 +519,12 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("thumb"));
         attrs.set(HtmlAttr::Role, "application");
         attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), (self.ctx.messages.role_description)(&self.ctx.locale));
-        attrs.set(HtmlAttr::TabIndex, "0");
+        // A disabled control must stay out of the tab order.
+        attrs.set(HtmlAttr::TabIndex, if self.ctx.disabled { "-1" } else { "0" });
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.label)(&self.ctx.locale));
+        if self.ctx.disabled {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
 
         let color = self.ctx.value.get();
         let x_val = channel_value(color, self.ctx.x_channel);
@@ -619,7 +623,7 @@ ColorArea
 | ----------- | --------- | ------------------------------------------------------------------------------ |
 | Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-dragging`                       |
 | Background  | `<div>`   | gradient background via CSS custom property                                    |
-| Thumb       | `<div>`   | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex="0"` |
+| Thumb       | `<div>`   | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled) |
 | HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled — omitted from form submission) |
 
 ## 3. Accessibility
@@ -629,7 +633,7 @@ ColorArea
 | Part  | Role          | Properties                                                                                    |
 | ----- | ------------- | --------------------------------------------------------------------------------------------- |
 | Root  | `group`       | groups area components                                                                        |
-| Thumb | `application` | `aria-roledescription="2d color picker"`, `aria-valuetext`, `aria-label`, `aria-keyshortcuts` |
+| Thumb | `application` | `aria-roledescription="2d color picker"`, `aria-valuetext`, `aria-label`, `aria-keyshortcuts`, `aria-disabled` (when disabled) |
 
 `aria-valuetext` MUST include a human-readable color name from `color_name_parts()`, not raw numeric values (e.g., `"dark vibrant blue, saturation 80%, lightness 50%"`).
 

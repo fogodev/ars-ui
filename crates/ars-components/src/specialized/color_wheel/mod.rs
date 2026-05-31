@@ -549,7 +549,15 @@ impl Api<'_> {
             .set(part_attr, part_val)
             .set(HtmlAttr::Id, self.ctx.ids.part("thumb"))
             .set(HtmlAttr::Role, "slider")
-            .set(HtmlAttr::TabIndex, "0");
+            // A disabled control must stay out of the tab order.
+            .set(
+                HtmlAttr::TabIndex,
+                if self.ctx.disabled { "-1" } else { "0" },
+            );
+
+        if self.ctx.disabled {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
 
         let hue = self.ctx.value.get().hue;
 
@@ -562,10 +570,6 @@ impl Api<'_> {
                 (self.ctx.messages.label)(&self.ctx.locale),
             )
             .set(HtmlAttr::Aria(AriaAttr::ValueText), self.formatted_value())
-            .set(
-                HtmlAttr::Aria(AriaAttr::LabelledBy),
-                self.ctx.ids.part("label"),
-            )
             .set_style(
                 CssProperty::Custom("ars-color-wheel-thumb-angle"),
                 format!("{hue}deg"),
@@ -780,6 +784,18 @@ mod tests {
     }
 
     #[test]
+    fn thumb_uses_aria_label_without_dangling_labelledby() {
+        let svc = service(Props::default());
+        let thumb = svc.connect(&|_| {}).thumb_attrs();
+
+        assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::Label)), Some("Hue"));
+        assert!(
+            !thumb.contains(&HtmlAttr::Aria(AriaAttr::LabelledBy)),
+            "the wheel has no Label part, so aria-labelledby must not dangle"
+        );
+    }
+
+    #[test]
     fn keydown_dispatches_increment_decrement() {
         let captured = core::cell::RefCell::new(Vec::new());
         let send = |event: Event| captured.borrow_mut().push(event);
@@ -908,6 +924,26 @@ mod tests {
                 .root_attrs()
                 .contains(&HtmlAttr::Data("ars-disabled"))
         );
+    }
+
+    #[test]
+    fn disabled_thumb_leaves_tab_order() {
+        let enabled = service(Props::default());
+        assert_eq!(
+            enabled
+                .connect(&|_| {})
+                .thumb_attrs()
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
+
+        let disabled = service(Props {
+            disabled: true,
+            ..Props::default()
+        });
+        let thumb = disabled.connect(&|_| {}).thumb_attrs();
+        assert_eq!(thumb.get(&HtmlAttr::TabIndex), Some("-1"));
+        assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
     }
 
     #[test]

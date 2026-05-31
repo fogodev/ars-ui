@@ -270,6 +270,15 @@ impl ars_core::Machine for Machine {
                     ctx.max = props.max;
                     ctx.disabled = props.disabled;
                     ctx.readonly = props.readonly;
+
+                    // Re-clamp the current value to the new bounds so an
+                    // out-of-range angle is not exposed via aria-valuenow / the
+                    // hidden input until the next interaction.
+                    let clamped = ctx.value.get().clamp(ctx.min, ctx.max);
+                    ctx.value.set(clamped);
+                    if ctx.value.is_controlled() {
+                        ctx.value.sync_controlled(Some(clamped));
+                    }
                 }));
             }
             _ => {}
@@ -556,7 +565,8 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "slider");
-        attrs.set(HtmlAttr::TabIndex, "0");
+        // A disabled control must stay out of the tab order.
+        attrs.set(HtmlAttr::TabIndex, if self.ctx.disabled { "-1" } else { "0" });
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), self.value().to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), self.ctx.min.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), self.ctx.max.to_string());
@@ -687,7 +697,7 @@ AngleSlider
 | Control     | `<div>`                 | Wraps track and thumb                                    |
 | Track       | `<div>`                 | Circular track background                                |
 | Range       | `<div>`                 | Filled arc indicator showing current value               |
-| Thumb       | `<div>`                 | `role="slider"`, `aria-valuenow/min/max`, `tabindex="0"` |
+| Thumb       | `<div>`                 | `role="slider"`, `aria-valuenow/min/max`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled) |
 | ValueText   | `<output>`              | `aria-live="off"`, displays formatted angle              |
 | MarkerGroup | `<div>`                 | `role="presentation"`, container for markers             |
 | Marker      | `<div>`                 | Positioned by angle via CSS custom property              |
@@ -707,7 +717,8 @@ AngleSlider
 | `aria-valuemin` / `aria-valuemax` | Thumb   | `"0"` / `"360"`                      |
 | `aria-valuetext`                  | Thumb   | Formatted angle (e.g., "45 degrees") |
 | `aria-label`                      | Thumb   | From messages (default: "Angle")     |
-| `tabindex="0"`                    | Thumb   | Focusable                            |
+| `tabindex`                        | Thumb   | `"-1"` when disabled, else `"0"`     |
+| `aria-disabled`                   | Thumb   | `"true"` when disabled               |
 | `data-ars-focus-visible`          | Thumb   | When keyboard-focused                |
 
 No `aria-orientation` -- circular geometry has no h/v distinction.

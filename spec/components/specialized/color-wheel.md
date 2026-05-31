@@ -443,7 +443,11 @@ impl<'a> Api<'a> {
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("thumb"));
         attrs.set(HtmlAttr::Role, "slider");
-        attrs.set(HtmlAttr::TabIndex, "0");
+        // A disabled control must stay out of the tab order.
+        attrs.set(HtmlAttr::TabIndex, if self.ctx.disabled { "-1" } else { "0" });
+        if self.ctx.disabled {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
 
         let hue = self.ctx.value.get().hue;
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{:.0}", hue));
@@ -451,7 +455,6 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), "360");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.label)(&self.ctx.locale));
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), self.formatted_value());
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
 
         attrs.set_style(CssProperty::Custom("ars-color-wheel-thumb-angle"),
             format!("{}deg", hue));
@@ -528,7 +531,7 @@ ColorWheel
 | ----------- | --------- | -------------------------------------------------------- |
 | Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-readonly` |
 | Track       | `<div>`   | conic-gradient background via CSS custom property        |
-| Thumb       | `<div>`   | `role="slider"`, `aria-valuenow/min/max`, `tabindex="0"` |
+| Thumb       | `<div>`   | `role="slider"`, `aria-valuenow/min/max`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled) |
 | HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled -- omitted from form submission) |
 
 ## 3. Accessibility
@@ -543,8 +546,8 @@ ColorWheel
 | `aria-valuemin` / `aria-valuemax` | Thumb   | `"0"` / `"360"`                |
 | `aria-label`                      | Thumb   | From messages (default: "Hue") |
 | `aria-valuetext`                  | Thumb   | Formatted hue (e.g., "180")    |
-| `aria-labelledby`                 | Thumb   | Label element ID               |
-| `tabindex="0"`                    | Thumb   | Focusable                      |
+| `tabindex`                        | Thumb   | `"-1"` when disabled, else `"0"` |
+| `aria-disabled`                   | Thumb   | `"true"` when disabled         |
 | `data-ars-focus-visible`          | Thumb   | When keyboard-focused          |
 
 No `aria-orientation` -- circular geometry has no h/v distinction.

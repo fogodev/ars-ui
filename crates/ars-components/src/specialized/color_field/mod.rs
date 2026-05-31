@@ -396,7 +396,14 @@ impl ars_core::Machine for Machine {
         let value = if let Some(v) = &props.value {
             Bindable::controlled(Some(*v))
         } else {
-            Bindable::uncontrolled(props.default_value)
+            // A channel field is an ARIA spinbutton: it needs a base color to
+            // expose a valid value and to accept keyboard steps / commits.
+            // Seed an initial color in channel mode when none was supplied.
+            let seed = props
+                .default_value
+                .or_else(|| props.channel.map(|_| ColorValue::default()));
+
+            Bindable::uncontrolled(seed)
         };
 
         let step = props
@@ -1428,6 +1435,35 @@ mod tests {
                 .input_attrs()
                 .contains(&HtmlAttr::Disabled)
         );
+    }
+
+    #[test]
+    fn channel_field_without_value_is_a_usable_spinbutton() {
+        // channel set, no value/default_value: must still seed a base color so
+        // the spinbutton exposes value metadata and keyboard steps work.
+        let mut svc = service(Props {
+            channel: Some(ColorChannel::Hue),
+            ..Props::default()
+        });
+
+        let input = svc.connect(&|_| {}).input_attrs();
+        assert_eq!(input.get(&HtmlAttr::Role), Some("spinbutton"));
+        assert!(
+            input.contains(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            "spinbutton must expose aria-valuenow even without an explicit value"
+        );
+        assert_eq!(
+            input.get(&HtmlAttr::Aria(AriaAttr::ValueMax)),
+            Some("360.00")
+        );
+
+        // Keyboard stepping must work (not no-op for lack of a color).
+        drop(svc.send(Event::Increment));
+        assert!((svc.connect(&|_| {}).value().unwrap().hue - 1.0).abs() < 1e-9);
+
+        // Whole-color mode with no value stays empty (unchanged behavior).
+        let whole = service(Props::default());
+        assert!(whole.connect(&|_| {}).value().is_none());
     }
 
     #[test]

@@ -307,7 +307,15 @@ impl ars_core::Machine for Machine {
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let value = match &props.value {
             Some(v) => Bindable::controlled(Some(v.clone())),
-            None => Bindable::uncontrolled(props.default_value.clone()),
+            None => {
+                // A channel field is an ARIA spinbutton: it needs a base color to
+                // expose a valid value and to accept keyboard steps / commits.
+                // Seed an initial color in channel mode when none was supplied.
+                let seed = props
+                    .default_value
+                    .or_else(|| props.channel.map(|_| ColorValue::default()));
+                Bindable::uncontrolled(seed)
+            }
         };
 
         let step = props.step.unwrap_or_else(|| {

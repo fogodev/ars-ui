@@ -724,11 +724,19 @@ impl Api<'_> {
                 HtmlAttr::Aria(AriaAttr::RoleDescription),
                 (self.ctx.messages.role_description)(&self.ctx.locale),
             )
-            .set(HtmlAttr::TabIndex, "0")
+            // A disabled control must stay out of the tab order.
+            .set(
+                HtmlAttr::TabIndex,
+                if self.ctx.disabled { "-1" } else { "0" },
+            )
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.label)(&self.ctx.locale),
             );
+
+        if self.ctx.disabled {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
 
         let color = self.ctx.value.get();
 
@@ -1161,6 +1169,26 @@ mod tests {
                 .root_attrs()
                 .contains(&HtmlAttr::Data("ars-disabled"))
         );
+    }
+
+    #[test]
+    fn disabled_thumb_leaves_tab_order() {
+        let enabled = service(Props::default());
+        assert_eq!(
+            enabled
+                .connect(&|_| {})
+                .thumb_attrs()
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
+
+        let disabled = service(Props {
+            disabled: true,
+            ..Props::default()
+        });
+        let thumb = disabled.connect(&|_| {}).thumb_attrs();
+        assert_eq!(thumb.get(&HtmlAttr::TabIndex), Some("-1"));
+        assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
     }
 
     #[test]

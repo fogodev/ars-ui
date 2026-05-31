@@ -209,7 +209,9 @@ impl ColorValue {
     /// or that contains non-hex characters.
     #[must_use]
     pub fn from_hex(hex: &str) -> Option<Self> {
-        let hex = hex.trim_start_matches('#');
+        // Strip at most one leading `#`. `trim_start_matches` would swallow
+        // extra markers, accepting malformed input like `##3366ff`.
+        let hex = hex.strip_prefix('#').unwrap_or(hex);
 
         // Hex digits are ASCII. Reject non-ASCII early so the byte-indexed
         // slices below cannot land on a non-char boundary and panic (a
@@ -1199,6 +1201,22 @@ mod tests {
     fn parse_color_string_dispatches_hex() {
         // The `#` branch of the dispatcher delegates to `from_hex`.
         assert_eq!(parse_color_string("#00ff00").unwrap().to_rgb(), (0, 255, 0));
+    }
+
+    #[test]
+    fn from_hex_rejects_extra_leading_markers() {
+        // Only one optional leading `#` is allowed; `##3366ff` is malformed.
+        assert_eq!(parse_color_string("##3366ff"), None);
+        assert_eq!(ColorValue::from_hex("##3366ff"), None);
+        // The single-marker and bare forms still parse.
+        assert_eq!(
+            ColorValue::from_hex("#3366ff").unwrap().to_rgb(),
+            (51, 102, 255)
+        );
+        assert_eq!(
+            ColorValue::from_hex("3366ff").unwrap().to_rgb(),
+            (51, 102, 255)
+        );
     }
 
     #[test]

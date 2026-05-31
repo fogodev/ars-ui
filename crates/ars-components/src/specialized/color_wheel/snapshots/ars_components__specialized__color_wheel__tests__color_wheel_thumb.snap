@@ -30,14 +30,6 @@ AttrMap {
         ),
         (
             Aria(
-                LabelledBy,
-            ),
-            String(
-                "cw-label",
-            ),
-        ),
-        (
-            Aria(
                 ValueMax,
             ),
             String(

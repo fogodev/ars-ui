@@ -342,6 +342,15 @@ impl ars_core::Machine for Machine {
                     ctx.max = props.max;
                     ctx.disabled = props.disabled;
                     ctx.readonly = props.readonly;
+
+                    // Re-clamp the current value to the new bounds so an
+                    // out-of-range angle is not exposed via aria-valuenow / the
+                    // hidden input until the next interaction.
+                    let clamped = ctx.value.get().clamp(ctx.min, ctx.max);
+                    ctx.value.set(clamped);
+                    if ctx.value.is_controlled() {
+                        ctx.value.sync_controlled(Some(clamped));
+                    }
                 }));
             }
 
@@ -734,7 +743,11 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Role, "slider")
-            .set(HtmlAttr::TabIndex, "0")
+            // A disabled control must stay out of the tab order.
+            .set(
+                HtmlAttr::TabIndex,
+                if self.ctx.disabled { "-1" } else { "0" },
+            )
             .set(HtmlAttr::Aria(AriaAttr::ValueNow), self.value().to_string())
             .set(HtmlAttr::Aria(AriaAttr::ValueMin), self.ctx.min.to_string())
             .set(HtmlAttr::Aria(AriaAttr::ValueMax), self.ctx.max.to_string())
@@ -1118,6 +1131,55 @@ mod tests {
                 .root_attrs()
                 .contains(&HtmlAttr::Aria(AriaAttr::Disabled))
         );
+    }
+
+    #[test]
+    fn set_props_clamps_value_to_new_bounds() {
+        let mut svc = service(Props {
+            default_value: 300.0,
+            ..Props::default()
+        });
+        assert!((svc.connect(&|_| {}).value() - 300.0).abs() < 1e-9);
+
+        // Shrink the range below the current value without changing `value`.
+        drop(svc.set_props(Props {
+            id: "angle-slider".to_string(),
+            default_value: 300.0,
+            min: 0.0,
+            max: 180.0,
+            ..Props::default()
+        }));
+
+        assert!(
+            (svc.connect(&|_| {}).value() - 180.0).abs() < 1e-9,
+            "value must clamp into the new bounds"
+        );
+        assert_eq!(
+            svc.connect(&|_| {})
+                .thumb_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("180")
+        );
+    }
+
+    #[test]
+    fn disabled_thumb_leaves_tab_order() {
+        let enabled = service(Props::default());
+        assert_eq!(
+            enabled
+                .connect(&|_| {})
+                .thumb_attrs()
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
+
+        let disabled = service(Props {
+            disabled: true,
+            ..Props::default()
+        });
+        let thumb = disabled.connect(&|_| {}).thumb_attrs();
+        assert_eq!(thumb.get(&HtmlAttr::TabIndex), Some("-1"));
+        assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
     }
 
     #[test]

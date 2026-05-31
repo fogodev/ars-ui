@@ -165,7 +165,9 @@ impl ColorValue {
 
     /// Parse a hex string ("#rrggbb" or "#rrggbbaa").
     pub fn from_hex(hex: &str) -> Option<Self> {
-        let hex = hex.trim_start_matches('#');
+        // Strip at most one leading `#`. `trim_start_matches` would swallow
+        // extra markers, accepting malformed input like `##3366ff`.
+        let hex = hex.strip_prefix('#').unwrap_or(hex);
 
         // Hex digits are ASCII. Reject non-ASCII early so the byte-indexed
         // slices below cannot land on a non-char boundary and panic (a
