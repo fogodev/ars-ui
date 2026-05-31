@@ -1,0 +1,97 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "f3969f614146",
+  "session_id": "237b9b0f-3f17-4f7d-a955-e50b875d5151",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-31T14:06:51.013981Z",
+  "branch": "t3code/c59961ed",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "682bd0edeca0",
+  "token_usage": {
+    "input_tokens": 110501,
+    "cache_creation_tokens": 8275220,
+    "cache_read_tokens": 454523587,
+    "output_tokens": 734163,
+    "api_call_count": 742
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #289: a framework-agnostic DatePicker state machine for ars-ui that composes a text input with an embedded Calendar in a popover, managing open/close state, date selection, input validation, and synchronization.",
+    "outcome": "Delivered PR #697 with full DatePicker implementation passing 5+ Codex review rounds (8→5→4→3→4 findings per pass), 142 tests at 100% function/99.87% line coverage, all xci-fast gates green, and spec fully synced.",
+    "learnings": {
+      "repo": [
+        "Machine trait requires `type Effect: EffectName`; focus emitted via `PendingEffect::named(Effect::X)` (adapter-driven), never closures in core — matches popover/dialog convention",
+        "CalendarDate fields are pub(crate); accessors year()->i32, month()->u8, day()->u8 (plain ints); no PartialOrd/Ord — use .compare()->Ordering; constructor new_gregorian(i32,u8,u8)->Result; nzu8 does not exist",
+        "ars-i18n already had private date_order(locale)->DateOrder with CLDR/Intl/fallback backends — only needed pub exposure; both DateField and DatePicker had reimplemented just the fallback heuristic",
+        "is_component_category in xtask lint matched hyphenated names ('date-time','data-display') but source dirs/snapshot paths use underscores, silently skipping entire categories from snapshot-count gate",
+        "is_ars_components_component had same hyphen/underscore bug, causing wrong floor formula for date-time and data-display categories",
+        "IsDateUnavailableFn is Callback<dyn Fn(&CalendarDate)->bool+Send+Sync>; use Callback::new_ref for for<'a> Fn(&'a T) higher-ranked form (not Callback::new)",
+        "ConnectApi trait only requires type Part + part_attrs (2-item trait); ComponentIds accessor is ids.id() with no public base_id field",
+        "Controlled-value pattern: requested_value context field + Effect::ValueChange named marker; adapter reads requested_value since get() hides it in controlled mode (rating_group convention)",
+        "Context derives Clone + manual Debug (skip message/callback fields); Messages same pattern since MessageFn isn't Debug",
+        "Service::new takes refs not values; send is #[must_use] — use drop() or capture result",
+        "Snapshot Change Check CI runs on push before snapshot-reviewed label can be added; pull_request: trigger defaults to [opened,synchronize,reopened] not labeled — always needs manual re-run",
+        "cargo insta accept has no -p flag — accepts all pending snapshots globally"
+      ],
+      "code": [
+        {
+          "path": "xtask/src/lint.rs",
+          "line": 814,
+          "end_line": 814,
+          "finding": "is_ars_components_component listed hyphenated dirs ('date-time','data-display') but filesystem uses underscores — wrong floor formula for those categories, causing unnecessary rating_group snapshot requirement"
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "finding": "is_component_category matched hyphenated names but snapshot-count scans underscore paths — two entire component categories silently excluded from the gate"
+        },
+        {
+          "path": "crates/ars-i18n/src/date.rs",
+          "line": 1245,
+          "end_line": 1245,
+          "finding": "Private date_order(locale)->DateOrder already fully implemented with CLDR/ICU4X, JS Intl (wasm), and heuristic fallback — only needed pub exposure; DateField had reimplemented only the fallback"
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_picker/mod.rs",
+          "finding": "Controlled-open semantics iterated three times: commit+notify (pass 1) → block-when-controlled (pass 4) → block+OpenFocus intent-carrying (pass 5 Option A) — each change cascaded through effects, context, and spec"
+        }
+      ],
+      "workflow": [
+        "TDD with proptest catches real design bugs unit tests miss — proptest revealed redundant open Bindable diverging from State, forcing a cleaner State-as-single-source-of-truth redesign",
+        "post-implementation-audit skill runs in phases (spec/impl drift → iterative 'anything missing' rounds → coverage) and reliably finds real bugs — the xtask gate bug and several ARIA gaps were found this way",
+        "Codex review loop: post @codex review, poll for terminal verdict, address all findings with TDD, reply inline with commit sha, resolve threads, re-trigger — pause loop when design decision needed",
+        "Run cargo xci-fast before every push; reserve cargo xci (full, includes wasm-coverage + feature-matrix) for pre-merge",
+        "Multi-commit PR history (one logical chunk per commit) is more reviewable than squashing everything",
+        "spec compile-snippets does only syn parsing (not type/borrow checking); blocks opt out with rust,no_check — spec code can be illustrative while real constraints are locked by tests"
+      ]
+    },
+    "friction": [
+      "Spec §1.7 had ~10 compile-blockers vs actual codebase APIs: no type Effect, string effect names, CalendarDate field access + nzu8 + NonZero that don't exist, no PartialOrd/Ord, ids.base_id, fn instead of IsDateUnavailableFn, by-value Service::new, missing on_props_changed/initial_effects",
+      "Controlled-open design reversed mid-implementation across 3 Codex passes (commit+notify → block-when-controlled → block+focus-intent), causing significant churn in effects, context, tests, and spec",
+      "Snapshot Change Check CI structural race: always fails on initial push before snapshot-reviewed label added; pull_request: trigger lacks labeled event — every snapshot PR needs a manual job re-run",
+      "cargo insta accept has no -p flag — discovered mid-session after a failed command attempt",
+      "Pre-existing staged pagination/mod.rs change broke first xci-fast run due to nightly-fmt rejection",
+      "Test-patterns Explore agent guessed DatePicker APIs (wrong event/field/part names) — spec was the only authoritative source and had to be read directly despite the agent output"
+    ],
+    "open_items": [
+      "P5-4 (focus intent during controlled-open reconciliation) addressed with OpenFocus machinery but no final Codex pass since Option A was pushed — polling loop not restarted",
+      "Full cargo xci (not just xci-fast) should run before merge to exercise js_date_order web-intl path via wasm-coverage CI",
+      "Snapshot Change Check structural race unresolved: should add labeled trigger or require CHANGELOG entry instead of post-push labeling",
+      "Pre-existing utility/highlight snapshot orphans block bare cargo insta test --unreferenced=reject — unrelated to this PR but a standing CI annoyance",
+      "js_date_order (browser Intl path for date_order) only exercised in nightly wasm-coverage CI, not in the default test run"
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
