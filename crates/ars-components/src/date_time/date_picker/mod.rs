@@ -98,7 +98,9 @@ pub enum Event {
         value: String,
     },
 
-    /// Focus entered the date picker (input or trigger).
+    /// Focus entered the input field (the date field). With `open_on_click`,
+    /// this opens the calendar. Adapters dispatch it from input focus only — not
+    /// trigger focus, which the trigger's own click/keydown handlers manage.
     FocusIn,
 
     /// Focus left the date picker entirely.
@@ -934,6 +936,27 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
+                // Defense-in-depth: reject a selection the picker disallows. The
+                // embedded calendar should never offer an out-of-range or
+                // unavailable date, but a scripted/stale/buggy `SelectDate` must
+                // not be able to commit a value the component forbids (the typed
+                // path enforces the same constraints).
+                let in_range = ctx
+                    .min
+                    .as_ref()
+                    .is_none_or(|m| date.compare(m) != Ordering::Less)
+                    && ctx
+                        .max
+                        .as_ref()
+                        .is_none_or(|m| date.compare(m) != Ordering::Greater);
+                let available = props
+                    .is_date_unavailable
+                    .as_ref()
+                    .is_none_or(|predicate| !predicate(date));
+                if !(in_range && available) {
+                    return None;
+                }
+
                 let date = date.clone();
                 let should_close = props.close_on_select;
                 let open_controlled = props.open.is_some();
@@ -1432,6 +1455,12 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Name, name);
         }
 
+        // A disabled picker must not submit: a disabled form control is excluded
+        // from submission, mirroring the disabled visible input and buttons.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
+
         // Always the canonical ISO 8601 string (`to_iso8601` reads the date's
         // ISO slots, not the display-calendar `year()/month()/day()` fields), so
         // a non-Gregorian value still submits the correct calendar-independent
@@ -1498,7 +1527,15 @@ impl<'a> Api<'a> {
         (self.send)(Event::KeyDown { key });
     }
 
-    /// Handles focus entering the component.
+    /// Handles focus entering the **input field**.
+    ///
+    /// Wire this to the `Input` element only — not the `Trigger`. The
+    /// `open_on_click` behavior ("focusing the date field opens the calendar")
+    /// applies to the input; the trigger has its own
+    /// [`on_trigger_click`](Self::on_trigger_click) /
+    /// [`on_trigger_keydown`](Self::on_trigger_keydown) handlers. Wiring focus-in
+    /// on the trigger would open the popover on trigger focus and then the
+    /// activating click/Enter would immediately toggle it closed.
     pub fn on_focusin(&self) {
         (self.send)(Event::FocusIn);
     }

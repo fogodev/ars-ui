@@ -85,7 +85,9 @@ pub enum Event {
     SelectDate { date: CalendarDate },
     /// The text input value changed (user typing in the field).
     InputChange { value: String },
-    /// Focus entered the date picker (input or trigger).
+    /// Focus entered the input field. With `open_on_click`, opens the calendar.
+    /// Adapters dispatch it from input focus only — not trigger focus (the
+    /// trigger's own click/keydown handlers manage opening).
     FocusIn,
     /// Focus left the date picker entirely.
     FocusOut,
@@ -623,6 +625,13 @@ impl ars_core::Machine for Machine {
             // ── Date selection (from calendar) ───────────────────────────
             Event::SelectDate { date } => {
                 if ctx.readonly { return None; }
+                // Defense-in-depth: reject a selection the picker disallows (the
+                // calendar should never offer it, but a scripted/stale/buggy
+                // event might), mirroring the typed-input constraints.
+                let in_range = ctx.min.as_ref().is_none_or(|m| date.compare(m) != Ordering::Less)
+                    && ctx.max.as_ref().is_none_or(|m| date.compare(m) != Ordering::Greater);
+                let available = props.is_date_unavailable.as_ref().is_none_or(|p| !p(date));
+                if !(in_range && available) { return None; }
                 let date = date.clone();
                 let should_close = props.close_on_select;
                 let open_controlled = props.open.is_some();
@@ -1053,6 +1062,11 @@ impl<'a> Api<'a> {
         if let Some(name) = &self.ctx.name {
             attrs.set(HtmlAttr::Name, name);
         }
+        // A disabled control is excluded from form submission — mirror the
+        // disabled visible input/buttons so a disabled picker submits nothing.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         attrs.set(HtmlAttr::Value, value);
         attrs
     }
@@ -1094,7 +1108,10 @@ impl<'a> Api<'a> {
         (self.send)(Event::KeyDown { key });
     }
 
-    /// Handle focus entering the component.
+    /// Handle focus entering the **input field**. Wire to the `Input` only — not
+    /// the `Trigger` (which has its own click/keydown handlers); wiring it on the
+    /// trigger would open on trigger focus and the activating click would
+    /// immediately toggle it closed.
     pub fn on_focusin(&self) {
         (self.send)(Event::FocusIn);
     }

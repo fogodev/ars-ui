@@ -1797,6 +1797,72 @@ fn selecting_already_selected_date_emits_no_value_change() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Codex review #697 (pass 5) — selection guard, disabled hidden input
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn select_date_out_of_range_is_rejected() {
+    // Defense-in-depth: a `SelectDate` for a date outside [min, max] must not
+    // commit, even though the calendar should never offer it.
+    let mut svc = service_with(
+        Props {
+            min: Some(date(2024, 1, 1)),
+            max: Some(date(2024, 12, 31)),
+            ..props()
+        },
+        en_us(),
+    );
+    drop(svc.send(Event::Open));
+
+    let result = svc.send(Event::SelectDate {
+        date: date(2025, 1, 1),
+    });
+
+    assert!(!result.state_changed);
+    assert!(result.pending_effects.is_empty());
+    assert_eq!(*svc.context().value.get(), None);
+}
+
+#[test]
+fn select_date_unavailable_is_rejected() {
+    let mut svc = service_with(
+        Props {
+            is_date_unavailable: Some(unavailable_after(date(2024, 6, 15))),
+            ..props()
+        },
+        en_us(),
+    );
+    drop(svc.send(Event::Open));
+
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 6, 20),
+    }));
+
+    assert_eq!(*svc.context().value.get(), None);
+}
+
+#[test]
+fn disabled_hidden_input_is_disabled() {
+    // A disabled picker must not submit its value: the hidden input carries
+    // `disabled` so the browser excludes it from form submission.
+    let svc = service_with(
+        Props {
+            disabled: true,
+            name: Some(String::from("date")),
+            default_value: Some(date(2024, 3, 15)),
+            ..props()
+        },
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    assert_eq!(
+        attr(&api.hidden_input_attrs(), HtmlAttr::Disabled).as_deref(),
+        Some("true"),
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Snapshots — root
 // ────────────────────────────────────────────────────────────────────
 
