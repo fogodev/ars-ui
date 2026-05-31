@@ -1,0 +1,129 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8d4592bcf483",
+  "session_id": "237b9b0f-3f17-4f7d-a955-e50b875d5151",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-31T13:44:52.972703Z",
+  "branch": "t3code/c59961ed",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "e1010d5142f1",
+  "token_usage": {
+    "input_tokens": 104266,
+    "cache_creation_tokens": 8223237,
+    "cache_read_tokens": 405586806,
+    "output_tokens": 701504,
+    "api_call_count": 688
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #289: the framework-agnostic DatePicker state machine (agnostic core only, no adapters) pairing a text input with an embedded Calendar in a popover, including full ARIA, data attrs, value/open controlled-prop sync, and TDD test coverage.",
+    "outcome": "PR #697 opened on fogodev/ars-ui with 5 commits: the DatePicker core, ars-i18n date_order exposure, xtask snapshot-gate fixes, Codex review remediation (passes 1–4 fully resolved, pass 5 partially resolved). The PR is green on all 22 CI checks but work is still in progress: pass-5 finding P5-4 (focus-intent on controlled-open SyncProps) was deferred pending a holistic design review, and the pass-5 clear fixes (P5-1/2/3) were being committed at the end of the transcript.",
+    "learnings": {
+      "repo": [
+        "ars-i18n already had a private `date_order(locale) -> DateOrder` with CLDR (icu4x), JS Intl (web-intl/wasm), and (language,region) fallback paths — both DateField and DatePicker had been reimplementing only the fallback heuristic; the fix was to make it public.",
+        "CalendarDate has no PartialOrd/Ord — comparisons must use `.compare(m) -> Ordering`; fields are `pub(crate)` so accessors `year()/month()/day()` are required; `new_gregorian(i32,u8,u8)` returns `Result`, not a direct value; `nzu8` helper does not exist anywhere.",
+        "The Machine trait requires `type Effect: EffectName` — string effect names and `use_platform_effects()` closures in core don't compile. Named focus effects (`PendingEffect::named(Effect::X)`) are the correct pattern; adapters execute actual DOM focus.",
+        "Service::new takes props and env by reference (`&`), and `send` is `#[must_use]` — must `drop(svc.send(...))` in tests.",
+        "ComponentIds has no public `base_id` field; the accessor is `ids.id()`.",
+        "Context derives `#[derive(Clone)]` + manual `impl Debug` (not PartialEq) — Messages holds MessageFn (Arc pointer equality PartialEq) which makes Context PartialEq unsound. Calendar establishes this convention.",
+        "The snapshot-count xtask gate silently skipped the entire `date_time` and `data_display` categories because `is_component_category` matched hyphenated dir names ('date-time') while the actual source dirs and snapshot paths use underscores ('date_time').",
+        "`is_ars_components_component` (which sets the 3-per-variant floor) had the same hyphen/underscore bug — this caused rating_group to incorrectly require 9 snapshots (9 = 3 variants × 3/variant) instead of 3 (1 variant × 3/variant).",
+        "Controlled-open semantics: Popover commits state locally on user events and relies on `on_open_change` + parent re-prop — but after Codex review, the DatePicker was changed to block state mutation when open is controlled (pure React-controlled model), requiring a `requested_open` context field.",
+        "For controlled value notifications, the repo convention (rating_group) is a `requested_value` context field + `Effect::ValueChange` named marker — NOT a Props callback — so the adapter reads the requested value and notifies upstream.",
+        "`Callback::new_ref` (not `Callback::new`) is required for higher-ranked `for<'a> Fn(&'a T)` form, e.g., `IsDateUnavailableFn`.",
+        "The CI Snapshot Change Check only fires on `pull_request: [opened, synchronize, reopened]` — it does NOT re-fire on `labeled`. Adding `snapshot-reviewed` label after PR creation leaves the check red; a manual re-run is needed.",
+        "`spec-compile-snippets` does `syn` syntax-only parsing — type/borrow errors are out of scope; blocks can opt out with `rust,no_check`.",
+        "calendar::Props.is_date_unavailable is `Option<IsDateUnavailableFn>` (a `Callback<dyn Fn(&CalendarDate)->bool+Send+Sync>`), not `Option<fn(&CalendarDate)->bool>`."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-i18n/src/date.rs",
+          "line": 1245,
+          "end_line": 1282,
+          "finding": "Private `date_order(locale)` function with cfg-selected CLDR (icu_date_order via ICU4X probe date), JS Intl (js_date_order via Intl.DateTimeFormat.formatToParts), and (language,region) heuristic fallback. Exposed as pub in this session."
+        },
+        {
+          "path": "crates/ars-i18n/src/date.rs",
+          "line": 489,
+          "end_line": 489,
+          "finding": "to_iso8601() returns canonical YYYY-MM-DD string — the correct format for hidden input values (not display-calendar year()/month()/day() fields)."
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "line": 814,
+          "end_line": 830,
+          "finding": "is_ars_components_component listed hyphenated dir names ('date-time', 'data-display') but filesystem dirs are underscored — caused wrong floor calculations for all date_time and data_display components. Fixed in this session."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/calendar/mod.rs",
+          "line": 1,
+          "end_line": 1,
+          "finding": "Canonical sync_props_into_ctx helper + Bindable::sync_controlled pattern for controlled/uncontrolled prop re-derivation on SyncProps events. DatePicker mirrors this exactly."
+        },
+        {
+          "path": "crates/ars-components/src/layout/collapsible/mod.rs",
+          "line": 1,
+          "end_line": 1,
+          "finding": "on_trigger_keydown returns bool (handled status) to prevent double-toggle from keydown + native click. DatePicker's on_trigger_keydown was updated to match."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/rating_group/mod.rs",
+          "line": 1,
+          "end_line": 1,
+          "finding": "Establishes the ValueChange convention: named Effect::ValueChange marker + requested_value context field (no Props callback). Adapter reads requested_value and notifies upstream."
+        }
+      ],
+      "workflow": [
+        "TDD discipline: write failing tests first (logic tests excluding snapshots), then implement, then generate+review snapshots with `cargo insta test` / `cargo insta accept` / `cargo insta test --unreferenced=reject`.",
+        "post-implementation-audit skill runs 3 phases: spec/impl drift scan, iterative completeness critic (rounds until dry), and llvm-cov coverage with gap analysis — all findings must be landed in the same PR.",
+        "The waiting-for-codex-review skill loop: post `@codex review`, poll for terminal verdict (👍 or 👀-dropped), triage findings with TDD, push fix, reply inline + resolve threads, re-post `@codex review`.",
+        "cargo xci-fast is the mandatory pre-push gate (10 gates); full cargo xci adds wasm-coverage and feature-matrix groups and is needed before merging PRs that touch i18n/cross-backend code.",
+        "When a Codex review re-litigates a prior decision (like controlled-open semantics), check with the user before implementing — the decision may be reversed, generating cascading changes.",
+        "Snapshot-count gate and spec-compile-snippets are xtask gates run as part of xci-fast — broken gates in those tools silently give false passes until the tool itself is fixed.",
+        "A proptest with controlled/uncontrolled prop toggling is a high-value invariant test — it caught a real Bindable internal-state divergence bug that unit tests missed."
+      ]
+    },
+    "friction": [
+      "Spec §1.7 had ~10 compile-blockers vs the actual codebase (string effects, missing `type Effect`, nonexistent `nzu8`, CalendarDate field access, non-Ord comparisons, wrong `is_date_unavailable` type, missing `on_props_changed`/`initial_effects`, by-value Service::new) — required extensive API archaeology before any code could be written.",
+      "A property test caught a real bug (open Bindable diverging from State on controlled→uncontrolled flip) that required removing the `open` Bindable entirely and making State the single source of truth — a significant mid-implementation refactor.",
+      "The snapshot-count xtask gate silently skipped two entire categories (date_time, data_display) due to a hyphen/underscore mismatch — the gate gave false passes on the entire date-time subsystem until fixed.",
+      "A stale staged change in pagination/mod.rs (from before the session) broke xci-fast until identified and fixed as a drive-by.",
+      "CI Snapshot Change Check ran before the snapshot-reviewed label was added (structural ordering race) — required a manual job re-run to clear the red check.",
+      "Codex review ran 5 passes with 8+5+4+3+4 findings; pass 4 reversed the controlled-open model chosen in pass 1, generating follow-on focus-flow complexity (P5-4) that required a design pause.",
+      "Closure lifetime errors in tests when using temporary closures in assertions — required binding to `let` before use.",
+      "Session limit was hit mid-work twice, requiring 'continue' prompts to resume."
+    ],
+    "open_items": [
+      "P5-4 deferred: focus-intent tracking for controlled-open SyncProps — when open is controlled, SyncProps currently always emits FocusCalendar on open / RestoreFocusToTrigger on close, losing the originating intent (a FocusIn-triggered open should keep focus in the input; a SelectDate close should restore to input). Needs new machinery (carried focus-intent field) after holistic design review.",
+      "Holistic controlled-state design review needed: the controlled-open and controlled-value models went through multiple reversals across Codex passes; a single coherent design doc should be reviewed before final merge.",
+      "Full `cargo xci` (not just xci-fast) should be run before merging since the PR includes i18n foundation changes (date_order exposure) that add the wasm-coverage and feature-matrix groups.",
+      "Pre-existing utility/highlight snapshot orphans still block a bare `cargo insta test --unreferenced=reject` — unrelated to this PR but a latent CI hazard.",
+      "CI timing race: Snapshot Change Check doesn't re-trigger on `labeled` events — needs either adding `labeled`/`unlabeled` to pull_request trigger types (expensive: re-runs all CI) or switching snapshot acknowledgment to CHANGELOG entries (first-push compatible).",
+      "IntlBackend trait still doesn't expose date field-order as a method — `date_order()` is now public in ars-i18n but components call it directly rather than through the trait abstraction. A proper trait method + both backend impls would be a cleaner foundation but was scoped as a separate task.",
+      "Adapter specs (Leptos/Dioxus) for DatePicker exist and reference calendar_props() correctly but haven't been updated to reflect the new controlled-open semantics (requested_open, block-when-controlled model) — should be reviewed before adapter implementation begins."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 124,
+      "user_lines_removed": 4,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "crates/ars-components/src/date_time/date_picker/mod.rs": 39,
+        "crates/ars-components/src/date_time/date_picker/tests.rs": 66,
+        "spec/components/date-time/date-picker.md": 19
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/date_time/date_picker/mod.rs": 2,
+        "spec/components/date-time/date-picker.md": 2
+      }
+    }
+  ]
+}
