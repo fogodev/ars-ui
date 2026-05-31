@@ -373,6 +373,13 @@ impl ars_core::Machine for Machine {
                 }
 
                 Event::Change(text) => {
+                    // An inert (read-only/disabled) field must not accept edits,
+                    // even mid-composition where this branch runs before the
+                    // guards below.
+                    if ctx.readonly || ctx.disabled {
+                        return None;
+                    }
+
                     let next_text = text.clone();
                     return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                         ctx.input_text = next_text;
@@ -849,7 +856,10 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.ctx.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        if let Some(color) = self.ctx.value.get() {
+        // Only submit a value when the field is valid. While invalid, the stored
+        // color is the last *valid* value, which no longer matches the visible
+        // input — submitting it would send a stale color.
+        if let Some(color) = (*self.ctx.value.get()).filter(|_| !self.ctx.invalid) {
             attrs.set(HtmlAttr::Value, color.to_hex(true));
         }
         // A disabled control must be omitted from form submission.
@@ -937,7 +947,7 @@ ColorField
 | Input        | `<input>` | `type="text"`, `aria-labelledby`, `aria-invalid`, `aria-required`, `aria-describedby`, native `readonly` (when read-only) |
 | Description  | `<div>`   | Referenced by Input `aria-describedby`                                                |
 | ErrorMessage | `<div>`   | `role="alert"`, referenced by Input `aria-describedby`                                |
-| HiddenInput  | `<input>` | `type="hidden"`, `name`, `value` (hex), `disabled` (when disabled — omitted from form submission) |
+| HiddenInput  | `<input>` | `type="hidden"`, `name`, `value` (hex; omitted while invalid so a stale last-valid color is not submitted), `disabled` (when disabled — omitted from form submission) |
 
 ## 3. Accessibility
 

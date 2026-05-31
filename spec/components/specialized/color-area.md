@@ -77,6 +77,16 @@ pub enum Event {
 pub struct Context {
     /// The current color value (controlled or uncontrolled).
     pub value: Bindable<ColorValue>,
+    /// The x-axis channel value in channel units, kept *unwrapped*.
+    ///
+    /// Source of truth for the x thumb position and value text. [`ColorValue`]
+    /// normalizes hue into `[0, 360)`, so reading a hue axis back from the color
+    /// would collapse the 360° endpoint onto 0°; tracking it here keeps the
+    /// endpoint distinct. See [`Context::y_value`](Self::y_value).
+    pub x_value: f64,
+    /// The y-axis channel value in channel units, kept unwrapped (see
+    /// [`x_value`](Self::x_value)).
+    pub y_value: f64,
     /// Which channel the x-axis controls.
     pub x_channel: ColorChannel,
     /// Which channel the y-axis controls.
@@ -158,16 +168,37 @@ impl Default for Props {
 ### 1.5 Full Machine Implementation
 
 ```rust,no_check
-/// Apply normalized (x, y) coordinates to both channels.
+/// Apply normalized (x, y) coordinates to both channels (y is inverted: top = max).
 fn apply_area_position(ctx: &mut Context, x: f64, y: f64) {
-    let color = *ctx.value.get();
     let (x_min, x_max) = channel_range(ctx.x_channel);
     let (y_min, y_max) = channel_range(ctx.y_channel);
     let x_val = x_min + x.clamp(0.0, 1.0) * (x_max - x_min);
     // y is inverted: top=max, bottom=min
     let y_val = y_max - y.clamp(0.0, 1.0) * (y_max - y_min);
+
+    ctx.x_value = x_val;
+    ctx.y_value = y_val;
+
+    // Apply both channels from a single base color. Reading the bindable twice
+    // (as two `set_*_value` calls would) discards the first change in controlled
+    // mode, where `get()` keeps returning the controlled color.
+    let color = *ctx.value.get();
     let updated = with_channel(&color, ctx.x_channel, x_val);
     ctx.value.set(with_channel(&updated, ctx.y_channel, y_val));
+}
+
+/// Set the x-axis channel value (unwrapped) and derive the color from it.
+fn set_x_value(ctx: &mut Context, value: f64) {
+    ctx.x_value = value;
+    let color = *ctx.value.get();
+    ctx.value.set(with_channel(&color, ctx.x_channel, value));
+}
+
+/// Set the y-axis channel value (unwrapped) and derive the color from it.
+fn set_y_value(ctx: &mut Context, value: f64) {
+    ctx.y_value = value;
+    let color = *ctx.value.get();
+    ctx.value.set(with_channel(&color, ctx.y_channel, value));
 }
 
 /// Format a single channel reading for `aria-valuetext`, including the channel
@@ -221,12 +252,16 @@ impl ars_core::Machine for Machine {
             Some(v) => Bindable::controlled(v.clone()),
             None => Bindable::uncontrolled(props.default_value.clone()),
         };
+        let x_value = channel_value(value.get(), props.x_channel);
+        let y_value = channel_value(value.get(), props.y_channel);
         let ids = ComponentIds::from_id(&props.id);
         let locale = env.locale.clone();
         let messages = messages.clone();
 
         (State::Idle, Context {
             value,
+            x_value,
+            y_value,
             x_channel: props.x_channel,
             y_channel: props.y_channel,
             disabled: props.disabled,
@@ -301,10 +336,8 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly { return None; }
                 let step = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    let current = channel_value(color, ctx.x_channel);
                     let (_, max) = channel_range(ctx.x_channel);
-                    ctx.value.set(with_channel(color, ctx.x_channel, (current + step).min(max)));
+                    set_x_value(ctx, (ctx.x_value + step).min(max));
                 }))
             }
 
@@ -312,10 +345,8 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly { return None; }
                 let step = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    let current = channel_value(color, ctx.x_channel);
                     let (min, _) = channel_range(ctx.x_channel);
-                    ctx.value.set(with_channel(color, ctx.x_channel, (current - step).max(min)));
+                    set_x_value(ctx, (ctx.x_value - step).max(min));
                 }))
             }
 
@@ -323,10 +354,8 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly { return None; }
                 let step = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    let current = channel_value(color, ctx.y_channel);
                     let (_, max) = channel_range(ctx.y_channel);
-                    ctx.value.set(with_channel(color, ctx.y_channel, (current + step).min(max)));
+                    set_y_value(ctx, (ctx.y_value + step).min(max));
                 }))
             }
 
@@ -334,46 +363,40 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly { return None; }
                 let step = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    let current = channel_value(color, ctx.y_channel);
                     let (min, _) = channel_range(ctx.y_channel);
-                    ctx.value.set(with_channel(color, ctx.y_channel, (current - step).max(min)));
+                    set_y_value(ctx, (ctx.y_value - step).max(min));
                 }))
             }
 
             (_, Event::SetXToMin) => {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get();
                     let (min, _) = channel_range(ctx.x_channel);
-                    ctx.value.set(with_channel(color, ctx.x_channel, min));
+                    set_x_value(ctx, min);
                 }))
             }
 
             (_, Event::SetXToMax) => {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get();
                     let (_, max) = channel_range(ctx.x_channel);
-                    ctx.value.set(with_channel(color, ctx.x_channel, max));
+                    set_x_value(ctx, max);
                 }))
             }
 
             (_, Event::SetYToMin) => {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get();
                     let (min, _) = channel_range(ctx.y_channel);
-                    ctx.value.set(with_channel(color, ctx.y_channel, min));
+                    set_y_value(ctx, min);
                 }))
             }
 
             (_, Event::SetYToMax) => {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get();
                     let (_, max) = channel_range(ctx.y_channel);
-                    ctx.value.set(with_channel(color, ctx.y_channel, max));
+                    set_y_value(ctx, max);
                 }))
             }
 
@@ -398,6 +421,9 @@ impl ars_core::Machine for Machine {
                     Some(color) => {
                         ctx.value.set(color);
                         ctx.value.sync_controlled(Some(color));
+                        // Re-derive both axis values from the parent's color.
+                        ctx.x_value = channel_value(&color, ctx.x_channel);
+                        ctx.y_value = channel_value(&color, ctx.y_channel);
                     }
                     None => ctx.value.sync_controlled(None),
                 }))
@@ -406,6 +432,9 @@ impl ars_core::Machine for Machine {
             (_, Event::SetProps) => {
                 let props = props.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
+                    let x_channel_changed = ctx.x_channel != props.x_channel;
+                    let y_channel_changed = ctx.y_channel != props.y_channel;
+
                     ctx.x_channel = props.x_channel;
                     ctx.y_channel = props.y_channel;
                     ctx.step = props.step;
@@ -413,6 +442,15 @@ impl ars_core::Machine for Machine {
                     ctx.disabled = props.disabled;
                     ctx.readonly = props.readonly;
                     ctx.dir = props.dir;
+
+                    // A new axis channel means the cached axis value refers to the
+                    // old channel; re-derive it from the current color.
+                    if x_channel_changed {
+                        ctx.x_value = channel_value(ctx.value.get(), ctx.x_channel);
+                    }
+                    if y_channel_changed {
+                        ctx.y_value = channel_value(ctx.value.get(), ctx.y_channel);
+                    }
                 }))
             }
 
@@ -532,8 +570,9 @@ impl<'a> Api<'a> {
         }
 
         let color = self.ctx.value.get();
-        let x_val = channel_value(color, self.ctx.x_channel);
-        let y_val = channel_value(color, self.ctx.y_channel);
+        // Unwrapped axis values keep hue endpoints (360°) distinct from 0°.
+        let x_val = self.ctx.x_value;
+        let y_val = self.ctx.y_value;
         let (x_min, x_max) = channel_range(self.ctx.x_channel);
         let (y_min, y_max) = channel_range(self.ctx.y_channel);
 

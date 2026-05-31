@@ -460,6 +460,13 @@ impl ars_core::Machine for Machine {
                 }
 
                 Event::Change(text) => {
+                    // An inert (read-only/disabled) field must not accept edits,
+                    // even mid-composition where this branch runs before the
+                    // guards below.
+                    if ctx.readonly || ctx.disabled {
+                        return None;
+                    }
+
                     let next_text = text.clone();
                     return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                         ctx.input_text = next_text;
@@ -986,7 +993,10 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Name, name.clone());
         }
 
-        if let Some(color) = self.ctx.value.get() {
+        // Only submit a value when the field is valid. While invalid, the stored
+        // color is the last *valid* value, which no longer matches the visible
+        // input — submitting it would send a stale color.
+        if let Some(color) = (*self.ctx.value.get()).filter(|_| !self.ctx.invalid) {
             attrs.set(HtmlAttr::Value, color.to_hex(true));
         }
 
@@ -1502,6 +1512,56 @@ mod tests {
             svc.connect(&|_| {}).input_text(),
             "50",
             "saturation 0.5 renders as 50%"
+        );
+    }
+
+    #[test]
+    fn invalid_field_omits_stale_hidden_value() {
+        let mut svc = service(Props {
+            name: Some("color".to_string()),
+            default_value: Some(ColorValue::from_rgb(255, 0, 0)),
+            ..Props::default()
+        });
+
+        // Valid state submits the value.
+        assert_eq!(
+            svc.connect(&|_| {})
+                .hidden_input_attrs()
+                .get(&HtmlAttr::Value),
+            Some("#ff0000")
+        );
+
+        // Commit an invalid string: value stays at the old red, invalid is set.
+        drop(svc.send(Event::Change("not a color".to_string())));
+        drop(svc.send(Event::Commit));
+
+        let hidden = svc.connect(&|_| {}).hidden_input_attrs();
+        assert!(
+            !hidden.contains(&HtmlAttr::Value),
+            "an invalid field must not submit the last valid color"
+        );
+        // The name is still present so the field round-trips as empty.
+        assert_eq!(hidden.get(&HtmlAttr::Name), Some("color"));
+    }
+
+    #[test]
+    fn readonly_field_ignores_ime_composition_edits() {
+        let mut svc = service(Props {
+            readonly: true,
+            default_value: Some(ColorValue::from_rgb(255, 0, 0)),
+            ..Props::default()
+        });
+
+        let before = svc.connect(&|_| {}).input_text().to_string();
+
+        drop(svc.send(Event::CompositionStart));
+        drop(svc.send(Event::Change("#0000ff".to_string())));
+        drop(svc.send(Event::CompositionEnd));
+
+        assert_eq!(
+            svc.connect(&|_| {}).input_text(),
+            before,
+            "a read-only field must not accept IME composition edits"
         );
     }
 
