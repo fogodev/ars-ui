@@ -162,6 +162,15 @@ impl Context {
     pub fn has_overflow_x(&self) -> bool { self.content_width > self.viewport_width }
     pub fn has_overflow_y(&self) -> bool { self.content_height > self.viewport_height }
 
+    /// Clamp stored offsets into `0..=(content - viewport)` per axis. The rest of
+    /// the machine assumes in-range offsets, so externally-supplied values
+    /// (overscroll bounce, a stale programmatic scroll after a shrink) are
+    /// clamped before storage.
+    fn clamp_offsets(&mut self) {
+        self.scroll_x = self.scroll_x.clamp(0.0, (self.content_width - self.viewport_width).max(0.0));
+        self.scroll_y = self.scroll_y.clamp(0.0, (self.content_height - self.viewport_height).max(0.0));
+    }
+
     /// Whether the horizontal scrollbar may be visible: orientation enables it
     /// and (outside `Always`) the content overflows.
     fn can_show_x(&self) -> bool {
@@ -371,9 +380,8 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.viewport_width = vw; ctx.viewport_height = vh;
                     ctx.content_width = cw; ctx.content_height = ch;
-                    // Clamp offsets that the shrunk content/viewport made invalid.
-                    ctx.scroll_x = ctx.scroll_x.clamp(0.0, (cw - vw).max(0.0));
-                    ctx.scroll_y = ctx.scroll_y.clamp(0.0, (ch - vh).max(0.0));
+                    // Clamp offsets the shrunk content/viewport made invalid.
+                    ctx.clamp_offsets();
                     ctx.update_visibility(active);
                 }))
             }
@@ -385,6 +393,7 @@ impl ars_core::Machine for Machine {
                 if *state == State::ThumbDragging {
                     Some(TransitionPlan::context_only(move |ctx| {
                         ctx.scroll_x = sx; ctx.scroll_y = sy;
+                        ctx.clamp_offsets();
                     }))
                 } else if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll {
                     // The agnostic core does not own timers. It records the
@@ -393,12 +402,14 @@ impl ars_core::Machine for Machine {
                     // back when it fires. See §1.6.1.
                     Some(TransitionPlan::to(State::ScrollActive).apply(move |ctx| {
                         ctx.scroll_x = sx; ctx.scroll_y = sy;
+                        ctx.clamp_offsets();
                         ctx.scrollbar_x_visible = ctx.can_show_x();
                         ctx.scrollbar_y_visible = ctx.can_show_y();
                     }).with_effect(PendingEffect::named(Effect::AutoHide)))
                 } else {
                     Some(TransitionPlan::context_only(move |ctx| {
                         ctx.scroll_x = sx; ctx.scroll_y = sy;
+                        ctx.clamp_offsets();
                     }))
                 }
             }
@@ -746,7 +757,10 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "none");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), "vertical");
+        // `role="none"` is presentational: ARIA attributes (incl.
+        // `aria-orientation`) are invalid on it. The axis is conveyed via a data
+        // attribute for styling; the part name already encodes it.
+        attrs.set(HtmlAttr::Data("ars-orientation"), "vertical");
         attrs.set_bool(HtmlAttr::Data("ars-visible"), self.ctx.scrollbar_y_visible);
         attrs
     }
@@ -766,7 +780,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "none");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), "horizontal");
+        attrs.set(HtmlAttr::Data("ars-orientation"), "horizontal");
         attrs.set_bool(HtmlAttr::Data("ars-visible"), self.ctx.scrollbar_x_visible);
         attrs
     }
@@ -786,6 +800,12 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "none");
+        // Visible only when both scrollbars are present, so adapters can hide the
+        // filler when a single axis shows without duplicating visibility logic.
+        attrs.set_bool(
+            HtmlAttr::Data("ars-visible"),
+            self.ctx.scrollbar_x_visible && self.ctx.scrollbar_y_visible,
+        );
         attrs
     }
 
@@ -832,16 +852,16 @@ ScrollArea
 │   └── CornerSquare <div> role="none" (gap filler when both axes)
 ```
 
-| Part         | Element | Key Attributes                                      |
-| ------------ | ------- | --------------------------------------------------- |
-| Root         | `<div>` | `data-ars-state`, `data-ars-overflow-x/y`           |
-| Viewport     | `<div>` | `role="region"`, `tabindex="0"`, `aria-label`       |
-| Content      | `<div>` | Inner content wrapper                               |
-| ScrollbarY   | `<div>` | `role="none"`, `data-ars-visible`                   |
-| ThumbY       | `<div>` | `role="none"`, sized/positioned by thumb metrics    |
-| ScrollbarX   | `<div>` | `role="none"`, `data-ars-visible`                   |
-| ThumbX       | `<div>` | `role="none"`, sized/positioned by thumb metrics    |
-| CornerSquare | `<div>` | `role="none"`, visible when both scrollbars present |
+| Part         | Element | Key Attributes                                              |
+| ------------ | ------- | ----------------------------------------------------------- |
+| Root         | `<div>` | `data-ars-state`, `data-ars-overflow-x/y`                   |
+| Viewport     | `<div>` | `role="region"`, `tabindex="0"`, `aria-label`               |
+| Content      | `<div>` | Inner content wrapper                                       |
+| ScrollbarY   | `<div>` | `role="none"`, `data-ars-orientation`, `data-ars-visible`   |
+| ThumbY       | `<div>` | `role="none"`, sized/positioned by thumb metrics            |
+| ScrollbarX   | `<div>` | `role="none"`, `data-ars-orientation`, `data-ars-visible`   |
+| ThumbX       | `<div>` | `role="none"`, sized/positioned by thumb metrics            |
+| CornerSquare | `<div>` | `role="none"`, `data-ars-visible` (both scrollbars present) |
 
 ## 3. Accessibility
 

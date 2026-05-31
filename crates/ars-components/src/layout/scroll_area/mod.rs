@@ -264,6 +264,20 @@ impl Context {
         self.content_height > self.viewport_height
     }
 
+    /// Clamp the stored scroll offsets into `0..=(content - viewport)` on each
+    /// axis. The rest of the machine (thumb metrics, edge queries) assumes
+    /// in-range offsets, so any externally-supplied value — overscroll bounce,
+    /// a stale programmatic scroll after the content shrank — is clamped before
+    /// it is stored.
+    fn clamp_offsets(&mut self) {
+        self.scroll_x = self
+            .scroll_x
+            .clamp(0.0, (self.content_width - self.viewport_width).max(0.0));
+        self.scroll_y = self
+            .scroll_y
+            .clamp(0.0, (self.content_height - self.viewport_height).max(0.0));
+    }
+
     /// Whether the horizontal scrollbar is permitted to be visible: the
     /// orientation must enable it and (outside `Always` mode) the content must
     /// overflow.
@@ -669,8 +683,7 @@ impl ars_core::Machine for Machine {
                     // Shrinking the content/viewport can leave a previously-valid
                     // offset past the new max; clamp so queries and adapter
                     // scroll-syncs never observe an impossible offset.
-                    ctx.scroll_x = ctx.scroll_x.clamp(0.0, (cw - vw).max(0.0));
-                    ctx.scroll_y = ctx.scroll_y.clamp(0.0, (ch - vh).max(0.0));
+                    ctx.clamp_offsets();
                     ctx.update_visibility(active);
                 }))
             }
@@ -685,6 +698,7 @@ impl ars_core::Machine for Machine {
                     Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                         ctx.scroll_x = sx;
                         ctx.scroll_y = sy;
+                        ctx.clamp_offsets();
                     }))
                 } else if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll {
                     Some(
@@ -692,6 +706,7 @@ impl ars_core::Machine for Machine {
                             .apply(move |ctx: &mut Context| {
                                 ctx.scroll_x = sx;
                                 ctx.scroll_y = sy;
+                                ctx.clamp_offsets();
                                 ctx.scrollbar_x_visible = ctx.can_show_x();
                                 ctx.scrollbar_y_visible = ctx.can_show_y();
                             })
@@ -701,6 +716,7 @@ impl ars_core::Machine for Machine {
                     Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                         ctx.scroll_x = sx;
                         ctx.scroll_y = sy;
+                        ctx.clamp_offsets();
                     }))
                 }
             }
@@ -1178,11 +1194,14 @@ impl Api<'_> {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ScrollbarY.data_attrs();
 
+        // `role="none"` is presentational, so ARIA state/property attributes
+        // (incl. `aria-orientation`) are not valid on it; the part name already
+        // encodes the axis. A `data-ars-orientation` marker is kept for styling.
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Role, "none")
-            .set(HtmlAttr::Aria(AriaAttr::Orientation), "vertical")
+            .set(HtmlAttr::Data("ars-orientation"), "vertical")
             .set_bool(HtmlAttr::Data("ars-visible"), self.ctx.scrollbar_y_visible);
 
         attrs
@@ -1212,7 +1231,7 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Role, "none")
-            .set(HtmlAttr::Aria(AriaAttr::Orientation), "horizontal")
+            .set(HtmlAttr::Data("ars-orientation"), "horizontal")
             .set_bool(HtmlAttr::Data("ars-visible"), self.ctx.scrollbar_x_visible);
 
         attrs
@@ -1233,6 +1252,10 @@ impl Api<'_> {
     }
 
     /// Attributes for the corner gap shown when both scrollbars are present.
+    ///
+    /// `data-ars-visible` is `true` only when both scrollbars are visible, so
+    /// adapters can hide the filler when a single axis is showing without
+    /// duplicating the core visibility logic.
     #[must_use]
     pub fn corner_square_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -1241,7 +1264,11 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
-            .set(HtmlAttr::Role, "none");
+            .set(HtmlAttr::Role, "none")
+            .set_bool(
+                HtmlAttr::Data("ars-visible"),
+                self.ctx.scrollbar_x_visible && self.ctx.scrollbar_y_visible,
+            );
 
         attrs
     }
@@ -2133,6 +2160,21 @@ mod tests {
     }
 
     #[test]
+    fn scroll_event_clamps_out_of_range_offsets() {
+        // Overscroll bounce / stale programmatic scroll can report offsets
+        // outside 0..=max; they must be clamped before storage.
+        let mut service = service(props());
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+
+        drop(service.send(Event::Scroll {
+            x: -50.0,
+            y: 9999.0,
+        }));
+        assert_eq!(service.context().scroll_x, 0.0);
+        assert_eq!(service.context().scroll_y, 300.0); // content 400 - viewport 100
+    }
+
+    #[test]
     fn resize_clamps_stored_offset_to_new_bounds() {
         let mut service = service(props());
         resize(&mut service, 100.0, 100.0, 100.0, 400.0);
@@ -2346,17 +2388,47 @@ mod tests {
             api.corner_square_attrs(),
         ] {
             assert_eq!(attrs.get(&HtmlAttr::Role), Some("none"));
+            // `role="none"` is presentational: no ARIA attributes belong on it.
+            assert!(attrs.get(&HtmlAttr::Aria(AriaAttr::Orientation)).is_none());
         }
 
+        // The axis is conveyed via a data attribute, not ARIA.
         assert_eq!(
             api.scrollbar_y_attrs()
-                .get(&HtmlAttr::Aria(AriaAttr::Orientation)),
+                .get(&HtmlAttr::Data("ars-orientation")),
             Some("vertical")
         );
         assert_eq!(
             api.scrollbar_x_attrs()
-                .get(&HtmlAttr::Aria(AriaAttr::Orientation)),
+                .get(&HtmlAttr::Data("ars-orientation")),
             Some("horizontal")
+        );
+    }
+
+    #[test]
+    fn corner_square_visible_only_when_both_scrollbars_present() {
+        let mut both = service(
+            props()
+                .orientation(ScrollOrientation::Both)
+                .scrollbar_visibility(ScrollbarVisibility::Always),
+        );
+        resize(&mut both, 100.0, 100.0, 400.0, 400.0);
+        assert_eq!(
+            both.connect(&|_| {})
+                .corner_square_attrs()
+                .get(&HtmlAttr::Data("ars-visible")),
+            Some("true")
+        );
+
+        // Vertical-only: corner filler must report hidden.
+        let mut single = service(props().orientation(ScrollOrientation::Vertical));
+        resize(&mut single, 100.0, 100.0, 400.0, 400.0);
+        assert_eq!(
+            single
+                .connect(&|_| {})
+                .corner_square_attrs()
+                .get(&HtmlAttr::Data("ars-visible")),
+            Some("false")
         );
     }
 

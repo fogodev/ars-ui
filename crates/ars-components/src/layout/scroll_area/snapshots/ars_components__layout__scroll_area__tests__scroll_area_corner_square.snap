@@ -4,4 +4,5 @@ expression: snapshot_attrs(&both_api.corner_square_attrs())
 ---
 data-ars-part=corner-square
 data-ars-scope=scroll-area
+data-ars-visible=true
 role=none
