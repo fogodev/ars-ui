@@ -193,10 +193,11 @@ impl Context {
     }
 }
 
-/// Whether a `Hover`/`Scroll` session is active (scrollbars should show for
-/// eligible axes) for the given state.
+/// Whether a hover/scroll/drag session is active (scrollbars should show for
+/// eligible axes) for the given state. `ThumbDragging` counts: a resize mid-drag
+/// must not hide the thumb being dragged.
 const fn is_session_active(state: State) -> bool {
-    matches!(state, State::Hovering | State::ScrollActive)
+    matches!(state, State::Hovering | State::ScrollActive | State::ThumbDragging)
 }
 ```
 
@@ -403,7 +404,10 @@ impl ars_core::Machine for Machine {
             // root and any overlaid scrollbar track, so each leave event checks
             // the other hover flag before hiding.
             Event::MouseEnter => {
-                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover {
+                // A captured pointer can re-enter the root mid-drag; record the
+                // hover flag but never leave `ThumbDragging`.
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover
+                    && *state != State::ThumbDragging {
                     Some(TransitionPlan::to(State::Hovering).apply(|ctx| {
                         ctx.hovering_root = true;
                         ctx.scrollbar_x_visible = ctx.can_show_x();
@@ -469,7 +473,10 @@ impl ars_core::Machine for Machine {
                     ctx.drag_start_thumb_pos = current_thumb_pos;
                     ctx.drag_start_scroll_pos = scroll_pos;
                     ctx.drag_axis = Some(a);
-                }))
+                })
+                // Cancel any running Scroll-mode hide timer so it cannot fire
+                // mid-drag; `ThumbDragEnd` starts a fresh one. No-op otherwise.
+                .cancel_effect(Effect::AutoHide))
             }
 
             Event::ThumbDragMove { pos } => {
@@ -536,15 +543,19 @@ impl ars_core::Machine for Machine {
                 let cross = props.scrollbar_cross_size.unwrap_or(0.0);
                 let dir = props.dir.unwrap_or(Direction::Ltr);
 
-                // Switching away from Scroll while the hide timer runs leaves
-                // ScrollActive and cancels the orphaned AutoHide so a stale timer
-                // cannot later hide an Always/Auto scrollbar.
+                // Leaving the visibility mode the current active state belongs to
+                // resets to Idle (else a stuck ScrollActive/Hovering lingers; for
+                // Scroll an orphaned AutoHide could later hide the scrollbar). A
+                // ThumbDragging session is preserved.
                 let leaving_scroll_active =
                     *state == State::ScrollActive && visibility != ScrollbarVisibility::Scroll;
+                let leaving_hover =
+                    *state == State::Hovering && visibility != ScrollbarVisibility::Hover;
+                let reset_state = leaving_scroll_active || leaving_hover;
                 // Derive visibility against the resulting state so a newly-enabled
-                // axis turns on while a hover/scroll session is still active.
-                let active = !leaving_scroll_active && is_session_active(*state);
-                let mut plan = if leaving_scroll_active {
+                // axis turns on while a session is still active.
+                let active = !reset_state && is_session_active(*state);
+                let mut plan = if reset_state {
                     TransitionPlan::to(State::Idle)
                 } else {
                     TransitionPlan::new()

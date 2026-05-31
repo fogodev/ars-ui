@@ -302,10 +302,14 @@ impl Context {
     }
 }
 
-/// Whether a `Hover`/`Scroll` session is currently active for the given state,
-/// i.e. scrollbars should be shown for eligible axes.
+/// Whether a hover/scroll/drag session is currently active for the given state,
+/// i.e. scrollbars should be shown for eligible axes. `ThumbDragging` counts:
+/// the thumb being dragged must stay visible even if a resize fires mid-drag.
 const fn is_session_active(state: State) -> bool {
-    matches!(state, State::Hovering | State::ScrollActive)
+    matches!(
+        state,
+        State::Hovering | State::ScrollActive | State::ThumbDragging
+    )
 }
 
 /// Detail payload an adapter can surface to its `on_scroll` callback.
@@ -699,7 +703,12 @@ impl ars_core::Machine for Machine {
             }
 
             Event::MouseEnter => {
-                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover {
+                // A captured pointer can re-enter the root mid-drag; record the
+                // hover flag but never leave `ThumbDragging`, or the drag would
+                // stop (mirrors the leave-path guard).
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover
+                    && *state != State::ThumbDragging
+                {
                     Some(
                         TransitionPlan::to(State::Hovering).apply(|ctx: &mut Context| {
                             ctx.hovering_root = true;
@@ -790,21 +799,26 @@ impl ars_core::Machine for Machine {
                 let min_thumb = ctx.min_thumb_size;
 
                 Some(
-                    TransitionPlan::to(State::ThumbDragging).apply(move |ctx: &mut Context| {
-                        ctx.drag_start_pointer_pos = pointer;
+                    TransitionPlan::to(State::ThumbDragging)
+                        .apply(move |ctx: &mut Context| {
+                            ctx.drag_start_pointer_pos = pointer;
 
-                        let (_, current_thumb_pos) = compute_thumb_metrics(
-                            viewport_size,
-                            content_size,
-                            scroll_pos,
-                            track_size,
-                            min_thumb,
-                        );
+                            let (_, current_thumb_pos) = compute_thumb_metrics(
+                                viewport_size,
+                                content_size,
+                                scroll_pos,
+                                track_size,
+                                min_thumb,
+                            );
 
-                        ctx.drag_start_thumb_pos = current_thumb_pos;
-                        ctx.drag_start_scroll_pos = scroll_pos;
-                        ctx.drag_axis = Some(axis);
-                    }),
+                            ctx.drag_start_thumb_pos = current_thumb_pos;
+                            ctx.drag_start_scroll_pos = scroll_pos;
+                            ctx.drag_axis = Some(axis);
+                        })
+                        // Explicitly cancel any running Scroll-mode hide timer so
+                        // it cannot fire mid-drag; `ThumbDragEnd` starts a fresh
+                        // one. A no-op when no AutoHide is active.
+                        .cancel_effect(Effect::AutoHide),
                 )
             }
 
@@ -932,19 +946,23 @@ impl ars_core::Machine for Machine {
                 let cross = props.scrollbar_cross_size.unwrap_or(0.0);
                 let dir = props.dir.unwrap_or(Direction::Ltr);
 
-                // Switching away from `Scroll` while the hide timer is running
-                // leaves `ScrollActive` and cancels the now-orphaned `AutoHide`
-                // effect, so a stale timer cannot later hide an `Always`/`Auto`
-                // scrollbar.
+                // Leaving the visibility mode the current active state belongs
+                // to resets the machine to `Idle`: otherwise a stuck
+                // `ScrollActive`/`Hovering` state lingers (and, for Scroll, an
+                // orphaned `AutoHide` timer could later hide an Always/Auto
+                // scrollbar). A `ThumbDragging` session is preserved.
                 let leaving_scroll_active =
                     *state == State::ScrollActive && visibility != ScrollbarVisibility::Scroll;
+                let leaving_hover =
+                    *state == State::Hovering && visibility != ScrollbarVisibility::Hover;
+                let reset_state = leaving_scroll_active || leaving_hover;
 
                 // After the (possible) state change, derive visibility against
                 // the resulting state so a newly-enabled axis turns on while the
-                // hover/scroll session is still active.
-                let active = !leaving_scroll_active && is_session_active(*state);
+                // session is still active.
+                let active = !reset_state && is_session_active(*state);
 
-                let mut plan = if leaving_scroll_active {
+                let mut plan = if reset_state {
                     TransitionPlan::to(State::Idle)
                 } else {
                     TransitionPlan::new()
@@ -1973,6 +1991,71 @@ mod tests {
         assert!(result.cancel_effects.contains(&Effect::AutoHide));
         assert!(service.context().scrollbar_x_visible);
         assert!(service.context().scrollbar_y_visible);
+    }
+
+    #[test]
+    fn resize_during_drag_keeps_scrollbar_visible() {
+        // A ResizeObserver firing mid-drag must not hide the thumb being dragged.
+        let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Scroll));
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::Scroll { x: 0.0, y: 50.0 }));
+        drop(service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::Y,
+        }));
+        assert!(service.context().scrollbar_y_visible);
+
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        assert_eq!(service.state(), &State::ThumbDragging);
+        assert!(service.context().scrollbar_y_visible);
+    }
+
+    #[test]
+    fn mouse_enter_during_drag_preserves_drag_state() {
+        let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Hover));
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::MouseEnter));
+        drop(service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::Y,
+        }));
+        drop(service.send(Event::MouseLeave));
+
+        // Captured pointer re-enters the root mid-drag.
+        let entered = service.send(Event::MouseEnter);
+        assert!(!entered.state_changed);
+        assert_eq!(service.state(), &State::ThumbDragging);
+        assert!(service.context().hovering_root);
+
+        drop(service.send(Event::ThumbDragMove { pos: 20.0 }));
+        assert!(service.context().scroll_y > 0.0);
+    }
+
+    #[test]
+    fn thumb_drag_start_cancels_running_auto_hide_timer() {
+        let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Scroll));
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::Scroll { x: 0.0, y: 50.0 }));
+
+        let result = service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::Y,
+        });
+
+        assert_eq!(service.state(), &State::ThumbDragging);
+        assert!(result.cancel_effects.contains(&Effect::AutoHide));
+    }
+
+    #[test]
+    fn leaving_hover_mode_resets_hovering_state() {
+        let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Hover));
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::MouseEnter));
+        assert_eq!(service.state(), &State::Hovering);
+
+        // Switch to Auto: the stuck Hovering state must reset to Idle.
+        drop(service.set_props(props().scrollbar_visibility(ScrollbarVisibility::Auto)));
+        assert_eq!(service.state(), &State::Idle);
     }
 
     #[test]
