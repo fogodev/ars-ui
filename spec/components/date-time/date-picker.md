@@ -28,13 +28,14 @@ references:
 >
 > - **Open/closed is owned by [`State`](#11-states).** There is no parallel
 >   `open: Bindable<bool>` context field — the connect API renders from the
->   state, and a redundant bindable could (and, under property testing, did)
->   diverge from the state when a controlled `open` prop flipped back to
->   uncontrolled. Controlled/uncontrolled open is honored by `init` (initial
->   state from `open`/`default_open`) and the `SyncProps` transition, and the
->   `on_open_change` callback (fired via `Effect::OpenChange` on every open ↔
->   closed transition) is the channel a controlled parent uses to reconcile —
->   the popover/dialog model.
+>   state. When `open` is **uncontrolled**, user events mutate `State` directly.
+>   When `open` is **controlled** (`props.open.is_some()`), user events do **not**
+>   mutate `State`: the request is recorded in `Context::requested_open` and
+>   signalled via `Effect::OpenChange`, and the parent reconciles by updating the
+>   `open` prop (applied by `SyncProps`). The adapter invokes
+>   `Props::on_open_change` with `requested_open` on every `OpenChange`.
+>   `OpenChange` is a user-interaction signal only — it is not emitted by
+>   `SyncProps` (a controlled prop change is the parent's own doing) or at mount.
 > - **Focus is adapter-driven via named effects.** The machine declares a typed
 >   `Effect` enum and emits [`PendingEffect::named`] intents (`OpenChange`,
 >   `ValueChange`, `FocusCalendar`, `RestoreFocusToTrigger`, `RestoreFocusToInput`);
@@ -119,6 +120,12 @@ pub struct Context {
     /// controlled, `value.get()` returns the parent's committed value, so the
     /// requested date would otherwise be invisible. `None` is a requested clear.
     pub requested_value: Option<CalendarDate>,
+    /// Most recently requested open state, carried to the adapter's
+    /// `on_open_change` wiring via `Effect::OpenChange`. When `open` is
+    /// controlled the machine does not mutate `State` on user events; it records
+    /// the request here and the parent reconciles by updating the `open` prop.
+    /// The adapter reads this (not `is_open()`) when an `OpenChange` fires.
+    pub requested_open: bool,
     /// Locale for formatting and parsing.
     pub locale: Locale,
     /// Resolved translatable messages.
@@ -246,6 +253,34 @@ fn parse_date(text: &str, format: &str) -> Option<CalendarDate> {
     let month = u8::try_from(month?).ok()?;
     let day = u8::try_from(day?).ok()?;
     CalendarDate::new_gregorian(year, month, day).ok()
+}
+
+/// Classification of input text for `Event::InputChange`.
+enum InputClass {
+    /// A complete, valid date.
+    Valid(CalendarDate),
+    /// Three numeric fields that do not form a valid date (e.g. `02/30/2024`) —
+    /// treated as a rejected commit, not in-progress text.
+    CompleteInvalid,
+    /// In-progress / non-numeric text still being edited.
+    Partial,
+}
+
+/// A "complete" entry is exactly three numeric fields in the format separator;
+/// only those can be rejected as invalid. Anything else is `Partial`.
+fn classify_input(text: &str, format: &str) -> InputClass {
+    let (sep, _order) = parse_format(format);
+    let tokens: Vec<&str> = text.split(sep).collect();
+    let complete_numeric = tokens.len() == 3
+        && tokens.iter().all(|t| {
+            let t = t.trim();
+            !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit())
+        });
+    if !complete_numeric { return InputClass::Partial; }
+    match parse_date(text, format) {
+        Some(date) => InputClass::Valid(date),
+        None => InputClass::CompleteInvalid,
+    }
 }
 ```
 
@@ -415,10 +450,12 @@ fn DatePicker(props: DatePickerProps) -> impl IntoView {
 /// never touches the DOM).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Effect {
-    /// Notify the consumer that the open state changed (the adapter reads the
-    /// current open state and invokes `Props::on_open_change`). Emitted on every
-    /// open ↔ closed transition and on a non-closed initial mount — the channel
-    /// a controlled-`open` parent uses to reconcile after a user-driven change.
+    /// Notify the consumer that an open/close was requested. The adapter reads
+    /// `Context::requested_open` (not `is_open()`, which still reflects the
+    /// committed state) and invokes `Props::on_open_change`. Emitted only from
+    /// user events — never from `SyncProps` (a controlled prop change is the
+    /// parent's own doing) or at mount. When `open` is controlled the `State` is
+    /// not mutated; the parent reconciles via the `open` prop.
     OpenChange,
     /// Notify the consumer that the selected value changed. The adapter reads
     /// `Context::requested_value` (the requested date — not `value.get()`, which
@@ -467,21 +504,21 @@ impl ars_core::Machine for Machine {
 
         // `State` is the single source of truth for open/closed; controlled
         // `open`/`default_open` only seed the initial state.
-        let initial_state = if props.open.unwrap_or(props.default_open) {
-            State::Open
-        } else {
-            State::Closed
-        };
+        let open = props.open.unwrap_or(props.default_open);
+        let initial_state = if open { State::Open } else { State::Closed };
 
-        // `requested_value` seeds from the initial committed value; it is only
-        // read by the adapter on an `Effect::ValueChange`, which never fires at init.
+        // The `requested_*` mirrors seed from the initial state; they are only
+        // read by the adapter on an `Effect::ValueChange` / `Effect::OpenChange`,
+        // neither of which fires at init.
         let requested_value = value.get().clone();
+        let requested_open = open;
 
         let ctx = Context {
             value,
             input_text,
             parsed_date: None,
             requested_value,
+            requested_open,
             locale,
             messages: messages.clone(),
             format,
@@ -515,14 +552,11 @@ impl ars_core::Machine for Machine {
         _ctx: &Self::Context,
         _props: &Self::Props,
     ) -> Vec<PendingEffect<Self>> {
-        // A picker that boots `Open` (controlled `open` or `default_open`) never
-        // runs the open transition, so emit the intents it would have: notify
-        // the consumer of the open state, then focus the calendar.
+        // A picker that boots `Open` focuses the calendar. It does NOT emit
+        // `OpenChange`: that is a user-interaction signal, and the initial open
+        // state is the parent's own configuration (no `onOpenChange` on mount).
         if *state == State::Open {
-            vec![
-                PendingEffect::named(Effect::OpenChange),
-                PendingEffect::named(Effect::FocusCalendar),
-            ]
+            vec![PendingEffect::named(Effect::FocusCalendar)]
         } else {
             Vec::new()
         }
@@ -551,15 +585,16 @@ impl ars_core::Machine for Machine {
                 Some(next) => TransitionPlan::to(next),
                 None => TransitionPlan::new(),
             };
-            plan = plan.apply(move |ctx| sync_props_into_ctx(ctx, &new_props));
+            plan = plan.apply(move |ctx| {
+                if let Some(open) = new_props.open { ctx.requested_open = open; }
+                sync_props_into_ctx(ctx, &new_props);
+            });
+            // No `OpenChange` here: a controlled `open` prop change is the parent's
+            // own doing. Focus still follows the open/close that lands.
             if opening {
-                plan = plan
-                    .with_effect(PendingEffect::named(Effect::OpenChange))
-                    .with_effect(PendingEffect::named(Effect::FocusCalendar));
+                plan = plan.with_effect(PendingEffect::named(Effect::FocusCalendar));
             } else if closing {
-                plan = plan
-                    .with_effect(PendingEffect::named(Effect::OpenChange))
-                    .with_effect(PendingEffect::named(Effect::RestoreFocusToTrigger));
+                plan = plan.with_effect(PendingEffect::named(Effect::RestoreFocusToTrigger));
             }
             return Some(plan);
         }
@@ -567,20 +602,17 @@ impl ars_core::Machine for Machine {
         if ctx.disabled { return None; }
 
         match event {
-            // ── Popover open / close (open-change + focus are adapter-driven
-            //    named effects) ─
+            // ── Popover open / close ──────────────────────────────────────
+            // `open_request` honors controlled `open`: when controlled it records
+            // the request + emits `OpenChange` without mutating `State`; when
+            // uncontrolled it transitions and fires the focus effect.
             Event::Open => {
-                if *state == State::Open || ctx.readonly { return None; }
-                Some(TransitionPlan::to(State::Open)
-                    .with_effect(PendingEffect::named(Effect::OpenChange))
-                    .with_effect(PendingEffect::named(Effect::FocusCalendar)))
+                if ctx.readonly { return None; }
+                open_request(state, props, true, Some(PendingEffect::named(Effect::FocusCalendar)))
             }
 
             Event::Close => {
-                if *state == State::Closed { return None; }
-                Some(TransitionPlan::to(State::Closed)
-                    .with_effect(PendingEffect::named(Effect::OpenChange))
-                    .with_effect(PendingEffect::named(Effect::RestoreFocusToTrigger)))
+                open_request(state, props, false, Some(PendingEffect::named(Effect::RestoreFocusToTrigger)))
             }
 
             Event::Toggle => match state {
@@ -593,28 +625,34 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly { return None; }
                 let date = date.clone();
                 let should_close = props.close_on_select;
-                let next_state = if should_close { State::Closed } else { State::Open };
-                let mut plan = TransitionPlan::to(next_state)
-                    .apply(move |ctx| {
-                        // Record the requested date so the adapter can forward it
-                        // even when `value` is controlled (where `get()` returns
-                        // the parent's value).
-                        ctx.requested_value = Some(date.clone());
-                        ctx.value.set(Some(date));
-                        // Derive the visible text and `parsed_date` from the value the
-                        // bindable actually exposes — for a controlled `value` that is
-                        // still the parent's value, so the display never optimistically
-                        // diverges from `selected_date()` / the hidden input / the
-                        // composed calendar props.
-                        ctx.parsed_date = ctx.value.get().clone();
-                        ctx.input_text = ctx.formatted_value();
-                        ctx.is_touched = true;
-                    })
-                    .with_effect(PendingEffect::named(Effect::ValueChange));
+                let open_controlled = props.open.is_some();
+                // Commit the close only when open is uncontrolled; otherwise just
+                // request it and let the parent reconcile.
+                let commit_close = should_close && !open_controlled;
+                // Suppress a no-op `ValueChange` when the date is already selected.
+                let value_changes = ctx.value.get().as_ref() != Some(&date);
+                let next_state = if commit_close { State::Closed } else { State::Open };
+                let mut plan = TransitionPlan::to(next_state).apply(move |ctx| {
+                    ctx.requested_value = Some(date.clone());
+                    ctx.value.set(Some(date));
+                    // Derive the visible text and `parsed_date` from the value the
+                    // bindable actually exposes — for a controlled `value` that is
+                    // still the parent's value, so the display never optimistically
+                    // diverges from `selected_date()` / the hidden input / the
+                    // composed calendar props.
+                    ctx.parsed_date = ctx.value.get().clone();
+                    ctx.input_text = ctx.formatted_value();
+                    ctx.is_touched = true;
+                    if should_close { ctx.requested_open = false; }
+                });
+                if value_changes {
+                    plan = plan.with_effect(PendingEffect::named(Effect::ValueChange));
+                }
                 if should_close {
-                    plan = plan
-                        .with_effect(PendingEffect::named(Effect::OpenChange))
-                        .with_effect(PendingEffect::named(Effect::RestoreFocusToInput));
+                    plan = plan.with_effect(PendingEffect::named(Effect::OpenChange));
+                    if commit_close {
+                        plan = plan.with_effect(PendingEffect::named(Effect::RestoreFocusToInput));
+                    }
                 }
                 Some(plan)
             }
@@ -625,20 +663,24 @@ impl ars_core::Machine for Machine {
                 let text = value.clone();
                 // Decide the committed-value outcome up front so `ValueChange`
                 // fires exactly when the value changes. A complete date that is
-                // rejected (out of range / unavailable) CLEARS the value, so the
-                // hidden input / calendar never submit a stale date contradicting
-                // the field; partial/unparseable text leaves the value untouched.
+                // rejected (out of range, unavailable, or not a real date such as
+                // `02/30/2024`) CLEARS the value, so the hidden input / calendar
+                // never submit a stale date contradicting the field; partial /
+                // non-numeric text leaves the value untouched.
                 let (committed_value, value_changed): (Option<CalendarDate>, bool) =
-                    if let Some(date) = parse_date(&text, &ctx.format) {
-                        let in_range = ctx.min.as_ref().is_none_or(|m| date.compare(m) != Ordering::Less)
-                            && ctx.max.as_ref().is_none_or(|m| date.compare(m) != Ordering::Greater);
-                        let available = props.is_date_unavailable.as_ref().is_none_or(|p| !p(&date));
-                        if in_range && available { (Some(date), true) } else { (None, true) }
-                    } else if text.is_empty() {
-                        (None, true)
-                    } else {
-                        (None, false)
+                    match classify_input(&text, &ctx.format) {
+                        InputClass::Valid(date) => {
+                            let in_range = ctx.min.as_ref().is_none_or(|m| date.compare(m) != Ordering::Less)
+                                && ctx.max.as_ref().is_none_or(|m| date.compare(m) != Ordering::Greater);
+                            let available = props.is_date_unavailable.as_ref().is_none_or(|p| !p(&date));
+                            if in_range && available { (Some(date), true) } else { (None, true) }
+                        }
+                        InputClass::CompleteInvalid => (None, true),
+                        InputClass::Partial if text.is_empty() => (None, true),
+                        InputClass::Partial => (None, false),
                     };
+                // Suppress a no-op `ValueChange` when the value would not change.
+                let value_changes = value_changed && committed_value.as_ref() != ctx.value.get().as_ref();
                 let mut plan = TransitionPlan::context_only(move |ctx| {
                     ctx.is_touched = true;
                     if value_changed {
@@ -657,7 +699,7 @@ impl ars_core::Machine for Machine {
                         ctx.input_text = text;
                     }
                 });
-                if value_changed {
+                if value_changes {
                     plan = plan.with_effect(PendingEffect::named(Effect::ValueChange));
                 }
                 Some(plan)
@@ -666,27 +708,17 @@ impl ars_core::Machine for Machine {
             // ── Focus management ─────────────────────────────────────────
             Event::FocusIn => {
                 // `readonly` blocks opening through the focus path just as it
-                // blocks the explicit `Open` event. Opening here emits no
-                // `FocusCalendar` — the user focused the input to type, so focus
-                // must stay in the field (only trigger/ArrowDown opens move it).
+                // blocks the explicit `Open` event. Open via focus passes no focus
+                // effect — the user focused the input to type, so focus stays in
+                // the field (only trigger/ArrowDown opens move it into the grid).
                 if *state == State::Closed && ctx.open_on_click && !ctx.readonly {
-                    Some(TransitionPlan::to(State::Open)
-                        .with_effect(PendingEffect::named(Effect::OpenChange)))
+                    open_request(state, props, true, None)
                 } else {
                     None
                 }
             }
 
-            Event::FocusOut => {
-                // Close: notify the open change, but no focus effect — focus has
-                // already left the component.
-                if *state == State::Open {
-                    Some(TransitionPlan::to(State::Closed)
-                        .with_effect(PendingEffect::named(Effect::OpenChange)))
-                } else {
-                    None
-                }
-            }
+            Event::FocusOut => open_request(state, props, false, None),
 
             // ── Keyboard shortcuts ───────────────────────────────────────
             Event::KeyDown { key } => match key {
@@ -712,6 +744,36 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+/// Builds the plan for a user-driven request to open or close.
+///
+/// When `open` is **controlled** (`props.open.is_some()`), `State` is not mutated:
+/// the request is recorded in `requested_open` and signalled via `OpenChange`, and
+/// the parent reconciles by updating the `open` prop. No focus effect fires
+/// (nothing visibly changed). When **uncontrolled**, `State` transitions and the
+/// supplied `focus` effect (if any) fires. Returns `None` when already in the
+/// requested open state.
+fn open_request(
+    state: &State,
+    props: &Props,
+    target_open: bool,
+    focus: Option<PendingEffect<Machine>>,
+) -> Option<TransitionPlan<Machine>> {
+    if (*state == State::Open) == target_open { return None; }
+    let controlled = props.open.is_some();
+    let mut plan = if controlled {
+        TransitionPlan::new()
+    } else {
+        TransitionPlan::to(if target_open { State::Open } else { State::Closed })
+    };
+    plan = plan
+        .apply(move |ctx| ctx.requested_open = target_open)
+        .with_effect(PendingEffect::named(Effect::OpenChange));
+    if !controlled && let Some(focus) = focus {
+        plan = plan.with_effect(focus);
+    }
+    Some(plan)
 }
 
 /// Re-applies the controlled value and cached scalar prop fields onto `ctx`.

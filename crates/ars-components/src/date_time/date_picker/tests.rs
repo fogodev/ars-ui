@@ -144,7 +144,7 @@ fn default_open_starts_open() {
 }
 
 #[test]
-fn controlled_open_emits_initial_open_change_and_focus_calendar() {
+fn controlled_open_emits_initial_focus_calendar_only() {
     let mut svc = service_with(
         Props {
             open: Some(true),
@@ -153,10 +153,9 @@ fn controlled_open_emits_initial_open_change_and_focus_calendar() {
         en_us(),
     );
 
-    assert_eq!(
-        initial_effect_names(&mut svc),
-        vec![Effect::OpenChange, Effect::FocusCalendar],
-    );
+    // Boot-open focuses the calendar but does NOT fire `OpenChange` — the
+    // initial open state is the parent's configuration, not a user interaction.
+    assert_eq!(initial_effect_names(&mut svc), vec![Effect::FocusCalendar]);
 }
 
 #[test]
@@ -665,10 +664,9 @@ fn sync_props_controlled_open_opens_and_focuses() {
     });
 
     assert_eq!(*svc.state(), State::Open);
-    assert_eq!(
-        effects(result),
-        vec![Effect::OpenChange, Effect::FocusCalendar],
-    );
+    // A parent-driven (controlled) open change does not re-fire `OpenChange`;
+    // focus still follows the open that lands at sync time.
+    assert_eq!(effects(result), vec![Effect::FocusCalendar]);
 }
 
 #[test]
@@ -687,10 +685,8 @@ fn sync_props_controlled_open_closes_and_restores_focus() {
     });
 
     assert_eq!(*svc.state(), State::Closed);
-    assert_eq!(
-        effects(result),
-        vec![Effect::OpenChange, Effect::RestoreFocusToTrigger],
-    );
+    // Parent-driven close: no `OpenChange`, focus returns to the trigger.
+    assert_eq!(effects(result), vec![Effect::RestoreFocusToTrigger]);
 }
 
 #[test]
@@ -1683,6 +1679,121 @@ fn typed_accepted_date_normalizes_display_when_uncontrolled() {
 
     assert_eq!(*svc.context().value.get(), Some(date(2024, 6, 20)));
     assert_eq!(svc.context().input_text, "06/20/2024");
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Codex review #697 (pass 4) — controlled-open veto, invalid clear, no-op
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn controlled_open_user_toggle_does_not_change_state() {
+    // With controlled `open: Some(false)`, a user Toggle must NOT open locally;
+    // it records the request and signals `OpenChange` for the parent to honor.
+    let mut svc = service_with(
+        Props {
+            open: Some(false),
+            ..props()
+        },
+        en_us(),
+    );
+
+    let result = svc.send(Event::Toggle);
+
+    assert_eq!(*svc.state(), State::Closed);
+    assert!(svc.context().requested_open);
+    assert_eq!(effects(result), vec![Effect::OpenChange]);
+}
+
+#[test]
+fn controlled_open_user_close_does_not_change_state() {
+    // With controlled `open: Some(true)`, a user Close must NOT close locally.
+    let mut svc = service_with(
+        Props {
+            open: Some(true),
+            ..props()
+        },
+        en_us(),
+    );
+
+    let result = svc.send(Event::Close);
+
+    assert_eq!(*svc.state(), State::Open);
+    assert!(!svc.context().requested_open);
+    assert_eq!(effects(result), vec![Effect::OpenChange]);
+}
+
+#[test]
+fn uncontrolled_open_user_toggle_changes_state() {
+    // Uncontrolled open still commits state on user events.
+    let mut svc = service();
+
+    drop(svc.send(Event::Toggle));
+
+    assert_eq!(*svc.state(), State::Open);
+    assert!(svc.context().requested_open);
+}
+
+#[test]
+fn typed_complete_invalid_date_clears_prior_value() {
+    // `02/30/2024` parses structurally but is not a real date — it must clear
+    // the committed value (not fall through as in-progress partial text), so the
+    // hidden input never submits the stale prior date.
+    let mut svc = service_with(
+        Props {
+            default_value: Some(date(2024, 6, 10)),
+            ..props()
+        },
+        en_us(),
+    );
+
+    let result = svc.send(Event::InputChange {
+        value: String::from("02/30/2024"),
+    });
+
+    assert_eq!(*svc.context().value.get(), None);
+    assert_eq!(svc.context().input_text, "02/30/2024");
+    assert!(effects(result).contains(&Effect::ValueChange));
+}
+
+#[test]
+fn partial_text_keeps_value_and_emits_no_value_change() {
+    // Genuinely incomplete text leaves the committed value intact.
+    let mut svc = service_with(
+        Props {
+            default_value: Some(date(2024, 6, 10)),
+            ..props()
+        },
+        en_us(),
+    );
+
+    let result = svc.send(Event::InputChange {
+        value: String::from("02/3"),
+    });
+
+    assert_eq!(*svc.context().value.get(), Some(date(2024, 6, 10)));
+    assert!(result.pending_effects.is_empty());
+}
+
+#[test]
+fn selecting_already_selected_date_emits_no_value_change() {
+    // Re-selecting the current value must not fire `ValueChange` (avoids noisy
+    // callbacks / redundant controlled reconciliation), though the popover still
+    // closes.
+    let mut svc = service_with(
+        Props {
+            default_value: Some(date(2024, 3, 15)),
+            ..props()
+        },
+        en_us(),
+    );
+    drop(svc.send(Event::Open));
+
+    let emitted = effects(svc.send(Event::SelectDate {
+        date: date(2024, 3, 15),
+    }));
+
+    assert!(!emitted.contains(&Effect::ValueChange));
+    assert_eq!(*svc.state(), State::Closed);
 }
 
 // ────────────────────────────────────────────────────────────────────
