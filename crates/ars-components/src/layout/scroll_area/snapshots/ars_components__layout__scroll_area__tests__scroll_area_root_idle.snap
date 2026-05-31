@@ -1,0 +1,9 @@
+---
+source: crates/ars-components/src/layout/scroll_area/mod.rs
+expression: snapshot_attrs(&both_api.root_attrs())
+---
+data-ars-overflow-x=true
+data-ars-overflow-y=true
+data-ars-part=root
+data-ars-scope=scroll-area
+data-ars-state=idle

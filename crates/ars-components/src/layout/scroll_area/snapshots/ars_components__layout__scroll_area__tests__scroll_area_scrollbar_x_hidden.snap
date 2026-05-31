@@ -1,0 +1,9 @@
+---
+source: crates/ars-components/src/layout/scroll_area/mod.rs
+expression: "snapshot_attrs(&scroll_active.connect(&|_| {}).scrollbar_x_attrs())"
+---
+data-ars-orientation=horizontal
+data-ars-part=scrollbar-x
+data-ars-scope=scroll-area
+data-ars-visible=false
+role=none

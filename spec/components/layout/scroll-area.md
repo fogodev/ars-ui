@@ -21,7 +21,7 @@ ScrollArea MUST preserve native keyboard scrolling (arrow keys, Page Up/Down, Ho
 ### 1.1 States
 
 ```rust
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum State {
     /// No active interaction.
     #[default]
@@ -38,6 +38,19 @@ pub enum State {
 ### 1.2 Events
 
 ```rust
+/// Scrollbar axis. `X` is the horizontal scrollbar, `Y` the vertical one.
+///
+/// Adapters tag pointer geometry with the axis it belongs to so the machine
+/// can route drag/track-click intents to the correct scroll offset without any
+/// DOM lookup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Axis {
+    /// The horizontal scrollbar (drives `scroll_x`).
+    X,
+    /// The vertical scrollbar (drives `scroll_y`).
+    Y,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// The viewport reported a scroll event.
@@ -67,6 +80,9 @@ pub enum Event {
     TrackClick { pos: f64, axis: Axis },
     /// Hide-delay timer fired.
     HideTimeout,
+    /// Re-sync prop-backed context fields after a props change. Emitted by
+    /// `Machine::on_props_changed`.
+    SyncProps,
 }
 ```
 
@@ -80,6 +96,13 @@ pub enum ScrollOrientation {
     Vertical,
     Horizontal,
     Both,
+}
+
+impl ScrollOrientation {
+    /// Whether the horizontal scrollbar is enabled for this orientation.
+    pub const fn allows_x(self) -> bool { matches!(self, Self::Horizontal | Self::Both) }
+    /// Whether the vertical scrollbar is enabled for this orientation.
+    pub const fn allows_y(self) -> bool { matches!(self, Self::Vertical | Self::Both) }
 }
 
 /// When scrollbars are visible.
@@ -108,9 +131,15 @@ pub struct Context {
     pub scrollbar_x_visible: bool,
     pub scrollbar_y_visible: bool,
     pub hovering_scrollbar: bool,
+    /// Whether the pointer is over the root scroll area. Tracked alongside
+    /// `hovering_scrollbar` so an overlaid scrollbar that outlives the root
+    /// hover still hides on its own leave event.
+    pub hovering_root: bool,
+    /// Which scroll orientation is enabled. Gates which scrollbars may show.
+    pub orientation: ScrollOrientation,
     pub scrollbar_visibility: ScrollbarVisibility,
     pub min_thumb_size: f64,
-    pub hide_delay_ms: u32,
+    pub hide_delay: Duration,
     /// Cross-axis scrollbar thickness (px). Used to shorten track_size when
     /// both scrollbars are visible (the CornerSquare occupies this space).
     pub scrollbar_cross_size: f64,
@@ -120,7 +149,7 @@ pub struct Context {
     pub drag_start_scroll_pos: f64,
     pub drag_axis: Option<Axis>,
     pub ids: ComponentIds,
-    /// Resolved text direction. Drives `normalize_scroll_left` and vertical
+    /// Resolved text direction. Drives `normalize_scroll_left_rtl` and vertical
     /// scrollbar placement (left side in RTL).
     pub dir: Direction,
     /// Resolved locale for message formatting.
@@ -133,20 +162,51 @@ impl Context {
     pub fn has_overflow_x(&self) -> bool { self.content_width > self.viewport_width }
     pub fn has_overflow_y(&self) -> bool { self.content_height > self.viewport_height }
 
-    pub fn update_visibility(&mut self) {
+    /// Clamp stored offsets into `0..=(content - viewport)` per axis. The rest of
+    /// the machine assumes in-range offsets, so externally-supplied values
+    /// (overscroll bounce, a stale programmatic scroll after a shrink) are
+    /// clamped before storage.
+    fn clamp_offsets(&mut self) {
+        self.scroll_x = self.scroll_x.clamp(0.0, (self.content_width - self.viewport_width).max(0.0));
+        self.scroll_y = self.scroll_y.clamp(0.0, (self.content_height - self.viewport_height).max(0.0));
+    }
+
+    /// Whether the horizontal scrollbar may be visible: orientation enables it
+    /// and (outside `Always`) the content overflows.
+    fn can_show_x(&self) -> bool {
+        self.orientation.allows_x()
+            && (self.scrollbar_visibility == ScrollbarVisibility::Always || self.has_overflow_x())
+    }
+    fn can_show_y(&self) -> bool {
+        self.orientation.allows_y()
+            && (self.scrollbar_visibility == ScrollbarVisibility::Always || self.has_overflow_y())
+    }
+
+    /// Recompute visibility after a metrics or prop change. `Always`/`Auto`
+    /// derive directly from orientation + overflow. For `Hover`/`Scroll`,
+    /// visibility tracks whether a hover/scroll session is `active` (state
+    /// `Hovering`/`ScrollActive`): when active each enabled+overflowing axis
+    /// shows — so a change that newly enables an axis turns it on; when inactive
+    /// both hide.
+    pub fn update_visibility(&mut self, active: bool) {
         match self.scrollbar_visibility {
-            ScrollbarVisibility::Always => {
-                self.scrollbar_x_visible = true;
-                self.scrollbar_y_visible = true;
+            ScrollbarVisibility::Always | ScrollbarVisibility::Auto => {
+                self.scrollbar_x_visible = self.can_show_x();
+                self.scrollbar_y_visible = self.can_show_y();
             }
-            ScrollbarVisibility::Auto => {
-                self.scrollbar_x_visible = self.has_overflow_x();
-                self.scrollbar_y_visible = self.has_overflow_y();
+            ScrollbarVisibility::Hover | ScrollbarVisibility::Scroll => {
+                self.scrollbar_x_visible = active && self.can_show_x();
+                self.scrollbar_y_visible = active && self.can_show_y();
             }
-            // Hover and Scroll are managed by state transitions.
-            _ => {}
         }
     }
+}
+
+/// Whether a hover/scroll/drag session is active (scrollbars should show for
+/// eligible axes) for the given state. `ThumbDragging` counts: a resize mid-drag
+/// must not hide the thumb being dragged.
+const fn is_session_active(state: State) -> bool {
+    matches!(state, State::Hovering | State::ScrollActive | State::ThumbDragging)
 }
 ```
 
@@ -174,8 +234,14 @@ pub struct Props {
     pub scrollbar_visibility: ScrollbarVisibility,
     /// Minimum thumb size in pixels.
     pub min_thumb_size: Option<f64>,
-    /// Delay in milliseconds before scrollbar hides (Scroll mode).
-    pub hide_delay_ms: Option<u32>,
+    /// Delay before the scrollbar hides (Scroll mode). Default: `1200ms`.
+    pub hide_delay: Duration,
+    /// Cross-axis scrollbar thickness in pixels. When both scrollbars are
+    /// visible, this is subtracted from each track's length so the thumb does
+    /// not overlap the `CornerSquare`. Should match the rendered scrollbar
+    /// thickness (e.g. the `--ars-scrollbar-size` CSS custom property).
+    /// Default: `0.0` (no corner correction).
+    pub scrollbar_cross_size: Option<f64>,
     /// Accessible label for the scroll area viewport.
     pub aria_label: Option<String>,
     /// Text/layout direction. Drives RTL scrollbar placement and
@@ -190,7 +256,8 @@ impl Default for Props {
             orientation: ScrollOrientation::Vertical,
             scrollbar_visibility: ScrollbarVisibility::Auto,
             min_thumb_size: None,
-            hide_delay_ms: None,
+            hide_delay: Duration::from_millis(1200),
+            scrollbar_cross_size: None,
             aria_label: None,
             dir: None,
         }
@@ -250,6 +317,17 @@ pub fn thumb_pos_to_scroll(
 ### 1.6 Full Machine Implementation
 
 ```rust
+/// Typed side-effect intents emitted by the `ScrollArea` machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Start (or restart) the auto-hide timer in `Scroll` visibility mode.
+    ///
+    /// The adapter owns the timer: it waits `Context::hide_delay` and then
+    /// sends `Event::HideTimeout` back to the machine. The agnostic core
+    /// never schedules timers itself.
+    AutoHide,
+}
+
 pub struct Machine;
 
 impl ars_core::Machine for Machine {
@@ -258,6 +336,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -269,10 +348,12 @@ impl ars_core::Machine for Machine {
             content_width: 0.0, content_height: 0.0,
             scrollbar_x_visible: false, scrollbar_y_visible: false,
             hovering_scrollbar: false,
+            hovering_root: false,
+            orientation: props.orientation,
             scrollbar_visibility: props.scrollbar_visibility,
             min_thumb_size: props.min_thumb_size.unwrap_or(20.0),
-            hide_delay_ms: props.hide_delay_ms.unwrap_or(1200),
-            scrollbar_cross_size: 0.0,
+            hide_delay: props.hide_delay,
+            scrollbar_cross_size: props.scrollbar_cross_size.unwrap_or(0.0),
             drag_start_pointer_pos: 0.0,
             drag_start_thumb_pos: 0.0,
             drag_start_scroll_pos: 0.0,
@@ -282,7 +363,7 @@ impl ars_core::Machine for Machine {
             locale,
             messages,
         };
-        ctx.update_visibility();
+        ctx.update_visibility(false);
         (State::Idle, ctx)
     }
 
@@ -295,56 +376,117 @@ impl ars_core::Machine for Machine {
         match event {
             Event::Resize { viewport_width, viewport_height, content_width, content_height } => {
                 let (vw, vh, cw, ch) = (*viewport_width, *viewport_height, *content_width, *content_height);
+                let active = is_session_active(*state);
+                let min_thumb = ctx.min_thumb_size;
+                // A drag's baseline was captured against the OLD geometry; capture
+                // the current scroll's thumb position now so the closure can shift
+                // the baseline by the old->new thumb delta (keeps tracking
+                // continuous; the pointer baseline is preserved).
+                let drag_rebase = if *state == State::ThumbDragging {
+                    ctx.drag_axis.map(|axis| {
+                        let scroll = match axis { Axis::X => ctx.scroll_x, Axis::Y => ctx.scroll_y };
+                        let (vp, content, track) = axis_metrics(ctx, axis);
+                        (axis, compute_thumb_metrics(vp, content, scroll, track, min_thumb).1)
+                    })
+                } else { None };
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.viewport_width = vw; ctx.viewport_height = vh;
                     ctx.content_width = cw; ctx.content_height = ch;
-                    ctx.update_visibility();
+                    // Clamp offsets the shrunk content/viewport made invalid.
+                    ctx.clamp_offsets();
+                    ctx.update_visibility(active);
+                    if let Some((axis, thumb_old)) = drag_rebase {
+                        let scroll = match axis { Axis::X => ctx.scroll_x, Axis::Y => ctx.scroll_y };
+                        let (vp, content, track) = axis_metrics(ctx, axis);
+                        let thumb_new = compute_thumb_metrics(vp, content, scroll, track, min_thumb).1;
+                        ctx.drag_start_thumb_pos += thumb_new - thumb_old;
+                        ctx.drag_start_scroll_pos = scroll;
+                    }
                 }))
             }
 
             Event::Scroll { x, y } => {
                 let (sx, sy) = (*x, *y);
-                if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll {
-                    let delay = ctx.hide_delay_ms;
+                // A scroll mid-drag is the browser echoing the offset the adapter
+                // just wrote; record it without leaving `ThumbDragging`.
+                if *state == State::ThumbDragging {
+                    Some(TransitionPlan::context_only(move |ctx| {
+                        ctx.scroll_x = sx; ctx.scroll_y = sy;
+                        ctx.clamp_offsets();
+                    }))
+                } else if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll {
+                    // The agnostic core does not own timers. It records the
+                    // `Effect::AutoHide` intent; the adapter starts a
+                    // `ctx.hide_delay` timer and sends `Event::HideTimeout`
+                    // back when it fires. See §1.6.1.
                     Some(TransitionPlan::to(State::ScrollActive).apply(move |ctx| {
                         ctx.scroll_x = sx; ctx.scroll_y = sy;
-                        ctx.scrollbar_x_visible = ctx.has_overflow_x();
-                        ctx.scrollbar_y_visible = ctx.has_overflow_y();
-                    }).with_named_effect("auto-hide-scrollbar", move |_ctx, _props, send| {
-                        let platform = use_platform_effects();
-                        let handle = platform.set_timeout(delay, Box::new(move || send(Event::HideTimeout)));
-                        let pc = platform.clone();
-                        Box::new(move || pc.clear_timeout(handle))
-                    }))
+                        ctx.clamp_offsets();
+                        ctx.scrollbar_x_visible = ctx.can_show_x();
+                        ctx.scrollbar_y_visible = ctx.can_show_y();
+                    }).with_effect(PendingEffect::named(Effect::AutoHide)))
                 } else {
                     Some(TransitionPlan::context_only(move |ctx| {
                         ctx.scroll_x = sx; ctx.scroll_y = sy;
+                        ctx.clamp_offsets();
                     }))
                 }
             }
 
+            // The hover scrollbars hide only once the pointer has left BOTH the
+            // root and any overlaid scrollbar track, so each leave event checks
+            // the other hover flag before hiding.
             Event::MouseEnter => {
-                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover {
+                // A captured pointer can re-enter the root mid-drag; record the
+                // hover flag but never leave `ThumbDragging`.
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover
+                    && *state != State::ThumbDragging {
                     Some(TransitionPlan::to(State::Hovering).apply(|ctx| {
-                        ctx.scrollbar_x_visible = ctx.has_overflow_x();
-                        ctx.scrollbar_y_visible = ctx.has_overflow_y();
+                        ctx.hovering_root = true;
+                        ctx.scrollbar_x_visible = ctx.can_show_x();
+                        ctx.scrollbar_y_visible = ctx.can_show_y();
                     }))
-                } else { None }
+                } else {
+                    Some(TransitionPlan::context_only(|ctx| { ctx.hovering_root = true; }))
+                }
             }
 
+            // A leave never hides while a thumb drag is active: the pointer is
+            // captured and routinely leaves the root mid-drag.
             Event::MouseLeave => {
-                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover && !ctx.hovering_scrollbar {
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover
+                    && !ctx.hovering_scrollbar
+                    && *state != State::ThumbDragging {
                     Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                        ctx.hovering_root = false;
                         ctx.scrollbar_x_visible = false; ctx.scrollbar_y_visible = false;
                     }))
-                } else { None }
+                } else {
+                    Some(TransitionPlan::context_only(|ctx| { ctx.hovering_root = false; }))
+                }
             }
 
             Event::MouseEnterScrollbar => Some(TransitionPlan::context_only(|ctx| { ctx.hovering_scrollbar = true; })),
-            Event::MouseLeaveScrollbar => Some(TransitionPlan::context_only(|ctx| { ctx.hovering_scrollbar = false; })),
+            Event::MouseLeaveScrollbar => {
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover
+                    && !ctx.hovering_root
+                    && *state != State::ThumbDragging {
+                    Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                        ctx.hovering_scrollbar = false;
+                        ctx.scrollbar_x_visible = false; ctx.scrollbar_y_visible = false;
+                    }))
+                } else {
+                    Some(TransitionPlan::context_only(|ctx| { ctx.hovering_scrollbar = false; }))
+                }
+            }
 
+            // Honour the hide timer only while still in Scroll mode and not
+            // dragging: a timeout queued before a switch to Always/Auto must be
+            // ignored (the adapter can cancel future fires, not an already-posted
+            // event).
             Event::HideTimeout => {
-                if *state != State::ThumbDragging {
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll
+                    && *state != State::ThumbDragging {
                     Some(TransitionPlan::to(State::Idle).apply(|ctx| {
                         ctx.scrollbar_x_visible = false; ctx.scrollbar_y_visible = false;
                     }))
@@ -364,7 +506,10 @@ impl ars_core::Machine for Machine {
                     ctx.drag_start_thumb_pos = current_thumb_pos;
                     ctx.drag_start_scroll_pos = scroll_pos;
                     ctx.drag_axis = Some(a);
-                }))
+                })
+                // Cancel any running Scroll-mode hide timer so it cannot fire
+                // mid-drag; `ThumbDragEnd` starts a fresh one. No-op otherwise.
+                .cancel_effect(Effect::AutoHide))
             }
 
             Event::ThumbDragMove { pos } => {
@@ -374,9 +519,16 @@ impl ars_core::Machine for Machine {
                 let (drag_start_pointer, drag_start_thumb, drag_scroll, min_thumb) =
                     (ctx.drag_start_pointer_pos, ctx.drag_start_thumb_pos, ctx.drag_start_scroll_pos, ctx.min_thumb_size);
                 let (viewport_size, content_size, track_size) = axis_metrics(ctx, axis);
-                let delta = p - drag_start_pointer;
+                // In RTL, normalized `scroll_x` (distance from inline-start)
+                // increases as the physical thumb moves left, so invert the
+                // horizontal pointer delta. Vertical/LTR are unchanged.
+                let raw_delta = p - drag_start_pointer;
+                let delta = if axis == Axis::X && ctx.dir == Direction::Rtl { -raw_delta } else { raw_delta };
                 let (thumb_size, _) = compute_thumb_metrics(viewport_size, content_size, drag_scroll, track_size, min_thumb);
-                let new_thumb_pos = (drag_start_thumb + delta).max(0.0);
+                // Clamp to the scrollable track so a drag past either end cannot
+                // request a scroll offset beyond the content bounds.
+                let max_thumb_pos = (track_size - thumb_size).max(0.0);
+                let new_thumb_pos = (drag_start_thumb + delta).clamp(0.0, max_thumb_pos);
                 let new_scroll = thumb_pos_to_scroll(new_thumb_pos, track_size, thumb_size, content_size, viewport_size);
                 Some(TransitionPlan::context_only(move |ctx| {
                     match axis { Axis::X => ctx.scroll_x = new_scroll, Axis::Y => ctx.scroll_y = new_scroll }
@@ -384,7 +536,23 @@ impl ars_core::Machine for Machine {
             }
 
             Event::ThumbDragEnd => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| { ctx.drag_axis = None; }))
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll {
+                    // Restart the adapter-owned hide timer cancelled at drag start.
+                    Some(TransitionPlan::to(State::ScrollActive)
+                        .apply(|ctx| { ctx.drag_axis = None; })
+                        .with_effect(PendingEffect::named(Effect::AutoHide)))
+                } else if ctx.scrollbar_visibility == ScrollbarVisibility::Hover {
+                    // The drag may have ended off-root (leave events were
+                    // suppressed mid-drag); re-apply the hover rule.
+                    let still_hovering = ctx.hovering_root || ctx.hovering_scrollbar;
+                    let target = if still_hovering { State::Hovering } else { State::Idle };
+                    Some(TransitionPlan::to(target).apply(move |ctx| {
+                        ctx.drag_axis = None;
+                        ctx.update_visibility(still_hovering);
+                    }))
+                } else {
+                    Some(TransitionPlan::to(State::Idle).apply(|ctx| { ctx.drag_axis = None; }))
+                }
             }
 
             Event::TrackClick { pos, axis } => {
@@ -392,14 +560,57 @@ impl ars_core::Machine for Machine {
                 let scroll_pos = match a { Axis::X => ctx.scroll_x, Axis::Y => ctx.scroll_y };
                 let (viewport_size, content_size, track_size) = axis_metrics(ctx, a);
                 let (thumb_size, thumb_pos) = compute_thumb_metrics(viewport_size, content_size, scroll_pos, track_size, ctx.min_thumb_size);
+                let max_scroll = (content_size - viewport_size).max(0.0);
                 let new_scroll = if p < thumb_pos {
                     (scroll_pos - viewport_size).max(0.0)
                 } else if p > thumb_pos + thumb_size {
-                    (scroll_pos + viewport_size).min(content_size - viewport_size)
+                    (scroll_pos + viewport_size).min(max_scroll)
                 } else { scroll_pos };
                 Some(TransitionPlan::context_only(move |ctx| {
                     match a { Axis::X => ctx.scroll_x = new_scroll, Axis::Y => ctx.scroll_y = new_scroll }
                 }))
+            }
+
+            // Re-derive prop-backed context fields after a controlled prop
+            // change, then recompute visibility. Emitted by `on_props_changed`.
+            Event::SyncProps => {
+                let orientation = props.orientation;
+                let visibility = props.scrollbar_visibility;
+                let min_thumb = props.min_thumb_size.unwrap_or(20.0);
+                let hide_delay = props.hide_delay;
+                let cross = props.scrollbar_cross_size.unwrap_or(0.0);
+                let dir = props.dir.unwrap_or(Direction::Ltr);
+
+                // Leaving the visibility mode the current active state belongs to
+                // resets to Idle (else a stuck ScrollActive/Hovering lingers; for
+                // Scroll an orphaned AutoHide could later hide the scrollbar). A
+                // ThumbDragging session is preserved.
+                let leaving_scroll_active =
+                    *state == State::ScrollActive && visibility != ScrollbarVisibility::Scroll;
+                let leaving_hover =
+                    *state == State::Hovering && visibility != ScrollbarVisibility::Hover;
+                let reset_state = leaving_scroll_active || leaving_hover;
+                // Derive visibility against the resulting state so a newly-enabled
+                // axis turns on while a session is still active.
+                let active = !reset_state && is_session_active(*state);
+                let mut plan = if reset_state {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+                plan = plan.apply(move |ctx| {
+                    ctx.orientation = orientation;
+                    ctx.scrollbar_visibility = visibility;
+                    ctx.min_thumb_size = min_thumb;
+                    ctx.hide_delay = hide_delay;
+                    ctx.scrollbar_cross_size = cross;
+                    ctx.dir = dir;
+                    ctx.update_visibility(active);
+                });
+                if leaving_scroll_active {
+                    plan = plan.cancel_effect(Effect::AutoHide);
+                }
+                Some(plan)
             }
         }
     }
@@ -409,23 +620,66 @@ impl ars_core::Machine for Machine {
     ) -> Api<'a> {
         Api { state, ctx, props, send }
     }
+
+    /// Sync prop-backed context fields when a controlled prop changes so adapter
+    /// rerenders are not ignored until remount. `id`, `locale`, and `aria_label`
+    /// are read live and need no sync.
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        let changed = old.orientation != new.orientation
+            || old.scrollbar_visibility != new.scrollbar_visibility
+            || old.min_thumb_size != new.min_thumb_size
+            || old.hide_delay != new.hide_delay
+            || old.scrollbar_cross_size != new.scrollbar_cross_size
+            || old.dir != new.dir;
+        if changed { vec![Event::SyncProps] } else { Vec::new() }
+    }
 }
 
 /// Helper: get (viewport_size, content_size, track_size) for an axis,
-/// accounting for the cross-axis scrollbar's CornerSquare gap.
+/// accounting for the cross-axis scrollbar's CornerSquare gap. The track length
+/// is clamped to zero so a corner gap wider than the viewport (tiny scroll
+/// areas) cannot yield a negative track and NaN thumb math.
 fn axis_metrics(ctx: &Context, axis: Axis) -> (f64, f64, f64) {
     match axis {
         Axis::X => {
             let cross = if ctx.scrollbar_y_visible { ctx.scrollbar_cross_size } else { 0.0 };
-            (ctx.viewport_width, ctx.content_width, ctx.viewport_width - cross)
+            (ctx.viewport_width, ctx.content_width, (ctx.viewport_width - cross).max(0.0))
         }
         Axis::Y => {
             let cross = if ctx.scrollbar_x_visible { ctx.scrollbar_cross_size } else { 0.0 };
-            (ctx.viewport_height, ctx.content_height, ctx.viewport_height - cross)
+            (ctx.viewport_height, ctx.content_height, (ctx.viewport_height - cross).max(0.0))
         }
     }
 }
 ```
+
+#### 1.6.1 Adapter Contract: Auto-Hide Timer
+
+Timers are a platform concern, so the agnostic machine never calls
+`set_timeout`/`clear_timeout` itself. `Effect::AutoHide` is emitted as a bare
+`PendingEffect::named(Effect::AutoHide)` **marker** (the same pattern Tooltip
+uses for `OpenDelay`/`CloseDelay`): its `run()` is a no-op, so the marker on its
+own schedules nothing. **The scroll-area adapter component is responsible for
+translating the marker into a real timer** — inspecting the emitted
+`pending_effects` for `Effect::AutoHide` rather than relying solely on the generic
+`use_machine` cleanup pass, since that pass only runs the (no-op) setup closure.
+This split is deliberate: the agnostic core cannot reach a platform from a
+transition, and adapter timer wiring is out of scope for the core crate (a
+separate adapter task, exactly as for Tooltip).
+
+The adapter must:
+
+1. Start (or restart) a timer for `Context::hide_delay` when it observes a
+   pending `Effect::AutoHide`.
+2. Send `Event::HideTimeout` back to the machine when the timer fires.
+3. Cancel the outstanding timer when it observes `Effect::AutoHide` in the
+   `cancel_effects` list (emitted on `ThumbDragStart`) or on any state change.
+
+The machine's `HideTimeout` handler then hides the scrollbars and returns to
+`State::Idle` (only while still in `Scroll` mode and not dragging). Because each
+new `Scroll` event re-emits the marker, the adapter treats a fresh intent as a
+"reset the timer" signal, keeping the scrollbar visible while scrolling
+continues.
 
 ### 1.7 Connect / API
 
@@ -526,7 +780,10 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "none");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), "vertical");
+        // `role="none"` is presentational: ARIA attributes (incl.
+        // `aria-orientation`) are invalid on it. The axis is conveyed via a data
+        // attribute for styling; the part name already encodes it.
+        attrs.set(HtmlAttr::Data("ars-orientation"), "vertical");
         attrs.set_bool(HtmlAttr::Data("ars-visible"), self.ctx.scrollbar_y_visible);
         attrs
     }
@@ -546,7 +803,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "none");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), "horizontal");
+        attrs.set(HtmlAttr::Data("ars-orientation"), "horizontal");
         attrs.set_bool(HtmlAttr::Data("ars-visible"), self.ctx.scrollbar_x_visible);
         attrs
     }
@@ -566,6 +823,12 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "none");
+        // Visible only when both scrollbars are present, so adapters can hide the
+        // filler when a single axis shows without duplicating visibility logic.
+        attrs.set_bool(
+            HtmlAttr::Data("ars-visible"),
+            self.ctx.scrollbar_x_visible && self.ctx.scrollbar_y_visible,
+        );
         attrs
     }
 
@@ -612,16 +875,16 @@ ScrollArea
 │   └── CornerSquare <div> role="none" (gap filler when both axes)
 ```
 
-| Part         | Element | Key Attributes                                      |
-| ------------ | ------- | --------------------------------------------------- |
-| Root         | `<div>` | `data-ars-state`, `data-ars-overflow-x/y`           |
-| Viewport     | `<div>` | `role="region"`, `tabindex="0"`, `aria-label`       |
-| Content      | `<div>` | Inner content wrapper                               |
-| ScrollbarY   | `<div>` | `role="none"`, `data-ars-visible`                   |
-| ThumbY       | `<div>` | `role="none"`, sized/positioned by thumb metrics    |
-| ScrollbarX   | `<div>` | `role="none"`, `data-ars-visible`                   |
-| ThumbX       | `<div>` | `role="none"`, sized/positioned by thumb metrics    |
-| CornerSquare | `<div>` | `role="none"`, visible when both scrollbars present |
+| Part         | Element | Key Attributes                                              |
+| ------------ | ------- | ----------------------------------------------------------- |
+| Root         | `<div>` | `data-ars-state`, `data-ars-overflow-x/y`                   |
+| Viewport     | `<div>` | `role="region"`, `tabindex="0"`, `aria-label`               |
+| Content      | `<div>` | Inner content wrapper                                       |
+| ScrollbarY   | `<div>` | `role="none"`, `data-ars-orientation`, `data-ars-visible`   |
+| ThumbY       | `<div>` | `role="none"`, sized/positioned by thumb metrics            |
+| ScrollbarX   | `<div>` | `role="none"`, `data-ars-orientation`, `data-ars-visible`   |
+| ThumbX       | `<div>` | `role="none"`, sized/positioned by thumb metrics            |
+| CornerSquare | `<div>` | `role="none"`, `data-ars-visible` (both scrollbars present) |
 
 ## 3. Accessibility
 
@@ -643,7 +906,7 @@ ScrollArea
 ### 4.1 Messages
 
 ```rust
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     pub viewport_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 }
@@ -668,28 +931,21 @@ impl ComponentMessages for Messages {}
 }
 ```
 
-**Horizontal scroll normalization:** RTL browsers use different `scrollLeft` conventions. The machine normalizes to a 0-to-positive range:
+**Horizontal scroll normalization:** RTL browsers use different `scrollLeft`
+conventions, and the two cannot be told apart from a single sample (both report
+`0` at one edge). The adapter therefore detects the browser's convention once and
+normalizes through the shared, convention-explicit helper from `ars-collections`
+— re-exported from this module — before sending `Event::Scroll`:
 
-```rust
-/// Normalizes `scrollLeft` across browser RTL conventions.
-/// - Standard (Chrome, Firefox >= 112): negative values, 0 at left edge
-/// - Legacy Firefox (< 112): negative values, 0 at right edge
-/// - Safari/WebKit: positive values, 0 at right edge
-///
-/// Returns normalized value in range [0, scrollWidth - clientWidth].
-fn normalize_scroll_left(raw: f64, scroll_width: f64, client_width: f64, is_rtl: bool) -> f64 {
-    if !is_rtl {
-        return raw;
-    }
-    // Detect convention by checking sign of scrollLeft at initial position
-    // Modern standard: raw <= 0, normalize to positive range
-    if raw <= 0.0 {
-        raw.abs()
-    } else {
-        // Safari positive convention: already positive
-        scroll_width - client_width - raw
-    }
-}
+```rust,no_check
+pub use ars_collections::{normalize_scroll_left_rtl, RtlScrollMode};
+
+// Adapter, on each horizontal scroll event (RTL only):
+let normalized_x = normalize_scroll_left_rtl(raw_scroll_left, scroll_width, client_width, mode);
+// `mode: RtlScrollMode` is `Negative` (Chrome/Edge/Firefox) or `Positive`
+// (Safari), detected once at startup. LTR `scrollLeft` is already `0..max` and
+// needs no normalization. The machine always works in the normalized
+// inline-start `0..max` range.
 ```
 
 ## 5. Library Parity
@@ -701,7 +957,7 @@ fn normalize_scroll_left(raw: f64, scroll_width: f64, client_width: f64, is_rtl:
 | Feature                   | ars-ui                           | Ark UI                  | Radix UI                | Notes                                            |
 | ------------------------- | -------------------------------- | ----------------------- | ----------------------- | ------------------------------------------------ |
 | Scrollbar visibility mode | `scrollbar_visibility` (4 modes) | --                      | `type` (4 modes)        | Same semantics, different naming                 |
-| Hide delay                | `hide_delay_ms`                  | --                      | `scrollHideDelay`       | Same feature                                     |
+| Hide delay                | `hide_delay`                     | --                      | `scrollHideDelay`       | Same feature                                     |
 | Direction (RTL)           | `dir`                            | --                      | `dir`                   | Same feature                                     |
 | CSP nonce                 | --                               | --                      | `nonce`                 | Adapter-level concern in ars-ui; not a core prop |
 | Orientation               | `orientation`                    | Scrollbar `orientation` | Scrollbar `orientation` | ars-ui sets at Root; refs set per-scrollbar      |

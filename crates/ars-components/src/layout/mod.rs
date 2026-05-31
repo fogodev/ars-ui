@@ -18,6 +18,9 @@ pub mod grid;
 /// Portal component machine.
 pub mod portal;
 
+/// `ScrollArea` component machine.
+pub mod scroll_area;
+
 /// Splitter component machine.
 pub mod splitter;
 

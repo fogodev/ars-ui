@@ -1,0 +1,6 @@
+---
+source: crates/ars-components/src/layout/scroll_area/mod.rs
+expression: snapshot_attrs(&both_api.content_attrs())
+---
+data-ars-part=content
+data-ars-scope=scroll-area

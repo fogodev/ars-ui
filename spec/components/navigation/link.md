@@ -39,7 +39,7 @@ external link detection.
 
 ```rust
 /// Distinguishes browser URL navigation from adapter-owned client routing.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Target {
     /// Browser-native URL navigation.
     Href(SafeUrl),
@@ -76,7 +76,7 @@ pub struct Context {
 }
 
 /// Describes the type of current-item indication for `aria-current`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AriaCurrent {
     /// The link represents the current page.
     Page,
@@ -88,8 +88,22 @@ pub enum AriaCurrent {
     Date,
     /// The link represents the current time.
     Time,
-    /// The link represents the current true value.
+    /// The link represents the current item using `aria-current="true"`.
     True,
+}
+
+impl AriaCurrent {
+    /// Returns the token rendered into `aria-current`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Page => "page",
+            Self::Step => "step",
+            Self::Location => "location",
+            Self::Date => "date",
+            Self::Time => "time",
+            Self::True => "true",
+        }
+    }
 }
 ```
 
@@ -173,6 +187,15 @@ pub enum Event {
     SyncProps,
 }
 
+// ── Effects ───────────────────────────────────────────────────────────────────
+
+/// Typed effect intents emitted by the `Link` machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// A non-disabled link was activated.
+    Navigate,
+}
+
 // ── Machine ───────────────────────────────────────────────────────────────────
 
 /// Machine for the `Link` component.
@@ -185,6 +208,7 @@ impl ars_core::Machine for Machine {
     type Props   = Props;
     type Api<'a> = Api<'a>;
     type Messages = Messages;
+    type Effect  = Effect;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let ids = ComponentIds::from_id(&props.id);
@@ -242,7 +266,9 @@ impl ars_core::Machine for Machine {
             }
 
             // ── PressEnd ──────────────────────────────────────────────────────
-            (_, Event::PressEnd) => {
+            // Guarded on `ctx.pressed`: a stray `PressEnd` while Idle/Focused is
+            // a no-op, so the link does not jump to `Focused` without a prior press.
+            (_, Event::PressEnd) if ctx.pressed => {
                 Some(TransitionPlan::to(State::Focused)
                     .apply(|ctx| {
                         ctx.pressed = false;
@@ -254,7 +280,7 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(|_ctx| {
                     // Navigation side effect handled by the framework adapter
                 })
-                .with_effect(PendingEffect::new("navigate", |ctx, props, _send| {
+                .with_effect(PendingEffect::new(Effect::Navigate, |ctx, props, _send| {
                     if let Some(ref on_navigate) = props.on_navigate {
                         on_navigate(ctx.href.clone());
                     }
@@ -263,6 +289,39 @@ impl ars_core::Machine for Machine {
                     }
                     no_cleanup()
                 })))
+            }
+
+            // ── SyncProps ─────────────────────────────────────────────────────
+            // Re-sync href/target/rel/is_current/disabled from props. When the
+            // link became disabled, also drop to `Idle` and clear focus/press
+            // interaction state so a disabled link never renders as active.
+            (_, Event::SyncProps) => {
+                let href = props.href.clone();
+                let target = props.target.clone();
+                let rel = props.rel.clone();
+                let is_current = props.is_current;
+                let disabled = props.disabled;
+
+                if disabled {
+                    Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
+                        ctx.href = href;
+                        ctx.target = target;
+                        ctx.rel = rel;
+                        ctx.is_current = is_current;
+                        ctx.disabled = disabled;
+                        ctx.focused = false;
+                        ctx.focus_visible = false;
+                        ctx.pressed = false;
+                    }))
+                } else {
+                    Some(TransitionPlan::context_only(move |ctx| {
+                        ctx.href = href;
+                        ctx.target = target;
+                        ctx.rel = rel;
+                        ctx.is_current = is_current;
+                        ctx.disabled = disabled;
+                    }))
+                }
             }
 
             _ => None,
@@ -276,6 +335,19 @@ impl ars_core::Machine for Machine {
         send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        if old.href != new.href
+            || old.target != new.target
+            || old.rel != new.rel
+            || old.is_current != new.is_current
+            || old.disabled != new.disabled
+        {
+            vec![Event::SyncProps]
+        } else {
+            Vec::new()
+        }
     }
 }
 ```
@@ -545,7 +617,7 @@ External links (those with `target="_blank"`, whether auto-detected or explicit)
 ### 6.1 Messages
 
 ```rust
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Announcement text appended to external links that open in a new tab.
     /// Default: "opens in new tab"

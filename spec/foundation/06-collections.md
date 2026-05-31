@@ -1837,6 +1837,12 @@ use indexmap::IndexMap;
 use crate::{key::Key, node::{Node, NodeType}, collection::{Collection, CollectionItem}};
 
 /// Configuration for a single tree item during construction.
+///
+/// Derives `Clone` and `PartialEq` (gated on `T`) so a config can ride inside a
+/// component `Event` that requires those bounds — e.g. TreeView's lazy
+/// `ChildrenLoaded { children: Vec<TreeItemConfig<T>> }`. `Debug` is hand-written
+/// below to avoid requiring `T: Debug`.
+#[derive(Clone, PartialEq)]
 pub struct TreeItemConfig<T> {
     /// Stable identity of the tree item.
     pub key: Key,

@@ -422,6 +422,19 @@ and those operational floors may temporarily lag the long-term targets below.
 
 > CI enforcement: see [14-ci.md](14-ci.md#2-coverage-pipeline).
 
+**Change-risk (CRAP) enforcement**: Coverage measures which lines run; the CRAP
+metric (`complexity² · (1 − coverage)³ + complexity`) measures which functions
+are risky to change — complex _and_ undertested. CI enforces a **regression**
+policy, not an absolute ceiling: a function at or above CRAP 30 MUST NOT get
+worse (more complexity or less coverage) than the committed `.crap-baseline.json`
+without a deliberate baseline update. New functions are not gated here — the
+per-crate coverage floors above already require new code to be tested. An
+absolute ceiling is intentionally avoided because at full coverage `CRAP` equals
+cyclomatic complexity, which would penalize the exhaustively-tested
+`Machine::transition` match that every stateful component requires.
+
+> CI enforcement: see [14-ci.md section 2.1.1](14-ci.md#211-crap-gate).
+
 **Snapshot count enforcement**: Every stateful component implementation file with more than two `State` variants MUST meet a per-variant floor. Rendered component modules (`component.rs`) require at least 3 snapshots per variant. Canonical `ars-components` machine modules require at least 1 snapshot per variant, focused on output-affecting connect-API attrs. Components with fewer fail the snapshot-count lint. The lint runs via `cargo xtask lint snapshot-count` and parses `*.snap` files in the test directory.
 
 > CI integration: see [14-ci.md](14-ci.md#24-snapshot-count-linting).

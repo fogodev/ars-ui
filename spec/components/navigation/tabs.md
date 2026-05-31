@@ -233,9 +233,10 @@ use ars_i18n::{Direction, Orientation};
 // ── States ────────────────────────────────────────────────────────────────────
 
 /// State of the `Tabs` component.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum State {
     /// No tab has keyboard focus.
+    #[default]
     Idle,
     /// A specific tab button has keyboard focus.
     Focused {
@@ -247,7 +248,11 @@ pub enum State {
 // ── Events ────────────────────────────────────────────────────────────────────
 
 /// Events for the `Tabs` component.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// Does not derive `Eq` because `SyncMessages` carries `Messages`
+/// (containing `MessageFn`), which only implements `PartialEq` (via
+/// `Arc::ptr_eq`).
+#[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// Activate a tab and show its panel.
     SelectTab(Key),
@@ -282,6 +287,20 @@ pub enum Event {
     /// selection invariant: `value` and `focused_tab` snap to the
     /// first non-disabled key in the new list when no longer valid.
     SetTabs(Vec<TabRegistration>),
+    /// Re-apply context-backed non-`dir` prop fields (`orientation`,
+    /// `activation_mode`, `loop_focus`, `disabled_keys`) after a runtime
+    /// prop change. Emitted by `Machine::on_props_changed` when those
+    /// fields differ. Re-runs the selection invariant.
+    SyncProps,
+    /// Re-apply provider-backed locale and localized `Messages` after an
+    /// adapter provider locale or message registry change. Close-button
+    /// labels and reorder announcements read from this live snapshot.
+    SyncMessages {
+        /// Active provider locale.
+        locale: Locale,
+        /// Localized tab messages for `locale`.
+        messages: Messages,
+    },
     /// Pure notification — see §5.3.
     CloseTab(Key),
     /// Pure notification — see §6.3.
@@ -291,6 +310,14 @@ pub enum Event {
         /// The target zero-based index in the tab list.
         new_index: usize,
     },
+    /// Push the parent's controlled inner `Props::value` into `ctx.value`
+    /// via `Bindable::sync_controlled`. Emitted by
+    /// `Machine::on_props_changed` only when both old and new props are
+    /// controlled and the inner value differs. Re-runs the selection
+    /// invariant; disabled or unregistered keys snap to the first enabled
+    /// registered tab. The outer `Option` (controlled vs. uncontrolled)
+    /// is fixed at mount per spec §1.5.
+    SyncControlledValue(Option<Key>),
 }
 
 // ── Effect ────────────────────────────────────────────────────────────────────
@@ -485,6 +512,21 @@ impl ars_core::Machine for Machine {
                     ctx.disabled_tabs = disabled_keys;
                     snap_value_to_valid_key(ctx);
                     snap_focused_tab_to_valid_key(ctx);
+                }))
+            }
+
+            // ── SyncMessages ─────────────────────────────────────────────────
+            // Re-applies provider-backed locale + localized messages.
+            // Idempotent — no transition when both already match.
+            (_, Event::SyncMessages { locale, messages }) => {
+                if ctx.locale == *locale && ctx.messages == *messages {
+                    return None;
+                }
+                let locale = locale.clone();
+                let messages = messages.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.locale = locale;
+                    ctx.messages = messages;
                 }))
             }
 
@@ -711,12 +753,17 @@ pub struct Api<'a> {
 
 impl<'a> Api<'a> {
     /// Returns the currently selected tab key, or `None` when no tab is
-    /// active (empty list).
-    pub fn selected_tab(&self) -> Option<&Key> { self.ctx.value.get().as_ref() }
+    /// active (empty list). A selected key that is currently *disabled*
+    /// reports as `None` — see the disabled-selection note below.
+    pub fn selected_tab(&self) -> Option<&Key> {
+        self.ctx.value.get().as_ref().filter(|key| !is_disabled(self.ctx, key))
+    }
 
-    /// Check if a specific tab is selected.
+    /// Check if a specific tab is selected. Returns `false` when
+    /// `tab_key` is currently *disabled*, even if it matches the stored
+    /// value — see the disabled-selection note below.
     pub fn is_tab_selected(&self, tab_key: &Key) -> bool {
-        self.ctx.value.get().as_ref() == Some(tab_key)
+        self.ctx.value.get().as_ref() == Some(tab_key) && !is_disabled(self.ctx, tab_key)
     }
 
     /// Get the key of the tab that currently has keyboard focus.
@@ -784,10 +831,12 @@ impl<'a> Api<'a> {
     /// Attrs for an individual tab trigger.
     ///
     /// `tab_key` — unique key for this tab. The DOM `id` is derived
-    /// as `ids.item("tab", &tab_key)`; the `aria-controls` target as
-    /// `ids.item("panel", &tab_key)`. Both flow from the single
-    /// `ComponentIds` base so consumers never thread an extra
-    /// `panel_id` argument through.
+    /// as `ids.item("tab", &dom_safe_key_token(tab_key))`; the
+    /// `aria-controls` target as `ids.item("panel", &dom_safe_key_token(tab_key))`.
+    /// The `Key` is first converted to a DOM-safe token (see §2) so
+    /// whitespace or punctuation in public string keys cannot break
+    /// IDREF parsing. Both flow from the single `ComponentIds` base so
+    /// consumers never thread an extra `panel_id` argument through.
     ///
     /// `focus_visible` — keyboard-modality bit. Adapters can pass
     /// `modality.is_keyboard()` for **every** tab; the method
@@ -810,13 +859,13 @@ impl<'a> Api<'a> {
         let is_disabled = self.ctx.disabled_tabs.contains(tab_key);
         let is_roving_anchor = is_selected || self.is_tablist_focus_fallback(tab_key);
 
-        attrs.set(HtmlAttr::Id, self.ctx.ids.item("tab", tab_key));
+        attrs.set(HtmlAttr::Id, self.ctx.ids.item("tab", &dom_safe_key_token(tab_key)));
         attrs.set(HtmlAttr::Role, "tab");
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Tab { tab_key: Key::default() }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Aria(AriaAttr::Selected), if is_selected { "true" } else { "false" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.item("panel", tab_key));
+        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.item("panel", &dom_safe_key_token(tab_key)));
         attrs.set(HtmlAttr::TabIndex, if is_roving_anchor { "0" } else { "-1" });
         if is_selected {
             attrs.set_bool(HtmlAttr::Data("ars-selected"), true);
@@ -835,11 +884,27 @@ impl<'a> Api<'a> {
     }
 
     /// Returns `true` when `tab_key` should anchor the roving tabindex
-    /// because no tab is currently selected. Used by `tab_attrs` to
-    /// keep the tablist reachable via natural `Tab` navigation when
-    /// `value == None`.
+    /// because no *registered* tab actually matches the current `value`.
+    /// Used by `tab_attrs` to keep the tablist reachable via natural
+    /// `Tab` navigation in both cases where `is_tab_selected` returns
+    /// `false` for every rendered tab:
+    ///
+    /// 1. `value == None` — uncontrolled or empty-list bootstrapping.
+    /// 2. `value == Some(stale_key)` in controlled mode — the controlled
+    ///    value points at a key that is no longer registered in
+    ///    `Context::tabs` (a `SetTabs` removed it before the parent
+    ///    re-synced). The ghost selection cannot be snapped away in
+    ///    controlled mode, so without this fallback the tablist would
+    ///    render with no `tabindex="0"` anchor and be skipped by natural
+    ///    `Tab` navigation.
+    ///
+    /// The guard keys off whether any *registered* tab is selected —
+    /// **not** off `value.is_some()` — so a controlled-stale value
+    /// pointing at an unregistered key still engages the fallback.
     fn is_tablist_focus_fallback(&self, tab_key: &Key) -> bool {
-        if self.ctx.value.get().is_some() { return false; }
+        let any_registered_tab_is_selected =
+            self.ctx.tabs.iter().any(|key| self.is_tab_selected(key));
+        if any_registered_tab_is_selected { return false; }
         self.ctx.tabs.iter()
             .find(|key| !self.ctx.disabled_tabs.contains(key))
             .is_some_and(|first| first == tab_key)
@@ -928,19 +993,19 @@ impl<'a> Api<'a> {
     /// Attrs for a tab panel.
     ///
     /// `tab_key` identifies the associated tab. The DOM `id` is
-    /// derived as `ids.item("panel", &tab_key)` and the
-    /// `aria-labelledby` target as `ids.item("tab", &tab_key)` —
-    /// same base IDs that `tab_attrs` uses, so the wiring is
-    /// guaranteed consistent.
+    /// derived as `ids.item("panel", &dom_safe_key_token(tab_key))` and the
+    /// `aria-labelledby` target as `ids.item("tab", &dom_safe_key_token(tab_key))`
+    /// — same DOM-safe key tokens (see §2) that `tab_attrs` uses, so the
+    /// wiring is guaranteed consistent.
     pub fn panel_attrs(&self, tab_key: &Key, tab_label: Option<&str>) -> AttrMap {
         let mut attrs = AttrMap::new();
         let is_selected = self.is_tab_selected(tab_key);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.item("panel", tab_key));
+        attrs.set(HtmlAttr::Id, self.ctx.ids.item("panel", &dom_safe_key_token(tab_key)));
         attrs.set(HtmlAttr::Role, "tabpanel");
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Panel { tab_key: Key::default(), tab_label: None }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.item("tab", tab_key));
+        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.item("tab", &dom_safe_key_token(tab_key)));
         if let Some(label) = tab_label {
             attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
         }
@@ -1044,6 +1109,19 @@ impl ConnectApi for Api<'_> {
     }
 }
 ```
+
+**Disabled-selection semantics.** `selected_tab` and `is_tab_selected`
+treat a _disabled_ selected key as unselected: when `Context::value`
+points at a key whose `disabled_tabs` flag is set, `selected_tab`
+returns `None` and `is_tab_selected` returns `false` for that key. This
+keeps `aria-selected="true"` off an inert tab and prevents its panel
+from rendering as the active panel. The exclusion is deliberately
+asymmetric — it filters out _disabled_ keys but **not** _unregistered_
+keys, so a controlled `value` pointing at a key that is not in
+`Context::tabs` still reports as selected (the parent owns the
+controlled value and is responsible for re-syncing it; see
+`is_tablist_focus_fallback`, which handles the roving-tabindex anchor
+for that stale-controlled case).
 
 ## 2. Anatomy
 
@@ -1174,6 +1252,17 @@ Tabs listed in `disabled_keys` (or `disabled_tabs` in `Context`) are
   that was the current `value` or `focused_tab`, the selection
   invariant snaps to the first non-disabled tab. See §1.5
   `snap_value_to_valid_key` / `snap_focused_tab_to_valid_key`.
+- The selection accessors `Api::selected_tab` and `Api::is_tab_selected`
+  treat a _disabled_ selected key as unselected: while `Context::value`
+  still points at a disabled key (e.g. between the moment a controlled
+  `value` lands on a disabled tab and the consumer re-syncing it),
+  `selected_tab` returns `None` and `is_tab_selected` returns `false`
+  for that key, so no inert tab renders `aria-selected="true"` or shows
+  its panel. This exclusion is deliberately asymmetric — it filters out
+  _disabled_ keys but **not** _unregistered_ keys, so a controlled
+  `value` pointing at a key absent from `Context::tabs` still reports as
+  selected and the roving-tabindex fallback (§1.6
+  `is_tablist_focus_fallback`) keeps the tablist reachable.
 
 ### 3.4 Keyboard Interaction
 

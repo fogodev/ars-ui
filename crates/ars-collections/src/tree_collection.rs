@@ -17,6 +17,11 @@ use crate::{
 };
 
 /// Configuration for a single tree item during construction.
+///
+/// Derives `Clone`/`PartialEq` conditionally on `T` so configs can be carried
+/// in component events (e.g. lazily-loaded children) and compared. `Debug` is
+/// hand-written below to avoid requiring `T: Debug`.
+#[derive(Clone, PartialEq)]
 pub struct TreeItemConfig<T> {
     /// Stable identity of the tree item.
     pub key: Key,
