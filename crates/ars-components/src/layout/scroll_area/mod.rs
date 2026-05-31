@@ -574,10 +574,12 @@ fn axis_metrics(ctx: &Context, axis: Axis) -> (f64, f64, f64) {
                 0.0
             };
 
+            // Clamp to zero: a corner gap wider than the viewport (tiny scroll
+            // areas) must not yield a negative track length.
             (
                 ctx.viewport_width,
                 ctx.content_width,
-                ctx.viewport_width - cross,
+                (ctx.viewport_width - cross).max(0.0),
             )
         }
 
@@ -591,7 +593,7 @@ fn axis_metrics(ctx: &Context, axis: Axis) -> (f64, f64, f64) {
             (
                 ctx.viewport_height,
                 ctx.content_height,
-                ctx.viewport_height - cross,
+                (ctx.viewport_height - cross).max(0.0),
             )
         }
     }
@@ -717,8 +719,11 @@ impl ars_core::Machine for Machine {
 
             Event::MouseLeave => {
                 // Hide only once the pointer has left both the root and any
-                // overlaid scrollbar track.
-                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover && !ctx.hovering_scrollbar
+                // overlaid scrollbar track — and never while a thumb drag is in
+                // progress (the pointer is captured and may leave the root).
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover
+                    && !ctx.hovering_scrollbar
+                    && *state != State::ThumbDragging
                 {
                     Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
                         ctx.hovering_root = false;
@@ -741,8 +746,11 @@ impl ars_core::Machine for Machine {
             Event::MouseLeaveScrollbar => {
                 // Mirror of `MouseLeave`: if the pointer is no longer over the
                 // root either, the overlaid scrollbar must hide now — no further
-                // root-leave event will arrive.
-                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover && !ctx.hovering_root {
+                // root-leave event will arrive. Never while dragging.
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover
+                    && !ctx.hovering_root
+                    && *state != State::ThumbDragging
+                {
                     Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
                         ctx.hovering_scrollbar = false;
                         ctx.scrollbar_x_visible = false;
@@ -909,7 +917,20 @@ impl ars_core::Machine for Machine {
                 let cross = props.scrollbar_cross_size.unwrap_or(0.0);
                 let dir = props.dir.unwrap_or(Direction::Ltr);
 
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                // Switching away from `Scroll` while the hide timer is running
+                // leaves `ScrollActive` and cancels the now-orphaned `AutoHide`
+                // effect, so a stale timer cannot later hide an `Always`/`Auto`
+                // scrollbar.
+                let leaving_scroll_active =
+                    *state == State::ScrollActive && visibility != ScrollbarVisibility::Scroll;
+
+                let mut plan = if leaving_scroll_active {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+
+                plan = plan.apply(move |ctx: &mut Context| {
                     ctx.orientation = orientation;
                     ctx.scrollbar_visibility = visibility;
                     ctx.min_thumb_size = min_thumb;
@@ -917,7 +938,13 @@ impl ars_core::Machine for Machine {
                     ctx.scrollbar_cross_size = cross;
                     ctx.dir = dir;
                     ctx.update_visibility();
-                }))
+                });
+
+                if leaving_scroll_active {
+                    plan = plan.cancel_effect(Effect::AutoHide);
+                }
+
+                Some(plan)
             }
         }
     }
@@ -1735,6 +1762,82 @@ mod tests {
                 .iter()
                 .any(|effect| effect.name == Effect::AutoHide),
         );
+    }
+
+    #[test]
+    fn thumb_drag_survives_negative_track_from_oversized_corner_gap() {
+        // A corner gap wider than the viewport must not produce a negative
+        // track length and NaN/negative drag math on tiny scroll areas.
+        let mut service = service(
+            props()
+                .orientation(ScrollOrientation::Both)
+                .scrollbar_visibility(ScrollbarVisibility::Always)
+                .scrollbar_cross_size(50.0),
+        );
+        resize(&mut service, 10.0, 10.0, 100.0, 100.0);
+
+        drop(service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::Y,
+        }));
+        assert_eq!(service.context().drag_start_thumb_pos, 0.0);
+
+        drop(service.send(Event::ThumbDragMove { pos: 5.0 }));
+        assert!(service.context().scroll_y.is_finite());
+        assert_eq!(service.context().scroll_y, 0.0);
+    }
+
+    #[test]
+    fn hover_leave_during_drag_does_not_cancel_the_drag() {
+        let mut service = service(
+            props()
+                .orientation(ScrollOrientation::Both)
+                .scrollbar_visibility(ScrollbarVisibility::Hover),
+        );
+        resize(&mut service, 100.0, 100.0, 400.0, 400.0);
+        drop(service.send(Event::MouseEnter));
+        drop(service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::Y,
+        }));
+        assert_eq!(service.state(), &State::ThumbDragging);
+
+        // Pointer (still captured) leaves the root mid-drag.
+        let leave = service.send(Event::MouseLeave);
+        assert!(!leave.state_changed);
+        assert_eq!(service.state(), &State::ThumbDragging);
+        assert_eq!(service.context().drag_axis, Some(Axis::Y));
+
+        // Drag continues to scroll instead of being ignored.
+        drop(service.send(Event::ThumbDragMove { pos: 20.0 }));
+        assert_close(service.context().scroll_y, 80.0);
+
+        // A scrollbar leave mid-drag is likewise ignored as a hide trigger.
+        let scrollbar_leave = service.send(Event::MouseLeaveScrollbar);
+        assert!(!scrollbar_leave.state_changed);
+        assert_eq!(service.state(), &State::ThumbDragging);
+    }
+
+    #[test]
+    fn syncing_away_from_scroll_mode_cancels_stale_auto_hide() {
+        let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Scroll));
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::Scroll { x: 0.0, y: 150.0 }));
+        assert_eq!(service.state(), &State::ScrollActive);
+
+        // Switch to Always: the orphaned hide timer must be cancelled and the
+        // machine must leave ScrollActive so a late HideTimeout cannot hide the
+        // now-always-visible scrollbar.
+        let result = service.set_props(
+            props()
+                .orientation(ScrollOrientation::Both)
+                .scrollbar_visibility(ScrollbarVisibility::Always),
+        );
+
+        assert_eq!(service.state(), &State::Idle);
+        assert!(result.cancel_effects.contains(&Effect::AutoHide));
+        assert!(service.context().scrollbar_x_visible);
+        assert!(service.context().scrollbar_y_visible);
     }
 
     #[test]

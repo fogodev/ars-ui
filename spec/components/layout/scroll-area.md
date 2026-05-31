@@ -399,8 +399,12 @@ impl ars_core::Machine for Machine {
                 }
             }
 
+            // A leave never hides while a thumb drag is active: the pointer is
+            // captured and routinely leaves the root mid-drag.
             Event::MouseLeave => {
-                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover && !ctx.hovering_scrollbar {
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover
+                    && !ctx.hovering_scrollbar
+                    && *state != State::ThumbDragging {
                     Some(TransitionPlan::to(State::Idle).apply(|ctx| {
                         ctx.hovering_root = false;
                         ctx.scrollbar_x_visible = false; ctx.scrollbar_y_visible = false;
@@ -412,7 +416,9 @@ impl ars_core::Machine for Machine {
 
             Event::MouseEnterScrollbar => Some(TransitionPlan::context_only(|ctx| { ctx.hovering_scrollbar = true; })),
             Event::MouseLeaveScrollbar => {
-                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover && !ctx.hovering_root {
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover
+                    && !ctx.hovering_root
+                    && *state != State::ThumbDragging {
                     Some(TransitionPlan::to(State::Idle).apply(|ctx| {
                         ctx.hovering_scrollbar = false;
                         ctx.scrollbar_x_visible = false; ctx.scrollbar_y_visible = false;
@@ -500,7 +506,18 @@ impl ars_core::Machine for Machine {
                 let hide_delay = props.hide_delay;
                 let cross = props.scrollbar_cross_size.unwrap_or(0.0);
                 let dir = props.dir.unwrap_or(Direction::Ltr);
-                Some(TransitionPlan::context_only(move |ctx| {
+
+                // Switching away from Scroll while the hide timer runs leaves
+                // ScrollActive and cancels the orphaned AutoHide so a stale timer
+                // cannot later hide an Always/Auto scrollbar.
+                let leaving_scroll_active =
+                    *state == State::ScrollActive && visibility != ScrollbarVisibility::Scroll;
+                let mut plan = if leaving_scroll_active {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+                plan = plan.apply(move |ctx| {
                     ctx.orientation = orientation;
                     ctx.scrollbar_visibility = visibility;
                     ctx.min_thumb_size = min_thumb;
@@ -508,7 +525,11 @@ impl ars_core::Machine for Machine {
                     ctx.scrollbar_cross_size = cross;
                     ctx.dir = dir;
                     ctx.update_visibility();
-                }))
+                });
+                if leaving_scroll_active {
+                    plan = plan.cancel_effect(Effect::AutoHide);
+                }
+                Some(plan)
             }
         }
     }
@@ -534,16 +555,18 @@ impl ars_core::Machine for Machine {
 }
 
 /// Helper: get (viewport_size, content_size, track_size) for an axis,
-/// accounting for the cross-axis scrollbar's CornerSquare gap.
+/// accounting for the cross-axis scrollbar's CornerSquare gap. The track length
+/// is clamped to zero so a corner gap wider than the viewport (tiny scroll
+/// areas) cannot yield a negative track and NaN thumb math.
 fn axis_metrics(ctx: &Context, axis: Axis) -> (f64, f64, f64) {
     match axis {
         Axis::X => {
             let cross = if ctx.scrollbar_y_visible { ctx.scrollbar_cross_size } else { 0.0 };
-            (ctx.viewport_width, ctx.content_width, ctx.viewport_width - cross)
+            (ctx.viewport_width, ctx.content_width, (ctx.viewport_width - cross).max(0.0))
         }
         Axis::Y => {
             let cross = if ctx.scrollbar_x_visible { ctx.scrollbar_cross_size } else { 0.0 };
-            (ctx.viewport_height, ctx.content_height, ctx.viewport_height - cross)
+            (ctx.viewport_height, ctx.content_height, (ctx.viewport_height - cross).max(0.0))
         }
     }
 }
