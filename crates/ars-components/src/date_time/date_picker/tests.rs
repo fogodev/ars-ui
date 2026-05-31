@@ -594,7 +594,10 @@ fn disabled_ignores_select_date() {
 }
 
 #[test]
-fn readonly_blocks_open() {
+fn readonly_allows_open_for_viewing() {
+    // `readonly` allows viewing but not editing: the picker still opens so the
+    // user can inspect the current date/month (the embedded Calendar blocks
+    // selection on its own). Only `SelectDate`/`InputChange` are guarded.
     let mut svc = service_with(
         Props {
             readonly: true,
@@ -605,7 +608,7 @@ fn readonly_blocks_open() {
 
     drop(svc.send(Event::Open));
 
-    assert_eq!(*svc.state(), State::Closed);
+    assert_eq!(*svc.state(), State::Open);
 }
 
 #[test]
@@ -1299,9 +1302,10 @@ fn api_and_messages_debug_eq_impls() {
 // ────────────────────────────────────────────────────────────────────
 
 #[test]
-fn readonly_blocks_focus_in_open() {
-    // `FocusIn` must respect `readonly` exactly as the explicit `Open` event
-    // does — a read-only field stays closed when focused.
+fn readonly_allows_focus_in_open_for_viewing() {
+    // `FocusIn` opens a read-only picker just like the explicit `Open` event:
+    // read-only allows viewing, so focusing the field opens the calendar (the
+    // editing paths remain guarded).
     let mut svc = service_with(
         Props {
             readonly: true,
@@ -1312,8 +1316,8 @@ fn readonly_blocks_focus_in_open() {
 
     let result = svc.send(Event::FocusIn);
 
-    assert_eq!(*svc.state(), State::Closed);
-    assert!(!result.state_changed);
+    assert_eq!(*svc.state(), State::Open);
+    assert!(result.state_changed);
 }
 
 #[test]
@@ -1466,6 +1470,16 @@ fn on_open_change_prop_round_trips() {
     assert!(props.on_open_change.is_some());
 }
 
+#[test]
+fn on_value_change_prop_round_trips() {
+    let props = Props {
+        on_value_change: Some(Callback::new(|_value: Option<CalendarDate>| {})),
+        ..props()
+    };
+
+    assert!(props.on_value_change.is_some());
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Codex review #697 (pass 2) — focus, value notify, reject, readonly, ISO
 // ────────────────────────────────────────────────────────────────────
@@ -1558,7 +1572,9 @@ fn typed_rejected_complete_date_clears_prior_value() {
 }
 
 #[test]
-fn readonly_trigger_is_disabled() {
+fn readonly_trigger_stays_enabled_for_viewing() {
+    // A read-only picker still opens for viewing, so its trigger must remain
+    // actionable (not `disabled`). Only `disabled` makes the trigger inert.
     let svc = service_with(
         Props {
             readonly: true,
@@ -1568,13 +1584,10 @@ fn readonly_trigger_is_disabled() {
     );
     let api = svc.connect(&|_| {});
 
+    assert_eq!(attr(&api.trigger_attrs(), HtmlAttr::Disabled), None);
     assert_eq!(
-        attr(&api.trigger_attrs(), HtmlAttr::Disabled).as_deref(),
-        Some("true"),
-    );
-    assert_eq!(
-        attr(&api.trigger_attrs(), HtmlAttr::Aria(AriaAttr::Disabled)).as_deref(),
-        Some("true"),
+        attr(&api.trigger_attrs(), HtmlAttr::Aria(AriaAttr::Disabled)),
+        None,
     );
 }
 
@@ -2072,6 +2085,44 @@ fn select_date_on_closed_uncontrolled_picker_stays_closed() {
     // The value still commits (and notifies) even though the popover stays put.
     assert_eq!(svc.context().value.get().as_ref(), Some(&date(2024, 3, 15)));
     assert_eq!(effects(result), vec![Effect::ValueChange]);
+}
+
+#[test]
+fn select_date_on_closed_picker_emits_no_close_effects() {
+    // With the default `close_on_select == true`, a stale/queued `SelectDate`
+    // that lands after the picker already closed (e.g. a calendar click racing
+    // with `FocusOut`) must NOT emit `OpenChange`/`RestoreFocusToInput` for a
+    // close that never happens — those would fire `on_open_change(false)`
+    // spuriously and pull focus back into the input. Only the value commits.
+    let mut svc = service();
+    assert_eq!(*svc.state(), State::Closed);
+
+    let result = svc.send(Event::SelectDate {
+        date: date(2024, 3, 15),
+    });
+
+    assert_eq!(*svc.state(), State::Closed);
+    let emitted = effects(result);
+    assert!(emitted.contains(&Effect::ValueChange));
+    assert!(!emitted.contains(&Effect::OpenChange));
+    assert!(!emitted.contains(&Effect::RestoreFocusToInput));
+}
+
+#[test]
+fn input_change_commits_native_digit_date() {
+    // A user typing a localized numeric date (Extended Arabic-Indic digits for
+    // `fa-IR`) must commit just like ASCII digits — the input classifier and
+    // parser transliterate native digits before the completeness/parse checks,
+    // so the value is not left stale as "in-progress" text.
+    let mut svc = service_with(props(), en_us());
+
+    // ۰۳/۱۵/۲۰۲۴ == 03/15/2024 in Extended Arabic-Indic digits.
+    let result = svc.send(Event::InputChange {
+        value: String::from("\u{06F0}\u{06F3}/\u{06F1}\u{06F5}/\u{06F2}\u{06F0}\u{06F2}\u{06F4}"),
+    });
+
+    assert_eq!(svc.context().value.get().as_ref(), Some(&date(2024, 3, 15)));
+    assert!(effects(result).contains(&Effect::ValueChange));
 }
 
 #[test]

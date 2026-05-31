@@ -2685,7 +2685,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "icu4x")]
+    #[cfg(all(feature = "std", feature = "icu4x"))]
     #[test]
     fn date_order_uses_icu_order_for_native_digit_and_non_gregorian_locales() {
         // Locales whose CLDR short date uses native digits and/or a non-Gregorian
@@ -2706,6 +2706,32 @@ mod tests {
             date_order(&Locale::parse("ar-EG").expect("locale should parse")),
             DateOrder::DayMonthYear,
         );
+    }
+
+    #[test]
+    fn fallback_date_order_covers_language_and_region_branches() {
+        // The `(language, region)` heuristic is the no-backend fallback (and the
+        // path `date_order` takes only when the ICU/JS probe yields nothing).
+        // Exercise every branch directly so it stays covered regardless of which
+        // locales happen to reach it through the backend probe.
+        use super::{DateOrder, fallback_date_order};
+
+        let order = |tag: &str| fallback_date_order(&Locale::parse(tag).expect("locale parses"));
+
+        // CJK languages are year-first regardless of region.
+        assert_eq!(order("ja-JP"), DateOrder::YearMonthDay);
+        assert_eq!(order("zh-CN"), DateOrder::YearMonthDay);
+        assert_eq!(order("ko-KR"), DateOrder::YearMonthDay);
+
+        // Month-first regions.
+        assert_eq!(order("en-US"), DateOrder::MonthDayYear);
+
+        // Year-first regions selected by region rather than language.
+        assert_eq!(order("en-CA"), DateOrder::YearMonthDay);
+
+        // Everything else is day-first (the most common order worldwide).
+        assert_eq!(order("en-GB"), DateOrder::DayMonthYear);
+        assert_eq!(order("de-DE"), DateOrder::DayMonthYear);
     }
 
     #[cfg(any(

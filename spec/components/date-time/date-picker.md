@@ -243,8 +243,11 @@ fn format_date(date: &CalendarDate, format: &str) -> String {
 }
 
 /// Parse a date string in the pattern's field order. `new_gregorian` is fallible
-/// (validates the date), so it is mapped to `Option` via `.ok()`.
+/// (validates the date), so it is mapped to `Option` via `.ok()`. Native decimal
+/// digits (e.g. Arabic-Indic) are transliterated to ASCII first so a localized
+/// numeric date still commits.
 fn parse_date(text: &str, format: &str) -> Option<CalendarDate> {
+    let text = normalize_digits(text);
     let (sep, order) = parse_format(format);
     let tokens: Vec<&str> = text.split(sep).collect();
     if tokens.len() != 3 { return None; }
@@ -277,6 +280,10 @@ enum InputClass {
 /// A "complete" entry is exactly three numeric fields in the format separator;
 /// only those can be rejected as invalid. Anything else is `Partial`.
 fn classify_input(text: &str, format: &str) -> InputClass {
+    // Transliterate native decimal digits to ASCII before the completeness check
+    // so a localized numeric date is recognised as complete (and can commit),
+    // not misclassified as in-progress text.
+    let text = normalize_digits(text);
     let (sep, _order) = parse_format(format);
     let tokens: Vec<&str> = text.split(sep).collect();
     let complete_numeric = tokens.len() == 3
@@ -285,7 +292,7 @@ fn classify_input(text: &str, format: &str) -> InputClass {
             !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit())
         });
     if !complete_numeric { return InputClass::Partial; }
-    match parse_date(text, format) {
+    match parse_date(&text, format) {
         Some(date) => InputClass::Valid(date),
         None => InputClass::CompleteInvalid,
     }
@@ -360,6 +367,11 @@ pub struct Props {
     /// parent uses it to reconcile its state after a user-driven open/close
     /// (mirrors `popover`/`dialog`).
     pub on_open_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
+    /// Called whenever the selected value changes. Fired by the adapter from the
+    /// [`Effect::ValueChange`] intent with `Context::requested_value` (the
+    /// requested date, or `None` for a clear); a controlled-`value` parent uses
+    /// it to echo the new value back (the value counterpart of `on_open_change`).
+    pub on_value_change: Option<Callback<dyn Fn(Option<CalendarDate>) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -390,6 +402,7 @@ impl Default for Props {
             today: CalendarDate::new_gregorian(2025, 1, 1)
                 .expect("2025-01-01 is a valid Gregorian date"),
             on_open_change: None,
+            on_value_change: None,
         }
     }
 }
@@ -622,10 +635,11 @@ impl ars_core::Machine for Machine {
             // `open_request` honors controlled `open`: when controlled it records
             // the request + emits `OpenChange` without mutating `State`; when
             // uncontrolled it transitions and fires the focus effect.
-            Event::Open => {
-                if ctx.readonly { return None; }
-                open_request(state, ctx, props, true, OpenFocus::Calendar)
-            }
+            // `readonly` does NOT block opening — a read-only picker still opens
+            // so the user can *view* the current date/month (the embedded
+            // Calendar blocks selection on its own); only the editing paths
+            // (`SelectDate`, `InputChange`) are guarded.
+            Event::Open => open_request(state, ctx, props, true, OpenFocus::Calendar),
 
             Event::Close => open_request(state, ctx, props, false, OpenFocus::Trigger),
 
@@ -647,9 +661,16 @@ impl ars_core::Machine for Machine {
                 let date = date.clone();
                 let should_close = props.close_on_select;
                 let open_controlled = props.open.is_some();
+                // The selection only *closes* the picker when it is actually open.
+                // A queued/stale `SelectDate` landing after the popover already
+                // closed (e.g. a calendar click racing with `FocusOut`) must not
+                // re-fire `OpenChange`/focus restoration for a close that never
+                // happens (that would call `on_open_change(false)` spuriously and
+                // yank focus back into the input).
+                let closes_open = should_close && *state == State::Open;
                 // Commit the close only when open is uncontrolled; otherwise just
                 // request it and let the parent reconcile.
-                let commit_close = should_close && !open_controlled;
+                let commit_close = closes_open && !open_controlled;
                 // Suppress a no-op `ValueChange` when the date is already selected.
                 let value_changes = ctx.value.get().as_ref() != Some(&date);
                 // Controlled `open` never mutates `State` here (a stale/scripted
@@ -674,7 +695,7 @@ impl ars_core::Machine for Machine {
                     ctx.parsed_date = ctx.value.get().clone();
                     ctx.input_text = ctx.formatted_value();
                     ctx.is_touched = true;
-                    if should_close {
+                    if closes_open {
                         ctx.requested_open = false;
                         // Controlled close: defer restoring focus to the input
                         // until the parent echoes the close.
@@ -684,7 +705,7 @@ impl ars_core::Machine for Machine {
                 if value_changes {
                     plan = plan.with_effect(PendingEffect::named(Effect::ValueChange));
                 }
-                if should_close {
+                if closes_open {
                     plan = plan.with_effect(PendingEffect::named(Effect::OpenChange));
                     if commit_close {
                         plan = plan.with_effect(PendingEffect::named(Effect::RestoreFocusToInput));
@@ -751,11 +772,11 @@ impl ars_core::Machine for Machine {
 
             // ── Focus management ─────────────────────────────────────────
             Event::FocusIn => {
-                // `readonly` blocks opening through the focus path just as it
-                // blocks the explicit `Open` event. Open via focus passes no focus
-                // effect — the user focused the input to type, so focus stays in
-                // the field (only trigger/ArrowDown opens move it into the grid).
-                if *state == State::Closed && ctx.open_on_click && !ctx.readonly {
+                // Open via focus passes no focus effect — the user focused the
+                // input, so focus stays in the field (only trigger/ArrowDown
+                // opens move it into the grid). `readonly` does not block this
+                // view-only open (see `Event::Open`).
+                if *state == State::Closed && ctx.open_on_click {
                     open_request(state, ctx, props, true, OpenFocus::None)
                 } else {
                     None
@@ -1042,10 +1063,10 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if self.is_open() { "true" } else { "false" });
         attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.part("content"));
         attrs.set(HtmlAttr::TabIndex, "0");
-        // `readonly` blocks every opening path, so the trigger advertises it is
-        // non-actionable rather than rendering enabled-but-inert (matches the
-        // input and clear-trigger, which already expose readonly/disabled).
-        if self.ctx.disabled || self.ctx.readonly {
+        // Only `disabled` makes the trigger non-actionable. A `readonly` picker
+        // still opens for viewing, so the trigger stays enabled (the editing
+        // paths are guarded in the machine; the clear-trigger stays disabled).
+        if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
