@@ -652,7 +652,15 @@ impl ars_core::Machine for Machine {
                 let commit_close = should_close && !open_controlled;
                 // Suppress a no-op `ValueChange` when the date is already selected.
                 let value_changes = ctx.value.get().as_ref() != Some(&date);
-                let next_state = if commit_close { State::Closed } else { State::Open };
+                // Controlled `open` never mutates `State` here (a stale/scripted
+                // selection must not locally reopen); otherwise close on select.
+                let next_state = if open_controlled {
+                    state.clone()
+                } else if should_close {
+                    State::Closed
+                } else {
+                    State::Open
+                };
                 let mut plan = TransitionPlan::to(next_state).apply(move |ctx| {
                     ctx.requested_value = Some(date.clone());
                     ctx.value.set(Some(date));
@@ -707,6 +715,11 @@ impl ars_core::Machine for Machine {
                     };
                 // Suppress a no-op `ValueChange` when the value would not change.
                 let value_changes = value_changed && committed_value.as_ref() != ctx.value.get().as_ref();
+                // Controlled `value` always reflects the bindable (parent's
+                // committed value) — for accepts AND clears/rejections — never
+                // optimistically showing typed/empty text the rest of the API
+                // contradicts.
+                let value_controlled = props.value.is_some();
                 let mut plan = TransitionPlan::context_only(move |ctx| {
                     ctx.is_touched = true;
                     if value_changed {
@@ -714,12 +727,15 @@ impl ars_core::Machine for Machine {
                         ctx.parsed_date = committed_value.clone();
                         ctx.requested_value = committed_value.clone();
                         ctx.value.set(committed_value);
-                        // For an accepted date, reflect the bindable's value so a
-                        // controlled `value` the parent hasn't echoed yet does not
-                        // diverge from the hidden input / calendar (the typed-input
-                        // analog of `SelectDate`). A rejected complete date or
-                        // explicit clear keeps the text the user sees.
-                        ctx.input_text = if accepted { ctx.formatted_value() } else { text };
+                        // Reflect the bindable for a controlled value (any change,
+                        // until the parent echoes) or an uncontrolled accept
+                        // (normalized); only an uncontrolled reject/clear keeps the
+                        // text the user sees.
+                        ctx.input_text = if value_controlled || accepted {
+                            ctx.formatted_value()
+                        } else {
+                            text
+                        };
                     } else {
                         // In-progress (partial/unparseable) typing is preserved.
                         ctx.input_text = text;
@@ -753,6 +769,12 @@ impl ars_core::Machine for Machine {
                 }
                 KeyboardKey::ArrowDown if *state == State::Closed => {
                     Self::transition(state, &Event::Open, ctx, props)
+                }
+                // Already open (e.g. opened by input focus, which keeps focus in
+                // the input): ArrowDown moves focus into the calendar grid so the
+                // input→calendar keyboard path works in the focus-open flow.
+                KeyboardKey::ArrowDown => {
+                    Some(TransitionPlan::new().with_effect(PendingEffect::named(Effect::FocusCalendar)))
                 }
                 _ => None,
             },

@@ -1960,6 +1960,90 @@ fn programmatic_controlled_open_defaults_to_focus_calendar() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Codex review #697 (pass 6) — controlled select/clear, ArrowDown-after-open
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn controlled_open_select_does_not_change_state() {
+    // A `SelectDate` reaching a controlled `open: Some(false)` picker must not
+    // locally (re)open it — the parent owns the open state. The value request is
+    // still recorded.
+    let mut svc = service_with(
+        Props {
+            open: Some(false),
+            ..props()
+        },
+        en_us(),
+    );
+
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 3, 15),
+    }));
+
+    assert_eq!(*svc.state(), State::Closed);
+    assert!(!svc.context().requested_open);
+    assert_eq!(svc.context().requested_value, Some(date(2024, 3, 15)));
+}
+
+#[test]
+fn controlled_value_clear_does_not_change_display() {
+    // Controlled `value` with a date: clearing the field records the request but
+    // the visible input keeps reflecting the parent's committed value (no
+    // optimistic empty text), so it never diverges from the hidden input.
+    let mut svc = service_with(
+        Props {
+            value: Some(Some(date(2024, 3, 15))),
+            ..props()
+        },
+        en_us(),
+    );
+
+    drop(svc.send(Event::InputChange {
+        value: String::new(),
+    }));
+
+    assert_eq!(*svc.context().value.get(), Some(date(2024, 3, 15)));
+    assert_eq!(svc.context().input_text, "03/15/2024");
+    assert_eq!(svc.context().requested_value, None);
+}
+
+#[test]
+fn controlled_value_rejected_typed_date_does_not_change_display() {
+    let mut svc = service_with(
+        Props {
+            value: Some(Some(date(2024, 3, 15))),
+            max: Some(date(2024, 12, 31)),
+            ..props()
+        },
+        en_us(),
+    );
+
+    drop(svc.send(Event::InputChange {
+        value: String::from("01/01/2025"),
+    }));
+
+    // Display still reflects the controlled value, not the rejected text.
+    assert_eq!(svc.context().input_text, "03/15/2024");
+    assert_eq!(*svc.context().value.get(), Some(date(2024, 3, 15)));
+}
+
+#[test]
+fn arrow_down_while_open_focuses_calendar() {
+    // After a focus-open (focus stays in the input), ArrowDown moves focus into
+    // the calendar grid.
+    let mut svc = service();
+    drop(svc.send(Event::FocusIn));
+    assert_eq!(*svc.state(), State::Open);
+
+    let emitted = effects(svc.send(Event::KeyDown {
+        key: KeyboardKey::ArrowDown,
+    }));
+
+    assert_eq!(emitted, vec![Effect::FocusCalendar]);
+    assert_eq!(*svc.state(), State::Open);
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Snapshots — root
 // ────────────────────────────────────────────────────────────────────
 
