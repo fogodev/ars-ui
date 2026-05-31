@@ -114,8 +114,14 @@ pub struct Context {
     pub disabled: bool,
     /// Whether the component is read-only.
     pub readonly: bool,
-    /// Whether the current value is invalid.
+    /// Whether the value is invalid per *external* validation (the `invalid`
+    /// prop / `SetInvalid`). Kept separate from `parse_error` so a prop refresh
+    /// cannot clear a parser-derived error.
     pub invalid: bool,
+    /// Whether the last commit failed to parse (or an empty required field was
+    /// committed). Parser-derived, owned by the machine — `SetProps` must not
+    /// clear it. The effective invalid state is `invalid || parse_error`.
+    pub parse_error: bool,
     /// Whether a value is required.
     pub required: bool,
     /// Whether IME composition is in progress.
@@ -226,7 +232,7 @@ fn format_value(
 }
 
 /// Parse `input_text` and update `value`; reset `input_text` to the formatted
-/// value. Sets `invalid` when parsing fails.
+/// value. Sets the parser-derived `parse_error` flag when parsing fails.
 fn commit_input(ctx: &mut Context) {
     if let Some(ch) = ctx.channel {
         // Channel mode: parse as f64. Reject non-finite input (`NaN`/`inf`),
@@ -254,16 +260,16 @@ fn commit_input(ctx: &mut Context) {
 
                 ctx.value.set(Some(new_color));
                 ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
-                ctx.invalid = false;
+                ctx.parse_error = false;
             }
         } else {
-            ctx.invalid = true;
+            ctx.parse_error = true;
         }
     } else {
         // Whole-color mode: parse via parse_color_string.
         if ctx.input_text.trim().is_empty() {
             ctx.value.set(None);
-            ctx.invalid = ctx.required;
+            ctx.parse_error = ctx.required;
 
             return;
         }
@@ -271,9 +277,9 @@ fn commit_input(ctx: &mut Context) {
         if let Some(color) = parse_color_string(&ctx.input_text) {
             ctx.value.set(Some(color));
             ctx.input_text = format_color_string(&color, ctx.color_format);
-            ctx.invalid = false;
+            ctx.parse_error = false;
         } else {
-            ctx.invalid = true;
+            ctx.parse_error = true;
         }
     }
 }
@@ -291,7 +297,7 @@ fn adjust_channel(ctx: &mut Context, delta: f64) {
         let new_color = with_channel(color, ch, new_val);
         ctx.value.set(Some(new_color.clone()));
         ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
-        ctx.invalid = false;
+        ctx.parse_error = false;
     }
 }
 
@@ -349,6 +355,7 @@ impl ars_core::Machine for Machine {
             disabled: props.disabled,
             readonly: props.readonly,
             invalid: props.invalid,
+            parse_error: false,
             required: props.required,
             is_composing: false,
             has_description: false,
@@ -437,7 +444,10 @@ impl ars_core::Machine for Machine {
                                     format_value(&color, ctx.channel, ctx.color_format);
                             }
 
+                            // A programmatic value is valid: clear both the
+                            // external and parser-derived invalid state.
                             ctx.invalid = false;
+                            ctx.parse_error = false;
                         }
                         None => ctx.value.sync_controlled(None),
                     },
@@ -529,7 +539,10 @@ impl ars_core::Machine for Machine {
                         ctx.input_text = format_value(&c, ctx.channel, ctx.color_format);
                     }
                     ctx.value.set(Some(c));
+                    // A programmatic value is valid: clear both the external and
+                    // parser-derived invalid state.
                     ctx.invalid = false;
+                    ctx.parse_error = false;
                 }))
             }
 
@@ -600,7 +613,7 @@ impl ars_core::Machine for Machine {
                         let new_color = with_channel(color, ch, max);
                         ctx.value.set(Some(new_color.clone()));
                         ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
-                        ctx.invalid = false;
+                        ctx.parse_error = false;
                     }
                 }))
             }
@@ -616,7 +629,7 @@ impl ars_core::Machine for Machine {
                         let new_color = with_channel(color, ch, min);
                         ctx.value.set(Some(new_color.clone()));
                         ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
-                        ctx.invalid = false;
+                        ctx.parse_error = false;
                     }
                 }))
             }
@@ -719,6 +732,12 @@ impl<'a> Api<'a> {
         matches!(self.state, State::Focused)
     }
 
+    /// The effective invalid state: external validation (`invalid` prop /
+    /// `SetInvalid`) OR a parser-derived error from the last commit.
+    pub const fn is_invalid(&self) -> bool {
+        self.ctx.invalid || self.ctx.parse_error
+    }
+
     /// The current value of the component.
     ///
     /// Reports the *pending* value so a committed edit is reflected consistently
@@ -745,7 +764,7 @@ impl<'a> Api<'a> {
         if self.ctx.readonly {
             attrs.set_bool(HtmlAttr::Data("ars-readonly"), true);
         }
-        if self.ctx.invalid {
+        if self.is_invalid() {
             attrs.set_bool(HtmlAttr::Data("ars-invalid"), true);
         }
         if self.ctx.focused {
@@ -811,7 +830,7 @@ impl<'a> Api<'a> {
 
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
 
-        if self.ctx.invalid {
+        if self.is_invalid() {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
         }
         if self.ctx.required {
@@ -831,7 +850,7 @@ impl<'a> Api<'a> {
         if self.ctx.has_description {
             describedby.push(self.ctx.ids.part("description"));
         }
-        if self.ctx.invalid {
+        if self.is_invalid() {
             describedby.push(self.ctx.ids.part("error-message"));
         }
         if !describedby.is_empty() {
@@ -881,13 +900,13 @@ impl<'a> Api<'a> {
         // Only submit a value when the field is valid. While invalid, the stored
         // color is the last *valid* value, which no longer matches the visible
         // input — submitting it would send a stale color.
-        if let Some(color) = (*self.ctx.value.pending()).filter(|_| !self.ctx.invalid) {
+        if let Some(color) = (*self.ctx.value.pending()).filter(|_| !self.is_invalid()) {
             attrs.set(HtmlAttr::Value, color.to_hex(true));
         }
         // A disabled control is omitted from form submission — and so is an
         // invalid one, so the field round-trips as absent rather than as an
         // empty `name=` carrying the stale last-valid color.
-        if self.ctx.disabled || self.ctx.invalid {
+        if self.ctx.disabled || self.is_invalid() {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
         attrs
@@ -971,7 +990,7 @@ ColorField
 
 | Part         | Element   | Key Attributes                                                                                                                                                                                                                                              |
 | ------------ | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Root         | `<div>`   | `data-ars-disabled`, `data-ars-readonly`, `data-ars-invalid`, `data-ars-focused`                                                                                                                                                                            |
+| Root         | `<div>`   | `data-ars-disabled`, `data-ars-readonly`, `data-ars-invalid` (effective invalid: external `invalid` prop **or** parser-derived `parse_error`; a prop refresh preserves the parser error), `data-ars-focused`                                                |
 | Label        | `<label>` | `for` pointing to Input                                                                                                                                                                                                                                     |
 | Input        | `<input>` | `type="text"`, `aria-labelledby`, `aria-invalid`, `aria-required`, `aria-describedby`, native `readonly` (when read-only)                                                                                                                                   |
 | Description  | `<div>`   | Referenced by Input `aria-describedby`                                                                                                                                                                                                                      |
@@ -982,22 +1001,22 @@ ColorField
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Attribute / Behaviour             | Element                  | Value                                                                                                                                           |
-| --------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `role="spinbutton"`               | Input (channel mode)     | ARIA spinbutton pattern                                                                                                                         |
-| `inputmode="numeric"`             | Input (channel mode)     | Numeric keyboard on mobile                                                                                                                      |
-| `inputmode="text"`                | Input (whole-color mode) | Text keyboard on mobile                                                                                                                         |
-| `aria-valuenow`                   | Input (channel mode)     | Current channel value, scaled to the visible 0-100 range for percentage channels                                                                |
-| `aria-valuemin` / `aria-valuemax` | Input (channel mode)     | From `channel_range(channel)`, scaled to 0-100 for percentage channels (saturation/lightness/brightness/alpha)                                  |
-| `aria-valuetext`                  | Input (channel mode)     | Localized formatted channel value                                                                                                               |
-| `aria-label`                      | Input (channel mode)     | Channel name (from messages)                                                                                                                    |
-| `aria-labelledby`                 | Input                    | Label element ID                                                                                                                                |
-| `aria-invalid`                    | Input                    | `"true"` when parse failed or external invalid                                                                                                  |
-| `aria-required`                   | Input                    | `"true"` when required                                                                                                                          |
-| `aria-readonly` / `readonly`      | Input                    | When read-only (both the native attribute and `aria-readonly` are set)                                                                          |
-| `aria-disabled` / `disabled`      | Input                    | When disabled                                                                                                                                   |
-| `aria-describedby`                | Input                    | Description + ErrorMessage IDs (kept in sync via `SetHasDescription`, which is honored even while the field is disabled or mid-IME-composition) |
-| `role="alert"`                    | ErrorMessage             | Live error announcement                                                                                                                         |
+| Attribute / Behaviour             | Element                  | Value                                                                                                                                                                                                                                                                     |
+| --------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `role="spinbutton"`               | Input (channel mode)     | ARIA spinbutton pattern                                                                                                                                                                                                                                                   |
+| `inputmode="numeric"`             | Input (channel mode)     | Numeric keyboard on mobile                                                                                                                                                                                                                                                |
+| `inputmode="text"`                | Input (whole-color mode) | Text keyboard on mobile                                                                                                                                                                                                                                                   |
+| `aria-valuenow`                   | Input (channel mode)     | Current channel value, scaled to the visible 0-100 range for percentage channels                                                                                                                                                                                          |
+| `aria-valuemin` / `aria-valuemax` | Input (channel mode)     | From `channel_range(channel)`, scaled to 0-100 for percentage channels (saturation/lightness/brightness/alpha)                                                                                                                                                            |
+| `aria-valuetext`                  | Input (channel mode)     | Localized formatted channel value                                                                                                                                                                                                                                         |
+| `aria-label`                      | Input (channel mode)     | Channel name (from messages)                                                                                                                                                                                                                                              |
+| `aria-labelledby`                 | Input                    | Label element ID                                                                                                                                                                                                                                                          |
+| `aria-invalid`                    | Input                    | `"true"` for the effective invalid state — the external `invalid` prop / `SetInvalid` **or** the parser-derived `parse_error` (`invalid \|\| parse_error`). A prop refresh (`SetProps`) updates only the external part and preserves a parser error from the last commit. |
+| `aria-required`                   | Input                    | `"true"` when required                                                                                                                                                                                                                                                    |
+| `aria-readonly` / `readonly`      | Input                    | When read-only (both the native attribute and `aria-readonly` are set)                                                                                                                                                                                                    |
+| `aria-disabled` / `disabled`      | Input                    | When disabled                                                                                                                                                                                                                                                             |
+| `aria-describedby`                | Input                    | Description + ErrorMessage IDs (kept in sync via `SetHasDescription`, which is honored even while the field is disabled or mid-IME-composition)                                                                                                                           |
+| `role="alert"`                    | ErrorMessage             | Live error announcement                                                                                                                                                                                                                                                   |
 
 ### 3.2 Keyboard Interaction
 

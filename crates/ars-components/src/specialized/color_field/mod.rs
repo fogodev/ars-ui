@@ -133,8 +133,15 @@ pub struct Context {
     /// Whether the component is read-only.
     pub readonly: bool,
 
-    /// Whether the current value is invalid.
+    /// Whether the value is invalid per *external* validation (the `invalid`
+    /// prop / `SetInvalid`). Kept separate from [`parse_error`](Self::parse_error)
+    /// so a prop refresh cannot clear a parser-derived error.
     pub invalid: bool,
+
+    /// Whether the last commit failed to parse (or an empty required field was
+    /// committed). Parser-derived, owned by the machine — `SetProps` must not
+    /// clear it. The effective invalid state is `invalid || parse_error`.
+    pub parse_error: bool,
 
     /// Whether a value is required.
     pub required: bool,
@@ -291,7 +298,7 @@ fn format_value(
 }
 
 /// Parse `input_text` and update `value`; reset `input_text` to the formatted
-/// value. Sets `invalid` when parsing fails.
+/// value. Sets the parser-derived `parse_error` flag when parsing fails.
 fn commit_input(ctx: &mut Context) {
     if let Some(ch) = ctx.channel {
         // Channel mode: parse as f64. Reject non-finite input (`NaN`/`inf`),
@@ -319,16 +326,16 @@ fn commit_input(ctx: &mut Context) {
 
                 ctx.value.set(Some(new_color));
                 ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
-                ctx.invalid = false;
+                ctx.parse_error = false;
             }
         } else {
-            ctx.invalid = true;
+            ctx.parse_error = true;
         }
     } else {
         // Whole-color mode: parse via parse_color_string.
         if ctx.input_text.trim().is_empty() {
             ctx.value.set(None);
-            ctx.invalid = ctx.required;
+            ctx.parse_error = ctx.required;
 
             return;
         }
@@ -336,9 +343,9 @@ fn commit_input(ctx: &mut Context) {
         if let Some(color) = parse_color_string(&ctx.input_text) {
             ctx.value.set(Some(color));
             ctx.input_text = format_color_string(&color, ctx.color_format);
-            ctx.invalid = false;
+            ctx.parse_error = false;
         } else {
-            ctx.invalid = true;
+            ctx.parse_error = true;
         }
     }
 }
@@ -360,7 +367,7 @@ fn adjust_channel(ctx: &mut Context, delta: f64) {
 
         ctx.value.set(Some(new_color));
         ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
-        ctx.invalid = false;
+        ctx.parse_error = false;
     }
 }
 
@@ -376,7 +383,7 @@ fn snap_channel(ctx: &mut Context, to_max: bool) {
 
         ctx.value.set(Some(new_color));
         ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
-        ctx.invalid = false;
+        ctx.parse_error = false;
     }
 }
 
@@ -435,6 +442,7 @@ impl ars_core::Machine for Machine {
             disabled: props.disabled,
             readonly: props.readonly,
             invalid: props.invalid,
+            parse_error: false,
             required: props.required,
             is_composing: false,
             has_description: false,
@@ -525,7 +533,10 @@ impl ars_core::Machine for Machine {
                                     format_value(&color, ctx.channel, ctx.color_format);
                             }
 
+                            // A programmatic value is valid: clear both the
+                            // external and parser-derived invalid state.
                             ctx.invalid = false;
+                            ctx.parse_error = false;
                         }
                         None => ctx.value.sync_controlled(None),
                     },
@@ -619,6 +630,7 @@ impl ars_core::Machine for Machine {
 
                     ctx.value.set(Some(new_value));
                     ctx.invalid = false;
+                    ctx.parse_error = false;
                 }))
             }
 
@@ -807,6 +819,13 @@ impl Api<'_> {
         matches!(self.state, State::Focused)
     }
 
+    /// The effective invalid state: external validation (`invalid` prop /
+    /// `SetInvalid`) OR a parser-derived error from the last commit.
+    #[must_use]
+    pub const fn is_invalid(&self) -> bool {
+        self.ctx.invalid || self.ctx.parse_error
+    }
+
     /// The current value of the component.
     ///
     /// Reports the *pending* value so a committed edit is reflected consistently
@@ -839,7 +858,7 @@ impl Api<'_> {
             attrs.set_bool(HtmlAttr::Data("ars-readonly"), true);
         }
 
-        if self.ctx.invalid {
+        if self.is_invalid() {
             attrs.set_bool(HtmlAttr::Data("ars-invalid"), true);
         }
 
@@ -936,7 +955,7 @@ impl Api<'_> {
             self.ctx.ids.part("label"),
         );
 
-        if self.ctx.invalid {
+        if self.is_invalid() {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
         }
 
@@ -963,7 +982,7 @@ impl Api<'_> {
             describedby.push(self.ctx.ids.part("description"));
         }
 
-        if self.ctx.invalid {
+        if self.is_invalid() {
             describedby.push(self.ctx.ids.part("error-message"));
         }
 
@@ -1029,14 +1048,14 @@ impl Api<'_> {
         // Only submit a value when the field is valid. While invalid, the stored
         // color is the last *valid* value, which no longer matches the visible
         // input — submitting it would send a stale color.
-        if let Some(color) = (*self.ctx.value.pending()).filter(|_| !self.ctx.invalid) {
+        if let Some(color) = (*self.ctx.value.pending()).filter(|_| !self.is_invalid()) {
             attrs.set(HtmlAttr::Value, color.to_hex(true));
         }
 
         // A disabled control is omitted from form submission — and so is an
         // invalid one, so the field round-trips as absent rather than as an
         // empty `name=` carrying the stale last-valid color.
-        if self.ctx.disabled || self.ctx.invalid {
+        if self.ctx.disabled || self.is_invalid() {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
@@ -1728,6 +1747,56 @@ mod tests {
             svc.connect(&|_| {}).input_text(),
             before,
             "a read-only field must not accept IME composition edits"
+        );
+    }
+
+    #[test]
+    fn prop_refresh_preserves_parser_invalid_state() {
+        // Commit an unparseable value, then a prop refresh with invalid=false
+        // must NOT clear the parser-derived error while the bad text is shown.
+        let mut svc = service(Props {
+            name: Some("color".to_string()),
+            default_value: Some(ColorValue::from_rgb(255, 0, 0)),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Change("not-a-color".to_string())));
+        drop(svc.send(Event::Commit));
+        assert_eq!(
+            svc.connect(&|_| {})
+                .input_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::Invalid)),
+            Some("true")
+        );
+
+        // External prop refresh (invalid stays false) — must not clear it.
+        drop(svc.set_props(Props {
+            id: "color-field".to_string(),
+            name: Some("color".to_string()),
+            default_value: Some(ColorValue::from_rgb(255, 0, 0)),
+            invalid: false,
+            ..Props::default()
+        }));
+
+        let api = svc.connect(&|_| {});
+        assert_eq!(
+            api.input_attrs().get(&HtmlAttr::Aria(AriaAttr::Invalid)),
+            Some("true"),
+            "parser-derived invalid must survive a prop refresh"
+        );
+        assert_eq!(
+            api.hidden_input_attrs().get(&HtmlAttr::Disabled),
+            Some("true"),
+            "an invalid field must not become submittable after a prop refresh"
+        );
+
+        // A successful commit clears the parser error.
+        drop(svc.send(Event::Change("#00ff00".to_string())));
+        drop(svc.send(Event::Commit));
+        assert!(
+            !svc.connect(&|_| {})
+                .input_attrs()
+                .contains(&HtmlAttr::Aria(AriaAttr::Invalid))
         );
     }
 
