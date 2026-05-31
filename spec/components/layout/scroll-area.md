@@ -371,6 +371,9 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.viewport_width = vw; ctx.viewport_height = vh;
                     ctx.content_width = cw; ctx.content_height = ch;
+                    // Clamp offsets that the shrunk content/viewport made invalid.
+                    ctx.scroll_x = ctx.scroll_x.clamp(0.0, (cw - vw).max(0.0));
+                    ctx.scroll_y = ctx.scroll_y.clamp(0.0, (ch - vh).max(0.0));
                     ctx.update_visibility(active);
                 }))
             }
@@ -392,7 +395,7 @@ impl ars_core::Machine for Machine {
                         ctx.scroll_x = sx; ctx.scroll_y = sy;
                         ctx.scrollbar_x_visible = ctx.can_show_x();
                         ctx.scrollbar_y_visible = ctx.can_show_y();
-                    }).with_named_effect(Effect::AutoHide, |_ctx, _props, _send| no_cleanup()))
+                    }).with_effect(PendingEffect::named(Effect::AutoHide)))
                 } else {
                     Some(TransitionPlan::context_only(move |ctx| {
                         ctx.scroll_x = sx; ctx.scroll_y = sy;
@@ -503,7 +506,7 @@ impl ars_core::Machine for Machine {
                     // Restart the adapter-owned hide timer cancelled at drag start.
                     Some(TransitionPlan::to(State::ScrollActive)
                         .apply(|ctx| { ctx.drag_axis = None; })
-                        .with_named_effect(Effect::AutoHide, |_ctx, _props, _send| no_cleanup()))
+                        .with_effect(PendingEffect::named(Effect::AutoHide)))
                 } else if ctx.scrollbar_visibility == ScrollbarVisibility::Hover {
                     // The drag may have ended off-root (leave events were
                     // suppressed mid-drag); re-apply the hover rule.
@@ -523,10 +526,11 @@ impl ars_core::Machine for Machine {
                 let scroll_pos = match a { Axis::X => ctx.scroll_x, Axis::Y => ctx.scroll_y };
                 let (viewport_size, content_size, track_size) = axis_metrics(ctx, a);
                 let (thumb_size, thumb_pos) = compute_thumb_metrics(viewport_size, content_size, scroll_pos, track_size, ctx.min_thumb_size);
+                let max_scroll = (content_size - viewport_size).max(0.0);
                 let new_scroll = if p < thumb_pos {
                     (scroll_pos - viewport_size).max(0.0)
                 } else if p > thumb_pos + thumb_size {
-                    (scroll_pos + viewport_size).min(content_size - viewport_size)
+                    (scroll_pos + viewport_size).min(max_scroll)
                 } else { scroll_pos };
                 Some(TransitionPlan::context_only(move |ctx| {
                     match a { Axis::X => ctx.scroll_x = new_scroll, Axis::Y => ctx.scroll_y = new_scroll }
@@ -618,17 +622,28 @@ fn axis_metrics(ctx: &Context, axis: Axis) -> (f64, f64, f64) {
 #### 1.6.1 Adapter Contract: Auto-Hide Timer
 
 Timers are a platform concern, so the agnostic machine never calls
-`set_timeout`/`clear_timeout` itself. Instead, a `Scroll` event in
-`ScrollbarVisibility::Scroll` mode transitions to `State::ScrollActive` and emits
-the named `Effect::AutoHide` intent. The adapter is responsible for:
+`set_timeout`/`clear_timeout` itself. `Effect::AutoHide` is emitted as a bare
+`PendingEffect::named(Effect::AutoHide)` **marker** (the same pattern Tooltip
+uses for `OpenDelay`/`CloseDelay`): its `run()` is a no-op, so the marker on its
+own schedules nothing. **The scroll-area adapter component is responsible for
+translating the marker into a real timer** — inspecting the emitted
+`pending_effects` for `Effect::AutoHide` rather than relying solely on the generic
+`use_machine` cleanup pass, since that pass only runs the (no-op) setup closure.
+This split is deliberate: the agnostic core cannot reach a platform from a
+transition, and adapter timer wiring is out of scope for the core crate (a
+separate adapter task, exactly as for Tooltip).
 
-1. Starting (or restarting) a timer for `Context::hide_delay` when it observes
-   `Effect::AutoHide`.
-2. Sending `Event::HideTimeout` back to the machine when the timer fires.
+The adapter must:
+
+1. Start (or restart) a timer for `Context::hide_delay` when it observes a
+   pending `Effect::AutoHide`.
+2. Send `Event::HideTimeout` back to the machine when the timer fires.
+3. Cancel the outstanding timer when it observes `Effect::AutoHide` in the
+   `cancel_effects` list (emitted on `ThumbDragStart`) or on any state change.
 
 The machine's `HideTimeout` handler then hides the scrollbars and returns to
-`State::Idle` (unless a thumb drag is in progress). Because each new `Scroll`
-event re-emits `Effect::AutoHide`, the adapter should treat a fresh intent as a
+`State::Idle` (only while still in `Scroll` mode and not dragging). Because each
+new `Scroll` event re-emits the marker, the adapter treats a fresh intent as a
 "reset the timer" signal, keeping the scrollbar visible while scrolling
 continues.
 

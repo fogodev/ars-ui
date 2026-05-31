@@ -21,7 +21,7 @@ use core::{
 
 use ars_core::{
     AriaAttr, AttrMap, ComponentIds, ComponentMessages, ComponentPart, ConnectApi, Direction, Env,
-    HtmlAttr, Locale, MessageFn, TransitionPlan, no_cleanup,
+    HtmlAttr, Locale, MessageFn, PendingEffect, TransitionPlan,
 };
 
 /// Scrollbar axis. `X` is the horizontal scrollbar, `Y` the vertical one.
@@ -666,6 +666,11 @@ impl ars_core::Machine for Machine {
                     ctx.viewport_height = vh;
                     ctx.content_width = cw;
                     ctx.content_height = ch;
+                    // Shrinking the content/viewport can leave a previously-valid
+                    // offset past the new max; clamp so queries and adapter
+                    // scroll-syncs never observe an impossible offset.
+                    ctx.scroll_x = ctx.scroll_x.clamp(0.0, (cw - vw).max(0.0));
+                    ctx.scroll_y = ctx.scroll_y.clamp(0.0, (ch - vh).max(0.0));
                     ctx.update_visibility(active);
                 }))
             }
@@ -690,9 +695,7 @@ impl ars_core::Machine for Machine {
                                 ctx.scrollbar_x_visible = ctx.can_show_x();
                                 ctx.scrollbar_y_visible = ctx.can_show_y();
                             })
-                            .with_named_effect(Effect::AutoHide, |_ctx, _props, _send| {
-                                no_cleanup()
-                            }),
+                            .with_effect(PendingEffect::named(Effect::AutoHide)),
                     )
                 } else {
                     Some(TransitionPlan::context_only(move |ctx: &mut Context| {
@@ -879,9 +882,7 @@ impl ars_core::Machine for Machine {
                             .apply(|ctx: &mut Context| {
                                 ctx.drag_axis = None;
                             })
-                            .with_named_effect(Effect::AutoHide, |_ctx, _props, _send| {
-                                no_cleanup()
-                            }),
+                            .with_effect(PendingEffect::named(Effect::AutoHide)),
                     )
                 } else if ctx.scrollbar_visibility == ScrollbarVisibility::Hover {
                     // A drag can end with the pointer off-root (leave events were
@@ -922,10 +923,11 @@ impl ars_core::Machine for Machine {
                     ctx.min_thumb_size,
                 );
 
+                let max_scroll = (content_size - viewport_size).max(0.0);
                 let new_scroll = if click < thumb_pos {
                     (scroll_pos - viewport_size).max(0.0)
                 } else if click > thumb_pos + thumb_size {
-                    (scroll_pos + viewport_size).min(content_size - viewport_size)
+                    (scroll_pos + viewport_size).min(max_scroll)
                 } else {
                     scroll_pos
                 };
@@ -2109,6 +2111,41 @@ mod tests {
         }));
 
         assert_eq!(service.context().scroll_y, 250.0);
+    }
+
+    #[test]
+    fn track_click_forward_clamps_to_nonnegative_max() {
+        // Always mode renders a scrollbar even without overflow; a forward-page
+        // click must clamp to 0, never a negative offset.
+        let mut service = service(
+            props()
+                .orientation(ScrollOrientation::Both)
+                .scrollbar_visibility(ScrollbarVisibility::Always),
+        );
+        resize(&mut service, 100.0, 100.0, 100.0, 100.0);
+        assert!(service.context().scrollbar_y_visible);
+
+        drop(service.send(Event::TrackClick {
+            pos: 200.0,
+            axis: Axis::Y,
+        }));
+        assert_eq!(service.context().scroll_y, 0.0);
+    }
+
+    #[test]
+    fn resize_clamps_stored_offset_to_new_bounds() {
+        let mut service = service(props());
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::Scroll { x: 0.0, y: 300.0 }));
+        assert_eq!(service.context().scroll_y, 300.0);
+
+        // Content shrinks: the old offset (300) now exceeds the new max (100).
+        resize(&mut service, 100.0, 100.0, 100.0, 200.0);
+        assert_eq!(service.context().scroll_y, 100.0);
+
+        // Content no longer overflows: offset clamps to 0.
+        resize(&mut service, 100.0, 100.0, 100.0, 80.0);
+        assert_eq!(service.context().scroll_y, 0.0);
     }
 
     #[test]
