@@ -240,8 +240,8 @@ pub struct Context {
     /// Component identifiers for ARIA attribute generation.
     pub ids: ComponentIds,
 
-    /// Resolved text direction. Drives [`normalize_scroll_left`] and vertical
-    /// scrollbar placement (left side in RTL).
+    /// Resolved text direction. Drives [`normalize_scroll_left_rtl`] and
+    /// vertical scrollbar placement (left side in RTL).
     pub dir: Direction,
 
     /// Resolved locale for message formatting.
@@ -283,10 +283,11 @@ impl Context {
     /// Recompute scrollbar visibility after a metrics or prop change.
     ///
     /// `Always` and `Auto` derive visibility directly from orientation and
-    /// overflow. `Hover` and `Scroll` are event-driven, but this still clamps
-    /// their flags off for any axis the orientation disables or that no longer
-    /// overflows, so a stale scrollbar cannot linger after a resize.
-    pub fn update_visibility(&mut self) {
+    /// overflow. For `Hover`/`Scroll`, visibility tracks whether a hover/scroll
+    /// session is currently `active` (state `Hovering`/`ScrollActive`): when
+    /// active, each enabled+overflowing axis shows — so a prop/metrics change
+    /// that newly enables an axis turns it on; when inactive, both hide.
+    pub fn update_visibility(&mut self, active: bool) {
         match self.scrollbar_visibility {
             ScrollbarVisibility::Always | ScrollbarVisibility::Auto => {
                 self.scrollbar_x_visible = self.can_show_x();
@@ -294,11 +295,17 @@ impl Context {
             }
 
             ScrollbarVisibility::Hover | ScrollbarVisibility::Scroll => {
-                self.scrollbar_x_visible &= self.can_show_x();
-                self.scrollbar_y_visible &= self.can_show_y();
+                self.scrollbar_x_visible = active && self.can_show_x();
+                self.scrollbar_y_visible = active && self.can_show_y();
             }
         }
     }
+}
+
+/// Whether a `Hover`/`Scroll` session is currently active for the given state,
+/// i.e. scrollbars should be shown for eligible axes.
+const fn is_session_active(state: State) -> bool {
+    matches!(state, State::Hovering | State::ScrollActive)
 }
 
 /// Detail payload an adapter can surface to its `on_scroll` callback.
@@ -536,32 +543,13 @@ pub fn thumb_pos_to_scroll(
     (thumb_pos / scrollable_track) * scrollable_content
 }
 
-/// Normalizes a raw `scrollLeft` value across browser RTL conventions to a
-/// 0-to-positive range `[0, scroll_width - client_width]`.
-///
-/// Adapters read the live `scrollLeft` and call this before sending
-/// [`Event::Scroll`] so the machine always works in a single convention:
-///
-/// - Standard (Chrome, Firefox >= 112): negative values, `0` at the left edge.
-/// - Legacy Firefox (< 112): negative values, `0` at the right edge (handled
-///   identically to the standard negative convention).
-/// - Safari/WebKit: positive values, `0` at the right edge.
-///
-/// In LTR the raw value is returned unchanged.
-#[must_use]
-pub fn normalize_scroll_left(raw: f64, scroll_width: f64, client_width: f64, is_rtl: bool) -> f64 {
-    if !is_rtl {
-        return raw;
-    }
-
-    // Modern standard: raw <= 0, normalize to a positive range.
-    if raw <= 0.0 {
-        raw.abs()
-    } else {
-        // Safari positive convention: already positive, mirror it.
-        scroll_width - client_width - raw
-    }
-}
+// RTL `scrollLeft` normalization is shared with the virtualization layer: a
+// sign heuristic cannot tell the negative convention's `0` (inline-start) from
+// the positive convention's `0` (inline-end), so the browser convention must be
+// detected once by the adapter and passed explicitly. Adapters read the live
+// `scrollLeft`, normalize with [`normalize_scroll_left_rtl`], then send the
+// result as [`Event::Scroll`]'s `x`.
+pub use ars_collections::{RtlScrollMode, normalize_scroll_left_rtl};
 
 /// Returns `(viewport_size, content_size, track_size)` for an axis, accounting
 /// for the cross-axis scrollbar's `CornerSquare` gap.
@@ -643,7 +631,7 @@ impl ars_core::Machine for Machine {
             messages: messages.clone(),
         };
 
-        ctx.update_visibility();
+        ctx.update_visibility(false);
 
         (State::Idle, ctx)
     }
@@ -667,20 +655,29 @@ impl ars_core::Machine for Machine {
                     *content_width,
                     *content_height,
                 );
+                let active = is_session_active(*state);
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.viewport_width = vw;
                     ctx.viewport_height = vh;
                     ctx.content_width = cw;
                     ctx.content_height = ch;
-                    ctx.update_visibility();
+                    ctx.update_visibility(active);
                 }))
             }
 
             Event::Scroll { x, y } => {
                 let (sx, sy) = (*x, *y);
 
-                if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll {
+                // A scroll event mid-drag is the browser echoing the offset the
+                // adapter just wrote; record it without leaving `ThumbDragging`,
+                // or later `ThumbDragMove` events would be dropped by the guard.
+                if *state == State::ThumbDragging {
+                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.scroll_x = sx;
+                        ctx.scroll_y = sy;
+                    }))
+                } else if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll {
                     Some(
                         TransitionPlan::to(State::ScrollActive)
                             .apply(move |ctx: &mut Context| {
@@ -764,15 +761,19 @@ impl ars_core::Machine for Machine {
             }
 
             Event::HideTimeout => {
-                // The adapter-owned hide timer must not collapse an in-progress
-                // thumb drag.
-                if *state == State::ThumbDragging {
-                    None
-                } else {
+                // Only honour the hide timer while still in Scroll mode and not
+                // dragging. A timeout that was already queued before a switch to
+                // Always/Auto must be ignored — the adapter can cancel future
+                // fires but not retract an already-posted event.
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll
+                    && *state != State::ThumbDragging
+                {
                     Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
                         ctx.scrollbar_x_visible = false;
                         ctx.scrollbar_y_visible = false;
                     }))
+                } else {
+                    None
                 }
             }
 
@@ -868,6 +869,20 @@ impl ars_core::Machine for Machine {
                                 no_cleanup()
                             }),
                     )
+                } else if ctx.scrollbar_visibility == ScrollbarVisibility::Hover {
+                    // A drag can end with the pointer off-root (leave events were
+                    // suppressed mid-drag). Re-apply the hover rule: stay visible
+                    // only while the pointer is still over the root or a track.
+                    let still_hovering = ctx.hovering_root || ctx.hovering_scrollbar;
+                    let target = if still_hovering {
+                        State::Hovering
+                    } else {
+                        State::Idle
+                    };
+                    Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
+                        ctx.drag_axis = None;
+                        ctx.update_visibility(still_hovering);
+                    }))
                 } else {
                     Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
                         ctx.drag_axis = None;
@@ -924,6 +939,11 @@ impl ars_core::Machine for Machine {
                 let leaving_scroll_active =
                     *state == State::ScrollActive && visibility != ScrollbarVisibility::Scroll;
 
+                // After the (possible) state change, derive visibility against
+                // the resulting state so a newly-enabled axis turns on while the
+                // hover/scroll session is still active.
+                let active = !leaving_scroll_active && is_session_active(*state);
+
                 let mut plan = if leaving_scroll_active {
                     TransitionPlan::to(State::Idle)
                 } else {
@@ -937,7 +957,7 @@ impl ars_core::Machine for Machine {
                     ctx.hide_delay = hide_delay;
                     ctx.scrollbar_cross_size = cross;
                     ctx.dir = dir;
-                    ctx.update_visibility();
+                    ctx.update_visibility(active);
                 });
 
                 if leaving_scroll_active {
@@ -1819,6 +1839,121 @@ mod tests {
     }
 
     #[test]
+    fn late_hide_timeout_after_mode_change_is_ignored() {
+        // A HideTimeout queued before switching away from Scroll must not hide
+        // the now-Always scrollbars.
+        let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Scroll));
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::Scroll { x: 0.0, y: 50.0 }));
+        drop(
+            service.set_props(
+                props()
+                    .orientation(ScrollOrientation::Both)
+                    .scrollbar_visibility(ScrollbarVisibility::Always),
+            ),
+        );
+
+        let result = service.send(Event::HideTimeout);
+
+        assert!(!result.state_changed);
+        assert!(service.context().scrollbar_y_visible);
+    }
+
+    #[test]
+    fn scroll_event_during_drag_keeps_drag_state() {
+        // The adapter writes the computed offset to the viewport; the browser's
+        // echoed Scroll event must not abort the drag.
+        let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Scroll));
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::Y,
+        }));
+        assert_eq!(service.state(), &State::ThumbDragging);
+
+        let echoed = service.send(Event::Scroll { x: 0.0, y: 30.0 });
+        assert!(!echoed.state_changed);
+        assert_eq!(service.state(), &State::ThumbDragging);
+        assert_eq!(service.context().scroll_y, 30.0);
+
+        // A subsequent drag move is still honoured.
+        drop(service.send(Event::ThumbDragMove { pos: 20.0 }));
+        assert_close(service.context().scroll_y, 80.0);
+    }
+
+    #[test]
+    fn prop_sync_turns_on_newly_enabled_axis_while_hovering() {
+        // Hovering in Vertical mode, then orientation -> Both: the horizontal
+        // scrollbar must appear immediately while the root is still hovered.
+        let mut service = service(
+            props()
+                .orientation(ScrollOrientation::Vertical)
+                .scrollbar_visibility(ScrollbarVisibility::Hover),
+        );
+        resize(&mut service, 100.0, 100.0, 400.0, 400.0);
+        drop(service.send(Event::MouseEnter));
+        assert!(service.context().scrollbar_y_visible);
+        assert!(!service.context().scrollbar_x_visible);
+
+        drop(
+            service.set_props(
+                props()
+                    .orientation(ScrollOrientation::Both)
+                    .scrollbar_visibility(ScrollbarVisibility::Hover),
+            ),
+        );
+
+        assert_eq!(service.state(), &State::Hovering);
+        assert!(service.context().scrollbar_x_visible);
+        assert!(service.context().scrollbar_y_visible);
+    }
+
+    #[test]
+    fn hover_drag_ending_off_root_hides_scrollbars() {
+        let mut service = service(
+            props()
+                .orientation(ScrollOrientation::Both)
+                .scrollbar_visibility(ScrollbarVisibility::Hover),
+        );
+        resize(&mut service, 100.0, 100.0, 400.0, 400.0);
+        drop(service.send(Event::MouseEnter));
+        drop(service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::Y,
+        }));
+        // Pointer leaves the root mid-drag (suppressed while dragging).
+        drop(service.send(Event::MouseLeave));
+
+        let end = service.send(Event::ThumbDragEnd);
+
+        assert!(end.state_changed);
+        assert_eq!(service.state(), &State::Idle);
+        assert!(!service.context().scrollbar_x_visible);
+        assert!(!service.context().scrollbar_y_visible);
+    }
+
+    #[test]
+    fn hover_drag_ending_over_root_stays_visible() {
+        let mut service = service(
+            props()
+                .orientation(ScrollOrientation::Both)
+                .scrollbar_visibility(ScrollbarVisibility::Hover),
+        );
+        resize(&mut service, 100.0, 100.0, 400.0, 400.0);
+        drop(service.send(Event::MouseEnter));
+        drop(service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::Y,
+        }));
+
+        // Pointer still over the root when the drag ends.
+        drop(service.send(Event::ThumbDragEnd));
+
+        assert_eq!(service.state(), &State::Hovering);
+        assert!(service.context().scrollbar_y_visible);
+    }
+
+    #[test]
     fn syncing_away_from_scroll_mode_cancels_stale_auto_hide() {
         let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Scroll));
         resize(&mut service, 100.0, 100.0, 100.0, 400.0);
@@ -1982,23 +2117,18 @@ mod tests {
         assert_close(service.context().drag_start_thumb_pos, 37.5);
     }
 
-    // --- normalize_scroll_left ---------------------------------------------
-
     #[test]
-    fn normalize_scroll_left_is_identity_in_ltr() {
-        assert_eq!(normalize_scroll_left(50.0, 400.0, 100.0, false), 50.0);
-    }
-
-    #[test]
-    fn normalize_scroll_left_flips_modern_rtl_negative_convention() {
-        assert_eq!(normalize_scroll_left(-50.0, 400.0, 100.0, true), 50.0);
-        assert_eq!(normalize_scroll_left(0.0, 400.0, 100.0, true), 0.0);
-    }
-
-    #[test]
-    fn normalize_scroll_left_mirrors_safari_positive_rtl_convention() {
-        // scroll_width - client_width - raw = 400 - 100 - 50 = 250.
-        assert_eq!(normalize_scroll_left(50.0, 400.0, 100.0, true), 250.0);
+    fn rtl_scroll_normalization_is_re_exported_with_explicit_mode() {
+        // The component re-exports the shared, convention-explicit helper rather
+        // than a sign heuristic; `0` differs between the two RTL conventions.
+        assert_eq!(
+            normalize_scroll_left_rtl(0.0, 400.0, 100.0, RtlScrollMode::Negative),
+            0.0
+        );
+        assert_eq!(
+            normalize_scroll_left_rtl(0.0, 400.0, 100.0, RtlScrollMode::Positive),
+            300.0
+        );
     }
 
     // --- query methods ------------------------------------------------------

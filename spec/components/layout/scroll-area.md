@@ -149,7 +149,7 @@ pub struct Context {
     pub drag_start_scroll_pos: f64,
     pub drag_axis: Option<Axis>,
     pub ids: ComponentIds,
-    /// Resolved text direction. Drives `normalize_scroll_left` and vertical
+    /// Resolved text direction. Drives `normalize_scroll_left_rtl` and vertical
     /// scrollbar placement (left side in RTL).
     pub dir: Direction,
     /// Resolved locale for message formatting.
@@ -174,21 +174,29 @@ impl Context {
     }
 
     /// Recompute visibility after a metrics or prop change. `Always`/`Auto`
-    /// derive directly from orientation + overflow; `Hover`/`Scroll` are
-    /// event-driven but still clamped off for any axis the orientation disables
-    /// or that no longer overflows, so a stale scrollbar cannot linger.
-    pub fn update_visibility(&mut self) {
+    /// derive directly from orientation + overflow. For `Hover`/`Scroll`,
+    /// visibility tracks whether a hover/scroll session is `active` (state
+    /// `Hovering`/`ScrollActive`): when active each enabled+overflowing axis
+    /// shows — so a change that newly enables an axis turns it on; when inactive
+    /// both hide.
+    pub fn update_visibility(&mut self, active: bool) {
         match self.scrollbar_visibility {
             ScrollbarVisibility::Always | ScrollbarVisibility::Auto => {
                 self.scrollbar_x_visible = self.can_show_x();
                 self.scrollbar_y_visible = self.can_show_y();
             }
             ScrollbarVisibility::Hover | ScrollbarVisibility::Scroll => {
-                self.scrollbar_x_visible &= self.can_show_x();
-                self.scrollbar_y_visible &= self.can_show_y();
+                self.scrollbar_x_visible = active && self.can_show_x();
+                self.scrollbar_y_visible = active && self.can_show_y();
             }
         }
     }
+}
+
+/// Whether a `Hover`/`Scroll` session is active (scrollbars should show for
+/// eligible axes) for the given state.
+const fn is_session_active(state: State) -> bool {
+    matches!(state, State::Hovering | State::ScrollActive)
 }
 ```
 
@@ -345,7 +353,7 @@ impl ars_core::Machine for Machine {
             locale,
             messages,
         };
-        ctx.update_visibility();
+        ctx.update_visibility(false);
         (State::Idle, ctx)
     }
 
@@ -358,16 +366,23 @@ impl ars_core::Machine for Machine {
         match event {
             Event::Resize { viewport_width, viewport_height, content_width, content_height } => {
                 let (vw, vh, cw, ch) = (*viewport_width, *viewport_height, *content_width, *content_height);
+                let active = is_session_active(*state);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.viewport_width = vw; ctx.viewport_height = vh;
                     ctx.content_width = cw; ctx.content_height = ch;
-                    ctx.update_visibility();
+                    ctx.update_visibility(active);
                 }))
             }
 
             Event::Scroll { x, y } => {
                 let (sx, sy) = (*x, *y);
-                if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll {
+                // A scroll mid-drag is the browser echoing the offset the adapter
+                // just wrote; record it without leaving `ThumbDragging`.
+                if *state == State::ThumbDragging {
+                    Some(TransitionPlan::context_only(move |ctx| {
+                        ctx.scroll_x = sx; ctx.scroll_y = sy;
+                    }))
+                } else if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll {
                     // The agnostic core does not own timers. It records the
                     // `Effect::AutoHide` intent; the adapter starts a
                     // `ctx.hide_delay` timer and sends `Event::HideTimeout`
@@ -428,8 +443,13 @@ impl ars_core::Machine for Machine {
                 }
             }
 
+            // Honour the hide timer only while still in Scroll mode and not
+            // dragging: a timeout queued before a switch to Always/Auto must be
+            // ignored (the adapter can cancel future fires, not an already-posted
+            // event).
             Event::HideTimeout => {
-                if *state != State::ThumbDragging {
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll
+                    && *state != State::ThumbDragging {
                     Some(TransitionPlan::to(State::Idle).apply(|ctx| {
                         ctx.scrollbar_x_visible = false; ctx.scrollbar_y_visible = false;
                     }))
@@ -477,6 +497,15 @@ impl ars_core::Machine for Machine {
                     Some(TransitionPlan::to(State::ScrollActive)
                         .apply(|ctx| { ctx.drag_axis = None; })
                         .with_named_effect(Effect::AutoHide, |_ctx, _props, _send| no_cleanup()))
+                } else if ctx.scrollbar_visibility == ScrollbarVisibility::Hover {
+                    // The drag may have ended off-root (leave events were
+                    // suppressed mid-drag); re-apply the hover rule.
+                    let still_hovering = ctx.hovering_root || ctx.hovering_scrollbar;
+                    let target = if still_hovering { State::Hovering } else { State::Idle };
+                    Some(TransitionPlan::to(target).apply(move |ctx| {
+                        ctx.drag_axis = None;
+                        ctx.update_visibility(still_hovering);
+                    }))
                 } else {
                     Some(TransitionPlan::to(State::Idle).apply(|ctx| { ctx.drag_axis = None; }))
                 }
@@ -512,6 +541,9 @@ impl ars_core::Machine for Machine {
                 // cannot later hide an Always/Auto scrollbar.
                 let leaving_scroll_active =
                     *state == State::ScrollActive && visibility != ScrollbarVisibility::Scroll;
+                // Derive visibility against the resulting state so a newly-enabled
+                // axis turns on while a hover/scroll session is still active.
+                let active = !leaving_scroll_active && is_session_active(*state);
                 let mut plan = if leaving_scroll_active {
                     TransitionPlan::to(State::Idle)
                 } else {
@@ -524,7 +556,7 @@ impl ars_core::Machine for Machine {
                     ctx.hide_delay = hide_delay;
                     ctx.scrollbar_cross_size = cross;
                     ctx.dir = dir;
-                    ctx.update_visibility();
+                    ctx.update_visibility(active);
                 });
                 if leaving_scroll_active {
                     plan = plan.cancel_effect(Effect::AutoHide);
@@ -830,32 +862,21 @@ impl ComponentMessages for Messages {}
 }
 ```
 
-**Horizontal scroll normalization:** RTL browsers use different `scrollLeft` conventions. The machine normalizes to a 0-to-positive range:
+**Horizontal scroll normalization:** RTL browsers use different `scrollLeft`
+conventions, and the two cannot be told apart from a single sample (both report
+`0` at one edge). The adapter therefore detects the browser's convention once and
+normalizes through the shared, convention-explicit helper from `ars-collections`
+— re-exported from this module — before sending `Event::Scroll`:
 
-```rust
-/// Normalizes `scrollLeft` across browser RTL conventions.
-/// - Standard (Chrome, Firefox >= 112): negative values, 0 at left edge
-/// - Legacy Firefox (< 112): negative values, 0 at right edge
-/// - Safari/WebKit: positive values, 0 at right edge
-///
-/// Returns normalized value in range [0, scrollWidth - clientWidth].
-///
-/// Public because adapters call it to normalize the live `scrollLeft` read
-/// before sending `Event::Scroll`; the machine itself always works in the
-/// single normalized convention.
-pub fn normalize_scroll_left(raw: f64, scroll_width: f64, client_width: f64, is_rtl: bool) -> f64 {
-    if !is_rtl {
-        return raw;
-    }
-    // Detect convention by checking sign of scrollLeft at initial position
-    // Modern standard: raw <= 0, normalize to positive range
-    if raw <= 0.0 {
-        raw.abs()
-    } else {
-        // Safari positive convention: already positive
-        scroll_width - client_width - raw
-    }
-}
+```rust,no_check
+pub use ars_collections::{normalize_scroll_left_rtl, RtlScrollMode};
+
+// Adapter, on each horizontal scroll event (RTL only):
+let normalized_x = normalize_scroll_left_rtl(raw_scroll_left, scroll_width, client_width, mode);
+// `mode: RtlScrollMode` is `Negative` (Chrome/Edge/Firefox) or `Positive`
+// (Safari), detected once at startup. LTR `scrollLeft` is already `0..max` and
+// needs no normalization. The machine always works in the normalized
+// inline-start `0..max` range.
 ```
 
 ## 5. Library Parity
