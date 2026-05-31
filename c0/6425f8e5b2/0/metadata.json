@@ -1,0 +1,110 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c06425f8e5b2",
+  "session_id": "173ea838-dc16-47bb-9a4e-a2e159509710",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-31T01:19:22.012242Z",
+  "branch": "impl-279",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "3618ab59d735",
+  "token_usage": {
+    "input_tokens": 59119,
+    "cache_creation_tokens": 2237092,
+    "cache_read_tokens": 96604573,
+    "output_tokens": 238710,
+    "api_call_count": 308
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "summary": {
+    "intent": "Implement the ScrollArea agnostic core component (issue #279), covering state management, axis metrics, thumb drag, track click, hover/visibility logic, auto-hide timer, and orientation gating, with full tests and spec synchronance.",
+    "outcome": "ScrollArea agnostic core fully implemented, audited, and pushed via PR #699 with two rounds of Codex review fixes applied (9 total defects resolved across P2 threads), 53 passing tests including snapshot fixtures, proptest, and conformance harnesses, and zero clippy/fmt warnings.",
+    "learnings": {
+      "repo": [
+        "Timer/delay effects follow a named-intent pattern (Effect enum owned by adapters); the agnostic core never calls set_timeout or use_platform_effects directly — canonical reference: tooltip and rating_group components.",
+        "Delay-with-a-default fields use plain std::time::Duration, never a u32 of milliseconds or Option<Duration>.",
+        "context_changed is set whenever an apply closure runs, not on value-diff — tests must not assert context_changed=false after no-op events.",
+        "Snapshot acceptance can be blocked by unrelated i18n-gated snapshots unreferenced without the feature flag; scroll_area snapshots must be promoted independently.",
+        "The pre-existing pagination/mod.rs map_or_else clippy error is a floating-stable vs. pinned-toolchain divergence and must be fixed before CI unblocks on Rust 1.96.0.",
+        "Post-implementation audit is a mandatory phase: Phase 1 (spec/impl drift), Phase 2 (adapter spec completeness), Phase 3 (coverage ≥ target) are all required before final verification."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 255,
+          "end_line": 255,
+          "finding": "Vertical-only ScrollArea must never set scrollbar_x_visible; orientation gating belongs in core via ScrollOrientation::allows_x/allows_y, not left as adapter concern."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 563,
+          "end_line": 563,
+          "finding": "on_props_changed was not implemented initially; controlled prop changes never synced into Context until SyncProps event + on_props_changed were added."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 774,
+          "end_line": 774,
+          "finding": "ThumbDragMove new_thumb_pos was clamped at 0 but not at track_size − thumb_size, allowing over-scroll via drag."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 692,
+          "end_line": 692,
+          "finding": "Hover could get stuck visible after leaving an overlaid track; fixed by adding hovering_root to Context and hiding on last leave (root or scrollbar)."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 786,
+          "end_line": 786,
+          "finding": "ThumbDragEnd in Scroll mode never re-emitted the AutoHide effect, leaving scrollbars permanently visible after a drag."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 631,
+          "end_line": 631,
+          "finding": "Resize didn't clear stale visibility in Hover/Scroll modes; update_visibility must clamp flags off for non-overflowing axes in all modes."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/pagination/mod.rs",
+          "finding": "Pre-existing map_or_else lint (should be unwrap_or_else) blocks workspace clippy on Rust 1.96.0; fixed as zero-risk 1-line change to unblock CI."
+        }
+      ],
+      "workflow": [
+        "Run cargo xci-fast (all 10 gates) as the mandatory pre-push gate; it covers clippy, fmt, tests, snapshots, doc build, and orphan check.",
+        "Accept new insta snapshots separately from the main test run to avoid being blocked by unrelated feature-gated snapshot failures.",
+        "Codex review triggered by posting @codex in the PR; two rounds were needed — each resolves a batch of P2 threads before re-triggering.",
+        "TDD discipline for Codex-review fixes: write a failing test reproducing the exact defect, apply the fix, verify the test passes — prevents regression and documents the contract.",
+        "Proptest seeds from earlier (since-removed) invariant failures must be reverted to avoid false-positive failures on committed code.",
+        "Background poll tasks for external review systems should be explicitly cancelled when the reviewer is unavailable, rather than left running."
+      ]
+    },
+    "friction": [
+      "context_only closures required explicit &mut Context annotations — took multiple edit iterations across ThumbDragMove, TrackClick, and other handlers before the borrow checker was satisfied.",
+      "Snapshot --accept was blocked by pre-existing i18n-gated highlight snapshots unreferenced without the feature flag, requiring manual promotion of scroll_area snapshots.",
+      "A background job race condition during snapshot cleanup required waiting and a full clean re-run.",
+      "Local floating stable clippy (1.96.0) flagged pagination/mod.rs which was pre-existing committed code, creating ambiguity that required confirmation before fixing.",
+      "A leftover proptest seed from a removed invariant produced a false-positive failure on committed code and had to be identified and reverted.",
+      "Messages struct needed PartialEq derived because Context derives it — not obvious from the spec, discovered only at compile time.",
+      "gh API thread replies failed silently with -f flag; required switching to -F for correct serialization."
+    ],
+    "open_items": [
+      "Codex pass 2 re-trigger is pending; a third review round may produce additional threads requiring fixes.",
+      "The i18n-gated highlight snapshot issue that blocked initial --accept is pre-existing and unresolved — will continue affecting PRs touching snapshots without the i18n feature flag.",
+      "Merge and issue #279 close are pending Codex 👍 + green CI; not yet complete."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
