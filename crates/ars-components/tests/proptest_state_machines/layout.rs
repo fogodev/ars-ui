@@ -529,6 +529,7 @@ fn arb_scroll_area_event() -> impl Strategy<Value = scroll_area::Event> {
         (-200.0f64..2000.0, arb_scroll_axis())
             .prop_map(|(pos, axis)| scroll_area::Event::TrackClick { pos, axis }),
         Just(scroll_area::Event::HideTimeout),
+        Just(scroll_area::Event::SyncProps),
     ]
 }
 
@@ -549,6 +550,14 @@ fn assert_scroll_area_invariants(service: &Service<scroll_area::Machine>) -> Tes
     // A drag is always tagged with the axis it started on.
     if *service.state() == scroll_area::State::ThumbDragging {
         prop_assert!(ctx.drag_axis.is_some());
+    }
+
+    // A scrollbar may only be visible on an axis its orientation enables.
+    if ctx.scrollbar_x_visible {
+        prop_assert!(ctx.orientation.allows_x());
+    }
+    if ctx.scrollbar_y_visible {
+        prop_assert!(ctx.orientation.allows_y());
     }
 
     Ok(())

@@ -13,7 +13,7 @@
 //! up elements by id; it consumes adapter-supplied scroll metrics and pointer
 //! geometry through [`Event`].
 
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use core::{
     fmt::{self, Debug},
     time::Duration,
@@ -123,6 +123,10 @@ pub enum Event {
 
     /// The adapter's hide-delay timer fired (`Scroll` visibility mode).
     HideTimeout,
+
+    /// Re-sync prop-backed context fields after a props change. Emitted by
+    /// [`Machine::on_props_changed`](ars_core::Machine::on_props_changed).
+    SyncProps,
 }
 
 /// Which scroll orientation is enabled.
@@ -137,6 +141,20 @@ pub enum ScrollOrientation {
 
     /// Both scrollbars are enabled.
     Both,
+}
+
+impl ScrollOrientation {
+    /// Whether the horizontal scrollbar is enabled for this orientation.
+    #[must_use]
+    pub const fn allows_x(self) -> bool {
+        matches!(self, Self::Horizontal | Self::Both)
+    }
+
+    /// Whether the vertical scrollbar is enabled for this orientation.
+    #[must_use]
+    pub const fn allows_y(self) -> bool {
+        matches!(self, Self::Vertical | Self::Both)
+    }
 }
 
 /// When scrollbars are visible.
@@ -185,6 +203,13 @@ pub struct Context {
 
     /// Whether the pointer is currently over a scrollbar track.
     pub hovering_scrollbar: bool,
+
+    /// Whether the pointer is currently over the root scroll area.
+    pub hovering_root: bool,
+
+    /// Which scroll orientation is enabled. Gates which scrollbars may become
+    /// visible.
+    pub orientation: ScrollOrientation,
 
     /// Resolved scrollbar visibility mode.
     pub scrollbar_visibility: ScrollbarVisibility,
@@ -239,23 +264,39 @@ impl Context {
         self.content_height > self.viewport_height
     }
 
-    /// Recompute scrollbar visibility for the `Always` and `Auto` modes.
+    /// Whether the horizontal scrollbar is permitted to be visible: the
+    /// orientation must enable it and (outside `Always` mode) the content must
+    /// overflow.
+    #[must_use]
+    fn can_show_x(&self) -> bool {
+        self.orientation.allows_x()
+            && (self.scrollbar_visibility == ScrollbarVisibility::Always || self.has_overflow_x())
+    }
+
+    /// Whether the vertical scrollbar is permitted to be visible.
+    #[must_use]
+    fn can_show_y(&self) -> bool {
+        self.orientation.allows_y()
+            && (self.scrollbar_visibility == ScrollbarVisibility::Always || self.has_overflow_y())
+    }
+
+    /// Recompute scrollbar visibility after a metrics or prop change.
     ///
-    /// `Hover` and `Scroll` modes are driven by state transitions and are left
-    /// untouched here.
+    /// `Always` and `Auto` derive visibility directly from orientation and
+    /// overflow. `Hover` and `Scroll` are event-driven, but this still clamps
+    /// their flags off for any axis the orientation disables or that no longer
+    /// overflows, so a stale scrollbar cannot linger after a resize.
     pub fn update_visibility(&mut self) {
         match self.scrollbar_visibility {
-            ScrollbarVisibility::Always => {
-                self.scrollbar_x_visible = true;
-                self.scrollbar_y_visible = true;
+            ScrollbarVisibility::Always | ScrollbarVisibility::Auto => {
+                self.scrollbar_x_visible = self.can_show_x();
+                self.scrollbar_y_visible = self.can_show_y();
             }
 
-            ScrollbarVisibility::Auto => {
-                self.scrollbar_x_visible = self.has_overflow_x();
-                self.scrollbar_y_visible = self.has_overflow_y();
+            ScrollbarVisibility::Hover | ScrollbarVisibility::Scroll => {
+                self.scrollbar_x_visible &= self.can_show_x();
+                self.scrollbar_y_visible &= self.can_show_y();
             }
-
-            ScrollbarVisibility::Hover | ScrollbarVisibility::Scroll => {}
         }
     }
 }
@@ -584,6 +625,8 @@ impl ars_core::Machine for Machine {
             scrollbar_x_visible: false,
             scrollbar_y_visible: false,
             hovering_scrollbar: false,
+            hovering_root: false,
+            orientation: props.orientation,
             scrollbar_visibility: props.scrollbar_visibility,
             min_thumb_size: props.min_thumb_size.unwrap_or(DEFAULT_MIN_THUMB_SIZE),
             hide_delay: props.hide_delay,
@@ -607,7 +650,7 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match event {
             Event::Resize {
@@ -641,8 +684,8 @@ impl ars_core::Machine for Machine {
                             .apply(move |ctx: &mut Context| {
                                 ctx.scroll_x = sx;
                                 ctx.scroll_y = sy;
-                                ctx.scrollbar_x_visible = ctx.has_overflow_x();
-                                ctx.scrollbar_y_visible = ctx.has_overflow_y();
+                                ctx.scrollbar_x_visible = ctx.can_show_x();
+                                ctx.scrollbar_y_visible = ctx.can_show_y();
                             })
                             .with_named_effect(Effect::AutoHide, |_ctx, _props, _send| {
                                 no_cleanup()
@@ -660,24 +703,32 @@ impl ars_core::Machine for Machine {
                 if ctx.scrollbar_visibility == ScrollbarVisibility::Hover {
                     Some(
                         TransitionPlan::to(State::Hovering).apply(|ctx: &mut Context| {
-                            ctx.scrollbar_x_visible = ctx.has_overflow_x();
-                            ctx.scrollbar_y_visible = ctx.has_overflow_y();
+                            ctx.hovering_root = true;
+                            ctx.scrollbar_x_visible = ctx.can_show_x();
+                            ctx.scrollbar_y_visible = ctx.can_show_y();
                         }),
                     )
                 } else {
-                    None
+                    Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                        ctx.hovering_root = true;
+                    }))
                 }
             }
 
             Event::MouseLeave => {
+                // Hide only once the pointer has left both the root and any
+                // overlaid scrollbar track.
                 if ctx.scrollbar_visibility == ScrollbarVisibility::Hover && !ctx.hovering_scrollbar
                 {
                     Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
+                        ctx.hovering_root = false;
                         ctx.scrollbar_x_visible = false;
                         ctx.scrollbar_y_visible = false;
                     }))
                 } else {
-                    None
+                    Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                        ctx.hovering_root = false;
+                    }))
                 }
             }
 
@@ -688,9 +739,20 @@ impl ars_core::Machine for Machine {
             }
 
             Event::MouseLeaveScrollbar => {
-                Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                    ctx.hovering_scrollbar = false;
-                }))
+                // Mirror of `MouseLeave`: if the pointer is no longer over the
+                // root either, the overlaid scrollbar must hide now — no further
+                // root-leave event will arrive.
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover && !ctx.hovering_root {
+                    Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
+                        ctx.hovering_scrollbar = false;
+                        ctx.scrollbar_x_visible = false;
+                        ctx.scrollbar_y_visible = false;
+                    }))
+                } else {
+                    Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                        ctx.hovering_scrollbar = false;
+                    }))
+                }
             }
 
             Event::HideTimeout => {
@@ -764,7 +826,10 @@ impl ars_core::Machine for Machine {
                     min_thumb,
                 );
 
-                let new_thumb_pos = (drag_start_thumb + delta).max(0.0);
+                // Clamp the thumb to the scrollable track so a drag past either
+                // end cannot request a scroll offset beyond the content bounds.
+                let max_thumb_pos = (track_size - thumb_size).max(0.0);
+                let new_thumb_pos = (drag_start_thumb + delta).clamp(0.0, max_thumb_pos);
                 let new_scroll = thumb_pos_to_scroll(
                     new_thumb_pos,
                     track_size,
@@ -782,9 +847,24 @@ impl ars_core::Machine for Machine {
             }
 
             Event::ThumbDragEnd => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
-                    ctx.drag_axis = None;
-                }))
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll {
+                    // The hide timer was cancelled when the drag began; restart
+                    // it so the scrollbar fades after the drag instead of
+                    // lingering until the next scroll.
+                    Some(
+                        TransitionPlan::to(State::ScrollActive)
+                            .apply(|ctx: &mut Context| {
+                                ctx.drag_axis = None;
+                            })
+                            .with_named_effect(Effect::AutoHide, |_ctx, _props, _send| {
+                                no_cleanup()
+                            }),
+                    )
+                } else {
+                    Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
+                        ctx.drag_axis = None;
+                    }))
+                }
             }
 
             Event::TrackClick { pos, axis } => {
@@ -820,6 +900,25 @@ impl ars_core::Machine for Machine {
                     },
                 ))
             }
+
+            Event::SyncProps => {
+                let orientation = props.orientation;
+                let visibility = props.scrollbar_visibility;
+                let min_thumb = props.min_thumb_size.unwrap_or(DEFAULT_MIN_THUMB_SIZE);
+                let hide_delay = props.hide_delay;
+                let cross = props.scrollbar_cross_size.unwrap_or(0.0);
+                let dir = props.dir.unwrap_or(Direction::Ltr);
+
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.orientation = orientation;
+                    ctx.scrollbar_visibility = visibility;
+                    ctx.min_thumb_size = min_thumb;
+                    ctx.hide_delay = hide_delay;
+                    ctx.scrollbar_cross_size = cross;
+                    ctx.dir = dir;
+                    ctx.update_visibility();
+                }))
+            }
         }
     }
 
@@ -834,6 +933,21 @@ impl ars_core::Machine for Machine {
             ctx,
             props,
             send,
+        }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        let prop_backed_context_changed = old.orientation != new.orientation
+            || old.scrollbar_visibility != new.scrollbar_visibility
+            || old.min_thumb_size != new.min_thumb_size
+            || old.hide_delay != new.hide_delay
+            || old.scrollbar_cross_size != new.scrollbar_cross_size
+            || old.dir != new.dir;
+
+        if prop_backed_context_changed {
+            alloc::vec![Event::SyncProps]
+        } else {
+            Vec::new()
         }
     }
 }
@@ -1263,6 +1377,7 @@ mod tests {
                 .min_thumb_size(40.0)
                 .hide_delay(Duration::from_millis(500))
                 .dir(Direction::Rtl)
+                .orientation(ScrollOrientation::Both)
                 .scrollbar_visibility(ScrollbarVisibility::Always),
         );
 
@@ -1294,7 +1409,11 @@ mod tests {
 
     #[test]
     fn hover_mode_toggles_visibility_on_enter_and_leave() {
-        let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Hover));
+        let mut service = service(
+            props()
+                .orientation(ScrollOrientation::Both)
+                .scrollbar_visibility(ScrollbarVisibility::Hover),
+        );
 
         resize(&mut service, 100.0, 100.0, 400.0, 400.0);
 
@@ -1340,7 +1459,8 @@ mod tests {
 
     #[test]
     fn mouse_enter_outside_hover_mode_is_ignored() {
-        // Only `Hover` mode reacts to pointer enter; other modes no-op.
+        // Only `Hover` mode shows scrollbars on pointer enter; other modes only
+        // record the root-hover flag without a state change.
         let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Auto));
 
         resize(&mut service, 100.0, 100.0, 400.0, 400.0);
@@ -1349,6 +1469,94 @@ mod tests {
 
         assert!(!result.state_changed);
         assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().hovering_root);
+    }
+
+    #[test]
+    fn hover_scrollbar_outliving_root_hides_on_scrollbar_leave() {
+        // root enter -> scrollbar enter -> root leave -> scrollbar leave: the
+        // final scrollbar leave must hide, since no further root-leave arrives.
+        let mut service = service(
+            props()
+                .orientation(ScrollOrientation::Both)
+                .scrollbar_visibility(ScrollbarVisibility::Hover),
+        );
+        resize(&mut service, 100.0, 100.0, 400.0, 400.0);
+
+        drop(service.send(Event::MouseEnter));
+        drop(service.send(Event::MouseEnterScrollbar));
+        drop(service.send(Event::MouseLeave));
+        assert_eq!(service.state(), &State::Hovering);
+        assert!(service.context().scrollbar_y_visible);
+
+        let result = service.send(Event::MouseLeaveScrollbar);
+
+        assert!(result.state_changed);
+        assert_eq!(service.state(), &State::Idle);
+        assert!(!service.context().scrollbar_x_visible);
+        assert!(!service.context().scrollbar_y_visible);
+    }
+
+    // --- orientation gating -------------------------------------------------
+
+    #[test]
+    fn orientation_gates_which_scrollbars_can_show() {
+        let mut vertical = service(props().orientation(ScrollOrientation::Vertical));
+        resize(&mut vertical, 100.0, 100.0, 400.0, 400.0);
+        assert!(vertical.context().scrollbar_y_visible);
+        assert!(
+            !vertical.context().scrollbar_x_visible,
+            "a vertical scroll area must never expose a horizontal scrollbar",
+        );
+
+        let mut horizontal = service(props().orientation(ScrollOrientation::Horizontal));
+        resize(&mut horizontal, 100.0, 100.0, 400.0, 400.0);
+        assert!(horizontal.context().scrollbar_x_visible);
+        assert!(!horizontal.context().scrollbar_y_visible);
+
+        let mut both = service(props().orientation(ScrollOrientation::Both));
+        resize(&mut both, 100.0, 100.0, 400.0, 400.0);
+        assert!(both.context().scrollbar_x_visible);
+        assert!(both.context().scrollbar_y_visible);
+    }
+
+    #[test]
+    fn always_mode_is_gated_by_orientation() {
+        // `Always` shows scrollbars regardless of overflow, but only on enabled
+        // axes.
+        let service = service(
+            props()
+                .orientation(ScrollOrientation::Vertical)
+                .scrollbar_visibility(ScrollbarVisibility::Always),
+        );
+        assert!(service.context().scrollbar_y_visible);
+        assert!(!service.context().scrollbar_x_visible);
+    }
+
+    // --- resize recomputation ----------------------------------------------
+
+    #[test]
+    fn resize_clears_stale_visibility_in_scroll_mode() {
+        let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Scroll));
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::Scroll { x: 0.0, y: 50.0 }));
+        assert!(service.context().scrollbar_y_visible);
+
+        // Content shrinks so the axis no longer overflows; the previously-shown
+        // scrollbar must clear even though Scroll mode is event-driven.
+        resize(&mut service, 100.0, 100.0, 100.0, 50.0);
+        assert!(!service.context().scrollbar_y_visible);
+    }
+
+    #[test]
+    fn resize_clears_stale_visibility_in_hover_mode() {
+        let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Hover));
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::MouseEnter));
+        assert!(service.context().scrollbar_y_visible);
+
+        resize(&mut service, 100.0, 100.0, 100.0, 50.0);
+        assert!(!service.context().scrollbar_y_visible);
     }
 
     // --- auto-hide (Scroll mode) -------------------------------------------
@@ -1489,6 +1697,62 @@ mod tests {
         assert_eq!(service.context().scroll_y, 0.0);
     }
 
+    #[test]
+    fn thumb_drag_clamps_scroll_to_content_bounds() {
+        let mut service = service(props());
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+
+        drop(service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::Y,
+        }));
+
+        // Dragging far past the track end must clamp to the maximum scroll
+        // (content 400 - viewport 100 = 300), not overshoot to 800.
+        drop(service.send(Event::ThumbDragMove { pos: 200.0 }));
+        assert_eq!(service.context().scroll_y, 300.0);
+    }
+
+    #[test]
+    fn scroll_mode_drag_end_restarts_auto_hide() {
+        let mut service = service(props().scrollbar_visibility(ScrollbarVisibility::Scroll));
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::Scroll { x: 0.0, y: 150.0 }));
+        drop(service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::Y,
+        }));
+
+        let result = service.send(Event::ThumbDragEnd);
+
+        // Drag-end in Scroll mode must restart the adapter-owned hide timer so
+        // the scrollbar fades instead of lingering.
+        assert_eq!(service.state(), &State::ScrollActive);
+        assert_eq!(service.context().drag_axis, None);
+        assert!(
+            result
+                .pending_effects
+                .iter()
+                .any(|effect| effect.name == Effect::AutoHide),
+        );
+    }
+
+    #[test]
+    fn drag_end_outside_scroll_mode_returns_to_idle() {
+        let mut service = service(props());
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::Y,
+        }));
+
+        let result = service.send(Event::ThumbDragEnd);
+
+        assert_eq!(service.state(), &State::Idle);
+        assert_eq!(service.context().drag_axis, None);
+        assert!(result.pending_effects.is_empty());
+    }
+
     // --- track click --------------------------------------------------------
 
     #[test]
@@ -1549,6 +1813,7 @@ mod tests {
         // thickness from each track so the thumb does not overlap the corner.
         let mut service = service(
             props()
+                .orientation(ScrollOrientation::Both)
                 .scrollbar_visibility(ScrollbarVisibility::Always)
                 .scrollbar_cross_size(8.0),
         );
@@ -1576,6 +1841,7 @@ mod tests {
         // axis_metrics (vertical scrollbar visible -> horizontal track shortened).
         let mut service = service(
             props()
+                .orientation(ScrollOrientation::Both)
                 .scrollbar_visibility(ScrollbarVisibility::Always)
                 .scrollbar_cross_size(8.0),
         );
@@ -1882,6 +2148,61 @@ mod tests {
         assert!(format!("{api:?}").contains("Api"));
     }
 
+    // --- prop synchronization ----------------------------------------------
+
+    #[test]
+    fn on_props_changed_emits_sync_only_for_prop_backed_changes() {
+        let base = props();
+
+        assert_eq!(
+            <Machine as ars_core::Machine>::on_props_changed(
+                &base,
+                &props().orientation(ScrollOrientation::Both)
+            )
+            .as_slice(),
+            [Event::SyncProps]
+        );
+        assert_eq!(
+            <Machine as ars_core::Machine>::on_props_changed(&base, &props().dir(Direction::Rtl))
+                .as_slice(),
+            [Event::SyncProps]
+        );
+        assert!(
+            <Machine as ars_core::Machine>::on_props_changed(&base, &props().aria_label("Log"))
+                .is_empty(),
+            "aria_label is read live from props, not synced into context",
+        );
+        assert!(<Machine as ars_core::Machine>::on_props_changed(&base, &base).is_empty());
+    }
+
+    #[test]
+    fn set_props_syncs_prop_backed_context_fields() {
+        let mut service = service(props());
+
+        drop(
+            service.set_props(
+                props()
+                    .orientation(ScrollOrientation::Both)
+                    .scrollbar_visibility(ScrollbarVisibility::Always)
+                    .min_thumb_size(50.0)
+                    .hide_delay(Duration::from_millis(900))
+                    .scrollbar_cross_size(10.0)
+                    .dir(Direction::Rtl),
+            ),
+        );
+
+        let ctx = service.context();
+        assert_eq!(ctx.orientation, ScrollOrientation::Both);
+        assert_eq!(ctx.scrollbar_visibility, ScrollbarVisibility::Always);
+        assert_eq!(ctx.min_thumb_size, 50.0);
+        assert_eq!(ctx.hide_delay, Duration::from_millis(900));
+        assert_eq!(ctx.scrollbar_cross_size, 10.0);
+        assert_eq!(ctx.dir, Direction::Rtl);
+        // Visibility recomputed against the new mode/orientation.
+        assert!(ctx.scrollbar_x_visible);
+        assert!(ctx.scrollbar_y_visible);
+    }
+
     #[test]
     fn part_attrs_matches_direct_methods() {
         let mut service = service(props());
@@ -1907,7 +2228,11 @@ mod tests {
 
     #[test]
     fn snapshot_all_output_affecting_branches() {
-        let mut both = service(props().scrollbar_visibility(ScrollbarVisibility::Always));
+        let mut both = service(
+            props()
+                .orientation(ScrollOrientation::Both)
+                .scrollbar_visibility(ScrollbarVisibility::Always),
+        );
 
         resize(&mut both, 100.0, 100.0, 400.0, 400.0);
 

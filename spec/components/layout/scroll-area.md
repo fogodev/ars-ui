@@ -80,6 +80,9 @@ pub enum Event {
     TrackClick { pos: f64, axis: Axis },
     /// Hide-delay timer fired.
     HideTimeout,
+    /// Re-sync prop-backed context fields after a props change. Emitted by
+    /// `Machine::on_props_changed`.
+    SyncProps,
 }
 ```
 
@@ -93,6 +96,13 @@ pub enum ScrollOrientation {
     Vertical,
     Horizontal,
     Both,
+}
+
+impl ScrollOrientation {
+    /// Whether the horizontal scrollbar is enabled for this orientation.
+    pub const fn allows_x(self) -> bool { matches!(self, Self::Horizontal | Self::Both) }
+    /// Whether the vertical scrollbar is enabled for this orientation.
+    pub const fn allows_y(self) -> bool { matches!(self, Self::Vertical | Self::Both) }
 }
 
 /// When scrollbars are visible.
@@ -121,6 +131,12 @@ pub struct Context {
     pub scrollbar_x_visible: bool,
     pub scrollbar_y_visible: bool,
     pub hovering_scrollbar: bool,
+    /// Whether the pointer is over the root scroll area. Tracked alongside
+    /// `hovering_scrollbar` so an overlaid scrollbar that outlives the root
+    /// hover still hides on its own leave event.
+    pub hovering_root: bool,
+    /// Which scroll orientation is enabled. Gates which scrollbars may show.
+    pub orientation: ScrollOrientation,
     pub scrollbar_visibility: ScrollbarVisibility,
     pub min_thumb_size: f64,
     pub hide_delay: Duration,
@@ -146,18 +162,31 @@ impl Context {
     pub fn has_overflow_x(&self) -> bool { self.content_width > self.viewport_width }
     pub fn has_overflow_y(&self) -> bool { self.content_height > self.viewport_height }
 
+    /// Whether the horizontal scrollbar may be visible: orientation enables it
+    /// and (outside `Always`) the content overflows.
+    fn can_show_x(&self) -> bool {
+        self.orientation.allows_x()
+            && (self.scrollbar_visibility == ScrollbarVisibility::Always || self.has_overflow_x())
+    }
+    fn can_show_y(&self) -> bool {
+        self.orientation.allows_y()
+            && (self.scrollbar_visibility == ScrollbarVisibility::Always || self.has_overflow_y())
+    }
+
+    /// Recompute visibility after a metrics or prop change. `Always`/`Auto`
+    /// derive directly from orientation + overflow; `Hover`/`Scroll` are
+    /// event-driven but still clamped off for any axis the orientation disables
+    /// or that no longer overflows, so a stale scrollbar cannot linger.
     pub fn update_visibility(&mut self) {
         match self.scrollbar_visibility {
-            ScrollbarVisibility::Always => {
-                self.scrollbar_x_visible = true;
-                self.scrollbar_y_visible = true;
+            ScrollbarVisibility::Always | ScrollbarVisibility::Auto => {
+                self.scrollbar_x_visible = self.can_show_x();
+                self.scrollbar_y_visible = self.can_show_y();
             }
-            ScrollbarVisibility::Auto => {
-                self.scrollbar_x_visible = self.has_overflow_x();
-                self.scrollbar_y_visible = self.has_overflow_y();
+            ScrollbarVisibility::Hover | ScrollbarVisibility::Scroll => {
+                self.scrollbar_x_visible &= self.can_show_x();
+                self.scrollbar_y_visible &= self.can_show_y();
             }
-            // Hover and Scroll are managed by state transitions.
-            _ => {}
         }
     }
 }
@@ -301,6 +330,8 @@ impl ars_core::Machine for Machine {
             content_width: 0.0, content_height: 0.0,
             scrollbar_x_visible: false, scrollbar_y_visible: false,
             hovering_scrollbar: false,
+            hovering_root: false,
+            orientation: props.orientation,
             scrollbar_visibility: props.scrollbar_visibility,
             min_thumb_size: props.min_thumb_size.unwrap_or(20.0),
             hide_delay: props.hide_delay,
@@ -343,8 +374,8 @@ impl ars_core::Machine for Machine {
                     // back when it fires. See §1.6.1.
                     Some(TransitionPlan::to(State::ScrollActive).apply(move |ctx| {
                         ctx.scroll_x = sx; ctx.scroll_y = sy;
-                        ctx.scrollbar_x_visible = ctx.has_overflow_x();
-                        ctx.scrollbar_y_visible = ctx.has_overflow_y();
+                        ctx.scrollbar_x_visible = ctx.can_show_x();
+                        ctx.scrollbar_y_visible = ctx.can_show_y();
                     }).with_named_effect(Effect::AutoHide, |_ctx, _props, _send| no_cleanup()))
                 } else {
                     Some(TransitionPlan::context_only(move |ctx| {
@@ -353,25 +384,43 @@ impl ars_core::Machine for Machine {
                 }
             }
 
+            // The hover scrollbars hide only once the pointer has left BOTH the
+            // root and any overlaid scrollbar track, so each leave event checks
+            // the other hover flag before hiding.
             Event::MouseEnter => {
                 if ctx.scrollbar_visibility == ScrollbarVisibility::Hover {
                     Some(TransitionPlan::to(State::Hovering).apply(|ctx| {
-                        ctx.scrollbar_x_visible = ctx.has_overflow_x();
-                        ctx.scrollbar_y_visible = ctx.has_overflow_y();
+                        ctx.hovering_root = true;
+                        ctx.scrollbar_x_visible = ctx.can_show_x();
+                        ctx.scrollbar_y_visible = ctx.can_show_y();
                     }))
-                } else { None }
+                } else {
+                    Some(TransitionPlan::context_only(|ctx| { ctx.hovering_root = true; }))
+                }
             }
 
             Event::MouseLeave => {
                 if ctx.scrollbar_visibility == ScrollbarVisibility::Hover && !ctx.hovering_scrollbar {
                     Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                        ctx.hovering_root = false;
                         ctx.scrollbar_x_visible = false; ctx.scrollbar_y_visible = false;
                     }))
-                } else { None }
+                } else {
+                    Some(TransitionPlan::context_only(|ctx| { ctx.hovering_root = false; }))
+                }
             }
 
             Event::MouseEnterScrollbar => Some(TransitionPlan::context_only(|ctx| { ctx.hovering_scrollbar = true; })),
-            Event::MouseLeaveScrollbar => Some(TransitionPlan::context_only(|ctx| { ctx.hovering_scrollbar = false; })),
+            Event::MouseLeaveScrollbar => {
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Hover && !ctx.hovering_root {
+                    Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                        ctx.hovering_scrollbar = false;
+                        ctx.scrollbar_x_visible = false; ctx.scrollbar_y_visible = false;
+                    }))
+                } else {
+                    Some(TransitionPlan::context_only(|ctx| { ctx.hovering_scrollbar = false; }))
+                }
+            }
 
             Event::HideTimeout => {
                 if *state != State::ThumbDragging {
@@ -406,7 +455,10 @@ impl ars_core::Machine for Machine {
                 let (viewport_size, content_size, track_size) = axis_metrics(ctx, axis);
                 let delta = p - drag_start_pointer;
                 let (thumb_size, _) = compute_thumb_metrics(viewport_size, content_size, drag_scroll, track_size, min_thumb);
-                let new_thumb_pos = (drag_start_thumb + delta).max(0.0);
+                // Clamp to the scrollable track so a drag past either end cannot
+                // request a scroll offset beyond the content bounds.
+                let max_thumb_pos = (track_size - thumb_size).max(0.0);
+                let new_thumb_pos = (drag_start_thumb + delta).clamp(0.0, max_thumb_pos);
                 let new_scroll = thumb_pos_to_scroll(new_thumb_pos, track_size, thumb_size, content_size, viewport_size);
                 Some(TransitionPlan::context_only(move |ctx| {
                     match axis { Axis::X => ctx.scroll_x = new_scroll, Axis::Y => ctx.scroll_y = new_scroll }
@@ -414,7 +466,14 @@ impl ars_core::Machine for Machine {
             }
 
             Event::ThumbDragEnd => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| { ctx.drag_axis = None; }))
+                if ctx.scrollbar_visibility == ScrollbarVisibility::Scroll {
+                    // Restart the adapter-owned hide timer cancelled at drag start.
+                    Some(TransitionPlan::to(State::ScrollActive)
+                        .apply(|ctx| { ctx.drag_axis = None; })
+                        .with_named_effect(Effect::AutoHide, |_ctx, _props, _send| no_cleanup()))
+                } else {
+                    Some(TransitionPlan::to(State::Idle).apply(|ctx| { ctx.drag_axis = None; }))
+                }
             }
 
             Event::TrackClick { pos, axis } => {
@@ -431,6 +490,26 @@ impl ars_core::Machine for Machine {
                     match a { Axis::X => ctx.scroll_x = new_scroll, Axis::Y => ctx.scroll_y = new_scroll }
                 }))
             }
+
+            // Re-derive prop-backed context fields after a controlled prop
+            // change, then recompute visibility. Emitted by `on_props_changed`.
+            Event::SyncProps => {
+                let orientation = props.orientation;
+                let visibility = props.scrollbar_visibility;
+                let min_thumb = props.min_thumb_size.unwrap_or(20.0);
+                let hide_delay = props.hide_delay;
+                let cross = props.scrollbar_cross_size.unwrap_or(0.0);
+                let dir = props.dir.unwrap_or(Direction::Ltr);
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.orientation = orientation;
+                    ctx.scrollbar_visibility = visibility;
+                    ctx.min_thumb_size = min_thumb;
+                    ctx.hide_delay = hide_delay;
+                    ctx.scrollbar_cross_size = cross;
+                    ctx.dir = dir;
+                    ctx.update_visibility();
+                }))
+            }
         }
     }
 
@@ -438,6 +517,19 @@ impl ars_core::Machine for Machine {
         state: &'a State, ctx: &'a Context, props: &'a Props, send: &'a dyn Fn(Event),
     ) -> Api<'a> {
         Api { state, ctx, props, send }
+    }
+
+    /// Sync prop-backed context fields when a controlled prop changes so adapter
+    /// rerenders are not ignored until remount. `id`, `locale`, and `aria_label`
+    /// are read live and need no sync.
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        let changed = old.orientation != new.orientation
+            || old.scrollbar_visibility != new.scrollbar_visibility
+            || old.min_thumb_size != new.min_thumb_size
+            || old.hide_delay != new.hide_delay
+            || old.scrollbar_cross_size != new.scrollbar_cross_size
+            || old.dir != new.dir;
+        if changed { vec![Event::SyncProps] } else { Vec::new() }
     }
 }
 
