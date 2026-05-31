@@ -323,8 +323,10 @@ impl ars_core::Machine for Machine {
             _ => {}
         }
 
-        // Disabled and read-only both block value-changing events.
-        if ctx.disabled || ctx.readonly {
+        // Disabled and read-only both block value-changing events, except
+        // `DragEnd`: a drag in flight when the control was disabled must still
+        // be able to terminate cleanly (exit `Dragging`, fire change-end).
+        if (ctx.disabled || ctx.readonly) && !matches!(event, Event::DragEnd) {
             return None;
         }
 
@@ -353,7 +355,8 @@ impl ars_core::Machine for Machine {
                 let step_degrees = *step;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     let color = *ctx.value.get();
-                    let new_hue = (color.hue + step_degrees) % 360.0;
+                    // `rem_euclid` keeps the hue non-negative for custom steps > 360.
+                    let new_hue = (color.hue + step_degrees).rem_euclid(360.0);
                     ctx.value.set(ColorValue {
                         hue: new_hue,
                         ..color
@@ -365,7 +368,8 @@ impl ars_core::Machine for Machine {
                 let step_degrees = *step;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     let color = *ctx.value.get();
-                    let new_hue = (color.hue - step_degrees + 360.0) % 360.0;
+                    // `rem_euclid` keeps the hue non-negative for custom steps > 360.
+                    let new_hue = (color.hue - step_degrees).rem_euclid(360.0);
                     ctx.value.set(ColorValue {
                         hue: new_hue,
                         ..color
@@ -735,6 +739,26 @@ mod tests {
     }
 
     #[test]
+    fn large_custom_step_keeps_hue_non_negative() {
+        // A decrement larger than 360 must wrap with Euclidean modulo, never
+        // storing a negative hue (which would leak below the declared range).
+        let mut svc = service(Props {
+            default_value: ColorValue::from_hsl(10.0, 1.0, 0.5),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Decrement { step: 720.0 }));
+
+        let hue = svc.connect(&|_| {}).value().hue;
+        assert!(
+            (0.0..360.0).contains(&hue),
+            "hue must stay within 0..360, got {hue}"
+        );
+        // 10 - 720 = -710; rem_euclid(360) = 10.
+        assert!((hue - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn thumb_is_slider_with_hue_valuetext() {
         let svc = service(Props {
             default_value: ColorValue::from_hsl(180.0, 1.0, 0.5),
@@ -883,6 +907,29 @@ mod tests {
             !svc.connect(&|_| {})
                 .root_attrs()
                 .contains(&HtmlAttr::Data("ars-disabled"))
+        );
+    }
+
+    #[test]
+    fn drag_end_terminates_after_mid_drag_disable() {
+        let mut svc = service(Props::default());
+
+        drop(svc.send(Event::DragStart { position: 0.5 }));
+        assert_eq!(svc.state(), &State::Dragging);
+
+        drop(svc.set_props(Props {
+            id: "color-wheel".to_string(),
+            disabled: true,
+            ..Props::default()
+        }));
+
+        let end = svc.send(Event::DragEnd);
+        assert_eq!(svc.state(), &State::Idle);
+        assert_eq!(end.pending_effects.len(), 1, "change-end still fires");
+        assert!(
+            !svc.connect(&|_| {})
+                .root_attrs()
+                .contains(&HtmlAttr::Data("ars-dragging"))
         );
     }
 

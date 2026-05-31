@@ -25,10 +25,11 @@ type LabelFn = dyn Fn(&Locale) -> String + Send + Sync;
 /// Role description for the area thumb.
 type RoleDescriptionFn = dyn Fn(&Locale) -> String + Send + Sync;
 
-/// Formats both channel values plus the perceptual color name for
-/// `aria-valuetext`. Arguments: `x_value`, `y_value`, `x_channel_name`,
-/// `y_channel_name`, `color_name`, `locale`.
-type ValueTextFn = dyn Fn(f64, f64, &str, &str, &str, &Locale) -> String + Send + Sync;
+/// Formats the `aria-valuetext`. Arguments: `x_axis_reading` (channel-aware,
+/// e.g. `"saturation 80%"` or `"hue 180°"`), `y_axis_reading`, `color_name`,
+/// `locale`. Readings are preformatted per channel so non-fractional channels
+/// (hue/RGB) are not mis-rendered as percentages.
+type ValueTextFn = dyn Fn(&str, &str, &str, &Locale) -> String + Send + Sync;
 
 /// Consumer callback fired on drag-end / pointer release.
 type ChangeEndFn = dyn Fn(ColorValue) + Send + Sync;
@@ -247,20 +248,8 @@ impl Default for Messages {
             label: MessageFn::static_str("Color area"),
             role_description: MessageFn::static_str("2d color picker"),
             value_text: MessageFn::new(
-                |x_value: f64,
-                 y_value: f64,
-                 x_name: &str,
-                 y_name: &str,
-                 color_name: &str,
-                 _locale: &Locale| {
-                    format!(
-                        "{}, {} {:.0}%, {} {:.0}%",
-                        color_name,
-                        x_name,
-                        x_value * 100.0,
-                        y_name,
-                        y_value * 100.0
-                    )
+                |x_reading: &str, y_reading: &str, color_name: &str, _locale: &Locale| {
+                    format!("{color_name}, {x_reading}, {y_reading}")
                 },
             ),
         }
@@ -268,6 +257,21 @@ impl Default for Messages {
 }
 
 impl ComponentMessages for Messages {}
+
+/// Format a single channel reading for `aria-valuetext`, including the channel
+/// name and a channel-appropriate unit (degrees for hue, raw for the 8-bit RGB
+/// channels, a percentage for the fractional channels).
+fn format_axis_reading(channel: ColorChannel, value: f64) -> String {
+    let name = format!("{channel:?}").to_lowercase();
+
+    match channel {
+        ColorChannel::Hue => format!("{name} {value:.0}°"),
+        ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => {
+            format!("{name} {value:.0}")
+        }
+        _ => format!("{name} {:.0}%", value * 100.0),
+    }
+}
 
 /// Apply normalized `(x, y)` coordinates to both channels (y is inverted: top = max).
 fn apply_area_position(ctx: &mut Context, x: f64, y: f64) {
@@ -350,11 +354,12 @@ impl ars_core::Machine for Machine {
     ) -> Option<TransitionPlan<Self>> {
         // A disabled area ignores value-changing input but still tracks focus
         // and accepts parent-driven prop syncs (so it can be re-enabled).
+        // `DragEnd` is allowed through so a drag in flight when the parent
+        // disabled the control can still terminate cleanly.
         if ctx.disabled {
             match event {
                 Event::DragStart { .. }
                 | Event::DragMove { .. }
-                | Event::DragEnd
                 | Event::IncrementX { .. }
                 | Event::DecrementX { .. }
                 | Event::IncrementY { .. }
@@ -733,20 +738,13 @@ impl Api<'_> {
         let (x_min, x_max) = channel_range(self.ctx.x_channel);
         let (y_min, y_max) = channel_range(self.ctx.y_channel);
 
-        let x_name = format!("{:?}", self.ctx.x_channel).to_lowercase();
-        let y_name = format!("{:?}", self.ctx.y_channel).to_lowercase();
+        let x_reading = format_axis_reading(self.ctx.x_channel, x_val);
+        let y_reading = format_axis_reading(self.ctx.y_channel, y_val);
         let color_name = color.color_name_en();
 
         attrs.set(
             HtmlAttr::Aria(AriaAttr::ValueText),
-            (self.ctx.messages.value_text)(
-                x_val,
-                y_val,
-                &x_name,
-                &y_name,
-                &color_name,
-                &self.ctx.locale,
-            ),
+            (self.ctx.messages.value_text)(&x_reading, &y_reading, &color_name, &self.ctx.locale),
         );
 
         let x_pct = if (x_max - x_min).abs() > f64::EPSILON {
@@ -1073,6 +1071,35 @@ mod tests {
     }
 
     #[test]
+    fn value_text_is_channel_aware_for_non_fractional_axes() {
+        // With a Hue x-axis the reading must be degrees, never a percentage like
+        // "18000%". RGB axes render as raw 0-255 values.
+        let svc = service(Props {
+            x_channel: ColorChannel::Hue,
+            y_channel: ColorChannel::Lightness,
+            default_value: ColorValue::from_hsl(180.0, 1.0, 0.5),
+            ..Props::default()
+        });
+
+        let value_text = svc
+            .connect(&|_| {})
+            .thumb_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::ValueText))
+            .expect("value text present")
+            .to_string();
+
+        assert!(
+            value_text.contains("hue 180°"),
+            "hue axis must read in degrees, got '{value_text}'"
+        );
+        assert!(
+            !value_text.contains('%') || value_text.contains("lightness"),
+            "hue must not be rendered as a percentage: '{value_text}'"
+        );
+        assert!(!value_text.contains("18000"));
+    }
+
+    #[test]
     fn drag_end_reports_pending_value_for_controlled_area() {
         use alloc::sync::Arc;
         use core::sync::atomic::{AtomicU64, Ordering};
@@ -1133,6 +1160,29 @@ mod tests {
             !svc.connect(&|_| {})
                 .root_attrs()
                 .contains(&HtmlAttr::Data("ars-disabled"))
+        );
+    }
+
+    #[test]
+    fn drag_end_terminates_after_mid_drag_disable() {
+        let mut svc = service(Props::default());
+
+        drop(svc.send(Event::DragStart { x: 0.5, y: 0.5 }));
+        assert_eq!(svc.state(), &State::Dragging);
+
+        drop(svc.set_props(Props {
+            id: "color-area".to_string(),
+            disabled: true,
+            ..Props::default()
+        }));
+
+        let end = svc.send(Event::DragEnd);
+        assert_eq!(svc.state(), &State::Idle);
+        assert_eq!(end.pending_effects.len(), 1, "change-end still fires");
+        assert!(
+            !svc.connect(&|_| {})
+                .root_attrs()
+                .contains(&HtmlAttr::Data("ars-dragging"))
         );
     }
 

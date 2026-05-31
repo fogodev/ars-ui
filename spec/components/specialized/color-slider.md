@@ -224,11 +224,12 @@ impl ars_core::Machine for Machine {
     ) -> Option<TransitionPlan<Self>> {
         // A disabled slider ignores value-changing input but still tracks focus
         // and accepts parent-driven prop syncs (so it can be re-enabled).
+        // `DragEnd` is allowed through so a drag in flight when the parent
+        // disabled the control can still terminate cleanly.
         if ctx.disabled {
             match event {
                 Event::DragStart { .. }
                 | Event::DragMove { .. }
-                | Event::DragEnd
                 | Event::Increment { .. }
                 | Event::Decrement { .. }
                 | Event::SetToMin
@@ -492,7 +493,12 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Orientation),
             if self.ctx.orientation == Orientation::Vertical { "vertical" } else { "horizontal" });
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.label)(&self.ctx.locale));
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), (self.ctx.messages.value_text)(val, &self.ctx.locale));
+        // Channel-aware reading ("hue 180°") plus the perceptual color name, as
+        // required by spec §3.1 (e.g. "hue 180°, dark vibrant blue").
+        let channel_name = format!("{:?}", self.ctx.channel).to_lowercase();
+        let reading = format!("{channel_name} {}", self.formatted_value());
+        let color_name = color.color_name_en();
+        attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), (self.ctx.messages.value_text)(&reading, &color_name, &self.ctx.locale));
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
 
         let pct = if (max - min).abs() > f64::EPSILON { (val - min) / (max - min) * 100.0 } else { 0.0 };
@@ -621,15 +627,18 @@ ColorSlider
 pub struct Messages {
     /// Label for the slider. Default: `"Color channel"`.
     pub label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    /// Formats the channel value for aria-valuetext.
-    pub value_text: MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync>,
+    /// Formats the `aria-valuetext`. Arguments: `reading` (channel-aware, e.g.
+    /// `"hue 180°"`) and `color_name` (the perceptual color name), plus `locale`.
+    pub value_text: MessageFn<dyn Fn(&str, &str, &Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
     fn default() -> Self {
         Self {
             label: MessageFn::static_str("Color channel"),
-            value_text: MessageFn::new(|val, _locale| format!("{val:.0}")),
+            value_text: MessageFn::new(|reading: &str, color_name: &str, _locale: &Locale| {
+                format!("{reading}, {color_name}")
+            }),
         }
     }
 }
@@ -640,7 +649,7 @@ impl ComponentMessages for Messages {}
 | Key                       | Default (en-US)                  | Purpose              |
 | ------------------------- | -------------------------------- | -------------------- |
 | `color_slider.label`      | `"Color channel"` (per-instance) | Thumb aria-label     |
-| `color_slider.value_text` | Channel-specific formatting      | Thumb aria-valuetext |
+| `color_slider.value_text` | `"{reading}, {color_name}"` (e.g. `"hue 180°, dark vibrant blue"`) | Thumb aria-valuetext |
 
 - **RTL**: Horizontal slider direction flips; ArrowLeft increments, ArrowRight decrements.
 - **Number formatting**: Channel values respect locale decimal separators.

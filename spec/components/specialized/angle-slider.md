@@ -275,43 +275,18 @@ impl ars_core::Machine for Machine {
             _ => {}
         }
 
-        // Disabled blocks all except Focus/Blur.
-        if ctx.disabled {
+        // Disabled and read-only both block value-changing input. Focus/Blur
+        // (handled in the main match) and `DragEnd` still pass through so a drag
+        // in flight when the control was disabled can terminate cleanly.
+        if ctx.disabled || ctx.readonly {
             match event {
-                Event::Focus { is_keyboard } => {
-                    let ik = *is_keyboard;
-                    return Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                        ctx.focused = true;
-                        ctx.focus_visible = ik;
-                    }));
-                }
-                Event::Blur => {
-                    return Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                        ctx.focused = false;
-                        ctx.focus_visible = false;
-                    }));
-                }
-                _ => return None,
-            }
-        }
-
-        // Readonly blocks drag and value changes.
-        if ctx.readonly {
-            match event {
-                Event::Focus { is_keyboard } => {
-                    let ik = *is_keyboard;
-                    return Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                        ctx.focused = true;
-                        ctx.focus_visible = ik;
-                    }));
-                }
-                Event::Blur => {
-                    return Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                        ctx.focused = false;
-                        ctx.focus_visible = false;
-                    }));
-                }
-                _ => return None,
+                Event::DragStart { .. }
+                | Event::DragMove { .. }
+                | Event::Increment
+                | Event::Decrement
+                | Event::SetValue { .. }
+                | Event::KeyDown { .. } => return None,
+                _ => {}
             }
         }
 

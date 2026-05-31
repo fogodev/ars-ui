@@ -348,26 +348,19 @@ impl ars_core::Machine for Machine {
             _ => {}
         }
 
-        // Disabled and read-only both allow only focus/blur.
+        // Disabled and read-only both block value-changing input. Focus/Blur
+        // (handled in the main match) and `DragEnd` still pass through so a drag
+        // in flight when the control was disabled can terminate cleanly.
         if ctx.disabled || ctx.readonly {
-            return match event {
-                Event::Focus { is_keyboard } => {
-                    let ik = *is_keyboard;
-                    Some(
-                        TransitionPlan::to(State::Focused).apply(move |ctx: &mut Context| {
-                            ctx.focused = true;
-                            ctx.focus_visible = ik;
-                        }),
-                    )
-                }
-
-                Event::Blur => Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
-                    ctx.focused = false;
-                    ctx.focus_visible = false;
-                })),
-
-                _ => None,
-            };
+            match event {
+                Event::DragStart { .. }
+                | Event::DragMove { .. }
+                | Event::Increment
+                | Event::Decrement
+                | Event::SetValue { .. }
+                | Event::KeyDown { .. } => return None,
+                _ => {}
+            }
         }
 
         match (state, event) {
@@ -1124,6 +1117,29 @@ mod tests {
             !svc.connect(&|_| {})
                 .root_attrs()
                 .contains(&HtmlAttr::Aria(AriaAttr::Disabled))
+        );
+    }
+
+    #[test]
+    fn drag_end_terminates_after_mid_drag_disable() {
+        let mut svc = service(Props::default());
+
+        drop(svc.send(Event::DragStart { angle: 90.0 }));
+        assert_eq!(svc.state(), &State::Dragging);
+
+        drop(svc.set_props(Props {
+            id: "angle-slider".to_string(),
+            disabled: true,
+            ..Props::default()
+        }));
+
+        let end = svc.send(Event::DragEnd);
+        assert_eq!(svc.state(), &State::Idle);
+        assert_eq!(end.pending_effects.len(), 1, "change-end still fires");
+        assert!(
+            !svc.connect(&|_| {})
+                .root_attrs()
+                .contains(&HtmlAttr::Data("ars-dragging"))
         );
     }
 

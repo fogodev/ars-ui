@@ -529,6 +529,15 @@ impl ars_core::Machine for Machine {
                     ctx.invalid = props.invalid;
                     ctx.required = props.required;
                     ctx.name = props.name.clone();
+
+                    // Re-render the input in the new channel/format unless the
+                    // user is mid-edit. `SyncValue` (which runs before this on a
+                    // combined update) formatted with the old representation.
+                    if !ctx.focused {
+                        ctx.input_text = (*ctx.value.get())
+                            .map(|color| format_value(&color, ctx.channel, ctx.color_format))
+                            .unwrap_or_default();
+                    }
                 }))
             }
 
@@ -1418,6 +1427,45 @@ mod tests {
             !svc.connect(&|_| {})
                 .input_attrs()
                 .contains(&HtmlAttr::Disabled)
+        );
+    }
+
+    #[test]
+    fn set_props_reformats_input_text_when_display_props_change() {
+        // An unfocused whole-color field switched to channel mode must re-render
+        // its text in the new representation, not leave the old hex string in a
+        // now-numeric spinbutton.
+        let mut svc = service(Props {
+            value: Some(ColorValue::from_hsl(120.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+        assert_eq!(svc.connect(&|_| {}).input_text(), "#00ff00");
+
+        drop(svc.set_props(Props {
+            id: "color-field".to_string(),
+            value: Some(ColorValue::from_hsl(120.0, 1.0, 0.5)),
+            channel: Some(ColorChannel::Hue),
+            ..Props::default()
+        }));
+
+        assert_eq!(
+            svc.connect(&|_| {}).input_text(),
+            "120",
+            "text must reformat to the hue channel representation"
+        );
+
+        // A combined value + channel change (SyncValue then SetProps) must end
+        // up formatted with the new channel, not the old one.
+        drop(svc.set_props(Props {
+            id: "color-field".to_string(),
+            value: Some(ColorValue::from_hsl(0.0, 0.5, 0.5)),
+            channel: Some(ColorChannel::Saturation),
+            ..Props::default()
+        }));
+        assert_eq!(
+            svc.connect(&|_| {}).input_text(),
+            "50",
+            "saturation 0.5 renders as 50%"
         );
     }
 

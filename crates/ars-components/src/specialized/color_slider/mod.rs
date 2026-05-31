@@ -22,8 +22,9 @@ use ars_interactions::KeyboardEventData;
 /// Label for the slider thumb.
 type LabelFn = dyn Fn(&Locale) -> String + Send + Sync;
 
-/// Formats the channel value for `aria-valuetext`.
-type ValueTextFn = dyn Fn(f64, &Locale) -> String + Send + Sync;
+/// Formats the `aria-valuetext`. Arguments: `reading` (channel-aware, e.g.
+/// `"hue 180°"`) and `color_name` (the perceptual color name), plus `locale`.
+type ValueTextFn = dyn Fn(&str, &str, &Locale) -> String + Send + Sync;
 
 /// Consumer callback fired on drag-end / pointer release.
 type ChangeEndFn = dyn Fn(ColorValue) + Send + Sync;
@@ -213,7 +214,9 @@ impl Default for Messages {
     fn default() -> Self {
         Self {
             label: MessageFn::static_str("Color channel"),
-            value_text: MessageFn::new(|val: f64, _locale: &Locale| format!("{val:.0}")),
+            value_text: MessageFn::new(|reading: &str, color_name: &str, _locale: &Locale| {
+                format!("{reading}, {color_name}")
+            }),
         }
     }
 }
@@ -298,11 +301,12 @@ impl ars_core::Machine for Machine {
     ) -> Option<TransitionPlan<Self>> {
         // A disabled slider ignores value-changing input but still tracks focus
         // and accepts parent-driven prop syncs (so it can be re-enabled).
+        // `DragEnd` is allowed through so a drag in flight when the parent
+        // disabled the control can still terminate cleanly.
         if ctx.disabled {
             match event {
                 Event::DragStart { .. }
                 | Event::DragMove { .. }
-                | Event::DragEnd
                 | Event::Increment { .. }
                 | Event::Decrement { .. }
                 | Event::SetToMin
@@ -664,6 +668,12 @@ impl Api<'_> {
 
         let (min, max) = channel_range(self.ctx.channel);
 
+        // Channel-aware reading ("hue 180°") plus the perceptual color name, as
+        // required by spec §3.1 (e.g. "hue 180°, dark vibrant blue").
+        let channel_name = format!("{:?}", self.ctx.channel).to_lowercase();
+        let reading = format!("{channel_name} {}", self.formatted_value());
+        let color_name = color.color_name_en();
+
         attrs
             .set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{val:.2}"))
             .set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{min:.2}"))
@@ -678,7 +688,7 @@ impl Api<'_> {
             )
             .set(
                 HtmlAttr::Aria(AriaAttr::ValueText),
-                (self.ctx.messages.value_text)(val, &self.ctx.locale),
+                (self.ctx.messages.value_text)(&reading, &color_name, &self.ctx.locale),
             )
             .set(
                 HtmlAttr::Aria(AriaAttr::LabelledBy),
@@ -1009,6 +1019,32 @@ mod tests {
     }
 
     #[test]
+    fn thumb_value_text_includes_channel_reading_and_color_name() {
+        let color = ColorValue::from_hsl(180.0, 1.0, 0.5);
+        let svc = service(Props {
+            channel: ColorChannel::Hue,
+            default_value: color,
+            ..Props::default()
+        });
+
+        let value_text = svc
+            .connect(&|_| {})
+            .thumb_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::ValueText))
+            .expect("value text present")
+            .to_string();
+
+        assert!(
+            value_text.contains("hue 180°"),
+            "channel reading missing from '{value_text}'"
+        );
+        assert!(
+            value_text.contains(&color.color_name_en()),
+            "perceptual color name missing from '{value_text}'"
+        );
+    }
+
+    #[test]
     fn drag_end_reports_pending_value_for_controlled_slider() {
         use alloc::sync::Arc;
         use core::sync::atomic::{AtomicU64, Ordering};
@@ -1095,6 +1131,35 @@ mod tests {
             value: None,
             ..Props::default()
         }));
+    }
+
+    #[test]
+    fn drag_end_terminates_after_mid_drag_disable() {
+        let mut svc = service(Props {
+            channel: ColorChannel::Hue,
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::DragStart { position: 0.5 }));
+        assert_eq!(svc.state(), &State::Dragging);
+
+        // Parent disables the control mid-drag.
+        drop(svc.set_props(Props {
+            id: "color-slider".to_string(),
+            channel: ColorChannel::Hue,
+            disabled: true,
+            ..Props::default()
+        }));
+
+        // Pointer-up must still exit the drag rather than wedging in Dragging.
+        let end = svc.send(Event::DragEnd);
+        assert_eq!(svc.state(), &State::Idle);
+        assert_eq!(end.pending_effects.len(), 1, "change-end still fires");
+        assert!(
+            !svc.connect(&|_| {})
+                .root_attrs()
+                .contains(&HtmlAttr::Data("ars-dragging"))
+        );
     }
 
     #[test]

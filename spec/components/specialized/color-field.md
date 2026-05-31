@@ -441,6 +441,15 @@ impl ars_core::Machine for Machine {
                     ctx.invalid = props.invalid;
                     ctx.required = props.required;
                     ctx.name = props.name.clone();
+
+                    // Re-render the input in the new channel/format unless the
+                    // user is mid-edit. `SyncValue` (which runs before this on a
+                    // combined update) formatted with the old representation.
+                    if !ctx.focused {
+                        ctx.input_text = (*ctx.value.get())
+                            .map(|color| format_value(&color, ctx.channel, ctx.color_format))
+                            .unwrap_or_default();
+                    }
                 }))
             }
 

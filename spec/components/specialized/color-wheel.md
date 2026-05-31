@@ -276,8 +276,10 @@ impl ars_core::Machine for Machine {
             _ => {}
         }
 
-        // Disabled and read-only both block value-changing events.
-        if ctx.disabled || ctx.readonly {
+        // Disabled and read-only both block value-changing events, except
+        // `DragEnd`: a drag in flight when the control was disabled must still
+        // be able to terminate cleanly (exit `Dragging`, fire change-end).
+        if (ctx.disabled || ctx.readonly) && !matches!(event, Event::DragEnd) {
             return None;
         }
 
@@ -304,7 +306,8 @@ impl ars_core::Machine for Machine {
                 let s = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
                     let hue = ctx.value.get().hue;
-                    let new_hue = (hue + s) % 360.0;
+                    // `rem_euclid` keeps the hue non-negative for custom steps > 360.
+                    let new_hue = (hue + s).rem_euclid(360.0);
                     let color = ctx.value.get().clone();
                     ctx.value.set(ColorValue { hue: new_hue, ..color });
                 }))
@@ -314,7 +317,8 @@ impl ars_core::Machine for Machine {
                 let s = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
                     let hue = ctx.value.get().hue;
-                    let new_hue = (hue - s + 360.0) % 360.0;
+                    // `rem_euclid` keeps the hue non-negative for custom steps > 360.
+                    let new_hue = (hue - s).rem_euclid(360.0);
                     let color = ctx.value.get().clone();
                     ctx.value.set(ColorValue { hue: new_hue, ..color });
                 }))

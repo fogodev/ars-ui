@@ -170,6 +170,20 @@ fn apply_area_position(ctx: &mut Context, x: f64, y: f64) {
     ctx.value.set(with_channel(&updated, ctx.y_channel, y_val));
 }
 
+/// Format a single channel reading for `aria-valuetext`, including the channel
+/// name and a channel-appropriate unit (degrees for hue, raw for the 8-bit RGB
+/// channels, a percentage for the fractional channels).
+fn format_axis_reading(channel: ColorChannel, value: f64) -> String {
+    let name = format!("{channel:?}").to_lowercase();
+    match channel {
+        ColorChannel::Hue => format!("{name} {value:.0}°"),
+        ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => {
+            format!("{name} {value:.0}")
+        }
+        _ => format!("{name} {:.0}%", value * 100.0),
+    }
+}
+
 /// Typed identifier for side effects emitted by the machine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Effect {
@@ -236,11 +250,12 @@ impl ars_core::Machine for Machine {
     ) -> Option<TransitionPlan<Self>> {
         // A disabled area ignores value-changing input but still tracks focus
         // and accepts parent-driven prop syncs (so it can be re-enabled).
+        // `DragEnd` is allowed through so a drag in flight when the parent
+        // disabled the control can still terminate cleanly.
         if ctx.disabled {
             match event {
                 Event::DragStart { .. }
                 | Event::DragMove { .. }
-                | Event::DragEnd
                 | Event::IncrementX { .. }
                 | Event::DecrementX { .. }
                 | Event::IncrementY { .. }
@@ -513,11 +528,11 @@ impl<'a> Api<'a> {
         let (x_min, x_max) = channel_range(self.ctx.x_channel);
         let (y_min, y_max) = channel_range(self.ctx.y_channel);
 
-        let x_name = format!("{:?}", self.ctx.x_channel).to_lowercase();
-        let y_name = format!("{:?}", self.ctx.y_channel).to_lowercase();
+        let x_reading = format_axis_reading(self.ctx.x_channel, x_val);
+        let y_reading = format_axis_reading(self.ctx.y_channel, y_val);
         let color_name = color.color_name_en();
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueText),
-            (self.ctx.messages.value_text)(x_val, y_val, &x_name, &y_name, &color_name, &self.ctx.locale));
+            (self.ctx.messages.value_text)(&x_reading, &y_reading, &color_name, &self.ctx.locale));
 
         let x_pct = if (x_max - x_min).abs() > f64::EPSILON {
             (x_val - x_min) / (x_max - x_min) * 100.0
@@ -645,10 +660,11 @@ pub struct Messages {
     pub label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Role description for screen readers. Default: `"2d color picker"`.
     pub role_description: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    /// Formats both channel values plus the perceptual color name for
-    /// `aria-valuetext`. Arguments: `x_value`, `y_value`, `x_channel_name`,
-    /// `y_channel_name`, `color_name`, `locale`.
-    pub value_text: MessageFn<dyn Fn(f64, f64, &str, &str, &str, &Locale) -> String + Send + Sync>,
+    /// Formats the `aria-valuetext`. Arguments: `x_axis_reading` (channel-aware,
+    /// e.g. `"saturation 80%"` or `"hue 180°"`), `y_axis_reading`, `color_name`,
+    /// `locale`. Readings are preformatted per channel so non-fractional channels
+    /// (hue/RGB) are not mis-rendered as percentages.
+    pub value_text: MessageFn<dyn Fn(&str, &str, &str, &Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
@@ -657,20 +673,8 @@ impl Default for Messages {
             label: MessageFn::static_str("Color area"),
             role_description: MessageFn::static_str("2d color picker"),
             value_text: MessageFn::new(
-                |x_value: f64,
-                 y_value: f64,
-                 x_name: &str,
-                 y_name: &str,
-                 color_name: &str,
-                 _locale: &Locale| {
-                    format!(
-                        "{}, {} {:.0}%, {} {:.0}%",
-                        color_name,
-                        x_name,
-                        x_value * 100.0,
-                        y_name,
-                        y_value * 100.0
-                    )
+                |x_reading: &str, y_reading: &str, color_name: &str, _locale: &Locale| {
+                    format!("{color_name}, {x_reading}, {y_reading}")
                 },
             ),
         }
@@ -684,7 +688,7 @@ impl ComponentMessages for Messages {}
 | ----------------------------- | -------------------------------------- | -------------------------- |
 | `color_area.label`            | `"Color area"`                         | Thumb aria-label           |
 | `color_area.role_description` | `"2d color picker"`                    | Thumb aria-roledescription |
-| `color_area.value_text`       | `"{color_name}, {x_channel} {x}%, {y_channel} {y}%"` | Thumb aria-valuetext       |
+| `color_area.value_text`       | `"{color_name}, {x_reading}, {y_reading}"` (each reading is channel-aware, e.g. `"saturation 80%"` / `"hue 180°"`) | Thumb aria-valuetext       |
 
 - **RTL**: x-axis gradient flips horizontally; ArrowLeft increments, ArrowRight decrements.
 - **Number formatting**: Channel values respect locale decimal separators.

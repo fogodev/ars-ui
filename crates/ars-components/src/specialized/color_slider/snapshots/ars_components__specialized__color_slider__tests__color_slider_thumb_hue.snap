@@ -73,7 +73,7 @@ AttrMap {
                 ValueText,
             ),
             String(
-                "120",
+                "hue 120°, very light vibrant green",
             ),
         ),
         (

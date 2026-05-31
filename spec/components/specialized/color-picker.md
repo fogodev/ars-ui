@@ -166,6 +166,14 @@ impl ColorValue {
     /// Parse a hex string ("#rrggbb" or "#rrggbbaa").
     pub fn from_hex(hex: &str) -> Option<Self> {
         let hex = hex.trim_start_matches('#');
+
+        // Hex digits are ASCII. Reject non-ASCII early so the byte-indexed
+        // slices below cannot land on a non-char boundary and panic (a
+        // multi-byte string such as `ああ` is exactly 6 bytes).
+        if !hex.is_ascii() {
+            return None;
+        }
+
         match hex.len() {
             6 => {
                 let r = u8::from_str_radix(&hex[0..2], 16).ok()?;

@@ -211,6 +211,13 @@ impl ColorValue {
     pub fn from_hex(hex: &str) -> Option<Self> {
         let hex = hex.trim_start_matches('#');
 
+        // Hex digits are ASCII. Reject non-ASCII early so the byte-indexed
+        // slices below cannot land on a non-char boundary and panic (a
+        // multi-byte string such as `ああ` is exactly 6 bytes).
+        if !hex.is_ascii() {
+            return None;
+        }
+
         match hex.len() {
             6 => {
                 let red = u8::from_str_radix(&hex[0..2], 16).ok()?;
@@ -1192,6 +1199,19 @@ mod tests {
     fn parse_color_string_dispatches_hex() {
         // The `#` branch of the dispatcher delegates to `from_hex`.
         assert_eq!(parse_color_string("#00ff00").unwrap().to_rgb(), (0, 255, 0));
+    }
+
+    #[test]
+    fn from_hex_rejects_non_ascii_without_panicking() {
+        // A `#`-prefixed string whose byte length is 6 or 8 but whose bytes are
+        // not ASCII (so the 2-byte slices fall on non-char boundaries) must
+        // return None rather than panic. Each `あ` is 3 bytes, so `#ああ`
+        // trims to a 6-byte string.
+        assert_eq!(ColorValue::from_hex("#ああ"), None);
+        assert_eq!(parse_color_string("#ああ"), None);
+        // 8-byte non-ASCII variant (`あ`+`あ`+`é` = 3+3+2 bytes): the leading
+        // 2-byte slice falls inside the first multi-byte char.
+        assert_eq!(parse_color_string("#ああé"), None);
     }
 
     #[test]
