@@ -182,3 +182,7 @@ Both mirror the impls exactly (preserving each spec's existing variable-binding 
 <status>completed</status>
 <summary>Background command "Watch Codex review pass 5 in background" completed (exit code 0)</summary>
 </task-notification>
+
+---
+
+Continue the Codex review loop: the round-5 spec-sync agent should be done — run cargo xci-fast, push, reply/resolve the 3 threads, re-trigger @codex review.
