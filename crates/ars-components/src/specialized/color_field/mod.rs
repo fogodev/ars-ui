@@ -314,7 +314,7 @@ fn commit_input(ctx: &mut Context) {
 
             let clamped = scaled.clamp(min, max);
 
-            if let Some(color) = ctx.value.get() {
+            if let Some(color) = ctx.value.pending() {
                 let new_color = with_channel(color, ch, clamped);
 
                 ctx.value.set(Some(new_color));
@@ -344,8 +344,12 @@ fn commit_input(ctx: &mut Context) {
 }
 
 /// Adjust the channel value by `delta` (positive or negative), clamped to range.
+///
+/// Reads the *pending* color so repeated controlled steps accumulate (each press
+/// builds on the last staged value, not the stale controlled prop).
 fn adjust_channel(ctx: &mut Context, delta: f64) {
-    if let (Some(ch), Some(color)) = (ctx.channel, ctx.value.get()) {
+    if let (Some(ch), Some(color)) = (ctx.channel, *ctx.value.pending()) {
+        let color = &color;
         let current = channel_value(color, ch);
 
         let (min, max) = channel_range(ch);
@@ -362,7 +366,8 @@ fn adjust_channel(ctx: &mut Context, delta: f64) {
 
 /// Snap the channel to `min` or `max` and refresh the input text.
 fn snap_channel(ctx: &mut Context, to_max: bool) {
-    if let (Some(ch), Some(color)) = (ctx.channel, ctx.value.get()) {
+    if let (Some(ch), Some(color)) = (ctx.channel, *ctx.value.pending()) {
+        let color = &color;
         let (min, max) = channel_range(ch);
 
         let target = if to_max { max } else { min };
@@ -547,7 +552,7 @@ impl ars_core::Machine for Machine {
                     // Switching an empty field into channel mode at runtime needs
                     // the same base-color seed as `init`, so the spinbutton stays
                     // usable and accessible (mirrors the seed in `init`).
-                    if ctx.channel.is_some() && ctx.value.get().is_none() {
+                    if ctx.channel.is_some() && ctx.value.pending().is_none() {
                         ctx.value.set(Some(ColorValue::default()));
                     }
 
@@ -555,7 +560,7 @@ impl ars_core::Machine for Machine {
                     // user is mid-edit. `SyncValue` (which runs before this on a
                     // combined update) formatted with the old representation.
                     if !ctx.focused {
-                        ctx.input_text = (*ctx.value.get())
+                        ctx.input_text = (*ctx.value.pending())
                             .map(|color| format_value(&color, ctx.channel, ctx.color_format))
                             .unwrap_or_default();
                     }
@@ -1057,9 +1062,12 @@ impl Api<'_> {
 
     /// Handles a keydown on the input element.
     ///
-    /// Shortcuts are suppressed while an IME composition is in progress.
+    /// Shortcuts are suppressed while an IME composition is in progress — both
+    /// when the machine already knows (`ctx.is_composing`) and when the event
+    /// itself reports composing (`data.is_composing`), in case the keydown
+    /// arrives before the `CompositionStart` event reaches the machine.
     pub fn on_input_keydown(&self, data: &KeyboardEventData) {
-        if self.ctx.is_composing {
+        if self.ctx.is_composing || data.is_composing {
             return;
         }
 
@@ -1539,6 +1547,49 @@ mod tests {
         // Whole-color mode with no value stays empty (unchanged behavior).
         let whole = service(Props::default());
         assert!(whole.connect(&|_| {}).value().is_none());
+    }
+
+    #[test]
+    fn controlled_channel_steps_accumulate_from_pending() {
+        // Controlled hue channel at 0°; two Increments before a parent sync must
+        // accumulate (0 -> 1 -> 2), not recompute from the stale prop each time.
+        let mut svc = service(Props {
+            channel: Some(ColorChannel::Hue),
+            value: Some(ColorValue::from_hsl(0.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Increment));
+        drop(svc.send(Event::Increment));
+
+        assert!(
+            (svc.connect(&|_| {}).value().unwrap().hue - 2.0).abs() < 1e-9,
+            "controlled channel steps must accumulate from the pending value"
+        );
+    }
+
+    #[test]
+    fn keydown_ignores_event_level_composition() {
+        // A keydown whose own `is_composing` flag is set must be ignored even
+        // before the CompositionStart event reaches the machine.
+        let svc = service(Props {
+            channel: Some(ColorChannel::Hue),
+            value: Some(ColorValue::from_hsl(0.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+
+        let captured = core::cell::RefCell::new(Vec::new());
+        let send = |event: Event| captured.borrow_mut().push(event);
+        let api = svc.connect(&send);
+
+        let mut composing = key(KeyboardKey::Enter);
+        composing.is_composing = true;
+        api.on_input_keydown(&composing);
+
+        assert!(
+            captured.borrow().is_empty(),
+            "a composing keydown must not dispatch shortcuts"
+        );
     }
 
     #[test]

@@ -347,10 +347,16 @@ impl ars_core::Machine for Machine {
                 let value = *value;
                 Some(TransitionPlan::context_only(move |ctx| match value {
                     Some(color) => {
+                        // If the parent is echoing the value we just emitted,
+                        // keep the cached slider value so a hue 360° endpoint
+                        // isn't re-derived back to 0° (the color normalizes
+                        // 360° -> 0°). Only re-derive for a genuinely new color.
+                        let echoes_pending = color == *ctx.value.pending();
                         ctx.value.set(color);
                         ctx.value.sync_controlled(Some(color));
-                        // Re-derive the slider value from the parent's color.
-                        ctx.slider_value = channel_value(&color, ctx.channel);
+                        if !echoes_pending {
+                            ctx.slider_value = channel_value(&color, ctx.channel);
+                        }
                     }
                     None => ctx.value.sync_controlled(None),
                 }))
@@ -494,16 +500,26 @@ impl<'a> Api<'a> {
         // Use the pending color so the gradient matches the in-progress drag
         // position in controlled mode (where `get()` returns the stale prop).
         let color = self.ctx.value.pending();
+        // A horizontal RTL slider renders the minimum on the right, so the
+        // gradient runs `to left` to keep the visible ramp aligned with the
+        // value selected by dragging/clicking.
+        let to_edge = if self.ctx.orientation == Orientation::Horizontal && self.ctx.dir == Direction::Rtl {
+            "to left"
+        } else {
+            "to right"
+        };
         let gradient = match self.ctx.channel {
-            ColorChannel::Hue => "linear-gradient(to right, \
+            ColorChannel::Hue => format!(
+                "linear-gradient({to_edge}, \
                 hsl(0,100%,50%), hsl(60,100%,50%), hsl(120,100%,50%), \
                 hsl(180,100%,50%), hsl(240,100%,50%), hsl(300,100%,50%), \
-                hsl(360,100%,50%))".to_string(),
+                hsl(360,100%,50%))"
+            ),
             ColorChannel::Alpha => format!(
                 // Fade from the *same* color at alpha 0 to alpha 1, so the track
                 // previews only opacity. `transparent` is transparent black and
                 // would make non-black colors fade through gray.
-                "linear-gradient(to right, {}, {})",
+                "linear-gradient({to_edge}, {}, {})",
                 ColorValue::new(color.hue, color.saturation, color.lightness, 0.0).to_css_hsl(),
                 ColorValue::new(color.hue, color.saturation, color.lightness, 1.0).to_css_hsl()
             ),
@@ -511,7 +527,7 @@ impl<'a> Api<'a> {
                 let (min, max) = channel_range(self.ctx.channel);
                 let start = with_channel(color, self.ctx.channel, min);
                 let end = with_channel(color, self.ctx.channel, max);
-                format!("linear-gradient(to right, {}, {})", start.to_css_hsl(), end.to_css_hsl())
+                format!("linear-gradient({to_edge}, {}, {})", start.to_css_hsl(), end.to_css_hsl())
             }
         };
         attrs.set_style(CssProperty::Custom("ars-color-slider-track-bg"), gradient);

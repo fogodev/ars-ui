@@ -62,11 +62,24 @@ fn snap_to_step(angle: f64, step: f64) -> f64 {
 fn wrap_value(value: f64, min: f64, max: f64) -> f64 {
     let range = max - min;
 
-    if range <= 0.0 {
+    if !range.is_finite() || range <= 0.0 {
         return min;
     }
 
     (value - min).rem_euclid(range) + min
+}
+
+/// Clamp `value` to `[min, max]` without panicking on malformed bounds.
+///
+/// `min`/`max` are public props with no enforced invariant, so a `min > max`
+/// or non-finite bound would make [`f64::clamp`] panic. In that case the value
+/// is returned unclamped rather than crashing the component.
+fn clamp_to_range(value: f64, min: f64, max: f64) -> f64 {
+    if !min.is_finite() || !max.is_finite() || min > max {
+        return value;
+    }
+
+    value.clamp(min, max)
 }
 
 /// The states for the `AngleSlider` component.
@@ -346,7 +359,7 @@ impl ars_core::Machine for Machine {
                     // Re-clamp the current value to the new bounds so an
                     // out-of-range angle is not exposed via aria-valuenow / the
                     // hidden input until the next interaction.
-                    let clamped = ctx.value.get().clamp(ctx.min, ctx.max);
+                    let clamped = clamp_to_range(*ctx.value.get(), ctx.min, ctx.max);
                     ctx.value.set(clamped);
                     if ctx.value.is_controlled() {
                         ctx.value.sync_controlled(Some(clamped));
@@ -374,7 +387,7 @@ impl ars_core::Machine for Machine {
 
         match (state, event) {
             (State::Idle | State::Focused, Event::DragStart { angle }) => {
-                let snapped = snap_to_step(*angle, ctx.step).clamp(ctx.min, ctx.max);
+                let snapped = clamp_to_range(snap_to_step(*angle, ctx.step), ctx.min, ctx.max);
                 Some(
                     TransitionPlan::to(State::Dragging).apply(move |ctx: &mut Context| {
                         ctx.value.set(snapped);
@@ -383,7 +396,7 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Dragging, Event::DragMove { angle }) => {
-                let snapped = snap_to_step(*angle, ctx.step).clamp(ctx.min, ctx.max);
+                let snapped = clamp_to_range(snap_to_step(*angle, ctx.step), ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(snapped);
                 }))
@@ -432,7 +445,7 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::SetValue { angle }) => {
-                let clamped = angle.clamp(ctx.min, ctx.max);
+                let clamped = clamp_to_range(*angle, ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(clamped);
                 }))
@@ -1198,6 +1211,30 @@ mod tests {
         let thumb = disabled.connect(&|_| {}).thumb_attrs();
         assert_eq!(thumb.get(&HtmlAttr::TabIndex), Some("-1"));
         assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+    }
+
+    #[test]
+    fn malformed_bounds_do_not_panic() {
+        // min > max must not panic f64::clamp via SetValue / drag.
+        let mut inverted = service(Props {
+            min: 300.0,
+            max: 30.0,
+            default_value: 100.0,
+            ..Props::default()
+        });
+        drop(inverted.send(Event::SetValue { angle: 150.0 }));
+        drop(inverted.send(Event::DragStart { angle: 200.0 }));
+        // Reaching here without panicking is the assertion; value stays finite.
+        assert!(inverted.connect(&|_| {}).value().is_finite());
+
+        // A NaN bound likewise must not panic.
+        let mut nan_bound = service(Props {
+            max: f64::NAN,
+            default_value: 45.0,
+            ..Props::default()
+        });
+        drop(nan_bound.send(Event::SetValue { angle: 90.0 }));
+        assert!(nan_bound.connect(&|_| {}).value().is_finite());
     }
 
     #[test]

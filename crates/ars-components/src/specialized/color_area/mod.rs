@@ -566,11 +566,18 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(
                     move |ctx: &mut Context| match value {
                         Some(color) => {
+                            // Keep the cached axis values when the parent echoes the
+                            // value we emitted, so a hue 360° endpoint isn't
+                            // re-derived back to 0° (the color normalizes 360°->0°).
+                            let echoes_pending = color == *ctx.value.pending();
+
                             ctx.value.set(color);
                             ctx.value.sync_controlled(Some(color));
-                            // Re-derive both axis values from the parent's color.
-                            ctx.x_value = channel_value(&color, ctx.x_channel);
-                            ctx.y_value = channel_value(&color, ctx.y_channel);
+
+                            if !echoes_pending {
+                                ctx.x_value = channel_value(&color, ctx.x_channel);
+                                ctx.y_value = channel_value(&color, ctx.y_channel);
+                            }
                         }
                         None => ctx.value.sync_controlled(None),
                     },

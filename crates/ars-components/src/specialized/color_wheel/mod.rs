@@ -327,9 +327,17 @@ impl ars_core::Machine for Machine {
                 return Some(TransitionPlan::context_only(
                     move |ctx: &mut Context| match value {
                         Some(color) => {
+                            // Keep the cached hue when the parent echoes the value
+                            // we emitted, so a 360° endpoint isn't re-derived to 0°
+                            // (the stored color normalizes 360° -> 0°).
+                            let echoes_pending = color == *ctx.value.pending();
+
                             ctx.value.set(color);
                             ctx.value.sync_controlled(Some(color));
-                            ctx.hue_value = color.hue;
+
+                            if !echoes_pending {
+                                ctx.hue_value = color.hue;
+                            }
                         }
                         None => ctx.value.sync_controlled(None),
                     },

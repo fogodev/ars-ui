@@ -249,7 +249,7 @@ fn commit_input(ctx: &mut Context) {
 
             let clamped = scaled.clamp(min, max);
 
-            if let Some(color) = ctx.value.get() {
+            if let Some(color) = ctx.value.pending() {
                 let new_color = with_channel(color, ch, clamped);
 
                 ctx.value.set(Some(new_color));
@@ -279,8 +279,12 @@ fn commit_input(ctx: &mut Context) {
 }
 
 /// Adjust the channel value by `delta` (positive or negative), clamped to range.
+///
+/// Reads the *pending* color so repeated controlled steps accumulate (each press
+/// builds on the last staged value, not the stale controlled prop).
 fn adjust_channel(ctx: &mut Context, delta: f64) {
-    if let (Some(ch), Some(color)) = (ctx.channel, ctx.value.get()) {
+    if let (Some(ch), Some(color)) = (ctx.channel, *ctx.value.pending()) {
+        let color = &color;
         let current = channel_value(color, ch);
         let (min, max) = channel_range(ch);
         let new_val = (current + delta).clamp(min, max);
@@ -460,7 +464,7 @@ impl ars_core::Machine for Machine {
                     // Switching an empty field into channel mode at runtime needs
                     // the same base-color seed as `init`, so the spinbutton stays
                     // usable and accessible (mirrors the seed in `init`).
-                    if ctx.channel.is_some() && ctx.value.get().is_none() {
+                    if ctx.channel.is_some() && ctx.value.pending().is_none() {
                         ctx.value.set(Some(ColorValue::default()));
                     }
 
@@ -468,7 +472,7 @@ impl ars_core::Machine for Machine {
                     // user is mid-edit. `SyncValue` (which runs before this on a
                     // combined update) formatted with the old representation.
                     if !ctx.focused {
-                        ctx.input_text = (*ctx.value.get())
+                        ctx.input_text = (*ctx.value.pending())
                             .map(|color| format_value(&color, ctx.channel, ctx.color_format))
                             .unwrap_or_default();
                     }
@@ -589,7 +593,9 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly || ctx.channel.is_none() { return None; }
 
                 Some(TransitionPlan::context_only(|ctx| {
-                    if let (Some(ch), Some(color)) = (ctx.channel, ctx.value.get()) {
+                    // Read the pending color so the snap builds on the staged value.
+                    if let (Some(ch), Some(color)) = (ctx.channel, *ctx.value.pending()) {
+                        let color = &color;
                         let (_, max) = channel_range(ch);
                         let new_color = with_channel(color, ch, max);
                         ctx.value.set(Some(new_color.clone()));
@@ -603,7 +609,9 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly || ctx.channel.is_none() { return None; }
 
                 Some(TransitionPlan::context_only(|ctx| {
-                    if let (Some(ch), Some(color)) = (ctx.channel, ctx.value.get()) {
+                    // Read the pending color so the snap builds on the staged value.
+                    if let (Some(ch), Some(color)) = (ctx.channel, *ctx.value.pending()) {
+                        let color = &color;
                         let (min, _) = channel_range(ch);
                         let new_color = with_channel(color, ch, min);
                         ctx.value.set(Some(new_color.clone()));
@@ -903,8 +911,13 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown on the input element.
+    ///
+    /// Shortcuts are suppressed while an IME composition is in progress — both
+    /// when the machine already knows (`ctx.is_composing`) and when the event
+    /// itself reports composing (`data.is_composing`), in case the keydown
+    /// arrives before the `CompositionStart` event reaches the machine.
     pub fn on_input_keydown(&self, data: &KeyboardEventData) {
-        if self.ctx.is_composing { return; }
+        if self.ctx.is_composing || data.is_composing { return; }
         match data.key {
             KeyboardKey::Enter => (self.send)(Event::Commit),
             KeyboardKey::ArrowUp if self.ctx.channel.is_some() => (self.send)(Event::Increment),

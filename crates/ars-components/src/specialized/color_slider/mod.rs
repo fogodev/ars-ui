@@ -442,10 +442,18 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(
                     move |ctx: &mut Context| match value {
                         Some(color) => {
+                            // If the parent is echoing the value we just emitted,
+                            // keep the cached slider value so a hue 360° endpoint
+                            // isn't re-derived back to 0° (the color normalizes
+                            // 360° -> 0°). Only re-derive for a genuinely new color.
+                            let echoes_pending = color == *ctx.value.pending();
+
                             ctx.value.set(color);
                             ctx.value.sync_controlled(Some(color));
-                            // Re-derive the slider value from the parent's color.
-                            ctx.slider_value = channel_value(&color, ctx.channel);
+
+                            if !echoes_pending {
+                                ctx.slider_value = channel_value(&color, ctx.channel);
+                            }
                         }
                         None => ctx.value.sync_controlled(None),
                     },
@@ -657,18 +665,29 @@ impl Api<'_> {
         // position in controlled mode (where `get()` returns the stale prop).
         let color = self.ctx.value.pending();
 
+        // A horizontal RTL slider renders the minimum on the right, so the
+        // gradient runs `to left` to keep the visible ramp aligned with the
+        // value selected by dragging/clicking.
+        let to_edge =
+            if self.ctx.orientation == Orientation::Horizontal && self.ctx.dir == Direction::Rtl {
+                "to left"
+            } else {
+                "to right"
+            };
+
         let gradient = match self.ctx.channel {
-            ColorChannel::Hue => "linear-gradient(to right, \
+            ColorChannel::Hue => format!(
+                "linear-gradient({to_edge}, \
                 hsl(0,100%,50%), hsl(60,100%,50%), hsl(120,100%,50%), \
                 hsl(180,100%,50%), hsl(240,100%,50%), hsl(300,100%,50%), \
                 hsl(360,100%,50%))"
-                .to_string(),
+            ),
 
             ColorChannel::Alpha => format!(
                 // Fade from the *same* color at alpha 0 to alpha 1, so the track
                 // previews only opacity. `transparent` is transparent black and
                 // would make non-black colors fade through gray.
-                "linear-gradient(to right, {}, {})",
+                "linear-gradient({to_edge}, {}, {})",
                 ColorValue::new(color.hue, color.saturation, color.lightness, 0.0).to_css_hsl(),
                 ColorValue::new(color.hue, color.saturation, color.lightness, 1.0).to_css_hsl()
             ),
@@ -680,7 +699,7 @@ impl Api<'_> {
                 let end = with_channel(color, self.ctx.channel, max);
 
                 format!(
-                    "linear-gradient(to right, {}, {})",
+                    "linear-gradient({to_edge}, {}, {})",
                     start.to_css_hsl(),
                     end.to_css_hsl()
                 )
@@ -1026,6 +1045,88 @@ mod tests {
             .on_thumb_keydown(&key(KeyboardKey::ArrowUp), false);
 
         assert!(matches!(vcap.borrow()[0], Event::Increment { .. }));
+    }
+
+    #[test]
+    fn controlled_sync_preserves_hue_endpoint() {
+        // Controlled hue slider dragged to the 360° endpoint; when the parent
+        // echoes the emitted (normalized hue 0) color, the slider value must
+        // stay at 360 rather than snapping back to 0.
+        let red = ColorValue::from_hsl(0.0, 1.0, 0.5);
+        let mut svc = service(Props {
+            channel: ColorChannel::Hue,
+            value: Some(red),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::SetToMax)); // slider_value 360, color hue -> 0
+        let emitted = *svc.connect(&|_| {}).value(); // hue 0 (normalized)
+
+        // Parent echoes the emitted color back through the value prop.
+        drop(svc.set_props(Props {
+            id: "color-slider".to_string(),
+            channel: ColorChannel::Hue,
+            value: Some(emitted),
+            ..Props::default()
+        }));
+
+        assert_eq!(
+            svc.connect(&|_| {})
+                .thumb_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("360.00"),
+            "endpoint must survive the parent echoing the normalized color"
+        );
+
+        // A genuinely different controlled color still re-derives the position.
+        drop(svc.set_props(Props {
+            id: "color-slider".to_string(),
+            channel: ColorChannel::Hue,
+            value: Some(ColorValue::from_hsl(90.0, 1.0, 0.5)),
+            ..Props::default()
+        }));
+        assert_eq!(
+            svc.connect(&|_| {})
+                .thumb_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("90.00")
+        );
+    }
+
+    #[test]
+    fn rtl_horizontal_track_gradient_runs_to_left() {
+        let rtl = service(Props {
+            channel: ColorChannel::Hue,
+            dir: Direction::Rtl,
+            ..Props::default()
+        });
+        let bg = rtl
+            .connect(&|_| {})
+            .track_attrs()
+            .styles()
+            .iter()
+            .find(|(p, _)| *p == CssProperty::Custom("ars-color-slider-track-bg"))
+            .map(|(_, value)| value.clone())
+            .expect("track bg");
+        assert!(
+            bg.starts_with("linear-gradient(to left,"),
+            "RTL gradient: {bg}"
+        );
+
+        // LTR is unchanged.
+        let ltr = service(Props {
+            channel: ColorChannel::Hue,
+            ..Props::default()
+        });
+        let bg_ltr = ltr
+            .connect(&|_| {})
+            .track_attrs()
+            .styles()
+            .iter()
+            .find(|(p, _)| *p == CssProperty::Custom("ars-color-slider-track-bg"))
+            .map(|(_, value)| value.clone())
+            .expect("track bg");
+        assert!(bg_ltr.starts_with("linear-gradient(to right,"));
     }
 
     #[test]

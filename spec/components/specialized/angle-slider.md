@@ -183,7 +183,22 @@ fn snap_to_step(angle: f64, step: f64) -> f64 {
 /// Wrap a value into the range [min, max).
 fn wrap_value(value: f64, min: f64, max: f64) -> f64 {
     let range = max - min;
-    ((value - min).rem_euclid(range)) + min
+    if !range.is_finite() || range <= 0.0 {
+        return min;
+    }
+    (value - min).rem_euclid(range) + min
+}
+
+/// Clamp `value` to `[min, max]` without panicking on malformed bounds.
+///
+/// `min`/`max` are public props with no enforced invariant, so a `min > max`
+/// or non-finite bound would make [`f64::clamp`] panic. In that case the value
+/// is returned unclamped rather than crashing the component.
+fn clamp_to_range(value: f64, min: f64, max: f64) -> f64 {
+    if !min.is_finite() || !max.is_finite() || min > max {
+        return value;
+    }
+    value.clamp(min, max)
 }
 
 /// Typed identifier for side effects emitted by the machine.
@@ -274,7 +289,7 @@ impl ars_core::Machine for Machine {
                     // Re-clamp the current value to the new bounds so an
                     // out-of-range angle is not exposed via aria-valuenow / the
                     // hidden input until the next interaction.
-                    let clamped = ctx.value.get().clamp(ctx.min, ctx.max);
+                    let clamped = clamp_to_range(*ctx.value.get(), ctx.min, ctx.max);
                     ctx.value.set(clamped);
                     if ctx.value.is_controlled() {
                         ctx.value.sync_controlled(Some(clamped));
@@ -302,13 +317,13 @@ impl ars_core::Machine for Machine {
         match (state, event) {
             // Drag lifecycle
             (State::Idle | State::Focused, Event::DragStart { angle }) => {
-                let snapped = snap_to_step(*angle, ctx.step).clamp(ctx.min, ctx.max);
+                let snapped = clamp_to_range(snap_to_step(*angle, ctx.step), ctx.min, ctx.max);
                 Some(TransitionPlan::to(State::Dragging).apply(move |ctx| {
                     ctx.value.set(snapped);
                 }))
             }
             (State::Dragging, Event::DragMove { angle }) => {
-                let snapped = snap_to_step(*angle, ctx.step).clamp(ctx.min, ctx.max);
+                let snapped = clamp_to_range(snap_to_step(*angle, ctx.step), ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(snapped);
                 }))
@@ -350,7 +365,7 @@ impl ars_core::Machine for Machine {
                 }))
             }
             (_, Event::SetValue { angle }) => {
-                let clamped = angle.clamp(ctx.min, ctx.max);
+                let clamped = clamp_to_range(*angle, ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(clamped);
                 }))
