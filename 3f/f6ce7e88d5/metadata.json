@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3ff6ce7e88d5",
+  "strategy": "manual-commit",
+  "branch": "impl-279",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/layout/scroll_area/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/layout.rs",
+    "spec/components/layout/scroll-area.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/3f/f6ce7e88d5/0/metadata.json",
+      "transcript": "/3f/f6ce7e88d5/0/full.jsonl",
+      "content_hash": "/3f/f6ce7e88d5/0/content_hash.txt",
+      "prompt": "/3f/f6ce7e88d5/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 56474,
+    "cache_creation_tokens": 1741387,
+    "cache_read_tokens": 81261122,
+    "output_tokens": 214959,
+    "api_call_count": 276
+  }
+}

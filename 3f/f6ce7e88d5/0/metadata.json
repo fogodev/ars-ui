@@ -1,0 +1,125 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3ff6ce7e88d5",
+  "session_id": "173ea838-dc16-47bb-9a4e-a2e159509710",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-31T00:55:17.149588Z",
+  "branch": "impl-279",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/layout/scroll_area/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/layout.rs",
+    "spec/components/layout/scroll-area.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "9fb20887d97e",
+  "token_usage": {
+    "input_tokens": 56474,
+    "cache_creation_tokens": 1741387,
+    "cache_read_tokens": 81261122,
+    "output_tokens": 214959,
+    "api_call_count": 276
+  },
+  "summary": {
+    "intent": "Implement the agnostic core for a ScrollArea component (task #279), following the project's Named Effect intents pattern where adapters own timers and the core emits Effect intents.",
+    "outcome": "ScrollArea core fully implemented with 43 unit tests, 13 snapshot fixtures, conformance and proptest harnesses, 97.48% line coverage, and all 6 Codex review issues resolved. PR #699 pushed to GitHub.",
+    "learnings": {
+      "repo": [
+        "Named Effect intents pattern: agnostic core never calls set_timeout directly; adapters own timers and the core emits Effect intents (e.g., Effect::AutoHide)",
+        "context_changed is set whenever an apply closure runs, not on value diff — closures must be carefully scoped",
+        "context_only closures require explicit &mut Context type annotation",
+        "set_state_for_test is #[cfg(test)] in ars-core and is unavailable cross-crate",
+        "Delay fields use plain Duration (not Option<Duration>) with a named DEFAULT_* constant, matching tooltip open_delay/close_delay convention",
+        "CI uses a floating @stable toolchain (currently 1.96.0), which can expose pre-existing clippy regressions in unrelated code",
+        "on_props_changed must be implemented to avoid stale prop sync bugs when props change after initial mount",
+        "scrollbar_cross_size belongs in Props for adapter spec parity, not as dead internal state"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 255,
+          "end_line": 255,
+          "finding": "Scrollbar visibility should be gated by orientation (allows_x/allows_y on ScrollOrientation) — initially omitted as an intentional audit decision, reversed after Codex review"
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 563,
+          "end_line": 563,
+          "finding": "on_props_changed was not implemented, causing stale prop sync when props update after mount — SyncProps event + on_props_changed added to fix"
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 774,
+          "end_line": 774,
+          "finding": "ThumbDragMove clamp was missing the upper bound [0, track_size - thumb_size], allowing scroll position to exceed max when dragging past track end"
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 631,
+          "end_line": 631,
+          "finding": "Resize event did not clear stale visibility flags in Hover/Scroll modes — overflow removal would leave scrollbar incorrectly visible"
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 786,
+          "end_line": 786,
+          "finding": "ThumbDragEnd never re-emitted AutoHide effect when ending drag in Scroll mode, leaving scrollbar permanently visible after drag"
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 692,
+          "end_line": 692,
+          "finding": "Hover state became stuck visible after root-leave while over the scrollbar track — required tracking hovering_root separately in Context"
+        },
+        {
+          "path": "crates/ars-components/src/navigation/pagination/mod.rs",
+          "finding": "Pre-existing clippy::unnecessary_option_map_or_else error exposed by Rust 1.96.0 stable — map_or_else(.., identity) → unwrap_or_else(..) blocks any clippy run on ars-components"
+        }
+      ],
+      "workflow": [
+        "Spec examples can embed platform-specific calls (e.g., set_timeout) that must be converted to Effect intents before implementation",
+        "Audit new implementations in 3 phases: spec/impl drift, adjacent surfaces (adapter specs, manifests, catalog), and coverage before submitting",
+        "Post-review: resolve all Codex P2 threads, update proptest invariants and spec in the same commit to keep them in sync",
+        "snapshot-reviewed label required on PRs that add .snap fixture files",
+        "cargo xci-fast is the pre-push gate — run before committing"
+      ]
+    },
+    "friction": [
+      "Spec example used platform set_timeout directly instead of the Named Effect intents pattern — required manual conversion before implementation",
+      "Axis enum was undefined in the spec and had to be defined locally",
+      "context_only closures required multiple rounds of adding explicit &mut Context annotations before the build passed",
+      "insta --accept blocked by pre-existing i18n-gated highlight snapshots not referenced without the i18n feature — required manual snapshot promotion",
+      "Background snapshot regeneration jobs raced, producing stale pending files that needed manual cleanup",
+      "Pre-existing pagination clippy error in ars-components blocked all clippy runs on the crate, requiring an incidental fix",
+      "Codex review latency required cancelling the background poller; review was not available until the following user prompt"
+    ],
+    "open_items": [
+      "PR #699 is open but Codex has not issued a final 👍 verdict — merge and issue close (#279) pending Codex approval + green CI",
+      "Leptos and Dioxus adapter implementations for ScrollArea are out of scope for this task and not yet done",
+      "Foundation promotion deferred: local Axis{X,Y} diverges from ars-dom's Axis{Horizontal,Vertical} — not resolved, noted as a cross-cutting refactor",
+      "Codex review threads replied to but thread resolution not yet confirmed — may require a follow-up pass"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-31T00:53:41.769639Z",
+    "agent_lines": 472,
+    "agent_removed": 46,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 472,
+    "total_lines_changed": 518,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
