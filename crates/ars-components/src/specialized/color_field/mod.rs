@@ -533,9 +533,11 @@ impl ars_core::Machine for Machine {
                                     format_value(&color, ctx.channel, ctx.color_format);
                             }
 
-                            // A programmatic value is valid: clear both the
-                            // external and parser-derived invalid state.
-                            ctx.invalid = false;
+                            // A synced value clears only the parser-derived
+                            // error; the external `invalid` prop is owned by the
+                            // parent (via `SetProps`/`SetInvalid`) and must not be
+                            // cleared here, or a value update that keeps
+                            // `invalid: true` would wrongly drop the invalid state.
                             ctx.parse_error = false;
                         }
                         None => ctx.value.sync_controlled(None),
@@ -629,7 +631,8 @@ impl ars_core::Machine for Machine {
                     }
 
                     ctx.value.set(Some(new_value));
-                    ctx.invalid = false;
+                    // Clear only the parser-derived error; external `invalid` is
+                    // controlled by the parent (`SetInvalid`/the `invalid` prop).
                     ctx.parse_error = false;
                 }))
             }
@@ -1747,6 +1750,52 @@ mod tests {
             svc.connect(&|_| {}).input_text(),
             before,
             "a read-only field must not accept IME composition edits"
+        );
+    }
+
+    #[test]
+    fn value_sync_preserves_external_invalid() {
+        // Controlled field marked invalid by the parent; the parent then updates
+        // the value while keeping invalid=true (only `value` changes, so only
+        // SyncValue fires). The external invalid state must survive.
+        let mut svc = service(Props {
+            value: Some(ColorValue::from_rgb(255, 0, 0)),
+            invalid: true,
+            ..Props::default()
+        });
+        assert_eq!(
+            svc.connect(&|_| {})
+                .input_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::Invalid)),
+            Some("true")
+        );
+
+        drop(svc.set_props(Props {
+            id: "color-field".to_string(),
+            value: Some(ColorValue::from_rgb(0, 0, 255)),
+            invalid: true,
+            ..Props::default()
+        }));
+
+        assert_eq!(
+            svc.connect(&|_| {})
+                .input_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::Invalid)),
+            Some("true"),
+            "a value-only sync must not clear the external invalid prop"
+        );
+
+        // Clearing the prop (invalid -> false) does take effect.
+        drop(svc.set_props(Props {
+            id: "color-field".to_string(),
+            value: Some(ColorValue::from_rgb(0, 0, 255)),
+            invalid: false,
+            ..Props::default()
+        }));
+        assert!(
+            !svc.connect(&|_| {})
+                .input_attrs()
+                .contains(&HtmlAttr::Aria(AriaAttr::Invalid))
         );
     }
 

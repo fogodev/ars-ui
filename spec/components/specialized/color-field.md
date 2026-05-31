@@ -444,9 +444,11 @@ impl ars_core::Machine for Machine {
                                     format_value(&color, ctx.channel, ctx.color_format);
                             }
 
-                            // A programmatic value is valid: clear both the
-                            // external and parser-derived invalid state.
-                            ctx.invalid = false;
+                            // A synced value clears only the parser-derived
+                            // error; the external `invalid` prop is owned by the
+                            // parent (via `SetProps`/`SetInvalid`) and must not be
+                            // cleared here, or a value update that keeps
+                            // `invalid: true` would wrongly drop the invalid state.
                             ctx.parse_error = false;
                         }
                         None => ctx.value.sync_controlled(None),
@@ -539,9 +541,8 @@ impl ars_core::Machine for Machine {
                         ctx.input_text = format_value(&c, ctx.channel, ctx.color_format);
                     }
                     ctx.value.set(Some(c));
-                    // A programmatic value is valid: clear both the external and
-                    // parser-derived invalid state.
-                    ctx.invalid = false;
+                    // Clear only the parser-derived error; external `invalid` is
+                    // controlled by the parent (`SetInvalid`/the `invalid` prop).
                     ctx.parse_error = false;
                 }))
             }
