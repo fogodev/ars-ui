@@ -1,0 +1,112 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "735f03d8e6ec",
+  "session_id": "173ea838-dc16-47bb-9a4e-a2e159509710",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-31T13:53:49.118787Z",
+  "branch": "impl-279",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "36dbb162beaa",
+  "token_usage": {
+    "input_tokens": 71856,
+    "cache_creation_tokens": 3968348,
+    "cache_read_tokens": 150951835,
+    "output_tokens": 296172,
+    "api_call_count": 409
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #279: the ScrollArea agnostic core component for the ars-ui Rust library, including state machine, API, effects, and full test coverage.",
+    "outcome": "PR #699 opened with all 60 lib tests, 13 snapshot fixtures, proptest, doctest, and spec-conformance passing; cargo xci-fast (10 gates) green. Pass-4 Codex fixes committed and pushed, awaiting final Codex re-run before merge.",
+    "learnings": {
+      "repo": [
+        "The workspace uses a named-intent effect pattern (e.g., Effect::AutoHide) so the agnostic core emits intent and the adapter owns the timer — mirrors tooltip and rating_group conventions.",
+        "Duration (not u32 hide_delay_ms) is the workspace convention for delay props, matching tooltip/hover_card/avatar, and carries a Default value.",
+        "context_changed is set whenever an apply closure runs, not on value-diff — be careful not to treat it as a change-detection signal.",
+        "set_state_for_test is #[cfg(test)] in ars-core and is unavailable cross-crate.",
+        "snapshot-reviewed label is required on PRs that add .snap fixture files.",
+        "ars-dom::Axis uses {Horizontal, Vertical} while scroll_area defines {X, Y} — a naming divergence that was not reconciled.",
+        "CI uses a floating @stable toolchain (currently 1.96.0); pre-existing lints can newly fail on toolchain bumps.",
+        "Insta --accept is blocked by pre-existing i18n-gated snapshot orphans; pending snapshots must be manually promoted.",
+        "context_only closures require explicit |ctx: &mut Context| type annotations because Rust infers the wrong type without them."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 255,
+          "end_line": 255,
+          "finding": "ScrollOrientation gating was missing; added allows_x/allows_y helpers and updated update_visibility to gate by orientation."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 563,
+          "end_line": 563,
+          "finding": "on_props_changed was not implemented; added SyncProps event mirroring the collapsible component pattern."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 631,
+          "end_line": 631,
+          "finding": "Resize did not clear stale visibility flags; update_visibility(active) now clamps flags off for non-overflowing axes."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 692,
+          "end_line": 692,
+          "finding": "Hover state stuck visible after pointer left overlaid track; fixed by tracking hovering_root so the last leave (root or scrollbar) hides the scrollbar."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 774,
+          "end_line": 774,
+          "finding": "ThumbDragMove clamped at 0 but not the upper bound; added clamp to [0, track_size - thumb_size]."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 786,
+          "end_line": 786,
+          "finding": "ThumbDragEnd in Scroll mode never restarted the AutoHide timer; now re-emits Effect::AutoHide on drag-end when in Scroll mode."
+        }
+      ],
+      "workflow": [
+        "gh api integer fields require -F (not -f) for in_reply_to to be sent as an integer, not a string.",
+        "After a push that appears to succeed, verify the upstream ref actually advanced before assuming CI picked up the commit.",
+        "Background Insta snapshot jobs can race and produce stale .pending.snap files; serialize snapshot acceptance steps.",
+        "Pre-existing clippy errors (e.g., map_or_else with identity in pagination/mod.rs) block crate-wide clippy and must be opportunistically fixed before the gate passes.",
+        "Multi-round Codex review is an effective audit loop: each round can surface edge cases (negative track sizes, drag-state guard gaps, RTL delegation to canonical helpers) missed by prior rounds."
+      ]
+    },
+    "friction": [
+      "Insta --accept blocked by pre-existing i18n-gated snapshot orphans, requiring manual snapshot promotion.",
+      "Background snapshot jobs raced, producing stale .pending.snap files that needed cleanup.",
+      "Pre-existing clippy error in pagination/mod.rs blocked crate-wide clippy until opportunistically fixed.",
+      "gh api -f vs -F integer field gotcha caused failed API calls for in_reply_to.",
+      "Push appeared to succeed but upstream ref had not advanced, requiring a second explicit push.",
+      "context_only closures silently inferred the wrong type without explicit |ctx: &mut Context| annotations.",
+      "normalize_scroll_left was a buggy reinvention of an existing canonical helper in ars_collections; discovered late in review."
+    ],
+    "open_items": [
+      "Pass-4 Codex fixes are committed/pushed but Codex has not been re-triggered; merge is pending Codex approval.",
+      "ars-dom::Axis {Horizontal, Vertical} vs scroll_area Axis {X, Y} naming divergence was not reconciled.",
+      "Adapter spec prop sketches were updated with scrollbar_cross_size but full Leptos/Dioxus adapter implementations were not written in this session.",
+      "ThumbDragging not counted as active session in is_session_active (Pass-4 fix committed but not yet Codex-verified).",
+      "MouseEnter guard against active drag (Pass-4 fix committed but not yet Codex-verified).",
+      "ThumbDragStart cancellation of running AutoHide timer (Pass-4 fix committed but not yet Codex-verified).",
+      "SyncProps should reset Hovering (not just ScrollActive) when new orientation mode doesn't support hover (Pass-4 fix committed but not yet Codex-verified)."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
