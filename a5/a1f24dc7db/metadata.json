@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "a5a1f24dc7db",
+  "strategy": "manual-commit",
+  "branch": "impl-279",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "spec/dioxus-components/layout/scroll-area.md",
+    "spec/leptos-components/layout/scroll-area.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/a5/a1f24dc7db/0/metadata.json",
+      "transcript": "/a5/a1f24dc7db/0/full.jsonl",
+      "content_hash": "/a5/a1f24dc7db/0/content_hash.txt",
+      "prompt": "/a5/a1f24dc7db/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 81961,
+    "cache_creation_tokens": 4754713,
+    "cache_read_tokens": 228754217,
+    "output_tokens": 380355,
+    "api_call_count": 527
+  }
+}

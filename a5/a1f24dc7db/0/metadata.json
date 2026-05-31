@@ -1,0 +1,133 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "a5a1f24dc7db",
+  "session_id": "173ea838-dc16-47bb-9a4e-a2e159509710",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-31T15:16:05.366609Z",
+  "branch": "impl-279",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "spec/leptos-components/layout/scroll-area.md",
+    "spec/dioxus-components/layout/scroll-area.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "3ea374c90b04",
+  "token_usage": {
+    "input_tokens": 81961,
+    "cache_creation_tokens": 4754713,
+    "cache_read_tokens": 228754217,
+    "output_tokens": 380355,
+    "api_call_count": 527
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "summary": {
+    "intent": "Implement the ScrollArea agnostic core component (issue #279) for the ars-ui Rust UI library — including the state machine, 8-part API, inline unit/snapshot tests, proptest, spec-conformance harness, and spec updates.",
+    "outcome": "PR #699 opened with a fully passing implementation (64+ lib tests, 13 snapshots, proptest, conformance, xci-fast all green). Seven rounds of Codex review addressed 24+ findings covering orientation gating, prop sync, drag clamping, timer/visibility correctness, RTL drag, and mid-drag rebase. Session ended mid-pass-7 with fixes pushed but Codex not yet re-triggered.",
+    "learnings": {
+      "repo": [
+        "Named-effect intent pattern: agnostic core emits Effect::AutoHide as a PendingEffect::named marker; the adapter component owns the actual timer and sends Event::HideTimeout back. Mirrors tooltip/rating_group — the spec example showing set_timeout inside the machine was incorrect.",
+        "context_changed is set whenever an apply closure runs, not on value diff — so a no-op closure still marks context changed and can cause false positives in test assertions.",
+        "ars_collections::normalize_scroll_left_rtl + RtlScrollMode is the canonical RTL scroll normalization helper; do not reinvent it in component modules.",
+        "Floating @stable toolchain (1.96.0) introduced clippy::unnecessary_option_map_or_else; pagination/mod.rs had a pre-existing violation that blocked any clippy run on ars-components.",
+        "insta --accept is blocked when any snapshot is unreferenced (e.g., i18n-gated highlight fixtures absent without the i18n feature); must promote pending snapshots manually via cargo insta review --accept-new.",
+        "snapshot-reviewed label must be re-applied any time a commit modifies .snap fixture files.",
+        "Local Axis{X,Y} in scroll_area differs from ars-dom's Axis{Horizontal,Vertical}; cross-crate refactor deferred as not worth the churn.",
+        "Props delay fields use plain Duration (not Option<Duration>), matching open_delay/close_delay in tooltip/hover_card/avatar — Option is reserved for 'None means off/no-dismiss'.",
+        "Proptest regression seed files written by a failing run should be reverted if the invariant causing the failure was removed.",
+        "drop(api) does not compile — Api is a borrow, not Drop; use a block scope to end the borrow instead.",
+        "cargo xci-fast is the mandatory pre-push gate (10 sub-gates: snapshot-count, spec-compile-snippets, spec-validate, clippy -D warnings, doc build, orphan-snapshots, etc.).",
+        "Codex review loop: post @codex review comment, poll for reaction lifecycle (👀 → 👍 / threads), fix each thread with TDD + spec sync, reply/resolve all threads, re-trigger."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-collections/src/virtualization.rs",
+          "finding": "normalize_scroll_left_rtl(raw, content, viewport, mode: RtlScrollMode) is the canonical RTL normalization helper; both RtlScrollMode and this fn are re-exported from ars_collections root."
+        },
+        {
+          "path": "crates/ars-leptos/src/use_machine/mod.rs",
+          "finding": "handle_effects calls effect.run() — the setup closure. A no_cleanup() effect schedules nothing; the adapter component must handle named effects (e.g. AutoHide) by wiring its own timer."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/pagination/mod.rs",
+          "finding": "Pre-existing clippy::unnecessary_option_map_or_else violation (map_or_else(.., identity) → unwrap_or_else(..)) that now fires under stable 1.96.0; fixed as a zero-risk one-liner to unblock clippy on the crate."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "finding": "is_session_active() must include ThumbDragging so resize mid-drag keeps the scrollbar visible. MouseEnter and hover-leave paths must also guard against an active drag to avoid aborting captured-pointer interactions."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "finding": "update_visibility(active: bool) — the active flag must reflect whether the resulting state is Hovering or ScrollActive. Callers: init(false), Resize(is_session_active), SyncProps(active after state resolution). Passing a hardcoded value caused stale visibility on resize and mode-change."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "finding": "ThumbDragStart must cancel_effect(AutoHide) to prevent a stale timer from hiding mid-drag. ThumbDragEnd in ScrollActive must re-emit AutoHide to restart the timer. SyncProps switching away from Scroll must also cancel AutoHide."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "finding": "Horizontal thumb drag in RTL must invert the delta (delta_x = -delta_x) before computing new thumb position, because RTL scroll offset increases leftward."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "finding": "Mid-drag resize must rebase drag_start_thumb_pos by (thumb_new - thumb_old) for the current scroll offset, preserving the grab offset so the next move event stays continuous."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "finding": "CornerSquare part needs data-ars-visible (both axes visible = true). Scrollbar track/thumb parts should use data-ars-orientation for styling — NOT aria-orientation, which is invalid on role=none elements."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/layout.rs",
+          "finding": "ScrollArea proptest invariants: (1) orientation gating — Vertical never sets scrollbar_x_visible, Horizontal never sets scrollbar_y_visible; (2) offsets always in [0, max_scroll] after any event sequence."
+        }
+      ],
+      "workflow": [
+        "Post-implementation audit is a mandatory 3-phase step: (1) spec/impl drift comparison, (2) adjacent surfaces (adapter specs, manifest, catalog, CI gates), (3) llvm-cov coverage audit with justified-miss documentation.",
+        "Each Codex review pass: fetch unresolved threads via gh api, fix each with a failing test first, sync the spec, run xci-fast, commit, push, reply to each thread with commit + test names, resolve all, re-trigger @codex review.",
+        "When a Codex finding challenges a design decision (not a clear bug), surface the tradeoff to the user before implementing to avoid reverting sound architectural choices.",
+        "Insta snapshot rename requires deleting the old .snap file and regenerating; just renaming the test leaves an orphan that blocks the orphan-check gate.",
+        "Spec code blocks that are adapter-sketch fragments (not runnable Rust) need rust,no_check fences to pass the spec-compile-snippets gate.",
+        "The proptest Event arbitrary must include all newly added events (e.g. SyncProps) to exercise the full state space."
+      ]
+    },
+    "friction": [
+      "Rust closure type inference required explicit `&mut Context` annotations on all context_only closures — compiler errors were not localized to the offending closure.",
+      "insta --accept blocked by pre-existing i18n-gated unreferenced snapshots; required manual cargo insta review --accept-new to promote only new fixtures.",
+      "Seven rounds of Codex review (24+ findings) with each round surfacing deeper edge cases in the ThumbDragging/visibility/timer interaction space — significant iteration overhead for a state-machine-heavy component.",
+      "Session limit hit mid-session requiring the user to issue 'Continue' to resume.",
+      "git push did not complete atomically with the commit; required a separate push verification step.",
+      "Pre-existing clippy error in pagination/mod.rs blocked all clippy runs on ars-components until fixed, even though it was unrelated to the task.",
+      "The spec's platform-timer auto-hide example was misleading — it showed set_timeout inside the agnostic machine, contradicting the codebase's adapter-owned-timer convention; required investigation of tooltip/rating_group patterns to identify the correct approach."
+    ],
+    "open_items": [
+      "PR #699 awaiting Codex pass-7 re-trigger and final 👍 before merge; pen/pel/pep fixes were pushed but @codex review was not yet re-posted at transcript end.",
+      "Leptos and Dioxus adapter components for ScrollArea are out of scope for this task (separate future issues).",
+      "AutoHide timer wiring in adapter components: core emits Effect::AutoHide as a named marker; adapter must start/restart/cancel the timer and send Event::HideTimeout back — documented in spec §1.6.1 but not yet implemented.",
+      "Foundation promotion of local Axis{X,Y} vs ars-dom's Axis{Horizontal,Vertical} deferred as a separate cross-cutting refactor.",
+      "Issue #279 board status still In Progress — will auto-close to Done via 'Closes #279' on PR merge."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-31T15:13:51.513564Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 128,
+    "human_modified": 8,
+    "human_removed": 0,
+    "total_committed": 128,
+    "total_lines_changed": 138,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
