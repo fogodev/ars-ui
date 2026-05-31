@@ -1,0 +1,131 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "5d508c3f5f1d",
+  "session_id": "173ea838-dc16-47bb-9a4e-a2e159509710",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-31T14:21:51.451525Z",
+  "branch": "impl-279",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "efb884d6271c",
+  "token_usage": {
+    "input_tokens": 74862,
+    "cache_creation_tokens": 4007300,
+    "cache_read_tokens": 176147774,
+    "output_tokens": 323256,
+    "api_call_count": 449
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Implement a ScrollArea agnostic core component (task #279) for the ars-ui Rust UI library, following existing component patterns for state machines, effects, and adapter boundaries.",
+    "outcome": "A complete ScrollArea state machine was implemented with 5 Codex review passes addressing 21 findings, achieving 62 unit tests, 13 snapshot fixtures, proptest and spec-conformance coverage, and 97.48% line / 98.39% region coverage. PR #699 is pending final Codex approval after the session limit was hit mid-pass-5.",
+    "learnings": {
+      "repo": [
+        "Timer/timeout effects follow a named marker pattern (e.g., Effect::AutoHide / PendingEffect::named) where the adapter owns the actual timer, not the core — matching tooltip and rating_group conventions.",
+        "hide_delay uses plain Duration (not u32 ms, not Option<Duration>) with a default value, consistent with tooltip/hover_card/avatar components.",
+        "RTL scroll normalization should use the canonical ars_collections::normalize_scroll_left_rtl helper with RtlScrollMode rather than inline logic.",
+        "Local Axis enum uses {X, Y} variants while ars-dom uses {Horizontal, Vertical} — a cross-cutting rename has been deferred as known debt.",
+        "Pre-existing clippy errors in sibling modules (e.g., pagination map_or_else) can block all clippy runs on the entire crate and must be fixed as a side-effect.",
+        "context_only closures require explicit &mut Context type annotations due to Rust inference limitations.",
+        "gh CLI API reply calls require -F (integer flag) not -f (string flag) for in_reply_to parameters.",
+        "context_changed is set whenever an apply closure runs (not value-diff), so no-op transitions still report changed.",
+        "set_state_for_test is #[cfg(test)] in ars-core — unavailable cross-crate, so unreachable defensive guards in the core cannot be tested."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 255,
+          "end_line": 255,
+          "finding": "Orientation gating: Context.orientation + ScrollOrientation::allows_x/allows_y helpers required to gate visibility flags per axis in part_attrs."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 563,
+          "end_line": 563,
+          "finding": "on_props_changed was missing; prop changes (scrollbar_visibility, hide_delay, etc.) never synced into Context until remount without Event::SyncProps."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 574,
+          "end_line": 575,
+          "finding": "AutoHide setup closure body is adapter-invoked by design; the core emits a named PendingEffect::named marker and the adapter owns timer lifecycle."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 631,
+          "end_line": 631,
+          "finding": "Resize handler did not clear stale visibility flags in Hover/Scroll modes — update_visibility(active: bool) param required for state-aware clears."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 692,
+          "end_line": 692,
+          "finding": "MouseLeaveScrollbar could leave state stuck; leave events must be guarded to no-op when ThumbDragging is active."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 774,
+          "end_line": 774,
+          "finding": "ThumbDragMove lacked an upper clamp; new_thumb_pos must be clamped to [0, track_size - thumb_size] to prevent scroll offset beyond content bounds."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 786,
+          "end_line": 786,
+          "finding": "ThumbDragEnd did not restart the AutoHide timer in Scroll mode, leaving scrollbar visible forever after a drag."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 409,
+          "end_line": 409,
+          "finding": "compute_thumb_metrics else 0.0 branch is unreachable after the early content<=viewport return — justified uncovered line."
+        },
+        {
+          "path": "crates/ars-collections/src/virtualization.rs",
+          "finding": "Contains the canonical normalize_scroll_left_rtl(raw, content, viewport, mode: RtlScrollMode) helper; scroll_area's inline sign-heuristic was wrong at raw==0 for positive mode."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/pagination/mod.rs",
+          "finding": "Pre-existing map_or_else(identity) pattern denied by Rust stable 1.96.0's new clippy lint — blocks all clippy runs on ars-components; requires a one-line fix."
+        }
+      ],
+      "workflow": [
+        "A 3-phase post-implementation audit (spec/impl drift → adjacent surfaces → coverage) catches systemic issues before Codex review, reducing review round count.",
+        "cargo xci-fast (10 gates) must be green after every fix batch before committing — running it per-patch prevents compounding gate failures.",
+        "Codex review findings should be triaged before implementing: 'clear bug' vs 'judgment call requiring user input' avoids over-fixing on contested design decisions.",
+        "Named test functions per finding (e.g., test_thumb_drag_clamp_upper_bound) make it easy to reply to review threads with specific test names as proof.",
+        "Background snapshot jobs can race; always wait for them and run a clean single pass rather than relying on parallel snap accept."
+      ]
+    },
+    "friction": [
+      "context_only closures required explicit &mut Context type annotations throughout, causing multiple rounds of compiler errors after initial write.",
+      "Background snapshot jobs raced with each other, requiring manual cleanup of stale .snap.pending files.",
+      "insta --accept was blocked by pre-existing i18n-gated snapshot fixtures, requiring manual promotion of only the scroll_area snapshots.",
+      "drop(api) pattern triggered clippy warnings; required block-scope refactoring to eliminate.",
+      "Pre-existing pagination map_or_else clippy error blocked all clippy runs on ars-components and had to be fixed as a side-effect.",
+      "gh CLI used -f instead of -F for in_reply_to, stringifying integers and causing API failures on the first reply attempt.",
+      "21 findings across 5 Codex review passes — each pass surfaced edge cases introduced by the previous round's fixes.",
+      "Session limit hit mid-pass-5, leaving final Codex reply/resolve/re-trigger incomplete."
+    ],
+    "open_items": [
+      "Pass 5 Codex threads not yet replied-to, resolved, or re-triggered — session ended before completion.",
+      "PR #699 merge to main and issue #279 close are pending Codex 👍 approval.",
+      "Adapter implementations (Leptos and Dioxus ScrollArea components) are out of scope for this PR and need separate tasks.",
+      "Axis{X,Y} vs ars-dom Axis{Horizontal,Vertical} naming inconsistency is a known cross-cutting rename, explicitly deferred.",
+      "Coverage measurement (97.48% line) was last taken after pass 3; final number after passes 4 and 5 additions is unverified."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
