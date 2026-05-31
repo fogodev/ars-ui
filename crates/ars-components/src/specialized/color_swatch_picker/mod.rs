@@ -561,7 +561,12 @@ impl Api<'_> {
             attrs.set_bool(HtmlAttr::Data("ars-selected"), true);
         }
 
-        let is_focused = self.ctx.focused_index == Some(index);
+        // Focused styling only applies while focus is actually within the picker;
+        // `focused_index` is retained across blur (for roving tabindex and to
+        // restore the position on re-entry), so gate the visual state on
+        // `State::Focused` to avoid stale `data-ars-focused` after tabbing away.
+        let is_focused =
+            matches!(self.state, State::Focused) && self.ctx.focused_index == Some(index);
 
         // Roving tabindex: the focused item is tabbable, or — before focus has
         // entered — the selected/first item, so keyboard users can Tab in.
@@ -896,6 +901,36 @@ mod tests {
                 .get(&HtmlAttr::Aria(AriaAttr::Disabled)),
             Some("true")
         );
+    }
+
+    #[test]
+    fn blur_clears_stale_focused_styling() {
+        let mut svc = service(Props {
+            colors: palette(),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Focus { is_keyboard: true }));
+        let focused = svc.connect(&|_| {}).focused_index().expect("focused");
+        assert!(
+            svc.connect(&|_| {})
+                .item_attrs(focused)
+                .contains(&HtmlAttr::Data("ars-focused")),
+            "the item is focused while focus is within the picker"
+        );
+
+        drop(svc.send(Event::Blur));
+
+        // After blur the root is idle; no item may still claim focus styling.
+        let api = svc.connect(&|_| {});
+        for index in 0..palette().len() {
+            let item = api.item_attrs(index);
+            assert!(
+                !item.contains(&HtmlAttr::Data("ars-focused")),
+                "item {index} keeps stale data-ars-focused after blur"
+            );
+            assert!(!item.contains(&HtmlAttr::Data("ars-focus-visible")));
+        }
     }
 
     #[test]

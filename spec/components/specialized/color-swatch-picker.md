@@ -468,7 +468,12 @@ impl<'a> Api<'a> {
             attrs.set_bool(HtmlAttr::Data("ars-selected"), true);
         }
 
-        let is_focused = self.ctx.focused_index == Some(index);
+        // Focused styling only applies while focus is actually within the picker;
+        // `focused_index` is retained across blur (for roving tabindex and to
+        // restore the position on re-entry), so gate the visual state on
+        // `State::Focused` to avoid stale `data-ars-focused` after tabbing away.
+        let is_focused =
+            matches!(self.state, State::Focused) && self.ctx.focused_index == Some(index);
         // Roving tabindex: the focused item is tabbable, or — before focus has
         // entered — the selected/first item, so keyboard users can Tab in.
         let is_tabbable = self.tabbable_index() == Some(index);
@@ -587,24 +592,24 @@ ColorSwatchPicker
 └── HiddenInput  (optional -- <input type="hidden">, form submission)
 ```
 
-| Part        | Element   | Key Attributes                                             |
-| ----------- | --------- | ---------------------------------------------------------- |
-| Root        | `<div>`   | `role="listbox"`, `aria-label`, `aria-orientation` (stack) |
-| Item        | `<div>`   | `role="option"`, `aria-selected`, roving `tabindex`        |
+| Part        | Element   | Key Attributes                                                                                           |
+| ----------- | --------- | -------------------------------------------------------------------------------------------------------- |
+| Root        | `<div>`   | `role="listbox"`, `aria-label`, `aria-orientation` (stack)                                               |
+| Item        | `<div>`   | `role="option"`, `aria-selected`, roving `tabindex`                                                      |
 | HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled -- omitted from form submission) |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Attribute          | Element | Value                                                 |
-| ------------------ | ------- | ----------------------------------------------------- |
-| `role="listbox"`   | Root    | ARIA listbox pattern                                  |
-| `aria-label`       | Root    | From `messages.label` (default: "Color swatches")     |
-| `aria-orientation` | Root    | `"horizontal"` for Stack layout; unset for Grid       |
-| `aria-disabled`    | Root    | `"true"` when disabled                                |
-| `role="option"`    | Item    | Individual swatch option                              |
-| `aria-selected`    | Item    | `"true"` when this item's color is the selected value |
+| Attribute          | Element | Value                                                                                                                                                                                                                                                                                     |
+| ------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `role="listbox"`   | Root    | ARIA listbox pattern                                                                                                                                                                                                                                                                      |
+| `aria-label`       | Root    | From `messages.label` (default: "Color swatches")                                                                                                                                                                                                                                         |
+| `aria-orientation` | Root    | `"horizontal"` for Stack layout; unset for Grid                                                                                                                                                                                                                                           |
+| `aria-disabled`    | Root    | `"true"` when disabled                                                                                                                                                                                                                                                                    |
+| `role="option"`    | Item    | Individual swatch option                                                                                                                                                                                                                                                                  |
+| `aria-selected`    | Item    | `"true"` when this item's color is the selected value                                                                                                                                                                                                                                     |
 | `tabindex`         | Item    | Roving: `"0"` on the tabbable item, `"-1"` on others. The tabbable item is the focused item; in the idle state it is the selected item, or the first item when none is selected, so the picker is keyboard-reachable before focus enters. Disabled/empty pickers expose no tabbable item. |
 
 ### 3.2 Keyboard Interaction

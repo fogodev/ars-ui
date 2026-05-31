@@ -770,9 +770,12 @@ impl<'a> Api<'a> {
                 if let Some(color) = self.ctx.value.get() {
                     let val = channel_value(color, ch);
                     let (min, max) = channel_range(ch);
-                    attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{:.2}", val));
-                    attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{:.2}", min));
-                    attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{:.2}", max));
+                    // Percentage channels display/commit as 0-100, so the spinbutton
+                    // ARIA range must match (the stored channel range is 0..=1).
+                    let scale = if channel_is_percentage(ch) { 100.0 } else { 1.0 };
+                    attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{:.2}", val * scale));
+                    attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{:.2}", min * scale));
+                    attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{:.2}", max * scale));
                     attrs.set(HtmlAttr::Aria(AriaAttr::ValueText),
                         (self.ctx.messages.channel_value_text)(ch, val, &self.ctx.locale));
                 }
@@ -940,35 +943,35 @@ ColorField
 └── HiddenInput      (<input>)      (required — type="hidden", submits hex)
 ```
 
-| Part         | Element   | Key Attributes                                                                        |
-| ------------ | --------- | ------------------------------------------------------------------------------------- |
-| Root         | `<div>`   | `data-ars-disabled`, `data-ars-readonly`, `data-ars-invalid`, `data-ars-focused`      |
-| Label        | `<label>` | `for` pointing to Input                                                               |
-| Input        | `<input>` | `type="text"`, `aria-labelledby`, `aria-invalid`, `aria-required`, `aria-describedby`, native `readonly` (when read-only) |
-| Description  | `<div>`   | Referenced by Input `aria-describedby`                                                |
-| ErrorMessage | `<div>`   | `role="alert"`, referenced by Input `aria-describedby`                                |
+| Part         | Element   | Key Attributes                                                                                                                                                        |
+| ------------ | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root         | `<div>`   | `data-ars-disabled`, `data-ars-readonly`, `data-ars-invalid`, `data-ars-focused`                                                                                      |
+| Label        | `<label>` | `for` pointing to Input                                                                                                                                               |
+| Input        | `<input>` | `type="text"`, `aria-labelledby`, `aria-invalid`, `aria-required`, `aria-describedby`, native `readonly` (when read-only)                                             |
+| Description  | `<div>`   | Referenced by Input `aria-describedby`                                                                                                                                |
+| ErrorMessage | `<div>`   | `role="alert"`, referenced by Input `aria-describedby`                                                                                                                |
 | HiddenInput  | `<input>` | `type="hidden"`, `name`, `value` (hex; omitted while invalid so a stale last-valid color is not submitted), `disabled` (when disabled — omitted from form submission) |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Attribute / Behaviour             | Element                  | Value                                          |
-| --------------------------------- | ------------------------ | ---------------------------------------------- |
-| `role="spinbutton"`               | Input (channel mode)     | ARIA spinbutton pattern                        |
-| `inputmode="numeric"`             | Input (channel mode)     | Numeric keyboard on mobile                     |
-| `inputmode="text"`                | Input (whole-color mode) | Text keyboard on mobile                        |
-| `aria-valuenow`                   | Input (channel mode)     | Current channel value                          |
-| `aria-valuemin` / `aria-valuemax` | Input (channel mode)     | From `channel_range(channel)`                  |
-| `aria-valuetext`                  | Input (channel mode)     | Localized formatted channel value              |
-| `aria-label`                      | Input (channel mode)     | Channel name (from messages)                   |
-| `aria-labelledby`                 | Input                    | Label element ID                               |
-| `aria-invalid`                    | Input                    | `"true"` when parse failed or external invalid |
-| `aria-required`                   | Input                    | `"true"` when required                         |
-| `aria-readonly` / `readonly`      | Input                    | When read-only (both the native attribute and `aria-readonly` are set) |
-| `aria-disabled` / `disabled`      | Input                    | When disabled                                  |
-| `aria-describedby`                | Input                    | Description + ErrorMessage IDs                 |
-| `role="alert"`                    | ErrorMessage             | Live error announcement                        |
+| Attribute / Behaviour             | Element                  | Value                                                                                                          |
+| --------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `role="spinbutton"`               | Input (channel mode)     | ARIA spinbutton pattern                                                                                        |
+| `inputmode="numeric"`             | Input (channel mode)     | Numeric keyboard on mobile                                                                                     |
+| `inputmode="text"`                | Input (whole-color mode) | Text keyboard on mobile                                                                                        |
+| `aria-valuenow`                   | Input (channel mode)     | Current channel value, scaled to the visible 0-100 range for percentage channels                               |
+| `aria-valuemin` / `aria-valuemax` | Input (channel mode)     | From `channel_range(channel)`, scaled to 0-100 for percentage channels (saturation/lightness/brightness/alpha) |
+| `aria-valuetext`                  | Input (channel mode)     | Localized formatted channel value                                                                              |
+| `aria-label`                      | Input (channel mode)     | Channel name (from messages)                                                                                   |
+| `aria-labelledby`                 | Input                    | Label element ID                                                                                               |
+| `aria-invalid`                    | Input                    | `"true"` when parse failed or external invalid                                                                 |
+| `aria-required`                   | Input                    | `"true"` when required                                                                                         |
+| `aria-readonly` / `readonly`      | Input                    | When read-only (both the native attribute and `aria-readonly` are set)                                         |
+| `aria-disabled` / `disabled`      | Input                    | When disabled                                                                                                  |
+| `aria-describedby`                | Input                    | Description + ErrorMessage IDs                                                                                 |
+| `role="alert"`                    | ErrorMessage             | Live error announcement                                                                                        |
 
 ### 3.2 Keyboard Interaction
 

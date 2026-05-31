@@ -876,10 +876,27 @@ impl Api<'_> {
                 let val = channel_value(color, ch);
                 let (min, max) = channel_range(ch);
 
+                // Percentage channels display/commit as 0-100, so the spinbutton
+                // ARIA range must match (the stored channel range is 0..=1).
+                let scale = if channel_is_percentage(ch) {
+                    100.0
+                } else {
+                    1.0
+                };
+
                 attrs
-                    .set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{val:.2}"))
-                    .set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{min:.2}"))
-                    .set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{max:.2}"))
+                    .set(
+                        HtmlAttr::Aria(AriaAttr::ValueNow),
+                        format!("{:.2}", val * scale),
+                    )
+                    .set(
+                        HtmlAttr::Aria(AriaAttr::ValueMin),
+                        format!("{:.2}", min * scale),
+                    )
+                    .set(
+                        HtmlAttr::Aria(AriaAttr::ValueMax),
+                        format!("{:.2}", max * scale),
+                    )
                     .set(
                         HtmlAttr::Aria(AriaAttr::ValueText),
                         (self.ctx.messages.channel_value_text)(ch, val, &self.ctx.locale),
@@ -1220,6 +1237,41 @@ mod tests {
             Some("180°")
         );
         assert_eq!(input.get(&HtmlAttr::Aria(AriaAttr::Label)), Some("Hue"));
+    }
+
+    #[test]
+    fn percentage_channel_spinbutton_aria_is_scaled() {
+        // Saturation displays/commits as 0-100, so the spinbutton ARIA range
+        // must be 0..100 (not the stored 0..1) to match the visible value.
+        let svc = service(Props {
+            channel: Some(ColorChannel::Saturation),
+            default_value: Some(ColorValue::from_hsl(0.0, 0.5, 0.5)),
+            ..Props::default()
+        });
+
+        let input = svc.connect(&|_| {}).input_attrs();
+        assert_eq!(
+            input.get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("50.00")
+        );
+        assert_eq!(input.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0.00"));
+        assert_eq!(
+            input.get(&HtmlAttr::Aria(AriaAttr::ValueMax)),
+            Some("100.00")
+        );
+
+        // Raw channels (hue) keep their native range.
+        let hue = service(Props {
+            channel: Some(ColorChannel::Hue),
+            default_value: Some(ColorValue::from_hsl(180.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+        assert_eq!(
+            hue.connect(&|_| {})
+                .input_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueMax)),
+            Some("360.00")
+        );
     }
 
     #[test]

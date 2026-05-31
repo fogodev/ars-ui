@@ -103,6 +103,14 @@ pub struct Context {
     /// The current color value (controlled or uncontrolled).
     pub value: Bindable<ColorValue>,
 
+    /// The hue value in degrees, kept *unwrapped*.
+    ///
+    /// Source of truth for `aria-valuenow`, the value text, and the thumb angle.
+    /// [`ColorValue`] normalizes hue into `[0, 360)` (so the stored color never
+    /// holds `360`), but the End/`SetToMax` endpoint exposes `360°` here so the
+    /// slider value can reach `aria-valuemax`. The derived color stays normalized.
+    pub hue_value: f64,
+
     /// Whether the component is disabled.
     pub disabled: bool,
 
@@ -209,11 +217,26 @@ impl ComponentMessages for Messages {}
 
 /// Apply a normalized angle (`0..=1`) to the hue value.
 fn apply_wheel_angle(ctx: &mut Context, angle: f64) {
+    // A full revolution returns to the top, so drags stay in `[0, 360)`.
     let hue = (angle.clamp(0.0, 1.0) * 360.0) % 360.0;
 
-    let color = *ctx.value.get();
+    set_hue(ctx, hue);
+}
 
-    ctx.value.set(ColorValue { hue, ..color });
+/// Set the hue value (kept unwrapped) and derive the normalized stored color.
+///
+/// [`ColorValue::new`] normalizes the hue into `[0, 360)`, so the stored color
+/// never violates that invariant even when `hue` is the `360°` endpoint.
+fn set_hue(ctx: &mut Context, hue: f64) {
+    ctx.hue_value = hue;
+
+    let color = *ctx.value.get();
+    ctx.value.set(ColorValue::new(
+        hue,
+        color.saturation,
+        color.lightness,
+        color.alpha,
+    ));
 }
 
 /// Build the change-end effect that invokes `Props::on_change_end`.
@@ -255,8 +278,11 @@ impl ars_core::Machine for Machine {
             Bindable::uncontrolled(props.default_value)
         };
 
+        let hue_value = value.get().hue;
+
         let context = Context {
             value,
+            hue_value,
             disabled: props.disabled,
             readonly: props.readonly,
             focused: false,
@@ -303,6 +329,7 @@ impl ars_core::Machine for Machine {
                         Some(color) => {
                             ctx.value.set(color);
                             ctx.value.sync_controlled(Some(color));
+                            ctx.hue_value = color.hue;
                         }
                         None => ctx.value.sync_controlled(None),
                     },
@@ -354,41 +381,31 @@ impl ars_core::Machine for Machine {
             (_, Event::Increment { step }) => {
                 let step_degrees = *step;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let color = *ctx.value.get();
                     // `rem_euclid` keeps the hue non-negative for custom steps > 360.
-                    let new_hue = (color.hue + step_degrees).rem_euclid(360.0);
-                    ctx.value.set(ColorValue {
-                        hue: new_hue,
-                        ..color
-                    });
+                    set_hue(ctx, (ctx.hue_value + step_degrees).rem_euclid(360.0));
                 }))
             }
 
             (_, Event::Decrement { step }) => {
                 let step_degrees = *step;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let color = *ctx.value.get();
                     // `rem_euclid` keeps the hue non-negative for custom steps > 360.
-                    let new_hue = (color.hue - step_degrees).rem_euclid(360.0);
-                    ctx.value.set(ColorValue {
-                        hue: new_hue,
-                        ..color
-                    });
+                    set_hue(ctx, (ctx.hue_value - step_degrees).rem_euclid(360.0));
                 }))
             }
 
             (_, Event::SetToMin) => Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                let color = *ctx.value.get();
-                ctx.value.set(ColorValue { hue: 0.0, ..color });
+                set_hue(ctx, 0.0);
             })),
 
-            (_, Event::SetToMax) => Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                let color = *ctx.value.get();
-                ctx.value.set(ColorValue {
-                    hue: 360.0,
-                    ..color
-                });
-            })),
+            (_, Event::SetToMax) => {
+                // 360° is the same ring position as 0°, but exposing it keeps
+                // aria-valuenow able to reach aria-valuemax; the stored color
+                // hue is normalized to 0° by `set_hue`.
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    set_hue(ctx, 360.0);
+                }))
+            }
 
             _ => None,
         }
@@ -490,7 +507,7 @@ impl Api<'_> {
     /// The current hue formatted for display.
     #[must_use]
     pub fn formatted_value(&self) -> String {
-        (self.ctx.messages.value_text)(self.ctx.value.get().hue, &self.ctx.locale)
+        (self.ctx.messages.value_text)(self.ctx.hue_value, &self.ctx.locale)
     }
 
     /// Attributes for the root element.
@@ -559,7 +576,9 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
 
-        let hue = self.ctx.value.get().hue;
+        // Unwrapped hue so the 360° endpoint reaches aria-valuemax (the stored
+        // color is normalized; 360° and 0° are the same ring position).
+        let hue = self.ctx.hue_value;
 
         attrs
             .set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{hue:.0}"))
@@ -740,6 +759,30 @@ mod tests {
         drop(svc.send(Event::Increment { step: 1.0 }));
 
         assert!((svc.connect(&|_| {}).value().hue - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn set_to_max_preserves_hue_invariant() {
+        let mut svc = service(Props {
+            default_value: ColorValue::from_hsl(120.0, 1.0, 0.5),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::SetToMax));
+
+        let api = svc.connect(&|_| {});
+        // The stored color hue is normalized into [0, 360) (360° -> 0°),
+        // so value() never violates the ColorValue invariant.
+        assert!(
+            (api.value().hue - 0.0).abs() < 1e-9,
+            "stored hue must be normalized, got {}",
+            api.value().hue
+        );
+        // ARIA still exposes the 360° endpoint (== aria-valuemax).
+        assert_eq!(
+            api.thumb_attrs().get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("360")
+        );
     }
 
     #[test]

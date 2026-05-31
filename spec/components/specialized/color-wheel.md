@@ -94,6 +94,13 @@ pub enum Event {
 pub struct Context {
     /// The value of the color wheel.
     pub value: Bindable<ColorValue>,
+    /// The hue value in degrees, kept *unwrapped*.
+    ///
+    /// Source of truth for `aria-valuenow`, the value text, and the thumb angle.
+    /// [`ColorValue`] normalizes hue into `[0, 360)` (so the stored color never
+    /// holds `360`), but the End/`SetToMax` endpoint exposes `360°` here so the
+    /// slider value can reach `aria-valuemax`. The derived color stays normalized.
+    pub hue_value: f64,
     /// Whether the color wheel is disabled.
     pub disabled: bool,
     /// Whether the color wheel is readonly.
@@ -168,9 +175,19 @@ impl Default for Props {
 ```rust,no_check
 /// Apply a normalized angle (0..1) to the hue value.
 fn apply_wheel_angle(ctx: &mut Context, angle: f64) {
+    // A full revolution returns to the top, so drags stay in `[0, 360)`.
     let hue = (angle.clamp(0.0, 1.0) * 360.0) % 360.0;
+    set_hue(ctx, hue);
+}
+
+/// Set the hue value (kept unwrapped) and derive the normalized stored color.
+///
+/// [`ColorValue::new`] normalizes the hue into `[0, 360)`, so the stored color
+/// never violates that invariant even when `hue` is the `360°` endpoint.
+fn set_hue(ctx: &mut Context, hue: f64) {
+    ctx.hue_value = hue;
     let color = *ctx.value.get();
-    ctx.value.set(ColorValue { hue, ..color });
+    ctx.value.set(ColorValue::new(hue, color.saturation, color.lightness, color.alpha));
 }
 
 /// Typed identifier for side effects emitted by the machine.
@@ -212,12 +229,14 @@ impl ars_core::Machine for Machine {
             None => Bindable::uncontrolled(props.default_value.clone()),
         };
 
+        let hue_value = value.get().hue;
         let ids = ComponentIds::from_id(&props.id);
         let locale = env.locale.clone();
         let messages = messages.clone();
 
         (State::Idle, Context {
             value,
+            hue_value,
             disabled: props.disabled,
             readonly: props.readonly,
             focused: false,
@@ -259,6 +278,8 @@ impl ars_core::Machine for Machine {
                     Some(color) => {
                         ctx.value.set(color);
                         ctx.value.sync_controlled(Some(color));
+                        // Re-derive the hue value from the parent's color.
+                        ctx.hue_value = color.hue;
                     }
                     None => ctx.value.sync_controlled(None),
                 }));
@@ -305,36 +326,31 @@ impl ars_core::Machine for Machine {
             (_, Event::Increment { step }) => {
                 let s = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let hue = ctx.value.get().hue;
                     // `rem_euclid` keeps the hue non-negative for custom steps > 360.
-                    let new_hue = (hue + s).rem_euclid(360.0);
-                    let color = ctx.value.get().clone();
-                    ctx.value.set(ColorValue { hue: new_hue, ..color });
+                    set_hue(ctx, (ctx.hue_value + s).rem_euclid(360.0));
                 }))
             }
 
             (_, Event::Decrement { step }) => {
                 let s = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let hue = ctx.value.get().hue;
                     // `rem_euclid` keeps the hue non-negative for custom steps > 360.
-                    let new_hue = (hue - s).rem_euclid(360.0);
-                    let color = ctx.value.get().clone();
-                    ctx.value.set(ColorValue { hue: new_hue, ..color });
+                    set_hue(ctx, (ctx.hue_value - s).rem_euclid(360.0));
                 }))
             }
 
             (_, Event::SetToMin) => {
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get().clone();
-                    ctx.value.set(ColorValue { hue: 0.0, ..color });
+                    set_hue(ctx, 0.0);
                 }))
             }
 
             (_, Event::SetToMax) => {
+                // 360° is the same ring position as 0°, but exposing it keeps
+                // aria-valuenow able to reach aria-valuemax; the stored color
+                // hue is normalized to 0° by `set_hue`.
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get().clone();
-                    ctx.value.set(ColorValue { hue: 360.0, ..color });
+                    set_hue(ctx, 360.0);
                 }))
             }
 
@@ -409,7 +425,7 @@ impl<'a> Api<'a> {
 
     /// Current hue formatted for display.
     pub fn formatted_value(&self) -> String {
-        (self.ctx.messages.value_text)(self.ctx.value.get().hue, &self.ctx.locale)
+        (self.ctx.messages.value_text)(self.ctx.hue_value, &self.ctx.locale)
     }
 
     pub fn root_attrs(&self) -> AttrMap {
@@ -449,7 +465,9 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
 
-        let hue = self.ctx.value.get().hue;
+        // Unwrapped hue so the 360° endpoint reaches aria-valuemax (the stored
+        // color is normalized; 360° and 0° are the same ring position).
+        let hue = self.ctx.hue_value;
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{:.0}", hue));
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), "0");
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), "360");
@@ -527,28 +545,28 @@ ColorWheel
 └── HiddenInput   (optional -- <input type="hidden">)
 ```
 
-| Part        | Element   | Key Attributes                                           |
-| ----------- | --------- | -------------------------------------------------------- |
-| Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-readonly` |
-| Track       | `<div>`   | conic-gradient background via CSS custom property        |
+| Part        | Element   | Key Attributes                                                                                                           |
+| ----------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-readonly`                                                                 |
+| Track       | `<div>`   | conic-gradient background via CSS custom property                                                                        |
 | Thumb       | `<div>`   | `role="slider"`, `aria-valuenow/min/max`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled) |
-| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled -- omitted from form submission) |
+| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled -- omitted from form submission)                 |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Attribute                         | Element | Value                          |
-| --------------------------------- | ------- | ------------------------------ |
-| `role="group"`                    | Root    | Groups wheel components        |
-| `role="slider"`                   | Thumb   | Standard 1D ARIA slider        |
-| `aria-valuenow`                   | Thumb   | Current hue (0-360)            |
-| `aria-valuemin` / `aria-valuemax` | Thumb   | `"0"` / `"360"`                |
-| `aria-label`                      | Thumb   | From messages (default: "Hue") |
-| `aria-valuetext`                  | Thumb   | Formatted hue (e.g., "180")    |
+| Attribute                         | Element | Value                            |
+| --------------------------------- | ------- | -------------------------------- |
+| `role="group"`                    | Root    | Groups wheel components          |
+| `role="slider"`                   | Thumb   | Standard 1D ARIA slider          |
+| `aria-valuenow`                   | Thumb   | Current hue (0-360)              |
+| `aria-valuemin` / `aria-valuemax` | Thumb   | `"0"` / `"360"`                  |
+| `aria-label`                      | Thumb   | From messages (default: "Hue")   |
+| `aria-valuetext`                  | Thumb   | Formatted hue (e.g., "180")      |
 | `tabindex`                        | Thumb   | `"-1"` when disabled, else `"0"` |
-| `aria-disabled`                   | Thumb   | `"true"` when disabled         |
-| `data-ars-focus-visible`          | Thumb   | When keyboard-focused          |
+| `aria-disabled`                   | Thumb   | `"true"` when disabled           |
+| `data-ars-focus-visible`          | Thumb   | When keyboard-focused            |
 
 No `aria-orientation` -- circular geometry has no h/v distinction.
 Arrow keys do NOT flip for RTL -- angular direction is universal.
