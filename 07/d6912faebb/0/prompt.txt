@@ -280,3 +280,38 @@ Continue Codex review loop pass 10: verify spec validate clean, run cargo xci-fa
 <status>completed</status>
 <summary>Background command "Watch Codex review pass 11 in background" completed (exit code 0)</summary>
 </task-notification>
+
+---
+
+<task-notification>
+<task-id>aeb538fb7a77ee101</task-id>
+<tool-use-id>toolu_01T7Qyf4syQrqcDDDHsj5Hdc</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-297-298-299/0b331910-f0e1-4751-b20c-89c65dad4636/tasks/aeb538fb7a77ee101.output</output-file>
+<status>completed</status>
+<summary>Agent "Sync color component specs" completed</summary>
+<result>Validation passes.
+
+## Summary
+
+`cargo xtask spec validate` output:
+```
+Validated 340 files (components + adapters).
+All checks passed.
+```
+
+### Files edited
+
+**`spec/components/specialized/color-picker.md`** (P1)
+- `parse_hsb_args` now clamps the HSB saturation and brightness channels to `0..=1` before the HSB→HSL conversion (`(... / 100.0).clamp(0.0, 1.0)` for each), with the out-of-range-input comment.
+
+**`spec/components/specialized/color-field.md`** (P3)
+- Both inert guards (the IME `is_composing` guard and the `disabled` guard) now let `SetHasDescription` fall through: the fall-through arm is `Event::SyncValue(_) | Event::SetProps | Event::SetHasDescription(_) =&gt; {}` in both.
+- Updated the `aria-describedby` ARIA-table row to note it stays in sync via `SetHasDescription` even while the field is disabled or mid-IME-composition.
+
+**`spec/components/specialized/color-area.md`** (P2)
+- `background_attrs` keeps the `--ars-color-area-bg` hue backdrop and now also exposes `data-ars-x-channel`/`data-ars-y-channel` (lowercased channel names) plus the four corner colors `--ars-color-area-corner-tl/tr/bl/br`, computed in visual order (top = y-axis max since y is inverted; left/right follow the RTL x flip) via `corner(x, y) = with_channel(with_channel(color, x_channel, x), y_channel, y).to_css_hsl()`.
+- Updated the Background attribute-table row to mention the channel data attrs + corner custom properties.
+
+No `crates/` files modified; no git operations run.</result>
+<usage><subagent_tokens>444620</subagent_tokens><tool_uses>22</tool_uses><duration_ms>145576</duration_ms></usage>
+</task-notification>
