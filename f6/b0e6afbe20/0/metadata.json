@@ -1,0 +1,105 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "f6b0e6afbe20",
+  "session_id": "fec18fa9-64f8-40bd-ae52-4502f8a1b2b9",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-31T20:27:30.726477Z",
+  "branch": "t3code/c59961ed",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_picker/mod.rs",
+    "crates/ars-components/src/date_time/date_picker/tests.rs",
+    "crates/ars-i18n/src/date.rs",
+    "spec/components/date-time/date-picker.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-8[1m]",
+  "turn_id": "db6bc60af334",
+  "checkpoint_transcript_start": 461,
+  "transcript_lines_at_start": 461,
+  "token_usage": {
+    "input_tokens": 8806,
+    "cache_creation_tokens": 379787,
+    "cache_read_tokens": 30807560,
+    "output_tokens": 82255,
+    "api_call_count": 100
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Fix two CI failures (Feature Flags — I18n cfg gate mismatch and a CRAP coverage regression) and address four P2 Codex code-review findings on the date picker component branch.",
+    "outcome": "All CI failures resolved, all four Codex findings implemented with tests, spec synced, and the branch merged with origin/main (which added the CRAP regression gate); 151 tests pass and clippy is clean.",
+    "learnings": {
+      "repo": [
+        ".crap-baseline.json is not committed to the repo — it is generated fresh each CI run by the CRAP gate (cargo xtask ci crap), so local baseline verification requires running coverage and cargo-crap manually.",
+        "ars-i18n coverage is measured via the wasm pipeline (web-intl feature), not the native-only lcov — cargo xci-fast's native-fast.lcov does not include ars-i18n, requiring a separate per-crate native lcov for CRAP checks on that crate.",
+        "The spec/components/date-time/date-picker.md snippet gate is syntax-only (syn::parse_file), so unqualified identifiers in snippets do not need to be in scope — no import preamble is injected.",
+        "The calendar component sets the parity reference for readonly semantics: allow opening, block selection mutations — date_picker had diverged by blocking opening entirely.",
+        "No date_picker adapter exists yet; the component is agnostic-only; Context docs referencing on_value_change adapter wiring were written ahead of the Props field existing."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-i18n/src/date.rs",
+          "line": 51,
+          "finding": "DateOrder is imported in the test module only under cfg(all(std, icu4x)), not plain cfg(icu4x) — tests that use DateOrder must match the all(std, icu4x) gate or use super:: qualification."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_picker/mod.rs",
+          "line": 143,
+          "finding": "Context::requested_value doc references 'the adapter's on_value_change wiring' but Props::on_value_change did not exist — doc was written ahead of the field, confirmed as real drift."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_picker/mod.rs",
+          "finding": "Close-side mutations and effects (focus restore, open flag clear, requested_value clear) ran unconditionally on SelectDate even when the picker was already closed — must be gated on closes_open (open→close transition only)."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_picker/mod.rs",
+          "finding": "parse_date and classify_input operated on raw input without normalizing localized (native) digits first — normalize_digits must be called before any ASCII digit parsing."
+        }
+      ],
+      "workflow": [
+        "When a function's CRAP score spikes to 30.0 at 0% coverage after a behavior fix, the root cause is usually that the fix made an alternate path unreachable — add a direct unit test for the now-uncovered path rather than reverting the fix.",
+        "cargo-crap can be run against a per-crate native lcov (llvm-cov export --lcov) to verify CRAP scores locally when the full wasm pipeline is unavailable, filtering output to just the target crate avoids false 0%-coverage noise from unrelated crates.",
+        "When a spec and its implementation directly contradict each other (Props doc vs state machine comments + passing tests), check the sibling component for the canonical parity reference before deciding which side is wrong."
+      ]
+    },
+    "friction": [
+      "clang-22 not available locally, making the full wasm coverage pipeline (needed for the merged native+wasm lcov the CRAP gate uses) unrunnable — had to verify CRAP scores via a separate per-crate native lcov as a proxy.",
+      "Branch was silently behind origin/main which had added a new CRAP regression gate; the CI failure gave no direct indication the gate itself was new, requiring manual git comparison to discover.",
+      "The CRAP regression was an indirect consequence of a correct bug fix (icu_date_order now succeeds for native-digit locales), making it non-obvious at fix time that fallback_date_order would lose coverage.",
+      "The spec had a direct internal contradiction on readonly semantics (Props doc vs state machine + deliberate comments + passing tests), requiring user escalation to resolve.",
+      "Session limit was hit mid-task, interrupting flow and requiring a cold-start continuation."
+    ],
+    "open_items": [
+      "No date_picker adapter exists yet — Context docs reference on_value_change adapter wiring but only the agnostic component is implemented; adapter needs to be built separately.",
+      "Machine::transition has CRAP ~48 (cyclomatic-complexity-dominated) — flagged as unchanged but worth tracking; complexity went down slightly with readonly-guard removals but remains high.",
+      "wasm coverage pipeline not locally runnable (clang-22 missing) — CRAP verification for CI-merged lcov must be trusted to CI; local checks are native-only proxies.",
+      "New #4 readonly semantics reversal flipped three existing tests and changed deliberate behavior — the change should be flagged explicitly in the PR description so reviewers understand it is intentional."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-31T20:26:17.005522Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 117,
+    "human_modified": 57,
+    "human_removed": 0,
+    "total_committed": 117,
+    "total_lines_changed": 174,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 5,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 5
+      }
+    }
+  ]
+}
