@@ -74,6 +74,12 @@ const EXCLUDE_GLOBS: &[&str] = &[
     // real browser, not under `cargo llvm-cov nextest`, so they are uninstrumented
     // (0%) on CI. It is test infrastructure, not shipped library surface.
     "crates/ars-e2e/**",
+    // Per-crate test and bench trees are not shipped library surface. `--path .`
+    // walks them, and complex/uninstrumented test helpers (e.g. proptest harness
+    // code) would otherwise register as spurious CRAP regressions on a gate
+    // documented as covering shipped component-library code only.
+    "crates/**/tests/**",
+    "crates/**/benches/**",
     // `ars-derive` is a proc-macro crate: its code runs inside the compiler, so
     // `cargo-llvm-cov` never instruments it. Every function would otherwise be
     // scored at 0% coverage and dominate the baseline with noise. It is
@@ -213,7 +219,12 @@ fn build_args(options: &Options) -> Vec<String> {
         }
 
         Action::Report => {
+            // `--threshold` only classifies rows (✗/▲/✓); `--min` is what limits
+            // output to functions at/above the cutoff. Pass both so the local
+            // report shows just the risky functions instead of every analyzed one.
             args.push("--threshold".to_owned());
+            args.push(options.threshold.to_string());
+            args.push("--min".to_owned());
             args.push(options.threshold.to_string());
         }
 
@@ -384,10 +395,13 @@ mod tests {
     }
 
     #[test]
-    fn report_uses_threshold_and_never_fails() {
+    fn report_uses_threshold_and_min_and_never_fails() {
         let args = build_args(&options(Action::Report));
 
         assert_eq!(values_after(&args, "--threshold"), vec!["30"]);
+        // `--min` limits the report to risky (>= cutoff) functions; without it
+        // cargo-crap dumps every analyzed function.
+        assert_eq!(values_after(&args, "--min"), vec!["30"]);
         assert!(!has_flag(&args, "--fail-regression"));
         assert!(!has_flag(&args, "--fail-above"));
         assert!(!has_flag(&args, "--baseline"));
@@ -434,6 +448,7 @@ mod tests {
             "examples/**",
             "xtask/**",
             "crates/ars-e2e/**",
+            "crates/**/tests/**",
             "crates/ars-derive/**",
         ] {
             assert!(

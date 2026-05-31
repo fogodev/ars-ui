@@ -279,8 +279,9 @@ jobs:
       - name: Coverage
         run: cargo xtask ci coverage
       # Reuses the merged lcov.info from the coverage step (no recompile).
-      # Fails the job if any function exceeds the CRAP threshold and emits
-      # ::warning annotations for each offender.
+      # Regression-mode gate: fails the job only when a tracked (>= CRAP 30)
+      # shipped-library function regresses vs the committed baseline. Output is
+      # the human table in the job log (no GitHub annotations).
       - name: CRAP gate
         run: cargo xtask ci crap
       - name: Upload coverage diagnostics
