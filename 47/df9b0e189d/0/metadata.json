@@ -1,0 +1,114 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "47df9b0e189d",
+  "session_id": "173ea838-dc16-47bb-9a4e-a2e159509710",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-31T01:49:36.451981Z",
+  "branch": "impl-279",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "dd3ab060dc8f",
+  "token_usage": {
+    "input_tokens": 67753,
+    "cache_creation_tokens": 2797027,
+    "cache_read_tokens": 134292195,
+    "output_tokens": 277791,
+    "api_call_count": 378
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #279 — a ScrollArea agnostic core state machine for the ars-ui Rust component library, following existing patterns for state/event/effect/API structure.",
+    "outcome": "ScrollArea core implemented (~900 lines), wired into layout module, 56 passing tests, 3 Codex review passes completed with all 14 P2 threads fixed and resolved, CI passing, PR #699 opened — pending final thread replies/resolve and Codex re-trigger confirmation for pass 3.",
+    "learnings": {
+      "repo": [
+        "The Effect intent pattern (e.g., Effect::AutoHide) is the established convention for async/timer side-effects in agnostic machines — not inline platform timers. Reference implementations: tooltip and rating_group.",
+        "Props that represent durations use Duration type, not u32/ms integers — consistent with tooltip, hover_card, and avatar conventions.",
+        "The canonical RTL scroll normalization helper is ars_collections::normalize_scroll_left_rtl(RtlScrollMode) in crates/ars-collections/src/virtualization.rs — local reimplementations are error-prone (sign-heuristic breaks at raw==0 for positive mode).",
+        "on_props_changed must be implemented via a SyncProps event + trait method, matching the collapsible pattern — omitting it is a known review catch.",
+        "cargo xci-fast runs 10 CI gates and is the fast pre-push check."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 255,
+          "end_line": 255,
+          "finding": "Visibility gating by orientation (allows_x/allows_y) belongs in the core machine via Context.orientation + ScrollOrientation helpers, not pushed to adapter layer."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 563,
+          "end_line": 563,
+          "finding": "SyncProps event and on_props_changed trait method were missing from initial implementation — required to handle live prop updates, matching collapsible pattern."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 692,
+          "end_line": 692,
+          "finding": "Hover state could get stuck after root-leave + scrollbar-leave sequence; fix requires Context.hovering_root tracking to disambiguate compound hover regions."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 774,
+          "end_line": 774,
+          "finding": "new_thumb_pos was clamped at 0 but not at the upper bound; must clamp to [0, track_size - thumb_size] to prevent thumb overrun."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 631,
+          "end_line": 631,
+          "finding": "Resize with non-overflowing axes did not clear visibility flags when in Hover or Scroll modes — requires explicit flag reset on resize."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 786,
+          "end_line": 786,
+          "finding": "ThumbDragEnd in Scroll mode never restarted the AutoHide timer — must emit Effect::AutoHide after drag ends in Scroll visibility mode."
+        },
+        {
+          "path": "crates/ars-collections/src/virtualization.rs",
+          "finding": "normalize_scroll_left_rtl takes explicit RtlScrollMode (adapter-detected, not sign-heuristic). Sign-heuristic approach fails at raw==0 for positive scroll mode."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/pagination/mod.rs",
+          "finding": "Pre-existing clippy lint: map_or_else(.., identity) flagged by stable toolchain 1.96.0 (released 4 days prior). Fixed incidentally during this session."
+        }
+      ],
+      "workflow": [
+        "context_only closures in this codebase require explicit &mut Context type annotations — the compiler does not infer them, causing multiple build fix rounds.",
+        "Messages structs require PartialEq derive to compile — easy to miss when scaffolding new components.",
+        "Codex review passes are iterative; plan for at least 2-3 passes with P2 threads requiring TDD fixes and spec sync before threads can be resolved.",
+        "Spec, impl, and all adapter specs (Leptos, Dioxus) must be kept in sync — omitting adapter spec updates is a review catch.",
+        "State enums should derive Copy per project spec conventions — easy to overlook during initial scaffolding.",
+        "When fixing Codex threads: implement with TDD, sync spec, reply to thread, resolve thread, then re-trigger Codex — all steps are required."
+      ]
+    },
+    "friction": [
+      "Spec for issue #279 contained an embedded platform set_timeout timer inside the agnostic machine — required design correction before implementation could begin.",
+      "Axis enum was missing from the spec entirely and needed to be defined from scratch.",
+      "Multiple rounds of compiler errors due to missing PartialEq on Messages and missing explicit &mut Context annotations in context_only closures.",
+      "Snapshot test acceptance was blocked by pre-existing i18n-gated fixtures unrelated to this change.",
+      "Background job races during snapshot regeneration caused non-deterministic test behavior.",
+      "New stable toolchain (1.96.0) introduced a clippy regression on pre-existing pagination code, requiring an incidental fix.",
+      "hide_delay_ms: u32 was initially implemented before user corrected it to hide_delay: Duration — convention not documented in spec, discovered via feedback."
+    ],
+    "open_items": [
+      "Codex pass 3 thread replies, thread resolution, and Codex re-trigger were not confirmed complete at transcript end — needs follow-up.",
+      "normalize_scroll_left local helper removed and deferred to ars_collections::normalize_scroll_left_rtl — adapter layer must detect and supply RtlScrollMode, which is not yet implemented in any adapter.",
+      "scrollbar_cross_size prop was added to Leptos/Dioxus adapter spec sketches but full adapter implementations were not written (out of scope for this issue).",
+      "Local Axis{X,Y} enum differs from ars-dom's Axis{Horizontal,Vertical} — identified as a potential future cross-cutting refactor, explicitly deferred."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
