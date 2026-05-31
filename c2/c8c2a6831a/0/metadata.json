@@ -1,0 +1,110 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c2c8c2a6831a",
+  "session_id": "173ea838-dc16-47bb-9a4e-a2e159509710",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-31T14:48:57.64559Z",
+  "branch": "impl-279",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "de1f86f65d90",
+  "token_usage": {
+    "input_tokens": 77983,
+    "cache_creation_tokens": 4045065,
+    "cache_read_tokens": 206086471,
+    "output_tokens": 345540,
+    "api_call_count": 494
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Implement GitHub issue #279: a framework-agnostic core state machine for the ScrollArea component in the ars-ui Rust UI library, covering state transitions, events, effects, and API surface without any platform-specific code.",
+    "outcome": "Full implementation delivered in PR #699 across ~6 hours: state machine with 4 states (Idle/Hovering/ScrollActive/ThumbDragging), complete event/effect/context/props/messages/API types, 8-part Part enum, 64 inline unit and snapshot tests, proptest, and spec-conformance harness. PR went through 6 Codex review passes fixing 21 findings; pass 6 fixes committed but merge verdict still pending.",
+    "learnings": {
+      "repo": [
+        "Named-effect intent pattern: agnostic core emits PendingEffect::named(EffectName::AutoHide, no_cleanup()) as a marker; the adapter owns the timer and sends Event::HideTimeout back. Core never calls platform APIs. Same pattern as tooltip/rating_group.",
+        "context_changed in SendResult is true whenever any apply closure runs — NOT a value-diff. Tests asserting a no-op must not check context_changed == false after a handler that runs a closure.",
+        "Canonical RTL support uses ars_collections::normalize_scroll_left_rtl + RtlScrollMode re-exported at crate root. Local sign-heuristic reimplementations break at raw==0 for positive mode.",
+        "Delay props convention: plain Duration field named <action>_delay (no _ms suffix), with DEFAULT_<ACTION>_DELAY: Duration = Duration::from_millis(N) constant. Matches tooltip/hover_card/avatar.",
+        "update_visibility(active: bool) must receive an explicit flag to correctly gate Hover/Scroll visibility state; callers compute active from the resulting state.",
+        "Orientation gating belongs in agnostic core: ScrollOrientation::allows_x()/allows_y() gate visibility flags in update_visibility. Leaving it to adapters is a footgun.",
+        "SyncProps event + on_props_changed (like collapsible) required for any prop-backed context fields — omitting means controlled prop changes never sync after mount.",
+        "ThumbDragging must be included in is_session_active — resize/enter/visibility checks must not hide scrollbars mid-drag.",
+        "Corner data-ars-visible is true only when both X and Y scrollbars are visible. Scrollbar track uses data-ars-orientation not aria-orientation (decorative, not interactive).",
+        "clamp_offsets helper centralizes per-axis clamping to [0, content - viewport] and must be called after Scroll, Resize, and SyncProps events.",
+        "Snapshot budget is enforced by a CI gate (xci snapshot-count); orphan check requires --features i18n to cover i18n-gated fixtures.",
+        "Spec compile-snippets gate compiles fenced code blocks; adapter sketch snippets need rust,no_check.",
+        "Always-mode visibility invariant in proptest must exclude HideTimeout — it hides unconditionally regardless of mode.",
+        "Pre-existing clippy::unnecessary_option_map_or_else in pagination/mod.rs caused by floating @stable moving to 1.96.0 blocks any clippy run on ars-components; requires a mechanical one-liner fix as a side-task."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "line": 774,
+          "end_line": 774,
+          "finding": "ThumbDragMove clamps the offset at 0 (lower bound) but not at the upper bound (track_size - thumb_size), allowing the thumb to be dragged past the end of the track."
+        },
+        {
+          "path": "crates/ars-components/src/layout/scroll_area/mod.rs",
+          "finding": "context_only closures require explicit |ctx: &mut Context| type annotation — the compiler cannot infer the receiver type in this macro context, causing repeated build-fix iterations."
+        },
+        {
+          "path": "crates/ars-core/src/lib.rs",
+          "finding": "context_changed is set whenever an apply closure runs, not based on value comparison. Tests must account for this when reasoning about no-op transitions."
+        },
+        {
+          "path": "crates/ars-collections/src/virtualization.rs",
+          "finding": "normalize_scroll_left_rtl and RtlScrollMode are defined here and re-exported at crate root — the canonical RTL normalization implementation."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/pagination/mod.rs",
+          "finding": "Pre-existing map_or_else clippy error triggered by compiler version bump to 1.96.0; blocks all clippy runs on ars-components until fixed."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/layout.rs",
+          "finding": "Anatomy/spec-conformance tests for layout components including ScrollArea live here."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/layout.rs",
+          "finding": "Layout proptests with orientation-gated invariants (e.g., Always-mode invariant must exclude HideTimeout events) live here."
+        }
+      ],
+      "workflow": [
+        "Codex review loop: post @codex review, poll for thumbs-up or threads, fix each finding with TDD (failing test → fix → spec sync → xci-fast → commit → push → reply inline → resolve → re-trigger). Never merge without thumbs-up.",
+        "cargo xci-fast (10-step gate) is mandatory before every push.",
+        "Post-implementation audit runs in three phases: Phase 1 (spec/impl drift section-by-section), Phase 2 (adjacent surfaces, 2 clean rounds), Phase 3 (llvm-cov branch coverage).",
+        "Apply snapshot-reviewed label to any PR adding .snap files; re-verify and reapply if snapshots change in later commits.",
+        "Git worktrees are used for feature branches.",
+        "When Codex challenges an architectural boundary, investigate canonical components (tooltip, rating_group) before deciding — if the boundary is correct, reply 'by design' with rationale and resolve the thread."
+      ]
+    },
+    "friction": [
+      "Rust closure type inference inside context_only required explicit |ctx: &mut Context| annotation on every closure, causing multiple build-fix iterations.",
+      "Messages type needed a manual PartialEq derive that was absent from the initial spec example.",
+      "insta --accept was blocked by pre-existing i18n-gated highlight snapshots (unreferenced without the feature flag), requiring manual promote and review.",
+      "Background snapshot jobs raced, leaving stale .pending files.",
+      "Pre-existing pagination clippy error blocked all clippy runs on ars-components.",
+      "Push after the pass-2 commit silently did not complete, requiring an explicit follow-up push command.",
+      "6 Codex review passes and 21 total findings — the ThumbDragging/visibility/timer interaction space was underestimated, leading to cascading edge cases across passes.",
+      "User had to correct hide_delay_ms: u32 to hide_delay: Duration — the initial spec example used a plain integer and the error was not caught in the initial audit."
+    ],
+    "open_items": [
+      "Codex pass 6 @codex review re-triggered but verdict is pending — PR #699 is not yet merged.",
+      "Adapter components (Leptos + Dioxus) for ScrollArea are out of scope for this task — AutoHide timer scheduling, pointer-capture wiring, and RTL mode detection land in separate adapter tasks.",
+      "Axis { X, Y } in scroll_area vs ars-dom's Axis { Horizontal, Vertical } naming inconsistency — cross-crate alignment deferred.",
+      "End-to-end tests are not applicable until adapter components exist."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
