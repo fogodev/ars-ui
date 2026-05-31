@@ -544,6 +544,13 @@ impl ars_core::Machine for Machine {
                     ctx.required = props.required;
                     ctx.name = props.name.clone();
 
+                    // Switching an empty field into channel mode at runtime needs
+                    // the same base-color seed as `init`, so the spinbutton stays
+                    // usable and accessible (mirrors the seed in `init`).
+                    if ctx.channel.is_some() && ctx.value.get().is_none() {
+                        ctx.value.set(Some(ColorValue::default()));
+                    }
+
                     // Re-render the input in the new channel/format unless the
                     // user is mid-edit. `SyncValue` (which runs before this on a
                     // combined update) formatted with the old representation.
@@ -1526,6 +1533,28 @@ mod tests {
         // Whole-color mode with no value stays empty (unchanged behavior).
         let whole = service(Props::default());
         assert!(whole.connect(&|_| {}).value().is_none());
+    }
+
+    #[test]
+    fn set_props_seeds_channel_value_when_switching_from_empty() {
+        // An empty whole-color field switched into channel mode at runtime must
+        // seed a base color so the spinbutton exposes value metadata.
+        let mut svc = service(Props::default());
+        assert!(svc.connect(&|_| {}).value().is_none());
+
+        drop(svc.set_props(Props {
+            id: "color-field".to_string(),
+            channel: Some(ColorChannel::Hue),
+            ..Props::default()
+        }));
+
+        let api = svc.connect(&|_| {});
+        assert!(api.value().is_some(), "channel mode must seed a base color");
+        assert!(
+            api.input_attrs()
+                .contains(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            "spinbutton must expose aria-valuenow after the switch"
+        );
     }
 
     #[test]

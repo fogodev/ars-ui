@@ -209,11 +209,12 @@ impl ars_core::Machine for Machine {
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Parent-driven prop syncs always apply, even when disabled or empty, so
-        // the picker can be re-enabled or populated; everything else is ignored
-        // in those states.
-        let is_prop_sync = matches!(event, Event::SyncValue(_) | Event::SetProps);
+        // the picker can be re-enabled or populated. `Blur` also passes through
+        // so focus disabled/emptied mid-interaction can still be cleaned up;
+        // every other event is ignored in those states.
+        let always_allowed = matches!(event, Event::SyncValue(_) | Event::SetProps | Event::Blur);
 
-        if !is_prop_sync && (ctx.disabled || ctx.colors.is_empty()) {
+        if !always_allowed && (ctx.disabled || ctx.colors.is_empty()) {
             return None;
         }
 

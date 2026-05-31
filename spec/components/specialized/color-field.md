@@ -457,6 +457,13 @@ impl ars_core::Machine for Machine {
                     ctx.required = props.required;
                     ctx.name = props.name.clone();
 
+                    // Switching an empty field into channel mode at runtime needs
+                    // the same base-color seed as `init`, so the spinbutton stays
+                    // usable and accessible (mirrors the seed in `init`).
+                    if ctx.channel.is_some() && ctx.value.get().is_none() {
+                        ctx.value.set(Some(ColorValue::default()));
+                    }
+
                     // Re-render the input in the new channel/format unless the
                     // user is mid-edit. `SyncValue` (which runs before this on a
                     // combined update) formatted with the old representation.

@@ -237,11 +237,12 @@ impl ars_core::Machine for Machine {
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Parent-driven prop syncs always apply, even when disabled or empty, so
-        // the picker can be re-enabled or populated; everything else is ignored
-        // in those states.
-        let is_prop_sync = matches!(event, Event::SyncValue(_) | Event::SetProps);
+        // the picker can be re-enabled or populated. `Blur` also passes through
+        // so focus disabled/emptied mid-interaction can still be cleaned up;
+        // every other event is ignored in those states.
+        let always_allowed = matches!(event, Event::SyncValue(_) | Event::SetProps | Event::Blur);
 
-        if !is_prop_sync && (ctx.disabled || ctx.colors.is_empty()) {
+        if !always_allowed && (ctx.disabled || ctx.colors.is_empty()) {
             return None;
         }
 
@@ -900,6 +901,33 @@ mod tests {
                 .root_attrs()
                 .get(&HtmlAttr::Aria(AriaAttr::Disabled)),
             Some("true")
+        );
+    }
+
+    #[test]
+    fn blur_is_processed_when_disabled_mid_focus() {
+        let mut svc = service(Props {
+            colors: palette(),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::Focus { is_keyboard: true }));
+        assert_eq!(svc.state(), &State::Focused);
+
+        // Parent disables the picker while it is focused.
+        drop(svc.set_props(Props {
+            id: "color-swatch-picker".to_string(),
+            colors: palette(),
+            disabled: true,
+            ..Props::default()
+        }));
+
+        // Blur must still be processed so focus state is cleaned up.
+        drop(svc.send(Event::Blur));
+        assert_eq!(
+            svc.state(),
+            &State::Idle,
+            "blur must clear the focused state"
         );
     }
 

@@ -495,18 +495,20 @@ fn parse_hsl_args(inner: &str, has_alpha: bool) -> Option<ColorValue> {
     Some(ColorValue::new(h, s, l, a.clamp(0.0, 1.0)))
 }
 
-/// Parse "h, s%, b%" inside hsb().
-fn parse_hsb_args(inner: &str) -> Option<ColorValue> {
+/// Parse "h, s%, b%" inside hsb() or "h, s%, b%, a" inside hsba().
+fn parse_hsb_args(inner: &str, has_alpha: bool) -> Option<ColorValue> {
     let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
-    if parts.len() != 3 { return None; }
+    let expected = if has_alpha { 4 } else { 3 };
+    if parts.len() != expected { return None; }
     let h: f64 = parts[0].parse().ok()?;
     let s: f64 = parts[1].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0;
     let b: f64 = parts[2].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0;
+    let a: f64 = if has_alpha { parts[3].parse().ok()? } else { 1.0 };
     // Convert HSB -> HSL: lightness = b * (1 - s/2)
     let l = b * (1.0 - s / 2.0);
     let sl = if l > 0.0 && l < 1.0 { (b - l) / l.min(1.0 - l) } else { 0.0 };
 
-    Some(ColorValue::new(h, sl, l, 1.0))
+    Some(ColorValue::new(h, sl, l, a.clamp(0.0, 1.0)))
 }
 
 /// Parse a user-typed string into a ColorValue.
@@ -529,8 +531,11 @@ pub fn parse_color_string(input: &str) -> Option<ColorValue> {
     if let Some(inner) = strip_fn_call(trimmed, "hsl") {
         return parse_hsl_args(inner, false);
     }
+    if let Some(inner) = strip_fn_call(trimmed, "hsba") {
+        return parse_hsb_args(inner, true);
+    }
     if let Some(inner) = strip_fn_call(trimmed, "hsb") {
-        return parse_hsb_args(inner);
+        return parse_hsb_args(inner, false);
     }
 
     None
@@ -551,7 +556,13 @@ pub fn format_color_string(color: &ColorValue, format: ColorFormat) -> String {
         ColorFormat::Hsl => color.to_css_hsl(),
         ColorFormat::Hsb => {
             let (h, s, b) = color.to_hsb();
-            format!("hsb({:.0}, {:.1}%, {:.1}%)", h, s * 100.0, b * 100.0)
+            // Emit `hsba(...)` for translucent colors so alpha round-trips
+            // through the parser instead of being silently dropped to opaque.
+            if color.alpha < 1.0 {
+                format!("hsba({:.0}, {:.1}%, {:.1}%, {:.2})", h, s * 100.0, b * 100.0, color.alpha)
+            } else {
+                format!("hsb({:.0}, {:.1}%, {:.1}%)", h, s * 100.0, b * 100.0)
+            }
         }
     }
 }

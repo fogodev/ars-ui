@@ -491,7 +491,9 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.props.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        // Pending color so the submitted value matches the in-progress drag in
+        // controlled mode (the thumb already tracks the pending hue_value).
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_hex(true));
         // A disabled control must be omitted from form submission.
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);

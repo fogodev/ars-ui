@@ -644,7 +644,9 @@ impl Api<'_> {
 
         attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
-        let color = self.ctx.value.get();
+        // Use the pending color so the gradient matches the in-progress drag
+        // position in controlled mode (where `get()` returns the stale prop).
+        let color = self.ctx.value.pending();
 
         let gradient = match self.ctx.channel {
             ColorChannel::Hue => "linear-gradient(to right, \
@@ -698,7 +700,9 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
 
-        let color = self.ctx.value.get();
+        // Pending color so the thumb background and the valuetext color name
+        // match the in-progress drag (controlled `get()` returns the old prop).
+        let color = self.ctx.value.pending();
 
         // The unwrapped slider value drives aria-valuenow and the thumb position
         // so the hue endpoint stays at 360° instead of wrapping to 0°.
@@ -787,7 +791,7 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Name, name.clone());
         }
 
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_hex(true));
 
         // A disabled control must be omitted from form submission.
         if self.ctx.disabled {
@@ -1169,6 +1173,35 @@ mod tests {
             value: None,
             ..Props::default()
         }));
+    }
+
+    #[test]
+    fn controlled_drag_display_uses_pending_color() {
+        // Controlled hue slider starting at red. The thumb position uses the
+        // pending slider_value, so the thumb background and hidden input must
+        // use the pending color too — not the stale controlled red.
+        let mut svc = service(Props {
+            channel: ColorChannel::Hue,
+            value: Some(ColorValue::from_hsl(0.0, 1.0, 0.5)),
+            name: Some("hue".to_string()),
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::DragStart {
+            position: 2.0 / 3.0,
+        })); // hue 240 (blue)
+
+        let api = svc.connect(&|_| {});
+        // value() still reflects the controlled prop (red).
+        assert!((api.value().hue - 0.0).abs() < 1e-9);
+        // The hidden input submits the pending (blue) color, matching the thumb.
+        let hidden = api.hidden_input_attrs();
+        let submitted = ColorValue::from_hex(hidden.get(&HtmlAttr::Value).unwrap()).expect("hex");
+        assert!(
+            (submitted.hue - 240.0).abs() < 1.0,
+            "hidden input must carry the pending hue, got {}",
+            submitted.hue
+        );
     }
 
     #[test]

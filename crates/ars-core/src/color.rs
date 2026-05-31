@@ -759,17 +759,25 @@ fn parse_hsl_args(inner: &str, has_alpha: bool) -> Option<ColorValue> {
     ))
 }
 
-/// Parse `h, s%, b%` inside `hsb()`.
-fn parse_hsb_args(inner: &str) -> Option<ColorValue> {
+/// Parse `h, s%, b%` inside `hsb()` or `h, s%, b%, a` inside `hsba()`.
+fn parse_hsb_args(inner: &str, has_alpha: bool) -> Option<ColorValue> {
     let parts = inner.split(',').map(str::trim).collect::<Vec<_>>();
 
-    if parts.len() != 3 {
+    let expected = if has_alpha { 4 } else { 3 };
+
+    if parts.len() != expected {
         return None;
     }
 
     let hue = parse_finite_f64(parts[0])?;
     let saturation = parse_finite_f64(parts[1].strip_suffix('%')?.trim())? / 100.0;
     let brightness = parse_finite_f64(parts[2].strip_suffix('%')?.trim())? / 100.0;
+
+    let alpha = if has_alpha {
+        parse_finite_f64(parts[3])?
+    } else {
+        1.0
+    };
 
     // Convert HSB -> HSL: lightness = brightness * (1 - saturation/2).
     let lightness = brightness * (1.0 - saturation / 2.0);
@@ -780,7 +788,12 @@ fn parse_hsb_args(inner: &str) -> Option<ColorValue> {
         0.0
     };
 
-    Some(ColorValue::new(hue, hsl_saturation, lightness, 1.0))
+    Some(ColorValue::new(
+        hue,
+        hsl_saturation,
+        lightness,
+        alpha.clamp(0.0, 1.0),
+    ))
 }
 
 /// Parse a user-typed string into a [`ColorValue`].
@@ -812,8 +825,12 @@ pub fn parse_color_string(input: &str) -> Option<ColorValue> {
         return parse_hsl_args(inner, false);
     }
 
+    if let Some(inner) = strip_fn_call(trimmed, "hsba") {
+        return parse_hsb_args(inner, true);
+    }
+
     if let Some(inner) = strip_fn_call(trimmed, "hsb") {
-        return parse_hsb_args(inner);
+        return parse_hsb_args(inner, false);
     }
 
     None
@@ -840,11 +857,22 @@ pub fn format_color_string(color: &ColorValue, format: ColorFormat) -> String {
         ColorFormat::Hsb => {
             let (hue, saturation, brightness) = color.to_hsb();
 
-            format!(
-                "hsb({hue:.0}, {:.1}%, {:.1}%)",
-                saturation * 100.0,
-                brightness * 100.0
-            )
+            // Emit `hsba(...)` for translucent colors so alpha round-trips
+            // through the parser instead of being silently dropped to opaque.
+            if color.alpha < 1.0 {
+                format!(
+                    "hsba({hue:.0}, {:.1}%, {:.1}%, {:.2})",
+                    saturation * 100.0,
+                    brightness * 100.0,
+                    color.alpha
+                )
+            } else {
+                format!(
+                    "hsb({hue:.0}, {:.1}%, {:.1}%)",
+                    saturation * 100.0,
+                    brightness * 100.0
+                )
+            }
         }
     }
 }
@@ -1201,6 +1229,30 @@ mod tests {
     fn parse_color_string_dispatches_hex() {
         // The `#` branch of the dispatcher delegates to `from_hex`.
         assert_eq!(parse_color_string("#00ff00").unwrap().to_rgb(), (0, 255, 0));
+    }
+
+    #[test]
+    fn hsb_format_round_trips_alpha() {
+        // A translucent color formatted as HSB must emit hsba(...) and parse
+        // back with the same alpha, not silently become opaque.
+        let translucent = ColorValue::new(210.0, 1.0, 0.5, 0.5);
+
+        let formatted = format_color_string(&translucent, ColorFormat::Hsb);
+        assert!(
+            formatted.starts_with("hsba("),
+            "translucent HSB must use hsba(): {formatted}"
+        );
+
+        let reparsed = parse_color_string(&formatted).expect("hsba parses");
+        assert!(
+            (reparsed.alpha - 0.5).abs() < 0.01,
+            "alpha must round-trip, got {}",
+            reparsed.alpha
+        );
+
+        // Opaque colors keep the plain hsb() form.
+        let opaque = ColorValue::from_hsl(210.0, 1.0, 0.5);
+        assert!(format_color_string(&opaque, ColorFormat::Hsb).starts_with("hsb("));
     }
 
     #[test]

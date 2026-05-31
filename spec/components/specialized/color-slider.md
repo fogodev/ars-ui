@@ -482,7 +482,9 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Track.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        let color = self.ctx.value.get();
+        // Use the pending color so the gradient matches the in-progress drag
+        // position in controlled mode (where `get()` returns the stale prop).
+        let color = self.ctx.value.pending();
         let gradient = match self.ctx.channel {
             ColorChannel::Hue => "linear-gradient(to right, \
                 hsl(0,100%,50%), hsl(60,100%,50%), hsl(120,100%,50%), \
@@ -516,7 +518,9 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
 
-        let color = self.ctx.value.get();
+        // Pending color so the thumb background and the valuetext color name
+        // match the in-progress drag (controlled `get()` returns the old prop).
+        let color = self.ctx.value.pending();
         // The unwrapped slider value drives aria-valuenow and the thumb position
         // so the hue endpoint stays at 360° instead of wrapping to 0°.
         let val = self.ctx.slider_value;
@@ -564,7 +568,7 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.props.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_hex(true));
         // A disabled control must be omitted from form submission.
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);

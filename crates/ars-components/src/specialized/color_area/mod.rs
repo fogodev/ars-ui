@@ -296,27 +296,33 @@ fn apply_area_position(ctx: &mut Context, x: f64, y: f64) {
     ctx.x_value = x_val;
     ctx.y_value = y_val;
 
-    // Apply both channels from a single base color. Reading the bindable twice
-    // (as two `set_*_value` calls would) discards the first change in controlled
-    // mode, where `get()` keeps returning the controlled color.
-    let color = *ctx.value.get();
+    // Apply both channels from the pending color in a single read. Reading
+    // `get()` in controlled mode returns the stale prop, and reading the bindable
+    // twice (as two `set_*_value` calls) would discard the first change.
+    let color = *ctx.value.pending();
     let updated = with_channel(&color, ctx.x_channel, x_val);
     ctx.value.set(with_channel(&updated, ctx.y_channel, y_val));
 }
 
 /// Set the x-axis channel value (unwrapped) and derive the color from it.
+///
+/// Bases the new color on the *pending* value so a prior single-axis change
+/// (e.g. an earlier `IncrementY`) is preserved in controlled mode, where
+/// `get()` still returns the unchanged controlled prop.
 fn set_x_value(ctx: &mut Context, value: f64) {
     ctx.x_value = value;
 
-    let color = *ctx.value.get();
+    let color = *ctx.value.pending();
     ctx.value.set(with_channel(&color, ctx.x_channel, value));
 }
 
 /// Set the y-axis channel value (unwrapped) and derive the color from it.
+///
+/// Bases the new color on the *pending* value (see [`set_x_value`]).
 fn set_y_value(ctx: &mut Context, value: f64) {
     ctx.y_value = value;
 
-    let color = *ctx.value.get();
+    let color = *ctx.value.pending();
     ctx.value.set(with_channel(&color, ctx.y_channel, value));
 }
 
@@ -720,7 +726,8 @@ impl Api<'_> {
 
         attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
-        let color = self.ctx.value.get();
+        // Pending color so the background hue tracks an in-progress controlled drag.
+        let color = self.ctx.value.pending();
 
         attrs.set_style(
             CssProperty::Custom("ars-color-area-bg"),
@@ -759,7 +766,9 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
 
-        let color = self.ctx.value.get();
+        // Pending color so the thumb background and color name match the
+        // in-progress drag in controlled mode.
+        let color = self.ctx.value.pending();
 
         // Unwrapped axis values keep hue endpoints (360°) distinct from 0°.
         let x_val = self.ctx.x_value;
@@ -830,7 +839,7 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Name, name.clone());
         }
 
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_hex(true));
 
         // A disabled control must be omitted from form submission.
         if self.ctx.disabled {
@@ -1097,6 +1106,36 @@ mod tests {
         assert!(
             value_text.contains(&perceptual),
             "value text '{value_text}' must include perceptual color name '{perceptual}'"
+        );
+    }
+
+    #[test]
+    fn controlled_keyboard_updates_both_axes_via_pending() {
+        // Controlled area; default x=Saturation, y=Lightness. Two single-axis
+        // keyboard edits before the parent syncs must both survive — the second
+        // must base on the pending color, not the stale controlled prop.
+        let mut svc = service(Props {
+            value: Some(ColorValue::from_hsl(0.0, 0.2, 0.2)),
+            step: 0.1,
+            ..Props::default()
+        });
+
+        drop(svc.send(Event::IncrementX { step: 0.1 })); // saturation 0.2 -> 0.3
+        drop(svc.send(Event::IncrementY { step: 0.1 })); // lightness 0.2 -> 0.3
+
+        // The pending color (what on_change_end / the hidden input report) must
+        // carry BOTH axis changes, not just the last one.
+        let hidden = svc.connect(&|_| {}).hidden_input_attrs();
+        let submitted = ColorValue::from_hex(hidden.get(&HtmlAttr::Value).unwrap()).expect("hex");
+        assert!(
+            (submitted.saturation - 0.3).abs() < 0.02,
+            "x-axis (saturation) change lost: {}",
+            submitted.saturation
+        );
+        assert!(
+            (submitted.lightness - 0.3).abs() < 0.02,
+            "y-axis (lightness) change lost: {}",
+            submitted.lightness
         );
     }
 
