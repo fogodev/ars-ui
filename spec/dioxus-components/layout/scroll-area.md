@@ -18,12 +18,21 @@ This spec maps the core [`ScrollArea`](../../components/layout/scroll-area.md) c
 pub mod scroll_area {
     #[derive(Props, Clone, PartialEq)]
     pub struct ScrollAreaProps {
+        #[props(default)]
         pub orientation: ScrollOrientation,
+        #[props(default)]
         pub scrollbar_visibility: ScrollbarVisibility,
-        pub hide_delay: Duration,
-        pub min_thumb_size: f64,
-        pub scrollbar_cross_size: f64,
-        pub dir: Direction,
+        // Optional so an omitted prop maps to the core `Props` default (e.g.
+        // `hide_delay` 1200ms, `min_thumb_size` 20px) rather than the field
+        // type's `Default` (`Duration::ZERO` / `0.0`).
+        #[props(optional)]
+        pub hide_delay: Option<Duration>,
+        #[props(optional)]
+        pub min_thumb_size: Option<f64>,
+        #[props(optional)]
+        pub scrollbar_cross_size: Option<f64>,
+        #[props(optional)]
+        pub dir: Option<Direction>,
         #[props(optional)]
         pub aria_label: Option<String>,
         pub children: Element,

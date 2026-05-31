@@ -674,6 +674,26 @@ impl ars_core::Machine for Machine {
                     *content_height,
                 );
                 let active = is_session_active(*state);
+                let min_thumb = ctx.min_thumb_size;
+                // A drag captured its baseline against the OLD track geometry. To
+                // keep tracking continuous, shift `drag_start_thumb_pos` by the
+                // change in the current scroll's thumb position from old to new
+                // geometry. Capture the old thumb position here (pre-resize); the
+                // new one is computed in the closure after the metrics update.
+                let drag_rebase = if *state == State::ThumbDragging {
+                    ctx.drag_axis.map(|axis| {
+                        let scroll = match axis {
+                            Axis::X => ctx.scroll_x,
+                            Axis::Y => ctx.scroll_y,
+                        };
+                        let (vp, content, track) = axis_metrics(ctx, axis);
+                        let thumb_old =
+                            compute_thumb_metrics(vp, content, scroll, track, min_thumb).1;
+                        (axis, thumb_old)
+                    })
+                } else {
+                    None
+                };
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.viewport_width = vw;
@@ -685,6 +705,20 @@ impl ars_core::Machine for Machine {
                     // scroll-syncs never observe an impossible offset.
                     ctx.clamp_offsets();
                     ctx.update_visibility(active);
+
+                    if let Some((axis, thumb_old)) = drag_rebase {
+                        let scroll = match axis {
+                            Axis::X => ctx.scroll_x,
+                            Axis::Y => ctx.scroll_y,
+                        };
+                        let (vp, content, track) = axis_metrics(ctx, axis);
+                        let thumb_new =
+                            compute_thumb_metrics(vp, content, scroll, track, min_thumb).1;
+                        // Keep the pointer baseline; only re-anchor the thumb so
+                        // the current pointer still maps to `scroll`.
+                        ctx.drag_start_thumb_pos += thumb_new - thumb_old;
+                        ctx.drag_start_scroll_pos = scroll;
+                    }
                 }))
             }
 
@@ -858,7 +892,16 @@ impl ars_core::Machine for Machine {
 
                 let (viewport_size, content_size, track_size) = axis_metrics(ctx, axis);
 
-                let delta = pointer - drag_start_pointer;
+                // In RTL, `scroll_x` is normalized to distance from inline-start
+                // (the right edge), which increases as the physical thumb moves
+                // left. Invert the horizontal pointer delta so dragging the thumb
+                // right scrolls toward inline-start. Vertical/LTR are unchanged.
+                let raw_delta = pointer - drag_start_pointer;
+                let delta = if axis == Axis::X && ctx.dir == Direction::Rtl {
+                    -raw_delta
+                } else {
+                    raw_delta
+                };
 
                 let (thumb_size, _) = compute_thumb_metrics(
                     viewport_size,
@@ -1776,6 +1819,48 @@ mod tests {
         drop(service.send(Event::ThumbDragMove { pos: 20.0 }));
 
         assert_close(service.context().scroll_x, 230.0);
+    }
+
+    #[test]
+    fn rtl_horizontal_thumb_drag_inverts_direction() {
+        // In RTL, dragging the horizontal thumb right (positive pointer delta)
+        // scrolls toward inline-start, i.e. decreases the normalized scroll_x.
+        let mut service = service(
+            props()
+                .orientation(ScrollOrientation::Both)
+                .dir(Direction::Rtl),
+        );
+        resize(&mut service, 100.0, 100.0, 400.0, 100.0);
+        drop(service.send(Event::Scroll { x: 150.0, y: 0.0 }));
+        drop(service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::X,
+        }));
+
+        // +20 pointer delta -> -20 thumb delta: 37.5 - 20 = 17.5 -> scroll 70.
+        drop(service.send(Event::ThumbDragMove { pos: 20.0 }));
+        assert_close(service.context().scroll_x, 70.0);
+        assert!(service.context().scroll_x < 150.0);
+    }
+
+    #[test]
+    fn resize_mid_drag_preserves_scroll_on_zero_delta_move() {
+        // A ResizeObserver firing mid-drag rebases the thumb baseline so the next
+        // zero-delta move keeps the current scroll instead of jumping.
+        let mut service = service(props());
+        resize(&mut service, 100.0, 100.0, 100.0, 400.0);
+        drop(service.send(Event::Scroll { x: 0.0, y: 150.0 }));
+        drop(service.send(Event::ThumbDragStart {
+            pos: 0.0,
+            axis: Axis::Y,
+        }));
+
+        // Viewport grows 100 -> 200 mid-drag.
+        resize(&mut service, 100.0, 200.0, 100.0, 400.0);
+
+        // Pointer unchanged (pos still 0) -> scroll must stay 150, not jump to 75.
+        drop(service.send(Event::ThumbDragMove { pos: 0.0 }));
+        assert_close(service.context().scroll_y, 150.0);
     }
 
     #[test]

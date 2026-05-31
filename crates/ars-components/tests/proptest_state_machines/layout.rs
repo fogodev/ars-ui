@@ -560,6 +560,12 @@ fn assert_scroll_area_invariants(service: &Service<scroll_area::Machine>) -> Tes
         prop_assert!(ctx.orientation.allows_y());
     }
 
+    // Stored offsets are always clamped to the scrollable range.
+    let max_x = (ctx.content_width - ctx.viewport_width).max(0.0);
+    let max_y = (ctx.content_height - ctx.viewport_height).max(0.0);
+    prop_assert!(ctx.scroll_x >= 0.0 && ctx.scroll_x <= max_x);
+    prop_assert!(ctx.scroll_y >= 0.0 && ctx.scroll_y <= max_y);
+
     Ok(())
 }
 

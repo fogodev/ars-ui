@@ -20,10 +20,13 @@ pub mod scroll_area {
     pub fn ScrollArea(
         #[prop(optional)] orientation: ScrollOrientation,
         #[prop(optional)] scrollbar_visibility: ScrollbarVisibility,
-        #[prop(optional)] hide_delay: Duration,
-        #[prop(optional)] min_thumb_size: f64,
-        #[prop(optional)] scrollbar_cross_size: f64,
-        #[prop(optional)] dir: Direction,
+        // Optional so an omitted prop maps to the core `Props` default (e.g.
+        // `hide_delay` 1200ms, `min_thumb_size` 20px) rather than the field
+        // type's `Default` (`Duration::ZERO` / `0.0`).
+        #[prop(optional)] hide_delay: Option<Duration>,
+        #[prop(optional)] min_thumb_size: Option<f64>,
+        #[prop(optional)] scrollbar_cross_size: Option<f64>,
+        #[prop(optional)] dir: Option<Direction>,
         #[prop(optional)] aria_label: Option<String>,
         children: Children,
     ) -> impl IntoView

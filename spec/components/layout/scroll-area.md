@@ -377,12 +377,31 @@ impl ars_core::Machine for Machine {
             Event::Resize { viewport_width, viewport_height, content_width, content_height } => {
                 let (vw, vh, cw, ch) = (*viewport_width, *viewport_height, *content_width, *content_height);
                 let active = is_session_active(*state);
+                let min_thumb = ctx.min_thumb_size;
+                // A drag's baseline was captured against the OLD geometry; capture
+                // the current scroll's thumb position now so the closure can shift
+                // the baseline by the old->new thumb delta (keeps tracking
+                // continuous; the pointer baseline is preserved).
+                let drag_rebase = if *state == State::ThumbDragging {
+                    ctx.drag_axis.map(|axis| {
+                        let scroll = match axis { Axis::X => ctx.scroll_x, Axis::Y => ctx.scroll_y };
+                        let (vp, content, track) = axis_metrics(ctx, axis);
+                        (axis, compute_thumb_metrics(vp, content, scroll, track, min_thumb).1)
+                    })
+                } else { None };
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.viewport_width = vw; ctx.viewport_height = vh;
                     ctx.content_width = cw; ctx.content_height = ch;
                     // Clamp offsets the shrunk content/viewport made invalid.
                     ctx.clamp_offsets();
                     ctx.update_visibility(active);
+                    if let Some((axis, thumb_old)) = drag_rebase {
+                        let scroll = match axis { Axis::X => ctx.scroll_x, Axis::Y => ctx.scroll_y };
+                        let (vp, content, track) = axis_metrics(ctx, axis);
+                        let thumb_new = compute_thumb_metrics(vp, content, scroll, track, min_thumb).1;
+                        ctx.drag_start_thumb_pos += thumb_new - thumb_old;
+                        ctx.drag_start_scroll_pos = scroll;
+                    }
                 }))
             }
 
@@ -500,7 +519,11 @@ impl ars_core::Machine for Machine {
                 let (drag_start_pointer, drag_start_thumb, drag_scroll, min_thumb) =
                     (ctx.drag_start_pointer_pos, ctx.drag_start_thumb_pos, ctx.drag_start_scroll_pos, ctx.min_thumb_size);
                 let (viewport_size, content_size, track_size) = axis_metrics(ctx, axis);
-                let delta = p - drag_start_pointer;
+                // In RTL, normalized `scroll_x` (distance from inline-start)
+                // increases as the physical thumb moves left, so invert the
+                // horizontal pointer delta. Vertical/LTR are unchanged.
+                let raw_delta = p - drag_start_pointer;
+                let delta = if axis == Axis::X && ctx.dir == Direction::Rtl { -raw_delta } else { raw_delta };
                 let (thumb_size, _) = compute_thumb_metrics(viewport_size, content_size, drag_scroll, track_size, min_thumb);
                 // Clamp to the scrollable track so a drag past either end cannot
                 // request a scroll offset beyond the content bounds.
