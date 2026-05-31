@@ -204,3 +204,7 @@ Continue the Codex review loop: round-6 spec-sync agent should be done — verif
 ---
 
 You haven't replied and resolved the review threads
+
+---
+
+Continue the Codex review loop pass 7: verify spec validate clean, run cargo xci-fast, push, then reply+resolve the 5 threads (L1 dbid 3330488977/PRRT_kwDORp4enM6F85Qw, L2 3330488979/PRRT_kwDORp4enM6F85Qx, L3 3330488981/PRRT_kwDORp4enM6F85Qz, L4 3330488984/PRRT_kwDORp4enM6F85Q0, L5 3330488985/PRRT_kwDORp4enM6F85Q1) and re-trigger @codex review, then watch for the next pass.
