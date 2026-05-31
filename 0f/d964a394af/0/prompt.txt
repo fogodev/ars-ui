@@ -142,3 +142,33 @@ No `crates/` files modified; no git operations run.</result>
 <status>completed</status>
 <summary>Background command "Watch Codex review pass 4 in background" completed (exit code 0)</summary>
 </task-notification>
+
+---
+
+<task-notification>
+<task-id>aeb538fb7a77ee101</task-id>
+<tool-use-id>toolu_01Uiq411UquexsZeLxCgCqMP</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-297-298-299/0b331910-f0e1-4751-b20c-89c65dad4636/tasks/aeb538fb7a77ee101.output</output-file>
+<status>completed</status>
+<summary>Agent "Sync color component specs" completed</summary>
+<result>Validation passes.
+
+## Summary
+
+`cargo xtask spec validate` output:
+```
+Validated 340 files (components + adapters).
+All checks passed.
+```
+
+### Files edited
+
+**`spec/components/specialized/color-slider.md`**
+- In the `(State::Dragging, Event::DragMove { position })` transition arm, added `if ctx.readonly { return None; }` at the top with the comment (readonly toggled mid-drag must stop further value changes; disabled handled by the guard above; DragEnd still terminates the drag).
+
+**`spec/components/specialized/color-area.md`**
+- Same guard added at the top of the `(State::Dragging, Event::DragMove { x, y })` arm, with the same comment.
+
+Both mirror the impls exactly (preserving each spec's existing variable-binding style). No `crates/` files modified; no git operations run.</result>
+<usage><subagent_tokens>265502</subagent_tokens><tool_uses>9</tool_uses><duration_ms>52828</duration_ms></usage>
+</task-notification>
