@@ -1,0 +1,102 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c0e6f298b218",
+  "session_id": "237b9b0f-3f17-4f7d-a955-e50b875d5151",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-31T00:25:51.018658Z",
+  "branch": "t3code/c59961ed",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "e7108956df17",
+  "token_usage": {
+    "input_tokens": 96390,
+    "cache_creation_tokens": 6494924,
+    "cache_read_tokens": 376325029,
+    "output_tokens": 677371,
+    "api_call_count": 650
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Implement a framework-agnostic DatePicker state machine in crates/ars-components/src/date_time/date_picker/ following a spec (§1.7), using TDD with proptest, achieving high test coverage and passing CI.",
+    "outcome": "PR #697 was created and pushed across 4+ commits with a fully implemented DatePicker state machine at ~100% function / 99.85% line coverage, along with fixes to xtask lint category matching bugs, a public date_order() API, and several spec-driven corrections discovered during 4 rounds of Codex review.",
+    "learnings": {
+      "repo": [
+        "CalendarDate fields are pub(crate); use accessors year()->i32, month()->u8, day()->u8; new_gregorian returns Result; no Ord impl — use .compare() instead",
+        "Machine trait requires 'type Effect: EffectName'; effects use PendingEffect::named(), not use_platform_effects() in core",
+        "ars-i18n had a private date_order(locale) with full CLDR/Intl/fallback logic — DateField and DatePicker were both reimplementing only the fallback heuristic; making it public eliminated duplication",
+        "CalendarDate::to_iso8601() exists and should be used for hidden date input value serialization, not manual year()/month()/day() concatenation",
+        "Service::new takes refs not values; send is #[must_use] requiring drop(svc.send(...))",
+        "is_date_unavailable prop must be Option<calendar::IsDateUnavailableFn> (Callback type), not a plain fn pointer",
+        "MessageFn is PartialEq via Arc pointer equality; Context/Messages derive Clone + manual Debug but not PartialEq",
+        "sync_props_into_ctx must only re-sync input_text when value/format changed, not on every prop sync, to avoid erasing in-progress typing",
+        "requested_value and requested_open context fields are needed for adapter notification in controlled mode",
+        "Controlled open must BLOCK state mutation when the open prop is controlled — differs from popover-parity commit model, and this was revised mid-PR",
+        "nzu8 helper referenced in the spec does not exist anywhere in the codebase — the spec fabricated it",
+        "xtask spec/compile_snippets.rs only does syn syntax parsing, not type/borrow checking; rust,no_check opt-out is available",
+        "FocusIn-open path must NOT emit FocusCalendar — focus stays in the input for typing; only trigger/ArrowDown move focus into the grid",
+        "Snapshot CI check runs on push before the snapshot-reviewed label is added; ci.yml pull_request trigger has no 'labeled' event type, requiring a manual job re-run"
+      ],
+      "code": [
+        {
+          "path": "xtask/src/lint.rs",
+          "line": 814,
+          "finding": "is_component_category matched hyphenated names (date-time) but dirs and snapshot paths use underscores (date_time), silently skipping entire date-time and data-display categories from the snapshot-count gate"
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "line": 814,
+          "finding": "is_ars_components_component had the same hyphen-vs-underscore bug affecting the floor calculation for snapshot counts, causing rating_group to get the wrong (too-high) floor"
+        },
+        {
+          "path": "crates/ars-i18n/src/date.rs",
+          "line": 1245,
+          "finding": "Private date_order(locale) function with full CLDR/Intl/fallback logic existed but was private; DateField and DatePicker were both reimplementing only the fallback heuristic"
+        },
+        {
+          "path": "crates/ars-i18n/src/date.rs",
+          "line": 489,
+          "finding": "CalendarDate::to_iso8601() returns YYYY-MM-DD and is the canonical way to serialize a date for hidden inputs"
+        }
+      ],
+      "workflow": [
+        "TDD approach: write tests first, watch them fail, then implement — proptest caught a real controlled/uncontrolled flip bug where open Bindable diverged from State",
+        "llvm-cov used to identify uncovered branches and drive toward 100% function / 99.85% line coverage",
+        "cargo insta workflow: run insta test to create pending snapshots, review, cargo insta accept, then run --unreferenced=reject as a separate gate",
+        "4 rounds of Codex review were needed, each surfacing second-order issues from prior fixes — iterative review is essential for state machine correctness and controlled-state semantics",
+        "Fixing infrastructure bugs (xtask lint gate) can reveal pre-existing failures (rating_group snapshot count) that must be bundled into the same PR",
+        "Spec had ~10 compile-blockers vs real codebase; always validate spec types and helpers against actual codebase before implementing"
+      ]
+    },
+    "friction": [
+      "Spec §1.7 had ~10 compile-blockers: fabricated nzu8 helper, wrong CalendarDate API (no Ord, fields not pub, new_gregorian returns Result), wrong effect registration pattern, missing type Effect, wrong is_date_unavailable type",
+      "xtask lint silently skipped entire date-time and data-display categories due to hyphen-vs-underscore mismatch — failures were invisible until the bug was found and fixed mid-PR",
+      "rating_group had a pre-existing snapshot count deficit (8 vs floor of 9) that only surfaced after fixing the lint gate, requiring an unexpected bundled fix",
+      "Snapshot CI check timing issue: runs on push before the snapshot-reviewed label is added, requiring a manual job re-run with no automated trigger",
+      "xci-fast failed on first run due to a pre-existing staged pagination/mod.rs nightly-fmt issue unrelated to the PR",
+      "Pre-existing utility/highlight snapshot orphans block --unreferenced=reject globally",
+      "sync_props_into_ctx re-syncing input_text unconditionally erased in-progress typing — subtle state management bug requiring targeted fix after Codex review",
+      "open Bindable was a redundant write-only mirror that could diverge from State in controlled/uncontrolled flip — proptest caught this, required removing the Bindable entirely"
+    ],
+    "open_items": [
+      "Pre-existing utility/highlight snapshot orphans still block bare cargo insta test --unreferenced=reject — needs cleanup in a separate PR",
+      "94 pre-existing crate-wide cargo doc warnings remain unaddressed",
+      "xtask spec/compile_snippets.rs only does syn parse — spec code snippets can reference non-existent helpers without being caught; full type-check would require a separate effort",
+      "ci.yml pull_request trigger has no 'labeled' event type — snapshot-reviewed PRs always need a manual job re-run; options are adding 'labeled' trigger (re-runs full CI expensively) or switching to CHANGELOG-entry-based acknowledgement",
+      "Full cargo xci (not just xci-fast) recommended before merge due to the i18n foundation change (date_order) touching the wasm web-intl path validated only by nightly CI",
+      "Codex pass 4 was still in progress when the transcript ended — PR may still have unresolved review threads"
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
