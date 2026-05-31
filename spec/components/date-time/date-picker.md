@@ -624,10 +624,10 @@ impl ars_core::Machine for Machine {
             // uncontrolled it transitions and fires the focus effect.
             Event::Open => {
                 if ctx.readonly { return None; }
-                open_request(state, props, true, OpenFocus::Calendar)
+                open_request(state, ctx, props, true, OpenFocus::Calendar)
             }
 
-            Event::Close => open_request(state, props, false, OpenFocus::Trigger),
+            Event::Close => open_request(state, ctx, props, false, OpenFocus::Trigger),
 
             Event::Toggle => match state {
                 State::Closed => Self::transition(state, &Event::Open, ctx, props),
@@ -653,13 +653,15 @@ impl ars_core::Machine for Machine {
                 // Suppress a no-op `ValueChange` when the date is already selected.
                 let value_changes = ctx.value.get().as_ref() != Some(&date);
                 // Controlled `open` never mutates `State` here (a stale/scripted
-                // selection must not locally reopen); otherwise close on select.
-                let next_state = if open_controlled {
-                    state.clone()
-                } else if should_close {
+                // selection must not locally reopen). Uncontrolled: close on
+                // select, or *preserve the current state* when `close_on_select`
+                // is false — a selection must never reopen an already-closed
+                // picker (a queued/stale calendar click that races with an
+                // outside-close or focus-out must not bring the popover back).
+                let next_state = if !open_controlled && should_close {
                     State::Closed
                 } else {
-                    State::Open
+                    state.clone()
                 };
                 let mut plan = TransitionPlan::to(next_state).apply(move |ctx| {
                     ctx.requested_value = Some(date.clone());
@@ -754,13 +756,13 @@ impl ars_core::Machine for Machine {
                 // effect — the user focused the input to type, so focus stays in
                 // the field (only trigger/ArrowDown opens move it into the grid).
                 if *state == State::Closed && ctx.open_on_click && !ctx.readonly {
-                    open_request(state, props, true, OpenFocus::None)
+                    open_request(state, ctx, props, true, OpenFocus::None)
                 } else {
                     None
                 }
             }
 
-            Event::FocusOut => open_request(state, props, false, OpenFocus::None),
+            Event::FocusOut => open_request(state, ctx, props, false, OpenFocus::None),
 
             // ── Keyboard shortcuts ───────────────────────────────────────
             Event::KeyDown { key } => match key {
@@ -819,14 +821,28 @@ impl OpenFocus {
 /// `requested_focus`) and signalled via `OpenChange`; the parent reconciles via
 /// the prop and the focus effect fires from `SyncProps` once the state lands.
 /// When **uncontrolled**, `State` transitions and the `focus` effect fires now.
-/// Returns `None` when already in the requested open state.
+/// Returns `None` when already in the requested open state — except that a no-op
+/// *close* clears any stale `requested_focus` left by a controlled open the
+/// parent vetoed (so a later programmatic open uses the per-direction default
+/// rather than a stale "don't move focus" intent).
 fn open_request(
     state: &State,
+    ctx: &Context,
     props: &Props,
     target_open: bool,
     focus: OpenFocus,
 ) -> Option<TransitionPlan<Machine>> {
-    if (*state == State::Open) == target_open { return None; }
+    if (*state == State::Open) == target_open {
+        // A controlled open the parent vetoed leaves a deferred focus intent
+        // with no `SyncProps` to consume it; a subsequent no-op close (e.g.
+        // `FocusOut` after the input lost focus) cancels it. `requested_focus`
+        // is only ever set under controlled `open`, so the uncontrolled no-op
+        // path stays a pure `None`.
+        if !target_open && ctx.requested_focus.is_some() {
+            return Some(TransitionPlan::new().apply(|ctx| { ctx.requested_focus = None; }));
+        }
+        return None;
+    }
     let controlled = props.open.is_some();
     let mut plan = if controlled {
         TransitionPlan::new()
@@ -1278,19 +1294,19 @@ impl ConnectApi for Api<'_> {
 
 ## 2. Anatomy
 
-| Part           | HTML Element            | Description                                          |
-| -------------- | ----------------------- | ---------------------------------------------------- |
-| `Root`         | `<div>`                 | Outermost container; `data-ars-scope="date-picker"`  |
-| `Label`        | `<label>`               | Associated label pointing to the input               |
-| `Control`      | `<div>`                 | Wrapper around the input and trigger button          |
-| `Input`        | `<input>`               | Date text input (or `DateField` segments container)  |
-| `Trigger`      | `<button type="button">` | Calendar icon button to toggle the popover (non-submit) |
+| Part           | HTML Element             | Description                                              |
+| -------------- | ------------------------ | -------------------------------------------------------- |
+| `Root`         | `<div>`                  | Outermost container; `data-ars-scope="date-picker"`      |
+| `Label`        | `<label>`                | Associated label pointing to the input                   |
+| `Control`      | `<div>`                  | Wrapper around the input and trigger button              |
+| `Input`        | `<input>`                | Date text input (or `DateField` segments container)      |
+| `Trigger`      | `<button type="button">` | Calendar icon button to toggle the popover (non-submit)  |
 | `ClearTrigger` | `<button type="button">` | Clears the selected date; hidden when empty (non-submit) |
-| `Positioner`   | `<div>`                 | Floating positioner managed by `ars-dom` positioning |
-| `Content`      | `<div role="dialog">`   | Popover content containing the embedded Calendar     |
-| `Description`  | `<div>`                 | Optional help text                                   |
-| `ErrorMessage` | `<div role="alert">`    | Validation error text                                |
-| `HiddenInput`  | `<input type="hidden">` | ISO date string for form submission                  |
+| `Positioner`   | `<div>`                  | Floating positioner managed by `ars-dom` positioning     |
+| `Content`      | `<div role="dialog">`    | Popover content containing the embedded Calendar         |
+| `Description`  | `<div>`                  | Optional help text                                       |
+| `ErrorMessage` | `<div role="alert">`     | Validation error text                                    |
+| `HiddenInput`  | `<input type="hidden">`  | ISO date string for form submission                      |
 
 ```text
 DatePicker (en-US, closed)
@@ -1329,13 +1345,13 @@ DatePicker (en-US, open)
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Element        | Role/Attribute        | Details                                                                                  |
-| -------------- | --------------------- | ---------------------------------------------------------------------------------------- |
-| `Input`        | `<input type="text">` | `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls` points to Content             |
+| Element        | Role/Attribute           | Details                                                                                  |
+| -------------- | ------------------------ | ---------------------------------------------------------------------------------------- |
+| `Input`        | `<input type="text">`    | `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls` points to Content             |
 | `Trigger`      | `<button type="button">` | `aria-label="Open calendar"`, `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls` |
-| `Content`      | `role="dialog"`       | `aria-label="Choose date"`                                                               |
-| `ErrorMessage` | `role="alert"`        | Announced immediately on render                                                          |
-| `Label`        | `<label>`             | `for` attribute points to Input                                                          |
+| `Content`      | `role="dialog"`          | `aria-label="Choose date"`                                                               |
+| `ErrorMessage` | `role="alert"`           | Announced immediately on render                                                          |
+| `Label`        | `<label>`                | `for` attribute points to Input                                                          |
 
 ### 3.2 Keyboard Interaction
 
@@ -1476,13 +1492,13 @@ The DatePicker participates in HTML form submission via a hidden `<input type="h
 
 ### 6.3 Events
 
-| Callback             | ars-ui                       | Ark UI                     | React Aria                           | Notes                               |
-| -------------------- | ---------------------------- | -------------------------- | ------------------------------------ | ----------------------------------- |
+| Callback             | ars-ui                                    | Ark UI                     | React Aria                           | Notes                                           |
+| -------------------- | ----------------------------------------- | -------------------------- | ------------------------------------ | ----------------------------------------------- |
 | Value change         | `requested_value` + `Effect::ValueChange` | `onValueChange`            | `onChange`                           | Equivalent (adapter forwards `requested_value`) |
-| Open change          | `on_open_change` callback    | `onOpenChange`             | `onOpenChange`                       | Equivalent (fired via `Effect::OpenChange`) |
-| Focus change         | `FocusIn` / `FocusOut`       | `onFocusChange` (calendar) | `onFocus`, `onBlur`, `onFocusChange` | Equivalent                          |
-| View change          | --                           | `onViewChange`             | --                                   | Ark UI view switching               |
-| Visible range change | --                           | `onVisibleRangeChange`     | --                                   | Ark UI calendar navigation callback |
+| Open change          | `on_open_change` callback                 | `onOpenChange`             | `onOpenChange`                       | Equivalent (fired via `Effect::OpenChange`)     |
+| Focus change         | `FocusIn` / `FocusOut`                    | `onFocusChange` (calendar) | `onFocus`, `onBlur`, `onFocusChange` | Equivalent                                      |
+| View change          | --                                        | `onViewChange`             | --                                   | Ark UI view switching                           |
+| Visible range change | --                                        | `onVisibleRangeChange`     | --                                   | Ark UI calendar navigation callback             |
 
 **Gaps:** None. View change and visible range change are Ark UI-specific features tied to their view switching model.
 

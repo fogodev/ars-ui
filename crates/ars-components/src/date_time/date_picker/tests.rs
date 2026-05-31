@@ -2044,6 +2044,75 @@ fn arrow_down_while_open_focuses_calendar() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Codex review #697 (pass 7) — stale-select reopen guard, vetoed-open focus
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn select_date_on_closed_uncontrolled_picker_stays_closed() {
+    // With `close_on_select == false`, a `SelectDate` that races in while an
+    // uncontrolled picker is already closed (a queued/scripted calendar
+    // selection, or a date click that lost to an outside-close/focus-out) must
+    // NOT reopen the popover. The "stay open" branch preserves the current
+    // state instead of forcing `Open`.
+    let mut svc = service_with(
+        Props {
+            close_on_select: false,
+            ..props()
+        },
+        en_us(),
+    );
+    assert_eq!(*svc.state(), State::Closed);
+
+    let result = svc.send(Event::SelectDate {
+        date: date(2024, 3, 15),
+    });
+
+    // The popover stays closed — the selection must not reopen it.
+    assert_eq!(*svc.state(), State::Closed);
+    // The value still commits (and notifies) even though the popover stays put.
+    assert_eq!(svc.context().value.get().as_ref(), Some(&date(2024, 3, 15)));
+    assert_eq!(effects(result), vec![Effect::ValueChange]);
+}
+
+#[test]
+fn vetoed_controlled_focus_open_then_close_clears_stale_focus_intent() {
+    // A controlled focus-in open records a deferred `OpenFocus::None` intent and
+    // requests the open via `OpenChange`. If the parent vetoes (leaves
+    // `open: Some(false)`), no `SyncProps` consumes the intent. A subsequent
+    // no-op close (`FocusOut` while already closed) must cancel the stale intent
+    // so a *later* programmatic open uses the per-direction default
+    // (`FocusCalendar`) rather than the stale "don't move focus" marker.
+    let mut svc = service_with(
+        Props {
+            open: Some(false),
+            ..props()
+        },
+        en_us(),
+    );
+
+    // Focus-in requests an open; parent vetoes, so state stays closed and a
+    // deferred `OpenFocus::None` intent lingers in `requested_focus`.
+    drop(svc.send(Event::FocusIn));
+
+    assert_eq!(*svc.state(), State::Closed);
+    assert_eq!(svc.context().requested_focus, Some(OpenFocus::None));
+
+    // The field loses focus before the parent ever honoured the open: a no-op
+    // close that must clear the stale intent.
+    drop(svc.send(Event::FocusOut));
+
+    assert_eq!(svc.context().requested_focus, None);
+
+    // The parent later opens programmatically: the calendar must receive focus.
+    let emitted = effects(svc.set_props(Props {
+        open: Some(true),
+        ..props()
+    }));
+
+    assert!(emitted.contains(&Effect::FocusCalendar));
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Snapshots — root
 // ────────────────────────────────────────────────────────────────────
 

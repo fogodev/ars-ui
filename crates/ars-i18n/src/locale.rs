@@ -107,6 +107,31 @@ impl Locale {
             })
     }
 
+    /// Returns a clone of this locale with the Gregorian calendar forced via the
+    /// `u-ca-gregory` Unicode extension.
+    ///
+    /// Field-order detection ([`date_order`](crate::date_order)) formats a probe
+    /// date and reads back which field comes first. Locales that default to a
+    /// non-Gregorian calendar (for example `fa-IR`, which uses the Solar Hijri
+    /// calendar) would otherwise convert the probe and emit values that the order
+    /// parser cannot recognise; forcing the Gregorian calendar keeps the probe's
+    /// year/month/day values intact while preserving the locale's own field order.
+    #[cfg(any(
+        feature = "icu4x",
+        all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x"))
+    ))]
+    #[must_use]
+    pub(crate) fn with_gregorian_calendar(&self) -> Self {
+        let mut icu = self.0.clone();
+
+        icu.extensions.unicode.keywords.set(
+            icu::locale::extensions::unicode::key!("ca"),
+            icu::locale::extensions::unicode::value!("gregory"),
+        );
+
+        Self(icu)
+    }
+
     /// Returns the first day of week requested by the `u-fw-*` Unicode extension.
     #[must_use]
     pub fn first_day_of_week_extension(&self) -> Option<Weekday> {

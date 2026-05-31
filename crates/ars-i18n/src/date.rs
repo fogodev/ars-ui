@@ -1278,9 +1278,14 @@ pub fn date_order(locale: &Locale) -> DateOrder {
 fn icu_date_order(locale: &Locale) -> Option<DateOrder> {
     let probe = CalendarDate::new_gregorian(2006, 11, 22).ok()?;
 
-    let formatter = build_icu_date_formatter(locale, FormatLength::Short);
+    // Force the Gregorian calendar so non-Gregorian-default locales (e.g. the
+    // Solar Hijri default for `fa-IR`) keep the probe's recognisable
+    // year/month/day values instead of converting them away.
+    let locale = locale.with_gregorian_calendar();
 
-    let formatted = format_icu_date(locale, FormatLength::Short, &formatter, &probe);
+    let formatter = build_icu_date_formatter(&locale, FormatLength::Short);
+
+    let formatted = format_icu_date(&locale, FormatLength::Short, &formatter, &probe);
 
     numeric_field_order_from_formatted(&formatted)
 }
@@ -1289,9 +1294,13 @@ fn icu_date_order(locale: &Locale) -> Option<DateOrder> {
 fn js_date_order(locale: &Locale) -> Option<DateOrder> {
     let probe = CalendarDate::new_gregorian(2006, 11, 22).ok()?;
 
-    let formatter = build_js_date_formatter(locale, FormatLength::Short);
+    // Force the Gregorian calendar (see `icu_date_order`): `Intl.DateTimeFormat`
+    // honours the `u-ca-gregory` extension carried in the BCP-47 tag.
+    let locale = locale.with_gregorian_calendar();
 
-    let formatted = format_js_date(locale, FormatLength::Short, &formatter, &probe);
+    let formatter = build_js_date_formatter(&locale, FormatLength::Short);
+
+    let formatted = format_js_date(&locale, FormatLength::Short, &formatter, &probe);
 
     numeric_field_order_from_formatted(&formatted)
 }
@@ -1321,6 +1330,11 @@ fn numeric_field_order_from_formatted(formatted: &str) -> Option<DateOrder> {
         Day,
         Year,
     }
+
+    // Transliterate native decimal digits (e.g. Extended Arabic-Indic for
+    // `fa-IR`, Arabic-Indic for `ar-EG`) to ASCII so the probe's year/month/day
+    // values are recognised regardless of the locale's numbering system.
+    let formatted = crate::number::normalize_digits(formatted);
 
     let mut numeric_runs = Vec::new();
 
@@ -2668,6 +2682,29 @@ mod tests {
                 DateFormatterPartKind::Month,
                 DateFormatterPartKind::Day,
             ]
+        );
+    }
+
+    #[cfg(feature = "icu4x")]
+    #[test]
+    fn date_order_uses_icu_order_for_native_digit_and_non_gregorian_locales() {
+        // Locales whose CLDR short date uses native digits and/or a non-Gregorian
+        // default calendar must still resolve to ICU's real numeric field order,
+        // not the `(language, region)` heuristic. Persian (`fa-IR`) writes the
+        // year first (and defaults to the Solar Hijri calendar with Extended
+        // Arabic-Indic digits); the order probe must force the Gregorian calendar
+        // and transliterate the digits so the order is detected as year/month/day
+        // rather than falling back to the heuristic's day/month/year.
+        assert_eq!(
+            date_order(&Locale::parse("fa-IR").expect("locale should parse")),
+            DateOrder::YearMonthDay,
+        );
+
+        // Arabic-Egypt uses Arabic-Indic digits in a day/month/year order; the
+        // transliteration must let ICU's real order win over the heuristic.
+        assert_eq!(
+            date_order(&Locale::parse("ar-EG").expect("locale should parse")),
+            DateOrder::DayMonthYear,
         );
     }
 

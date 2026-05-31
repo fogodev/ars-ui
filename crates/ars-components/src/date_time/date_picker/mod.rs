@@ -725,11 +725,25 @@ impl OpenFocus {
 /// Returns `None` when the popover is already in the requested open state.
 fn open_request(
     state: &State,
+    ctx: &Context,
     props: &Props,
     target_open: bool,
     focus: OpenFocus,
 ) -> Option<TransitionPlan<Machine>> {
     if (*state == State::Open) == target_open {
+        // Already in the requested open-state, so there is nothing to
+        // reconcile. A controlled open the parent vetoed (left `open`
+        // unchanged) leaves a deferred focus intent in `requested_focus` with no
+        // `SyncProps` to consume it; a subsequent no-op *close* (e.g. `FocusOut`
+        // after the input lost focus) cancels that stale intent so a later
+        // programmatic open uses the per-direction default (`FocusCalendar`)
+        // instead of suppressing it. (`requested_focus` is only ever set under
+        // controlled `open`, so the uncontrolled no-op path stays a pure `None`.)
+        if !target_open && ctx.requested_focus.is_some() {
+            return Some(TransitionPlan::new().apply(|ctx: &mut Context| {
+                ctx.requested_focus = None;
+            }));
+        }
         return None;
     }
 
@@ -973,10 +987,10 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly {
                     return None;
                 }
-                open_request(state, props, true, OpenFocus::Calendar)
+                open_request(state, ctx, props, true, OpenFocus::Calendar)
             }
 
-            Event::Close => open_request(state, props, false, OpenFocus::Trigger),
+            Event::Close => open_request(state, ctx, props, false, OpenFocus::Trigger),
 
             Event::Toggle => match state {
                 State::Closed => Self::transition(state, &Event::Open, ctx, props),
@@ -1021,14 +1035,15 @@ impl ars_core::Machine for Machine {
 
                 // When `open` is controlled, never mutate `State` here — the
                 // parent owns it (a stale/scripted selection must not locally
-                // reopen or move the picker). Otherwise close on select (or stay
-                // open when `close_on_select` is false).
-                let next_state = if open_controlled {
-                    state.clone()
-                } else if should_close {
+                // reopen or move the picker). Uncontrolled: close on select, or
+                // *preserve the current state* when `close_on_select` is false —
+                // a selection must never reopen an already-closed picker (a
+                // queued/stale calendar click that races with an outside-close
+                // or focus-out must not bring the popover back).
+                let next_state = if !open_controlled && should_close {
                     State::Closed
                 } else {
-                    State::Open
+                    state.clone()
                 };
 
                 let mut plan = TransitionPlan::to(next_state).apply(move |ctx: &mut Context| {
@@ -1163,13 +1178,13 @@ impl ars_core::Machine for Machine {
                 // so no focus effect is passed — only explicit trigger/ArrowDown
                 // opens move focus into the grid.
                 if *state == State::Closed && ctx.open_on_click && !ctx.readonly {
-                    open_request(state, props, true, OpenFocus::None)
+                    open_request(state, ctx, props, true, OpenFocus::None)
                 } else {
                     None
                 }
             }
 
-            Event::FocusOut => open_request(state, props, false, OpenFocus::None),
+            Event::FocusOut => open_request(state, ctx, props, false, OpenFocus::None),
 
             Event::KeyDown { key } => match key {
                 KeyboardKey::Escape if *state == State::Open => {
