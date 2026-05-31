@@ -53,13 +53,27 @@ pub const BASELINE_PATH: &str = ".crap-baseline.json";
 /// Files skipped at walk time (`--exclude`, relative to `--path`). Honored
 /// because the gate runs under `--path .` (not `--workspace`, where `--exclude`
 /// is a no-op). Every entry must carry a justification.
+// The CRAP gate enforces change-risk for the **shipped component library**
+// only. Tooling, test infrastructure, generated output, and demo apps are
+// excluded: their complexity is not a library-maintenance concern, and several
+// of them (the coverage harness, browser E2E flows) run *as the test/coverage
+// tooling* on CI rather than instrumented-under-test, so they report 0%
+// coverage and would inflate CRAP with pure noise.
 const EXCLUDE_GLOBS: &[&str] = &[
     // Build artifacts and generated output — never first-party source.
     "target/**",
-    // Demo/example apps are not shipped library surface; their complexity is not
-    // a maintenance-risk concern the gate should track. `--workspace` skipped
+    // Demo/example apps are not shipped library surface. `--workspace` skipped
     // them (non-member walk); `--path .` would otherwise sweep them in.
     "examples/**",
+    // `xtask` is the workspace task runner, not shipped library code. Its
+    // wasm-coverage helpers (`generate_wasm_lcov`, `discover_wasm_clang`, …) run
+    // as the coverage tool on CI — executed but not instrumented-as-under-test —
+    // so they score 0% and would register as spurious CRAP regressions.
+    "xtask/**",
+    // `ars-e2e` is the browser/WebDriver end-to-end harness; its flows run in a
+    // real browser, not under `cargo llvm-cov nextest`, so they are uninstrumented
+    // (0%) on CI. It is test infrastructure, not shipped library surface.
+    "crates/ars-e2e/**",
     // `ars-derive` is a proc-macro crate: its code runs inside the compiler, so
     // `cargo-llvm-cov` never instruments it. Every function would otherwise be
     // scored at 0% coverage and dominate the baseline with noise. It is
@@ -411,15 +425,22 @@ mod tests {
     }
 
     #[test]
-    fn exclude_globs_skip_target_and_unmeasured_proc_macro_crate() {
-        assert!(
-            EXCLUDE_GLOBS.contains(&"crates/ars-derive/**"),
-            "ars-derive is unmeasured by llvm-cov and must be excluded"
-        );
-        assert!(
-            EXCLUDE_GLOBS.contains(&"target/**"),
-            "build artifacts must be excluded"
-        );
+    fn exclude_globs_scope_gate_to_shipped_library() {
+        // The CRAP gate must skip tooling, test infrastructure, the proc-macro
+        // crate, build artifacts, and demos — anything that is not shipped
+        // library code or that runs uninstrumented-as-tooling on CI (→ 0%).
+        for required in [
+            "target/**",
+            "examples/**",
+            "xtask/**",
+            "crates/ars-e2e/**",
+            "crates/ars-derive/**",
+        ] {
+            assert!(
+                EXCLUDE_GLOBS.contains(&required),
+                "CRAP gate must exclude {required} (not shipped library code)"
+            );
+        }
     }
 
     #[test]

@@ -3,22 +3,6 @@
   "version": "0.2.2",
   "entries": [
     {
-      "file": "./xtask/src/main.rs",
-      "function": "main",
-      "line": 550,
-      "cyclomatic": 65.0,
-      "coverage": 0.0,
-      "crap": 4290.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "run_tabs_flow",
-      "line": 67,
-      "cyclomatic": 44.0,
-      "coverage": 0.0,
-      "crap": 1980.0
-    },
-    {
       "file": "./crates/ars-leptos/src/navigation/tabs.rs",
       "function": "handle_tab_keydown",
       "line": 1499,
@@ -51,14 +35,6 @@
       "crap": 870.0
     },
     {
-      "file": "./crates/ars-e2e/src/utility/separator.rs",
-      "function": "run_separator_flow",
-      "line": 17,
-      "cyclomatic": 26.0,
-      "coverage": 0.0,
-      "crap": 702.0
-    },
-    {
       "file": "./crates/ars-dioxus/src/platform.rs",
       "function": "mime_type_for_path",
       "line": 625,
@@ -75,38 +51,6 @@
       "crap": 600.0
     },
     {
-      "file": "./crates/ars-e2e/src/utility/landmark.rs",
-      "function": "run_landmark_flow",
-      "line": 28,
-      "cyclomatic": 24.0,
-      "coverage": 0.0,
-      "crap": 600.0
-    },
-    {
-      "file": "./xtask/src/spec/validate.rs",
-      "function": "execute",
-      "line": 12,
-      "cyclomatic": 24.0,
-      "coverage": 0.0,
-      "crap": 600.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_step",
-      "line": 420,
-      "cyclomatic": 23.0,
-      "coverage": 0.0,
-      "crap": 552.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "generate_wasm_lcov",
-      "line": 685,
-      "cyclomatic": 27.0,
-      "coverage": 15.929203539823009,
-      "crap": 460.1746306215897
-    },
-    {
       "file": "./crates/ars-i18n/src/provider/web_intl.rs",
       "function": "WebIntlBackend::convert_date",
       "line": 606,
@@ -115,28 +59,12 @@
       "crap": 420.0
     },
     {
-      "file": "./xtask/src/spec/search.rs",
-      "function": "execute",
-      "line": 87,
-      "cyclomatic": 19.0,
-      "coverage": 0.0,
-      "crap": 380.0
-    },
-    {
       "file": "./crates/ars-i18n/src/provider/web_intl.rs",
       "function": "parse_english_ordinal_month_label",
       "line": 847,
       "cyclomatic": 18.0,
       "coverage": null,
       "crap": 342.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/error_boundary.rs",
-      "function": "run_error_boundary_flow",
-      "line": 60,
-      "cyclomatic": 17.0,
-      "coverage": 0.0,
-      "crap": 306.0
     },
     {
       "file": "./crates/ars-core/src/modality.rs",
@@ -155,59 +83,11 @@
       "crap": 286.0
     },
     {
-      "file": "./crates/ars-e2e/src/utility/visually_hidden.rs",
-      "function": "run_visually_hidden_flow",
-      "line": 17,
-      "cyclomatic": 16.0,
-      "coverage": 0.0,
-      "crap": 272.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "assert_keyboard_focus_sequence",
-      "line": 262,
-      "cyclomatic": 16.0,
-      "coverage": 0.0,
-      "crap": 272.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "discover_wasm_clang",
-      "line": 1845,
-      "cyclomatic": 17.0,
-      "coverage": 6.896551724137931,
-      "crap": 250.2357620238632
-    },
-    {
       "file": "./crates/ars-i18n/src/provider/web_intl.rs",
       "function": "WebIntlBackend::resolve_named_month",
       "line": 180,
       "cyclomatic": 15.0,
       "coverage": null,
-      "crap": 240.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/heading.rs",
-      "function": "run_heading_flow",
-      "line": 27,
-      "cyclomatic": 15.0,
-      "coverage": 0.0,
-      "crap": 240.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "run_button_flow",
-      "line": 72,
-      "cyclomatic": 15.0,
-      "coverage": 0.0,
-      "crap": 240.0
-    },
-    {
-      "file": "./xtask/src/spec/deps.rs",
-      "function": "execute",
-      "line": 12,
-      "cyclomatic": 15.0,
-      "coverage": 0.0,
       "crap": 240.0
     },
     {
@@ -251,14 +131,6 @@
       "crap": 210.0
     },
     {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "collect_md_files",
-      "line": 109,
-      "cyclomatic": 14.0,
-      "coverage": 0.0,
-      "crap": 210.0
-    },
-    {
       "file": "./crates/ars-leptos/src/utility/landmark.rs",
       "function": "Landmark",
       "line": 34,
@@ -275,41 +147,9 @@
       "crap": 182.0
     },
     {
-      "file": "./crates/ars-e2e/src/utility/mod.rs",
-      "function": "run",
-      "line": 71,
-      "cyclomatic": 13.0,
-      "coverage": 0.0,
-      "crap": 182.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/dismissable.rs",
-      "function": "assert_region_anatomy",
-      "line": 87,
-      "cyclomatic": 13.0,
-      "coverage": 0.0,
-      "crap": 182.0
-    },
-    {
       "file": "./crates/ars-components/src/date_time/calendar/mod.rs",
       "function": "Api::part_attrs",
       "line": 2176,
-      "cyclomatic": 13.0,
-      "coverage": 0.0,
-      "crap": 182.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run_stage_inner",
-      "line": 225,
-      "cyclomatic": 13.0,
-      "coverage": 0.0,
-      "crap": 182.0
-    },
-    {
-      "file": "./xtask/src/spec/context.rs",
-      "function": "execute",
-      "line": 15,
       "cyclomatic": 13.0,
       "coverage": 0.0,
       "crap": 182.0
@@ -331,22 +171,6 @@
       "crap": 156.0
     },
     {
-      "file": "./crates/ars-e2e/src/utility/highlight.rs",
-      "function": "run_highlight_flow",
-      "line": 24,
-      "cyclomatic": 12.0,
-      "coverage": 0.0,
-      "crap": 156.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "assert_form_attrs",
-      "line": 206,
-      "cyclomatic": 12.0,
-      "coverage": 0.0,
-      "crap": 156.0
-    },
-    {
       "file": "./crates/ars-components/src/specialized/file_upload/mod.rs",
       "function": "Api::part_attrs",
       "line": 1696,
@@ -361,46 +185,6 @@
       "cyclomatic": 145.0,
       "coverage": 97.97297297297297,
       "crap": 145.17511148155094
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/dismissable.rs",
-      "function": "run_dismissable_flow",
-      "line": 64,
-      "cyclomatic": 11.0,
-      "coverage": 0.0,
-      "crap": 132.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "discover_chromedriver",
-      "line": 1788,
-      "cyclomatic": 11.0,
-      "coverage": 0.0,
-      "crap": 132.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_coverage",
-      "line": 722,
-      "cyclomatic": 11.0,
-      "coverage": 0.0,
-      "crap": 132.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "dioxusfmt_files",
-      "line": 1009,
-      "cyclomatic": 11.0,
-      "coverage": 0.0,
-      "crap": 132.0
-    },
-    {
-      "file": "./xtask/src/spec/toc.rs",
-      "function": "execute",
-      "line": 12,
-      "cyclomatic": 11.0,
-      "coverage": 0.0,
-      "crap": 132.0
     },
     {
       "file": "./crates/ars-leptos/src/utility/heading.rs",
@@ -451,14 +235,6 @@
       "crap": 110.0
     },
     {
-      "file": "./xtask/src/manifest.rs",
-      "function": "Error::fmt",
-      "line": 159,
-      "cyclomatic": 10.0,
-      "coverage": 0.0,
-      "crap": 110.0
-    },
-    {
       "file": "./crates/ars-core/src/connect.rs",
       "function": "HtmlEvent::fmt",
       "line": 1116,
@@ -496,14 +272,6 @@
       "line": 98,
       "cyclomatic": 9.0,
       "coverage": null,
-      "crap": 90.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "assert_disabled_state",
-      "line": 170,
-      "cyclomatic": 9.0,
-      "coverage": 0.0,
       "crap": 90.0
     },
     {
@@ -560,38 +328,6 @@
       "line": 562,
       "cyclomatic": 9.0,
       "coverage": null,
-      "crap": 90.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run_streaming_process",
-      "line": 697,
-      "cyclomatic": 9.0,
-      "coverage": 0.0,
-      "crap": 90.0
-    },
-    {
-      "file": "./xtask/src/mutants.rs",
-      "function": "run",
-      "line": 110,
-      "cyclomatic": 9.0,
-      "coverage": 0.0,
-      "crap": 90.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_coverage_native",
-      "line": 788,
-      "cyclomatic": 9.0,
-      "coverage": 0.0,
-      "crap": 90.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "collect_rust_files",
-      "line": 1042,
-      "cyclomatic": 9.0,
-      "coverage": 0.0,
       "crap": 90.0
     },
     {
@@ -691,30 +427,6 @@
       "crap": 72.0
     },
     {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "start_fixture_session",
-      "line": 123,
-      "cyclomatic": 8.0,
-      "coverage": 0.0,
-      "crap": 72.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/z_index_allocator.rs",
-      "function": "run_z_index_allocator_flow",
-      "line": 18,
-      "cyclomatic": 8.0,
-      "coverage": 0.0,
-      "crap": 72.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "assert_as_child_links",
-      "line": 225,
-      "cyclomatic": 8.0,
-      "coverage": 0.0,
-      "crap": 72.0
-    },
-    {
       "file": "./crates/ars-components/tests/proptest_state_machines/navigation/tree_view.rs",
       "function": "assert_tree_view_invariants",
       "line": 193,
@@ -739,60 +451,12 @@
       "crap": 72.0
     },
     {
-      "file": "./xtask/src/crap.rs",
-      "function": "Error::fmt",
-      "line": 130,
-      "cyclomatic": 8.0,
-      "coverage": 0.0,
-      "crap": 72.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "Error::fmt",
-      "line": 109,
-      "cyclomatic": 8.0,
-      "coverage": 0.0,
-      "crap": 72.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "leptosfmt_inputs",
-      "line": 956,
-      "cyclomatic": 8.0,
-      "coverage": 0.0,
-      "crap": 72.0
-    },
-    {
-      "file": "./xtask/src/spec/adapters.rs",
-      "function": "execute",
-      "line": 12,
-      "cyclomatic": 8.0,
-      "coverage": 0.0,
-      "crap": 72.0
-    },
-    {
-      "file": "./xtask/src/spec/search.rs",
-      "function": "SectionFilter::heading_patterns",
-      "line": 50,
-      "cyclomatic": 8.0,
-      "coverage": 0.0,
-      "crap": 72.0
-    },
-    {
       "file": "./crates/ars-components/src/navigation/tree_view/mod.rs",
       "function": "Machine::transition",
       "line": 794,
       "cyclomatic": 67.0,
       "coverage": 98.15384615384616,
       "crap": 67.0282457605826
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "NightlyLlvmTools::discover",
-      "line": 1938,
-      "cyclomatic": 8.0,
-      "coverage": 4.0,
-      "crap": 64.623104
     },
     {
       "file": "./crates/ars-components/src/selection/listbox/mod.rs",
@@ -875,134 +539,6 @@
       "crap": 56.0
     },
     {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "visible_tab",
-      "line": 233,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/axe.rs",
-      "function": "axe_source",
-      "line": 52,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/browser.rs",
-      "function": "webdriver_addr",
-      "line": 46,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/client_only.rs",
-      "function": "run_client_only_flow",
-      "line": 18,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/mod.rs",
-      "function": "visible_tab_now",
-      "line": 230,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "assert_size_attrs",
-      "line": 150,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "assert_link_button",
-      "line": 245,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "merge_files",
-      "line": 641,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./xtask/src/mutants.rs",
-      "function": "Error::fmt",
-      "line": 63,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "clippy_workspace",
-      "line": 500,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./xtask/src/ci/feature_matrix.rs",
-      "function": "run_group",
-      "line": 330,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "execute",
-      "line": 44,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./xtask/src/spec/related.rs",
-      "function": "execute",
-      "line": 12,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./xtask/src/spec/digest.rs",
-      "function": "execute",
-      "line": 18,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./xtask/src/spec/category.rs",
-      "function": "execute",
-      "line": 12,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "check_adapter_parity",
-      "line": 127,
-      "cyclomatic": 7.0,
-      "coverage": 0.0,
-      "crap": 56.0
-    },
-    {
       "file": "./crates/ars-components/src/input/pin_input/mod.rs",
       "function": "Machine::transition",
       "line": 547,
@@ -1025,14 +561,6 @@
       "cyclomatic": 51.0,
       "coverage": 98.11320754716981,
       "crap": 51.01747079804134
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "stage_name",
-      "line": 791,
-      "cyclomatic": 12.0,
-      "coverage": 35.714285714285715,
-      "crap": 50.256559766763836
     },
     {
       "file": "./crates/ars-core/src/connect.rs",
@@ -1195,78 +723,6 @@
       "crap": 42.0
     },
     {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "assert_focus_indicator_visible",
-      "line": 56,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "assert_forced_colors_focus_indicator_visible",
-      "line": 72,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "wait_for_tab_absent",
-      "line": 190,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "visible_tab_order",
-      "line": 247,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "spawn_fixture_server",
-      "line": 57,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/axe.rs",
-      "function": "run_axe",
-      "line": 12,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/dismissable.rs",
-      "function": "assert_inside_pointer_does_not_dismiss",
-      "line": 120,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "focus_by_tabbing_to",
-      "line": 323,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "collect_forward_tab_ids",
-      "line": 346,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
       "file": "./crates/ars-components/tests/proptest_state_machines/selection.rs",
       "function": "assert_combobox_invariants",
       "line": 470,
@@ -1320,62 +776,6 @@
       "line": 141,
       "cyclomatic": 6.0,
       "coverage": null,
-      "crap": 42.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "preflight_wasm_runner",
-      "line": 1751,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "tee_reader",
-      "line": 737,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "format_workspace",
-      "line": 322,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_fmt",
-      "line": 476,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "cargo_with_format",
-      "line": 878,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./xtask/src/ci/feature_matrix.rs",
-      "function": "group_step",
-      "line": 362,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
-      "crap": 42.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "Error::fmt",
-      "line": 85,
-      "cyclomatic": 6.0,
-      "coverage": 0.0,
       "crap": 42.0
     },
     {
@@ -1651,78 +1051,6 @@
       "crap": 30.0
     },
     {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "assert_selected_indicator_visible",
-      "line": 105,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "FocusStyles::has_visible_focus_indicator",
-      "line": 208,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "wait_for_visible_tab",
-      "line": 208,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "visible_tabs_debug",
-      "line": 407,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/main.rs",
-      "function": "main",
-      "line": 75,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/mod.rs",
-      "function": "visible_tab",
-      "line": 208,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/dismissable.rs",
-      "function": "assert_dismiss_button_keyboard_activation",
-      "line": 139,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "assert_variant_attrs",
-      "line": 131,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "assert_loading_state",
-      "line": 193,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
       "file": "./crates/ars-components/tests/proptest_state_machines/navigation/link.rs",
       "function": "assert_link_invariants",
       "line": 68,
@@ -1779,62 +1107,6 @@
       "crap": 30.0
     },
     {
-      "file": "./xtask/src/test.rs",
-      "function": "run_invocations",
-      "line": 446,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_release",
-      "line": 554,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_spec_compile_snippets",
-      "line": 638,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "map_test_error",
-      "line": 851,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "dioxusfmt",
-      "line": 992,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "capture_command_stdout",
-      "line": 1121,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
-      "file": "./xtask/src/spec/info.rs",
-      "function": "execute",
-      "line": 12,
-      "cyclomatic": 5.0,
-      "coverage": 0.0,
-      "crap": 30.0
-    },
-    {
       "file": "./crates/ars-components/src/input/textarea/mod.rs",
       "function": "Machine::transition",
       "line": 621,
@@ -1849,30 +1121,6 @@
       "cyclomatic": 28.0,
       "coverage": 99.12280701754386,
       "crap": 28.000529177668703
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "check_enum_variants",
-      "line": 816,
-      "cyclomatic": 27.0,
-      "coverage": 96.55172413793103,
-      "crap": 27.029890524416746
-    },
-    {
-      "file": "./xtask/src/crap.rs",
-      "function": "run",
-      "line": 238,
-      "cyclomatic": 6.0,
-      "coverage": 16.666666666666664,
-      "crap": 26.83333333333334
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "format_stdin",
-      "line": 344,
-      "cyclomatic": 9.0,
-      "coverage": 41.66666666666667,
-      "crap": 25.078124999999993
     },
     {
       "file": "./crates/ars-components/src/data_display/table/mod.rs",
@@ -1899,28 +1147,12 @@
       "crap": 24.713653544478916
     },
     {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "code_lines_without_comments_and_strings",
-      "line": 717,
-      "cyclomatic": 24.0,
-      "coverage": 92.85714285714286,
-      "crap": 24.20991253644315
-    },
-    {
       "file": "./crates/ars-components/src/navigation/accordion/mod.rs",
       "function": "Machine::transition",
       "line": 395,
       "cyclomatic": 24.0,
       "coverage": 97.43589743589743,
       "crap": 24.009710210893644
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "lint_block",
-      "line": 276,
-      "cyclomatic": 24.0,
-      "coverage": 98.59154929577466,
-      "crap": 24.001609338634466
     },
     {
       "file": "./crates/ars-components/src/overlay/drawer/mod.rs",
@@ -1974,14 +1206,6 @@
       "file": "./crates/ars-components/src/navigation/tabs/mod.rs",
       "function": "Api::on_tab_keydown",
       "line": 1673,
-      "cyclomatic": 23.0,
-      "coverage": 100.0,
-      "crap": 23.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "step_name",
-      "line": 1257,
       "cyclomatic": 23.0,
       "coverage": 100.0,
       "crap": 23.0
@@ -2371,142 +1595,6 @@
       "crap": 20.0
     },
     {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "assert_active_role",
-      "line": 11,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "assert_active_text_contains",
-      "line": 39,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "run",
-      "line": 47,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "assert_visible_tab_order",
-      "line": 264,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "drag_tab_onto",
-      "line": 291,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "assert_visible_tab_roledescription",
-      "line": 429,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "assert_selected_tab_contains",
-      "line": 443,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/mod.rs",
-      "function": "run",
-      "line": 38,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/browser.rs",
-      "function": "maybe_spawn_chromedriver",
-      "line": 15,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/mod.rs",
-      "function": "open_utility_panel",
-      "line": 106,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/mod.rs",
-      "function": "element_by_id",
-      "line": 116,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/dismissable.rs",
-      "function": "run",
-      "line": 44,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/dismissable.rs",
-      "function": "assert_escape_dismisses",
-      "line": 156,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/dismissable.rs",
-      "function": "wait_for_status_contains",
-      "line": 245,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/error_boundary.rs",
-      "function": "run",
-      "line": 40,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "run",
-      "line": 50,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "assert_button_root",
-      "line": 122,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
       "file": "./crates/ars-components/tests/proptest_state_machines/data_display.rs",
       "function": "no_disabled_keys_in_selection",
       "line": 180,
@@ -2587,124 +1675,12 @@
       "crap": 20.0
     },
     {
-      "file": "./xtask/src/coverage.rs",
-      "function": "build_profiler_runtime_shim",
-      "line": 1556,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "preflight_nightly_wasm32",
-      "line": 1723,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run",
-      "line": 147,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run_feature_matrix_group",
-      "line": 209,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run_feature_matrix_group_inner",
-      "line": 420,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run_owned_invocations",
-      "line": 468,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./xtask/src/manifest.rs",
-      "function": "extract_html_comment_header",
-      "line": 319,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./xtask/src/spec/reverse.rs",
-      "function": "execute",
-      "line": 12,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./xtask/src/spec/profile.rs",
-      "function": "execute",
-      "line": 12,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./xtask/src/examples.rs",
-      "function": "serve",
-      "line": 131,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./xtask/src/examples.rs",
-      "function": "serve_desktop",
-      "line": 149,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./xtask/src/examples.rs",
-      "function": "server_command",
-      "line": 171,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
-      "file": "./xtask/src/mcp.rs",
-      "function": "McpServer::call_tool",
-      "line": 59,
-      "cyclomatic": 4.0,
-      "coverage": 0.0,
-      "crap": 20.0
-    },
-    {
       "file": "./crates/ars-components/src/data_display/rating_group/mod.rs",
       "function": "Machine::transition",
       "line": 379,
       "cyclomatic": 19.0,
       "coverage": 95.0,
       "crap": 19.045125
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "check_snapshot_count",
-      "line": 211,
-      "cyclomatic": 19.0,
-      "coverage": 95.18072289156626,
-      "crap": 19.040406654925697
     },
     {
       "file": "./crates/ars-components/src/selection/menu_bar/mod.rs",
@@ -2801,14 +1777,6 @@
       "cyclomatic": 18.0,
       "coverage": 100.0,
       "crap": 18.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "Error::fmt",
-      "line": 238,
-      "cyclomatic": 11.0,
-      "coverage": 62.5,
-      "crap": 17.380859375
     },
     {
       "file": "./crates/ars-collections/src/selection.rs",
@@ -3003,22 +1971,6 @@
       "crap": 16.0
     },
     {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "attribute_span_before",
-      "line": 638,
-      "cyclomatic": 15.0,
-      "coverage": 86.20689655172413,
-      "crap": 15.59043011193571
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_mutual_exclusion",
-      "line": 677,
-      "cyclomatic": 4.0,
-      "coverage": 11.11111111111111,
-      "crap": 15.237311385459533
-    },
-    {
       "file": "./crates/ars-components/src/date_time/date_field/mod.rs",
       "function": "Api::on_segment_keydown",
       "line": 1584,
@@ -3059,14 +2011,6 @@
       "crap": 15.000899830831804
     },
     {
-      "file": "./xtask/src/spec/compile_snippets.rs",
-      "function": "execute",
-      "line": 63,
-      "cyclomatic": 15.0,
-      "coverage": 98.68421052631578,
-      "crap": 15.000512556495115
-    },
-    {
       "file": "./crates/ars-components/src/input/text_field/mod.rs",
       "function": "props_output_changed",
       "line": 1076,
@@ -3099,36 +2043,12 @@
       "crap": 14.524806554392354
     },
     {
-      "file": "./xtask/src/lint.rs",
-      "function": "infer_snapshot_component",
-      "line": 448,
-      "cyclomatic": 14.0,
-      "coverage": 86.66666666666667,
-      "crap": 14.464592592592592
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "resolve_steps",
-      "line": 388,
-      "cyclomatic": 6.0,
-      "coverage": 38.46153846153847,
-      "crap": 14.389622212107415
-    },
-    {
       "file": "./crates/ars-components/src/date_time/date_field/mod.rs",
       "function": "Api::segment_attrs",
       "line": 1429,
       "cyclomatic": 13.0,
       "coverage": 81.42857142857143,
       "crap": 14.082486880466472
-    },
-    {
-      "file": "./xtask/src/spec/compile_snippets.rs",
-      "function": "collect_md_files",
-      "line": 365,
-      "cyclomatic": 14.0,
-      "coverage": 93.54838709677419,
-      "crap": 14.0526333456413
     },
     {
       "file": "./crates/ars-components/src/date_time/time_field/mod.rs",
@@ -3323,14 +2243,6 @@
       "crap": 13.231824417009603
     },
     {
-      "file": "./xtask/src/lint.rs",
-      "function": "parse_enum_variants",
-      "line": 837,
-      "cyclomatic": 13.0,
-      "coverage": 88.88888888888889,
-      "crap": 13.231824417009603
-    },
-    {
       "file": "./crates/ars-components/src/selection/context_menu/mod.rs",
       "function": "Api::dispatch_activation",
       "line": 975,
@@ -3353,14 +2265,6 @@
       "cyclomatic": 13.0,
       "coverage": 93.10344827586206,
       "crap": 13.055434827176185
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "detect_state_variants",
-      "line": 488,
-      "cyclomatic": 13.0,
-      "coverage": 93.33333333333333,
-      "crap": 13.050074074074073
     },
     {
       "file": "./crates/ars-components/src/layout/splitter/mod.rs",
@@ -3489,14 +2393,6 @@
       "cyclomatic": 13.0,
       "coverage": 100.0,
       "crap": 13.0
-    },
-    {
-      "file": "./xtask/src/manifest.rs",
-      "function": "parse_frontmatter_yaml",
-      "line": 340,
-      "cyclomatic": 11.0,
-      "coverage": 75.0,
-      "crap": 12.890625
     },
     {
       "file": "./crates/ars-collections/src/key.rs",
@@ -4275,198 +3171,6 @@
       "crap": 12.0
     },
     {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "assert_accessibility_tree_has_role_and_name",
-      "line": 149,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "dispatch_pointer_tap",
-      "line": 336,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "wait_for_active_tab_contains",
-      "line": 383,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/desktop.rs",
-      "function": "run",
-      "line": 62,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "Adapter::fixture_name",
-      "line": 35,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "Adapter::default_port",
-      "line": 49,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/visually_hidden.rs",
-      "function": "id_prefix",
-      "line": 82,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/separator.rs",
-      "function": "id_prefix",
-      "line": 71,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/landmark.rs",
-      "function": "id_prefix",
-      "line": 82,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/landmark.rs",
-      "function": "assert_no_attr",
-      "line": 99,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/client_only.rs",
-      "function": "id_prefix",
-      "line": 51,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/mod.rs",
-      "function": "assert_attr",
-      "line": 126,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/mod.rs",
-      "function": "assert_attr_present",
-      "line": 144,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/mod.rs",
-      "function": "assert_bool_attr",
-      "line": 158,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/mod.rs",
-      "function": "active_id",
-      "line": 172,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/mod.rs",
-      "function": "wait_for_text",
-      "line": 244,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/z_index_allocator.rs",
-      "function": "id_prefix",
-      "line": 59,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/highlight.rs",
-      "function": "id_prefix",
-      "line": 63,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/dismissable.rs",
-      "function": "status_text",
-      "line": 237,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/heading.rs",
-      "function": "id_prefix",
-      "line": 67,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/heading.rs",
-      "function": "assert_no_attr",
-      "line": 84,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "assert_eq_active_id",
-      "line": 362,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "assert_enabled",
-      "line": 374,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "id_prefix",
-      "line": 414,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
       "file": "./crates/ars-components/tests/proptest_state_machines/layout.rs",
       "function": "assert_splitter_invariants",
       "line": 410,
@@ -4643,334 +3347,6 @@
       "crap": 12.0
     },
     {
-      "file": "./xtask/src/coverage.rs",
-      "function": "coverage_rustflags",
-      "line": 1535,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "base_wasm_cargo_args",
-      "line": 1584,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "run_command",
-      "line": 1675,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "capture_output",
-      "line": 1690,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "preflight_nightly",
-      "line": 1705,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run_stage",
-      "line": 195,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run_i18n_browser_stage",
-      "line": 245,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run_dom_browser_stage",
-      "line": 275,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "preflight_nextest",
-      "line": 492,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "preflight_wasm_pack",
-      "line": 510,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "preflight_for_stage",
-      "line": 528,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run_shell_command",
-      "line": 651,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/mutants.rs",
-      "function": "preflight_cargo_mutants",
-      "line": 159,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run",
-      "line": 295,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_adapter_parity",
-      "line": 596,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_snapshot_count",
-      "line": 611,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_error_variant_coverage",
-      "line": 662,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "cargo",
-      "line": 908,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_leptosfmt",
-      "line": 1064,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_dioxusfmt",
-      "line": 1085,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "preflight_nightly",
-      "line": 1156,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/ci/feature_matrix.rs",
-      "function": "preflight_wasm32",
-      "line": 373,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/manifest.rs",
-      "function": "find_component_key",
-      "line": 254,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "InfoTool::execute",
-      "line": 65,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "DepsTool::execute",
-      "line": 98,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "CategoryTool::execute",
-      "line": 131,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ReverseTool::execute",
-      "line": 164,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "RelatedTool::execute",
-      "line": 197,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ProfileTool::execute",
-      "line": 230,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "TocTool::execute",
-      "line": 263,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "AdaptersTool::execute",
-      "line": 314,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "SearchTool::execute",
-      "line": 359,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "DigestTool::execute",
-      "line": 399,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ContextTool::execute",
-      "line": 440,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/spec/context.rs",
-      "function": "append_file",
-      "line": 75,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/main.rs",
-      "function": "discover_spec_root",
-      "line": 534,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/examples.rs",
-      "function": "Framework::fmt",
-      "line": 30,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/examples.rs",
-      "function": "leptos_command",
-      "line": 200,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/e2e.rs",
-      "function": "run_category",
-      "line": 97,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/e2e.rs",
-      "function": "run_desktop",
-      "line": 143,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
-      "file": "./xtask/src/mcp.rs",
-      "function": "serve",
-      "line": 96,
-      "cyclomatic": 3.0,
-      "coverage": 0.0,
-      "crap": 12.0
-    },
-    {
       "file": "./crates/ars-components/src/input/switch/mod.rs",
       "function": "Api::control_attrs",
       "line": 616,
@@ -5017,14 +3393,6 @@
       "cyclomatic": 10.0,
       "coverage": 77.58620689655173,
       "crap": 11.126019927016277
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "extract_api_rust_blocks",
-      "line": 189,
-      "cyclomatic": 11.0,
-      "coverage": 90.2439024390244,
-      "crap": 11.11236052872129
     },
     {
       "file": "./crates/ars-components/src/input/checkbox_group/mod.rs",
@@ -5246,14 +3614,6 @@
       "file": "./crates/ars-dom/src/focus.rs",
       "function": "is_focusable_element",
       "line": 602,
-      "cyclomatic": 11.0,
-      "coverage": 100.0,
-      "crap": 11.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "Error::fmt",
-      "line": 239,
       "cyclomatic": 11.0,
       "coverage": 100.0,
       "crap": 11.0
@@ -5643,14 +4003,6 @@
       "crap": 9.648
     },
     {
-      "file": "./xtask/src/coverage.rs",
-      "function": "parse_lcov_records",
-      "line": 425,
-      "cyclomatic": 7.0,
-      "coverage": 62.5,
-      "crap": 9.583984375
-    },
-    {
       "file": "./crates/ars-collections/src/tree_collection.rs",
       "function": "TreeCollection::compute_visible",
       "line": 142,
@@ -5689,14 +4041,6 @@
       "cyclomatic": 9.0,
       "coverage": 85.18518518518519,
       "crap": 9.263374485596708
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "is_pub_fn_decl",
-      "line": 414,
-      "cyclomatic": 9.0,
-      "coverage": 86.66666666666667,
-      "crap": 9.192
     },
     {
       "file": "./crates/ars-components/src/navigation/link/mod.rs",
@@ -6051,46 +4395,6 @@
       "crap": 9.0
     },
     {
-      "file": "./xtask/src/coverage.rs",
-      "function": "check_all_from_content",
-      "line": 954,
-      "cyclomatic": 9.0,
-      "coverage": 100.0,
-      "crap": 9.0
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "is_rust_item_line",
-      "line": 682,
-      "cyclomatic": 9.0,
-      "coverage": 100.0,
-      "crap": 9.0
-    },
-    {
-      "file": "./xtask/src/spec/digest.rs",
-      "function": "extract_section",
-      "line": 75,
-      "cyclomatic": 9.0,
-      "coverage": 100.0,
-      "crap": 9.0
-    },
-    {
-      "file": "./xtask/src/spec/search.rs",
-      "function": "SectionFilter::parse",
-      "line": 36,
-      "cyclomatic": 9.0,
-      "coverage": 100.0,
-      "crap": 9.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "check_error_variant_coverage",
-      "line": 351,
-      "cyclomatic": 9.0,
-      "coverage": 100.0,
-      "crap": 9.0
-    },
-    {
       "file": "./crates/ars-components/src/data_display/stat.rs",
       "function": "Api::part_attrs",
       "line": 348,
@@ -6129,14 +4433,6 @@
       "cyclomatic": 8.0,
       "coverage": 81.81818181818183,
       "crap": 8.384673178061608
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "glob_to_regex",
-      "line": 972,
-      "cyclomatic": 8.0,
-      "coverage": 85.0,
-      "crap": 8.216
     },
     {
       "file": "./crates/ars-components/src/utility/fieldset/mod.rs",
@@ -6187,14 +4483,6 @@
       "crap": 8.01718639857675
     },
     {
-      "file": "./xtask/src/lint.rs",
-      "function": "detect_part_counts",
-      "line": 640,
-      "cyclomatic": 8.0,
-      "coverage": 93.54838709677419,
-      "crap": 8.01718639857675
-    },
-    {
       "file": "./crates/ars-components/src/utility/download_trigger/mod.rs",
       "function": "parse_network_path_origin",
       "line": 468,
@@ -6225,14 +4513,6 @@
       "cyclomatic": 8.0,
       "coverage": 95.0,
       "crap": 8.008000000000001
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "collect_files_inner",
-      "line": 1021,
-      "cyclomatic": 8.0,
-      "coverage": 95.23809523809523,
-      "crap": 8.006910700788252
     },
     {
       "file": "./crates/ars-components/src/selection/combobox/mod.rs",
@@ -6731,14 +5011,6 @@
       "crap": 7.333333333333336
     },
     {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "matching_angle_end",
-      "line": 558,
-      "cyclomatic": 7.0,
-      "coverage": 83.33333333333334,
-      "crap": 7.226851851851851
-    },
-    {
       "file": "./crates/ars-collections/src/tree_collection.rs",
       "function": "TreeCollection::flat_insert_position",
       "line": 900,
@@ -6753,22 +5025,6 @@
       "cyclomatic": 7.0,
       "coverage": 84.0,
       "crap": 7.200704
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "adapter_parity_report",
-      "line": 160,
-      "cyclomatic": 7.0,
-      "coverage": 85.18518518518519,
-      "crap": 7.159325306101712
-    },
-    {
-      "file": "./xtask/src/crap.rs",
-      "function": "build_args",
-      "line": 173,
-      "cyclomatic": 5.0,
-      "coverage": 55.88235294117647,
-      "crap": 7.146728068389986
     },
     {
       "file": "./crates/ars-core/src/modality.rs",
@@ -6809,14 +5065,6 @@
       "cyclomatic": 7.0,
       "coverage": 91.30434782608695,
       "crap": 7.032218295389168
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "parse_test_bodies",
-      "line": 896,
-      "cyclomatic": 7.0,
-      "coverage": 93.33333333333333,
-      "crap": 7.014518518518519
     },
     {
       "file": "./crates/ars-i18n/src/number/mod.rs",
@@ -6865,14 +5113,6 @@
       "cyclomatic": 7.0,
       "coverage": 95.0,
       "crap": 7.006125
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "collect_derives",
-      "line": 602,
-      "cyclomatic": 7.0,
-      "coverage": 95.45454545454545,
-      "crap": 7.004601803155522
     },
     {
       "file": "./crates/ars-interactions/src/drag_drop.rs",
@@ -7499,46 +5739,6 @@
       "crap": 7.0
     },
     {
-      "file": "./xtask/src/coverage.rs",
-      "function": "write_lcov_records",
-      "line": 557,
-      "cyclomatic": 7.0,
-      "coverage": 100.0,
-      "crap": 7.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "parse_wasm_artifacts",
-      "line": 1994,
-      "cyclomatic": 7.0,
-      "coverage": 100.0,
-      "crap": 7.0
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "has_manual_impl",
-      "line": 485,
-      "cyclomatic": 7.0,
-      "coverage": 100.0,
-      "crap": 7.0
-    },
-    {
-      "file": "./xtask/src/spec/compile_snippets.rs",
-      "function": "rewrite_fences_to_no_check",
-      "line": 173,
-      "cyclomatic": 7.0,
-      "coverage": 100.0,
-      "crap": 7.0
-    },
-    {
-      "file": "./xtask/src/spec/compile_snippets.rs",
-      "function": "extract_rust_blocks",
-      "line": 275,
-      "cyclomatic": 7.0,
-      "coverage": 100.0,
-      "crap": 7.0
-    },
-    {
       "file": "./crates/ars-collections/src/tree_collection.rs",
       "function": "TreeCollection::is_visible_with_expanded",
       "line": 372,
@@ -7553,14 +5753,6 @@
       "cyclomatic": 6.0,
       "coverage": 70.83333333333334,
       "crap": 6.893229166666665
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "infer_source_component",
-      "line": 688,
-      "cyclomatic": 6.0,
-      "coverage": 72.5,
-      "crap": 6.7486875
     },
     {
       "file": "./crates/ars-components/src/utility/field/mod.rs",
@@ -7595,22 +5787,6 @@
       "crap": 6.5625
     },
     {
-      "file": "./xtask/src/manifest.rs",
-      "function": "SpecRoot::discover",
-      "line": 223,
-      "cyclomatic": 6.0,
-      "coverage": 75.0,
-      "crap": 6.5625
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "preflight_llvm_cov",
-      "line": 1215,
-      "cyclomatic": 3.0,
-      "coverage": 27.27272727272727,
-      "crap": 6.462058602554471
-    },
-    {
       "file": "./crates/ars-components/src/utility/fieldset/mod.rs",
       "function": "Api::root_attrs",
       "line": 327,
@@ -7635,14 +5811,6 @@
       "crap": 6.276780507362589
     },
     {
-      "file": "./xtask/src/lint.rs",
-      "function": "parse_enum_variant_count",
-      "line": 597,
-      "cyclomatic": 6.0,
-      "coverage": 81.81818181818183,
-      "crap": 6.216378662659654
-    },
-    {
       "file": "./crates/ars-components/src/input/text_field/mod.rs",
       "function": "Api::on_input_keydown",
       "line": 1041,
@@ -7654,14 +5822,6 @@
       "file": "./crates/ars-components/src/date_time/calendar/mod.rs",
       "function": "Context::is_date_disabled",
       "line": 764,
-      "cyclomatic": 6.0,
-      "coverage": 85.71428571428571,
-      "crap": 6.104956268221574
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "check_from_content",
-      "line": 875,
       "cyclomatic": 6.0,
       "coverage": 85.71428571428571,
       "crap": 6.104956268221574
@@ -7803,22 +5963,6 @@
       "crap": 6.020833333333333
     },
     {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "attr_brackets_are_balanced",
-      "line": 695,
-      "cyclomatic": 6.0,
-      "coverage": 91.66666666666666,
-      "crap": 6.020833333333333
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "balanced_body",
-      "line": 922,
-      "cyclomatic": 6.0,
-      "coverage": 91.66666666666666,
-      "crap": 6.020833333333333
-    },
-    {
       "file": "./crates/ars-components/src/selection/combobox/mod.rs",
       "function": "serialize_key",
       "line": 2491,
@@ -7857,14 +6001,6 @@
       "cyclomatic": 6.0,
       "coverage": 95.23809523809523,
       "crap": 6.003887269193392
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "adapter_test_counts",
-      "line": 392,
-      "cyclomatic": 6.0,
-      "coverage": 95.45454545454545,
-      "crap": 6.0033809166040575
     },
     {
       "file": "./crates/ars-components/src/input/range_slider/mod.rs",
@@ -9027,78 +7163,6 @@
       "crap": 6.0
     },
     {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "computed_focus_styles",
-      "line": 168,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "assert_active_tab_contains",
-      "line": 378,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "FixtureSession::quit",
-      "line": 116,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/axe.rs",
-      "function": "axe_cache_path",
-      "line": 90,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/mod.rs",
-      "function": "dispatch_pointer_sequence",
-      "line": 176,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/dismissable.rs",
-      "function": "assert_outside_pointer_dismisses",
-      "line": 168,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/dismissable.rs",
-      "function": "assert_outside_focus_dismisses",
-      "line": 198,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/dismissable.rs",
-      "function": "dismiss_buttons",
-      "line": 229,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "element_rect",
-      "line": 384,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
       "file": "./crates/ars-components/tests/proptest_state_machines/input/radio_group.rs",
       "function": "item_disabled",
       "line": 84,
@@ -9547,158 +7611,6 @@
       "crap": 6.0
     },
     {
-      "file": "./xtask/src/coverage.rs",
-      "function": "wasm_test_args",
-      "line": 1607,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "llvm_profile_file",
-      "line": 1627,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run_unit_stage",
-      "line": 297,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run_release_stage",
-      "line": 342,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "run_nextest_command",
-      "line": 621,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "configure_color_output",
-      "line": 681,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "format_failure",
-      "line": 762,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "leptosfmt_check",
-      "line": 930,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "leptosfmt_format",
-      "line": 944,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "is_leptos_source",
-      "line": 1107,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "is_dioxus_source",
-      "line": 1111,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "format_stdin_with_command",
-      "line": 1115,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/ci/feature_matrix.rs",
-      "function": "group_def",
-      "line": 295,
-      "cyclomatic": 6.0,
-      "coverage": 100.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/manifest.rs",
-      "function": "find_component",
-      "line": 278,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ValidateTool::execute",
-      "line": 284,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "LintCodeTool::execute",
-      "line": 475,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/examples.rs",
-      "function": "list",
-      "line": 110,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/i18n.rs",
-      "function": "i18n_feature_lists",
-      "line": 16,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
-      "file": "./xtask/src/e2e.rs",
-      "function": "Error::fmt",
-      "line": 229,
-      "cyclomatic": 2.0,
-      "coverage": 0.0,
-      "crap": 6.0
-    },
-    {
       "file": "./crates/ars-components/src/date_time/date_field/mod.rs",
       "function": "commit_buffer_for_kind",
       "line": 1838,
@@ -9753,14 +7665,6 @@
       "cyclomatic": 5.0,
       "coverage": 73.91304347826086,
       "crap": 5.443823456891592
-    },
-    {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "wait_for_fixture_server",
-      "line": 230,
-      "cyclomatic": 5.0,
-      "coverage": 75.0,
-      "crap": 5.390625
     },
     {
       "file": "./crates/ars-components/src/utility/form/mod.rs",
@@ -9862,22 +7766,6 @@
       "file": "./crates/ars-components/src/navigation/steps/mod.rs",
       "function": "Status::as_str",
       "line": 53,
-      "cyclomatic": 5.0,
-      "coverage": 85.71428571428571,
-      "crap": 5.072886297376093
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "parse_atx_heading",
-      "line": 249,
-      "cyclomatic": 5.0,
-      "coverage": 85.71428571428571,
-      "crap": 5.072886297376093
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "extract_component_from_test_file",
-      "line": 425,
       "cyclomatic": 5.0,
       "coverage": 85.71428571428571,
       "crap": 5.072886297376093
@@ -11211,46 +9099,6 @@
       "crap": 5.0
     },
     {
-      "file": "./xtask/src/coverage.rs",
-      "function": "parse_wasm_bindgen_version_from_lock",
-      "line": 512,
-      "cyclomatic": 5.0,
-      "coverage": 100.0,
-      "crap": 5.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "collect_profraw_files",
-      "line": 2069,
-      "cyclomatic": 5.0,
-      "coverage": 100.0,
-      "crap": 5.0
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "preceded_by_doc",
-      "line": 446,
-      "cyclomatic": 5.0,
-      "coverage": 100.0,
-      "crap": 5.0
-    },
-    {
-      "file": "./xtask/src/e2e.rs",
-      "function": "category_command",
-      "line": 159,
-      "cyclomatic": 5.0,
-      "coverage": 100.0,
-      "crap": 5.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "preflight_leptosfmt",
-      "line": 1175,
-      "cyclomatic": 3.0,
-      "coverage": 40.0,
-      "crap": 4.944
-    },
-    {
       "file": "./crates/ars-components/src/navigation/pagination/mod.rs",
       "function": "Size::as_str",
       "line": 81,
@@ -11329,14 +9177,6 @@
       "cyclomatic": 4.0,
       "coverage": 81.25,
       "crap": 4.10546875
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "workspace_root_for",
-      "line": 781,
-      "cyclomatic": 4.0,
-      "coverage": 81.81818181818183,
-      "crap": 4.096168294515402
     },
     {
       "file": "./crates/ars-i18n/src/calendar/date.rs",
@@ -11515,14 +9355,6 @@
       "crap": 4.012021036814425
     },
     {
-      "file": "./xtask/src/manifest.rs",
-      "function": "parse_yaml_list",
-      "line": 369,
-      "cyclomatic": 4.0,
-      "coverage": 90.9090909090909,
-      "crap": 4.012021036814425
-    },
-    {
       "file": "./crates/ars-components/src/input/slider/mod.rs",
       "function": "snap_to_step",
       "line": 1326,
@@ -11569,14 +9401,6 @@
       "cyclomatic": 4.0,
       "coverage": 92.85714285714286,
       "crap": 4.005830903790088
-    },
-    {
-      "file": "./xtask/src/manifest.rs",
-      "function": "parse_heading",
-      "line": 386,
-      "cyclomatic": 4.0,
-      "coverage": 93.33333333333333,
-      "crap": 4.004740740740741
     },
     {
       "file": "./crates/ars-i18n/src/detect.rs",
@@ -12054,22 +9878,6 @@
       "file": "./crates/ars-a11y/src/aria/attribute.rs",
       "function": "AriaChecked::as_str",
       "line": 284,
-      "cyclomatic": 4.0,
-      "coverage": 100.0,
-      "crap": 4.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/desktop.rs",
-      "function": "Example::package",
-      "line": 27,
-      "cyclomatic": 4.0,
-      "coverage": 100.0,
-      "crap": 4.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/desktop.rs",
-      "function": "Example::path",
-      "line": 35,
       "cyclomatic": 4.0,
       "coverage": 100.0,
       "crap": 4.0
@@ -13395,30 +11203,6 @@
       "crap": 4.0
     },
     {
-      "file": "./xtask/src/spec/compile_snippets.rs",
-      "function": "check_block",
-      "line": 345,
-      "cyclomatic": 4.0,
-      "coverage": 100.0,
-      "crap": 4.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "is_ars_components_component",
-      "line": 807,
-      "cyclomatic": 4.0,
-      "coverage": 100.0,
-      "crap": 4.0
-    },
-    {
-      "file": "./xtask/src/e2e.rs",
-      "function": "DesktopExample::as_str",
-      "line": 43,
-      "cyclomatic": 4.0,
-      "coverage": 100.0,
-      "crap": 4.0
-    },
-    {
       "file": "./crates/ars-collections/src/tree_collection.rs",
       "function": "TreeCollection::replace",
       "line": 838,
@@ -13651,14 +11435,6 @@
       "crap": 3.0416666666666665
     },
     {
-      "file": "./crates/ars-e2e/src/error.rs",
-      "function": "Error::fmt",
-      "line": 30,
-      "cyclomatic": 3.0,
-      "coverage": 83.33333333333334,
-      "crap": 3.0416666666666665
-    },
-    {
       "file": "./crates/ars-components/src/date_time/date_field/mod.rs",
       "function": "Api::state_name",
       "line": 1665,
@@ -13694,14 +11470,6 @@
       "file": "./crates/ars-components/src/utility/download_trigger/mod.rs",
       "function": "canonical_host_for_origin_compare",
       "line": 557,
-      "cyclomatic": 3.0,
-      "coverage": 84.61538461538461,
-      "crap": 3.0327719617660445
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "render_summary",
-      "line": 772,
       "cyclomatic": 3.0,
       "coverage": 84.61538461538461,
       "crap": 3.0327719617660445
@@ -13763,14 +11531,6 @@
       "crap": 3.0262390670553936
     },
     {
-      "file": "./xtask/src/examples.rs",
-      "function": "desktop_command",
-      "line": 190,
-      "cyclomatic": 3.0,
-      "coverage": 85.71428571428571,
-      "crap": 3.0262390670553936
-    },
-    {
       "file": "./crates/ars-components/src/selection/autocomplete/mod.rs",
       "function": "Api::content_attrs",
       "line": 886,
@@ -13806,14 +11566,6 @@
       "file": "./crates/ars-components/src/input/checkbox/mod.rs",
       "function": "value_change_plan",
       "line": 770,
-      "cyclomatic": 3.0,
-      "coverage": 88.23529411764706,
-      "crap": 3.0146549969468754
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "is_ars_components_machine_module",
-      "line": 757,
       "cyclomatic": 3.0,
       "coverage": 88.23529411764706,
       "crap": 3.0146549969468754
@@ -13883,22 +11635,6 @@
       "crap": 3.009
     },
     {
-      "file": "./crates/ars-e2e/src/browser.rs",
-      "function": "wait_for_tcp",
-      "line": 62,
-      "cyclomatic": 3.0,
-      "coverage": 90.9090909090909,
-      "crap": 3.006761833208114
-    },
-    {
-      "file": "./xtask/src/i18n.rs",
-      "function": "parse_i18n_feature_lists",
-      "line": 24,
-      "cyclomatic": 3.0,
-      "coverage": 91.30434782608695,
-      "crap": 3.0059176460918877
-    },
-    {
       "file": "./crates/ars-i18n/src/date.rs",
       "function": "format_icu_date",
       "line": 881,
@@ -13918,14 +11654,6 @@
       "file": "./crates/ars-components/src/overlay/tour/mod.rs",
       "function": "Machine::initial_effects",
       "line": 1057,
-      "cyclomatic": 3.0,
-      "coverage": 91.66666666666666,
-      "crap": 3.0052083333333335
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "collect_files",
-      "line": 1004,
       "cyclomatic": 3.0,
       "coverage": 91.66666666666666,
       "crap": 3.0052083333333335
@@ -14001,14 +11729,6 @@
       "cyclomatic": 3.0,
       "coverage": 93.75,
       "crap": 3.002197265625
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "parse_part_variant_count",
-      "line": 573,
-      "cyclomatic": 3.0,
-      "coverage": 94.11764705882352,
-      "crap": 3.0018318746183597
     },
     {
       "file": "./crates/ars-components/src/selection/combobox/mod.rs",
@@ -14686,30 +12406,6 @@
       "file": "./crates/ars-a11y/src/keyboard/shortcuts.rs",
       "function": "Platform::action_key_label",
       "line": 154,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "Adapter::fixture_path",
-      "line": 42,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "chrome_capabilities",
-      "line": 168,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "server_command",
-      "line": 178,
       "cyclomatic": 3.0,
       "coverage": 100.0,
       "crap": 3.0
@@ -16587,110 +14283,6 @@
       "crap": 3.0
     },
     {
-      "file": "./xtask/src/coverage.rs",
-      "function": "parse_package_stats",
-      "line": 611,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./xtask/src/crap.rs",
-      "function": "run_cargo_crap",
-      "line": 267,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./xtask/src/crap.rs",
-      "function": "preflight_cargo_crap",
-      "line": 288,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "parse_wasm_pack_summary",
-      "line": 588,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./xtask/src/mutants.rs",
-      "function": "default_features",
-      "line": 96,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "preflight_dioxus_cli",
-      "line": 1194,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "preflight_nextest",
-      "line": 1234,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./xtask/src/manifest.rs",
-      "function": "extract_frontmatter",
-      "line": 304,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "lint_file",
-      "line": 160,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "manual_impl_line_matches",
-      "line": 516,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./xtask/src/examples.rs",
-      "function": "dioxus_command",
-      "line": 224,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./xtask/src/e2e.rs",
-      "function": "Adapter::as_str",
-      "line": 21,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
-      "file": "./xtask/src/e2e.rs",
-      "function": "Category::as_str",
-      "line": 63,
-      "cyclomatic": 3.0,
-      "coverage": 100.0,
-      "crap": 3.0
-    },
-    {
       "file": "./crates/ars-core/src/lib.rs",
       "function": "Service::send",
       "line": 1155,
@@ -16782,14 +14374,6 @@
       "file": "./crates/ars-components/src/input/textarea/mod.rs",
       "function": "Api::character_count",
       "line": 1010,
-      "cyclomatic": 2.0,
-      "coverage": 76.92307692307693,
-      "crap": 2.049157942649067
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "impl_trait_matches",
-      "line": 534,
       "cyclomatic": 2.0,
       "coverage": 76.92307692307693,
       "crap": 2.049157942649067
@@ -16995,14 +14579,6 @@
       "crap": 2.014565316340464
     },
     {
-      "file": "./crates/ars-e2e/src/browser.rs",
-      "function": "ChildGuard::drop",
-      "line": 121,
-      "cyclomatic": 2.0,
-      "coverage": 85.71428571428571,
-      "crap": 2.011661807580175
-    },
-    {
       "file": "./crates/ars-components/src/input/checkbox/mod.rs",
       "function": "Api::label_attrs",
       "line": 559,
@@ -17067,14 +14643,6 @@
       "crap": 2.0054869684499312
     },
     {
-      "file": "./crates/ars-e2e/src/browser.rs",
-      "function": "wait_for_tcp_with_child_guard",
-      "line": 78,
-      "cyclomatic": 2.0,
-      "coverage": 90.0,
-      "crap": 2.004
-    },
-    {
       "file": "./crates/ars-components/src/date_time/time_field/mod.rs",
       "function": "maybe_publish",
       "line": 1616,
@@ -17107,14 +14675,6 @@
       "crap": 2.004
     },
     {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "trait_path_segment_matches",
-      "line": 579,
-      "cyclomatic": 2.0,
-      "coverage": 90.0,
-      "crap": 2.004
-    },
-    {
       "file": "./crates/ars-components/src/input/slider/mod.rs",
       "function": "discrete_label",
       "line": 1485,
@@ -17142,14 +14702,6 @@
       "file": "./crates/ars-components/src/selection/select/mod.rs",
       "function": "Api::item_indicator_attrs",
       "line": 1398,
-      "cyclomatic": 2.0,
-      "coverage": 90.9090909090909,
-      "crap": 2.0030052592036065
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "glob_root",
-      "line": 955,
       "cyclomatic": 2.0,
       "coverage": 90.9090909090909,
       "crap": 2.0030052592036065
@@ -29515,358 +27067,6 @@
       "crap": 2.0
     },
     {
-      "file": "./crates/ars-e2e/fixtures/leptos/src/main.rs",
-      "function": "main",
-      "line": 21,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/leptos/src/main.rs",
-      "function": "App",
-      "line": 38,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/leptos/src/categories/utility.rs",
-      "function": "register_messages",
-      "line": 152,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/leptos/src/categories/utility.rs",
-      "function": "FixtureError::fmt",
-      "line": 167,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/leptos/src/categories/utility.rs",
-      "function": "fixture_error",
-      "line": 174,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/leptos/src/categories/utility.rs",
-      "function": "HeadingProviderDemo",
-      "line": 179,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/leptos/src/categories/utility.rs",
-      "function": "ZIndexProbe",
-      "line": 207,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/leptos/src/categories/utility.rs",
-      "function": "UtilityPanel",
-      "line": 221,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/leptos/src/categories/mod.rs",
-      "function": "i18n_registries",
-      "line": 31,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/leptos/src/categories/navigation.rs",
-      "function": "register_messages",
-      "line": 69,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/leptos/src/categories/navigation.rs",
-      "function": "NavigationPanel",
-      "line": 87,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/dioxus/src/main.rs",
-      "function": "main",
-      "line": 21,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/dioxus/src/main.rs",
-      "function": "App",
-      "line": 38,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/dioxus/src/categories/utility.rs",
-      "function": "register_messages",
-      "line": 156,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/dioxus/src/categories/utility.rs",
-      "function": "FixtureErrorChild",
-      "line": 168,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/dioxus/src/categories/utility.rs",
-      "function": "ZIndexProbe",
-      "line": 173,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/dioxus/src/categories/utility.rs",
-      "function": "UtilityPanel",
-      "line": 185,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/dioxus/src/categories/mod.rs",
-      "function": "i18n_registries",
-      "line": 31,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/dioxus/src/categories/navigation.rs",
-      "function": "register_messages",
-      "line": 69,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/fixtures/dioxus/src/categories/navigation.rs",
-      "function": "NavigationPanel",
-      "line": 87,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "ax_tree_has_role_and_name",
-      "line": 215,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "node_property_value",
-      "line": 226,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "string_prop",
-      "line": 233,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "is_zero_width",
-      "line": 241,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "is_transparent",
-      "line": 245,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/assertions.rs",
-      "function": "shadow_is_none",
-      "line": 249,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/error.rs",
-      "function": "Error::from",
-      "line": 24,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/navigation/tabs.rs",
-      "function": "find_tab",
-      "line": 186,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/desktop.rs",
-      "function": "Example::fmt",
-      "line": 45,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "leptos_command",
-      "line": 185,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "dioxus_command",
-      "line": 206,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "fixture_log_path",
-      "line": 281,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/fixtures.rs",
-      "function": "examples_target_dir",
-      "line": 293,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/axe.rs",
-      "function": "format_axe_violations",
-      "line": 100,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/browser.rs",
-      "function": "webdriver_url",
-      "line": 40,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/browser.rs",
-      "function": "quiet_spawn",
-      "line": 91,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/browser.rs",
-      "function": "ChildGuard::new_with_log",
-      "line": 112,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/visually_hidden.rs",
-      "function": "hidden_element_by_id",
-      "line": 64,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/visually_hidden.rs",
-      "function": "assert_expected_tag",
-      "line": 72,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/separator.rs",
-      "function": "assert_expected_tag",
-      "line": 78,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/landmark.rs",
-      "function": "assert_expected_tag",
-      "line": 89,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/dismissable.rs",
-      "function": "region_root",
-      "line": 220,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/heading.rs",
-      "function": "assert_expected_tag",
-      "line": 74,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/button.rs",
-      "function": "number_prop",
-      "line": 410,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
       "file": "./crates/ars-components/tests/proptest_state_machines/layout.rs",
       "function": "arb_collapsible_props",
       "line": 13,
@@ -37867,686 +35067,6 @@
       "crap": 2.0
     },
     {
-      "file": "./xtask/tests/spec_corpus_compile_snippets.rs",
-      "function": "workspace_spec_root",
-      "line": 26,
-      "cyclomatic": 1.0,
-      "coverage": null,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "default_thresholds",
-      "line": 54,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "CrateStats::line_pct",
-      "line": 326,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "CrateStats::branch_pct",
-      "line": 334,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "check",
-      "line": 867,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "check_all",
-      "line": 947,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "wasm_no_run_args",
-      "line": 1618,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "nightly_cargo_command",
-      "line": 1641,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "artifact_to_ir_path",
-      "line": 2034,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/crap.rs",
-      "function": "Error::from",
-      "line": 163,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/crap.rs",
-      "function": "preflight_lcov",
-      "line": 303,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "Summary::add_assign",
-      "line": 71,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "integration_invocations",
-      "line": 390,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "adapter_invocations",
-      "line": 399,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "should_force_color_output",
-      "line": 690,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "Invocation::nextest",
-      "line": 821,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/mutants.rs",
-      "function": "Error::from",
-      "line": 88,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_clippy",
-      "line": 487,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_unit",
-      "line": 542,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_i18n_browser",
-      "line": 546,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_dom_browser",
-      "line": 550,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_integration",
-      "line": 588,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_adapter",
-      "line": 592,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "is_expected_mutual_exclusion_failure",
-      "line": 718,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_crap",
-      "line": 835,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "run_test_stage",
-      "line": 845,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "format_summary",
-      "line": 1307,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/manifest.rs",
-      "function": "resolve_foundation",
-      "line": 294,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/manifest.rs",
-      "function": "category_file",
-      "line": 299,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "is_target_api_heading",
-      "line": 271,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "is_rust_identifier_continue",
-      "line": 595,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "register_all",
-      "line": 13,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "get_string",
-      "line": 30,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "InfoTool::name",
-      "line": 44,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "InfoTool::description",
-      "line": 48,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "InfoTool::input_schema",
-      "line": 52,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "DepsTool::name",
-      "line": 77,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "DepsTool::description",
-      "line": 81,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "DepsTool::input_schema",
-      "line": 85,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "CategoryTool::name",
-      "line": 110,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "CategoryTool::description",
-      "line": 114,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "CategoryTool::input_schema",
-      "line": 118,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ReverseTool::name",
-      "line": 143,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ReverseTool::description",
-      "line": 147,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ReverseTool::input_schema",
-      "line": 151,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "RelatedTool::name",
-      "line": 176,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "RelatedTool::description",
-      "line": 180,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "RelatedTool::input_schema",
-      "line": 184,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ProfileTool::name",
-      "line": 209,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ProfileTool::description",
-      "line": 213,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ProfileTool::input_schema",
-      "line": 217,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "TocTool::name",
-      "line": 242,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "TocTool::description",
-      "line": 246,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "TocTool::input_schema",
-      "line": 250,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ValidateTool::name",
-      "line": 272,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ValidateTool::description",
-      "line": 276,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ValidateTool::input_schema",
-      "line": 280,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "AdaptersTool::name",
-      "line": 293,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "AdaptersTool::description",
-      "line": 297,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "AdaptersTool::input_schema",
-      "line": 301,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "SearchTool::name",
-      "line": 326,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "SearchTool::description",
-      "line": 330,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "SearchTool::input_schema",
-      "line": 334,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "DigestTool::name",
-      "line": 378,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "DigestTool::description",
-      "line": 382,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "DigestTool::input_schema",
-      "line": 386,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ContextTool::name",
-      "line": 411,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ContextTool::description",
-      "line": 415,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "ContextTool::input_schema",
-      "line": 419,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "LintCodeTool::name",
-      "line": 463,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "LintCodeTool::description",
-      "line": 467,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/spec/tools.rs",
-      "function": "LintCodeTool::input_schema",
-      "line": 471,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/tool.rs",
-      "function": "ToolError::fmt",
-      "line": 15,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/tool.rs",
-      "function": "ToolError::from",
-      "line": 23,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/tool.rs",
-      "function": "ToolRegistry::fmt",
-      "line": 59,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "Error::from",
-      "line": 104,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "Error::from",
-      "line": 110,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "Error::from",
-      "line": 116,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "snapshot_min_per_variant",
-      "line": 799,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "files_matching_glob",
-      "line": 943,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/examples.rs",
-      "function": "dioxus_desktop_command",
-      "line": 259,
-      "cyclomatic": 2.0,
-      "coverage": 100.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/e2e.rs",
-      "function": "run_navigation",
-      "line": 123,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/e2e.rs",
-      "function": "run_utility",
-      "line": 133,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/mcp.rs",
-      "function": "McpServer::get_info",
-      "line": 29,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
-      "file": "./xtask/src/mcp.rs",
-      "function": "McpServer::list_tools",
-      "line": 40,
-      "cyclomatic": 1.0,
-      "coverage": 0.0,
-      "crap": 2.0
-    },
-    {
       "file": "./crates/ars-components/src/date_time/date_field/mod.rs",
       "function": "Api::new",
       "line": 1309,
@@ -38798,14 +35318,6 @@
       "file": "./crates/ars-dom/src/platform.rs",
       "function": "on_animation_end_impl",
       "line": 1558,
-      "cyclomatic": 1.0,
-      "coverage": 80.0,
-      "crap": 1.008
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "default_wasm_coverage_targets",
-      "line": 389,
       "cyclomatic": 1.0,
       "coverage": 80.0,
       "crap": 1.008
@@ -46862,38 +43374,6 @@
       "file": "./crates/ars-a11y/src/touch.rs",
       "function": "InputMode::apply_to",
       "line": 99,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/desktop.rs",
-      "function": "desktop_build_command",
-      "line": 82,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/desktop.rs",
-      "function": "examples_target_dir",
-      "line": 104,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/browser.rs",
-      "function": "ChildGuard::new",
-      "line": 105,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./crates/ars-e2e/src/utility/visually_hidden.rs",
-      "function": "class_token_present",
-      "line": 68,
       "cyclomatic": 1.0,
       "coverage": 100.0,
       "crap": 1.0
@@ -71886,278 +68366,6 @@
       "file": "./crates/ars-interactions/src/press.rs",
       "function": "use_press",
       "line": 643,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "native_thresholds",
-      "line": 151,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "is_wasm_coverage_package",
-      "line": 163,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "native_coverage_packages",
-      "line": 172,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "check_native",
-      "line": 185,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "FileCoverage::record_line",
-      "line": 301,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "FileCoverage::record_branch",
-      "line": 308,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "package_source_needles",
-      "line": 602,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "object_name_for_ir",
-      "line": 2051,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/coverage.rs",
-      "function": "linked_wasm_name_for_ir",
-      "line": 2060,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "unit_invocation_specs",
-      "line": 305,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "release_invocation_specs",
-      "line": 350,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "nextest_summary_regex",
-      "line": 543,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "ansi_escape_regex",
-      "line": 552,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "parse_nextest_summary",
-      "line": 558,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/test.rs",
-      "function": "wasm_pack_summary_regex",
-      "line": 577,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "print_header",
-      "line": 1284,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "print_pass",
-      "line": 1288,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "print_summary",
-      "line": 1292,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "format_header",
-      "line": 1297,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/ci/mod.rs",
-      "function": "format_pass",
-      "line": 1302,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/spec/lint_code.rs",
-      "function": "last_path_segment",
-      "line": 392,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/spec/compile_snippets.rs",
-      "function": "patched_fence_count",
-      "line": 238,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/tool.rs",
-      "function": "ToolRegistry::new",
-      "line": 68,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/tool.rs",
-      "function": "ToolRegistry::register",
-      "line": 73,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/tool.rs",
-      "function": "ToolRegistry::tools",
-      "line": 78,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/tool.rs",
-      "function": "ToolRegistry::find",
-      "line": 83,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "parse_state_variant_count",
-      "line": 548,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "alias_target_component",
-      "line": 552,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "is_component_category",
-      "line": 742,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/lint.rs",
-      "function": "normalize_path",
-      "line": 1049,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/examples.rs",
-      "function": "catalog",
-      "line": 86,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/examples.rs",
-      "function": "resolve",
-      "line": 95,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/e2e.rs",
-      "function": "navigation_command",
-      "line": 197,
-      "cyclomatic": 1.0,
-      "coverage": 100.0,
-      "crap": 1.0
-    },
-    {
-      "file": "./xtask/src/e2e.rs",
-      "function": "desktop_command",
-      "line": 203,
       "cyclomatic": 1.0,
       "coverage": 100.0,
       "crap": 1.0
