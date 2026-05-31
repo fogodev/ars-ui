@@ -1,0 +1,75 @@
+---
+source: crates/ars-components/src/date_time/date_picker/tests.rs
+expression: snapshot_attrs(&api.trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "date-picker",
+            ),
+        ),
+        (
+            Aria(
+                Expanded,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                HasPopup,
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Open calendar",
+            ),
+        ),
+        (
+            Aria(
+                Controls,
+            ),
+            String(
+                "date-picker-content",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "date-picker-trigger",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

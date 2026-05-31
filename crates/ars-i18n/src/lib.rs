@@ -59,9 +59,9 @@ pub use case::case_fold;
 pub use case::{to_lowercase, to_uppercase};
 pub use collation::{CollationFormat, CollationOptions, CollationStrength, StringCollator};
 pub use date::{
-    DateFormatter, DateFormatterOptions, DateFormatterPart, DateFormatterPartKind,
+    DateFormatter, DateFormatterOptions, DateFormatterPart, DateFormatterPartKind, DateOrder,
     DateRangeFormatterPart, DateRangePartSource, FormatLength, MonthFormat, NumericWidth,
-    ResolvedDateFormatterOptions, TextWidth, TimeZoneNameFormat,
+    ResolvedDateFormatterOptions, TextWidth, TimeZoneNameFormat, date_order,
 };
 #[cfg(feature = "std")]
 pub use detect::locale_from_accept_language;

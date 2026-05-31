@@ -1825,6 +1825,18 @@ impl DateFormatter {
 
     pub fn resolved_options(&self) -> ResolvedDateFormatterOptions;
 }
+
+/// The order of the year, month, and day fields in a locale's numeric date.
+pub enum DateOrder {
+    MonthDayYear, // e.g. en-US — MM/dd/yyyy
+    DayMonthYear, // e.g. en-GB — dd/MM/yyyy (most common worldwide)
+    YearMonthDay, // e.g. ja-JP — yyyy/MM/dd
+}
+
+/// Returns the locale's preferred numeric date field order. Resolves from real
+/// locale data when a backend is compiled in (CLDR via ICU4X, or the browser
+/// `Intl` API on wasm) and falls back to a `(language, region)` heuristic.
+pub fn date_order(locale: &Locale) -> DateOrder;
 ```
 
 Normative behavior:

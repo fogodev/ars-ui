@@ -610,6 +610,13 @@ DateField segment order MUST be derived from the resolved locale's date pattern,
 3. **Fallback to language only**: If the exact region is not available (e.g., `en-XX`), fall back to the language's default pattern (e.g., `en` -> `MM/dd/yyyy`).
 4. **Final fallback**: Gregorian calendar with ISO 8601 order (`yyyy-MM-dd`).
 
+In the implementation, the year/month/day ordering for non-era calendars is
+resolved by [`ars_i18n::date_order`](../../foundation/04-internationalization.md)
+(CLDR via ICU4X, the browser `Intl` API on wasm, or a `(language, region)`
+heuristic fallback) — the **same source** `DatePicker` uses, so the two date
+inputs always agree on field order. `DateField` then layers calendar-specific
+segments (e.g. the Japanese era) and locale separators on top.
+
 **Locale-Specific Patterns**:
 
 | Locale        | Pattern       | Segment Order               | Calendar        | Notes                            |

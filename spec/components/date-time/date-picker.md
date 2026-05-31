@@ -6,19 +6,53 @@ foundation_deps: [architecture, accessibility, i18n, interactions, forms]
 shared_deps: [date-time-types]
 related: [calendar, date-field, date-range-picker]
 references:
-  ark-ui: DatePicker
-  react-aria: DatePicker
+    ark-ui: DatePicker
+    react-aria: DatePicker
 ---
 
 # DatePicker
 
-`DatePicker` is a composite component that combines a `DateField` (segmented date input) with a `Calendar` in a popover.
+`DatePicker` is a composite component that combines a date text input with a `Calendar` in a popover.
 
-The DatePicker composes two internal machines:
+- The DatePicker machine owns the popover open/close lifecycle, the selected
+  value, input text parsing/validation, and the ARIA/`data-ars-*` surface.
+- The `Calendar` is **composed by the adapter** from [`Api::calendar_props`](#18-connect--api):
+  the adapter instantiates a `Calendar` machine inside the `Content` part and
+  bridges its `SelectDate` event back as [`Event::SelectDate`](#12-events). The
+  DatePicker does not embed a `Calendar` `Service` in its own context.
 
-- A `DateField` machine handles the input segments.
-- A `Calendar` machine handles the popover calendar grid.
-- The DatePicker's own state machine manages the popover open/close lifecycle and synchronizes the selected value between the two sub-components.
+> **Spec-vs-implementation reconciliation.** The §1.7/§1.8 code blocks predate
+> the current core engine and sibling components. The agnostic implementation
+> (`crates/ars-components/src/date_time/date_picker/`) keeps the semantics below
+> while using the real APIs, and these sections have been updated to match:
+>
+> - **Open/closed is owned by [`State`](#11-states).** There is no parallel
+>   `open: Bindable<bool>` context field — the connect API renders from the
+>   state. When `open` is **uncontrolled**, user events mutate `State` directly.
+>   When `open` is **controlled** (`props.open.is_some()`), user events do **not**
+>   mutate `State`: the request is recorded in `Context::requested_open` and
+>   signalled via `Effect::OpenChange`, and the parent reconciles by updating the
+>   `open` prop (applied by `SyncProps`). The adapter invokes
+>   `Props::on_open_change` with `requested_open` on every `OpenChange`.
+>   `OpenChange` is a user-interaction signal only — it is not emitted by
+>   `SyncProps` (a controlled prop change is the parent's own doing) or at mount.
+> - **Focus is adapter-driven via named effects.** The machine declares a typed
+>   `Effect` enum and emits [`PendingEffect::named`] intents (`OpenChange`,
+>   `ValueChange`, `FocusCalendar`, `RestoreFocusToTrigger`, `RestoreFocusToInput`);
+>   the adapter performs the live, element-handle-based focus. The core never calls
+>   `use_platform_effects()`/`focus_element_by_id` (matches `popover`/`dialog`
+>   and the element/ref handling note in issue #289).
+> - **Real `CalendarDate` API.** `year()`/`month()`/`day()` are methods returning
+>   plain integers, `new_gregorian` is fallible, and `CalendarDate` has no `Ord`
+>   so range checks use `CalendarDate::compare`.
+> - **`is_date_unavailable` reuses `calendar::IsDateUnavailableFn`** so it
+>   forwards cleanly into `Api::calendar_props` and keeps `Props: Clone + PartialEq`.
+> - **Controlled-prop sync.** A `SyncProps(Box<Props>)` event plus
+>   `on_props_changed`/`initial_effects` keep controlled `value`/`open`/`min`/
+>   `max`/`disabled` live, matching Calendar/DateField/Popover.
+> - **Format-aware parse/format.** `format_date`/`parse_date` honour the resolved
+>   `format` pattern (field order + separator), so the locale-default `format` is
+>   not dead code.
 
 ## 1. State Machine
 
@@ -51,12 +85,19 @@ pub enum Event {
     SelectDate { date: CalendarDate },
     /// The text input value changed (user typing in the field).
     InputChange { value: String },
-    /// Focus entered the date picker (input or trigger).
+    /// Focus entered the input field. With `open_on_click`, opens the calendar.
+    /// Adapters dispatch it from input focus only — not trigger focus (the
+    /// trigger's own click/keydown handlers manage opening).
     FocusIn,
     /// Focus left the date picker entirely.
     FocusOut,
     /// Keyboard event on the input or trigger.
     KeyDown { key: KeyboardKey },
+    /// Re-apply context-backed prop fields after a props change. Emitted by
+    /// [`on_props_changed`](#17-full-machine-implementation) so controlled
+    /// `value`/`open` and the cached `min`/`max`/`disabled`/`format` fields
+    /// follow parent-driven prop updates.
+    SyncProps(Box<Props>),
 }
 ```
 
@@ -64,16 +105,35 @@ pub enum Event {
 
 ```rust
 /// Context for the DatePicker component.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// Only `Clone + Debug` are required by the `Machine` trait. `PartialEq` is not
+/// derived — nothing compares whole contexts, and `Messages` holds `MessageFn`
+/// closures that have no structural equality.
+#[derive(Clone, Debug)]
 pub struct Context {
     /// The selected date value (controlled/uncontrolled).
     pub value: Bindable<Option<CalendarDate>>,
-    /// Whether the popover is open (controlled/uncontrolled).
-    pub open: Bindable<bool>,
     /// Raw text in the input field.
     pub input_text: String,
     /// Last successfully parsed date from input text.
     pub parsed_date: Option<CalendarDate>,
+    /// Most recently requested value, carried to the adapter's value-change
+    /// wiring via `Effect::ValueChange`. Distinct from `value`: when `value` is
+    /// controlled, `value.get()` returns the parent's committed value, so the
+    /// requested date would otherwise be invisible. `None` is a requested clear.
+    pub requested_value: Option<CalendarDate>,
+    /// Most recently requested open state, carried to the adapter's
+    /// `on_open_change` wiring via `Effect::OpenChange`. When `open` is
+    /// controlled the machine does not mutate `State` on user events; it records
+    /// the request here and the parent reconciles by updating the `open` prop.
+    /// The adapter reads this (not `is_open()`) when an `OpenChange` fires.
+    pub requested_open: bool,
+    /// Focus move to perform the next time an open/close lands, recorded per user
+    /// event so a controlled-`open` reconciliation (which lands the state change
+    /// in `SyncProps`) reproduces the originating intent. `None` = no override,
+    /// so `SyncProps` uses the per-direction default (calendar on open, trigger
+    /// on close). Internal — the adapter only ever sees the resulting focus effect.
+    requested_focus: Option<OpenFocus>,
     /// Locale for formatting and parsing.
     pub locale: Locale,
     /// Resolved translatable messages.
@@ -84,14 +144,14 @@ pub struct Context {
     pub min: Option<CalendarDate>,
     /// Maximum selectable date (forwarded to Calendar).
     pub max: Option<CalendarDate>,
+    /// Adapter-injected "today" date, forwarded to the embedded Calendar.
+    pub today: CalendarDate,
     /// Disabled state.
     pub disabled: bool,
     /// Read-only state.
     pub readonly: bool,
     /// Whether clicking/focusing the input opens the popover.
     pub open_on_click: bool,
-    /// Unavailable date predicate result cache.
-    pub unavailable_dates: Vec<CalendarDate>,
     /// Whether the input has been interacted with.
     pub is_touched: bool,
     /// Form field name.
@@ -108,14 +168,14 @@ impl Context {
     /// Format the current value as a display string for the input field.
     pub fn formatted_value(&self) -> String {
         match self.value.get() {
-            Some(date) => format_date(date, &self.format, &self.locale),
+            Some(date) => format_date(date, &self.format),
             None => String::new(),
         }
     }
 
     /// Attempt to parse a text string into a CalendarDate.
     pub fn parse_input(&self, text: &str) -> Option<CalendarDate> {
-        parse_date(text, &self.format, &self.locale)
+        parse_date(text, &self.format)
     }
 
     /// Sync the input text to reflect the current value.
@@ -124,28 +184,118 @@ impl Context {
     }
 }
 
-/// Format a CalendarDate according to the given pattern and locale.
-fn format_date(date: &CalendarDate, format: &str, locale: &Locale) -> String {
-    // Production: ICU4X DateTimeFormatter.
-    // Simplified placeholder for the spec:
-    format!("{:02}/{:02}/{:04}", date.month.get(), date.day.get(), date.year)
+/// One of the three ordered fields in a date format pattern.
+enum DateField { Year, Month, Day }
+
+/// Locale-appropriate default date format pattern (used when `Props::format` is
+/// `None`). Field order comes from [`ars_i18n::date_order`], which uses real
+/// locale data — CLDR via ICU4X, or the browser `Intl` API on wasm — falling
+/// back to a `(language, region)` heuristic, so every locale gets the correct
+/// month/day/year order and the order matches the sibling `date_field`. The
+/// separator stays a small locale heuristic (`.` for German/Korean, `/` else).
+fn default_format_for_locale(locale: &Locale) -> String {
+    let separator = match (locale.language(), locale.region()) {
+        ("de", Some("DE")) | ("ko", Some("KR")) => '.',
+        _ => '/',
+    };
+    let order: [&str; 3] = match date_order(locale) {
+        DateOrder::MonthDayYear => ["MM", "dd", "yyyy"],
+        DateOrder::DayMonthYear => ["dd", "MM", "yyyy"],
+        DateOrder::YearMonthDay => ["yyyy", "MM", "dd"],
+    };
+    format!("{}{separator}{}{separator}{}", order[0], order[1], order[2])
 }
 
-/// Parse a date string according to the given pattern and locale.
-fn parse_date(text: &str, format: &str, locale: &Locale) -> Option<CalendarDate> {
-    // Production: ICU4X DateTimeParser.
-    // Simplified placeholder for the spec:
-    let parts = text.split('/').collect::<Vec<_>>();
-    if parts.len() != 3 { return None; }
-    let month = parts[0].parse::<u8>().ok()?;
-    let day   = parts[1].parse::<u8>().ok()?;
-    let year  = parts[2].parse::<i32>().ok()?;
-    if month < 1 || month > 12 || day < 1 || day > 31 { return None; }
-    Some(CalendarDate::new_gregorian(
-        year,
-        NonZero::new(month).expect("parsed month is 1-based"),
-        NonZero::new(day).expect("parsed day is 1-based"),
-    ))
+/// Parse a format pattern into its separator and ordered fields. The separator
+/// is the first non-alphabetic character; each token's leading letter selects
+/// the field (`y`/`Y` → year, `d`/`D` → day, otherwise month).
+fn parse_format(format: &str) -> (char, [DateField; 3]) {
+    let sep = format.chars().find(|c| !c.is_ascii_alphabetic()).unwrap_or('/');
+    let mut order = [DateField::Month, DateField::Day, DateField::Year];
+    let tokens: Vec<&str> = format.split(sep).collect();
+    if tokens.len() == 3 {
+        for (index, token) in tokens.iter().enumerate() {
+            order[index] = match token.chars().next() {
+                Some('y' | 'Y') => DateField::Year,
+                Some('d' | 'D') => DateField::Day,
+                _ => DateField::Month,
+            };
+        }
+    }
+    (sep, order)
+}
+
+/// Format a `CalendarDate` in the pattern's field order (month/day zero-padded
+/// to two digits, year to four). Uses the real `year()`/`month()`/`day()`
+/// accessor methods.
+fn format_date(date: &CalendarDate, format: &str) -> String {
+    let (sep, order) = parse_format(format);
+    let mut out = String::new();
+    for (index, field) in order.iter().enumerate() {
+        if index > 0 { out.push(sep); }
+        match field {
+            DateField::Year => out.push_str(&format!("{:04}", date.year())),
+            DateField::Month => out.push_str(&format!("{:02}", date.month())),
+            DateField::Day => out.push_str(&format!("{:02}", date.day())),
+        }
+    }
+    out
+}
+
+/// Parse a date string in the pattern's field order. `new_gregorian` is fallible
+/// (validates the date), so it is mapped to `Option` via `.ok()`. Native decimal
+/// digits (e.g. Arabic-Indic) are transliterated to ASCII first so a localized
+/// numeric date still commits.
+fn parse_date(text: &str, format: &str) -> Option<CalendarDate> {
+    let text = normalize_digits(text);
+    let (sep, order) = parse_format(format);
+    let tokens: Vec<&str> = text.split(sep).collect();
+    if tokens.len() != 3 { return None; }
+    let (mut year, mut month, mut day) = (None, None, None);
+    for (index, field) in order.iter().enumerate() {
+        let parsed: i64 = tokens[index].trim().parse().ok()?;
+        match field {
+            DateField::Year => year = Some(parsed),
+            DateField::Month => month = Some(parsed),
+            DateField::Day => day = Some(parsed),
+        }
+    }
+    let year = i32::try_from(year?).ok()?;
+    let month = u8::try_from(month?).ok()?;
+    let day = u8::try_from(day?).ok()?;
+    CalendarDate::new_gregorian(year, month, day).ok()
+}
+
+/// Classification of input text for `Event::InputChange`.
+enum InputClass {
+    /// A complete, valid date.
+    Valid(CalendarDate),
+    /// Three numeric fields that do not form a valid date (e.g. `02/30/2024`) —
+    /// treated as a rejected commit, not in-progress text.
+    CompleteInvalid,
+    /// In-progress / non-numeric text still being edited.
+    Partial,
+}
+
+/// A "complete" entry is exactly three numeric fields in the format separator;
+/// only those can be rejected as invalid. Anything else is `Partial`.
+fn classify_input(text: &str, format: &str) -> InputClass {
+    // Transliterate native decimal digits to ASCII before the completeness check
+    // so a localized numeric date is recognised as complete (and can commit),
+    // not misclassified as in-progress text.
+    let text = normalize_digits(text);
+    let (sep, _order) = parse_format(format);
+    let tokens: Vec<&str> = text.split(sep).collect();
+    let complete_numeric = tokens.len() == 3
+        && tokens.iter().all(|t| {
+            let t = t.trim();
+            !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit())
+        });
+    if !complete_numeric { return InputClass::Partial; }
+    match parse_date(&text, format) {
+        Some(date) => InputClass::Valid(date),
+        None => InputClass::CompleteInvalid,
+    }
 }
 ```
 
@@ -169,8 +319,10 @@ pub struct Props {
     pub disabled: bool,
     /// Whether the date picker allows viewing but not editing.
     pub readonly: bool,
-    /// Predicate for unavailable dates (forwarded to Calendar).
-    pub is_date_unavailable: Option<fn(&CalendarDate) -> bool>,
+    /// Predicate for unavailable dates (forwarded to Calendar). Reuses
+    /// `calendar::IsDateUnavailableFn` (an `Arc`-backed `Callback`) so it
+    /// forwards directly into `Api::calendar_props` and keeps `Props: PartialEq`.
+    pub is_date_unavailable: Option<calendar::IsDateUnavailableFn>,
     /// Date format pattern. Defaults to locale-appropriate format.
     pub format: Option<String>,
     /// Placeholder text for the input field.
@@ -205,6 +357,21 @@ pub struct Props {
     /// `page_behavior: PageBehavior::Single` is set on the underlying Calendar).
     /// Forwarded to the embedded Calendar component's `visible_months` prop.
     pub visible_months: usize,
+    /// The "today" date, injected by the adapter for testability/SSR. Forwarded
+    /// to the embedded Calendar's `today` so an empty picker opens on the current
+    /// month and marks the correct day. Defaults to a fixed date (matching
+    /// `calendar::Props::default().today`); adapters inject the real today.
+    pub today: CalendarDate,
+    /// Called whenever the open state changes. Fired by the adapter from the
+    /// [`Effect::OpenChange`] intent with the new open value; a controlled-`open`
+    /// parent uses it to reconcile its state after a user-driven open/close
+    /// (mirrors `popover`/`dialog`).
+    pub on_open_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
+    /// Called whenever the selected value changes. Fired by the adapter from the
+    /// [`Effect::ValueChange`] intent with `Context::requested_value` (the
+    /// requested date, or `None` for a clear); a controlled-`value` parent uses
+    /// it to echo the new value back (the value counterpart of `on_open_change`).
+    pub on_value_change: Option<Callback<dyn Fn(Option<CalendarDate>) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -232,6 +399,10 @@ impl Default for Props {
             default_open: false,
             open_on_click: true,
             visible_months: 1,
+            today: CalendarDate::new_gregorian(2025, 1, 1)
+                .expect("2025-01-01 is a valid Gregorian date"),
+            on_open_change: None,
+            on_value_change: None,
         }
     }
 }
@@ -295,62 +466,90 @@ fn DatePicker(props: DatePickerProps) -> impl IntoView {
 ### 1.7 Full Machine Implementation
 
 ```rust
+/// Typed identifier for every named effect the machine emits. The adapter
+/// performs the live, element-handle-based work from these intents (the core
+/// never touches the DOM).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Notify the consumer that an open/close was requested. The adapter reads
+    /// `Context::requested_open` (not `is_open()`, which still reflects the
+    /// committed state) and invokes `Props::on_open_change`. Emitted only from
+    /// user events — never from `SyncProps` (a controlled prop change is the
+    /// parent's own doing) or at mount. When `open` is controlled the `State` is
+    /// not mutated; the parent reconciles via the `open` prop.
+    OpenChange,
+    /// Notify the consumer that the selected value changed. The adapter reads
+    /// `Context::requested_value` (the requested date — not `value.get()`, which
+    /// a controlled bindable holds at the parent's value) and forwards it.
+    /// Emitted on a selection, an accepted typed entry, or a clear. Mirrors the
+    /// `requested_value` + `ValueChange` convention of other value components.
+    ValueChange,
+    /// Move focus into the embedded calendar. Emitted when the popover opens via
+    /// the trigger / `ArrowDown` (an explicit `Open`), not when opened by input
+    /// focus (`FocusIn`), which keeps focus in the input for typing.
+    FocusCalendar,
+    /// Return focus to the trigger. Emitted on `Close`/Escape.
+    RestoreFocusToTrigger,
+    /// Return focus to the input. Emitted when a selection closes the popover.
+    RestoreFocusToInput,
+}
+
 pub struct Machine;
 
 impl ars_core::Machine for Machine {
-    type State   = State;
-    type Event   = Event;
+    type State = State;
+    type Event = Event;
     type Context = Context;
-    type Props   = Props;
+    type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let value = match props.value {
-            Some(v) => Bindable::controlled(v),
-            None    => Bindable::uncontrolled(props.default_value.clone()),
+        let value = match &props.value {
+            Some(v) => Bindable::controlled(v.clone()),
+            None => Bindable::uncontrolled(props.default_value.clone()),
         };
 
         let locale = env.locale.clone();
-        let messages = messages.clone();
-
-        let locale_tag = locale.to_bcp47();
-        let default_format = match locale_tag.as_str() {
-            "en-US" | "en-CA" => "MM/dd/yyyy",
-            "en-GB" | "de-DE" | "fr-FR" | "es-ES" | "it-IT" | "ru-RU" => "dd/MM/yyyy",
-            "ja-JP" | "zh-CN" | "zh-TW" | "ko-KR" => "yyyy/MM/dd",
-            _ => "MM/dd/yyyy",
-        };
         let format = props
             .format
             .clone()
-            .unwrap_or_else(|| default_format.to_string());
+            .unwrap_or_else(|| default_format_for_locale(&locale));
 
         let input_text = value
             .get()
             .as_ref()
-            .map(|d| format_date(d, &format, &locale))
+            .map(|d| format_date(d, &format))
             .unwrap_or_default();
 
-        let open = match props.open {
-            Some(v) => Bindable::controlled(v),
-            None    => Bindable::uncontrolled(props.default_open),
-        };
+        // `State` is the single source of truth for open/closed; controlled
+        // `open`/`default_open` only seed the initial state.
+        let open = props.open.unwrap_or(props.default_open);
+        let initial_state = if open { State::Open } else { State::Closed };
+
+        // The `requested_*` mirrors seed from the initial state; they are only
+        // read by the adapter on an `Effect::ValueChange` / `Effect::OpenChange`,
+        // neither of which fires at init.
+        let requested_value = value.get().clone();
+        let requested_open = open;
 
         let ctx = Context {
             value,
-            open,
             input_text,
             parsed_date: None,
+            requested_value,
+            requested_focus: None,
+            requested_open,
             locale,
-            messages,
+            messages: messages.clone(),
             format,
             min: props.min.clone(),
             max: props.max.clone(),
+            today: props.today.clone(),
             disabled: props.disabled,
             readonly: props.readonly,
             open_on_click: props.open_on_click,
-            unavailable_dates: Vec::new(),
             is_touched: false,
             name: props.name.clone(),
             required: props.required,
@@ -358,9 +557,31 @@ impl ars_core::Machine for Machine {
             ids: ComponentIds::from_id(&props.id),
         };
 
-        let initial_state = if *open.get() { State::Open } else { State::Closed };
-
         (initial_state, ctx)
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        debug_assert_eq!(old.id, new.id, "DatePicker id must remain stable after init");
+        if old == new {
+            Vec::new()
+        } else {
+            vec![Event::SyncProps(Box::new(new.clone()))]
+        }
+    }
+
+    fn initial_effects(
+        state: &Self::State,
+        _ctx: &Self::Context,
+        _props: &Self::Props,
+    ) -> Vec<PendingEffect<Self>> {
+        // A picker that boots `Open` focuses the calendar. It does NOT emit
+        // `OpenChange`: that is a user-interaction signal, and the initial open
+        // state is the parent's own configuration (no `onOpenChange` on mount).
+        if *state == State::Open {
+            vec![PendingEffect::named(Effect::FocusCalendar)]
+        } else {
+            Vec::new()
+        }
     }
 
     fn transition(
@@ -369,70 +590,126 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        // `SyncProps` flows through even when disabled so a parent can take the
+        // picker *out of* the disabled state. Controlled `open` forces the
+        // matching state; uncontrolled (`None`) preserves the current state.
+        if let Event::SyncProps(new_props) = event {
+            let new_props = new_props.as_ref().clone();
+            let was_open = *state == State::Open;
+            let target = match new_props.open {
+                Some(true) => Some(State::Open),
+                Some(false) => Some(State::Closed),
+                None => None,
+            };
+            let opening = !was_open && target.as_ref() == Some(&State::Open);
+            let closing = was_open && target.as_ref() == Some(&State::Closed);
+            // The focus intent recorded by the user event that prompted this
+            // reconciliation (read before the apply closure consumes it); `None`
+            // for a purely programmatic change, where the per-direction default
+            // applies.
+            let pending_focus = ctx.requested_focus;
+            let mut plan = match target {
+                Some(next) => TransitionPlan::to(next),
+                None => TransitionPlan::new(),
+            };
+            plan = plan.apply(move |ctx| {
+                if let Some(open) = new_props.open { ctx.requested_open = open; }
+                ctx.requested_focus = None; // consume
+                sync_props_into_ctx(ctx, &new_props);
+            });
+            // No `OpenChange` here: a controlled `open` prop change is the parent's
+            // own doing. Focus reproduces the originating user intent (or the
+            // per-direction default for a programmatic change).
+            if opening && let Some(focus) = pending_focus.unwrap_or(OpenFocus::Calendar).effect() {
+                plan = plan.with_effect(focus);
+            } else if closing && let Some(focus) = pending_focus.unwrap_or(OpenFocus::Trigger).effect() {
+                plan = plan.with_effect(focus);
+            }
+            return Some(plan);
+        }
+
         if ctx.disabled { return None; }
 
         match event {
-            // ── Popover open / close ─────────────────────────────────────
-            Event::Open => {
-                if *state == State::Open || ctx.readonly { return None; }
-                Some(TransitionPlan::to(State::Open)
-                    .apply(|ctx| {
-                        ctx.open.set(true);
-                    })
-                    .with_effect(PendingEffect::new("focus-calendar", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let grid_id = ctx.ids.part("grid");
-                        platform.focus_element_by_id(&grid_id);
-                        no_cleanup()
-                    })))
-            }
+            // ── Popover open / close ──────────────────────────────────────
+            // `open_request` honors controlled `open`: when controlled it records
+            // the request + emits `OpenChange` without mutating `State`; when
+            // uncontrolled it transitions and fires the focus effect.
+            // `readonly` does NOT block opening — a read-only picker still opens
+            // so the user can *view* the current date/month (the embedded
+            // Calendar blocks selection on its own); only the editing paths
+            // (`SelectDate`, `InputChange`) are guarded.
+            Event::Open => open_request(state, ctx, props, true, OpenFocus::Calendar),
 
-            Event::Close => {
-                if *state == State::Closed { return None; }
-                Some(TransitionPlan::to(State::Closed)
-                    .apply(|ctx| {
-                        ctx.open.set(false);
-                    })
-                    .with_effect(PendingEffect::new("restore-focus", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let trigger_id = ctx.ids.part("trigger");
-                        platform.focus_element_by_id(&trigger_id);
-                        no_cleanup()
-                    })))
-            }
+            Event::Close => open_request(state, ctx, props, false, OpenFocus::Trigger),
 
-            Event::Toggle => {
-                match state {
-                    State::Closed => Self::transition(state, &Event::Open, ctx, props),
-                    State::Open   => Self::transition(state, &Event::Close, ctx, props),
-                }
-            }
+            Event::Toggle => match state {
+                State::Closed => Self::transition(state, &Event::Open, ctx, props),
+                State::Open => Self::transition(state, &Event::Close, ctx, props),
+            },
 
             // ── Date selection (from calendar) ───────────────────────────
             Event::SelectDate { date } => {
                 if ctx.readonly { return None; }
+                // Defense-in-depth: reject a selection the picker disallows (the
+                // calendar should never offer it, but a scripted/stale/buggy
+                // event might), mirroring the typed-input constraints.
+                let in_range = ctx.min.as_ref().is_none_or(|m| date.compare(m) != Ordering::Less)
+                    && ctx.max.as_ref().is_none_or(|m| date.compare(m) != Ordering::Greater);
+                let available = props.is_date_unavailable.as_ref().is_none_or(|p| !p(date));
+                if !(in_range && available) { return None; }
                 let date = date.clone();
-                let format = ctx.format.clone();
-                let locale = ctx.locale.clone();
                 let should_close = props.close_on_select;
-                let next_state = if should_close { State::Closed } else { State::Open };
-                let mut plan = TransitionPlan::to(next_state)
-                    .apply(move |ctx| {
-                        ctx.value.set(Some(date.clone()));
-                        ctx.input_text = format_date(&date, &format, &locale);
-                        ctx.parsed_date = Some(date);
-                        if should_close {
-                            ctx.open.set(false);
-                        }
-                        ctx.is_touched = true;
-                    });
-                if should_close {
-                    plan = plan.with_effect(PendingEffect::new("restore-focus-after-select", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let input_id = ctx.ids.part("input");
-                        platform.focus_element_by_id(&input_id);
-                        no_cleanup()
-                    }));
+                let open_controlled = props.open.is_some();
+                // The selection only *closes* the picker when it is actually open.
+                // A queued/stale `SelectDate` landing after the popover already
+                // closed (e.g. a calendar click racing with `FocusOut`) must not
+                // re-fire `OpenChange`/focus restoration for a close that never
+                // happens (that would call `on_open_change(false)` spuriously and
+                // yank focus back into the input).
+                let closes_open = should_close && *state == State::Open;
+                // Commit the close only when open is uncontrolled; otherwise just
+                // request it and let the parent reconcile.
+                let commit_close = closes_open && !open_controlled;
+                // Suppress a no-op `ValueChange` when the date is already selected.
+                let value_changes = ctx.value.get().as_ref() != Some(&date);
+                // Controlled `open` never mutates `State` here (a stale/scripted
+                // selection must not locally reopen). Uncontrolled: close on
+                // select, or *preserve the current state* when `close_on_select`
+                // is false — a selection must never reopen an already-closed
+                // picker (a queued/stale calendar click that races with an
+                // outside-close or focus-out must not bring the popover back).
+                let next_state = if !open_controlled && should_close {
+                    State::Closed
+                } else {
+                    state.clone()
+                };
+                let mut plan = TransitionPlan::to(next_state).apply(move |ctx| {
+                    ctx.requested_value = Some(date.clone());
+                    ctx.value.set(Some(date));
+                    // Derive the visible text and `parsed_date` from the value the
+                    // bindable actually exposes — for a controlled `value` that is
+                    // still the parent's value, so the display never optimistically
+                    // diverges from `selected_date()` / the hidden input / the
+                    // composed calendar props.
+                    ctx.parsed_date = ctx.value.get().clone();
+                    ctx.input_text = ctx.formatted_value();
+                    ctx.is_touched = true;
+                    if closes_open {
+                        ctx.requested_open = false;
+                        // Controlled close: defer restoring focus to the input
+                        // until the parent echoes the close.
+                        if !commit_close { ctx.requested_focus = Some(OpenFocus::Input); }
+                    }
+                });
+                if value_changes {
+                    plan = plan.with_effect(PendingEffect::named(Effect::ValueChange));
+                }
+                if closes_open {
+                    plan = plan.with_effect(PendingEffect::named(Effect::OpenChange));
+                    if commit_close {
+                        plan = plan.with_effect(PendingEffect::named(Effect::RestoreFocusToInput));
+                    }
                 }
                 Some(plan)
             }
@@ -441,77 +718,92 @@ impl ars_core::Machine for Machine {
             Event::InputChange { value } => {
                 if ctx.readonly { return None; }
                 let text = value.clone();
-                let format = ctx.format.clone();
-                let locale = ctx.locale.clone();
-                let min = ctx.min.clone();
-                let max = ctx.max.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
+                // Decide the committed-value outcome up front so `ValueChange`
+                // fires exactly when the value changes. A complete date that is
+                // rejected (out of range, unavailable, or not a real date such as
+                // `02/30/2024`) CLEARS the value, so the hidden input / calendar
+                // never submit a stale date contradicting the field; partial /
+                // non-numeric text leaves the value untouched.
+                let (committed_value, value_changed): (Option<CalendarDate>, bool) =
+                    match classify_input(&text, &ctx.format) {
+                        InputClass::Valid(date) => {
+                            let in_range = ctx.min.as_ref().is_none_or(|m| date.compare(m) != Ordering::Less)
+                                && ctx.max.as_ref().is_none_or(|m| date.compare(m) != Ordering::Greater);
+                            let available = props.is_date_unavailable.as_ref().is_none_or(|p| !p(&date));
+                            if in_range && available { (Some(date), true) } else { (None, true) }
+                        }
+                        InputClass::CompleteInvalid => (None, true),
+                        InputClass::Partial if text.is_empty() => (None, true),
+                        InputClass::Partial => (None, false),
+                    };
+                // Suppress a no-op `ValueChange` when the value would not change.
+                let value_changes = value_changed && committed_value.as_ref() != ctx.value.get().as_ref();
+                // Controlled `value` always reflects the bindable (parent's
+                // committed value) — for accepts AND clears/rejections — never
+                // optimistically showing typed/empty text the rest of the API
+                // contradicts.
+                let value_controlled = props.value.is_some();
+                let mut plan = TransitionPlan::context_only(move |ctx| {
                     ctx.is_touched = true;
-                    // Attempt to parse the input.
-                    if let Some(date) = parse_date(&text, &format, &locale) {
-                        // Validate against min/max.
-                        let in_range = min.as_ref().map_or(true, |m| date >= *m)
-                            && max.as_ref().map_or(true, |m| date <= *m);
-                        if in_range {
-                            ctx.parsed_date = Some(date.clone());
-                            ctx.value.set(Some(date));
-                        }
+                    if value_changed {
+                        let accepted = committed_value.is_some();
+                        ctx.parsed_date = committed_value.clone();
+                        ctx.requested_value = committed_value.clone();
+                        ctx.value.set(committed_value);
+                        // Reflect the bindable for a controlled value (any change,
+                        // until the parent echoes) or an uncontrolled accept
+                        // (normalized); only an uncontrolled reject/clear keeps the
+                        // text the user sees.
+                        ctx.input_text = if value_controlled || accepted {
+                            ctx.formatted_value()
+                        } else {
+                            text
+                        };
                     } else {
-                        // If text is empty, clear the value.
-                        if text.is_empty() {
-                            ctx.parsed_date = None;
-                            ctx.value.set(None);
-                        }
+                        // In-progress (partial/unparseable) typing is preserved.
+                        ctx.input_text = text;
                     }
-                    ctx.input_text = text;
-                }))
+                });
+                if value_changes {
+                    plan = plan.with_effect(PendingEffect::named(Effect::ValueChange));
+                }
+                Some(plan)
             }
 
             // ── Focus management ─────────────────────────────────────────
             Event::FocusIn => {
+                // Open via focus passes no focus effect — the user focused the
+                // input, so focus stays in the field (only trigger/ArrowDown
+                // opens move it into the grid). `readonly` does not block this
+                // view-only open (see `Event::Open`).
                 if *state == State::Closed && ctx.open_on_click {
-                    Some(TransitionPlan::to(State::Open)
-                        .apply(|ctx| {
-                            ctx.open.set(true);
-                        })
-                        .with_effect(PendingEffect::new("focus-calendar", |ctx, _props, _send| {
-                            let platform = use_platform_effects();
-                            let grid_id = ctx.ids.part("grid");
-                            platform.focus_element_by_id(&grid_id);
-                            no_cleanup()
-                        })))
-                } else {
-                    Some(TransitionPlan::context_only(|_ctx| {
-                        // No state change; just marks that the component has focus.
-                    }))
-                }
-            }
-
-            Event::FocusOut => {
-                // Close popover if open and focus leaves the entire component.
-                if *state == State::Open {
-                    Some(TransitionPlan::to(State::Closed)
-                        .apply(|ctx| {
-                            ctx.open.set(false);
-                        }))
+                    open_request(state, ctx, props, true, OpenFocus::None)
                 } else {
                     None
                 }
             }
 
+            Event::FocusOut => open_request(state, ctx, props, false, OpenFocus::None),
+
             // ── Keyboard shortcuts ───────────────────────────────────────
-            Event::KeyDown { key } => {
-                match key {
-                    KeyboardKey::Escape if *state == State::Open => {
-                        Self::transition(state, &Event::Close, ctx, props)
-                    }
-                    KeyboardKey::ArrowDown if *state == State::Closed => {
-                        // Alt+ArrowDown opens the picker (handled at adapter level).
-                        Self::transition(state, &Event::Open, ctx, props)
-                    }
-                    _ => None,
+            Event::KeyDown { key } => match key {
+                KeyboardKey::Escape if *state == State::Open => {
+                    Self::transition(state, &Event::Close, ctx, props)
                 }
-            }
+                KeyboardKey::ArrowDown if *state == State::Closed => {
+                    Self::transition(state, &Event::Open, ctx, props)
+                }
+                // Already open (e.g. opened by input focus, which keeps focus in
+                // the input): ArrowDown moves focus into the calendar grid so the
+                // input→calendar keyboard path works in the focus-open flow.
+                KeyboardKey::ArrowDown => {
+                    Some(TransitionPlan::new().with_effect(PendingEffect::named(Effect::FocusCalendar)))
+                }
+                _ => None,
+            },
+
+            // Handled above the disabled guard.
+            Event::SyncProps(_) => None,
         }
     }
 
@@ -522,6 +814,100 @@ impl ars_core::Machine for Machine {
         send: &'a dyn Fn(Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
+    }
+}
+
+/// The focus move that should accompany an open/close once it actually lands.
+/// Recorded per user event so controlled-`open` reconciliation (which lands the
+/// state change later in `SyncProps`) can reproduce the originating intent.
+/// Internal — the adapter only ever sees the resulting focus `Effect`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OpenFocus { Calendar, Trigger, Input, None }
+
+impl OpenFocus {
+    fn effect(self) -> Option<PendingEffect<Machine>> {
+        match self {
+            OpenFocus::Calendar => Some(PendingEffect::named(Effect::FocusCalendar)),
+            OpenFocus::Trigger => Some(PendingEffect::named(Effect::RestoreFocusToTrigger)),
+            OpenFocus::Input => Some(PendingEffect::named(Effect::RestoreFocusToInput)),
+            OpenFocus::None => None,
+        }
+    }
+}
+
+/// Builds the plan for a user-driven request to open or close.
+///
+/// When `open` is **controlled** (`props.open.is_some()`), `State` is not mutated:
+/// the request is recorded in `requested_open` (and the `focus` intent in
+/// `requested_focus`) and signalled via `OpenChange`; the parent reconciles via
+/// the prop and the focus effect fires from `SyncProps` once the state lands.
+/// When **uncontrolled**, `State` transitions and the `focus` effect fires now.
+/// Returns `None` when already in the requested open state — except that a no-op
+/// *close* clears any stale `requested_focus` left by a controlled open the
+/// parent vetoed (so a later programmatic open uses the per-direction default
+/// rather than a stale "don't move focus" intent).
+fn open_request(
+    state: &State,
+    ctx: &Context,
+    props: &Props,
+    target_open: bool,
+    focus: OpenFocus,
+) -> Option<TransitionPlan<Machine>> {
+    if (*state == State::Open) == target_open {
+        // A controlled open the parent vetoed leaves a deferred focus intent
+        // with no `SyncProps` to consume it; a subsequent no-op close (e.g.
+        // `FocusOut` after the input lost focus) cancels it. `requested_focus`
+        // is only ever set under controlled `open`, so the uncontrolled no-op
+        // path stays a pure `None`.
+        if !target_open && ctx.requested_focus.is_some() {
+            return Some(TransitionPlan::new().apply(|ctx| { ctx.requested_focus = None; }));
+        }
+        return None;
+    }
+    let controlled = props.open.is_some();
+    let mut plan = if controlled {
+        TransitionPlan::new()
+    } else {
+        TransitionPlan::to(if target_open { State::Open } else { State::Closed })
+    };
+    plan = plan
+        .apply(move |ctx| {
+            ctx.requested_open = target_open;
+            if controlled { ctx.requested_focus = Some(focus); }
+        })
+        .with_effect(PendingEffect::named(Effect::OpenChange));
+    if !controlled && let Some(focus) = focus.effect() {
+        plan = plan.with_effect(focus);
+    }
+    Some(plan)
+}
+
+/// Re-applies the controlled value and cached scalar prop fields onto `ctx`.
+/// Open/closed is owned by `State` (the `SyncProps` transition derives the
+/// target state from `props.open`), so there is no `open` field to refresh.
+///
+/// The input text is re-synced **only when the displayed value or format
+/// actually changed** — an unrelated prop change (e.g. `invalid`, `description`,
+/// `disabled`) must not clobber a partial/invalid date the user is typing.
+fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
+    let previous_display = ctx.formatted_value();
+    ctx.value.sync_controlled(props.value.clone());
+    ctx.min = props.min.clone();
+    ctx.max = props.max.clone();
+    ctx.today = props.today.clone();
+    ctx.disabled = props.disabled;
+    ctx.readonly = props.readonly;
+    ctx.open_on_click = props.open_on_click;
+    ctx.name = props.name.clone();
+    ctx.required = props.required;
+    ctx.is_rtl = props.is_rtl;
+    ctx.format = props
+        .format
+        .clone()
+        .unwrap_or_else(|| default_format_for_locale(&ctx.locale));
+    let next_display = ctx.formatted_value();
+    if next_display != previous_display {
+        ctx.input_text = next_display;
     }
 }
 ```
@@ -615,9 +1001,11 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.part("content"));
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
 
-        // Announce the selected date when present.
-        if let Some(date) = &self.ctx.parsed_date {
-            let formatted = format_date(date, &self.ctx.format, &self.ctx.locale);
+        // Announce the selected date from the live value, so the description is
+        // present for `default_value` and controlled values too — not only for
+        // dates typed or picked during this session.
+        if let Some(date) = self.ctx.value.get() {
+            let formatted = format_date(date, &self.ctx.format);
             attrs.set(HtmlAttr::Aria(AriaAttr::Description),
                 (self.ctx.messages.selected_date_label)(&formatted, &self.ctx.locale));
         }
@@ -646,6 +1034,10 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true");
         }
         if self.ctx.required {
+            // Native `required` on the visible control drives browser constraint
+            // validation (ARIA alone does not); the hidden input is `type=hidden`
+            // and cannot validate.
+            attrs.set_bool(HtmlAttr::Required, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
         if self.props.invalid {
@@ -661,10 +1053,19 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("trigger"));
+        // Explicit `type="button"` so activating the trigger never submits a
+        // surrounding form (the HTML default button type is `submit`).
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.trigger_label)(&self.ctx.locale));
+        // The trigger advertises the popup it opens (matches the Popover trigger
+        // convention); the Input carries the same `aria-haspopup`.
+        attrs.set(HtmlAttr::Aria(AriaAttr::HasPopup), "dialog");
         attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if self.is_open() { "true" } else { "false" });
         attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.part("content"));
         attrs.set(HtmlAttr::TabIndex, "0");
+        // Only `disabled` makes the trigger non-actionable. A `readonly` picker
+        // still opens for viewing, so the trigger stays enabled (the editing
+        // paths are guarded in the machine; the clear-trigger stays disabled).
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
@@ -679,6 +1080,8 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("clear-trigger"));
+        // Explicit `type="button"` so clearing never submits a surrounding form.
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.clear_label)(&self.ctx.locale));
         attrs.set(HtmlAttr::TabIndex, "-1");
         if self.ctx.disabled || self.ctx.readonly {
@@ -741,9 +1144,12 @@ impl<'a> Api<'a> {
 
     /// Get the hidden input attributes.
     pub fn hidden_input_attrs(&self) -> AttrMap {
+        // Canonical ISO 8601 via `to_iso8601()` (the date's ISO slots), so a
+        // non-Gregorian value still submits the correct calendar-independent
+        // date rather than its display-calendar `year()/month()/day()` fields.
         let value = self.ctx.value.get()
             .as_ref()
-            .map(|d| format!("{:04}-{:02}-{:02}", d.year, d.month.get(), d.day.get()))
+            .map(CalendarDate::to_iso8601)
             .unwrap_or_default();
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::HiddenInput.data_attrs();
@@ -752,6 +1158,11 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Type, "hidden");
         if let Some(name) = &self.ctx.name {
             attrs.set(HtmlAttr::Name, name);
+        }
+        // A disabled control is excluded from form submission — mirror the
+        // disabled visible input/buttons so a disabled picker submits nothing.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
         }
         attrs.set(HtmlAttr::Value, value);
         attrs
@@ -765,11 +1176,17 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown on the trigger button.
-    pub fn on_trigger_keydown(&self, data: &KeyboardEventData) {
+    ///
+    /// Returns `true` when the key was handled so adapters can prevent the
+    /// follow-up native button-activation click — without this, Enter/Space
+    /// would toggle once on keydown and again on the synthesized click, leaving
+    /// the popover back in its original state (mirrors
+    /// `collapsible::Api::on_trigger_keydown`).
+    pub fn on_trigger_keydown(&self, data: &KeyboardEventData) -> bool {
         match data.key {
-            KeyboardKey::Enter | KeyboardKey::Space => (self.send)(Event::Toggle),
-            KeyboardKey::ArrowDown   => (self.send)(Event::Open),
-            _ => {}
+            KeyboardKey::Enter | KeyboardKey::Space => { (self.send)(Event::Toggle); true }
+            KeyboardKey::ArrowDown => { (self.send)(Event::Open); true }
+            _ => false,
         }
     }
 
@@ -788,7 +1205,10 @@ impl<'a> Api<'a> {
         (self.send)(Event::KeyDown { key });
     }
 
-    /// Handle focus entering the component.
+    /// Handle focus entering the **input field**. Wire to the `Input` only — not
+    /// the `Trigger` (which has its own click/keydown handlers); wiring it on the
+    /// trigger would open on trigger focus and the activating click would
+    /// immediately toggle it closed.
     pub fn on_focusin(&self) {
         (self.send)(Event::FocusIn);
     }
@@ -814,18 +1234,19 @@ impl<'a> Api<'a> {
     /// Content part and wires its SelectDate event back to this machine.
     pub fn calendar_props(&self) -> calendar::Props {
         calendar::Props {
-            id: format!("{}-calendar", self.ctx.ids.base_id),
+            id: format!("{}-calendar", self.ctx.ids.id()),
             value: Some(self.ctx.value.get().clone()),
-            default_value: None,
             min: self.ctx.min.clone(),
             max: self.ctx.max.clone(),
             disabled: self.ctx.disabled,
             readonly: self.ctx.readonly,
-            is_date_unavailable: self.props.is_date_unavailable,
-            first_day_of_week: None,
+            is_date_unavailable: self.props.is_date_unavailable.clone(),
             is_rtl: self.ctx.is_rtl,
             visible_months: self.props.visible_months,
-            today: CalendarDate::new_gregorian(2024, nzu8(1), nzu8(1)), // adapter injects real today
+            // Forward the adapter-injected "today" so the calendar opens on the
+            // current month and marks the correct day (otherwise it falls back to
+            // the fixed `calendar::Props::default().today`).
+            today: self.ctx.today.clone(),
             ..calendar::Props::default()
         }
     }
@@ -894,19 +1315,19 @@ impl ConnectApi for Api<'_> {
 
 ## 2. Anatomy
 
-| Part           | HTML Element            | Description                                          |
-| -------------- | ----------------------- | ---------------------------------------------------- |
-| `Root`         | `<div>`                 | Outermost container; `data-ars-scope="date-picker"`  |
-| `Label`        | `<label>`               | Associated label pointing to the input               |
-| `Control`      | `<div>`                 | Wrapper around the input and trigger button          |
-| `Input`        | `<input>`               | Date text input (or `DateField` segments container)  |
-| `Trigger`      | `<button>`              | Calendar icon button to toggle the popover           |
-| `ClearTrigger` | `<button>`              | Clears the selected date; hidden when empty          |
-| `Positioner`   | `<div>`                 | Floating positioner managed by `ars-dom` positioning |
-| `Content`      | `<div role="dialog">`   | Popover content containing the embedded Calendar     |
-| `Description`  | `<div>`                 | Optional help text                                   |
-| `ErrorMessage` | `<div role="alert">`    | Validation error text                                |
-| `HiddenInput`  | `<input type="hidden">` | ISO date string for form submission                  |
+| Part           | HTML Element             | Description                                              |
+| -------------- | ------------------------ | -------------------------------------------------------- |
+| `Root`         | `<div>`                  | Outermost container; `data-ars-scope="date-picker"`      |
+| `Label`        | `<label>`                | Associated label pointing to the input                   |
+| `Control`      | `<div>`                  | Wrapper around the input and trigger button              |
+| `Input`        | `<input>`                | Date text input (or `DateField` segments container)      |
+| `Trigger`      | `<button type="button">` | Calendar icon button to toggle the popover (non-submit)  |
+| `ClearTrigger` | `<button type="button">` | Clears the selected date; hidden when empty (non-submit) |
+| `Positioner`   | `<div>`                  | Floating positioner managed by `ars-dom` positioning     |
+| `Content`      | `<div role="dialog">`    | Popover content containing the embedded Calendar         |
+| `Description`  | `<div>`                  | Optional help text                                       |
+| `ErrorMessage` | `<div role="alert">`     | Validation error text                                    |
+| `HiddenInput`  | `<input type="hidden">`  | ISO date string for form submission                      |
 
 ```text
 DatePicker (en-US, closed)
@@ -945,13 +1366,13 @@ DatePicker (en-US, open)
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Element        | Role/Attribute        | Details                                                                      |
-| -------------- | --------------------- | ---------------------------------------------------------------------------- |
-| `Input`        | `<input type="text">` | `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls` points to Content |
-| `Trigger`      | `<button>`            | `aria-label="Open calendar"`, `aria-expanded`, `aria-controls`               |
-| `Content`      | `role="dialog"`       | `aria-label="Choose date"`                                                   |
-| `ErrorMessage` | `role="alert"`        | Announced immediately on render                                              |
-| `Label`        | `<label>`             | `for` attribute points to Input                                              |
+| Element        | Role/Attribute           | Details                                                                                  |
+| -------------- | ------------------------ | ---------------------------------------------------------------------------------------- |
+| `Input`        | `<input type="text">`    | `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls` points to Content             |
+| `Trigger`      | `<button type="button">` | `aria-label="Open calendar"`, `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls` |
+| `Content`      | `role="dialog"`          | `aria-label="Choose date"`                                                               |
+| `ErrorMessage` | `role="alert"`           | Announced immediately on render                                                          |
+| `Label`        | `<label>`                | `for` attribute points to Input                                                          |
 
 ### 3.2 Keyboard Interaction
 
@@ -976,18 +1397,27 @@ DatePicker (en-US, open)
 ### 4.1 Messages
 
 ```rust
+/// `MessageFn` carrying a locale-only label closure.
+pub type LocaleLabelFn = dyn Fn(&Locale) -> String + Send + Sync;
+
+/// `MessageFn` carrying a formatted-date plus locale label closure.
+pub type SelectedDateLabelFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
+
 /// Messages for the DatePicker component.
-#[derive(Clone, Debug)]
+///
+/// Only `Clone` is derived; `Debug` and `PartialEq` are implemented manually
+/// because `MessageFn` wraps a closure (no structural `Debug`/`Eq`).
+#[derive(Clone)]
 pub struct Messages {
     /// Trigger button label (default: "Open calendar").
-    pub trigger_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub trigger_label: MessageFn<LocaleLabelFn>,
     /// Clear button label (default: "Clear date").
-    pub clear_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub clear_label: MessageFn<LocaleLabelFn>,
     /// Content dialog label (default: "Choose date").
-    pub content_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub content_label: MessageFn<LocaleLabelFn>,
     /// Announces the selected date (e.g. "Selected date: March 15, 2025").
     /// Used as `aria-description` on the input field when a date is selected.
-    pub selected_date_label: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    pub selected_date_label: MessageFn<SelectedDateLabelFn>,
 }
 // Calendar navigation labels (prev/next month, today, unavailable) belong to
 // the embedded Calendar component's Messages — not duplicated here.
@@ -998,7 +1428,9 @@ impl Default for Messages {
             trigger_label: MessageFn::static_str("Open calendar"),
             clear_label: MessageFn::static_str("Clear date"),
             content_label: MessageFn::static_str("Choose date"),
-            selected_date_label: MessageFn::new(|date, _locale| format!("Selected date: {}", date)),
+            selected_date_label: MessageFn::new(|date: &str, _locale: &Locale| {
+                format!("Selected date: {date}")
+            }),
         }
     }
 }
@@ -1011,7 +1443,7 @@ impl ComponentMessages for Messages {}
 The DatePicker participates in HTML form submission via a hidden `<input type="hidden">` element rendered by the `HiddenInput` part. The hidden input carries the selected date in ISO 8601 format (`YYYY-MM-DD`).
 
 - **`name` prop**: When set, the hidden input includes `name="{value}"` so the date is submitted with the form under that key.
-- **Required validation**: When `required` is `true`, the input carries `aria-required="true"`. Form validation treats an empty value as invalid.
+- **Required validation**: When `required` is `true`, the visible input carries both the native `required` attribute and `aria-required="true"`, so the browser enforces constraint validation (ARIA alone does not) and an empty value is treated as invalid.
 - **Reset**: On form reset, the adapter restores the initial value (the `default_value` from Props or `None`) and syncs the input text accordingly.
 - **`aria-describedby`**: The input's `aria-describedby` chains the Description and ErrorMessage IDs so assistive technology announces help text and validation errors.
 - **ISO value**: The hidden input's `value` is always the ISO 8601 representation of the selected date (e.g., `2024-03-15`), regardless of the display format used in the visible input.
@@ -1039,8 +1471,8 @@ The DatePicker participates in HTML form submission via a hidden `<input type="h
 | Placeholder           | `placeholder`         | `placeholder`                | `placeholderValue`     | React Aria uses a DateValue placeholder             |
 | Name                  | `name`                | `name`                       | `name`                 | Equivalent                                          |
 | Visible months        | `visible_months`      | `numOfMonths`                | --                     | ars-ui and Ark UI support multi-month               |
-| Default open          | --                    | `defaultOpen`                | `defaultOpen`          | Not present in ars-ui                               |
-| Controlled open       | --                    | `open`                       | `isOpen`               | Not present as a controlled prop                    |
+| Default open          | `default_open`        | `defaultOpen`                | `defaultOpen`          | Uncontrolled initial open state                     |
+| Controlled open       | `open`                | `open`                       | `isOpen`               | Controlled open; pair with `on_open_change`         |
 | Fixed weeks           | --                    | `fixedWeeks`                 | --                     | ars-ui always renders 6 weeks                       |
 | Default view          | --                    | `defaultView`                | --                     | Ark UI has month/year view switching                |
 | View control          | --                    | `view`, `minView`, `maxView` | --                     | Ark UI view switching not in ars-ui                 |
@@ -1081,13 +1513,13 @@ The DatePicker participates in HTML form submission via a hidden `<input type="h
 
 ### 6.3 Events
 
-| Callback             | ars-ui                       | Ark UI                     | React Aria                           | Notes                               |
-| -------------------- | ---------------------------- | -------------------------- | ------------------------------------ | ----------------------------------- |
-| Value change         | `SelectDate` / `InputChange` | `onValueChange`            | `onChange`                           | Equivalent                          |
-| Open change          | `Open` / `Close` events      | `onOpenChange`             | `onOpenChange`                       | Equivalent                          |
-| Focus change         | `FocusIn` / `FocusOut`       | `onFocusChange` (calendar) | `onFocus`, `onBlur`, `onFocusChange` | Equivalent                          |
-| View change          | --                           | `onViewChange`             | --                                   | Ark UI view switching               |
-| Visible range change | --                           | `onVisibleRangeChange`     | --                                   | Ark UI calendar navigation callback |
+| Callback             | ars-ui                                    | Ark UI                     | React Aria                           | Notes                                           |
+| -------------------- | ----------------------------------------- | -------------------------- | ------------------------------------ | ----------------------------------------------- |
+| Value change         | `requested_value` + `Effect::ValueChange` | `onValueChange`            | `onChange`                           | Equivalent (adapter forwards `requested_value`) |
+| Open change          | `on_open_change` callback                 | `onOpenChange`             | `onOpenChange`                       | Equivalent (fired via `Effect::OpenChange`)     |
+| Focus change         | `FocusIn` / `FocusOut`                    | `onFocusChange` (calendar) | `onFocus`, `onBlur`, `onFocusChange` | Equivalent                                      |
+| View change          | --                                        | `onViewChange`             | --                                   | Ark UI view switching                           |
+| Visible range change | --                                        | `onVisibleRangeChange`     | --                                   | Ark UI calendar navigation callback             |
 
 **Gaps:** None. View change and visible range change are Ark UI-specific features tied to their view switching model.
 
@@ -1124,104 +1556,104 @@ The DatePicker participates in HTML form submission via a hidden `<input type="h
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ars_core::service::Service;
+    use ars_core::{Env, Service};
+
+    fn date(year: i32, month: u8, day: u8) -> CalendarDate {
+        CalendarDate::new_gregorian(year, month, day).expect("valid test date")
+    }
 
     fn make_service() -> Service<Machine> {
-        Service::new(Props {
-            id: "test-dp".into(),
-            label: "Date".into(),
-            placeholder: Some("MM/DD/YYYY".into()),
-            name: Some("date".into()),
-            ..Props::default()
-        }, Env::default(), Default::default())
+        Service::new(
+            Props {
+                id: "test-dp".into(),
+                label: "Date".into(),
+                placeholder: Some("MM/DD/YYYY".into()),
+                name: Some("date".into()),
+                ..Props::default()
+            },
+            &Env::default(),
+            &Messages::default(),
+        )
     }
 
     #[test]
     fn initial_state_is_closed() {
         let svc = make_service();
         assert_eq!(*svc.state(), State::Closed);
-        assert!(!*svc.context().open.get());
     }
 
     #[test]
     fn toggle_opens_popover() {
         let mut svc = make_service();
-        svc.send(Event::Toggle);
+        drop(svc.send(Event::Toggle));
         assert_eq!(*svc.state(), State::Open);
-        assert!(*svc.context().open.get());
     }
 
     #[test]
     fn toggle_twice_closes_popover() {
         let mut svc = make_service();
-        svc.send(Event::Toggle);
-        svc.send(Event::Toggle);
+        drop(svc.send(Event::Toggle));
+        drop(svc.send(Event::Toggle));
         assert_eq!(*svc.state(), State::Closed);
     }
 
     #[test]
     fn select_date_closes_and_updates_value() {
         let mut svc = make_service();
-        svc.send(Event::Open);
-        let date = CalendarDate::new_gregorian(2024, nzu8(3), nzu8(15));
-        svc.send(Event::SelectDate { date: date.clone() });
+        drop(svc.send(Event::Open));
+        let chosen = date(2024, 3, 15);
+        drop(svc.send(Event::SelectDate { date: chosen.clone() }));
         assert_eq!(*svc.state(), State::Closed);
-        assert_eq!(*svc.context().value.get(), Some(date));
+        assert_eq!(*svc.context().value.get(), Some(chosen));
         assert_eq!(svc.context().input_text, "03/15/2024");
     }
 
     #[test]
     fn input_change_parses_valid_date() {
         let mut svc = make_service();
-        svc.send(Event::InputChange { value: "06/20/2024".into() });
-        assert_eq!(
-            *svc.context().value.get(),
-            Some(CalendarDate::new_gregorian(2024, nzu8(6), nzu8(20))),
-        );
+        drop(svc.send(Event::InputChange { value: "06/20/2024".into() }));
+        assert_eq!(*svc.context().value.get(), Some(date(2024, 6, 20)));
     }
 
     #[test]
     fn input_change_ignores_invalid_text() {
         let mut svc = make_service();
-        svc.send(Event::InputChange { value: "not-a-date".into() });
+        drop(svc.send(Event::InputChange { value: "not-a-date".into() }));
         assert_eq!(*svc.context().value.get(), None);
     }
 
     #[test]
     fn escape_closes_popover() {
         let mut svc = make_service();
-        svc.send(Event::Open);
-        svc.send(Event::KeyDown { key: KeyboardKey::Escape });
+        drop(svc.send(Event::Open));
+        drop(svc.send(Event::KeyDown { key: KeyboardKey::Escape }));
         assert_eq!(*svc.state(), State::Closed);
     }
 
     #[test]
     fn disabled_picker_ignores_events() {
-        let mut svc = Service::new(Props {
-            id: "test-dp".into(),
-            disabled: true,
-            ..Props::default()
-        }, Env::default(), Default::default());
-        svc.send(Event::Open);
+        let mut svc = Service::new(
+            Props { id: "test-dp".into(), disabled: true, ..Props::default() },
+            &Env::default(),
+            &Messages::default(),
+        );
+        drop(svc.send(Event::Open));
         assert_eq!(*svc.state(), State::Closed);
     }
 
     #[test]
     fn hidden_input_has_iso_value() {
         let mut svc = make_service();
-        let date = CalendarDate::new_gregorian(2024, nzu8(12), nzu8(25));
-        svc.send(Event::SelectDate { date });
+        drop(svc.send(Event::SelectDate { date: date(2024, 12, 25) }));
         let api = svc.connect(&|_| {});
-        let attrs = api.hidden_input_attrs();
-        // The hidden input should carry the ISO-formatted date.
-        // attrs.get(HtmlAttr::Value) == "2024-12-25"
+        assert_eq!(api.hidden_input_attrs().get(&HtmlAttr::Value), Some("2024-12-25"));
     }
 
     #[test]
     fn focusout_closes_open_popover() {
         let mut svc = make_service();
-        svc.send(Event::Open);
-        svc.send(Event::FocusOut);
+        drop(svc.send(Event::Open));
+        drop(svc.send(Event::FocusOut));
         assert_eq!(*svc.state(), State::Closed);
     }
 }
