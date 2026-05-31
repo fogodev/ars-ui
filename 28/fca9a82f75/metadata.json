@@ -1,0 +1,42 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "28fca9a82f75",
+  "strategy": "manual-commit",
+  "branch": "impl-297-298-299",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/specialized/angle_slider/mod.rs",
+    "crates/ars-components/src/specialized/color_area/mod.rs",
+    "crates/ars-components/src/specialized/color_area/snapshots/ars_components__specialized__color_area__tests__color_area_thumb.snap",
+    "crates/ars-components/src/specialized/color_field/mod.rs",
+    "crates/ars-components/src/specialized/color_slider/mod.rs",
+    "crates/ars-components/src/specialized/color_swatch_picker/mod.rs",
+    "crates/ars-components/src/specialized/color_swatch_picker/snapshots/ars_components__specialized__color_swatch_picker__tests__color_swatch_picker_item_selected.snap",
+    "crates/ars-components/src/specialized/color_wheel/mod.rs",
+    "crates/ars-core/src/color.rs",
+    "crates/ars-core/src/lib.rs",
+    "crates/ars-core/src/message_fn.rs",
+    "spec/components/specialized/angle-slider.md",
+    "spec/components/specialized/color-area.md",
+    "spec/components/specialized/color-field.md",
+    "spec/components/specialized/color-slider.md",
+    "spec/components/specialized/color-swatch-picker.md",
+    "spec/components/specialized/color-wheel.md",
+    "spec/foundation/01-architecture.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/28/fca9a82f75/0/metadata.json",
+      "transcript": "/28/fca9a82f75/0/full.jsonl",
+      "content_hash": "/28/fca9a82f75/0/content_hash.txt",
+      "prompt": "/28/fca9a82f75/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 127887,
+    "cache_creation_tokens": 5149926,
+    "cache_read_tokens": 240543278,
+    "output_tokens": 576322,
+    "api_call_count": 536
+  }
+}
