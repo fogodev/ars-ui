@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>b7nwlktm4</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-300/4d75909d-79e8-4b6f-9389-8b363876c42a/tasks/b7nwlktm4.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex round-5 verdict" completed (exit code 0)</summary>
+</task-notification>

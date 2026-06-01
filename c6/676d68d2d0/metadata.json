@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c6676d68d2d0",
+  "strategy": "manual-commit",
+  "branch": "impl-300",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/specialized/color_picker/mod.rs",
+    "spec/components/specialized/color-picker.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/c6/676d68d2d0/0/metadata.json",
+      "transcript": "/c6/676d68d2d0/0/full.jsonl",
+      "content_hash": "/c6/676d68d2d0/0/content_hash.txt",
+      "prompt": "/c6/676d68d2d0/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 3243,
+    "cache_creation_tokens": 29653,
+    "cache_read_tokens": 23042928,
+    "output_tokens": 20673,
+    "api_call_count": 29
+  }
+}
