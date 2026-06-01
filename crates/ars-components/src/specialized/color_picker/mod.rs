@@ -246,8 +246,21 @@ pub struct Context {
     /// The current color value (controlled or uncontrolled).
     pub value: Bindable<ColorValue>,
 
-    /// Whether the picker popover is open (controlled or uncontrolled).
-    pub open: Bindable<bool>,
+    /// Whether the picker popover is open.
+    ///
+    /// Mirrors [`State`] (which is the source of truth for open/closed). A plain
+    /// `bool` rather than a `Bindable`: the controlled-vs-uncontrolled `open`
+    /// distinction is resolved by `on_props_changed` emitting `Open`/`Close`, so
+    /// there is no separate controlled slot to drift out of sync with `State`.
+    pub open: bool,
+
+    /// The unwrapped hue in degrees `[0, 360]` for the hue channel slider.
+    ///
+    /// [`ColorValue`] normalizes hue into `[0, 360)`, so reading hue back from
+    /// the color collapses the 360° endpoint onto 0°. Tracking it here keeps the
+    /// hue slider's thumb position and `aria-valuenow` at the right-hand
+    /// endpoint, exactly as the standalone `ColorSlider` does.
+    pub hue_value: f64,
 
     /// The currently displayed text format.
     pub format: ColorFormat,
@@ -304,22 +317,56 @@ pub struct Context {
 impl Context {
     /// Returns the channels available in the current color space, in display
     /// order. Used by adapters to lay out the per-channel inputs.
+    ///
+    /// `Alpha` is appended whenever [`show_alpha`](Self::show_alpha) is set, so an
+    /// adapter that renders one input per returned channel also renders the alpha
+    /// input the `show_alpha`/alpha-slider contract promises. (HWB maps onto the
+    /// HSL channel triplet for the numeric inputs.)
     #[must_use]
     pub const fn channels(&self) -> &'static [ColorChannel] {
-        match self.color_space {
-            ColorSpace::Rgb => &[ColorChannel::Red, ColorChannel::Green, ColorChannel::Blue],
-
-            ColorSpace::Hsl | ColorSpace::Hwb => &[
+        match (self.color_space, self.show_alpha) {
+            (ColorSpace::Rgb, false) => {
+                &[ColorChannel::Red, ColorChannel::Green, ColorChannel::Blue]
+            }
+            (ColorSpace::Rgb, true) => &[
+                ColorChannel::Red,
+                ColorChannel::Green,
+                ColorChannel::Blue,
+                ColorChannel::Alpha,
+            ],
+            (ColorSpace::Hsl | ColorSpace::Hwb, false) => &[
                 ColorChannel::Hue,
                 ColorChannel::Saturation,
                 ColorChannel::Lightness,
             ],
-
-            ColorSpace::Hsb => &[
+            (ColorSpace::Hsl | ColorSpace::Hwb, true) => &[
+                ColorChannel::Hue,
+                ColorChannel::Saturation,
+                ColorChannel::Lightness,
+                ColorChannel::Alpha,
+            ],
+            (ColorSpace::Hsb, false) => &[
                 ColorChannel::Hue,
                 ColorChannel::Saturation,
                 ColorChannel::Brightness,
             ],
+            (ColorSpace::Hsb, true) => &[
+                ColorChannel::Hue,
+                ColorChannel::Saturation,
+                ColorChannel::Brightness,
+                ColorChannel::Alpha,
+            ],
+        }
+    }
+
+    /// The vertical channel the 2D area edits in the current color space:
+    /// brightness for HSB, lightness for HSL / RGB / HEX. (The horizontal axis is
+    /// always saturation; the hue and alpha sliders are space-independent.)
+    #[must_use]
+    pub const fn area_y_channel(&self) -> ColorChannel {
+        match self.color_space {
+            ColorSpace::Hsb => ColorChannel::Brightness,
+            _ => ColorChannel::Lightness,
         }
     }
 }
@@ -443,6 +490,10 @@ pub struct Messages {
     /// Label for the lightness channel. Default: `"Lightness"`.
     pub lightness_label: MessageFn<LabelFn>,
 
+    /// Label for the brightness channel (the HSB area's vertical axis).
+    /// Default: `"Brightness"`.
+    pub brightness_label: MessageFn<LabelFn>,
+
     /// `aria-label` for the eyedropper trigger. Default: `"Pick color from screen"`.
     pub eyedropper_label: MessageFn<LabelFn>,
 
@@ -475,6 +526,7 @@ impl Default for Messages {
             alpha_label: MessageFn::static_str("Alpha"),
             saturation_label: MessageFn::static_str("Saturation"),
             lightness_label: MessageFn::static_str("Lightness"),
+            brightness_label: MessageFn::static_str("Brightness"),
             eyedropper_label: MessageFn::static_str("Pick color from screen"),
             format_toggle_label: MessageFn::static_str("Toggle color format"),
             swatch_label: MessageFn::new(|color: &ColorValue, _locale: &Locale| {
@@ -515,27 +567,50 @@ impl ComponentMessages for Messages {}
 /// Both base the new color on the *pending* value so a controlled drag-in-flight
 /// accumulates rather than re-reading the stale controlled prop.
 fn apply_drag_position(ctx: &mut Context, target: DragTarget, x: f64, y: f64) {
-    let current = *ctx.value.pending();
-
     match target {
         DragTarget::Area => {
+            let current = *ctx.value.pending();
             let saturation = x.clamp(0.0, 1.0);
-            let lightness = (1.0 - y).clamp(0.0, 1.0);
-
-            ctx.value.set(ColorValue::new(
-                current.hue,
-                saturation,
-                lightness,
-                current.alpha,
-            ));
+            let y_value = (1.0 - y).clamp(0.0, 1.0);
+            // The area's vertical axis is brightness in HSB, lightness otherwise.
+            let y_channel = ctx.area_y_channel();
+            let updated = with_channel(&current, ColorChannel::Saturation, saturation);
+            ctx.value.set(with_channel(&updated, y_channel, y_value));
         }
 
         DragTarget::Channel(channel) => {
             let (min, max) = channel_range(channel);
             let value = min + x.clamp(0.0, 1.0) * (max - min);
-
-            ctx.value.set(with_channel(&current, channel, value));
+            set_channel_value(ctx, channel, value);
         }
+    }
+}
+
+/// Set a single channel on the pending color, keeping the unwrapped
+/// [`Context::hue_value`] in sync when the hue channel is edited so the 360°
+/// endpoint survives [`ColorValue`]'s `[0, 360)` hue wrap.
+fn set_channel_value(ctx: &mut Context, channel: ColorChannel, value: f64) {
+    let base = *ctx.value.pending();
+    ctx.value.set(with_channel(&base, channel, value));
+    if channel == ColorChannel::Hue {
+        ctx.hue_value = value.clamp(0.0, 360.0);
+    }
+}
+
+/// Re-derive the cached unwrapped hue from the current color after an external
+/// full-color set (text input, swatch, eyedropper, controlled-value sync).
+const fn sync_hue_from_color(ctx: &mut Context) {
+    ctx.hue_value = ctx.value.pending().hue;
+}
+
+/// The current value of `channel` for keyboard stepping — the unwrapped
+/// [`Context::hue_value`] for hue (so stepping near the 360° endpoint does not
+/// collapse to 0°), the live color value otherwise.
+fn channel_current(ctx: &Context, channel: ColorChannel) -> f64 {
+    if channel == ColorChannel::Hue {
+        ctx.hue_value
+    } else {
+        channel_value(ctx.value.pending(), channel)
     }
 }
 
@@ -564,7 +639,7 @@ fn open_lifecycle_effects() -> [PendingEffect<Machine>; 2] {
 /// The `Closed → Open` transition plan, shared by `Open` and `Toggle`.
 fn open_plan() -> TransitionPlan<Machine> {
     let mut plan = TransitionPlan::to(State::Open).apply(|ctx: &mut Context| {
-        ctx.open.set(true);
+        ctx.open = true;
     });
 
     for effect in open_lifecycle_effects() {
@@ -578,7 +653,7 @@ fn open_plan() -> TransitionPlan<Machine> {
 fn close_plan() -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Closed)
         .apply(|ctx: &mut Context| {
-            ctx.open.set(false);
+            ctx.open = false;
         })
         .with_effect(PendingEffect::named(Effect::DetachClickOutside))
 }
@@ -629,21 +704,16 @@ impl ars_core::Machine for Machine {
             Bindable::uncontrolled(props.default_value)
         };
 
-        let open = if let Some(open) = props.open {
-            Bindable::controlled(open)
-        } else {
-            Bindable::uncontrolled(props.default_open)
-        };
+        let open = props.open.unwrap_or(props.default_open);
 
-        let state = if *open.get() {
-            State::Open
-        } else {
-            State::Closed
-        };
+        let state = if open { State::Open } else { State::Closed };
+
+        let hue_value = value.get().hue;
 
         let context = Context {
             value,
             open,
+            hue_value,
             format: props.default_format,
             disabled: props.disabled,
             readonly: props.readonly,
@@ -681,6 +751,10 @@ impl ars_core::Machine for Machine {
             match event {
                 Event::Open
                 | Event::Close
+                // `DragEnd` passes through so a drag already in flight when the
+                // parent disables the control still terminates cleanly (fires
+                // `on_change_end`, clears `data-ars-dragging`), matching ColorArea.
+                | Event::DragEnd
                 | Event::Focus { .. }
                 | Event::Blur { .. }
                 | Event::SyncValue(_)
@@ -758,6 +832,7 @@ impl ars_core::Machine for Machine {
                 let color = *color;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(color);
+                    sync_hue_from_color(ctx);
                 }))
             }
 
@@ -768,8 +843,7 @@ impl ars_core::Machine for Machine {
 
                 let (channel, value) = (*channel, *value);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let color = *ctx.value.pending();
-                    ctx.value.set(with_channel(&color, channel, value));
+                    set_channel_value(ctx, channel, value);
                 }))
             }
 
@@ -797,11 +871,9 @@ impl ars_core::Machine for Machine {
 
                 let (channel, step) = (*channel, *step);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let color = *ctx.value.pending();
                     let (_, max) = channel_range(channel);
-                    let next = (channel_value(&color, channel) + step).min(max);
-
-                    ctx.value.set(with_channel(&color, channel, next));
+                    let current = channel_current(ctx, channel);
+                    set_channel_value(ctx, channel, (current + step).min(max));
                 }))
             }
 
@@ -812,11 +884,9 @@ impl ars_core::Machine for Machine {
 
                 let (channel, step) = (*channel, *step);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    let color = *ctx.value.pending();
                     let (min, _) = channel_range(channel);
-                    let next = (channel_value(&color, channel) - step).max(min);
-
-                    ctx.value.set(with_channel(&color, channel, next));
+                    let current = channel_current(ctx, channel);
+                    set_channel_value(ctx, channel, (current - step).max(min));
                 }))
             }
 
@@ -840,6 +910,7 @@ impl ars_core::Machine for Machine {
                 let color = *color;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(color);
+                    sync_hue_from_color(ctx);
                 }))
             }
 
@@ -871,6 +942,7 @@ impl ars_core::Machine for Machine {
                     }
 
                     ctx.value.sync_controlled(value);
+                    sync_hue_from_color(ctx);
                 }))
             }
 
@@ -1107,7 +1179,21 @@ impl Api<'_> {
         match self.ctx.format {
             ColorFormat::Hex => color.to_hex(self.ctx.show_alpha),
 
-            ColorFormat::Hsl => color.to_css_hsl(),
+            ColorFormat::Hsl => {
+                // `to_css_hsl()` emits `hsla(...)` whenever alpha < 1; suppress
+                // alpha when the alpha controls are hidden so HSL matches the Hex
+                // and RGB branches (and the submitted hidden value).
+                if self.ctx.show_alpha && color.alpha < 1.0 {
+                    color.to_css_hsl()
+                } else {
+                    format!(
+                        "hsl({:.0}, {:.1}%, {:.1}%)",
+                        color.hue,
+                        color.saturation * 100.0,
+                        color.lightness * 100.0
+                    )
+                }
+            }
 
             ColorFormat::Rgb => {
                 let (red, green, blue) = color.to_rgb();
@@ -1358,7 +1444,22 @@ impl Api<'_> {
                 (self.ctx.messages.area_label)(&self.ctx.locale),
             );
 
+        // A disabled custom control must announce its disabled state to AT, not
+        // merely leave the tab order (it is still in the accessibility tree).
+        if self.ctx.disabled {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
+
         let color = self.ctx.value.pending();
+
+        // The area's vertical axis is brightness in HSB, lightness otherwise.
+        let y_channel = self.ctx.area_y_channel();
+        let y_value = channel_value(color, y_channel);
+        let y_label = if y_channel == ColorChannel::Brightness {
+            (self.ctx.messages.brightness_label)(&self.ctx.locale)
+        } else {
+            (self.ctx.messages.lightness_label)(&self.ctx.locale)
+        };
 
         let saturation_text = (self.ctx.messages.channel_value_text)(
             &(self.ctx.messages.saturation_label)(&self.ctx.locale),
@@ -1367,16 +1468,16 @@ impl Api<'_> {
             &self.ctx.locale,
         );
 
-        let lightness_text = (self.ctx.messages.channel_value_text)(
-            &(self.ctx.messages.lightness_label)(&self.ctx.locale),
-            &format!("{:.0}%", (color.lightness * 100.0).round()),
+        let y_text = (self.ctx.messages.channel_value_text)(
+            &y_label,
+            &format!("{:.0}%", (y_value * 100.0).round()),
             "",
             &self.ctx.locale,
         );
 
         attrs.set(
             HtmlAttr::Aria(AriaAttr::ValueText),
-            format!("{saturation_text}, {lightness_text}"),
+            format!("{saturation_text}, {y_text}"),
         );
 
         attrs
@@ -1386,7 +1487,7 @@ impl Api<'_> {
             )
             .set_style(
                 CssProperty::Custom("ars-color-picker-area-thumb-y"),
-                format!("{:.1}%", (1.0 - color.lightness) * 100.0),
+                format!("{:.1}%", (1.0 - y_value) * 100.0),
             )
             .set_style(CssProperty::BackgroundColor, color.to_css_hsl())
             .set(
@@ -1447,8 +1548,9 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
 
-        let color = self.ctx.value.pending();
-        let value = channel_value(color, channel);
+        // Use the unwrapped hue so the thumb stays at the 360° endpoint instead
+        // of collapsing to 0° (ColorValue wraps hue into `[0, 360)`).
+        let value = channel_current(self.ctx, channel);
         let (min, max) = channel_range(channel);
 
         let label = match channel {
@@ -1524,6 +1626,9 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Role, "button")
+            // `type="button"` so a swatch rendered as a real `<button>` in a form
+            // selects the preset instead of submitting (matches the trigger).
+            .set(HtmlAttr::Type, "button")
             // A disabled picker keeps its swatches out of the tab order too,
             // matching the area and channel thumbs.
             .set(
@@ -1714,11 +1819,13 @@ impl Api<'_> {
     }
 
     /// Handle arrow/Home/End keydown on the area thumb. Left/Right adjust
-    /// saturation, Up/Down adjust lightness; `shift` selects the large step. In
-    /// RTL the saturation (x-axis) arrows are mirrored.
+    /// saturation, Up/Down adjust the area's vertical channel (brightness in HSB,
+    /// lightness otherwise); `shift` selects the large step. In RTL the saturation
+    /// (x-axis) arrows are mirrored.
     pub fn on_area_thumb_keydown(&self, data: &KeyboardEventData, shift: bool) {
         let saturation_step = self.keyboard_step(ColorChannel::Saturation, shift);
-        let lightness_step = self.keyboard_step(ColorChannel::Lightness, shift);
+        let y_channel = self.ctx.area_y_channel();
+        let y_step = self.keyboard_step(y_channel, shift);
 
         let rtl = self.ctx.dir == Direction::Rtl;
 
@@ -1748,13 +1855,13 @@ impl Api<'_> {
             }),
 
             KeyboardKey::ArrowUp => (self.send)(Event::ChannelIncrement {
-                channel: ColorChannel::Lightness,
-                step: lightness_step,
+                channel: y_channel,
+                step: y_step,
             }),
 
             KeyboardKey::ArrowDown => (self.send)(Event::ChannelDecrement {
-                channel: ColorChannel::Lightness,
-                step: lightness_step,
+                channel: y_channel,
+                step: y_step,
             }),
 
             _ => {}
@@ -2154,15 +2261,17 @@ mod tests {
     // ── Channels / color space ─────────────────────────────────────
 
     #[test]
-    fn channels_track_color_space() {
+    fn channels_track_color_space_and_alpha() {
+        // show_alpha defaults to true → Alpha is appended so adapters render the
+        // alpha input the contract promises.
         let hsl = service(Props::default());
-
         assert_eq!(
             hsl.context().channels(),
             &[
                 ColorChannel::Hue,
                 ColorChannel::Saturation,
-                ColorChannel::Lightness
+                ColorChannel::Lightness,
+                ColorChannel::Alpha
             ]
         );
 
@@ -2170,23 +2279,41 @@ mod tests {
             color_space: ColorSpace::Rgb,
             ..Props::default()
         });
-
         assert_eq!(
             rgb.context().channels(),
-            &[ColorChannel::Red, ColorChannel::Green, ColorChannel::Blue]
+            &[
+                ColorChannel::Red,
+                ColorChannel::Green,
+                ColorChannel::Blue,
+                ColorChannel::Alpha
+            ]
         );
 
         let hsb = service(Props {
             color_space: ColorSpace::Hsb,
             ..Props::default()
         });
-
         assert_eq!(
             hsb.context().channels(),
             &[
                 ColorChannel::Hue,
                 ColorChannel::Saturation,
-                ColorChannel::Brightness
+                ColorChannel::Brightness,
+                ColorChannel::Alpha
+            ]
+        );
+
+        // show_alpha = false drops the alpha input.
+        let no_alpha = service(Props {
+            show_alpha: false,
+            ..Props::default()
+        });
+        assert_eq!(
+            no_alpha.context().channels(),
+            &[
+                ColorChannel::Hue,
+                ColorChannel::Saturation,
+                ColorChannel::Lightness
             ]
         );
     }
@@ -3462,6 +3589,164 @@ mod tests {
                 .channel_slider_thumb_attrs(ColorChannel::Hue)
                 .get(&HtmlAttr::TabIndex),
             Some("0")
+        );
+    }
+
+    // ── Codex review #706 second pass ──────────────────────────────
+
+    #[test]
+    fn drag_end_terminates_after_mid_drag_disable() {
+        let mut svc = open_service(Props::default());
+        drop(svc.send(Event::DragStart {
+            target: DragTarget::Area,
+            x: 0.5,
+            y: 0.5,
+        }));
+        assert!(matches!(svc.state(), State::Dragging { .. }));
+
+        // Parent disables mid-drag.
+        drop(svc.set_props(Props {
+            id: "color-picker".to_string(),
+            default_open: true,
+            disabled: true,
+            ..Props::default()
+        }));
+
+        // Pointer-up still terminates the drag and fires on_change_end.
+        let mut end = svc.send(Event::DragEnd);
+        assert_eq!(svc.state(), &State::Open);
+        assert!(run_effects(&svc, &mut end).contains(&Effect::ChangeEnd));
+        assert!(
+            !svc.connect(&|_| {})
+                .area_thumb_attrs()
+                .contains(&HtmlAttr::Data("ars-dragging"))
+        );
+    }
+
+    #[test]
+    fn hue_slider_preserves_360_endpoint() {
+        // Drag the hue slider fully to the max: the thumb must read 360, not
+        // wrap back to 0.
+        let mut svc = open_service(Props::default());
+        drop(svc.send(Event::DragStart {
+            target: DragTarget::Channel(ColorChannel::Hue),
+            x: 1.0,
+            y: 0.0,
+        }));
+        let thumb = svc
+            .connect(&|_| {})
+            .channel_slider_thumb_attrs(ColorChannel::Hue);
+        assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("360"));
+        assert_eq!(
+            thumb
+                .styles()
+                .iter()
+                .find(|(p, _)| *p == CssProperty::Custom("ars-color-picker-channel-thumb-position"))
+                .map(|(_, v)| v.clone()),
+            Some("100.0%".to_string())
+        );
+
+        // Keyboard increment past the top also pins at 360 rather than wrapping.
+        let mut svc = open_service(Props {
+            default_value: ColorValue::from_hsl(359.0, 1.0, 0.5),
+            ..Props::default()
+        });
+        drop(svc.send(Event::ChannelIncrement {
+            channel: ColorChannel::Hue,
+            step: 10.0,
+        }));
+        assert_eq!(
+            svc.connect(&|_| {})
+                .channel_slider_thumb_attrs(ColorChannel::Hue)
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("360")
+        );
+    }
+
+    #[test]
+    fn hsb_color_space_makes_the_area_edit_brightness() {
+        let mut svc = open_service(Props {
+            color_space: ColorSpace::Hsb,
+            default_value: ColorValue::from_hsl(200.0, 0.5, 0.5),
+            ..Props::default()
+        });
+        assert_eq!(svc.context().area_y_channel(), ColorChannel::Brightness);
+
+        // The area value text names the brightness axis, not lightness.
+        let value_text = svc
+            .connect(&|_| {})
+            .area_thumb_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::ValueText))
+            .expect("value text")
+            .to_string();
+        assert!(
+            value_text.contains("Brightness"),
+            "HSB area must report brightness, got '{value_text}'"
+        );
+
+        // An area drag in HSB edits saturation + brightness.
+        drop(svc.send(Event::DragStart {
+            target: DragTarget::Area,
+            x: 1.0,
+            y: 0.0,
+        }));
+        let value = *svc.connect(&|_| {}).value();
+        let (_, sat_hsb, brightness) = value.to_hsb();
+        assert!((sat_hsb - 1.0).abs() < 1e-6, "saturation -> 1");
+        assert!(
+            (brightness - 1.0).abs() < 1e-6,
+            "brightness -> 1 (top of area)"
+        );
+
+        // Up arrow on the HSB area thumb increments brightness.
+        let captured = RefCell::new(Vec::new());
+        let send = |event: Event| captured.borrow_mut().push(event);
+        svc.connect(&send)
+            .on_area_thumb_keydown(&key(KeyboardKey::ArrowUp), false);
+        assert!(matches!(
+            captured.borrow()[0],
+            Event::ChannelIncrement {
+                channel: ColorChannel::Brightness,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn value_as_string_hsl_drops_alpha_when_show_alpha_false() {
+        let mut svc = service(Props {
+            default_value: ColorValue::new(0.0, 1.0, 0.5, 0.5),
+            show_alpha: false,
+            ..Props::default()
+        });
+        drop(svc.send(Event::SetFormat(ColorFormat::Hsl)));
+        let string = svc.connect(&|_| {}).value_as_string();
+        assert!(
+            string.starts_with("hsl(") && !string.contains("hsla"),
+            "HSL must hide alpha when show_alpha=false, got '{string}'"
+        );
+    }
+
+    #[test]
+    fn disabled_area_thumb_is_marked_for_assistive_tech() {
+        let svc = service(Props {
+            disabled: true,
+            ..Props::default()
+        });
+        let thumb = svc.connect(&|_| {}).area_thumb_attrs();
+        assert_eq!(thumb.get(&HtmlAttr::TabIndex), Some("-1"));
+        assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+    }
+
+    #[test]
+    fn swatch_is_type_button() {
+        let svc = service(Props {
+            swatches: alloc::vec![ColorValue::default()],
+            ..Props::default()
+        });
+        assert_eq!(
+            svc.connect(&|_| {}).swatch_attrs(0).get(&HtmlAttr::Type),
+            Some("button")
         );
     }
 

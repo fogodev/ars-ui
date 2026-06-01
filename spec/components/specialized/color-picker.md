@@ -719,8 +719,17 @@ pub struct Context {
     pub value: Bindable<ColorValue>,
     /// The currently displayed format in the input area.
     pub format: ColorFormat,
-    /// Whether the picker popover is open.
-    pub open: Bindable<bool>,
+    /// Whether the picker popover is open. A plain `bool` mirroring `State`
+    /// (the source of truth); the controlled-vs-uncontrolled `open` distinction
+    /// is resolved by `on_props_changed` emitting `Open`/`Close`, so there is no
+    /// separate controlled slot to drift out of sync with `State`.
+    pub open: bool,
+    /// The unwrapped hue in degrees `[0, 360]` for the hue channel slider.
+    /// `ColorValue` normalizes hue into `[0, 360)`, so reading hue back from the
+    /// color collapses the 360° endpoint onto 0°; tracking it here keeps the hue
+    /// slider's thumb position and `aria-valuenow` at the right-hand endpoint
+    /// (the same technique the standalone `ColorSlider` uses).
+    pub hue_value: f64,
     /// Whether the component is disabled.
     pub disabled: bool,
     /// Whether the component is read-only.
@@ -761,14 +770,20 @@ pub struct Context {
 
 impl Context {
     /// Returns the channels available in the current color space, in display
-    /// order. (HWB maps onto the HSL channel triplet for the per-channel inputs.)
-    pub const fn channels(&self) -> &'static [ColorChannel] {
+    /// order. `Alpha` is appended whenever `show_alpha` is set, so an adapter
+    /// that renders one input per returned channel also renders the alpha input
+    /// the `show_alpha`/alpha-slider contract promises. (HWB maps onto the HSL
+    /// channel triplet for the numeric inputs.) Returns one of a fixed set of
+    /// `&'static` slices keyed by `(color_space, show_alpha)`.
+    pub const fn channels(&self) -> &'static [ColorChannel] { /* per (space, show_alpha) */ }
+
+    /// The vertical channel the 2D area edits in the current color space:
+    /// brightness for HSB, lightness for HSL / RGB / HEX. (The horizontal axis is
+    /// always saturation; the hue and alpha sliders are space-independent.)
+    pub const fn area_y_channel(&self) -> ColorChannel {
         match self.color_space {
-            ColorSpace::Rgb => &[ColorChannel::Red, ColorChannel::Green, ColorChannel::Blue],
-            ColorSpace::Hsl | ColorSpace::Hwb => {
-                &[ColorChannel::Hue, ColorChannel::Saturation, ColorChannel::Lightness]
-            }
-            ColorSpace::Hsb => &[ColorChannel::Hue, ColorChannel::Saturation, ColorChannel::Brightness],
+            ColorSpace::Hsb => ColorChannel::Brightness,
+            _ => ColorChannel::Lightness,
         }
     }
 }
@@ -872,7 +887,7 @@ fn is_readonly(ctx: &Context, _props: &Props) -> bool {
 
 /// Whether the component is open.
 fn is_open(ctx: &Context, _props: &Props) -> bool {
-    *ctx.open.get()
+    ctx.open
 }
 ```
 
@@ -882,10 +897,12 @@ fn is_open(ctx: &Context, _props: &Props) -> bool {
 
 **Transition Behavior** for `ChangeColorSpace(new_space)`:
 
-1. **Recompute value**: Convert the current color value from the old color space to `new_space`. Preserve perceptual magnitudes where possible (e.g., HSL->HSB preserves hue and saturation, converts lightness to brightness).
-2. **Update context**: Set `ctx.color_space = new_space`. Update `ctx.value` with the converted color.
-3. **Remap channels**: The color area and channel sliders update to reflect the new space's channels (e.g., switching from RGB to HSL changes the area from Red/Green to Hue/Saturation, and the slider from Blue to Lightness).
+1. **Update context**: Set `ctx.color_space = new_space`. The stored `ColorValue` is unchanged — the same color is simply presented through the new space's parameters.
+2. **Remap the numeric inputs**: `Context::channels()` returns the new space's channel set (RGB→`[R, G, B]`, HSL→`[H, S, L]`, HSB→`[H, S, B]`, plus `Alpha` when `show_alpha`), so the per-channel text inputs re-label and re-bind to the new channels.
+3. **Remap the 2D area's vertical axis**: the area is always the visual saturation × {lightness | brightness} square of the current hue — `Context::area_y_channel()` returns brightness in HSB and lightness in HSL/RGB/HEX. The horizontal axis is always saturation, and the hue and alpha sliders are space-independent (always hue/alpha). The area is **not** remapped to arbitrary channel pairs: RGB/HEX have no perceptually-navigable hue square (they are edited through the numeric inputs), so they reuse the HSL square as the visual picker. This is the standard Ark UI / React Aria picker model.
 4. **Live region announcement**: Emit an `aria-live="polite"` announcement: `"Switched to {space} color space"` (e.g., "Switched to HSL color space"). This informs screen reader users that the control layout has changed.
+
+A controlled `color_space` prop change is routed through this same `Event::ChangeColorSpace` from `on_props_changed`, so a prop-driven switch announces and remaps identically to a runtime one — and `SetProps` never touches `color_space`, so an unrelated prop update cannot revert a runtime switch.
 
 **UI Affordance**: The color space selector (button group, dropdown, or segmented control) emits `Event::ChangeColorSpace(selected_space)` when the user selects a different space. The spec does not prescribe a specific UI pattern -- adapters choose the appropriate control.
 
@@ -930,24 +947,45 @@ pub enum Effect {
 }
 
 /// Apply an adapter-normalized pointer position to the color value for the given
-/// drag target. `Area` maps x→saturation `[0, 1]` and y→lightness `[1, 0]`
-/// (top = lightest); `Channel` maps x across the channel's full range. Both base
-/// the new color on the *pending* value so a controlled drag-in-flight
-/// accumulates rather than re-reading the stale controlled prop.
+/// drag target. `Area` maps x→saturation `[0, 1]` and y→the area's vertical
+/// channel `[1, 0]` (brightness in HSB, lightness otherwise); `Channel` maps x
+/// across the channel's full range. Bases the new color on the *pending* value
+/// so a controlled drag-in-flight accumulates.
 fn apply_drag_position(ctx: &mut Context, target: DragTarget, x: f64, y: f64) {
-    let current = *ctx.value.pending();
     match target {
         DragTarget::Area => {
+            let current = *ctx.value.pending();
             let saturation = x.clamp(0.0, 1.0);
-            let lightness = (1.0 - y).clamp(0.0, 1.0);
-            ctx.value.set(ColorValue::new(current.hue, saturation, lightness, current.alpha));
+            let y_value = (1.0 - y).clamp(0.0, 1.0);
+            let y_channel = ctx.area_y_channel(); // brightness in HSB, else lightness
+            let updated = with_channel(&current, ColorChannel::Saturation, saturation);
+            ctx.value.set(with_channel(&updated, y_channel, y_value));
         }
         DragTarget::Channel(channel) => {
             let (min, max) = channel_range(channel);
             let value = min + x.clamp(0.0, 1.0) * (max - min);
-            ctx.value.set(with_channel(&current, channel, value));
+            set_channel_value(ctx, channel, value);
         }
     }
+}
+
+/// Set one channel, keeping the unwrapped `hue_value` in sync when hue is edited
+/// so the 360° endpoint survives `ColorValue`'s `[0, 360)` hue wrap.
+fn set_channel_value(ctx: &mut Context, channel: ColorChannel, value: f64) {
+    let base = *ctx.value.pending();
+    ctx.value.set(with_channel(&base, channel, value));
+    if channel == ColorChannel::Hue {
+        ctx.hue_value = value.clamp(0.0, 360.0);
+    }
+}
+
+/// Re-derive the cached unwrapped hue after an external full-color set.
+fn sync_hue_from_color(ctx: &mut Context) { ctx.hue_value = ctx.value.pending().hue; }
+
+/// The current value of `channel` for keyboard stepping — the unwrapped
+/// `hue_value` for hue, the live color value otherwise.
+fn channel_current(ctx: &Context, channel: ColorChannel) -> f64 {
+    if channel == ColorChannel::Hue { ctx.hue_value } else { channel_value(ctx.value.pending(), channel) }
 }
 
 /// Invoke `Props::on_change_end` with the pending (drag-staged) color.
@@ -971,7 +1009,7 @@ fn open_lifecycle_effects() -> [PendingEffect<Machine>; 2] {
 }
 
 fn open_plan() -> TransitionPlan<Machine> {
-    let mut plan = TransitionPlan::to(State::Open).apply(|ctx: &mut Context| ctx.open.set(true));
+    let mut plan = TransitionPlan::to(State::Open).apply(|ctx: &mut Context| ctx.open = true);
     for effect in open_lifecycle_effects() {
         plan = plan.with_effect(effect);
     }
@@ -980,7 +1018,7 @@ fn open_plan() -> TransitionPlan<Machine> {
 
 fn close_plan() -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Closed)
-        .apply(|ctx: &mut Context| ctx.open.set(false))
+        .apply(|ctx: &mut Context| ctx.open = false)
         .with_effect(PendingEffect::named(Effect::DetachClickOutside))
 }
 
@@ -1018,15 +1056,14 @@ impl ars_core::Machine for Machine {
             Some(color) => Bindable::controlled(color),
             None => Bindable::uncontrolled(props.default_value),
         };
-        let open = match props.open {
-            Some(open) => Bindable::controlled(open),
-            None => Bindable::uncontrolled(props.default_open),
-        };
-        let state = if *open.get() { State::Open } else { State::Closed };
+        let open = props.open.unwrap_or(props.default_open);
+        let state = if open { State::Open } else { State::Closed };
+        let hue_value = value.get().hue;
 
         (state, Context {
             value,
             open,
+            hue_value,
             format: props.default_format,
             disabled: props.disabled,
             readonly: props.readonly,
@@ -1060,6 +1097,10 @@ impl ars_core::Machine for Machine {
         if ctx.disabled {
             match event {
                 Event::Open | Event::Close
+                // `DragEnd` passes through so a drag in flight when the parent
+                // disables the control still terminates cleanly (fires
+                // `on_change_end`, clears `data-ars-dragging`), like ColorArea.
+                | Event::DragEnd
                 | Event::Focus { .. } | Event::Blur { .. }
                 | Event::SyncValue(_) | Event::SetProps => {}
                 _ => return None,
@@ -1103,15 +1144,15 @@ impl ars_core::Machine for Machine {
             (_, Event::SetColor(color)) => {
                 if ctx.readonly { return None; }
                 let color = *color;
-                Some(TransitionPlan::context_only(move |ctx| ctx.value.set(color)))
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.value.set(color);
+                    sync_hue_from_color(ctx);
+                }))
             }
             (State::Open, Event::SetChannel { channel, value }) => {
                 if ctx.readonly { return None; }
                 let (channel, value) = (*channel, *value);
-                Some(TransitionPlan::context_only(move |ctx| {
-                    let color = *ctx.value.pending();
-                    ctx.value.set(with_channel(&color, channel, value));
-                }))
+                Some(TransitionPlan::context_only(move |ctx| set_channel_value(ctx, channel, value)))
             }
             (_, Event::SetFormat(format)) => {
                 let format = *format;
@@ -1127,20 +1168,16 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly { return None; }
                 let (channel, step) = (*channel, *step);
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = *ctx.value.pending();
                     let (_, max) = channel_range(channel);
-                    let next = (channel_value(&color, channel) + step).min(max);
-                    ctx.value.set(with_channel(&color, channel, next));
+                    set_channel_value(ctx, channel, (channel_current(ctx, channel) + step).min(max));
                 }))
             }
             (State::Open, Event::ChannelDecrement { channel, step }) => {
                 if ctx.readonly { return None; }
                 let (channel, step) = (*channel, *step);
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = *ctx.value.pending();
                     let (min, _) = channel_range(channel);
-                    let next = (channel_value(&color, channel) - step).max(min);
-                    ctx.value.set(with_channel(&color, channel, next));
+                    set_channel_value(ctx, channel, (channel_current(ctx, channel) - step).max(min));
                 }))
             }
 
@@ -1152,7 +1189,10 @@ impl ars_core::Machine for Machine {
             (_, Event::EyedropperResult(Some(color))) => {
                 if ctx.readonly { return None; }
                 let color = *color;
-                Some(TransitionPlan::context_only(move |ctx| ctx.value.set(color)))
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.value.set(color);
+                    sync_hue_from_color(ctx);
+                }))
             }
             (_, Event::SetEyedropperSupported(supported)) => {
                 let supported = *supported;
@@ -1172,6 +1212,7 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx| {
                     if let Some(color) = value { ctx.value.set(color); }
                     ctx.value.sync_controlled(value);
+                    sync_hue_from_color(ctx);
                 }))
             }
             (_, Event::SetProps) => {
@@ -1311,7 +1352,13 @@ impl Api<'_> {
         let color = self.ctx.value.pending();
         match self.ctx.format {
             ColorFormat::Hex => color.to_hex(self.ctx.show_alpha),
-            ColorFormat::Hsl => color.to_css_hsl(),
+            // `to_css_hsl()` emits `hsla(...)` when alpha < 1; suppress alpha when
+            // alpha controls are hidden so HSL matches Hex/RGB and the hidden value.
+            ColorFormat::Hsl if self.ctx.show_alpha && color.alpha < 1.0 => color.to_css_hsl(),
+            ColorFormat::Hsl => format!(
+                "hsl({:.0}, {:.1}%, {:.1}%)",
+                color.hue, color.saturation * 100.0, color.lightness * 100.0
+            ),
             ColorFormat::Rgb => {
                 let (r, g, b) = color.to_rgb();
                 if self.ctx.show_alpha && color.alpha < 1.0 {
@@ -1378,15 +1425,20 @@ Highlights of the part attribute surface:
 - **`area_attrs`** — `role="group"` plus the `--ars-color-picker-area-bg` hue
   backdrop custom property.
 - **`area_thumb_attrs`** — `role="application"`, `aria-roledescription`,
-  `aria-label`, a composed saturation/lightness `aria-valuetext`,
-  `aria-keyshortcuts`, thumb-position custom properties, `tabindex` (`-1` when
-  disabled), and `data-ars-dragging` while dragging.
+  `aria-label`, a composed `aria-valuetext` of saturation + the area's vertical
+  channel (lightness, or brightness in HSB via `Context::area_y_channel()`),
+  `aria-keyshortcuts`, thumb-position custom properties (the y position tracks
+  that vertical channel), `tabindex` (`-1` when disabled) with `aria-disabled`
+  when disabled, and `data-ars-dragging` while dragging.
 - **`channel_slider_attrs(channel)` / `channel_slider_thumb_attrs(channel)`** —
   `role="group"` / `role="slider"` with `data-ars-channel`, `aria-valuenow`/`min`/
   `max`, `aria-label`, the thumb-position custom property, and `data-ars-dragging`
-  for the matching channel.
-- **`swatch_attrs(index)`** — `role="button"`, `data-ars-index`, and (when `index`
-  is in range) `aria-label` from `messages.swatch_label`, the `--ars-swatch-color`
+  for the matching channel; `tabindex="-1"` + `aria-disabled` when disabled. The
+  hue thumb reports the unwrapped `Context::hue_value` so it stays at the 360°
+  endpoint instead of wrapping to 0°.
+- **`swatch_attrs(index)`** — `type="button"`, `role="button"`, `data-ars-index`,
+  `tabindex` (`-1` + `aria-disabled` when disabled), and (when `index` is in
+  range) `aria-label` from `messages.swatch_label`, the `--ars-swatch-color`
   custom property, and `data-ars-selected` when the swatch equals the current
   value. An out-of-range index yields the base attributes only.
 - **`channel_input_attrs(channel, index)`** — `type="text"`, `inputmode="numeric"`,
@@ -1462,25 +1514,25 @@ ColorPicker
 └── HiddenInput                 (required — for form submission)
 ```
 
-| Part                 | Element                 | Required | Key Attributes                                                                                                                            |
-| -------------------- | ----------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `Root`               | `<div>`                 | yes      | `data-ars-state`, `data-ars-disabled`, `data-ars-readonly`                                                                                |
-| `Label`              | `<label>`               | yes      | `for` (trigger ID)                                                                                                                        |
-| `Control`            | `<div>`                 | yes      |                                                                                                                                           |
-| `Trigger`            | `<button>`              | yes      | `type="button"`, `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`, `aria-labelledby`                                            |
-| `Content`            | `<div>`                 | yes      | `role="dialog"`, `aria-labelledby`, `data-ars-state`                                                                                      |
-| `Area`               | `<div>`                 | yes      | `role="group"`                                                                                                                            |
-| `AreaThumb`          | `<div>`                 | yes      | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex="0"`                                                            |
-| `ChannelSlider`      | `<div>`                 | yes      | `role="group"`, `data-ars-channel`                                                                                                        |
-| `ChannelSliderThumb` | `<div>`                 | yes      | `role="slider"`, `tabindex` (`0`, `-1` when disabled), `aria-valuenow`, `aria-label`, `aria-disabled` when disabled                       |
-| `AlphaSlider`        | `<div>`                 | no       | `role="group"`, `data-ars-channel="alpha"`                                                                                                |
-| `SwatchGroup`        | `<div>`                 | no       | `role="group"`                                                                                                                            |
-| `Swatch`             | `<button>`              | no       | `role="button"`, `tabindex` (`0`, `-1` when disabled), `aria-label`, `data-ars-selected`, `data-ars-index`, `aria-disabled` when disabled |
-| `FormatSelect`       | `<select>` / `<button>` | no       | `aria-label`                                                                                                                              |
-| `ChannelInput`       | `<input>`               | no       | `type="text"`, `inputmode="numeric"`, `data-ars-channel`, `data-ars-channel-index`                                                        |
-| `HexInput`           | `<input>`               | no       | `type="text"`, `inputmode="text"`                                                                                                         |
-| `EyeDropperTrigger`  | `<button>`              | no       | `aria-label`, `hidden` (when unsupported)                                                                                                 |
-| `HiddenInput`        | `<input type="hidden">` | yes      | `name`, `value`                                                                                                                           |
+| Part                 | Element                 | Required | Key Attributes                                                                                                                                                          |
+| -------------------- | ----------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Root`               | `<div>`                 | yes      | `data-ars-state`, `data-ars-disabled`, `data-ars-readonly`                                                                                                              |
+| `Label`              | `<label>`               | yes      | `for` (trigger ID)                                                                                                                                                      |
+| `Control`            | `<div>`                 | yes      |                                                                                                                                                                         |
+| `Trigger`            | `<button>`              | yes      | `type="button"`, `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`, `aria-labelledby`                                                                          |
+| `Content`            | `<div>`                 | yes      | `role="dialog"`, `aria-labelledby`, `data-ars-state`                                                                                                                    |
+| `Area`               | `<div>`                 | yes      | `role="group"`                                                                                                                                                          |
+| `AreaThumb`          | `<div>`                 | yes      | `role="application"`, `aria-roledescription`, `aria-valuetext` (saturation + lightness/brightness), `tabindex` (`0`, `-1` when disabled), `aria-disabled` when disabled |
+| `ChannelSlider`      | `<div>`                 | yes      | `role="group"`, `data-ars-channel`                                                                                                                                      |
+| `ChannelSliderThumb` | `<div>`                 | yes      | `role="slider"`, `tabindex` (`0`, `-1` when disabled), `aria-valuenow`, `aria-label`, `aria-disabled` when disabled                                                     |
+| `AlphaSlider`        | `<div>`                 | no       | `role="group"`, `data-ars-channel="alpha"`                                                                                                                              |
+| `SwatchGroup`        | `<div>`                 | no       | `role="group"`                                                                                                                                                          |
+| `Swatch`             | `<button>`              | no       | `type="button"`, `role="button"`, `tabindex` (`0`, `-1` when disabled), `aria-label`, `data-ars-selected`, `data-ars-index`, `aria-disabled` when disabled              |
+| `FormatSelect`       | `<select>` / `<button>` | no       | `aria-label`                                                                                                                                                            |
+| `ChannelInput`       | `<input>`               | no       | `type="text"`, `inputmode="numeric"`, `data-ars-channel`, `data-ars-channel-index`                                                                                      |
+| `HexInput`           | `<input>`               | no       | `type="text"`, `inputmode="text"`                                                                                                                                       |
+| `EyeDropperTrigger`  | `<button>`              | no       | `aria-label`, `hidden` (when unsupported)                                                                                                                               |
+| `HiddenInput`        | `<input type="hidden">` | yes      | `name`, `value`                                                                                                                                                         |
 
 ## 3. Accessibility
 
@@ -1543,6 +1595,7 @@ pub struct Messages {
     pub alpha_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub saturation_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub lightness_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    pub brightness_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub eyedropper_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub format_toggle_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub swatch_label: MessageFn<dyn Fn(&ColorValue, &Locale) -> String + Send + Sync>,
@@ -1562,6 +1615,7 @@ impl Default for Messages {
             alpha_label: MessageFn::static_str("Alpha"),
             saturation_label: MessageFn::static_str("Saturation"),
             lightness_label: MessageFn::static_str("Lightness"),
+            brightness_label: MessageFn::static_str("Brightness"),
             eyedropper_label: MessageFn::static_str("Pick color from screen"),
             format_toggle_label: MessageFn::static_str("Toggle color format"),
             swatch_label: MessageFn::new(|color, _locale| format!("Select color {}", color.to_hex(false))),
