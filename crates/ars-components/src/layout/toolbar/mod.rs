@@ -341,9 +341,13 @@ fn set_items_plan(
 ) -> Option<TransitionPlan<Machine>> {
     let disabled_items = normalized_disabled_items(count, disabled_items);
 
-    let focused_index = ctx
-        .focused_index
-        .filter(|index| can_focus_index(count, &disabled_items, *index));
+    let focused_index = if ctx.disabled {
+        None
+    } else {
+        ctx.focused_index
+            .filter(|index| can_focus_index(count, &disabled_items, *index))
+            .or_else(|| first_enabled_index(count, &disabled_items))
+    };
 
     if ctx.item_count == count
         && ctx.disabled_items == disabled_items
@@ -665,8 +669,6 @@ mod tests {
     fn roving_tabindex_tracks_focused_item_and_skips_disabled_items() {
         let mut service = service(Props::new().id("tools"));
 
-        drop(service.send(Event::FocusFirst));
-
         assert_eq!(
             service
                 .connect(&|_| {})
@@ -692,6 +694,24 @@ mod tests {
             Some("true")
         );
         assert_eq!(api.item_attrs(3).get(&HtmlAttr::TabIndex), Some("0"));
+    }
+
+    #[test]
+    fn set_items_seeds_first_enabled_roving_target() {
+        let mut service =
+            Service::<Machine>::new(Props::new().id("toolbar"), &Env::default(), &Messages);
+
+        drop(service.send(Event::SetItems {
+            count: 4,
+            disabled_items: vec![0, 2],
+        }));
+
+        assert_eq!(service.context().focused_index, Some(1));
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.item_attrs(0).get(&HtmlAttr::TabIndex), Some("-1"));
+        assert_eq!(api.item_attrs(1).get(&HtmlAttr::TabIndex), Some("0"));
     }
 
     #[test]
@@ -814,7 +834,7 @@ mod tests {
 
         assert_eq!(service.context().item_count, 3);
         assert_eq!(service.context().disabled_items, vec![1]);
-        assert_eq!(service.context().focused_index, None);
+        assert_eq!(service.context().focused_index, Some(0));
 
         let before = service.context().clone();
 

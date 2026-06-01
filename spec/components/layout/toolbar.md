@@ -167,8 +167,13 @@ impl ars_core::Machine for Machine {
             Event::SetItems { count, disabled_items } => {
                 let count = *count;
                 let disabled_items = normalize_disabled_items(count, disabled_items);
-                let focused_index = ctx.focused_index
-                    .filter(|index| index < count && !disabled_items.contains(index));
+                let focused_index = if ctx.disabled {
+                    None
+                } else {
+                    ctx.focused_index
+                        .filter(|index| index < count && !disabled_items.contains(index))
+                        .or_else(|| first_enabled_index(count, &disabled_items))
+                };
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.item_count = count;
                     ctx.disabled_items = disabled_items;
