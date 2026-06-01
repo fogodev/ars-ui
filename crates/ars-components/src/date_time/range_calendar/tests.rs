@@ -477,6 +477,111 @@ fn invalid_external_ranges_are_ignored_on_init_and_sync() {
 }
 
 #[test]
+fn external_range_validation_covers_span_bounds_and_unavailable_branches() {
+    let unavailable = Callback::new_ref(|date: &CalendarDate| date.day() == 12);
+
+    let svc = service_with(
+        props()
+            .allow_single_date_range(false)
+            .value(Some(range(date(2024, 1, 10), date(2024, 1, 10)))),
+        en_us(),
+    );
+
+    assert_eq!(*svc.context().value.get(), None);
+
+    let svc = service_with(
+        props()
+            .min_range_days(Some(5))
+            .value(Some(range(date(2024, 1, 10), date(2024, 1, 11)))),
+        en_us(),
+    );
+
+    assert_eq!(*svc.context().value.get(), None);
+
+    let svc = service_with(
+        props()
+            .max(Some(date(2024, 1, 10)))
+            .value(Some(range(date(2024, 1, 11), date(2024, 1, 12)))),
+        en_us(),
+    );
+
+    assert_eq!(*svc.context().value.get(), None);
+
+    let svc = service_with(
+        props()
+            .is_date_unavailable(Some(unavailable.clone()))
+            .value(Some(range(date(2024, 1, 10), date(2024, 1, 13)))),
+        en_us(),
+    );
+
+    assert_eq!(*svc.context().value.get(), None);
+
+    let svc = service_with(
+        props()
+            .is_date_unavailable(Some(unavailable))
+            .value(Some(range(date(2024, 1, 10), date(2024, 1, 11)))),
+        en_us(),
+    );
+
+    assert_eq!(
+        *svc.context().value.get(),
+        Some(range(date(2024, 1, 10), date(2024, 1, 11))),
+    );
+}
+
+#[test]
+fn prop_sync_revalidates_uncontrolled_value_and_pending_hover() {
+    let mut svc = service_with(
+        props().default_value(Some(range(date(2024, 1, 10), date(2024, 1, 15)))),
+        en_us(),
+    );
+
+    drop(svc.set_props(props().max(Some(date(2024, 1, 12)))));
+
+    assert_eq!(*svc.context().value.get(), None);
+
+    let mut svc = service();
+
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 1, 10),
+    }));
+    drop(svc.send(Event::HoverDate {
+        date: date(2024, 1, 20),
+    }));
+    drop(svc.set_props(props().max(Some(date(2024, 1, 15)))));
+
+    assert_eq!(svc.context().anchor_date, Some(date(2024, 1, 10)));
+    assert_eq!(svc.context().hovering_date, None);
+}
+
+#[test]
+fn current_value_revalidation_can_clear_controlled_static_unavailable_range() {
+    let mut ctx = service_with(
+        props().value(Some(range(date(2024, 1, 10), date(2024, 1, 12)))),
+        en_us(),
+    )
+    .context()
+    .clone();
+
+    ctx.unavailable_dates = vec![date(2024, 1, 11)];
+
+    revalidate_current_value(&mut ctx);
+
+    assert_eq!(*ctx.value.get(), None);
+}
+
+#[test]
+fn context_range_validation_rejects_bound_violating_endpoints() {
+    let svc = service_with(props().min(Some(date(2024, 1, 10))), en_us());
+    let ctx = svc.context();
+
+    assert!(!range_is_selectable(
+        ctx,
+        &range(date(2024, 1, 5), date(2024, 1, 12)),
+    ));
+}
+
+#[test]
 fn constraint_sync_clears_pending_anchor_and_hover_when_anchor_becomes_invalid() {
     let mut svc = service();
 
