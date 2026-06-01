@@ -1,0 +1,141 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0a89da4e9609",
+  "session_id": "019e80c5-8e5f-7291-ba97-21da7035e74c",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T03:11:50.329315Z",
+  "branch": "codex/issue-287-range-calendar-core",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/date_time/calendar/grid.rs",
+    "crates/ars-components/src/date_time/mod.rs",
+    "crates/ars-components/src/date_time/range_calendar/mod.rs",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_anchor.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_anchor.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_disabled.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_hover_range.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_in_range.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_range_end.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_range_start.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_today.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_unavailable.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__grid.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__grid_group.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__head_cell.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__head_row.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__header.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__heading.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__next_trigger.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__prev_trigger.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__root_disabled_readonly_rtl.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__root_idle.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__root_pending.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__row.snap",
+    "crates/ars-components/src/date_time/range_calendar/tests.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "spec/components/date-time/range-calendar.md",
+    "spec/dioxus-components/date-time/range-calendar.md",
+    "spec/foundation/02-component-catalog.md",
+    "spec/leptos-components/date-time/range-calendar.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "e8bb3635d736",
+  "token_usage": {
+    "input_tokens": 854807,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 18420480,
+    "output_tokens": 47887,
+    "api_call_count": 135
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement the framework-agnostic RangeCalendar core (issue #287) in the ars-ui Rust project, reusing existing Calendar grid machinery and adding range-specific state, hover preview, span validation, and ARIA attributes.",
+    "outcome": "RangeCalendar core fully implemented with TDD, comprehensive snapshot/conformance/proptest coverage, spec drift corrected in core and adapter specs, all verification gates passed, and a PR opened closing issue #287 with 31 files changed.",
+    "learnings": {
+      "repo": [
+        "The spec tooling can declare 'No spec change required' but issue-level requirements can override it; when public API contracts (max-span, allow_single_date_range) are missing from the spec, a minimal spec sync is required before implementation.",
+        "The pre-push gate is `cargo xci --profile fast` — a 10-step pipeline covering clippy, fmt, unit tests (7,472+), integration, adapter, spec snippets, error variants, mutual-exclusion, and native coverage.",
+        "Snapshots live under `crates/ars-components/src/date_time/range_calendar/snapshots/` and the snapshot-count check (step 8 of xci) validates against a per-module budget; RangeCalendar passed at 21 snapshots.",
+        "Post-implementation audit is a mandatory project skill that found real spec drift: core/adapter specs described endpoint-only aria-selected and lacked the offset-aware Cell/CellTrigger shape already established by Calendar.",
+        "Proptest entries for RangeCalendar compile but are correctly excluded from fast-profile nightly runs — the proptest target name (`proptest_range_calendar`) is the right scope."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/calendar/grid.rs",
+          "finding": "Grid helpers had to be widened from private to pub(crate) so RangeCalendar could reuse week grid generation, month offsets, visible-range checks, and month stepping without creating a new dependency."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/mod.rs",
+          "finding": "Clippy caught two style issues in the initial implementation: an Option::map().unwrap_or_else() chain and a manual early return that should use ?; both were fixed before the pre-push gate."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/date_time.rs",
+          "finding": "RangeCalendar spec conformance coverage added for range_calendar::Part alongside existing Calendar coverage in the shared date_time conformance test file."
+        },
+        {
+          "path": "spec/components/date-time/range-calendar.md",
+          "finding": "Spec drift corrected post-audit: aria-selected must appear on every confirmed in-range cell (not just endpoints), and Cell/CellTrigger anatomy uses the offset-aware shape {date: CalendarDate} consistent with Calendar."
+        }
+      ],
+      "workflow": [
+        "TDD RED→GREEN: write tests first that fail on missing types, confirm compile-time failures match expectations, then implement — prevents over-building.",
+        "`cargo insta test --lib --unreferenced=reject -- range_calendar` fails because the filtered binary still scans unrelated pre-existing unreferenced snapshots across the whole crate; use the unflagged form for the focused module and accept the caveat.",
+        "`gh project item-edit` first failed with a local flag difference; the correct invocation uses `--project-id` rather than `--owner --number` when the local gh version differs.",
+        "The post-implementation audit skill is a required step for ars-ui agnostic core work — spec drift (aria-selected scope, anatomy shape) was caught and landed in the same PR rather than as follow-up debt.",
+        "PRs with `.snap` files require the `snapshot-reviewed` label before merge."
+      ]
+    },
+    "friction": [
+      "`gh project item-edit` CLI flag mismatch between local gh version and expected flags; required switching from `--owner/--number` form to `--project-id` form.",
+      "`cargo insta test --lib --unreferenced=reject -- range_calendar` incorrectly fails because the filtered test binary scans all existing snapshots in the crate, not just the targeted module's; no clean per-module unreferenced check is available.",
+      "Spec declared 'No spec change required' for issue #287 but the issue itself specified two public options (`allow_single_date_range`, `min_range_days`, `max_range_days`) absent from the spec, requiring a planning-phase decision to reconcile the conflict.",
+      "`cargo xci --profile fast` has substantial runtime (7,472+ unit tests + coverage instrumentation build); the coverage phase alone requires a full incremental rebuild with instrumentation."
+    ],
+    "open_items": [
+      "The `--unreferenced=reject` caveat with filtered insta runs has no clean per-module solution; the full workspace unreferenced check should be run separately or the insta CLI needs a module-scoped mode.",
+      "PR still needs the `snapshot-reviewed` label applied after opening (21 new RangeCalendar snapshots).",
+      "Codex review loop (`waiting-for-codex-review` skill) was not yet started at transcript end — CI green and Codex 👍 are still pending.",
+      "Leptos and Dioxus adapter components for RangeCalendar are explicitly out of scope for this PR; adapter work is deferred to a follow-up issue."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T03:10:33.536602Z",
+    "agent_lines": 3531,
+    "agent_removed": 0,
+    "human_added": 172,
+    "human_modified": 74,
+    "human_removed": 0,
+    "total_committed": 3740,
+    "total_lines_changed": 3777,
+    "agent_percentage": 93.48689436060366,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 123,
+      "user_lines_removed": 37,
+      "agent_lines_added": 3691,
+      "agent_lines_removed": 23,
+      "user_added_per_file": {
+        "crates/ars-components/src/date_time/range_calendar/mod.rs": 107,
+        "crates/ars-components/src/date_time/range_calendar/tests.rs": 14,
+        "crates/ars-components/tests/proptest_state_machines/date_time.rs": 2
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/date_time/range_calendar/mod.rs": 37
+      }
+    }
+  ]
+}

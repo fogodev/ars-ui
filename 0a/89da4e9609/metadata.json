@@ -1,0 +1,55 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0a89da4e9609",
+  "strategy": "manual-commit",
+  "branch": "codex/issue-287-range-calendar-core",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/date_time/calendar/grid.rs",
+    "crates/ars-components/src/date_time/mod.rs",
+    "crates/ars-components/src/date_time/range_calendar/mod.rs",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_anchor.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_anchor.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_disabled.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_hover_range.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_in_range.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_range_end.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_range_start.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_today.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__cell_trigger_unavailable.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__grid.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__grid_group.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__head_cell.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__head_row.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__header.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__heading.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__next_trigger.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__prev_trigger.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__root_disabled_readonly_rtl.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__root_idle.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__root_pending.snap",
+    "crates/ars-components/src/date_time/range_calendar/snapshots/ars_components__date_time__range_calendar__tests__row.snap",
+    "crates/ars-components/src/date_time/range_calendar/tests.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "spec/components/date-time/range-calendar.md",
+    "spec/dioxus-components/date-time/range-calendar.md",
+    "spec/foundation/02-component-catalog.md",
+    "spec/leptos-components/date-time/range-calendar.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0a/89da4e9609/0/metadata.json",
+      "transcript": "/0a/89da4e9609/0/full.jsonl",
+      "content_hash": "/0a/89da4e9609/0/content_hash.txt",
+      "prompt": "/0a/89da4e9609/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 854807,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 18420480,
+    "output_tokens": 47887,
+    "api_call_count": 135
+  }
+}

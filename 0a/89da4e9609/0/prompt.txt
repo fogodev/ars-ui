@@ -1,0 +1,66 @@
+Implement task #287
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Implement RangeCalendar Agnostic Core
+
+## Summary
+Build the framework-agnostic `RangeCalendar` in `ars-components`, reusing the existing Calendar grid/navigation machinery and adding range-specific state, hover preview, range attributes, and span validation. Because issue #287 adds behavior not present in `spec/components/date-time/range-calendar.md`, first update that spec with the minimal public contract for range span limits and single-date ranges.
+
+## Key Changes
+- Before coding, move GitHub issue #287 to `In Progress`; keep the PR scoped to agnostic core only, with no Leptos/Dioxus adapter components.
+- Add `crates/ars-components/src/date_time/range_calendar/mod.rs` plus `tests.rs`, and export it from `crates/ars-components/src/date_time/mod.rs`.
+- Reuse `calendar::grid` for week grids, month offsets, visible-range checks, weekday ordering, and month stepping; do not create a new dependency.
+- Public API:
+  - `Props { value: Option<Option<DateRange>>, default_value: Option<DateRange>, min, max, disabled, readonly, is_date_unavailable, first_day_of_week, show_week_numbers, is_rtl, visible_months, page_behavior, today, allow_single_date_range, min_range_days, max_range_days }`
+  - `allow_single_date_range: bool` defaults to `true`, preserving `DateRange::new(start, end)` equality support.
+  - `min_range_days: Option<u32>` and `max_range_days: Option<u32>` count inclusive calendar days, so `start == end` is length `1`.
+  - `Event` includes `SelectDate`, `HoverDate`, `HoverEnd`, navigation/focus/keyboard events, and `SyncProps`.
+  - `Effect` includes `AnnounceMonth`, `AnnounceRangeStart`, and `AnnounceRangeComplete` as named intents only.
+- Range behavior:
+  - First valid `SelectDate` sets `anchor_date`, clears current value, clears hover, and focuses the date.
+  - Hover while anchored sets `hovering_date`; `HoverEnd` clears it.
+  - Second valid `SelectDate` normalizes the range, validates single-date/span constraints, writes `ctx.value`, clears anchor/hover, and focuses the end click date.
+  - Invalid second selections leave the pending anchor intact so the user can choose another end date.
+  - Disabled blocks interactive events except `FocusOut` and `SyncProps`; readonly allows focus/navigation but blocks selection and hover-preview mutation.
+- Connect API:
+  - Scope is `range-calendar`; anatomy mirrors Calendar with `GridGroup`.
+  - Grid always sets `role="grid"` and `aria-multiselectable="true"`.
+  - Cells use `aria-selected="true"` for every date inside the confirmed range.
+  - Cell triggers expose `data-ars-range-start`, `data-ars-range-end`, `data-ars-in-range`, `data-ars-in-hover-range`, and `data-ars-anchor`.
+  - Add `on_cell_hover`, `on_grid_mouseleave`, `on_cell_click`, `on_grid_keydown`, prev/next handlers, month helpers, and state accessors matching Calendar conventions.
+
+## Tests
+- Add unit tests first in `range_calendar/tests.rs` for:
+  - first click anchor and second click range completion;
+  - reverse-order clicks normalize start/end;
+  - hover preview sets and clears `data-ars-in-hover-range`;
+  - `aria-selected` appears for all confirmed in-range cells;
+  - grid and grid-group attributes include range selection ARIA;
+  - `Shift+PageUp` / `Shift+PageDown` year navigation and `Enter` / `Space` range selection;
+  - min/max date constraints and unavailable-date rejection;
+  - `max_range_days`, `min_range_days`, and `allow_single_date_range = false`;
+  - controlled `value` sync and controlled pending-value behavior.
+- Add snapshot coverage for every anatomy part and each output-affecting branch: idle/focused root, pending root, disabled/readonly/rtl root, nav triggers, heading, grid, grid group, head row/cell, row, selected/in-range/hover-range/anchor/disabled/unavailable/today cell triggers.
+- Add spec-conformance coverage in `crates/ars-components/tests/spec_conformance/date_time.rs` for `range_calendar::Part`.
+- Add proptest coverage in `crates/ars-components/tests/proptest_state_machines/date_time.rs` for invariants: valid month bounds, focused date clamped to min/max, pending anchor consistency, completed range normalized, range span constraints never violated, and grid generation remains 6x7 when representable.
+- Verification commands:
+  - `cargo test -p ars-components --lib -- date_time::range_calendar`
+  - `cargo test -p ars-components --test spec_conformance -- date_time`
+  - `cargo insta test -p ars-components --lib -- range_calendar --unreferenced=reject`
+  - `cargo test -p ars-components --tests -- proptest_range_calendar`
+  - `cargo clippy -p ars-components --all-targets --all-features -- -D warnings`
+  - `cargo xtask spec validate`
+  - targeted coverage via `cargo llvm-cov test -p ars-components --lib --text -- range_calendar`
+
+## Delivery Workflow
+- After named tests pass, invoke `.agents/skills/post-implementation-audit/SKILL.md` and land all findings in the same PR.
+- Present the final diff for user review before any commit.
+- After approval, run `cargo xci --profile fast` or `cargo xci-fast`.
+- Commit only after approval, push, open a PR with `Closes #287`, add `snapshot-reviewed` if `.snap` files changed, then invoke `.agents/skills/waiting-for-codex-review/SKILL.md` until Codex leaves 👍 and CI is green.
+
+## Assumptions
+- The issue’s span/single-date bullets are authoritative, so the spec will be updated despite the current “No spec change required” note.
+- No adapter component work, no new crates, and no mutation-testing gate are part of this task.
+- This checkout is currently detached at `HEAD`; implementation should start by creating a `codex/issue-287-range-calendar-core` branch.
