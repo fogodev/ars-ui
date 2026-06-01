@@ -1,0 +1,38 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "7c7baa35a3eb",
+  "strategy": "manual-commit",
+  "branch": "codex/issue-276-toolbar-core",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/layout/mod.rs",
+    "crates/ars-components/src/layout/toolbar/mod.rs",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_item_disabled.snap",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_item_focused.snap",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_root.snap",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_root_disabled.snap",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_rtl_root.snap",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_separator.snap",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_vertical_root.snap",
+    "crates/ars-components/tests/proptest_state_machines/layout.rs",
+    "crates/ars-components/tests/spec_conformance/layout.rs",
+    "spec/components/layout/toolbar.md",
+    "spec/dioxus-components/layout/toolbar.md",
+    "spec/leptos-components/layout/toolbar.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/7c/7baa35a3eb/0/metadata.json",
+      "transcript": "/7c/7baa35a3eb/0/full.jsonl",
+      "content_hash": "/7c/7baa35a3eb/0/content_hash.txt",
+      "prompt": "/7c/7baa35a3eb/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 712033,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 23825024,
+    "output_tokens": 43560,
+    "api_call_count": 164
+  }
+}

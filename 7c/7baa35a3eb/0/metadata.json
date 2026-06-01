@@ -1,0 +1,117 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "7c7baa35a3eb",
+  "session_id": "019e80c6-598f-7d31-b875-7bc81e3463c5",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T02:19:22.08297Z",
+  "branch": "codex/issue-276-toolbar-core",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/layout/mod.rs",
+    "crates/ars-components/src/layout/toolbar/mod.rs",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_item_disabled.snap",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_item_focused.snap",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_root.snap",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_root_disabled.snap",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_rtl_root.snap",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_separator.snap",
+    "crates/ars-components/src/layout/toolbar/snapshots/ars_components__layout__toolbar__tests__toolbar_vertical_root.snap",
+    "crates/ars-components/tests/proptest_state_machines/layout.rs",
+    "crates/ars-components/tests/spec_conformance/layout.rs",
+    "spec/components/layout/toolbar.md",
+    "spec/dioxus-components/layout/toolbar.md",
+    "spec/leptos-components/layout/toolbar.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "4ddc81facd94",
+  "token_usage": {
+    "input_tokens": 712033,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 23825024,
+    "output_tokens": 43560,
+    "api_call_count": 164
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement framework-agnostic Toolbar core state machine in ars-components crate with comprehensive testing and spec updates",
+    "outcome": "Successfully implemented Toolbar core with State/Event/Context/Props/Messages/Part/Machine/Api structure, achieving 95.9% line coverage and 97.4% region coverage. Added spec conformance and proptest tests. Created PR and branch codex/issue-276-toolbar-core. Adapter implementations (Leptos/Dioxus) deferred.",
+    "learnings": {
+      "repo": [
+        "Services reject empty IDs - all tests must supply an id parameter",
+        "cargo insta test --unreferenced=reject fails with pre-existing feature-gated utility/highlight snapshots; workaround is --features i18n",
+        "Detached HEAD state requires creating a branch before making file changes",
+        "cargo xtask must compile from scratch on fresh checkout",
+        "GitHub Projects API requires multiple calls to discover correct field/option IDs for status updates",
+        "Project uses cargo xci --profile fast as 10-gate CI verification before commits"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/toolbar/mod.rs",
+          "finding": "Audit found on_props_changed emitted prop-sync event but transition ignored it; fixed by creating SetProps event that carries new props through the state machine"
+        }
+      ],
+      "workflow": [
+        "Proptest tests marked as ignored for nightly test suite",
+        "snapshot-reviewed label still needs to be applied after PR creation",
+        ".agents/skills/waiting-for-codex-review/SKILL.md workflow needs to be invoked for PR review",
+        "TDD approach: write tests first, implement to pass, then audit for correctness"
+      ]
+    },
+    "friction": [
+      "Initial detached HEAD state required branch creation before proceeding",
+      "cargo xtask full recompilation on fresh checkout delayed initial setup",
+      "GitHub Projects API discovery for correct field/option IDs required multiple trial calls",
+      "snapshot test infrastructure complexity with feature-gated files requiring specific cargo flags"
+    ],
+    "open_items": [
+      "Apply snapshot-reviewed label to PR",
+      "Invoke codex review workflow via .agents/skills/waiting-for-codex-review/SKILL.md",
+      "Defer Leptos and Dioxus adapter implementations to future tasks",
+      "Monitor CI verification with cargo xci --profile fast before next steps"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T02:18:35.293998Z",
+    "agent_lines": 1420,
+    "agent_removed": 0,
+    "human_added": 90,
+    "human_modified": 74,
+    "human_removed": 0,
+    "total_committed": 1547,
+    "total_lines_changed": 1584,
+    "agent_percentage": 89.64646464646465,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 82,
+      "user_lines_removed": 37,
+      "agent_lines_added": 1539,
+      "agent_lines_removed": 14,
+      "user_added_per_file": {
+        "crates/ars-components/src/layout/toolbar/mod.rs": 72,
+        "crates/ars-components/tests/proptest_state_machines/layout.rs": 2,
+        "spec/components/layout/toolbar.md": 2,
+        "spec/dioxus-components/layout/toolbar.md": 3,
+        "spec/leptos-components/layout/toolbar.md": 3
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/layout/toolbar/mod.rs": 29,
+        "spec/components/layout/toolbar.md": 2,
+        "spec/dioxus-components/layout/toolbar.md": 3,
+        "spec/leptos-components/layout/toolbar.md": 3
+      }
+    }
+  ]
+}
