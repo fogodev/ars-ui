@@ -115,6 +115,12 @@ pub struct Context {
     pub unavailable_dates: Vec<CalendarDate>,
     /// User-provided predicate for dynamic unavailability checks.
     pub is_date_unavailable_fn: Option<IsDateUnavailableFn>,
+    /// Whether same-day ranges are valid.
+    pub allow_single_date_range: bool,
+    /// Minimum inclusive range length in calendar days.
+    pub min_range_days: Option<u32>,
+    /// Maximum inclusive range length in calendar days.
+    pub max_range_days: Option<u32>,
     /// Component IDs.
     pub ids: ComponentIds,
     /// Number of months displayed side-by-side. Default: 2 (common for range pickers).
@@ -128,7 +134,7 @@ pub struct Context {
 
 Context shares the same navigation fields as Calendar (`focused_date`, `visible_month`, `visible_year`, `page_behavior`, etc.) and the same grid computation methods -- see Calendar `calendar.md` section 1.6 for `weeks()`, `weeks_for()`, `month_year_at_offset()`, `advance_month()`, `sync_visible_to_focused()`, `clamp_date()`, and related helpers. These methods are identical and should be extracted into a shared module by implementors.
 
-The range-specific fields are `anchor_date`, `hovering_date`, and the `Bindable<Option<DateRange>>` value type.
+The range-specific fields are `anchor_date`, `hovering_date`, `allow_single_date_range`, `min_range_days`, `max_range_days`, and the `Bindable<Option<DateRange>>` value type.
 
 **Date constraint methods** (identical to Calendar):
 
@@ -167,6 +173,31 @@ impl Context {
             Some(max) if date > *max => max.clone(),
             _ => date,
         }
+    }
+
+    /// Whether a completed range satisfies same-day and span constraints.
+    pub fn range_is_allowed(&self, range: &DateRange) -> bool {
+        if !self.allow_single_date_range && range.start == range.end {
+            return false;
+        }
+
+        let Some(length) = inclusive_range_days(range) else {
+            return false;
+        };
+
+        if let Some(min) = self.min_range_days {
+            if length < min {
+                return false;
+            }
+        }
+
+        if let Some(max) = self.max_range_days {
+            if length > max {
+                return false;
+            }
+        }
+
+        true
     }
 }
 ```
@@ -378,6 +409,9 @@ impl ars_core::Machine for Machine {
             readonly: props.readonly,
             unavailable_dates: Vec::new(),
             is_date_unavailable_fn: props.is_date_unavailable,
+            allow_single_date_range: props.allow_single_date_range,
+            min_range_days: props.min_range_days,
+            max_range_days: props.max_range_days,
             ids: ComponentIds::from_id(&props.id),
             visible_months: props.visible_months.max(1),
             page_behavior: props.page_behavior.clone(),
@@ -449,12 +483,19 @@ impl ars_core::Machine for Machine {
                     Some(ref anchor) => {
                         // Second click: complete the range.
                         let anchor = anchor.clone();
+                        let Some(range) = DateRange::normalized(anchor.clone(), date.clone()) else {
+                            return None;
+                        };
+                        if !range_is_selectable(ctx, &range) {
+                            return Some(TransitionPlan::to(State::Focused)
+                                .apply(move |ctx| {
+                                    ctx.focused_date = date;
+                                    ctx.sync_visible_to_focused();
+                                }));
+                        }
+
                         Some(TransitionPlan::to(State::Focused)
                             .apply(move |ctx| {
-                                let range = DateRange::normalized(
-                                    anchor,
-                                    date.clone(),
-                                );
                                 ctx.value.set(Some(range));
                                 ctx.anchor_date = None;
                                 ctx.hovering_date = None;
@@ -481,6 +522,7 @@ impl ars_core::Machine for Machine {
 
             // ── Hover preview ────────────────────────────────────────────
             Event::HoverDate { date } => {
+                if ctx.readonly { return None; }
                 if ctx.anchor_date.is_none() { return None; }
                 let date = date.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -583,6 +625,48 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+fn range_is_selectable(ctx: &Context, range: &DateRange) -> bool {
+    if !ctx.range_is_allowed(range) {
+        return false;
+    }
+
+    if ctx.is_date_disabled(&range.start) || ctx.is_date_disabled(&range.end) {
+        return false;
+    }
+
+    if ctx.unavailable_dates.is_empty() && ctx.is_date_unavailable_fn.is_none() {
+        return true;
+    }
+
+    range_dates_all(ctx, range, |ctx, date| !ctx.is_date_unavailable(date))
+}
+
+fn range_dates_all(
+    ctx: &Context,
+    range: &DateRange,
+    mut predicate: impl FnMut(&Context, &CalendarDate) -> bool,
+) -> bool {
+    let Some(days) = inclusive_range_days(range) else {
+        return false;
+    };
+
+    for offset in 0..days {
+        let Ok(offset) = i32::try_from(offset) else {
+            return false;
+        };
+
+        let Ok(date) = range.start.add_days(offset) else {
+            return false;
+        };
+
+        if !predicate(ctx, &date) {
+            return false;
+        }
+    }
+
+    true
 }
 
 impl Machine {
