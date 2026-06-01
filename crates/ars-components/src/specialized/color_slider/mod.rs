@@ -665,15 +665,16 @@ impl Api<'_> {
         // position in controlled mode (where `get()` returns the stale prop).
         let color = self.ctx.value.pending();
 
-        // A horizontal RTL slider renders the minimum on the right, so the
-        // gradient runs `to left` to keep the visible ramp aligned with the
-        // value selected by dragging/clicking.
-        let to_edge =
-            if self.ctx.orientation == Orientation::Horizontal && self.ctx.dir == Direction::Rtl {
-                "to left"
-            } else {
-                "to right"
-            };
+        // The gradient must run along the slider's travel axis, matching the
+        // thumb position: vertical sliders ramp bottom→top (`to top`), and a
+        // horizontal RTL slider (minimum on the right) ramps `to left`.
+        let to_edge = if self.ctx.orientation == Orientation::Vertical {
+            "to top"
+        } else if self.ctx.dir == Direction::Rtl {
+            "to left"
+        } else {
+            "to right"
+        };
 
         let gradient = match self.ctx.channel {
             ColorChannel::Hue => format!(
@@ -1090,6 +1091,27 @@ mod tests {
                 .thumb_attrs()
                 .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
             Some("90.00")
+        );
+    }
+
+    #[test]
+    fn vertical_track_gradient_runs_to_top() {
+        let svc = service(Props {
+            channel: ColorChannel::Hue,
+            orientation: Orientation::Vertical,
+            ..Props::default()
+        });
+        let bg = svc
+            .connect(&|_| {})
+            .track_attrs()
+            .styles()
+            .iter()
+            .find(|(p, _)| *p == CssProperty::Custom("ars-color-slider-track-bg"))
+            .map(|(_, value)| value.clone())
+            .expect("track bg");
+        assert!(
+            bg.starts_with("linear-gradient(to top,"),
+            "vertical track gradient must run along the vertical axis: {bg}"
         );
     }
 

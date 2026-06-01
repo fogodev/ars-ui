@@ -500,10 +500,12 @@ impl<'a> Api<'a> {
         // Use the pending color so the gradient matches the in-progress drag
         // position in controlled mode (where `get()` returns the stale prop).
         let color = self.ctx.value.pending();
-        // A horizontal RTL slider renders the minimum on the right, so the
-        // gradient runs `to left` to keep the visible ramp aligned with the
-        // value selected by dragging/clicking.
-        let to_edge = if self.ctx.orientation == Orientation::Horizontal && self.ctx.dir == Direction::Rtl {
+        // The gradient must run along the slider's travel axis, matching the
+        // thumb position: vertical sliders ramp bottom→top (`to top`), and a
+        // horizontal RTL slider (minimum on the right) ramps `to left`.
+        let to_edge = if self.ctx.orientation == Orientation::Vertical {
+            "to top"
+        } else if self.ctx.dir == Direction::Rtl {
             "to left"
         } else {
             "to right"

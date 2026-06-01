@@ -25,6 +25,9 @@ use ars_core::{
     ConnectApi, CssProperty, Env, HtmlAttr, KeyboardKey, Locale, MessageFn, PendingEffect,
     TransitionPlan, no_cleanup,
 };
+// `f64::atan2`/`round`/`rem_euclid` are std-only; use the libm-backed `core_maths`
+// versions so the module compiles under `#![no_std]` (matching `ars-core::color`).
+use core_maths::CoreFloat;
 
 /// Formats the angle value for `aria-valuetext`.
 type ValueTextFn = dyn Fn(f64, &Locale) -> String + Send + Sync;
@@ -43,10 +46,10 @@ pub fn compute_angle(center: (f64, f64), pointer: (f64, f64)) -> f64 {
     let dx = pointer.0 - center.0;
     let dy = pointer.1 - center.1;
 
-    let degrees = dy.atan2(dx).to_degrees();
+    let degrees = CoreFloat::atan2(dy, dx) * (180.0 / core::f64::consts::PI);
 
     // Normalize to 0..360, with 0 at the top (12 o'clock).
-    (degrees + 90.0).rem_euclid(360.0)
+    CoreFloat::rem_euclid(degrees + 90.0, 360.0)
 }
 
 /// Snap an angle to the nearest multiple of `step`.
@@ -55,7 +58,7 @@ fn snap_to_step(angle: f64, step: f64) -> f64 {
         return angle;
     }
 
-    (angle / step).round() * step
+    CoreFloat::round(angle / step) * step
 }
 
 /// Wrap a value into the range `[min, max)`.
@@ -66,7 +69,7 @@ fn wrap_value(value: f64, min: f64, max: f64) -> f64 {
         return min;
     }
 
-    (value - min).rem_euclid(range) + min
+    CoreFloat::rem_euclid(value - min, range) + min
 }
 
 /// Clamp `value` to `[min, max]` without panicking on malformed bounds.

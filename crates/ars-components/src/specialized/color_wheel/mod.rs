@@ -18,6 +18,9 @@ use ars_core::{
     MessageFn, PendingEffect, TransitionPlan, no_cleanup,
 };
 use ars_interactions::KeyboardEventData;
+// `f64::rem_euclid` is std-only; use the libm-backed `core_maths` version so the
+// module compiles under `#![no_std]` (matching `ars-core::color`).
+use core_maths::CoreFloat;
 
 /// Label for the wheel thumb.
 type LabelFn = dyn Fn(&Locale) -> String + Send + Sync;
@@ -390,7 +393,10 @@ impl ars_core::Machine for Machine {
                 let step_degrees = *step;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     // `rem_euclid` keeps the hue non-negative for custom steps > 360.
-                    set_hue(ctx, (ctx.hue_value + step_degrees).rem_euclid(360.0));
+                    set_hue(
+                        ctx,
+                        CoreFloat::rem_euclid(ctx.hue_value + step_degrees, 360.0),
+                    );
                 }))
             }
 
@@ -398,7 +404,10 @@ impl ars_core::Machine for Machine {
                 let step_degrees = *step;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     // `rem_euclid` keeps the hue non-negative for custom steps > 360.
-                    set_hue(ctx, (ctx.hue_value - step_degrees).rem_euclid(360.0));
+                    set_hue(
+                        ctx,
+                        CoreFloat::rem_euclid(ctx.hue_value - step_degrees, 360.0),
+                    );
                 }))
             }
 

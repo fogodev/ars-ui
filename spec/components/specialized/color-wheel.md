@@ -173,6 +173,10 @@ impl Default for Props {
 ### 1.5 Full Machine Implementation
 
 ```rust,no_check
+// `f64::rem_euclid` is std-only; use the libm-backed `core_maths` version so the
+// module compiles under `#![no_std]` (matching `ars-core::color`).
+use core_maths::CoreFloat;
+
 /// Apply a normalized angle (0..1) to the hue value.
 fn apply_wheel_angle(ctx: &mut Context, angle: f64) {
     // A full revolution returns to the top, so drags stay in `[0, 360)`.
@@ -332,7 +336,7 @@ impl ars_core::Machine for Machine {
                 let s = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
                     // `rem_euclid` keeps the hue non-negative for custom steps > 360.
-                    set_hue(ctx, (ctx.hue_value + s).rem_euclid(360.0));
+                    set_hue(ctx, CoreFloat::rem_euclid(ctx.hue_value + s, 360.0));
                 }))
             }
 
@@ -340,7 +344,7 @@ impl ars_core::Machine for Machine {
                 let s = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
                     // `rem_euclid` keeps the hue non-negative for custom steps > 360.
-                    set_hue(ctx, (ctx.hue_value - s).rem_euclid(360.0));
+                    set_hue(ctx, CoreFloat::rem_euclid(ctx.hue_value - s, 360.0));
                 }))
             }
 
