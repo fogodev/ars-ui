@@ -2,7 +2,12 @@
 
 use alloc::{format, string::String, sync::Arc};
 
-use ars_core::{AriaAttr, AttrMap, Callback, ComponentPart, Env, HtmlAttr, KeyboardKey, Service};
+use std::sync::Mutex;
+
+use ars_core::{
+    AriaAttr, AttrMap, Callback, ComponentPart, ConnectApi, Env, HtmlAttr, KeyboardKey, MessageFn,
+    Service,
+};
 use ars_i18n::{
     CalendarDate, DateRange, Locale, StubIntlBackend, Weekday,
     locales::{en_gb, en_us, fa},
@@ -168,6 +173,75 @@ fn grid_attrs_mark_range_selection_as_multiselectable() {
 }
 
 #[test]
+fn range_messages_debug_and_announcement_labels_are_exercised() {
+    let messages = Messages::default();
+
+    assert_eq!(
+        (messages.range_start_label)("January 10, 2024", &en_us()),
+        "Selected January 10, 2024 as range start. Select an end date.",
+    );
+    assert_eq!(
+        (messages.range_complete_label)("January 10, 2024", "January 12, 2024", &en_us()),
+        "Selected January 10, 2024 to January 12, 2024",
+    );
+    assert!(format!("{messages:?}").contains("Messages"));
+    assert_eq!(messages, messages.clone());
+}
+
+#[test]
+fn range_messages_partial_eq_covers_mismatched_fields() {
+    let messages = Messages::default();
+
+    let mut other = messages.clone();
+    other.prev_month_label = MessageFn::static_str("Prev");
+    assert_ne!(messages, other);
+
+    let mut other = messages.clone();
+    other.next_month_label = MessageFn::static_str("Next");
+    assert_ne!(messages, other);
+
+    let mut other = messages.clone();
+    other.prev_page_label =
+        MessageFn::new(|count: usize, _locale: &Locale| format!("Back {count}"));
+    assert_ne!(messages, other);
+
+    let mut other = messages.clone();
+    other.next_page_label =
+        MessageFn::new(|count: usize, _locale: &Locale| format!("Forward {count}"));
+    assert_ne!(messages, other);
+
+    let mut other = messages.clone();
+    other.month_range_separator = MessageFn::static_str(" to ");
+    assert_ne!(messages, other);
+
+    let mut other = messages.clone();
+    other.unavailable_suffix = MessageFn::static_str("not available");
+    assert_ne!(messages, other);
+
+    let mut other = messages.clone();
+    other.disabled_suffix = MessageFn::static_str("not allowed");
+    assert_ne!(messages, other);
+
+    let mut other = messages.clone();
+    other.range_start_suffix = MessageFn::static_str("start");
+    assert_ne!(messages, other);
+
+    let mut other = messages.clone();
+    other.range_end_suffix = MessageFn::static_str("end");
+    assert_ne!(messages, other);
+
+    let mut other = messages.clone();
+    other.range_start_label =
+        MessageFn::new(|start: &str, _locale: &Locale| format!("Start {start}"));
+    assert_ne!(messages, other);
+
+    let mut other = messages.clone();
+    other.range_complete_label =
+        MessageFn::new(|start: &str, end: &str, _locale: &Locale| format!("{start} through {end}"));
+    assert_ne!(messages, other);
+}
+
+#[test]
 fn api_exposes_offset_specific_outside_month_helper() {
     let svc = service_with(props().visible_months(2), en_us());
 
@@ -176,6 +250,101 @@ fn api_exposes_offset_specific_outside_month_helper() {
     assert!(!api.is_outside_month_for(&date(2024, 1, 15), 0));
     assert!(api.is_outside_month_for(&date(2024, 1, 15), 1));
     assert!(!api.is_outside_month_for(&date(2024, 2, 15), 1));
+}
+
+#[test]
+fn offset_cell_attrs_and_nav_disabled_branches_are_covered() {
+    let svc = service();
+    let api = svc.connect(&|_| {});
+
+    let outside = api.cell_attrs_for(&date(2023, 12, 31), 0);
+    assert_eq!(
+        attr(&outside, HtmlAttr::Data("ars-outside-month")).as_deref(),
+        Some("true"),
+    );
+
+    let inside = api.cell_attrs_for(&date(2024, 1, 15), 0);
+    assert!(inside.get(&HtmlAttr::Data("ars-outside-month")).is_none());
+
+    let disabled = service_with(props().disabled(true), en_us());
+    let api = disabled.connect(&|_| {});
+    assert!(api.is_prev_disabled());
+    assert!(api.is_next_disabled());
+
+    let min_limited = service_with(props().min(Some(date(2024, 2, 1))), en_us());
+    let api = min_limited.connect(&|_| {});
+    assert!(api.is_prev_disabled());
+
+    let min_allowed = service_with(props().min(Some(date(2023, 1, 1))), en_us());
+    let api = min_allowed.connect(&|_| {});
+    assert!(!api.is_prev_disabled());
+
+    let max_limited = service_with(props().max(Some(date(2024, 1, 31))), en_us());
+    let api = max_limited.connect(&|_| {});
+    assert!(api.is_next_disabled());
+
+    let max_allowed = service_with(props().max(Some(date(2025, 12, 31))), en_us());
+    let api = max_allowed.connect(&|_| {});
+    assert!(!api.is_next_disabled());
+
+    let single_step = service_with(props().page_behavior(PageBehavior::Single), en_us());
+    let api = single_step.connect(&|_| {});
+    assert_eq!(
+        attr(&api.prev_trigger_attrs(), HtmlAttr::Aria(AriaAttr::Label)).as_deref(),
+        Some("Previous month"),
+    );
+}
+
+#[test]
+fn disabled_readonly_and_single_month_attrs_cover_remaining_branches() {
+    let svc = service_with(
+        props()
+            .disabled(true)
+            .readonly(true)
+            .visible_months(1)
+            .page_behavior(PageBehavior::Single),
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    assert_eq!(api.range_heading_text(), api.heading_text());
+
+    let grid = api.grid_attrs_for(0);
+    assert_eq!(
+        attr(&grid, HtmlAttr::Aria(AriaAttr::ReadOnly)).as_deref(),
+        Some("true"),
+    );
+    assert_eq!(
+        attr(&grid, HtmlAttr::Aria(AriaAttr::Disabled)).as_deref(),
+        Some("true"),
+    );
+
+    let prev = api.prev_trigger_attrs();
+    assert_eq!(attr(&prev, HtmlAttr::Disabled).as_deref(), Some("true"));
+    assert_eq!(
+        attr(&prev, HtmlAttr::Aria(AriaAttr::Disabled)).as_deref(),
+        Some("true"),
+    );
+
+    let next = api.next_trigger_attrs();
+    assert_eq!(
+        attr(&next, HtmlAttr::Aria(AriaAttr::Label)).as_deref(),
+        Some("Next month"),
+    );
+    assert_eq!(attr(&next, HtmlAttr::Disabled).as_deref(), Some("true"));
+
+    let cell = api.cell_attrs(&date(2024, 1, 15));
+    assert_eq!(
+        attr(&cell, HtmlAttr::Aria(AriaAttr::Disabled)).as_deref(),
+        Some("true"),
+    );
+
+    let outside = api.cell_attrs(&date(2023, 12, 31));
+    assert_eq!(
+        attr(&outside, HtmlAttr::Data("ars-outside-month")).as_deref(),
+        Some("true"),
+    );
+    assert!(api.is_disabled(&date(2024, 1, 15)));
 }
 
 #[test]
@@ -239,6 +408,239 @@ fn keyboard_enter_and_space_follow_two_step_range_selection() {
         *svc.context().value.get(),
         Some(range(date(2024, 1, 15), date(2024, 1, 16))),
     );
+}
+
+#[test]
+fn hover_events_are_noops_when_readonly_without_anchor_or_without_hover() {
+    let mut svc = service_with(props().readonly(true), en_us());
+
+    drop(svc.send(Event::HoverDate {
+        date: date(2024, 1, 12),
+    }));
+
+    assert_eq!(svc.context().hovering_date, None);
+
+    let mut svc = service();
+
+    drop(svc.send(Event::HoverDate {
+        date: date(2024, 1, 12),
+    }));
+    drop(svc.send(Event::HoverEnd));
+
+    assert_eq!(svc.context().hovering_date, None);
+}
+
+#[test]
+fn readonly_selection_and_unavailable_hover_sync_branches_are_covered() {
+    let mut svc = service_with(props().readonly(true), en_us());
+
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 1, 12),
+    }));
+
+    assert_eq!(svc.context().anchor_date, None);
+
+    let unavailable = Callback::new_ref(|date: &CalendarDate| date.day() == 12);
+    let mut svc = service();
+
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 1, 10),
+    }));
+    drop(svc.send(Event::HoverDate {
+        date: date(2024, 1, 12),
+    }));
+    drop(svc.set_props(props().is_date_unavailable(Some(unavailable))));
+
+    assert_eq!(svc.context().anchor_date, Some(date(2024, 1, 10)));
+    assert_eq!(svc.context().hovering_date, None);
+}
+
+#[test]
+fn direct_navigation_events_and_set_month_year_update_focus() {
+    let mut svc = service();
+
+    drop(svc.send(Event::NextMonth));
+    assert_eq!(svc.context().visible_month, 3);
+
+    drop(svc.send(Event::PrevMonth));
+    assert_eq!(svc.context().visible_month, 1);
+
+    drop(svc.send(Event::NextYear));
+    assert_eq!(svc.context().visible_year, 2025);
+
+    drop(svc.send(Event::PrevYear));
+    assert_eq!(svc.context().visible_year, 2024);
+
+    drop(svc.send(Event::SetMonth { month: 2 }));
+    assert_eq!(svc.context().visible_month, 2);
+
+    drop(svc.send(Event::SetMonth { month: 13 }));
+    assert_eq!(svc.context().visible_month, 2);
+
+    drop(svc.send(Event::SetYear { year: 2026 }));
+    assert_eq!(svc.context().visible_year, 2026);
+}
+
+#[test]
+fn focus_events_and_single_page_navigation_branches_are_covered() {
+    let mut svc = service_with(props().page_behavior(PageBehavior::Single), en_us());
+
+    drop(svc.send(Event::FocusIn));
+    assert_eq!(*svc.state(), State::Focused);
+
+    drop(svc.send(Event::FocusDate {
+        date: date(2024, 1, 20),
+    }));
+    assert_eq!(svc.context().focused_date, date(2024, 1, 20));
+
+    drop(svc.send(Event::NextMonth));
+    assert_eq!(svc.context().visible_month, 2);
+
+    drop(svc.send(Event::PrevMonth));
+    assert_eq!(svc.context().visible_month, 1);
+
+    drop(svc.send(Event::FocusOut));
+    assert_eq!(*svc.state(), State::Idle);
+
+    let mut disabled = service_with(props().disabled(true), en_us());
+    drop(disabled.send(Event::FocusIn));
+    assert_eq!(*disabled.state(), State::Idle);
+}
+
+#[test]
+fn keyboard_navigation_covers_calendar_movement_branches() {
+    let mut svc = service();
+
+    drop(svc.send(Event::KeyDown {
+        key: KeyboardKey::ArrowLeft,
+        shift: false,
+    }));
+    assert_eq!(svc.context().focused_date, date(2024, 1, 14));
+
+    drop(svc.send(Event::KeyDown {
+        key: KeyboardKey::ArrowUp,
+        shift: false,
+    }));
+    assert_eq!(svc.context().focused_date, date(2024, 1, 7));
+
+    drop(svc.send(Event::KeyDown {
+        key: KeyboardKey::ArrowDown,
+        shift: false,
+    }));
+    assert_eq!(svc.context().focused_date, date(2024, 1, 14));
+
+    drop(svc.send(Event::KeyDown {
+        key: KeyboardKey::Home,
+        shift: false,
+    }));
+    assert_eq!(svc.context().focused_date, date(2024, 1, 14));
+
+    drop(svc.send(Event::KeyDown {
+        key: KeyboardKey::End,
+        shift: false,
+    }));
+    assert_eq!(svc.context().focused_date, date(2024, 1, 20));
+
+    drop(svc.send(Event::KeyDown {
+        key: KeyboardKey::PageUp,
+        shift: false,
+    }));
+    assert_eq!(svc.context().focused_date, date(2023, 12, 20));
+
+    drop(svc.send(Event::KeyDown {
+        key: KeyboardKey::PageDown,
+        shift: false,
+    }));
+    assert_eq!(svc.context().focused_date, date(2024, 1, 20));
+
+    drop(svc.send(Event::KeyDown {
+        key: KeyboardKey::ArrowRight,
+        shift: false,
+    }));
+    assert_eq!(svc.context().focused_date, date(2024, 1, 21));
+
+    drop(svc.send(Event::KeyDown {
+        key: KeyboardKey::Escape,
+        shift: true,
+    }));
+    assert_eq!(svc.context().focused_date, date(2024, 1, 21));
+}
+
+#[test]
+fn api_accessors_part_dispatch_and_event_helpers_are_covered() {
+    let mut svc = service_with(props().show_week_numbers(true), en_us());
+    drop(svc.send(Event::FocusIn));
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 1, 10),
+    }));
+    drop(svc.send(Event::HoverDate {
+        date: date(2024, 1, 12),
+    }));
+
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::clone(&sent);
+    let send = move |event| captured.lock().expect("events lock").push(event);
+    let api = svc.connect(&send);
+
+    assert!(format!("{api:?}").contains("Api"));
+    assert_eq!(api.today(), &date(2024, 1, 15));
+    assert_eq!(api.focused_date(), &date(2024, 1, 10));
+    assert!(api.is_focused());
+    assert_eq!(api.visible_month_count(), 2);
+    assert_eq!(api.month_offsets().collect::<Vec<_>>(), vec![0, 1]);
+    assert!(api.show_week_numbers());
+    assert_eq!(api.weeks().len(), 6);
+    assert_eq!(api.weeks_for(1).len(), 6);
+    assert_eq!(api.week_day_labels().len(), 7);
+    assert!(format!("{:?}", svc.context()).contains("Context"));
+
+    let parts = [
+        Part::Root,
+        Part::Header,
+        Part::PrevTrigger,
+        Part::NextTrigger,
+        Part::Heading,
+        Part::Grid,
+        Part::GridGroup,
+        Part::HeadRow,
+        Part::HeadCell {
+            day: Weekday::Monday,
+        },
+        Part::Row { week_index: 0 },
+        Part::Cell {
+            date: date(2024, 1, 10),
+            offset: 0,
+        },
+        Part::CellTrigger {
+            date: date(2024, 1, 10),
+            offset: 0,
+        },
+    ];
+
+    for part in parts {
+        assert!(!ConnectApi::part_attrs(&api, part).attrs().is_empty());
+    }
+
+    api.on_cell_click(date(2024, 1, 11));
+    api.on_cell_hover(date(2024, 1, 12));
+    api.on_grid_mouseleave();
+    api.on_grid_focusin();
+    api.on_grid_focusout(false);
+    api.on_grid_focusout(true);
+    api.on_grid_keydown(KeyboardKey::Enter, false);
+    api.on_prev_click();
+    api.on_next_click();
+
+    let sent = sent.lock().expect("events lock");
+    assert_eq!(sent.len(), 8);
+    assert!(matches!(sent[0], Event::SelectDate { .. }));
+    assert!(matches!(sent[1], Event::HoverDate { .. }));
+    assert_eq!(sent[2], Event::HoverEnd);
+    assert_eq!(sent[3], Event::FocusIn);
+    assert_eq!(sent[4], Event::FocusOut);
+    assert!(matches!(sent[5], Event::KeyDown { .. }));
+    assert_eq!(sent[6], Event::PrevMonth);
+    assert_eq!(sent[7], Event::NextMonth);
 }
 
 #[test]
