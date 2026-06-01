@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/selection/segment_group/mod.rs
+expression: "snapshot_attrs(&selected.connect(&|_| {}).item_text_attrs(&key(\"grid\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item-text",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "segment-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "checked",
+            ),
+        ),
+    ],
+    styles: [],
+}

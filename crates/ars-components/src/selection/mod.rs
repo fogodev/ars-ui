@@ -25,3 +25,6 @@ pub mod menu_bar;
 
 /// Select component machine.
 pub mod select;
+
+/// Segment group component machine.
+pub mod segment_group;

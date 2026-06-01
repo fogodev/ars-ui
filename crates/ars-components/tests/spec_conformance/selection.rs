@@ -2,7 +2,7 @@
 
 use ars_collections::Key;
 use ars_components::selection::{
-    autocomplete, combobox, context_menu, listbox, menu, menu_bar, select,
+    autocomplete, combobox, context_menu, listbox, menu, menu_bar, segment_group, select,
 };
 
 use super::helper::assert_anatomy;
@@ -179,6 +179,30 @@ fn autocomplete_anatomy_matches_spec() {
             (autocomplete::Part::EmptyState, "empty-state"),
             (autocomplete::Part::LoadingIndicator, "loading-indicator"),
             (autocomplete::Part::LiveRegion, "live-region"),
+        ],
+    );
+}
+
+#[test]
+fn segment_group_anatomy_matches_spec() {
+    assert_anatomy(
+        "segment-group",
+        &[
+            (segment_group::Part::Root, "root"),
+            (
+                segment_group::Part::Item {
+                    value: Key::default(),
+                },
+                "item",
+            ),
+            (
+                segment_group::Part::ItemText {
+                    value: Key::default(),
+                },
+                "item-text",
+            ),
+            (segment_group::Part::Indicator, "indicator"),
+            (segment_group::Part::HiddenInput, "hidden-input"),
         ],
     );
 }

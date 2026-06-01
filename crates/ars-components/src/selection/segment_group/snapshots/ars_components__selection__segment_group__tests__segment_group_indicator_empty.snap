@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/selection/segment_group/mod.rs
+expression: "snapshot_attrs(&empty.connect(&|_| {}).indicator_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "segment-group",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

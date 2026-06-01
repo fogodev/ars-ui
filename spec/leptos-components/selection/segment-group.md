@@ -20,32 +20,36 @@ pub fn SegmentGroup(
     #[prop(optional)] id: Option<String>,
     #[prop(optional, into)] value: Option<Signal<Key>>,
     #[prop(optional)] default_value: Option<Key>,
+    #[prop(optional)] disabled: bool,
+    #[prop(optional)] readonly: bool,
+    #[prop(optional)] invalid: bool,
     #[prop(optional)] orientation: Option<Orientation>,
+    #[prop(optional)] dir: Option<Direction>,
     #[prop(optional)] loop_focus: bool,
     #[prop(optional)] name: Option<String>,
     #[prop(optional)] form: Option<String>,
-    #[prop(optional)] on_value_change: Option<Callback<Key>>,
+    #[prop(optional)] on_value_change: Option<Callback<Option<Key>>>,
     children: Children,
 ) -> impl IntoView
 ```
 
-Compound helpers typically include `Item`, `ItemLabel`, `ItemIndicator`, `Indicator`, and `HiddenInput` parts.
+Compound helpers typically include `Item`, `ItemText`, `Indicator`, and `HiddenInput` parts.
 
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with keyed single selection, orientation, readonly or invalid state, and form participation.
-- Part parity: full parity for segments, per-item indicators, optional moving indicator, and hidden-input bridge.
+- Part parity: full parity for segments, item text, optional moving indicator, and hidden-input bridge.
 - Traceability note: this spec promotes hidden-input behavior, orientation-aware key handling, indicator measurement, forced-colors fallback, and SSR measurement policy from the agnostic contract.
 
 ## 4. Part Mapping
 
-| Core part / structure | Required?                       | Adapter rendering target   | Ownership     | Attr source                   | Notes                                        |
-| --------------------- | ------------------------------- | -------------------------- | ------------- | ----------------------------- | -------------------------------------------- |
-| Root                  | required                        | group host                 | adapter-owned | api.root_attrs()              | Owns the segmented control scope.            |
-| Item                  | repeated                        | segment host               | adapter-owned | api.item_attrs(key)           | One per segment choice.                      |
-| ItemIndicator         | optional repeated               | decorative state indicator | adapter-owned | api.item_indicator_attrs(key) | Can reflect selected state inside each item. |
-| Indicator             | optional                        | moving highlight host      | adapter-owned | api.indicator_attrs()         | Uses adapter-owned measurement and CSS vars. |
-| HiddenInput           | required when `name` is present | native hidden input        | adapter-owned | api.hidden_input_attrs()      | Bridges native form submission.              |
+| Core part / structure | Required?                       | Adapter rendering target | Ownership     | Attr source              | Notes                                        |
+| --------------------- | ------------------------------- | ------------------------ | ------------- | ------------------------ | -------------------------------------------- |
+| Root                  | required                        | group host               | adapter-owned | api.root_attrs()         | Owns the segmented control scope.            |
+| Item                  | repeated                        | segment host             | adapter-owned | api.item_attrs(key)      | One per segment choice.                      |
+| ItemText              | repeated                        | visible item text        | adapter-owned | api.item_text_attrs(key) | Carries item text part attrs.                |
+| Indicator             | optional                        | moving highlight host    | adapter-owned | api.indicator_attrs()    | Uses adapter-owned measurement and CSS vars. |
+| HiddenInput           | required when `name` is present | native hidden input      | adapter-owned | api.hidden_input_attrs() | Bridges native form submission.              |
 
 ## 5. Attr Merge and Ownership Rules
 
@@ -59,12 +63,13 @@ The root publishes required segmented-control context to item, indicator, and hi
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop / event  | Mode           | Sync trigger                       | Machine event / update path               | Notes                                                      |
-| --------------------- | -------------- | ---------------------------------- | ----------------------------------------- | ---------------------------------------------------------- |
-| `value`               | controlled     | signal change after mount          | value sync event                          | Updates checked item state and hidden-input serialization. |
-| item activation       | adapter event  | click, Enter, Space, or arrow keys | `SelectItem` or equivalent                | Arrow-key behavior follows orientation and direction.      |
-| indicator measurement | adapter effect | selection change or layout change  | update CSS custom properties              | Only for the moving indicator part.                        |
-| form reset            | adapter bridge | native form reset                  | restore default value and indicator state | Applies only when the group participates in a form.        |
+| Adapter prop / event  | Mode           | Sync trigger                      | Machine event / update path               | Notes                                                      |
+| --------------------- | -------------- | --------------------------------- | ----------------------------------------- | ---------------------------------------------------------- |
+| `value`               | controlled     | signal change after mount         | value sync event                          | Updates checked item state and hidden-input serialization. |
+| item activation       | adapter event  | click, Enter, or Space            | `SelectValue`                             | Arrow keys move focus; activation changes selection.       |
+| item registration     | adapter effect | item mount or unmount             | `RegisterItem` / `UnregisterItem`         | Keeps logical focus order aligned with mounted item order. |
+| indicator measurement | adapter effect | selection change or layout change | update CSS custom properties              | Only for the moving indicator part.                        |
+| form reset            | adapter bridge | native form reset                 | restore default value and indicator state | Applies only when the group participates in a form.        |
 
 ## 8. Registration and Cleanup Contract
 
@@ -89,9 +94,9 @@ The root publishes required segmented-control context to item, indicator, and hi
 
 ## 11. Callback Payload Contract
 
-| Callback          | Payload source           | Payload shape | Timing                            | Cancelable? | Notes                                    |
-| ----------------- | ------------------------ | ------------- | --------------------------------- | ----------- | ---------------------------------------- |
-| `on_value_change` | machine-derived snapshot | `Key`         | after committed selection changes | no          | Fires after the checked item is updated. |
+| Callback          | Payload source           | Payload shape | Timing                        | Cancelable? | Notes                                                         |
+| ----------------- | ------------------------ | ------------- | ----------------------------- | ----------- | ------------------------------------------------------------- |
+| `on_value_change` | machine-derived snapshot | `Option<Key>` | after selection-change intent | no          | Controlled mode emits without committing the requested value. |
 
 ## 12. Failure and Degradation Rules
 
@@ -213,7 +218,7 @@ Keep one machine, one hidden-input helper, and one optional measurement helper f
 
 ## 29. Test Scenarios
 
-1. Arrow keys move focus and selection according to orientation and direction.
+1. Arrow keys move focus according to orientation and direction without selecting.
 2. Changing the selected segment updates hidden-input serialization and callback timing.
 3. The moving indicator updates after selection changes when measurement is available.
 4. SSR and non-web fallback paths keep checked-state styling valid without live measurement.
