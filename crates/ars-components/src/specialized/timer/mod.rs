@@ -73,6 +73,11 @@ pub enum Event {
 
     /// Set the remaining/elapsed time directly.
     SetTime(Duration),
+
+    /// Synchronize the context-backed props (`target`, `interval`, `mode`)
+    /// after a controlled prop update. Emitted by
+    /// [`Machine::on_props_changed`](ars_core::Machine::on_props_changed).
+    SyncProps,
 }
 
 /// Context for the `Timer` component.
@@ -318,7 +323,12 @@ impl ars_core::Machine for Machine {
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (State, Context) {
         let current = initial_duration(props.mode, props.target);
 
-        let state = if props.auto_start {
+        // A zero-duration countdown is already complete; it must not enter
+        // `Running` (which would show `00:00` ticking and defer the
+        // announcement). `auto_start` is ignored in that degenerate case.
+        let state = if is_instantly_complete(props.mode, props.target) {
+            State::Completed
+        } else if props.auto_start {
             State::Running
         } else {
             State::Idle
@@ -329,7 +339,10 @@ impl ars_core::Machine for Machine {
             Context {
                 current,
                 target: props.target,
-                interval: props.interval,
+                // Guarantee forward progress: a zero interval would make every
+                // tick a no-op (countdown never reaches zero, stopwatch never
+                // advances) and keep the adapter interval alive forever.
+                interval: effective_interval(props.interval),
                 mode: props.mode,
                 auto_start: props.auto_start,
                 locale: env.locale.clone(),
@@ -338,6 +351,19 @@ impl ars_core::Machine for Machine {
                 intl_backend: Arc::clone(&env.intl_backend),
             },
         )
+    }
+
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "timer::Props.id must remain stable after init"
+        );
+
+        if old.target != new.target || old.interval != new.interval || old.mode != new.mode {
+            alloc::vec![Event::SyncProps]
+        } else {
+            Vec::new()
+        }
     }
 
     fn initial_effects(
@@ -360,7 +386,7 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
             // Idle start, paused resume, and paused start all enter `Running`
@@ -413,20 +439,50 @@ impl ars_core::Machine for Machine {
 
             (_, Event::Restart) => {
                 let initial = initial_duration(ctx.mode, ctx.target);
-                Some(
-                    TransitionPlan::to(State::Running)
-                        .apply(move |ctx: &mut Context| {
-                            ctx.current = initial;
-                        })
-                        .cancel_effect(Effect::TimerInterval)
-                        .with_effect(PendingEffect::named(Effect::TimerInterval)),
-                )
+
+                // Restarting a zero-duration countdown completes immediately
+                // rather than entering `Running`; otherwise reset and run.
+                if is_instantly_complete(ctx.mode, ctx.target) {
+                    Some(
+                        TransitionPlan::to(State::Completed)
+                            .apply(move |ctx: &mut Context| {
+                                ctx.current = initial;
+                            })
+                            .cancel_effect(Effect::TimerInterval),
+                    )
+                } else {
+                    Some(
+                        TransitionPlan::to(State::Running)
+                            .apply(move |ctx: &mut Context| {
+                                ctx.current = initial;
+                            })
+                            .cancel_effect(Effect::TimerInterval)
+                            .with_effect(PendingEffect::named(Effect::TimerInterval)),
+                    )
+                }
             }
 
             (_, Event::SetTime(duration)) => {
                 let duration = *duration;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.current = duration;
+                }))
+            }
+
+            (_, Event::SyncProps) => {
+                let target = props.target;
+                let interval = effective_interval(props.interval);
+                let mode = props.mode;
+                // While idle the displayed value mirrors the (new) initial; once
+                // running/paused/completed the in-progress `current` is kept.
+                let reset_current = matches!(state, State::Idle);
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.target = target;
+                    ctx.interval = interval;
+                    ctx.mode = mode;
+                    if reset_current {
+                        ctx.current = initial_duration(mode, target);
+                    }
                 }))
             }
 
@@ -816,6 +872,29 @@ const fn initial_duration(mode: Mode, target: Duration) -> Duration {
     }
 }
 
+/// The fallback tick interval substituted for a zero interval.
+///
+/// A zero interval makes every tick a no-op (a countdown never reaches zero and
+/// a stopwatch never advances), so it is replaced with 1ms to guarantee the
+/// timer always makes forward progress.
+const MIN_INTERVAL: Duration = Duration::from_millis(1);
+
+/// Replaces a zero interval with [`MIN_INTERVAL`]; any non-zero interval (even
+/// sub-millisecond) already makes progress and is left untouched.
+const fn effective_interval(interval: Duration) -> Duration {
+    if interval.is_zero() {
+        MIN_INTERVAL
+    } else {
+        interval
+    }
+}
+
+/// Whether a `(mode, target)` pair describes a countdown that is already at
+/// zero and therefore complete on arrival.
+const fn is_instantly_complete(mode: Mode, target: Duration) -> bool {
+    matches!(mode, Mode::Countdown) && target.is_zero()
+}
+
 /// Builds the marker effect that starts the adapter-owned tick interval.
 fn interval_effect() -> PendingEffect<Machine> {
     PendingEffect::named(Effect::TimerInterval)
@@ -1054,6 +1133,150 @@ mod tests {
 
         assert!(debug.contains("timer::Context"));
         assert!(debug.contains("<dyn IntlBackend>"));
+    }
+
+    #[test]
+    fn timer_zero_interval_is_clamped_to_guarantee_progress() {
+        let mut service = fresh_service(
+            test_props()
+                .target(Duration::from_secs(1))
+                .interval(Duration::ZERO),
+        );
+
+        // The zero interval is replaced with the 1ms floor.
+        assert_eq!(service.context().interval, Duration::from_millis(1));
+
+        // And a countdown therefore still makes progress instead of stalling.
+        drop(service.send(Event::Start));
+        drop(service.send(Event::Tick));
+        assert_eq!(service.context().current, Duration::from_millis(999));
+    }
+
+    #[test]
+    fn timer_zero_target_countdown_initializes_completed() {
+        let mut service = fresh_service(test_props().target(Duration::ZERO));
+
+        assert_eq!(service.state(), &State::Completed);
+        assert_eq!(service.context().current, Duration::ZERO);
+        // No interval is armed for an already-complete timer, even with auto-start.
+        assert!(service.take_initial_effects().is_empty());
+
+        let mut auto = fresh_service(test_props().target(Duration::ZERO).auto_start(true));
+        assert_eq!(auto.state(), &State::Completed);
+        assert!(auto.take_initial_effects().is_empty());
+
+        // A zero-target stopwatch is not "complete" — it counts up from zero.
+        let stopwatch = fresh_service(test_props().mode(Mode::Stopwatch).target(Duration::ZERO));
+        assert_eq!(stopwatch.state(), &State::Idle);
+    }
+
+    #[test]
+    fn timer_zero_target_restart_completes_immediately() {
+        let mut service = fresh_service(test_props().target(Duration::ZERO));
+
+        let result = service.send(Event::Restart);
+
+        assert_eq!(service.state(), &State::Completed);
+        assert_eq!(service.context().current, Duration::ZERO);
+        // No interval armed; it completed on arrival.
+        assert!(result.pending_effects.is_empty());
+        assert_eq!(result.cancel_effects, vec![Effect::TimerInterval]);
+    }
+
+    #[test]
+    fn timer_on_props_changed_emits_sync_only_for_context_backed_props() {
+        let base = test_props();
+
+        // No change -> no event.
+        assert!(<Machine as ars_core::Machine>::on_props_changed(&base, &base).is_empty());
+
+        // auto_start is consumed only at init, so it is not synced.
+        assert!(
+            <Machine as ars_core::Machine>::on_props_changed(
+                &base,
+                &Props {
+                    auto_start: true,
+                    ..base.clone()
+                },
+            )
+            .is_empty()
+        );
+
+        // target / interval / mode each trigger a sync.
+        for changed in [
+            Props {
+                target: Duration::from_secs(5),
+                ..base.clone()
+            },
+            Props {
+                interval: Duration::from_millis(250),
+                ..base.clone()
+            },
+            Props {
+                mode: Mode::Stopwatch,
+                ..base.clone()
+            },
+        ] {
+            assert_eq!(
+                <Machine as ars_core::Machine>::on_props_changed(&base, &changed),
+                vec![Event::SyncProps]
+            );
+        }
+    }
+
+    #[test]
+    fn timer_set_props_syncs_context_backed_props() {
+        let mut service = fresh_service(
+            test_props()
+                .target(Duration::from_secs(60))
+                .interval(Duration::from_secs(1)),
+        );
+        assert_eq!(service.context().current, Duration::from_secs(60));
+
+        // Idle: synced fields land in context and `current` re-mirrors the target.
+        let result = service.set_props(
+            test_props()
+                .target(Duration::from_secs(30))
+                .interval(Duration::from_millis(500)),
+        );
+        assert!(result.context_changed);
+        assert_eq!(service.context().target, Duration::from_secs(30));
+        assert_eq!(service.context().interval, Duration::from_millis(500));
+        assert_eq!(service.context().current, Duration::from_secs(30));
+
+        // A zero interval pushed via props is clamped on sync, too.
+        drop(
+            service.set_props(
+                test_props()
+                    .target(Duration::from_secs(30))
+                    .interval(Duration::ZERO),
+            ),
+        );
+        assert_eq!(service.context().interval, Duration::from_millis(1));
+    }
+
+    #[test]
+    fn timer_set_props_while_running_keeps_current_but_updates_interval() {
+        let mut service = fresh_service(
+            test_props()
+                .target(Duration::from_secs(60))
+                .interval(Duration::from_secs(1)),
+        );
+        drop(service.send(Event::Start));
+        drop(service.send(Event::Tick)); // current -> 59s
+
+        drop(
+            service.set_props(
+                test_props()
+                    .target(Duration::from_secs(60))
+                    .interval(Duration::from_secs(2)),
+            ),
+        );
+
+        assert_eq!(service.state(), &State::Running);
+        assert_eq!(service.context().interval, Duration::from_secs(2));
+        // Mid-run elapsed value is preserved (not reset to the target).
+        assert_eq!(service.context().current, Duration::from_secs(59));
     }
 
     // ───────────────────── transitions ─────────────────────

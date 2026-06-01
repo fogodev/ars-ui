@@ -64,6 +64,9 @@ pub enum Event {
     Tick,
     /// Set the remaining/elapsed time directly.
     SetTime(Duration),
+    /// Synchronize the context-backed props (`target`, `interval`, `mode`)
+    /// after a controlled prop update. Emitted by `Machine::on_props_changed`.
+    SyncProps,
 }
 ```
 
@@ -175,7 +178,11 @@ impl ars_core::Machine for Machine {
             Mode::Stopwatch => Duration::ZERO,
         };
 
-        let state = if props.auto_start {
+        // A zero-duration countdown is already complete; it must not enter
+        // `Running` (auto_start is ignored in that degenerate case).
+        let state = if is_instantly_complete(props.mode, props.target) {
+            State::Completed
+        } else if props.auto_start {
             State::Running
         } else {
             State::Idle
@@ -184,7 +191,8 @@ impl ars_core::Machine for Machine {
         (state, Context {
             current,
             target: props.target,
-            interval: props.interval,
+            // A zero interval would make every tick a no-op, so clamp to 1ms.
+            interval: effective_interval(props.interval),
             mode: props.mode,
             auto_start: props.auto_start,
             locale: env.locale.clone(),
@@ -192,6 +200,17 @@ impl ars_core::Machine for Machine {
             ids: ComponentIds::from_id(&props.id),
             intl_backend: Arc::clone(&env.intl_backend),
         })
+    }
+
+    // Sync the context-backed props after a controlled update so transitions
+    // (Tick/Reset/Restart/SyncProps) read the latest target/interval/mode.
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(old.id, new.id, "timer::Props.id must remain stable after init");
+        if old.target != new.target || old.interval != new.interval || old.mode != new.mode {
+            vec![Event::SyncProps]
+        } else {
+            Vec::new()
+        }
     }
 
     // Auto-started timers boot directly into `Running` without a transition,
@@ -212,7 +231,7 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
             // Idle start, paused resume, and paused start all enter `Running`
@@ -260,20 +279,40 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::Restart) => {
-                let initial = match ctx.mode {
-                    Mode::Countdown => ctx.target,
-                    Mode::Stopwatch => Duration::ZERO,
-                };
-                Some(TransitionPlan::to(State::Running)
-                    .apply(move |ctx| { ctx.current = initial; })
-                    .cancel_effect(Effect::TimerInterval)
-                    .with_effect(PendingEffect::named(Effect::TimerInterval)))
+                let initial = initial_duration(ctx.mode, ctx.target);
+                // Restarting a zero-duration countdown completes immediately.
+                if is_instantly_complete(ctx.mode, ctx.target) {
+                    Some(TransitionPlan::to(State::Completed)
+                        .apply(move |ctx| { ctx.current = initial; })
+                        .cancel_effect(Effect::TimerInterval))
+                } else {
+                    Some(TransitionPlan::to(State::Running)
+                        .apply(move |ctx| { ctx.current = initial; })
+                        .cancel_effect(Effect::TimerInterval)
+                        .with_effect(PendingEffect::named(Effect::TimerInterval)))
+                }
             }
 
             (_, Event::SetTime(duration)) => {
                 let duration = *duration;
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.current = duration;
+                }))
+            }
+
+            (_, Event::SyncProps) => {
+                let target = props.target;
+                let interval = effective_interval(props.interval);
+                let mode = props.mode;
+                // Idle mirrors the new initial; running/paused keep `current`.
+                let reset_current = matches!(state, State::Idle);
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.target = target;
+                    ctx.interval = interval;
+                    ctx.mode = mode;
+                    if reset_current {
+                        ctx.current = initial_duration(mode, target);
+                    }
                 }))
             }
 
@@ -289,6 +328,24 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+/// The initial `current` value for a given mode and target.
+const fn initial_duration(mode: Mode, target: Duration) -> Duration {
+    match mode {
+        Mode::Countdown => target,
+        Mode::Stopwatch => Duration::ZERO,
+    }
+}
+
+/// Replaces a zero interval with a 1ms floor so ticks always make progress.
+const fn effective_interval(interval: Duration) -> Duration {
+    if interval.is_zero() { Duration::from_millis(1) } else { interval }
+}
+
+/// Whether a `(mode, target)` describes a countdown that is already complete.
+const fn is_instantly_complete(mode: Mode, target: Duration) -> bool {
+    matches!(mode, Mode::Countdown) && target.is_zero()
 }
 ```
 
