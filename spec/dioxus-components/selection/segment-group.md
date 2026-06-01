@@ -23,8 +23,16 @@ pub struct SegmentGroupProps {
     pub value: Option<Signal<Key>>,
     #[props(optional)]
     pub default_value: Option<Key>,
+    #[props(optional, default = false)]
+    pub disabled: bool,
+    #[props(optional, default = false)]
+    pub readonly: bool,
+    #[props(optional, default = false)]
+    pub invalid: bool,
     #[props(optional)]
     pub orientation: Option<Orientation>,
+    #[props(optional)]
+    pub dir: Option<Direction>,
     #[props(optional, default = true)]
     pub loop_focus: bool,
     #[props(optional)]

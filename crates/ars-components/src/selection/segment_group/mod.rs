@@ -407,7 +407,10 @@ impl ars_core::Machine for Machine {
 
         match (state, event) {
             (_, Event::SelectValue(value)) => {
-                if is_item_disabled(ctx, value) || ctx.value.get().as_ref() == Some(value) {
+                if !item_is_present(ctx, value)
+                    || is_item_disabled(ctx, value)
+                    || ctx.value.get().as_ref() == Some(value)
+                {
                     return None;
                 }
 
@@ -793,6 +796,10 @@ impl Api<'_> {
             attrs.set(HtmlAttr::Form, form.clone());
         }
 
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
+
         attrs
     }
 
@@ -945,6 +952,12 @@ fn is_item_disabled(ctx: &Context, item: &Key) -> bool {
     ctx.disabled || item_definition(ctx, item).is_some_and(|segment| segment.disabled)
 }
 
+fn item_is_present(ctx: &Context, item: &Key) -> bool {
+    ordered_items(ctx)
+        .iter()
+        .any(|registered| registered == item)
+}
+
 fn can_focus_item(ctx: &Context, item: &Key) -> bool {
     ordered_items(ctx)
         .iter()
@@ -1074,9 +1087,9 @@ fn sync_props_plan(state: &State, ctx: &Context, props: &Props) -> TransitionPla
 
     let focused_will_be_disabled = ctx.focused_item.as_ref().is_some_and(|focused| {
         disabled
-            || items
+            || !items
                 .iter()
-                .any(|item| &item.value == focused && item.disabled)
+                .any(|item| &item.value == focused && !item.disabled)
     });
 
     let target_idle = matches!(state, State::Focused { .. }) && focused_will_be_disabled;
@@ -1271,6 +1284,16 @@ mod tests {
     }
 
     #[test]
+    fn segment_group_rejects_absent_selection_values() {
+        let mut service = Service::<Machine>::new(props(), &Env::default(), &Messages);
+
+        let result = service.send(Event::SelectValue(key("missing")));
+
+        assert_eq!(service.context().value.get().as_ref(), Some(&key("grid")));
+        assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
     fn segment_group_roving_tabindex_prefers_focused_then_selected_then_first_enabled() {
         let mut service = Service::<Machine>::new(
             Props::new().id("view-mode").items(vec![
@@ -1309,6 +1332,28 @@ mod tests {
             service
                 .connect(&|_| {})
                 .item_attrs(&key("list"))
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
+    }
+
+    #[test]
+    fn segment_group_set_props_clears_focus_when_item_is_removed() {
+        let mut service = Service::<Machine>::new(props(), &Env::default(), &Messages);
+
+        drop(service.send(Event::FocusItem {
+            item: key("table"),
+            is_keyboard: true,
+        }));
+
+        drop(service.set_props(props().items(vec![segment("grid"), segment("list")])));
+
+        assert_eq!(service.state(), &State::Idle);
+        assert_eq!(service.context().focused_item, None);
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .item_attrs(&key("grid"))
                 .get(&HtmlAttr::TabIndex),
             Some("0")
         );
@@ -1760,6 +1805,34 @@ mod tests {
         assert_eq!(attrs.get(&HtmlAttr::Form), Some("settings-form"));
         assert_eq!(attrs.get(&HtmlAttr::TabIndex), Some("-1"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Hidden)), Some("true"));
+    }
+
+    #[test]
+    fn segment_group_hidden_input_is_disabled_with_group_not_readonly() {
+        let disabled = Service::<Machine>::new(
+            props().name("view").disabled(true),
+            &Env::default(),
+            &Messages,
+        );
+        let readonly = Service::<Machine>::new(
+            props().name("view").readonly(true),
+            &Env::default(),
+            &Messages,
+        );
+
+        assert_eq!(
+            disabled
+                .connect(&|_| {})
+                .hidden_input_attrs()
+                .get(&HtmlAttr::Disabled),
+            Some("true")
+        );
+        assert!(
+            !readonly
+                .connect(&|_| {})
+                .hidden_input_attrs()
+                .contains(&HtmlAttr::Disabled)
+        );
     }
 
     #[test]
