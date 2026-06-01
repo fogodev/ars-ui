@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "fe50f202f705",
+  "strategy": "manual-commit",
+  "branch": "codex/issue-287-range-calendar-core",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/range_calendar/mod.rs",
+    "crates/ars-components/src/date_time/range_calendar/tests.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/fe/50f202f705/0/metadata.json",
+      "transcript": "/fe/50f202f705/0/full.jsonl",
+      "content_hash": "/fe/50f202f705/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 131419,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 10744832,
+    "output_tokens": 15162,
+    "api_call_count": 108
+  }
+}

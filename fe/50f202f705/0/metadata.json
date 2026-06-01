@@ -1,0 +1,93 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "fe50f202f705",
+  "session_id": "019e80c5-8e5f-7291-ba97-21da7035e74c",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T05:01:33.146296Z",
+  "branch": "codex/issue-287-range-calendar-core",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/range_calendar/tests.rs",
+    "crates/ars-components/src/date_time/range_calendar/mod.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "e8bb3635d736",
+  "checkpoint_transcript_start": 2572,
+  "transcript_lines_at_start": 2572,
+  "token_usage": {
+    "input_tokens": 131419,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 10744832,
+    "output_tokens": 15162,
+    "api_call_count": 108
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Address three P2 findings from an automated Codex review cycle on PR #704 (RangeCalendar component) in the fogodev/ars-ui Rust UI library, then push and re-trigger review.",
+    "outcome": "All three edge cases were fixed with regression tests (zero visible_months fallback, stale controlled range attributes during pending selection, invalid external range validation), local gates passed, and a follow-up commit was pushed to the PR branch.",
+    "learnings": {
+      "repo": [
+        "Codex signals an in-progress review via an 'eyes' reaction on the PR issue itself, not on the @codex review comment — the terminal approval signal is a thumbs-up reaction on the issue.",
+        "The project uses `cargo xtask spec validate` as a dedicated spec conformance gate separate from unit tests.",
+        "RangeCalendar has a proptest suite invoked via `cargo test -p ars-components --tests -- proptest_range_calendar` in addition to unit and spec conformance tests.",
+        "Disabled calendars should still accept externally supplied values for display purposes; disabled blocks interaction, not value display.",
+        "The local skill at `.agents/skills/waiting-for-codex-review/SKILL.md` documents the expected Codex reaction protocol."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/mod.rs",
+          "line": 150,
+          "end_line": 215,
+          "finding": "visible_months prop normalization happens at init/sync time; zero value was not being clamped to the two-month default before this fix."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/mod.rs",
+          "line": 560,
+          "end_line": 690,
+          "finding": "Controlled range prop sync path did not clear rendered range attributes while a pending anchor was active, causing stale confirmed-range UI state."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/mod.rs",
+          "line": 930,
+          "end_line": 1045,
+          "finding": "External range values entered Bindable storage without validation; invalid ranges (e.g. end before start, unavailable dates) needed to be rejected at the sync boundary."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/tests.rs",
+          "finding": "Three new regression tests added: zero_visible_months_falls_back_to_two_month_default, controlled_first_click_hides_stale_confirmed_range_attrs, invalid_external_ranges_are_ignored_on_init_and_sync."
+        }
+      ],
+      "workflow": [
+        "Write failing tests before touching implementation to confirm the bug is exposed, then fix.",
+        "Run `cargo fmt --check` and `cargo clippy` before committing; rustfmt and Clippy often require a mechanical cleanup pass after implementation changes.",
+        "Run `cargo llvm-cov test --lib --text` scoped to the changed module as a final pre-commit coverage evidence step.",
+        "When CI checks are slow to appear after a push, inspect specific run job IDs via `gh api repos/.../actions/runs/<id>/jobs` rather than waiting blindly on `gh pr checks`."
+      ]
+    },
+    "friction": [
+      "Codex review status was misread initially by watching only the @codex review comment reactions instead of the PR issue-level reactions, requiring a skill file lookup to clarify the correct signal.",
+      "CI checks took multiple 180-240 second polling cycles to progress, with several jobs (Coverage, Release Verification, Dioxus feature-flag) in the long tail requiring extended waits.",
+      "The new Actions run was not immediately attached to the pushed commit, requiring an extra sleep before `gh pr checks` reflected the correct run.",
+      "Clippy and rustfmt both required a separate mechanical fix pass after the initial implementation, adding an extra test-fix-fmt-check cycle."
+    ],
+    "open_items": [
+      "A new Codex review cycle was triggered at the end of the session but had not yet returned a result — approval or additional findings are pending.",
+      "Coverage and Release Verification CI jobs were still running when the session ended; their results are not confirmed green."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T05:01:00.222954Z",
+    "agent_lines": 221,
+    "agent_removed": 44,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 221,
+    "total_lines_changed": 265,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
