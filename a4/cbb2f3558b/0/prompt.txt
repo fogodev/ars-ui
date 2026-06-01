@@ -1,0 +1,1 @@
+Doesn't the cargo xci-fast run the coverage locally? Why it didn't catch that ars-components was below the threshold?

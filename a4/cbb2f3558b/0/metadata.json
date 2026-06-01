@@ -1,0 +1,92 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "a4cbb2f3558b",
+  "session_id": "019e80c5-8e5f-7291-ba97-21da7035e74c",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T06:21:19.450771Z",
+  "branch": "codex/issue-287-range-calendar-core",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/range_calendar/tests.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "e3de0f1c708e",
+  "checkpoint_transcript_start": 3480,
+  "transcript_lines_at_start": 3480,
+  "token_usage": {
+    "input_tokens": 431421,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 23451904,
+    "output_tokens": 24725,
+    "api_call_count": 179
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Fix a branch coverage CI failure on PR #704 (range-calendar-core, issue #287) where ars-components dropped below the 90% branch coverage threshold after review-fix commits.",
+    "outcome": "Coverage raised from 89.8% to 90.4% branch coverage by adding targeted RangeCalendar tests covering uncovered branches (readonly/hover paths, PartialEq short-circuit, disabled attribute branches, keyboard navigation). Commit pushed and CI re-triggered.",
+    "learnings": {
+      "repo": [
+        "CI measures coverage on the PR merge commit (branch + main), not the branch head alone — a thin local margin can become a miss after merging with main changes.",
+        "cargo xcov / cargo xci-fast run the workspace-level native coverage gate; running a targeted `cargo llvm-cov test -p ars-components --lib --text -- <module>` is NOT equivalent and will not catch threshold failures.",
+        "ars-components requires ≥90% branch coverage; the codecov gate has two checks: codecov/project (workspace total) and codecov/patch (new code delta) — they can fail independently.",
+        "@codex review is triggered via a GitHub issue comment on the PR, and signals activity with an eyes reaction before posting its review.",
+        "cargo +nightly llvm-cov test -p ars-components --lib --branch --text produces a line-annotated coverage report useful for hunting specific uncovered branches."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/mod.rs",
+          "line": 1360,
+          "end_line": 2185,
+          "finding": "Multiple uncovered branches identified: readonly/no-anchor hover paths, no-op HoverEnd, direct navigation events, offset-specific cell attrs, nav disabled branches with min/max, range announcement message closures, and PartialEq short-circuit paths."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/tests.rs",
+          "line": 1,
+          "finding": "Test file grew from ~140 lines to 44 tests across multiple rounds of coverage fixes. Two separate Messages::default() values are not equality-comparable (callbacks are identity-sensitive); must clone the same instance to test message equality."
+        }
+      ],
+      "workflow": [
+        "After review-fix commits that touch coverage-sensitive code, always run cargo xcov or xci-fast rather than a targeted per-module llvm-cov slice — the threshold gate is workspace-level.",
+        "Maintain a meaningful margin (>0.3%) over coverage thresholds to absorb merge-commit drift from main.",
+        "When CI coverage fails, pull job logs with `gh api repos/.../actions/jobs/<id>/logs | rg ...` to separate workspace threshold failures from Codecov patch gate failures before deciding the fix strategy.",
+        "Polling CI with `gh pr checks` and `gh run view --json status,conclusion,jobs` is more reliable than waiting for PR page updates; coverage and release verification are the longest jobs."
+      ]
+    },
+    "friction": [
+      "CI measures the merge commit rather than the branch head — a 90.1% local result failed remotely because main had moved, requiring multiple additional rounds of coverage work.",
+      "Initial approach only ran targeted module coverage instead of the full cargo xcov gate, which masked the threshold problem until CI caught it.",
+      "Three separate rounds of test additions were needed before the branch percentage moved enough (90.1% → 90.1% → 90.4%) because line coverage gains don't always translate to branch counter improvements.",
+      "Coverage CI job is slow (took ~10+ minutes), requiring many polling intervals before getting a result.",
+      "One added test assertion incorrectly assumed two separately-constructed Messages::default() values are equal; identity-sensitive callbacks caused a test failure that required a fix."
+    ],
+    "open_items": [
+      "Coverage margin at 90.4% is still relatively thin — future changes to ars-components that touch branch-heavy code risk dropping below threshold again.",
+      "The root cause of why xci-fast passed on the initial PR push but coverage failed post-review-fix was not fully diagnosed — unclear if xci-fast was run at all after the follow-up commits or just skipped.",
+      "Framework-facing connect helpers in range_calendar/mod.rs still have some uncovered branches that were intentionally left for a future pass."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T06:20:39.690852Z",
+    "agent_lines": 403,
+    "agent_removed": 1,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 403,
+    "total_lines_changed": 404,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
