@@ -25,6 +25,22 @@ type LabelFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
 /// Returns the localized `aria-label` for the download trigger.
 type DownloadLabelFn = dyn Fn(&Locale) -> String + Send + Sync;
 
+/// Default pixel size of a single QR module, used by [`Props::default`] and as
+/// the fallback when a caller supplies a non-finite or non-positive
+/// `module_size`.
+const DEFAULT_MODULE_SIZE: f64 = 4.0;
+
+/// Whether `value` is an http(s) URL, comparing the scheme case-insensitively
+/// (URL schemes are case-insensitive per RFC 3986).
+fn is_url(value: &str) -> bool {
+    value
+        .get(..7)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+        || value
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
+}
+
 /// Error correction level for QR encoding.
 ///
 /// Higher levels recover from more damage at the cost of denser matrices.
@@ -67,9 +83,10 @@ pub enum QrErrorCorrection {
 /// let props = Props { value: "hello".into(), ..Props::default() };
 /// let api = Api::new(&props, Some(matrix), &Env::default(), &Messages::default());
 ///
-/// let root = api.root_attrs();
-/// assert_eq!(root.get(&HtmlAttr::Role), Some("img"));
-/// assert_eq!(root.get(&HtmlAttr::Aria(AriaAttr::Label)), Some("QR code: hello"));
+/// // The pattern (SVG) is the accessible image; the root is a sized container.
+/// let pattern = api.pattern_attrs();
+/// assert_eq!(pattern.get(&HtmlAttr::Role), Some("img"));
+/// assert_eq!(pattern.get(&HtmlAttr::Aria(AriaAttr::Label)), Some("QR code: hello"));
 /// // (3 modules + 4 * 2 quiet-zone modules) * 4.0px module size = 44px.
 /// assert_eq!(api.pixel_size(), 44.0);
 /// ```
@@ -152,7 +169,7 @@ impl Default for Props {
             id: String::new(),
             value: String::new(),
             error_correction: QrErrorCorrection::Medium,
-            module_size: 4.0,
+            module_size: DEFAULT_MODULE_SIZE,
             quiet_zone: 4,
             foreground: "#000000".into(),
             background: "#ffffff".into(),
@@ -193,13 +210,14 @@ impl ComponentMessages for Messages {}
 #[derive(ComponentPart)]
 #[scope = "qr-code"]
 pub enum Part {
-    /// Container with `role="img"`, sized to the rendered QR code.
+    /// Neutral container sized to the rendered QR code.
     Root,
 
     /// Optional decorative frame around the code.
     Frame,
 
-    /// The QR module grid, rendered as SVG or canvas by the adapter.
+    /// The QR module grid (the accessible `role="img"` element), rendered as
+    /// SVG or canvas by the adapter.
     Pattern,
 
     /// Optional centered image/logo overlay.
@@ -240,21 +258,50 @@ impl<'a> Api<'a> {
         self.matrix.as_ref()
     }
 
+    /// The module size used for rendering, normalized to a positive, finite
+    /// value.
+    ///
+    /// A non-finite or non-positive `module_size` prop (`0.0`, negative, `NaN`,
+    /// or infinity) would otherwise produce invalid `width`/`height` styles such
+    /// as `-44px` or `NaNpx`, so it falls back to the default module size.
+    fn effective_module_size(&self) -> f64 {
+        if self.props.module_size.is_finite() && self.props.module_size > 0.0 {
+            self.props.module_size
+        } else {
+            DEFAULT_MODULE_SIZE
+        }
+    }
+
+    /// The accessible name for the QR image, using the link-specific template
+    /// when the value is an http(s) URL.
+    fn aria_label(&self) -> String {
+        if is_url(&self.props.value) {
+            (self.messages.link_label)(&self.props.value, &self.locale)
+        } else {
+            (self.messages.label)(&self.props.value, &self.locale)
+        }
+    }
+
     /// Total pixel size of the rendered QR code (including the quiet zone).
     ///
-    /// Returns `0.0` when no matrix has been supplied.
+    /// Returns `0.0` when no matrix has been supplied. The module size is
+    /// normalized via [`Api::effective_module_size`] so non-finite or
+    /// non-positive props never reach the rendered dimensions.
     #[must_use]
     pub fn pixel_size(&self) -> f64 {
-        match &self.matrix {
-            Some(matrix) => {
-                (matrix.size + self.props.quiet_zone * 2) as f64 * self.props.module_size
-            }
-
-            None => 0.0,
+        if let Some(matrix) = &self.matrix {
+            (matrix.size + self.props.quiet_zone * 2) as f64 * self.effective_module_size()
+        } else {
+            0.0
         }
     }
 
     /// Attributes for the root element.
+    ///
+    /// The root is a neutral sized container. The accessible image semantics
+    /// live on [`Api::pattern_attrs`] (the SVG that visually is the QR code) so
+    /// that the optional interactive [`Part::DownloadTrigger`] is not pruned
+    /// from the accessibility tree by a `role="img"` ancestor.
     #[must_use]
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -266,19 +313,9 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Id, self.props.id.clone());
         }
 
-        let label = if self.props.value.starts_with("http://")
-            || self.props.value.starts_with("https://")
-        {
-            (self.messages.link_label)(&self.props.value, &self.locale)
-        } else {
-            (self.messages.label)(&self.props.value, &self.locale)
-        };
-
         let size = self.pixel_size();
 
         attrs
-            .set(HtmlAttr::Role, "img")
-            .set(HtmlAttr::Aria(AriaAttr::Label), label)
             .set_style(CssProperty::Width, format!("{size}px"))
             .set_style(CssProperty::Height, format!("{size}px"));
 
@@ -292,18 +329,31 @@ impl<'a> Api<'a> {
     }
 
     /// Attributes for the QR module grid.
+    ///
+    /// Carries `role="img"` and the URL-aware `aria-label`: the pattern element
+    /// is the QR code's accessible image.
     #[must_use]
     pub fn pattern_attrs(&self) -> AttrMap {
-        part_attrs(&Part::Pattern)
+        let mut attrs = part_attrs(&Part::Pattern);
+
+        attrs
+            .set(HtmlAttr::Role, "img")
+            .set(HtmlAttr::Aria(AriaAttr::Label), self.aria_label());
+
+        attrs
     }
 
     /// Attributes for the optional centered overlay image.
+    ///
+    /// The overlay is decorative: the QR pattern already exposes the encoded
+    /// content via its `aria-label`, so the `<img>` is marked presentational
+    /// with an empty `alt`.
     #[must_use]
     pub fn overlay_attrs(&self) -> AttrMap {
         let mut attrs = part_attrs(&Part::Overlay);
 
         if let Some(src) = &self.props.overlay_src {
-            attrs.set(HtmlAttr::Src, src.clone());
+            attrs.set(HtmlAttr::Src, src.clone()).set(HtmlAttr::Alt, "");
         }
 
         attrs
@@ -375,19 +425,29 @@ mod tests {
     }
 
     #[test]
-    fn connect_produces_img_role_with_aria_label() {
+    fn pattern_is_the_accessible_image() {
         let props = Props {
             value: "hello".to_string(),
             ..Props::default()
         };
 
-        let attrs = api(&props, Some(sample_matrix())).root_attrs();
+        let connected = api(&props, Some(sample_matrix()));
 
-        assert_eq!(attrs.get(&HtmlAttr::Role), Some("img"));
+        // The pattern (SVG) carries the image semantics...
+        let pattern = connected.pattern_attrs();
+
+        assert_eq!(pattern.get(&HtmlAttr::Role), Some("img"));
         assert_eq!(
-            attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
+            pattern.get(&HtmlAttr::Aria(AriaAttr::Label)),
             Some("QR code: hello")
         );
+
+        // ...and the root does NOT, so an interactive DownloadTrigger rendered
+        // inside the root is not pruned from the accessibility tree.
+        let root = connected.root_attrs();
+
+        assert!(!root.contains(&HtmlAttr::Role));
+        assert!(!root.contains(&HtmlAttr::Aria(AriaAttr::Label)));
     }
 
     #[test]
@@ -399,7 +459,7 @@ mod tests {
 
         assert_eq!(
             api(&https, Some(sample_matrix()))
-                .root_attrs()
+                .pattern_attrs()
                 .get(&HtmlAttr::Aria(AriaAttr::Label)),
             Some("QR code linking to https://example.com")
         );
@@ -411,9 +471,40 @@ mod tests {
 
         assert_eq!(
             api(&http, Some(sample_matrix()))
-                .root_attrs()
+                .pattern_attrs()
                 .get(&HtmlAttr::Aria(AriaAttr::Label)),
             Some("QR code linking to http://example.com")
+        );
+    }
+
+    #[test]
+    fn url_scheme_is_matched_case_insensitively() {
+        for value in ["HTTPS://example.com", "Http://example.com", "HtTpS://x.io"] {
+            let props = Props {
+                value: value.to_string(),
+                ..Props::default()
+            };
+
+            assert_eq!(
+                api(&props, Some(sample_matrix()))
+                    .pattern_attrs()
+                    .get(&HtmlAttr::Aria(AriaAttr::Label)),
+                Some(alloc::format!("QR code linking to {value}").as_str()),
+                "scheme of {value:?} should be recognized as a URL"
+            );
+        }
+
+        // A value that merely contains "http" later is not a URL.
+        let not_url = Props {
+            value: "see http://x later".to_string(),
+            ..Props::default()
+        };
+
+        assert_eq!(
+            api(&not_url, Some(sample_matrix()))
+                .pattern_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("QR code: see http://x later")
         );
     }
 
@@ -468,6 +559,34 @@ mod tests {
     }
 
     #[test]
+    fn non_finite_or_nonpositive_module_size_falls_back_to_default() {
+        // (size 3 + quiet_zone 4 * 2) * DEFAULT_MODULE_SIZE 4.0 = 44.0.
+        for module_size in [0.0, -8.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let props = Props {
+                module_size,
+                ..Props::default()
+            };
+
+            let connected = api(&props, Some(sample_matrix()));
+
+            assert!(
+                (connected.pixel_size() - 44.0).abs() < f64::EPSILON,
+                "module_size {module_size} should fall back to the default"
+            );
+
+            // The rendered dimensions are never negative or `NaNpx`.
+            assert_eq!(
+                connected
+                    .root_attrs()
+                    .styles()
+                    .iter()
+                    .find(|(prop, _)| *prop == CssProperty::Width),
+                Some(&(CssProperty::Width, "44px".to_string()))
+            );
+        }
+    }
+
+    #[test]
     fn no_matrix_yields_zero_pixel_size() {
         let props = Props::default();
         let connected = api(&props, None);
@@ -498,20 +617,24 @@ mod tests {
     }
 
     #[test]
-    fn overlay_attrs_sets_src_only_when_present() {
+    fn overlay_attrs_sets_src_and_decorative_alt_only_when_present() {
         let without = Props::default();
 
-        assert!(!api(&without, None).overlay_attrs().contains(&HtmlAttr::Src));
+        let bare = api(&without, None).overlay_attrs();
+
+        assert!(!bare.contains(&HtmlAttr::Src));
+        assert!(!bare.contains(&HtmlAttr::Alt));
 
         let with = Props {
             overlay_src: Some("/logo.png".to_string()),
             ..Props::default()
         };
 
-        assert_eq!(
-            api(&with, None).overlay_attrs().get(&HtmlAttr::Src),
-            Some("/logo.png")
-        );
+        let decorated = api(&with, None).overlay_attrs();
+
+        assert_eq!(decorated.get(&HtmlAttr::Src), Some("/logo.png"));
+        // Decorative overlay: empty alt so AT does not announce the file name.
+        assert_eq!(decorated.get(&HtmlAttr::Alt), Some(""));
     }
 
     #[test]
@@ -641,11 +764,27 @@ mod tests {
     }
 
     #[test]
-    fn pattern_snapshot() {
-        let props = Props::default();
+    fn pattern_default_snapshot() {
+        let props = Props {
+            value: "hello".to_string(),
+            ..Props::default()
+        };
 
         assert_snapshot!(
-            "qr_code_pattern",
+            "qr_code_pattern_default",
+            snapshot_attrs(&api(&props, None).pattern_attrs())
+        );
+    }
+
+    #[test]
+    fn pattern_url_snapshot() {
+        let props = Props {
+            value: "https://example.com".to_string(),
+            ..Props::default()
+        };
+
+        assert_snapshot!(
+            "qr_code_pattern_url",
             snapshot_attrs(&api(&props, None).pattern_attrs())
         );
     }

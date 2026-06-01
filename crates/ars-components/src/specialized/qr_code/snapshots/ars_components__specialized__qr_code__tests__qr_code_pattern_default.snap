@@ -1,6 +1,6 @@
 ---
 source: crates/ars-components/src/specialized/qr_code/mod.rs
-expression: "snapshot_attrs(&api(&props, None).root_attrs())"
+expression: "snapshot_attrs(&api(&props, None).pattern_attrs())"
 ---
 AttrMap {
     attrs: [
@@ -9,7 +9,7 @@ AttrMap {
                 "ars-part",
             ),
             String(
-                "root",
+                "pattern",
             ),
         ),
         (
@@ -20,15 +20,20 @@ AttrMap {
                 "qr-code",
             ),
         ),
-    ],
-    styles: [
         (
-            Width,
-            "0px",
+            Aria(
+                Label,
+            ),
+            String(
+                "QR code: hello",
+            ),
         ),
         (
-            Height,
-            "0px",
+            Role,
+            String(
+                "img",
+            ),
         ),
     ],
+    styles: [],
 }

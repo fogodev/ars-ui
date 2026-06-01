@@ -21,6 +21,12 @@ AttrMap {
             ),
         ),
         (
+            Alt,
+            String(
+                "",
+            ),
+        ),
+        (
             Src,
             String(
                 "/logo.png",

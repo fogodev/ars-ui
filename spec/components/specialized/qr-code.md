@@ -115,6 +115,17 @@ pub enum Part {
     DownloadTrigger,
 }
 
+/// Default pixel size of a single QR module; also the fallback when a caller
+/// supplies a non-finite or non-positive `module_size`.
+const DEFAULT_MODULE_SIZE: f64 = 4.0;
+
+/// Whether `value` is an http(s) URL, comparing the scheme case-insensitively
+/// (URL schemes are case-insensitive per RFC 3986).
+fn is_url(value: &str) -> bool {
+    value.get(..7).is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+        || value.get(..8).is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
+}
+
 pub struct Api<'a> {
     props: &'a Props,
     matrix: Option<QrMatrix>,
@@ -137,15 +148,39 @@ impl<'a> Api<'a> {
         self.matrix.as_ref()
     }
 
+    /// The module size used for rendering, normalized to a positive, finite
+    /// value. A non-finite or non-positive `module_size` prop falls back to the
+    /// default so `width`/`height` can never become `-44px` or `NaNpx`.
+    fn effective_module_size(&self) -> f64 {
+        if self.props.module_size.is_finite() && self.props.module_size > 0.0 {
+            self.props.module_size
+        } else {
+            DEFAULT_MODULE_SIZE
+        }
+    }
+
+    /// The accessible name for the QR image, using the link-specific template
+    /// when the value is an http(s) URL.
+    fn aria_label(&self) -> String {
+        if is_url(&self.props.value) {
+            (self.messages.link_label)(&self.props.value, &self.locale)
+        } else {
+            (self.messages.label)(&self.props.value, &self.locale)
+        }
+    }
+
     /// Total pixel size of the rendered QR code (including quiet zone).
     /// Returns `0.0` when no matrix has been supplied.
     pub fn pixel_size(&self) -> f64 {
         match &self.matrix {
-            Some(matrix) => (matrix.size + self.props.quiet_zone * 2) as f64 * self.props.module_size,
+            Some(matrix) => (matrix.size + self.props.quiet_zone * 2) as f64 * self.effective_module_size(),
             None => 0.0,
         }
     }
 
+    /// The root is a neutral sized container. The image semantics live on
+    /// `pattern_attrs` so the optional interactive `DownloadTrigger` is not
+    /// pruned from the accessibility tree by a `role="img"` ancestor.
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
@@ -155,13 +190,6 @@ impl<'a> Api<'a> {
         if !self.props.id.is_empty() {
             attrs.set(HtmlAttr::Id, self.props.id.clone());
         }
-        attrs.set(HtmlAttr::Role, "img");
-        let label = if self.props.value.starts_with("http://") || self.props.value.starts_with("https://") {
-            (self.messages.link_label)(&self.props.value, &self.locale)
-        } else {
-            (self.messages.label)(&self.props.value, &self.locale)
-        };
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
         let size = self.pixel_size();
         attrs.set_style(CssProperty::Width, format!("{size}px"));
         attrs.set_style(CssProperty::Height, format!("{size}px"));
@@ -176,11 +204,15 @@ impl<'a> Api<'a> {
         attrs
     }
 
+    /// The pattern (SVG) is the QR code's accessible image, carrying `role="img"`
+    /// and the URL-aware `aria-label`.
     pub fn pattern_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Pattern.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Role, "img");
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), self.aria_label());
         attrs
     }
 
@@ -189,8 +221,11 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Overlay.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        // Decorative overlay: the pattern already exposes the content via its
+        // aria-label, so the <img> is marked presentational with an empty alt.
         if let Some(src) = &self.props.overlay_src {
             attrs.set(HtmlAttr::Src, src.clone());
+            attrs.set(HtmlAttr::Alt, "");
         }
         attrs
     }
@@ -225,31 +260,37 @@ impl ConnectApi for Api<'_> {
 
 ```text
 QrCode
-├── Root             (required — role="img", container for the QR code)
+├── Root             (required — neutral sized container for the QR code)
 ├── Frame            (optional — decorative frame around the code)
-├── Pattern          (required — the actual QR module grid, rendered as SVG or Canvas)
-├── Overlay          (optional — centered image/logo)
+├── Pattern          (required — the QR module grid, role="img", rendered as SVG or Canvas)
+├── Overlay          (optional — centered decorative image/logo)
 └── DownloadTrigger  (optional — button to download QR code as image)
 ```
 
-| Part            | Element    | Key Attributes                          |
-| --------------- | ---------- | --------------------------------------- |
-| Root            | `<div>`    | `role="img"`, `aria-label`, sized to QR |
-| Frame           | `<div>`    | decorative border                       |
-| Pattern         | `<svg>`    | QR module grid rendering                |
-| Overlay         | `<img>`    | `src` from `overlay_src` prop           |
-| DownloadTrigger | `<button>` | `aria-label` from messages              |
+| Part            | Element    | Key Attributes                             |
+| --------------- | ---------- | ------------------------------------------ |
+| Root            | `<div>`    | sized to QR (no role — neutral container)  |
+| Frame           | `<div>`    | decorative border                          |
+| Pattern         | `<svg>`    | `role="img"`, `aria-label`, QR module grid |
+| Overlay         | `<img>`    | `src` from `overlay_src` prop, `alt=""`    |
+| DownloadTrigger | `<button>` | `aria-label` from messages                 |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Part | Role  | Properties                                                     |
-| ---- | ----- | -------------------------------------------------------------- |
-| Root | `img` | `aria-label` — `"QR code: {value}"` (or link variant for URLs) |
+| Part    | Role  | Properties                                                     |
+| ------- | ----- | -------------------------------------------------------------- |
+| Pattern | `img` | `aria-label` — `"QR code: {value}"` (or link variant for URLs) |
 
-The QR code is a purely visual element. The `aria-label` conveys the encoded data.
-If the data is a URL, the label indicates that (e.g., `"QR code linking to {url}"`).
+The QR code is a purely visual element. The accessible image semantics live on
+the `Pattern` (the SVG that visually is the code), not on `Root`: `role="img"`
+is a leaf role that prunes its descendants from the accessibility tree, so
+putting it on `Root` would hide the interactive `DownloadTrigger`. The
+`aria-label` conveys the encoded data; if the data is a URL (scheme matched
+case-insensitively), the label indicates that (e.g., `"QR code linking to {url}"`).
+The `Overlay` image is decorative (`alt=""`) since the `Pattern` already conveys
+the content.
 
 ## 4. Internationalization
 
@@ -285,7 +326,7 @@ impl ComponentMessages for Messages {}
 | `qr_code.link_label`     | `"QR code linking to {url}"` | Label when value is a URL |
 | `qr_code.download_label` | `"Download QR code"`         | Download trigger label    |
 
-The `root_attrs()` method formats `aria-label` from `messages.label` (or `messages.link_label` when the value is a URL), replacing `{value}` / `{url}` with the encoded data.
+The `pattern_attrs()` method formats `aria-label` from `messages.label` (or `messages.link_label` when the value is a URL), replacing `{value}` / `{url}` with the encoded data.
 
 - **RTL**: QR codes are direction-agnostic (fixed matrix). No RTL adjustments needed for the pattern itself. Surrounding layout elements obey the document direction.
 

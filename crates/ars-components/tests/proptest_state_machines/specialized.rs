@@ -374,13 +374,49 @@ mod qr_code_proptests {
         ]
     }
 
-    /// A mix of plain text and URL values so the link-label branch is exercised.
+    /// A mix of plain text and URL values (including mixed-case schemes) so the
+    /// link-label branch and its case-insensitive scheme match are exercised.
     fn arb_value() -> impl Strategy<Value = String> {
         prop_oneof![
             "[a-zA-Z0-9 ]{0,24}",
             r"https://[a-z]{1,12}\.[a-z]{2,4}",
             r"http://[a-z]{1,12}\.[a-z]{2,4}",
+            r"(?i:https)://[a-z]{1,12}\.[a-z]{2,4}",
+            r"(?i:http)://[a-z]{1,12}\.[a-z]{2,4}",
         ]
+    }
+
+    /// Module sizes spanning both the valid range and the invalid values
+    /// (`0.0`, negative, `NaN`, infinities) that must fall back to the default.
+    fn arb_module_size() -> impl Strategy<Value = f64> {
+        prop_oneof![
+            1.0f64..20.0,
+            Just(0.0),
+            -20.0f64..0.0,
+            Just(f64::NAN),
+            Just(f64::INFINITY),
+            Just(f64::NEG_INFINITY),
+        ]
+    }
+
+    /// Mirrors `Api::effective_module_size`: a non-finite or non-positive
+    /// `module_size` falls back to the default `4.0`.
+    fn effective_module_size(module_size: f64) -> f64 {
+        if module_size.is_finite() && module_size > 0.0 {
+            module_size
+        } else {
+            4.0
+        }
+    }
+
+    /// Mirrors `qr_code::is_url`: an http(s) scheme matched case-insensitively.
+    fn is_url(value: &str) -> bool {
+        value
+            .get(..7)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+            || value
+                .get(..8)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
     }
 
     prop_compose! {
@@ -388,7 +424,7 @@ mod qr_code_proptests {
             id in "[a-z]{0,8}",
             value in arb_value(),
             error_correction in arb_error_correction(),
-            module_size in 1.0f64..20.0,
+            module_size in arb_module_size(),
             quiet_zone in 0usize..10,
             overlay_src in proptest::option::of("[a-z./]{1,16}"),
             overlay_size in 0.0f64..0.5,
@@ -444,10 +480,12 @@ mod qr_code_proptests {
             );
         }
 
-        /// The root always carries the scope/part contract plus `role="img"`.
+        /// The root carries the scope/part contract but never the image role or
+        /// accessible name (those live on the pattern), so an interactive
+        /// DownloadTrigger inside the root stays in the accessibility tree.
         #[test]
         #[ignore = "proptest — nightly extended-proptest job"]
-        fn qr_root_always_has_scope_part_role(
+        fn qr_root_has_scope_part_but_not_image_role(
             props in arb_props(),
             matrix in arb_opt_matrix(),
         ) {
@@ -456,28 +494,31 @@ mod qr_code_proptests {
 
             prop_assert_eq!(attrs.get(&HtmlAttr::Data("ars-scope")), Some("qr-code"));
             prop_assert_eq!(attrs.get(&HtmlAttr::Data("ars-part")), Some("root"));
-            prop_assert_eq!(attrs.get(&HtmlAttr::Role), Some("img"));
+            prop_assert!(!attrs.contains(&HtmlAttr::Role));
+            prop_assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Label)));
         }
 
-        /// The aria-label uses the link template iff the value is an http(s) URL.
+        /// The pattern is the accessible image: scope/part plus `role="img"` and
+        /// the URL-aware aria-label (link template iff the value is an http(s)
+        /// URL, scheme matched case-insensitively).
         #[test]
         #[ignore = "proptest — nightly extended-proptest job"]
-        fn qr_label_follows_url_branch(
+        fn qr_pattern_is_image_with_url_aware_label(
             props in arb_props(),
             matrix in arb_opt_matrix(),
         ) {
-            let is_url =
-                props.value.starts_with("http://") || props.value.starts_with("https://");
-
-            let expected = if is_url {
+            let expected = if is_url(&props.value) {
                 format!("QR code linking to {}", props.value)
             } else {
                 format!("QR code: {}", props.value)
             };
 
             let attrs =
-                Api::new(&props, matrix, &Env::default(), &Messages::default()).root_attrs();
+                Api::new(&props, matrix, &Env::default(), &Messages::default()).pattern_attrs();
 
+            prop_assert_eq!(attrs.get(&HtmlAttr::Data("ars-scope")), Some("qr-code"));
+            prop_assert_eq!(attrs.get(&HtmlAttr::Data("ars-part")), Some("pattern"));
+            prop_assert_eq!(attrs.get(&HtmlAttr::Role), Some("img"));
             prop_assert_eq!(
                 attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
                 Some(expected.as_str())
@@ -515,7 +556,8 @@ mod qr_code_proptests {
 
             let expected = match api.matrix() {
                 Some(matrix) => {
-                    (matrix.size + props.quiet_zone * 2) as f64 * props.module_size
+                    (matrix.size + props.quiet_zone * 2) as f64
+                        * effective_module_size(props.module_size)
                 }
 
                 None => 0.0,
@@ -544,10 +586,11 @@ mod qr_code_proptests {
             );
         }
 
-        /// The overlay `src` is emitted exactly when `overlay_src` is set.
+        /// The overlay `src` and its decorative empty `alt` are emitted exactly
+        /// when `overlay_src` is set.
         #[test]
         #[ignore = "proptest — nightly extended-proptest job"]
-        fn qr_overlay_src_emitted_iff_present(props in arb_props()) {
+        fn qr_overlay_src_and_alt_emitted_iff_present(props in arb_props()) {
             let overlay = props.overlay_src.clone();
 
             let attrs =
@@ -555,8 +598,10 @@ mod qr_code_proptests {
 
             if let Some(src) = overlay {
                 prop_assert_eq!(attrs.get(&HtmlAttr::Src), Some(src.as_str()));
+                prop_assert_eq!(attrs.get(&HtmlAttr::Alt), Some(""));
             } else {
                 prop_assert_eq!(attrs.get(&HtmlAttr::Src), None);
+                prop_assert_eq!(attrs.get(&HtmlAttr::Alt), None);
             }
         }
 

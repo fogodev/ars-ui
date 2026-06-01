@@ -20,6 +20,20 @@ AttrMap {
                 "qr-code",
             ),
         ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "QR code linking to https://example.com",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "img",
+            ),
+        ),
     ],
     styles: [],
 }

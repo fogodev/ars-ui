@@ -21,23 +21,9 @@ AttrMap {
             ),
         ),
         (
-            Aria(
-                Label,
-            ),
-            String(
-                "QR code linking to https://example.com",
-            ),
-        ),
-        (
             Id,
             String(
                 "qr-1",
-            ),
-        ),
-        (
-            Role,
-            String(
-                "img",
             ),
         ),
     ],

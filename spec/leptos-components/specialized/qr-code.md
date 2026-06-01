@@ -39,21 +39,21 @@ When `download_file_name` is `Some`, the adapter renders the optional `DownloadT
 
 ## 4. Part Mapping
 
-| Core part / structure | Required? | Adapter rendering target | Ownership     | Attr source                    | Notes                                        |
-| --------------------- | --------- | ------------------------ | ------------- | ------------------------------ | -------------------------------------------- |
-| `Root`                | required  | `<div>`                  | adapter-owned | `api.root_attrs()`             | Carries `role="img"` and resolved label.     |
-| `Frame`               | optional  | `<div>`                  | adapter-owned | `api.frame_attrs()`            | Decorative wrapper when themed.              |
-| `Pattern`             | required  | `<svg>`                  | adapter-owned | `api.pattern_attrs()`          | Canonical render target for SSR-safe output. |
-| `Overlay`             | optional  | `<img>`                  | adapter-owned | `api.overlay_attrs()`          | Render only when `overlay_src` is present.   |
-| `DownloadTrigger`     | optional  | `<button>`               | adapter-owned | `api.download_trigger_attrs()` | Render only when download is enabled.        |
+| Core part / structure | Required? | Adapter rendering target | Ownership     | Attr source                    | Notes                                      |
+| --------------------- | --------- | ------------------------ | ------------- | ------------------------------ | ------------------------------------------ |
+| `Root`                | required  | `<div>`                  | adapter-owned | `api.root_attrs()`             | Neutral sized container; carries no role.  |
+| `Frame`               | optional  | `<div>`                  | adapter-owned | `api.frame_attrs()`            | Decorative wrapper when themed.            |
+| `Pattern`             | required  | `<svg>`                  | adapter-owned | `api.pattern_attrs()`          | `role="img"` + label; SSR-safe SVG target. |
+| `Overlay`             | optional  | `<img>`                  | adapter-owned | `api.overlay_attrs()`          | Render when `overlay_src` set; `alt=""`.   |
+| `DownloadTrigger`     | optional  | `<button>`               | adapter-owned | `api.download_trigger_attrs()` | Render only when download is enabled.      |
 
 ## 5. Attr Merge and Ownership Rules
 
-| Target node       | Core attrs                     | Adapter-owned attrs                   | Consumer attrs    | Merge order                   | Ownership notes                               |
-| ----------------- | ------------------------------ | ------------------------------------- | ----------------- | ----------------------------- | --------------------------------------------- |
-| `Root`            | role, label, size, scope, part | none beyond wrapper class merge       | decoration attrs  | root semantics and sizing win | consumer styling must not remove `role="img"` |
-| `Pattern`         | QR matrix rendering attrs      | generated `<path>` or module children | none beyond style | generated pattern wins        | rendering stays adapter-owned                 |
-| `DownloadTrigger` | button attrs and label         | click handler                         | decoration only   | label and handler win         | download trigger remains optional             |
+| Target node       | Core attrs               | Adapter-owned attrs                   | Consumer attrs    | Merge order                   | Ownership notes                       |
+| ----------------- | ------------------------ | ------------------------------------- | ----------------- | ----------------------------- | ------------------------------------- |
+| `Root`            | size, scope, part        | none beyond wrapper class merge       | decoration attrs  | sizing wins                   | neutral container; no image role      |
+| `Pattern`         | role, label, scope, part | generated `<path>` or module children | none beyond style | image semantics + pattern win | consumer must not remove `role="img"` |
+| `DownloadTrigger` | button attrs and label   | click handler                         | decoration only   | label and handler win         | download trigger remains optional     |
 
 ## 6. Composition / Context Contract
 
@@ -190,7 +190,7 @@ pub fn QrCode(value: String) -> impl IntoView {
 
 ## 26. Adapter Invariants
 
-- The root always remains `role="img"` with a resolved label.
+- The pattern always remains `role="img"` with a resolved label; the root stays a neutral sized container.
 - The QR pattern remains renderable during SSR.
 - Download support never blocks baseline rendering.
 
