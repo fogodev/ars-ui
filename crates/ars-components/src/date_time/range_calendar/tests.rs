@@ -300,6 +300,17 @@ fn static_unavailable_dates_drive_context_and_trigger_attrs() {
 }
 
 #[test]
+fn static_unavailable_dates_inside_range_block_validation() {
+    let svc = service();
+    let mut ctx = svc.context().clone();
+    let blocked = range(date(2024, 1, 10), date(2024, 1, 15));
+
+    ctx.unavailable_dates = vec![date(2024, 1, 12)];
+
+    assert!(!range_is_selectable(&ctx, &blocked));
+}
+
+#[test]
 fn unavailable_dates_inside_pending_range_block_completion() {
     let unavailable = Callback::new_ref(|date: &CalendarDate| date.day() == 12);
     let mut svc = service_with(props().is_date_unavailable(Some(unavailable)), en_us());

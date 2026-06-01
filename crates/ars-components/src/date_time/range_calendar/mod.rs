@@ -1165,7 +1165,7 @@ fn range_is_selectable(ctx: &Context, range: &DateRange) -> bool {
         return false;
     }
 
-    if ctx.is_date_unavailable_fn.is_none() {
+    if ctx.unavailable_dates.is_empty() && ctx.is_date_unavailable_fn.is_none() {
         return true;
     }
 
