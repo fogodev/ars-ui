@@ -428,8 +428,15 @@ impl ars_core::Machine for Machine {
 
             (_, Event::Reset) => {
                 let initial = initial_duration(ctx.mode, ctx.target);
+                // A zero-duration countdown resets back to `Completed`, not
+                // `Idle`, so it can never be (re)started into a running `00:00`.
+                let target_state = if is_instantly_complete(ctx.mode, ctx.target) {
+                    State::Completed
+                } else {
+                    State::Idle
+                };
                 Some(
-                    TransitionPlan::to(State::Idle)
+                    TransitionPlan::to(target_state)
                         .apply(move |ctx: &mut Context| {
                             ctx.current = initial;
                         })
@@ -473,17 +480,47 @@ impl ars_core::Machine for Machine {
                 let target = props.target;
                 let interval = effective_interval(props.interval);
                 let mode = props.mode;
-                // While idle the displayed value mirrors the (new) initial; once
-                // running/paused/completed the in-progress `current` is kept.
-                let reset_current = matches!(state, State::Idle);
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.target = target;
-                    ctx.interval = interval;
-                    ctx.mode = mode;
-                    if reset_current {
-                        ctx.current = initial_duration(mode, target);
+
+                // Syncing into a zero-duration countdown completes on arrival,
+                // matching init/reset/restart, so it is never left idle and
+                // startable into a running `00:00`.
+                if is_instantly_complete(mode, target) {
+                    Some(
+                        TransitionPlan::to(State::Completed)
+                            .apply(move |ctx: &mut Context| {
+                                ctx.target = target;
+                                ctx.interval = interval;
+                                ctx.mode = mode;
+                                ctx.current = Duration::ZERO;
+                            })
+                            .cancel_effect(Effect::TimerInterval),
+                    )
+                } else {
+                    // While idle the displayed value mirrors the (new) initial;
+                    // once running/paused the in-progress `current` is kept.
+                    let reset_current = matches!(state, State::Idle);
+                    // A live cadence change must re-arm the adapter interval,
+                    // otherwise it keeps firing at the old rate while ticks use
+                    // the new interval.
+                    let rearm = matches!(state, State::Running) && interval != ctx.interval;
+
+                    let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.target = target;
+                        ctx.interval = interval;
+                        ctx.mode = mode;
+                        if reset_current {
+                            ctx.current = initial_duration(mode, target);
+                        }
+                    });
+
+                    if rearm {
+                        plan = plan
+                            .cancel_effect(Effect::TimerInterval)
+                            .with_effect(interval_effect());
                     }
-                }))
+
+                    Some(plan)
+                }
             }
 
             _ => None,
@@ -1277,6 +1314,61 @@ mod tests {
         assert_eq!(service.context().interval, Duration::from_secs(2));
         // Mid-run elapsed value is preserved (not reset to the target).
         assert_eq!(service.context().current, Duration::from_secs(59));
+    }
+
+    #[test]
+    fn timer_set_props_interval_change_while_running_rearms_interval() {
+        let mut service = fresh_service(
+            test_props()
+                .target(Duration::from_secs(60))
+                .interval(Duration::from_secs(1)),
+        );
+        drop(service.send(Event::Start));
+
+        // Changing the cadence mid-run cancels and re-emits the adapter
+        // interval so it restarts at the new rate.
+        let changed = service.set_props(
+            test_props()
+                .target(Duration::from_secs(60))
+                .interval(Duration::from_secs(2)),
+        );
+        assert_eq!(changed.cancel_effects, vec![Effect::TimerInterval]);
+        assert_eq!(effect_names(&changed), vec![Effect::TimerInterval]);
+
+        // A sync that does not change the cadence does not churn the interval.
+        let unchanged = service.set_props(
+            test_props()
+                .target(Duration::from_secs(30))
+                .interval(Duration::from_secs(2)),
+        );
+        assert!(unchanged.cancel_effects.is_empty());
+        assert!(unchanged.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn timer_zero_target_reset_stays_completed() {
+        let mut service = fresh_service(test_props().target(Duration::ZERO));
+        assert_eq!(service.state(), &State::Completed);
+
+        // Reset must not drop a zero-duration countdown back to a startable Idle.
+        drop(service.send(Event::Reset));
+        assert_eq!(service.state(), &State::Completed);
+        assert_eq!(service.context().current, Duration::ZERO);
+    }
+
+    #[test]
+    fn timer_sync_into_zero_target_countdown_completes() {
+        let mut service = fresh_service(test_props().target(Duration::from_secs(60)));
+        assert_eq!(service.state(), &State::Idle);
+
+        // Updating props to a zero-duration countdown completes on sync rather
+        // than leaving an idle, startable zero timer.
+        let result = service.set_props(test_props().mode(Mode::Countdown).target(Duration::ZERO));
+
+        assert_eq!(service.state(), &State::Completed);
+        assert_eq!(service.context().current, Duration::ZERO);
+        assert_eq!(result.cancel_effects, vec![Effect::TimerInterval]);
+        assert!(result.pending_effects.is_empty());
     }
 
     // ───────────────────── transitions ─────────────────────

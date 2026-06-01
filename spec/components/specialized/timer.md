@@ -269,11 +269,15 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::Reset) => {
-                let initial = match ctx.mode {
-                    Mode::Countdown => ctx.target,
-                    Mode::Stopwatch => Duration::ZERO,
+                let initial = initial_duration(ctx.mode, ctx.target);
+                // A zero-duration countdown resets to Completed, not Idle, so it
+                // cannot be (re)started into a running 00:00.
+                let target_state = if is_instantly_complete(ctx.mode, ctx.target) {
+                    State::Completed
+                } else {
+                    State::Idle
                 };
-                Some(TransitionPlan::to(State::Idle)
+                Some(TransitionPlan::to(target_state)
                     .apply(move |ctx| { ctx.current = initial; })
                     .cancel_effect(Effect::TimerInterval))
             }
@@ -304,16 +308,36 @@ impl ars_core::Machine for Machine {
                 let target = props.target;
                 let interval = effective_interval(props.interval);
                 let mode = props.mode;
-                // Idle mirrors the new initial; running/paused keep `current`.
-                let reset_current = matches!(state, State::Idle);
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.target = target;
-                    ctx.interval = interval;
-                    ctx.mode = mode;
-                    if reset_current {
-                        ctx.current = initial_duration(mode, target);
+                // Syncing into a zero-duration countdown completes on arrival.
+                if is_instantly_complete(mode, target) {
+                    Some(TransitionPlan::to(State::Completed)
+                        .apply(move |ctx| {
+                            ctx.target = target;
+                            ctx.interval = interval;
+                            ctx.mode = mode;
+                            ctx.current = Duration::ZERO;
+                        })
+                        .cancel_effect(Effect::TimerInterval))
+                } else {
+                    // Idle mirrors the new initial; running/paused keep `current`.
+                    let reset_current = matches!(state, State::Idle);
+                    // A live cadence change re-arms the adapter interval.
+                    let rearm = matches!(state, State::Running) && interval != ctx.interval;
+                    let mut plan = TransitionPlan::context_only(move |ctx| {
+                        ctx.target = target;
+                        ctx.interval = interval;
+                        ctx.mode = mode;
+                        if reset_current {
+                            ctx.current = initial_duration(mode, target);
+                        }
+                    });
+                    if rearm {
+                        plan = plan
+                            .cancel_effect(Effect::TimerInterval)
+                            .with_effect(PendingEffect::named(Effect::TimerInterval));
                     }
-                }))
+                    Some(plan)
+                }
             }
 
             _ => None,
