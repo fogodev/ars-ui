@@ -4,7 +4,16 @@ category: specialized
 tier: complex
 foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
-related: [angle-slider, color-area, color-field, color-slider, color-swatch, color-swatch-picker, color-wheel]
+related:
+    [
+        angle-slider,
+        color-area,
+        color-field,
+        color-slider,
+        color-swatch,
+        color-swatch-picker,
+        color-wheel,
+    ]
 references:
     ark-ui: ColorPicker
     react-aria: ColorPicker
@@ -1163,6 +1172,10 @@ impl ars_core::Machine for Machine {
                 // (SetProps excludes color_space), so it must pass through or a
                 // disabled picker stays stuck on the old channel set.
                 | Event::ChangeColorSpace(_)
+                // The adapter's EyeDropper capability report is not user
+                // interaction; let it through so a picker opened while disabled
+                // records support and the trigger is ready once re-enabled.
+                | Event::SetEyedropperSupported(_)
                 | Event::Focus { .. } | Event::Blur { .. }
                 | Event::SyncValue(_) | Event::SetProps => {}
                 _ => return None,
@@ -1478,9 +1491,11 @@ impl Api<'_> {
     }
 
     /// The `aria-live` announcement for the active color space, used by the
-    /// `Effect::AnnounceColorSpace` adapter handler.
+    /// `Effect::AnnounceColorSpace` adapter handler. Uses the user-facing
+    /// upper-case label (`"RGB"`, `"HSL"`, …) via `color_space_label`, not the
+    /// Rust `Debug` name, so screen readers hear "Switched to HSL color space".
     pub fn color_space_announcement(&self) -> String {
-        (self.ctx.messages.color_space_switched)(&format!("{:?}", self.ctx.color_space), &self.ctx.locale)
+        (self.ctx.messages.color_space_switched)(color_space_label(self.ctx.color_space), &self.ctx.locale)
     }
 
     // --- Imperative actions ---
@@ -1489,8 +1504,24 @@ impl Api<'_> {
     pub fn close(&self) { (self.send)(Event::Close); }
     pub fn set_value(&self, color: ColorValue) { (self.send)(Event::SetColor(color)); }
     pub fn set_format(&self, format: ColorFormat) { (self.send)(Event::SetFormat(format)); }
+
+    /// Set one channel from its numeric input, in the same display units
+    /// `channel_input_attrs` exposes (degrees for hue, `0`–`255` for RGB, a
+    /// `0`–`100` percent for the fractional channels). The percent is converted
+    /// back to the `0..=1` channel unit so reading and writing an input
+    /// round-trip; space-aware (HSB saturation in HSB).
+    pub fn set_channel(&self, channel: ColorChannel, display_value: f64) {
+        let value = match channel {
+            ColorChannel::Hue | ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => display_value,
+            _ => display_value / 100.0,
+        };
+        (self.send)(Event::SetChannel { channel, value });
+    }
 }
 ```
+
+`color_space_label(space)` maps the `ColorSpace` enum to its user-facing
+upper-case label (`Rgb → "RGB"`, `Hsl → "HSL"`, `Hsb → "HSB"`, `Hwb → "HWB"`).
 
 Each `*_attrs` method emits the part's `data-ars-scope`/`data-ars-part` tokens
 (via `Part::data_attrs()`) plus the ARIA/`data-ars-*` attributes and CSS custom
@@ -1502,6 +1533,13 @@ for the channel inputs — rather than precomputed into the context.
 
 Highlights of the part attribute surface:
 
+- **`root_attrs`** — `data-ars-state` = `open`/`closed`, `data-ars-disabled` /
+  `data-ars-readonly` when set, and `dir` (`ltr`/`rtl`/`auto` via
+  `Direction::as_html_attr`) so adapter styles flip the visual picker in RTL to
+  match the RTL-mirrored keyboard handling.
+- **`format_select_attrs`** — `aria-label` from `messages.format_toggle_label`;
+  `disabled` + `aria-disabled` when disabled (the machine drops `SetFormat` while
+  disabled, so the selector must not appear operable).
 - **`trigger_attrs`** — `type="button"` (so a real `<button>` in a form toggles
   rather than submits), `aria-haspopup="dialog"`, `aria-expanded`,
   `aria-controls` (content id), `aria-labelledby` (label id), and `aria-label`
@@ -1547,7 +1585,9 @@ events: `on_trigger_click` / `on_trigger_keydown` (Enter/Space → `Toggle`),
 `on_area_thumb_keydown(data, shift)` (arrows → `AreaXStep`/`AreaYStep`,
 RTL-mirrored on the x-axis; the machine applies them space-aware),
 `on_channel_slider_keydown(channel, data, shift)` (arrows + Home/End),
-`on_swatch_click(index)` (→ `SetColor`), and `on_eyedropper_click` (→
+`on_swatch_click(index)` (→ `SetColor`), `set_channel(channel, display_value)`
+(→ `SetChannel`, converting the input's display units back to channel units so a
+numeric channel input round-trips), and `on_eyedropper_click` (→
 `EyedropperRequest`). Keyboard steps for the fractional channels (saturation,
 lightness, brightness, alpha) come from `channel_step_default` so a single arrow
 press is a perceptible 1%/10% nudge; the configured `channel_step` /
@@ -1606,7 +1646,7 @@ ColorPicker
 
 | Part                 | Element                 | Required | Key Attributes                                                                                                                                                          |
 | -------------------- | ----------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Root`               | `<div>`                 | yes      | `data-ars-state`, `data-ars-disabled`, `data-ars-readonly`                                                                                                              |
+| `Root`               | `<div>`                 | yes      | `dir`, `data-ars-state`, `data-ars-disabled`, `data-ars-readonly`                                                                                                       |
 | `Label`              | `<label>`               | yes      | `for` (trigger ID)                                                                                                                                                      |
 | `Control`            | `<div>`                 | yes      |                                                                                                                                                                         |
 | `Trigger`            | `<button>`              | yes      | `type="button"`, `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`, `aria-labelledby`                                                                          |
@@ -1618,7 +1658,7 @@ ColorPicker
 | `AlphaSlider`        | `<div>`                 | no       | `role="group"`, `data-ars-channel="alpha"`                                                                                                                              |
 | `SwatchGroup`        | `<div>`                 | no       | `role="group"`                                                                                                                                                          |
 | `Swatch`             | `<button>`              | no       | `type="button"`, `role="button"`, `tabindex` (`0`, `-1` when disabled), `aria-label`, `data-ars-selected`, `data-ars-index`, `aria-disabled` when disabled              |
-| `FormatSelect`       | `<select>` / `<button>` | no       | `aria-label`                                                                                                                                                            |
+| `FormatSelect`       | `<select>` / `<button>` | no       | `aria-label`, `disabled` + `aria-disabled` when disabled                                                                                                                |
 | `ChannelInput`       | `<input>`               | no       | `type="text"`, `inputmode="numeric"`, `value` (current channel value), `data-ars-channel`, `data-ars-channel-index`                                                     |
 | `HexInput`           | `<input>`               | no       | `type="text"`, `inputmode="text"`                                                                                                                                       |
 | `EyeDropperTrigger`  | `<button>`              | no       | `type="button"`, `aria-label`, `hidden` (when unsupported)                                                                                                              |
@@ -1628,27 +1668,27 @@ ColorPicker
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Attribute / Behaviour               | Element                                                 | Value                                              |
-| ----------------------------------- | ------------------------------------------------------- | -------------------------------------------------- |
-| `role="dialog"`                     | `Content`                                               | Popover container                                  |
-| `aria-haspopup="dialog"`            | `Trigger`                                               | Indicates popover                                  |
-| `aria-expanded`                     | `Trigger`                                               | `"true"` / `"false"`                               |
-| `aria-controls`                     | `Trigger`                                               | Content ID                                         |
-| `aria-labelledby`                   | `Content`, `Trigger`                                    | Label ID                                           |
-| `role="application"`                | `AreaThumb`                                             | 2D color area interaction                          |
-| `aria-roledescription="color area"` | `AreaThumb`                                             | Describes the 2D area control                      |
-| `role="slider"`                     | Channel slider thumbs                                   | Slider interaction                                 |
-| `aria-valuenow`                     | Channel slider thumbs                                   | Current numeric value                              |
-| `aria-valuemin` / `aria-valuemax`   | Channel slider thumbs                                   | Channel range                                      |
-| `aria-valuetext`                    | `AreaThumb`                                             | Formatted color string                             |
-| `aria-label`                        | `AreaThumb`                                             | `"Color area selector"`                            |
-| `aria-label`                        | Channel slider thumbs                                   | `"Hue"`, `"Alpha"`                                 |
-| `aria-label`                        | `EyeDropperTrigger`                                     | `"Pick color from screen"`                         |
-| `aria-label`                        | `FormatSelect`                                          | `"Toggle color format"`                            |
-| `aria-label`                        | `Swatch`                                                | `"Select color #rrggbb"`                           |
-| `aria-live="polite"`                | Value text live region                                  | Announces color changes                            |
-| `aria-disabled="true"`              | `Trigger`, `AreaThumb`, channel slider thumbs, `Swatch` | When disabled (these also drop to `tabindex="-1"`) |
-| `aria-keyshortcuts`                 | `AreaThumb`                                             | Documents arrow key controls                       |
+| Attribute / Behaviour               | Element                                                                 | Value                                                           |
+| ----------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `role="dialog"`                     | `Content`                                                               | Popover container                                               |
+| `aria-haspopup="dialog"`            | `Trigger`                                                               | Indicates popover                                               |
+| `aria-expanded`                     | `Trigger`                                                               | `"true"` / `"false"`                                            |
+| `aria-controls`                     | `Trigger`                                                               | Content ID                                                      |
+| `aria-labelledby`                   | `Content`, `Trigger`                                                    | Label ID                                                        |
+| `role="application"`                | `AreaThumb`                                                             | 2D color area interaction                                       |
+| `aria-roledescription="color area"` | `AreaThumb`                                                             | Describes the 2D area control                                   |
+| `role="slider"`                     | Channel slider thumbs                                                   | Slider interaction                                              |
+| `aria-valuenow`                     | Channel slider thumbs                                                   | Current numeric value                                           |
+| `aria-valuemin` / `aria-valuemax`   | Channel slider thumbs                                                   | Channel range                                                   |
+| `aria-valuetext`                    | `AreaThumb`                                                             | Formatted color string                                          |
+| `aria-label`                        | `AreaThumb`                                                             | `"Color area selector"`                                         |
+| `aria-label`                        | Channel slider thumbs                                                   | `"Hue"`, `"Alpha"`                                              |
+| `aria-label`                        | `EyeDropperTrigger`                                                     | `"Pick color from screen"`                                      |
+| `aria-label`                        | `FormatSelect`                                                          | `"Toggle color format"`                                         |
+| `aria-label`                        | `Swatch`                                                                | `"Select color #rrggbb"`                                        |
+| `aria-live="polite"`                | Value text live region                                                  | Announces color changes                                         |
+| `aria-disabled="true"`              | `Trigger`, `AreaThumb`, channel slider thumbs, `Swatch`, `FormatSelect` | When disabled (the focusable ones also drop to `tabindex="-1"`) |
+| `aria-keyshortcuts`                 | `AreaThumb`                                                             | Documents arrow key controls                                    |
 
 ### 3.2 Keyboard Interaction
 

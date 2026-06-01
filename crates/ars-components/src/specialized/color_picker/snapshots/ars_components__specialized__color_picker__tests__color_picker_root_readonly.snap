@@ -36,6 +36,12 @@ AttrMap {
                 "closed",
             ),
         ),
+        (
+            Dir,
+            String(
+                "ltr",
+            ),
+        ),
     ],
     styles: [],
 }

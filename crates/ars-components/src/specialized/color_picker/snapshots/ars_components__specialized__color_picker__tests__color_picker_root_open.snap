@@ -28,6 +28,12 @@ AttrMap {
                 "open",
             ),
         ),
+        (
+            Dir,
+            String(
+                "ltr",
+            ),
+        ),
     ],
     styles: [],
 }

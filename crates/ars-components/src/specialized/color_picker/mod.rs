@@ -815,6 +815,10 @@ impl ars_core::Machine for Machine {
                 // deliberately excludes `color_space`, so it must pass through
                 // here or a disabled picker would be stuck on the old channel set.
                 | Event::ChangeColorSpace(_)
+                // The adapter's `EyeDropper` capability report is not user
+                // interaction — let it through so a picker opened while disabled
+                // records support and the trigger is ready once it is re-enabled.
+                | Event::SetEyedropperSupported(_)
                 | Event::Focus { .. }
                 | Event::Blur { .. }
                 | Event::SyncValue(_)
@@ -1210,6 +1214,17 @@ const fn channel_token(channel: ColorChannel) -> &'static str {
     }
 }
 
+/// The user-facing upper-case label for a color space (e.g. `"HSL"`), used in
+/// the color-space-switch announcement instead of the Rust `Debug` name.
+const fn color_space_label(space: ColorSpace) -> &'static str {
+    match space {
+        ColorSpace::Rgb => "RGB",
+        ColorSpace::Hsl => "HSL",
+        ColorSpace::Hsb => "HSB",
+        ColorSpace::Hwb => "HWB",
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Api
 // ────────────────────────────────────────────────────────────────────
@@ -1341,11 +1356,13 @@ impl Api<'_> {
     }
 
     /// The `aria-live` announcement text for the active color space, used by the
-    /// [`Effect::AnnounceColorSpace`] adapter handler.
+    /// [`Effect::AnnounceColorSpace`] adapter handler. Uses the user-facing
+    /// upper-case label (`"RGB"`, `"HSL"`, …) rather than the Rust `Debug` name,
+    /// so screen readers hear "Switched to HSL color space".
     #[must_use]
     pub fn color_space_announcement(&self) -> String {
         (self.ctx.messages.color_space_switched)(
-            &format!("{:?}", self.ctx.color_space),
+            color_space_label(self.ctx.color_space),
             &self.ctx.locale,
         )
     }
@@ -1372,6 +1389,23 @@ impl Api<'_> {
         (self.send)(Event::SetFormat(format));
     }
 
+    /// Set a single channel from its numeric input, in the same display units
+    /// [`channel_input_attrs`](Self::channel_input_attrs) exposes: degrees for
+    /// hue, raw `0`–`255` for the RGB channels, and a `0`–`100` percentage for the
+    /// fractional channels (saturation, lightness, brightness, alpha). The
+    /// percentage is converted back to the `0..=1` channel unit before dispatch,
+    /// so reading and writing an input round-trip. Space-aware: in HSB, the
+    /// `Saturation` channel is HSB saturation.
+    pub fn set_channel(&self, channel: ColorChannel, display_value: f64) {
+        let value = match channel {
+            ColorChannel::Hue | ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => {
+                display_value
+            }
+            _ => display_value / 100.0,
+        };
+        (self.send)(Event::SetChannel { channel, value });
+    }
+
     // --- Part attrs ---
 
     /// Attributes for the root element.
@@ -1383,6 +1417,10 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
+            // Expose the resolved direction so adapter styles flip the area
+            // gradient / layout in RTL to match the RTL-mirrored keyboard
+            // handling (the spec requires the visual picker to flip in RTL).
+            .set(HtmlAttr::Dir, self.ctx.dir.as_html_attr())
             .set(
                 HtmlAttr::Data("ars-state"),
                 if self.is_open() { "open" } else { "closed" },
@@ -1774,6 +1812,15 @@ impl Api<'_> {
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.format_toggle_label)(&self.ctx.locale),
             );
+
+        // The machine drops `SetFormat` while disabled, so the selector must not
+        // appear operable: disable it (works for `<select>`/`<button>`) and mark
+        // it for AT, mirroring the other interactive parts.
+        if self.ctx.disabled {
+            attrs
+                .set_bool(HtmlAttr::Disabled, true)
+                .set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
 
         attrs
     }
@@ -2426,11 +2473,10 @@ mod tests {
 
         assert!(names.contains(&Effect::AnnounceColorSpace));
         assert_eq!(svc.connect(&|_| {}).color_space(), ColorSpace::Rgb);
-        assert!(
-            svc.connect(&|_| {})
-                .color_space_announcement()
-                .contains("Rgb")
-        );
+        // User-facing upper-case label, not the Rust Debug name.
+        let announcement = svc.connect(&|_| {}).color_space_announcement();
+        assert!(announcement.contains("RGB"), "got '{announcement}'");
+        assert!(!announcement.contains("Rgb"));
     }
 
     // ── Format switching ───────────────────────────────────────────
@@ -3986,6 +4032,144 @@ mod tests {
                 .get(&HtmlAttr::Value),
             Some("210")
         );
+    }
+
+    // ── Codex review #706 fourth pass ──────────────────────────────
+
+    #[test]
+    fn format_select_is_disabled_when_picker_disabled() {
+        let disabled = service(Props {
+            disabled: true,
+            ..Props::default()
+        });
+        let attrs = disabled.connect(&|_| {}).format_select_attrs();
+        assert!(attrs.contains(&HtmlAttr::Disabled));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+
+        // Enabled: no disabled markers.
+        let enabled = service(Props::default());
+        assert!(
+            !enabled
+                .connect(&|_| {})
+                .format_select_attrs()
+                .contains(&HtmlAttr::Disabled)
+        );
+    }
+
+    #[test]
+    fn eyedropper_support_syncs_while_disabled() {
+        // Opened while disabled: the adapter's capability report still applies,
+        // so the trigger is ready once the picker is re-enabled.
+        let mut svc = service(Props {
+            disabled: true,
+            default_open: true,
+            ..Props::default()
+        });
+        drop(svc.take_initial_effects());
+        drop(svc.send(Event::SetEyedropperSupported(true)));
+        assert!(svc.context().eyedropper_supported);
+        assert!(
+            !svc.connect(&|_| {})
+                .eye_dropper_trigger_attrs()
+                .contains(&HtmlAttr::Hidden),
+            "eyedropper trigger is shown once support is recorded"
+        );
+    }
+
+    #[test]
+    fn set_channel_converts_display_units() {
+        // Fractional channels: the display percentage is converted back to 0..=1.
+        let captured = RefCell::new(Vec::new());
+        let svc = open_service(Props::default());
+        let send = |event: Event| captured.borrow_mut().push(event);
+        let api = svc.connect(&send);
+
+        api.set_channel(ColorChannel::Saturation, 60.0); // 60% -> 0.6
+        api.set_channel(ColorChannel::Hue, 200.0); // degrees pass through
+        api.set_channel(ColorChannel::Red, 128.0); // 0-255 pass through
+
+        let events = captured.borrow();
+        assert_eq!(
+            events[0],
+            Event::SetChannel {
+                channel: ColorChannel::Saturation,
+                value: 0.6
+            }
+        );
+        assert_eq!(
+            events[1],
+            Event::SetChannel {
+                channel: ColorChannel::Hue,
+                value: 200.0
+            }
+        );
+        assert_eq!(
+            events[2],
+            Event::SetChannel {
+                channel: ColorChannel::Red,
+                value: 128.0
+            }
+        );
+    }
+
+    #[test]
+    fn set_channel_round_trips_with_channel_input_value() {
+        // Reading an input value and writing it straight back must be a no-op.
+        let mut svc = open_service(Props {
+            default_value: ColorValue::from_hsl(210.0, 0.4, 0.6),
+            ..Props::default()
+        });
+        let displayed: f64 = svc
+            .connect(&|_| {})
+            .channel_input_attrs(ColorChannel::Saturation, 1)
+            .get(&HtmlAttr::Value)
+            .unwrap()
+            .parse()
+            .unwrap();
+        let before = svc.connect(&|_| {}).value().saturation;
+        let captured = RefCell::new(None);
+        svc.connect(&|event: Event| *captured.borrow_mut() = Some(event))
+            .set_channel(ColorChannel::Saturation, displayed);
+        let event = captured.borrow().expect("set_channel dispatched an event");
+        drop(svc.send(event));
+        assert!((svc.connect(&|_| {}).value().saturation - before).abs() < 0.01);
+    }
+
+    #[test]
+    fn root_attrs_expose_direction() {
+        let ltr = service(Props::default());
+        assert_eq!(
+            ltr.connect(&|_| {}).root_attrs().get(&HtmlAttr::Dir),
+            Some("ltr")
+        );
+        let rtl = service(Props {
+            dir: Direction::Rtl,
+            ..Props::default()
+        });
+        assert_eq!(
+            rtl.connect(&|_| {}).root_attrs().get(&HtmlAttr::Dir),
+            Some("rtl")
+        );
+    }
+
+    #[test]
+    fn color_space_announcement_uses_user_facing_label() {
+        for (space, label) in [
+            (ColorSpace::Rgb, "RGB"),
+            (ColorSpace::Hsl, "HSL"),
+            (ColorSpace::Hsb, "HSB"),
+            (ColorSpace::Hwb, "HWB"),
+        ] {
+            let svc = service(Props {
+                color_space: space,
+                ..Props::default()
+            });
+            let announcement = svc.connect(&|_| {}).color_space_announcement();
+            assert!(
+                announcement.contains(label),
+                "{space:?} should announce '{label}', got '{announcement}'"
+            );
+        }
     }
 
     // ── Snapshots: every anatomy part + output-affecting branches ──
