@@ -221,6 +221,31 @@ fn min_max_and_unavailable_dates_block_selection() {
 }
 
 #[test]
+fn unavailable_dates_inside_pending_range_block_completion() {
+    let unavailable = Callback::new_ref(|date: &CalendarDate| date.day() == 12);
+    let mut svc = service_with(props().is_date_unavailable(Some(unavailable)), en_us());
+
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 1, 10),
+    }));
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 1, 15),
+    }));
+
+    assert_eq!(*svc.context().value.get(), None);
+    assert_eq!(svc.context().anchor_date, Some(date(2024, 1, 10)));
+
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 1, 11),
+    }));
+
+    assert_eq!(
+        *svc.context().value.get(),
+        Some(range(date(2024, 1, 10), date(2024, 1, 11))),
+    );
+}
+
+#[test]
 fn range_span_constraints_keep_anchor_pending_when_invalid() {
     let mut svc = service_with(props().max_range_days(Some(3)), en_us());
 
@@ -290,6 +315,44 @@ fn controlled_value_sync_preserves_pending_anchor() {
         *svc.context().value.get(),
         Some(range(date(2024, 1, 3), date(2024, 1, 4))),
     );
+}
+
+#[test]
+fn constraint_sync_clears_pending_anchor_and_hover_when_anchor_becomes_invalid() {
+    let mut svc = service();
+
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 1, 10),
+    }));
+    drop(svc.send(Event::HoverDate {
+        date: date(2024, 1, 12),
+    }));
+    drop(svc.set_props(props().min(Some(date(2024, 1, 15)))));
+
+    assert_eq!(svc.context().anchor_date, None);
+    assert_eq!(svc.context().hovering_date, None);
+
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 1, 16),
+    }));
+
+    assert_eq!(*svc.context().value.get(), None);
+    assert_eq!(svc.context().anchor_date, Some(date(2024, 1, 16)));
+}
+
+#[test]
+fn unavailable_sync_clears_pending_anchor_when_predicate_rejects_it() {
+    let mut svc = service();
+
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 1, 10),
+    }));
+
+    let unavailable = Callback::new_ref(|date: &CalendarDate| date.day() == 10);
+    drop(svc.set_props(props().is_date_unavailable(Some(unavailable))));
+
+    assert_eq!(svc.context().anchor_date, None);
+    assert_eq!(svc.context().hovering_date, None);
 }
 
 #[test]

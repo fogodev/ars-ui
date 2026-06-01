@@ -1076,7 +1076,30 @@ fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
 
     ctx.focused_date = ctx.clamp_date(ctx.focused_date.clone());
 
+    revalidate_pending_selection(ctx);
     ctx.sync_visible_to_focused();
+}
+
+fn revalidate_pending_selection(ctx: &mut Context) {
+    let anchor_still_selectable = ctx
+        .anchor_date
+        .as_ref()
+        .is_some_and(|date| !ctx.is_date_disabled(date) && !ctx.is_date_unavailable(date));
+
+    if !anchor_still_selectable {
+        ctx.anchor_date = None;
+        ctx.hovering_date = None;
+
+        return;
+    }
+
+    if ctx
+        .hovering_date
+        .as_ref()
+        .is_some_and(|date| ctx.is_date_disabled(date) || ctx.is_date_unavailable(date))
+    {
+        ctx.hovering_date = None;
+    }
 }
 
 fn apply_select_date(ctx: &Context, date: CalendarDate) -> Option<TransitionPlan<Machine>> {
@@ -1086,7 +1109,7 @@ fn apply_select_date(ctx: &Context, date: CalendarDate) -> Option<TransitionPlan
 
     if let Some(anchor) = &ctx.anchor_date {
         let range = DateRange::normalized(anchor.clone(), date.clone())?;
-        if !ctx.range_is_allowed(&range) {
+        if !range_is_selectable(ctx, &range) {
             let focused = date;
 
             return Some(
@@ -1122,6 +1145,48 @@ fn apply_select_date(ctx: &Context, date: CalendarDate) -> Option<TransitionPlan
                 .with_effect(ars_core::PendingEffect::named(Effect::AnnounceRangeStart)),
         )
     }
+}
+
+fn range_is_selectable(ctx: &Context, range: &DateRange) -> bool {
+    if !ctx.range_is_allowed(range) {
+        return false;
+    }
+
+    if ctx.is_date_disabled(&range.start) || ctx.is_date_disabled(&range.end) {
+        return false;
+    }
+
+    if ctx.is_date_unavailable_fn.is_none() {
+        return true;
+    }
+
+    range_dates_all(ctx, range, |ctx, date| !ctx.is_date_unavailable(date))
+}
+
+fn range_dates_all(
+    ctx: &Context,
+    range: &DateRange,
+    mut predicate: impl FnMut(&Context, &CalendarDate) -> bool,
+) -> bool {
+    let Some(days) = inclusive_range_days(range) else {
+        return false;
+    };
+
+    for offset in 0..days {
+        let Ok(offset) = i32::try_from(offset) else {
+            return false;
+        };
+
+        let Ok(date) = range.start.add_days(offset) else {
+            return false;
+        };
+
+        if !predicate(ctx, &date) {
+            return false;
+        }
+    }
+
+    true
 }
 
 fn step_for_page_behavior(ctx: &Context) -> i32 {
