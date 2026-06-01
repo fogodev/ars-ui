@@ -28,6 +28,12 @@ AttrMap {
                 "Pick color from screen",
             ),
         ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
     ],
     styles: [],
 }

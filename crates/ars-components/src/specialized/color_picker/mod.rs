@@ -191,6 +191,16 @@ pub enum Event {
         step: f64,
     },
 
+    /// Keyboard adjustment of the 2D area's horizontal (saturation) axis by a
+    /// signed fraction `[-1, 1]`. Space-aware: HSB saturation in HSB, HSL
+    /// saturation otherwise (the area is a 2D control, not a single channel, so
+    /// it does not reuse `ChannelIncrement`).
+    AreaXStep(f64),
+
+    /// Keyboard adjustment of the 2D area's vertical axis by a signed fraction
+    /// `[-1, 1]` — brightness in HSB, lightness otherwise.
+    AreaYStep(f64),
+
     /// Close on interact outside (suppressed while dragging).
     CloseOnInteractOutside,
 
@@ -562,22 +572,15 @@ impl ComponentMessages for Messages {}
 /// given drag target.
 ///
 /// For [`DragTarget::Area`] the x-axis maps to saturation `[0, 1]` and the
-/// y-axis maps to lightness `[1, 0]` (top = lightest). For
-/// [`DragTarget::Channel`] the x-axis maps across the channel's full range.
-/// Both base the new color on the *pending* value so a controlled drag-in-flight
-/// accumulates rather than re-reading the stale controlled prop.
+/// y-axis maps to the area's vertical channel `[1, 0]` (top = max), interpreted
+/// in the active color space (HSB saturation × brightness for HSB, HSL
+/// saturation × lightness otherwise). For [`DragTarget::Channel`] the x-axis maps
+/// across the channel's full range. Both base the new color on the *pending*
+/// value so a controlled drag-in-flight accumulates rather than re-reading the
+/// stale controlled prop.
 fn apply_drag_position(ctx: &mut Context, target: DragTarget, x: f64, y: f64) {
     match target {
-        DragTarget::Area => {
-            let current = *ctx.value.pending();
-            let saturation = x.clamp(0.0, 1.0);
-            let y_value = (1.0 - y).clamp(0.0, 1.0);
-            // The area's vertical axis is brightness in HSB, lightness otherwise.
-            let y_channel = ctx.area_y_channel();
-            let updated = with_channel(&current, ColorChannel::Saturation, saturation);
-            ctx.value.set(with_channel(&updated, y_channel, y_value));
-        }
-
+        DragTarget::Area => set_area(ctx, x, 1.0 - y),
         DragTarget::Channel(channel) => {
             let (min, max) = channel_range(channel);
             let value = min + x.clamp(0.0, 1.0) * (max - min);
@@ -586,11 +589,60 @@ fn apply_drag_position(ctx: &mut Context, target: DragTarget, x: f64, y: f64) {
     }
 }
 
-/// Set a single channel on the pending color, keeping the unwrapped
-/// [`Context::hue_value`] in sync when the hue channel is edited so the 360°
-/// endpoint survives [`ColorValue`]'s `[0, 360)` hue wrap.
+/// The current area coordinates `(saturation, y)` in `0..=1`, interpreted in the
+/// active color space: HSB saturation × brightness for HSB, HSL saturation ×
+/// lightness otherwise.
+fn area_axes(ctx: &Context) -> (f64, f64) {
+    let color = ctx.value.pending();
+    if ctx.color_space == ColorSpace::Hsb {
+        let (_, hsb_saturation, brightness) = color.to_hsb();
+        (hsb_saturation, brightness)
+    } else {
+        (color.saturation, color.lightness)
+    }
+}
+
+/// Write the area coordinates `(saturation, y)` back to the pending color,
+/// space-aware so HSB edits stay coherent in HSB space (both axes set together
+/// via [`ColorValue::from_hsb`]) rather than mixing HSL saturation with HSB
+/// brightness. Hue and alpha are preserved.
+fn set_area(ctx: &mut Context, saturation: f64, y: f64) {
+    let current = *ctx.value.pending();
+    let saturation = saturation.clamp(0.0, 1.0);
+    let y = y.clamp(0.0, 1.0);
+
+    let next = if ctx.color_space == ColorSpace::Hsb {
+        let mut color = ColorValue::from_hsb(current.hue, saturation, y);
+        color.alpha = current.alpha;
+        color
+    } else {
+        let updated = with_channel(&current, ColorChannel::Saturation, saturation);
+        with_channel(&updated, ColorChannel::Lightness, y)
+    };
+
+    ctx.value.set(next);
+}
+
+/// Set a single channel on the pending color, space-aware so the value the user
+/// edits matches the active color space:
+///
+/// - **Hue** also updates the unwrapped [`Context::hue_value`] so the 360°
+///   endpoint survives [`ColorValue`]'s `[0, 360)` wrap.
+/// - **Saturation in HSB** is HSB saturation (set via [`ColorValue::from_hsb`]
+///   keeping the current brightness), so the numeric S input stays consistent
+///   with the HSB area; in every other space it is HSL saturation.
+/// - All other channels go straight through [`with_channel`].
 fn set_channel_value(ctx: &mut Context, channel: ColorChannel, value: f64) {
     let base = *ctx.value.pending();
+
+    if channel == ColorChannel::Saturation && ctx.color_space == ColorSpace::Hsb {
+        let (hue, _, brightness) = base.to_hsb();
+        let mut next = ColorValue::from_hsb(hue, value, brightness);
+        next.alpha = base.alpha;
+        ctx.value.set(next);
+        return;
+    }
+
     ctx.value.set(with_channel(&base, channel, value));
     if channel == ColorChannel::Hue {
         ctx.hue_value = value.clamp(0.0, 360.0);
@@ -603,14 +655,17 @@ const fn sync_hue_from_color(ctx: &mut Context) {
     ctx.hue_value = ctx.value.pending().hue;
 }
 
-/// The current value of `channel` for keyboard stepping — the unwrapped
-/// [`Context::hue_value`] for hue (so stepping near the 360° endpoint does not
-/// collapse to 0°), the live color value otherwise.
+/// The current value of `channel` for keyboard stepping and numeric display,
+/// space-aware to mirror [`set_channel_value`]: the unwrapped
+/// [`Context::hue_value`] for hue, HSB saturation for Saturation in HSB, the
+/// live color value otherwise.
 fn channel_current(ctx: &Context, channel: ColorChannel) -> f64 {
-    if channel == ColorChannel::Hue {
-        ctx.hue_value
-    } else {
-        channel_value(ctx.value.pending(), channel)
+    match channel {
+        ColorChannel::Hue => ctx.hue_value,
+        ColorChannel::Saturation if ctx.color_space == ColorSpace::Hsb => {
+            ctx.value.pending().to_hsb().1
+        }
+        _ => channel_value(ctx.value.pending(), channel),
     }
 }
 
@@ -755,6 +810,11 @@ impl ars_core::Machine for Machine {
                 // parent disables the control still terminates cleanly (fires
                 // `on_change_end`, clears `data-ars-dragging`), matching ColorArea.
                 | Event::DragEnd
+                // A controlled `color_space` prop change arrives as
+                // `ChangeColorSpace` (see `on_props_changed`) and `SetProps`
+                // deliberately excludes `color_space`, so it must pass through
+                // here or a disabled picker would be stuck on the old channel set.
+                | Event::ChangeColorSpace(_)
                 | Event::Focus { .. }
                 | Event::Blur { .. }
                 | Event::SyncValue(_)
@@ -887,6 +947,28 @@ impl ars_core::Machine for Machine {
                     let (min, _) = channel_range(channel);
                     let current = channel_current(ctx, channel);
                     set_channel_value(ctx, channel, (current - step).max(min));
+                }))
+            }
+
+            (State::Open, Event::AreaXStep(delta)) => {
+                if ctx.readonly {
+                    return None;
+                }
+                let delta = *delta;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let (saturation, y) = area_axes(ctx);
+                    set_area(ctx, saturation + delta, y);
+                }))
+            }
+
+            (State::Open, Event::AreaYStep(delta)) => {
+                if ctx.readonly {
+                    return None;
+                }
+                let delta = *delta;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let (saturation, y) = area_axes(ctx);
+                    set_area(ctx, saturation, y + delta);
                 }))
             }
 
@@ -1208,11 +1290,24 @@ impl Api<'_> {
             ColorFormat::Hsb => {
                 let (hue, saturation, brightness) = color.to_hsb();
 
-                format!(
-                    "hsb({hue:.0}, {:.1}%, {:.1}%)",
-                    saturation * 100.0,
-                    brightness * 100.0
-                )
+                // Emit `hsba(...)` for a translucent color (matching the
+                // canonical `format_color_string`) so the displayed text
+                // round-trips through the parser instead of silently dropping
+                // alpha; suppress alpha when the alpha controls are hidden.
+                if self.ctx.show_alpha && color.alpha < 1.0 {
+                    format!(
+                        "hsba({hue:.0}, {:.1}%, {:.1}%, {:.2})",
+                        saturation * 100.0,
+                        brightness * 100.0,
+                        color.alpha
+                    )
+                } else {
+                    format!(
+                        "hsb({hue:.0}, {:.1}%, {:.1}%)",
+                        saturation * 100.0,
+                        brightness * 100.0
+                    )
+                }
             }
         }
     }
@@ -1452,10 +1547,10 @@ impl Api<'_> {
 
         let color = self.ctx.value.pending();
 
-        // The area's vertical axis is brightness in HSB, lightness otherwise.
-        let y_channel = self.ctx.area_y_channel();
-        let y_value = channel_value(color, y_channel);
-        let y_label = if y_channel == ColorChannel::Brightness {
+        // The area axes are interpreted in the active space: HSB saturation ×
+        // brightness for HSB, HSL saturation × lightness otherwise.
+        let (area_saturation, y_value) = area_axes(self.ctx);
+        let y_label = if self.ctx.area_y_channel() == ColorChannel::Brightness {
             (self.ctx.messages.brightness_label)(&self.ctx.locale)
         } else {
             (self.ctx.messages.lightness_label)(&self.ctx.locale)
@@ -1463,7 +1558,7 @@ impl Api<'_> {
 
         let saturation_text = (self.ctx.messages.channel_value_text)(
             &(self.ctx.messages.saturation_label)(&self.ctx.locale),
-            &format!("{:.0}%", (color.saturation * 100.0).round()),
+            &format!("{:.0}%", (area_saturation * 100.0).round()),
             "",
             &self.ctx.locale,
         );
@@ -1483,7 +1578,7 @@ impl Api<'_> {
         attrs
             .set_style(
                 CssProperty::Custom("ars-color-picker-area-thumb-x"),
-                format!("{:.1}%", color.saturation * 100.0),
+                format!("{:.1}%", area_saturation * 100.0),
             )
             .set_style(
                 CssProperty::Custom("ars-color-picker-area-thumb-y"),
@@ -1495,7 +1590,15 @@ impl Api<'_> {
                 "ArrowUp ArrowDown ArrowLeft ArrowRight",
             );
 
-        if self.is_dragging() {
+        // Only the area thumb itself is "dragging"; a hue/alpha slider drag keeps
+        // the state `Dragging` but targets a channel, so the area thumb must not
+        // claim the active flag.
+        if matches!(
+            self.state,
+            State::Dragging {
+                target: DragTarget::Area
+            }
+        ) {
             attrs.set_bool(HtmlAttr::Data("ars-dragging"), true);
         }
 
@@ -1689,7 +1792,10 @@ impl Api<'_> {
             .set(HtmlAttr::Type, "text")
             .set(HtmlAttr::InputMode, "numeric")
             .set(HtmlAttr::Data("ars-channel"), channel_token(channel))
-            .set(HtmlAttr::Data("ars-channel-index"), index.to_string());
+            .set(HtmlAttr::Data("ars-channel-index"), index.to_string())
+            // Populate the current channel value so adapters that source input
+            // props from the connect attrs show the existing color, not a blank.
+            .set(HtmlAttr::Value, self.channel_display_value(channel));
 
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -1700,6 +1806,21 @@ impl Api<'_> {
         }
 
         attrs
+    }
+
+    /// The current value of `channel` formatted for its numeric text input:
+    /// degrees for hue (`0`–`360`), raw `0`–`255` for the RGB channels, and an
+    /// integer percentage for the fractional channels (saturation, lightness,
+    /// brightness, alpha). Space-aware via [`channel_current`].
+    #[must_use]
+    fn channel_display_value(&self, channel: ColorChannel) -> String {
+        let value = channel_current(self.ctx, channel);
+        match channel {
+            ColorChannel::Hue | ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => {
+                format!("{value:.0}")
+            }
+            _ => format!("{:.0}", value * 100.0),
+        }
     }
 
     /// Attributes for the hex text input.
@@ -1735,6 +1856,9 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
+            // `type="button"` so an eyedropper rendered as a native `<button>` in
+            // a form opens the picker instead of submitting (matches the trigger).
+            .set(HtmlAttr::Type, "button")
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.eyedropper_label)(&self.ctx.locale),
@@ -1823,47 +1947,21 @@ impl Api<'_> {
     /// lightness otherwise); `shift` selects the large step. In RTL the saturation
     /// (x-axis) arrows are mirrored.
     pub fn on_area_thumb_keydown(&self, data: &KeyboardEventData, shift: bool) {
-        let saturation_step = self.keyboard_step(ColorChannel::Saturation, shift);
-        let y_channel = self.ctx.area_y_channel();
-        let y_step = self.keyboard_step(y_channel, shift);
-
+        // Both area axes are fractional `[0, 1]`, so they share the saturation
+        // step (1% default, 10% with Shift). The area emits its own `AreaXStep`/
+        // `AreaYStep` so the machine can apply them space-aware (HSB vs HSL).
+        let step = self.keyboard_step(ColorChannel::Saturation, shift);
         let rtl = self.ctx.dir == Direction::Rtl;
 
         match data.key {
-            KeyboardKey::ArrowRight => (self.send)(if rtl {
-                Event::ChannelDecrement {
-                    channel: ColorChannel::Saturation,
-                    step: saturation_step,
-                }
-            } else {
-                Event::ChannelIncrement {
-                    channel: ColorChannel::Saturation,
-                    step: saturation_step,
-                }
-            }),
-
-            KeyboardKey::ArrowLeft => (self.send)(if rtl {
-                Event::ChannelIncrement {
-                    channel: ColorChannel::Saturation,
-                    step: saturation_step,
-                }
-            } else {
-                Event::ChannelDecrement {
-                    channel: ColorChannel::Saturation,
-                    step: saturation_step,
-                }
-            }),
-
-            KeyboardKey::ArrowUp => (self.send)(Event::ChannelIncrement {
-                channel: y_channel,
-                step: y_step,
-            }),
-
-            KeyboardKey::ArrowDown => (self.send)(Event::ChannelDecrement {
-                channel: y_channel,
-                step: y_step,
-            }),
-
+            KeyboardKey::ArrowRight => {
+                (self.send)(Event::AreaXStep(if rtl { -step } else { step }));
+            }
+            KeyboardKey::ArrowLeft => {
+                (self.send)(Event::AreaXStep(if rtl { step } else { -step }));
+            }
+            KeyboardKey::ArrowUp => (self.send)(Event::AreaYStep(step)),
+            KeyboardKey::ArrowDown => (self.send)(Event::AreaYStep(-step)),
             _ => {}
         }
     }
@@ -2418,20 +2516,10 @@ mod tests {
 
         let events = captured.borrow();
 
-        assert!(matches!(
-            events[0],
-            Event::ChannelIncrement {
-                channel: ColorChannel::Saturation,
-                ..
-            }
-        ));
-        assert!(matches!(
-            events[1],
-            Event::ChannelIncrement {
-                channel: ColorChannel::Lightness,
-                ..
-            }
-        ));
+        // The area is a 2D control, so it steps its own space-aware axes.
+        let step = channel_step_default(ColorChannel::Saturation);
+        assert_eq!(events[0], Event::AreaXStep(step));
+        assert_eq!(events[1], Event::AreaYStep(step * 10.0)); // shift = large step
     }
 
     #[test]
@@ -2452,21 +2540,10 @@ mod tests {
 
         let events = captured.borrow();
 
-        // RTL: ArrowRight decrements saturation, ArrowLeft increments it.
-        assert!(matches!(
-            events[0],
-            Event::ChannelDecrement {
-                channel: ColorChannel::Saturation,
-                ..
-            }
-        ));
-        assert!(matches!(
-            events[1],
-            Event::ChannelIncrement {
-                channel: ColorChannel::Saturation,
-                ..
-            }
-        ));
+        // RTL mirrors the x-axis: ArrowRight steps saturation negative, ArrowLeft positive.
+        let step = channel_step_default(ColorChannel::Saturation);
+        assert_eq!(events[0], Event::AreaXStep(-step));
+        assert_eq!(events[1], Event::AreaXStep(step));
     }
 
     #[test]
@@ -3386,20 +3463,9 @@ mod tests {
         let events = captured.borrow();
 
         assert_eq!(events.len(), 2, "Tab must not dispatch an event");
-        assert!(matches!(
-            events[0],
-            Event::ChannelDecrement {
-                channel: ColorChannel::Saturation,
-                ..
-            }
-        ));
-        assert!(matches!(
-            events[1],
-            Event::ChannelDecrement {
-                channel: ColorChannel::Lightness,
-                ..
-            }
-        ));
+        let step = channel_step_default(ColorChannel::Saturation);
+        assert_eq!(events[0], Event::AreaXStep(-step));
+        assert_eq!(events[1], Event::AreaYStep(-step));
     }
 
     #[test]
@@ -3698,18 +3764,61 @@ mod tests {
             "brightness -> 1 (top of area)"
         );
 
-        // Up arrow on the HSB area thumb increments brightness.
+        // Up arrow steps the area's vertical axis (brightness in HSB) positive,
+        // and the machine applies AreaYStep space-aware.
         let captured = RefCell::new(Vec::new());
         let send = |event: Event| captured.borrow_mut().push(event);
         svc.connect(&send)
             .on_area_thumb_keydown(&key(KeyboardKey::ArrowUp), false);
-        assert!(matches!(
+        assert_eq!(
             captured.borrow()[0],
-            Event::ChannelIncrement {
-                channel: ColorChannel::Brightness,
-                ..
-            }
-        ));
+            Event::AreaYStep(channel_step_default(ColorChannel::Saturation))
+        );
+
+        // Stepping the HSB area's x-axis edits HSB saturation specifically.
+        let mut hsb = open_service(Props {
+            color_space: ColorSpace::Hsb,
+            default_value: ColorValue::from_hsl(200.0, 0.3, 0.4),
+            ..Props::default()
+        });
+        let before = hsb.connect(&|_| {}).value().to_hsb().1;
+        drop(hsb.send(Event::AreaXStep(0.1)));
+        let after = hsb.connect(&|_| {}).value().to_hsb().1;
+        assert!(
+            after > before,
+            "AreaXStep raises HSB saturation: {before} -> {after}"
+        );
+    }
+
+    #[test]
+    fn hsb_channel_input_value_uses_hsb_saturation() {
+        // In HSB the numeric S input must show HSB saturation (matching the area),
+        // not HSL saturation.
+        let svc = open_service(Props {
+            color_space: ColorSpace::Hsb,
+            default_value: ColorValue::from_hsl(200.0, 0.5, 0.5),
+            ..Props::default()
+        });
+        let color = *svc.connect(&|_| {}).value();
+        let (_, hsb_sat, _) = color.to_hsb();
+        let input = svc
+            .connect(&|_| {})
+            .channel_input_attrs(ColorChannel::Saturation, 1);
+        assert_eq!(
+            input.get(&HtmlAttr::Value),
+            Some(format!("{:.0}", hsb_sat * 100.0).as_str())
+        );
+
+        // Setting the HSB saturation channel keeps brightness fixed.
+        let mut svc = svc;
+        let before_v = svc.connect(&|_| {}).value().to_hsb().2;
+        drop(svc.send(Event::SetChannel {
+            channel: ColorChannel::Saturation,
+            value: 0.9,
+        }));
+        let (_, s_after, v_after) = svc.connect(&|_| {}).value().to_hsb();
+        assert!((s_after - 0.9).abs() < 1e-6, "HSB saturation set to 0.9");
+        assert!((v_after - before_v).abs() < 1e-6, "brightness preserved");
     }
 
     #[test]
@@ -3747,6 +3856,135 @@ mod tests {
         assert_eq!(
             svc.connect(&|_| {}).swatch_attrs(0).get(&HtmlAttr::Type),
             Some("button")
+        );
+    }
+
+    // ── Codex review #706 third pass ───────────────────────────────
+
+    #[test]
+    fn disabled_picker_still_honors_color_space_prop_change() {
+        // A disabled, controlled-color-space picker must still remap when the
+        // parent switches color_space (it arrives as ChangeColorSpace, which
+        // SetProps excludes).
+        let mut svc = service(Props {
+            disabled: true,
+            color_space: ColorSpace::Hsl,
+            ..Props::default()
+        });
+        drop(svc.set_props(Props {
+            id: "color-picker".to_string(),
+            disabled: true,
+            color_space: ColorSpace::Rgb,
+            ..Props::default()
+        }));
+        assert_eq!(svc.connect(&|_| {}).color_space(), ColorSpace::Rgb);
+    }
+
+    #[test]
+    fn eyedropper_trigger_is_type_button() {
+        let svc = service(Props::default());
+        assert_eq!(
+            svc.connect(&|_| {})
+                .eye_dropper_trigger_attrs()
+                .get(&HtmlAttr::Type),
+            Some("button")
+        );
+    }
+
+    #[test]
+    fn area_thumb_dragging_flag_only_for_area_target() {
+        // A channel-slider drag keeps the state Dragging, but the area thumb must
+        // not claim data-ars-dragging.
+        let mut svc = open_service(Props::default());
+        drop(svc.send(Event::DragStart {
+            target: DragTarget::Channel(ColorChannel::Hue),
+            x: 0.5,
+            y: 0.0,
+        }));
+        assert!(
+            !svc.connect(&|_| {})
+                .area_thumb_attrs()
+                .contains(&HtmlAttr::Data("ars-dragging")),
+            "area thumb must not be 'dragging' during a hue-slider drag"
+        );
+
+        // An actual area drag does set the flag.
+        let mut svc = open_service(Props::default());
+        drop(svc.send(Event::DragStart {
+            target: DragTarget::Area,
+            x: 0.5,
+            y: 0.5,
+        }));
+        assert!(
+            svc.connect(&|_| {})
+                .area_thumb_attrs()
+                .contains(&HtmlAttr::Data("ars-dragging"))
+        );
+    }
+
+    #[test]
+    fn value_as_string_hsb_preserves_alpha() {
+        let mut svc = service(Props {
+            default_value: ColorValue::new(120.0, 1.0, 0.5, 0.5),
+            show_alpha: true,
+            ..Props::default()
+        });
+        drop(svc.send(Event::SetFormat(ColorFormat::Hsb)));
+        let string = svc.connect(&|_| {}).value_as_string();
+        assert!(
+            string.starts_with("hsba("),
+            "translucent HSB must emit hsba(...), got '{string}'"
+        );
+
+        // Opaque (or hidden alpha) stays hsb(...).
+        let opaque = service(Props {
+            default_value: ColorValue::from_hsl(120.0, 1.0, 0.5),
+            ..Props::default()
+        });
+        let mut opaque = opaque;
+        drop(opaque.send(Event::SetFormat(ColorFormat::Hsb)));
+        assert!(
+            opaque
+                .connect(&|_| {})
+                .value_as_string()
+                .starts_with("hsb(")
+        );
+    }
+
+    #[test]
+    fn channel_inputs_expose_current_value() {
+        // RGB pure red: R=255, G=0, B=0, alpha=100%.
+        let svc = open_service(Props {
+            color_space: ColorSpace::Rgb,
+            default_value: ColorValue::from_rgb(255, 0, 0),
+            ..Props::default()
+        });
+        let api = svc.connect(&|_| {});
+        assert_eq!(
+            api.channel_input_attrs(ColorChannel::Red, 0)
+                .get(&HtmlAttr::Value),
+            Some("255")
+        );
+        assert_eq!(
+            api.channel_input_attrs(ColorChannel::Green, 1)
+                .get(&HtmlAttr::Value),
+            Some("0")
+        );
+        assert_eq!(
+            api.channel_input_attrs(ColorChannel::Alpha, 3)
+                .get(&HtmlAttr::Value),
+            Some("100")
+        );
+        // Hue input shows degrees.
+        let hsl = open_service(Props {
+            default_value: ColorValue::from_hsl(210.0, 0.5, 0.5),
+            ..Props::default()
+        });
+        assert_eq!(
+            hsl.connect(&|_| {})
+                .channel_input_attrs(ColorChannel::Hue, 0)
+                .get(&HtmlAttr::Value),
+            Some("210")
         );
     }
 

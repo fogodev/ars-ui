@@ -146,6 +146,17 @@ impl ColorValue {
         (self.hue, sv, v)
     }
 
+    /// Create from an HSB/HSV triplet with full alpha (inverse of `to_hsb`).
+    /// Used by ColorPicker so the HSB area/inputs edit HSB saturation × brightness
+    /// coherently (HSB→HSL: `l = v·(1 − s/2)`, then recover HSL saturation).
+    pub fn from_hsb(hue: f64, saturation: f64, brightness: f64) -> Self {
+        let s = saturation.clamp(0.0, 1.0);
+        let v = brightness.clamp(0.0, 1.0);
+        let l = v * (1.0 - s / 2.0);
+        let sl = if l <= 0.0 || l >= 1.0 { 0.0 } else { (v - l) / l.min(1.0 - l) };
+        Self::new(hue, sl, l, 1.0)
+    }
+
     /// Create from RGB values (0-255).
     pub fn from_rgb(r: u8, g: u8, b: u8) -> Self {
         let r = r as f64 / 255.0;
@@ -689,6 +700,14 @@ pub enum Event {
         /// The step.
         step: f64,
     },
+    /// Keyboard adjustment of the 2D area's horizontal (saturation) axis by a
+    /// signed fraction. Space-aware (HSB saturation in HSB, else HSL): the area
+    /// is a 2D control, not a single channel, so it does not reuse
+    /// `ChannelIncrement`/`Decrement`.
+    AreaXStep(f64),
+    /// Keyboard adjustment of the 2D area's vertical axis by a signed fraction
+    /// (brightness in HSB, lightness otherwise).
+    AreaYStep(f64),
     /// Close on interact outside (suppressed while dragging).
     CloseOnInteractOutside,
     /// Close on escape.
@@ -953,14 +972,7 @@ pub enum Effect {
 /// so a controlled drag-in-flight accumulates.
 fn apply_drag_position(ctx: &mut Context, target: DragTarget, x: f64, y: f64) {
     match target {
-        DragTarget::Area => {
-            let current = *ctx.value.pending();
-            let saturation = x.clamp(0.0, 1.0);
-            let y_value = (1.0 - y).clamp(0.0, 1.0);
-            let y_channel = ctx.area_y_channel(); // brightness in HSB, else lightness
-            let updated = with_channel(&current, ColorChannel::Saturation, saturation);
-            ctx.value.set(with_channel(&updated, y_channel, y_value));
-        }
+        DragTarget::Area => set_area(ctx, x, 1.0 - y),
         DragTarget::Channel(channel) => {
             let (min, max) = channel_range(channel);
             let value = min + x.clamp(0.0, 1.0) * (max - min);
@@ -969,10 +981,50 @@ fn apply_drag_position(ctx: &mut Context, target: DragTarget, x: f64, y: f64) {
     }
 }
 
-/// Set one channel, keeping the unwrapped `hue_value` in sync when hue is edited
-/// so the 360° endpoint survives `ColorValue`'s `[0, 360)` hue wrap.
+/// Current area coordinates `(saturation, y)` in `0..=1`, interpreted in the
+/// active space: HSB saturation × brightness for HSB, HSL saturation × lightness
+/// otherwise.
+fn area_axes(ctx: &Context) -> (f64, f64) {
+    let color = ctx.value.pending();
+    if ctx.color_space == ColorSpace::Hsb {
+        let (_, s, v) = color.to_hsb();
+        (s, v)
+    } else {
+        (color.saturation, color.lightness)
+    }
+}
+
+/// Write the area coordinates back to the pending color, space-aware so HSB edits
+/// set both axes together via `from_hsb` (no HSL-sat/HSB-bright mixing). Hue/alpha
+/// preserved.
+fn set_area(ctx: &mut Context, saturation: f64, y: f64) {
+    let current = *ctx.value.pending();
+    let s = saturation.clamp(0.0, 1.0);
+    let y = y.clamp(0.0, 1.0);
+    let next = if ctx.color_space == ColorSpace::Hsb {
+        let mut color = ColorValue::from_hsb(current.hue, s, y);
+        color.alpha = current.alpha;
+        color
+    } else {
+        let updated = with_channel(&current, ColorChannel::Saturation, s);
+        with_channel(&updated, ColorChannel::Lightness, y)
+    };
+    ctx.value.set(next);
+}
+
+/// Set one channel, space-aware: hue also updates the unwrapped `hue_value` (360°
+/// endpoint), Saturation-in-HSB is HSB saturation (via `from_hsb`, preserving
+/// brightness) so the numeric S input matches the HSB area, others go through
+/// `with_channel`.
 fn set_channel_value(ctx: &mut Context, channel: ColorChannel, value: f64) {
     let base = *ctx.value.pending();
+    if channel == ColorChannel::Saturation && ctx.color_space == ColorSpace::Hsb {
+        let (hue, _, brightness) = base.to_hsb();
+        let mut next = ColorValue::from_hsb(hue, value, brightness);
+        next.alpha = base.alpha;
+        ctx.value.set(next);
+        return;
+    }
     ctx.value.set(with_channel(&base, channel, value));
     if channel == ColorChannel::Hue {
         ctx.hue_value = value.clamp(0.0, 360.0);
@@ -982,10 +1034,16 @@ fn set_channel_value(ctx: &mut Context, channel: ColorChannel, value: f64) {
 /// Re-derive the cached unwrapped hue after an external full-color set.
 fn sync_hue_from_color(ctx: &mut Context) { ctx.hue_value = ctx.value.pending().hue; }
 
-/// The current value of `channel` for keyboard stepping — the unwrapped
-/// `hue_value` for hue, the live color value otherwise.
+/// Current value of `channel` for keyboard stepping / numeric display — unwrapped
+/// `hue_value` for hue, HSB saturation for Saturation-in-HSB, live value otherwise.
 fn channel_current(ctx: &Context, channel: ColorChannel) -> f64 {
-    if channel == ColorChannel::Hue { ctx.hue_value } else { channel_value(ctx.value.pending(), channel) }
+    match channel {
+        ColorChannel::Hue => ctx.hue_value,
+        ColorChannel::Saturation if ctx.color_space == ColorSpace::Hsb => {
+            ctx.value.pending().to_hsb().1
+        }
+        _ => channel_value(ctx.value.pending(), channel),
+    }
 }
 
 /// Invoke `Props::on_change_end` with the pending (drag-staged) color.
@@ -1101,6 +1159,10 @@ impl ars_core::Machine for Machine {
                 // disables the control still terminates cleanly (fires
                 // `on_change_end`, clears `data-ars-dragging`), like ColorArea.
                 | Event::DragEnd
+                // A controlled `color_space` change arrives as `ChangeColorSpace`
+                // (SetProps excludes color_space), so it must pass through or a
+                // disabled picker stays stuck on the old channel set.
+                | Event::ChangeColorSpace(_)
                 | Event::Focus { .. } | Event::Blur { .. }
                 | Event::SyncValue(_) | Event::SetProps => {}
                 _ => return None,
@@ -1178,6 +1240,24 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx| {
                     let (min, _) = channel_range(channel);
                     set_channel_value(ctx, channel, (channel_current(ctx, channel) - step).max(min));
+                }))
+            }
+            // The 2D area steps its own space-aware axes (saturation × lightness
+            // or brightness) rather than reusing the channel events.
+            (State::Open, Event::AreaXStep(delta)) => {
+                if ctx.readonly { return None; }
+                let delta = *delta;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    let (s, y) = area_axes(ctx);
+                    set_area(ctx, s + delta, y);
+                }))
+            }
+            (State::Open, Event::AreaYStep(delta)) => {
+                if ctx.readonly { return None; }
+                let delta = *delta;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    let (s, y) = area_axes(ctx);
+                    set_area(ctx, s, y + delta);
                 }))
             }
 
@@ -1367,6 +1447,13 @@ impl Api<'_> {
                     format!("rgb({r}, {g}, {b})")
                 }
             }
+            // `hsba(...)` for a translucent color (matching the canonical
+            // `format_color_string`) so the text round-trips; `hsb(...)` when
+            // opaque or alpha is hidden.
+            ColorFormat::Hsb if self.ctx.show_alpha && color.alpha < 1.0 => {
+                let (h, s, b) = color.to_hsb();
+                format!("hsba({h:.0}, {:.1}%, {:.1}%, {:.2})", s * 100.0, b * 100.0, color.alpha)
+            }
             ColorFormat::Hsb => {
                 let (h, s, b) = color.to_hsb();
                 format!("hsb({h:.0}, {:.1}%, {:.1}%)", s * 100.0, b * 100.0)
@@ -1426,10 +1513,11 @@ Highlights of the part attribute surface:
   backdrop custom property.
 - **`area_thumb_attrs`** — `role="application"`, `aria-roledescription`,
   `aria-label`, a composed `aria-valuetext` of saturation + the area's vertical
-  channel (lightness, or brightness in HSB via `Context::area_y_channel()`),
-  `aria-keyshortcuts`, thumb-position custom properties (the y position tracks
-  that vertical channel), `tabindex` (`-1` when disabled) with `aria-disabled`
-  when disabled, and `data-ars-dragging` while dragging.
+  axis (lightness, or brightness in HSB); positions/readings come from
+  `area_axes()` so HSB uses HSB saturation. Also `aria-keyshortcuts`,
+  thumb-position custom properties, `tabindex` (`-1` when disabled) with
+  `aria-disabled` when disabled, and `data-ars-dragging` **only** while the
+  active drag target is the area (a hue/alpha slider drag does not flag it).
 - **`channel_slider_attrs(channel)` / `channel_slider_thumb_attrs(channel)`** —
   `role="group"` / `role="slider"` with `data-ars-channel`, `aria-valuenow`/`min`/
   `max`, `aria-label`, the thumb-position custom property, and `data-ars-dragging`
@@ -1442,9 +1530,11 @@ Highlights of the part attribute surface:
   custom property, and `data-ars-selected` when the swatch equals the current
   value. An out-of-range index yields the base attributes only.
 - **`channel_input_attrs(channel, index)`** — `type="text"`, `inputmode="numeric"`,
-  `data-ars-channel`/`data-ars-channel-index`, the channel id, and
-  `disabled`/`readonly` mirrors.
-- **`eye_dropper_trigger_attrs`** — `aria-label`; `hidden` when
+  `data-ars-channel`/`data-ars-channel-index`, the channel id, the current
+  channel `value` (degrees for hue, raw `0`–`255` for RGB, integer percent for
+  the fractional channels; space-aware via `channel_current` so HSB shows HSB
+  saturation), and `disabled`/`readonly` mirrors.
+- **`eye_dropper_trigger_attrs`** — `type="button"`, `aria-label`; `hidden` when
   `eyedropper_supported` is `false`; `disabled` when disabled or read-only.
 - **`hidden_input_attrs`** — `type="hidden"`, optional `name`, and the canonical
   hex `value` (8-digit when `show_alpha` and translucent); `disabled` omits it
@@ -1454,8 +1544,8 @@ The `Api` also exposes typed event-dispatch helpers so adapters never hand-build
 events: `on_trigger_click` / `on_trigger_keydown` (Enter/Space → `Toggle`),
 `on_content_keydown` (Escape → `CloseOnEscape`), `on_area_pointer_down(x, y)` and
 `on_channel_slider_pointer_down(channel, x)` (→ `DragStart`),
-`on_area_thumb_keydown(data, shift)` (arrows → saturation/lightness
-`ChannelIncrement`/`Decrement`, RTL-mirrored on the x-axis),
+`on_area_thumb_keydown(data, shift)` (arrows → `AreaXStep`/`AreaYStep`,
+RTL-mirrored on the x-axis; the machine applies them space-aware),
 `on_channel_slider_keydown(channel, data, shift)` (arrows + Home/End),
 `on_swatch_click(index)` (→ `SetColor`), and `on_eyedropper_click` (→
 `EyedropperRequest`). Keyboard steps for the fractional channels (saturation,
@@ -1529,9 +1619,9 @@ ColorPicker
 | `SwatchGroup`        | `<div>`                 | no       | `role="group"`                                                                                                                                                          |
 | `Swatch`             | `<button>`              | no       | `type="button"`, `role="button"`, `tabindex` (`0`, `-1` when disabled), `aria-label`, `data-ars-selected`, `data-ars-index`, `aria-disabled` when disabled              |
 | `FormatSelect`       | `<select>` / `<button>` | no       | `aria-label`                                                                                                                                                            |
-| `ChannelInput`       | `<input>`               | no       | `type="text"`, `inputmode="numeric"`, `data-ars-channel`, `data-ars-channel-index`                                                                                      |
+| `ChannelInput`       | `<input>`               | no       | `type="text"`, `inputmode="numeric"`, `value` (current channel value), `data-ars-channel`, `data-ars-channel-index`                                                     |
 | `HexInput`           | `<input>`               | no       | `type="text"`, `inputmode="text"`                                                                                                                                       |
-| `EyeDropperTrigger`  | `<button>`              | no       | `aria-label`, `hidden` (when unsupported)                                                                                                                               |
+| `EyeDropperTrigger`  | `<button>`              | no       | `type="button"`, `aria-label`, `hidden` (when unsupported)                                                                                                              |
 | `HiddenInput`        | `<input type="hidden">` | yes      | `name`, `value`                                                                                                                                                         |
 
 ## 3. Accessibility

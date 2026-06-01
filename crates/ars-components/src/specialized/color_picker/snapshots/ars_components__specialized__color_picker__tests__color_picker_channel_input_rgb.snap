@@ -54,6 +54,12 @@ AttrMap {
                 "text",
             ),
         ),
+        (
+            Value,
+            String(
+                "255",
+            ),
+        ),
     ],
     styles: [],
 }
