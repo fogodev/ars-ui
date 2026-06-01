@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bpvos8ft7</task-id>
+<tool-use-id>toolu_01FYVSZfD5Rg1ifaDiFeFpAj</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-294/5bc925b4-160c-4dbe-8b86-2e569a259845/tasks/bpvos8ft7.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex re-review + Coverage/CRAP gate" completed (exit code 0)</summary>
+</task-notification>
