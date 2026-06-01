@@ -425,7 +425,7 @@ mod qr_code_proptests {
             value in arb_value(),
             error_correction in arb_error_correction(),
             module_size in arb_module_size(),
-            quiet_zone in 0usize..10,
+            quiet_zone in prop_oneof![0usize..10, Just(usize::MAX), Just(usize::MAX / 2)],
             overlay_src in proptest::option::of("[a-z./]{1,16}"),
             overlay_size in 0.0f64..0.5,
         ) -> Props {
@@ -556,7 +556,7 @@ mod qr_code_proptests {
 
             let expected = match api.matrix() {
                 Some(matrix) => {
-                    (matrix.size + props.quiet_zone * 2) as f64
+                    (matrix.size as f64 + props.quiet_zone as f64 * 2.0)
                         * effective_module_size(props.module_size)
                 }
 

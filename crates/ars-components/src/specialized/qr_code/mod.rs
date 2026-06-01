@@ -286,11 +286,14 @@ impl<'a> Api<'a> {
     ///
     /// Returns `0.0` when no matrix has been supplied. The module size is
     /// normalized via [`Api::effective_module_size`] so non-finite or
-    /// non-positive props never reach the rendered dimensions.
+    /// non-positive props never reach the rendered dimensions. The module
+    /// count is summed in `f64` so a large `quiet_zone` cannot overflow the
+    /// `usize` arithmetic (which would panic in debug or wrap in release).
     #[must_use]
     pub fn pixel_size(&self) -> f64 {
         if let Some(matrix) = &self.matrix {
-            (matrix.size + self.props.quiet_zone * 2) as f64 * self.effective_module_size()
+            let modules_per_side = matrix.size as f64 + self.props.quiet_zone as f64 * 2.0;
+            modules_per_side * self.effective_module_size()
         } else {
             0.0
         }
@@ -584,6 +587,21 @@ mod tests {
                 Some(&(CssProperty::Width, "44px".to_string()))
             );
         }
+    }
+
+    #[test]
+    fn large_quiet_zone_does_not_overflow_sizing() {
+        // A huge quiet_zone must not panic (debug) or wrap (release) in the
+        // usize arithmetic; the f64 sum stays finite and positive.
+        let props = Props {
+            quiet_zone: usize::MAX,
+            ..Props::default()
+        };
+
+        let size = api(&props, Some(sample_matrix())).pixel_size();
+
+        assert!(size.is_finite());
+        assert!(size > 0.0);
     }
 
     #[test]

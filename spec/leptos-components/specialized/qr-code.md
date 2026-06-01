@@ -136,7 +136,7 @@ The component owns no repeated registration beyond optional temporary download r
 ## 19. Consumer Expectations and Guarantees
 
 - Consumers may assume the QR output is available without client-only APIs.
-- Consumers may assume the root is labeled as an image.
+- Consumers may assume the pattern is labeled as an image (`role="img"` + label).
 - Consumers must not assume download support exists on every runtime.
 
 ## 20. Platform Support Matrix
@@ -196,7 +196,7 @@ pub fn QrCode(value: String) -> impl IntoView {
 
 ## 27. Accessibility and SSR Notes
 
-Root labeling must remain present even when the encoded value is a URL or when an overlay is shown. Decorative frame and overlay content must not replace the root label.
+Pattern labeling must remain present even when the encoded value is a URL or when an overlay is shown: the pattern carries `role="img"` plus the resolved label, and the root stays a neutral sized container. Decorative frame and overlay content must not replace the pattern label.
 
 ## 28. Parity Summary and Intentional Deviations
 
@@ -215,7 +215,7 @@ Intentional deviations: the adapter standardizes on SVG as the primary rendering
 
 | Behavior         | Preferred oracle type | Notes                                                    |
 | ---------------- | --------------------- | -------------------------------------------------------- |
-| root semantics   | DOM attrs             | assert role and accessible label                         |
+| image semantics  | DOM attrs             | assert `role="img"` + accessible label on the pattern    |
 | QR structure     | rendered structure    | assert SVG root and matrix-derived children or path data |
 | download cleanup | cleanup side effects  | assert object URLs are revoked                           |
 
