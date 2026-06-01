@@ -49,6 +49,17 @@ fn default_today_matches_spec_contract() {
 }
 
 #[test]
+fn zero_visible_months_falls_back_to_two_month_default() {
+    let mut svc = service_with(props().visible_months(0), en_us());
+
+    assert_eq!(svc.context().visible_months, 2);
+
+    drop(svc.set_props(props().visible_months(0)));
+
+    assert_eq!(svc.context().visible_months, 2);
+}
+
+#[test]
 fn first_click_sets_anchor_and_second_click_completes_range() {
     let mut svc = service();
 
@@ -405,6 +416,64 @@ fn controlled_value_sync_preserves_pending_anchor() {
         *svc.context().value.get(),
         Some(range(date(2024, 1, 3), date(2024, 1, 4))),
     );
+}
+
+#[test]
+fn controlled_first_click_hides_stale_confirmed_range_attrs() {
+    let mut svc = service_with(
+        props().value(Some(range(date(2024, 1, 1), date(2024, 1, 3)))),
+        en_us(),
+    );
+
+    drop(svc.send(Event::SelectDate {
+        date: date(2024, 1, 10),
+    }));
+
+    let api = svc.connect(&|_| {});
+    let stale_attrs = api.cell_attrs(&date(2024, 1, 2));
+
+    assert!(
+        stale_attrs
+            .get(&HtmlAttr::Aria(AriaAttr::Selected))
+            .is_none()
+    );
+    assert!(!svc.context().is_in_range(&date(2024, 1, 2)));
+}
+
+#[test]
+fn invalid_external_ranges_are_ignored_on_init_and_sync() {
+    let invalid = range(date(2024, 1, 1), date(2024, 1, 3));
+    let valid = range(date(2024, 1, 10), date(2024, 1, 11));
+
+    let svc = service_with(
+        props()
+            .min(Some(date(2024, 1, 10)))
+            .value(Some(invalid.clone())),
+        en_us(),
+    );
+
+    assert_eq!(*svc.context().value.get(), None);
+
+    let svc = service_with(
+        props().max_range_days(Some(2)).default_value(Some(invalid)),
+        en_us(),
+    );
+
+    assert_eq!(*svc.context().value.get(), None);
+
+    let mut svc = service_with(props().value(Some(valid.clone())), en_us());
+
+    assert_eq!(*svc.context().value.get(), Some(valid));
+
+    drop(
+        svc.set_props(
+            props()
+                .max_range_days(Some(2))
+                .value(Some(range(date(2024, 1, 10), date(2024, 1, 15)))),
+        ),
+    );
+
+    assert_eq!(*svc.context().value.get(), None);
 }
 
 #[test]

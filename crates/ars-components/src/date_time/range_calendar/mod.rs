@@ -167,7 +167,7 @@ pub struct Props {
     /// Right-to-left layout direction.
     pub is_rtl: bool,
 
-    /// Number of months displayed side-by-side. Clamped to at least 1.
+    /// Number of months displayed side-by-side. Zero falls back to the default.
     pub visible_months: usize,
 
     /// Controls navigation step size.
@@ -613,28 +613,21 @@ impl Context {
     /// Whether a confirmed range includes `date`.
     #[must_use]
     pub fn is_in_range(&self, date: &CalendarDate) -> bool {
-        self.value
-            .get()
-            .as_ref()
+        self.visible_range()
             .is_some_and(|range| range.contains(date))
     }
 
     /// Whether `date` is the confirmed range start.
     #[must_use]
     pub fn is_range_start(&self, date: &CalendarDate) -> bool {
-        self.value
-            .get()
-            .as_ref()
+        self.visible_range()
             .is_some_and(|range| range.start == *date)
     }
 
     /// Whether `date` is the confirmed range end.
     #[must_use]
     pub fn is_range_end(&self, date: &CalendarDate) -> bool {
-        self.value
-            .get()
-            .as_ref()
-            .is_some_and(|range| range.end == *date)
+        self.visible_range().is_some_and(|range| range.end == *date)
     }
 
     /// Whether `date` falls in the pending hover preview range.
@@ -686,6 +679,14 @@ impl Context {
         }
 
         true
+    }
+
+    fn visible_range(&self) -> Option<&DateRange> {
+        if self.anchor_date.is_some() {
+            self.value.pending().as_ref()
+        } else {
+            self.value.get().as_ref()
+        }
     }
 
     /// Scrolls the visible window to include the focused date.
@@ -764,6 +765,115 @@ fn inclusive_range_days(range: &DateRange) -> Option<u32> {
     let days = range.start.days_until(&range.end).ok()?;
 
     u32::try_from(days).ok()?.checked_add(1)
+}
+
+fn visible_months_or_default(visible_months: usize) -> usize {
+    if visible_months == 0 {
+        Props::default().visible_months
+    } else {
+        visible_months
+    }
+}
+
+fn sanitize_external_range(props: &Props, range: Option<DateRange>) -> Option<DateRange> {
+    range.filter(|range| external_range_is_selectable(props, range))
+}
+
+fn external_range_is_selectable(props: &Props, range: &DateRange) -> bool {
+    if !range_satisfies_span_constraints(
+        range,
+        props.allow_single_date_range,
+        props.min_range_days,
+        props.max_range_days,
+    ) {
+        return false;
+    }
+
+    if date_outside_bounds(&range.start, props.min.as_ref(), props.max.as_ref())
+        || date_outside_bounds(&range.end, props.min.as_ref(), props.max.as_ref())
+    {
+        return false;
+    }
+
+    let Some(predicate) = &props.is_date_unavailable else {
+        return true;
+    };
+
+    range_dates_all_for_range(range, |date| !predicate(date))
+}
+
+fn range_satisfies_span_constraints(
+    range: &DateRange,
+    allow_single_date_range: bool,
+    min_range_days: Option<u32>,
+    max_range_days: Option<u32>,
+) -> bool {
+    if !allow_single_date_range && range.start == range.end {
+        return false;
+    }
+
+    let Some(length) = inclusive_range_days(range) else {
+        return false;
+    };
+
+    if let Some(min) = min_range_days
+        && length < min
+    {
+        return false;
+    }
+
+    if let Some(max) = max_range_days
+        && length > max
+    {
+        return false;
+    }
+
+    true
+}
+
+fn date_outside_bounds(
+    date: &CalendarDate,
+    min: Option<&CalendarDate>,
+    max: Option<&CalendarDate>,
+) -> bool {
+    if let Some(min) = min
+        && date.compare(min) == Ordering::Less
+    {
+        return true;
+    }
+
+    if let Some(max) = max
+        && date.compare(max) == Ordering::Greater
+    {
+        return true;
+    }
+
+    false
+}
+
+fn range_dates_all_for_range(
+    range: &DateRange,
+    mut predicate: impl FnMut(&CalendarDate) -> bool,
+) -> bool {
+    let Some(days) = inclusive_range_days(range) else {
+        return false;
+    };
+
+    for offset in 0..days {
+        let Ok(offset) = i32::try_from(offset) else {
+            return false;
+        };
+
+        let Ok(date) = range.start.add_days(offset) else {
+            return false;
+        };
+
+        if !predicate(&date) {
+            return false;
+        }
+    }
+
+    true
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -855,9 +965,9 @@ impl ars_core::Machine for Machine {
         messages: &Self::Messages,
     ) -> (Self::State, Self::Context) {
         let value = if let Some(controlled) = &props.value {
-            Bindable::controlled(controlled.clone())
+            Bindable::controlled(sanitize_external_range(props, controlled.clone()))
         } else {
-            Bindable::uncontrolled(props.default_value.clone())
+            Bindable::uncontrolled(sanitize_external_range(props, props.default_value.clone()))
         };
 
         let mut initial_date = value
@@ -882,7 +992,7 @@ impl ars_core::Machine for Machine {
             .first_day_of_week
             .unwrap_or_else(|| locale.first_day_of_week(&*env.intl_backend));
 
-        let visible_months = props.visible_months.max(1);
+        let visible_months = visible_months_or_default(props.visible_months);
 
         let focused_date = initial_date;
 
@@ -1065,7 +1175,12 @@ impl ars_core::Machine for Machine {
 }
 
 fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
-    ctx.value.sync_controlled(props.value.clone());
+    ctx.value.sync_controlled(
+        props
+            .value
+            .clone()
+            .map(|range| sanitize_external_range(props, range)),
+    );
     ctx.min = props.min.clone();
     ctx.max = props.max.clone();
     ctx.disabled = props.disabled;
@@ -1073,7 +1188,7 @@ fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
     ctx.is_date_unavailable_fn = props.is_date_unavailable.clone();
     ctx.show_week_numbers = props.show_week_numbers;
     ctx.is_rtl = props.is_rtl;
-    ctx.visible_months = props.visible_months.max(1);
+    ctx.visible_months = visible_months_or_default(props.visible_months);
     ctx.page_behavior = props.page_behavior;
     ctx.today = props.today.clone();
     ctx.allow_single_date_range = props.allow_single_date_range;
@@ -1084,9 +1199,26 @@ fn sync_props_into_ctx(ctx: &mut Context, props: &Props) {
         .unwrap_or_else(|| ctx.locale.first_day_of_week(&*ctx.intl_backend));
 
     ctx.focused_date = ctx.clamp_date(ctx.focused_date.clone());
+    revalidate_current_value(ctx);
 
     revalidate_pending_selection(ctx);
     ctx.sync_visible_to_focused();
+}
+
+fn revalidate_current_value(ctx: &mut Context) {
+    let value_still_selectable = ctx
+        .value
+        .get()
+        .as_ref()
+        .is_none_or(|range| range_is_selectable(ctx, range));
+
+    if !value_still_selectable {
+        ctx.value.set(None);
+
+        if ctx.value.is_controlled() {
+            ctx.value.sync_controlled(Some(None));
+        }
+    }
 }
 
 fn revalidate_pending_selection(ctx: &mut Context) {
@@ -1161,7 +1293,9 @@ fn range_is_selectable(ctx: &Context, range: &DateRange) -> bool {
         return false;
     }
 
-    if ctx.is_date_disabled(&range.start) || ctx.is_date_disabled(&range.end) {
+    if date_outside_bounds(&range.start, ctx.min.as_ref(), ctx.max.as_ref())
+        || date_outside_bounds(&range.end, ctx.min.as_ref(), ctx.max.as_ref())
+    {
         return false;
     }
 
@@ -1169,33 +1303,7 @@ fn range_is_selectable(ctx: &Context, range: &DateRange) -> bool {
         return true;
     }
 
-    range_dates_all(ctx, range, |ctx, date| !ctx.is_date_unavailable(date))
-}
-
-fn range_dates_all(
-    ctx: &Context,
-    range: &DateRange,
-    mut predicate: impl FnMut(&Context, &CalendarDate) -> bool,
-) -> bool {
-    let Some(days) = inclusive_range_days(range) else {
-        return false;
-    };
-
-    for offset in 0..days {
-        let Ok(offset) = i32::try_from(offset) else {
-            return false;
-        };
-
-        let Ok(date) = range.start.add_days(offset) else {
-            return false;
-        };
-
-        if !predicate(ctx, &date) {
-            return false;
-        }
-    }
-
-    true
+    range_dates_all_for_range(range, |date| !ctx.is_date_unavailable(date))
 }
 
 fn step_for_page_behavior(ctx: &Context) -> i32 {
