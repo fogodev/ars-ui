@@ -1,0 +1,124 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "10e333fd1e7c",
+  "session_id": "1f28245f-ab38-40e8-8c17-f578e8fb3a40",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T03:47:15.893138Z",
+  "branch": "impl-288",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/specialized/qr_code/mod.rs",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_overlay_with_src.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_pattern.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_pattern_default.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_pattern_url.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_root_default.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_root_no_matrix.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_root_url_with_id.snap",
+    "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+    "spec/components/specialized/qr-code.md",
+    "spec/dioxus-components/specialized/qr-code.md",
+    "spec/leptos-components/specialized/qr-code.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "06047c5dd98c",
+  "checkpoint_transcript_start": 391,
+  "transcript_lines_at_start": 391,
+  "token_usage": {
+    "input_tokens": 25921,
+    "cache_creation_tokens": 414350,
+    "cache_read_tokens": 16517596,
+    "output_tokens": 51876,
+    "api_call_count": 59
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Implement a QrCode agnostic core component (issue #288), get it through Codex review by addressing all findings, and merge the PR with CI green and Codex approval.",
+    "outcome": "All four Codex review findings were addressed (URL case-insensitivity, role='img' relocated from root to pattern, overlay alt='', module_size sanitization), xci-fast passed all 10 gates, and the fixes were committed and pushed. The PR remains open pending Codex's second-round verdict.",
+    "learnings": {
+      "repo": [
+        "The CI gate is `cargo xci-fast` with 10 checks: fmt, clippy, unit, integration, adapter, spec-compile-snippets, error-variant-coverage, mutual-exclusion, snapshot-count, coverage-native.",
+        "Codex bot (`chatgpt-codex-connector[bot]`) auto-triggers on new PRs with a 👀 reaction; a terminal verdict is signaled by 👀 dropping and review threads opening (no 👍).",
+        "PRs containing .snap fixture files require the `snapshot-reviewed` label before merging.",
+        "The codebase convention for f64 props is to guard with `is_finite()` and `<= 0.0`, falling back to a named default constant (e.g., `DEFAULT_MODULE_SIZE = 4.0`), matching `meter` and `angle_slider`.",
+        "Both leptos and dioxus adapter specs must be kept in sync with core component spec changes — each has parts tables, merge tables, and invariant lines that can become stale independently.",
+        "`HtmlAttr::Alt` exists in the crate for emitting decorative `alt=\"\"` on overlay images.",
+        "Snapshot files are per-test and named by full test path; orphaned snapshots from renamed or removed tests must be deleted manually."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/specialized/qr_code/mod.rs",
+          "finding": "role='img' and aria-label were moved from root_attrs to pattern_attrs so that a DownloadTrigger nested under Root stays in the a11y tree (role='img' is a leaf role that prunes children). Root is now a neutral sized container."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/qr_code/mod.rs",
+          "finding": "URL scheme matching must use case-insensitive comparison (eq_ignore_ascii_case on the scheme) rather than starts_with(\"https://\") because HTTP schemes are case-insensitive per spec."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/qr_code/mod.rs",
+          "finding": "A stale doc comment on the Part::Root variant still referenced role='img' after the T2 fix — xci-fast did not catch it, requiring a manual post-pass check before committing."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+          "finding": "Proptest strategies for qr_code needed arb_module_size broadened to include invalid values (non-finite, non-positive) to cover the new sanitization path."
+        }
+      ],
+      "workflow": [
+        "Codex review loop pattern: post @codex review trigger → poll for 👀-drop + threads → address all threads with TDD + no coverage regression → push → reply to and resolve each thread → re-trigger @codex review.",
+        "Architectural/accessibility decisions that reshape the documented spec contract should be surfaced to the user before implementing (T2 was blocked on user input for role placement).",
+        "Spec edits require syncing three documents: the core component spec plus both adapter specs (leptos and dioxus), each with parts tables, merge tables, and invariant prose.",
+        "Markdown table editors/formatters auto-reformat on save, so verifying content correctness rather than column alignment is sufficient after an edit."
+      ]
+    },
+    "friction": [
+      "Codex returned 4 unresolved threads instead of 👍, requiring a full fix-and-re-trigger cycle rather than a straight merge.",
+      "T2 (role='img' placement) blocked on a user design decision — the spec's documented anatomy was in conflict with correct a11y semantics, requiring an explicit call on direction.",
+      "Adapter specs (leptos and dioxus) each had 3 stale spots referencing the old role='img' placement on Root, discovered only after the core spec was already updated.",
+      "A stale `Part::Root` doc comment referencing role='img' slipped through xci-fast and required a manual fix + quick re-verify after the gate had already passed.",
+      "Markdown table alignment broke after editing adapter spec rows, requiring re-padding or relying on the formatter to auto-correct."
+    ],
+    "open_items": [
+      "Codex second-round review pending — transcript ends after push, before Codex responds to the re-trigger.",
+      "PR #703 remains open; merge requires both CI green (likely satisfied) and Codex 👍 (not yet received).",
+      "If Codex raises new threads in round 2, another fix-push-resolve-retrigger cycle will be needed."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T03:46:12.586457Z",
+    "agent_lines": 401,
+    "agent_removed": 170,
+    "human_added": 11,
+    "human_modified": 2,
+    "human_removed": 0,
+    "total_committed": 412,
+    "total_lines_changed": 584,
+    "agent_percentage": 97.77397260273972,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 7,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 7
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 12,
+      "user_lines_removed": 0,
+      "agent_lines_added": 406,
+      "agent_lines_removed": 170,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 7,
+        "crates/ars-components/src/specialized/qr_code/mod.rs": 5
+      }
+    }
+  ]
+}

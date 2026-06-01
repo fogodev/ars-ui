@@ -1,0 +1,36 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "10e333fd1e7c",
+  "strategy": "manual-commit",
+  "branch": "impl-288",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/specialized/qr_code/mod.rs",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_overlay_with_src.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_pattern.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_pattern_default.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_pattern_url.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_root_default.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_root_no_matrix.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_root_url_with_id.snap",
+    "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+    "spec/components/specialized/qr-code.md",
+    "spec/dioxus-components/specialized/qr-code.md",
+    "spec/leptos-components/specialized/qr-code.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/10/e333fd1e7c/0/metadata.json",
+      "transcript": "/10/e333fd1e7c/0/full.jsonl",
+      "content_hash": "/10/e333fd1e7c/0/content_hash.txt",
+      "prompt": "/10/e333fd1e7c/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 25921,
+    "cache_creation_tokens": 414350,
+    "cache_read_tokens": 16517596,
+    "output_tokens": 51876,
+    "api_call_count": 59
+  }
+}
