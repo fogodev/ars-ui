@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bdbpt936q</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-300/27e71c0c-50a2-4743-a430-d81de5d4c318/tasks/bdbpt936q.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex for next-pass verdict" completed (exit code 0)</summary>
+</task-notification>
