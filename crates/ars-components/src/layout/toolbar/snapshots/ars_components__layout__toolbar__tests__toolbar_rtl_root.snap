@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/layout/toolbar/mod.rs
+expression: "snapshot_attrs(&service(Props::new().dir(Direction::Rtl)).connect(&|_|\n{}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toolbar",
+            ),
+        ),
+        (
+            Aria(
+                Orientation,
+            ),
+            String(
+                "horizontal",
+            ),
+        ),
+        (
+            Dir,
+            String(
+                "rtl",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "toolbar",
+            ),
+        ),
+    ],
+    styles: [],
+}

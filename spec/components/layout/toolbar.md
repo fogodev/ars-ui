@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: [layout-shared-types]
 related: []
 references:
-  radix-ui: Toolbar
-  react-aria: Toolbar
+    radix-ui: Toolbar
+    react-aria: Toolbar
 ---
 
 # Toolbar
@@ -50,6 +50,18 @@ pub enum Event {
     },
     /// Focus left the toolbar.
     Blur,
+    /// Replace the rendered item registry.
+    SetItems {
+        /// Number of rendered toolbar items.
+        count: usize,
+        /// Disabled item indices in the current rendered order.
+        disabled_items: Vec<usize>,
+    },
+    /// Synchronize output-affecting props stored in context.
+    SetProps {
+        /// Latest props snapshot.
+        props: Props,
+    },
 }
 ```
 
@@ -60,8 +72,7 @@ pub enum Event {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
     /// Index of the currently focused item (roving tabindex target).
-    /// `None` when no item has been focused yet (first Tab into toolbar
-    /// focuses the first enabled item).
+    /// `None` when the toolbar is disabled or has no enabled items.
     pub focused_index: Option<usize>,
     /// Toolbar orientation.
     pub orientation: Orientation,
@@ -129,6 +140,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = NoEffect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, _env: &Env, _messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -150,10 +162,38 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled { return None; }
-
         match event {
+            Event::SetItems { count, disabled_items } => {
+                let count = *count;
+                let disabled_items = normalize_disabled_items(count, disabled_items);
+                let focused_index =
+                    roving_target(ctx.focused_index, count, &disabled_items, ctx.disabled);
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.item_count = count;
+                    ctx.disabled_items = disabled_items;
+                    ctx.focused_index = focused_index;
+                }))
+            }
+            Event::SetProps { props } => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.orientation = props.orientation;
+                    ctx.dir = props.dir;
+                    ctx.disabled = props.disabled;
+                    if ctx.disabled {
+                        ctx.focused_index = None;
+                    } else {
+                        ctx.focused_index = roving_target(
+                            ctx.focused_index,
+                            ctx.item_count,
+                            &ctx.disabled_items,
+                            false,
+                        );
+                    }
+                }))
+            }
             Event::FocusItem(index) => {
+                if ctx.disabled { return None; }
                 let idx = *index;
                 if idx >= ctx.item_count || ctx.disabled_items.contains(&idx) {
                     return None;
@@ -163,6 +203,7 @@ impl ars_core::Machine for Machine {
                 }))
             }
             Event::FocusNext => {
+                if ctx.disabled { return None; }
                 let next = next_enabled_index(
                     ctx.focused_index.unwrap_or(0),
                     ctx.item_count,
@@ -174,6 +215,7 @@ impl ars_core::Machine for Machine {
                 }))
             }
             Event::FocusPrev => {
+                if ctx.disabled { return None; }
                 let prev = next_enabled_index(
                     ctx.focused_index.unwrap_or(0),
                     ctx.item_count,
@@ -185,18 +227,21 @@ impl ars_core::Machine for Machine {
                 }))
             }
             Event::FocusFirst => {
+                if ctx.disabled { return None; }
                 let first = first_enabled_index(ctx.item_count, &ctx.disabled_items);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.focused_index = first;
                 }))
             }
             Event::FocusLast => {
+                if ctx.disabled { return None; }
                 let last = last_enabled_index(ctx.item_count, &ctx.disabled_items);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.focused_index = last;
                 }))
             }
             Event::Focus { .. } => {
+                if ctx.disabled { return None; }
                 if ctx.focused_index.is_some() { return None; }
                 let first = first_enabled_index(ctx.item_count, &ctx.disabled_items);
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -220,16 +265,41 @@ impl ars_core::Machine for Machine {
     }
 }
 
+fn normalize_disabled_items(count: usize, disabled: &[usize]) -> Vec<usize> {
+    let mut disabled = disabled.iter()
+        .copied()
+        .filter(|index| *index < count)
+        .collect::<Vec<_>>();
+    disabled.sort_unstable();
+    disabled.dedup();
+    disabled
+}
+
+fn roving_target(
+    current: Option<usize>,
+    count: usize,
+    disabled: &[usize],
+    toolbar_disabled: bool,
+) -> Option<usize> {
+    if toolbar_disabled {
+        None
+    } else {
+        current
+            .filter(|index| index < count && !disabled.contains(index))
+            .or_else(|| first_enabled_index(count, disabled))
+    }
+}
+
 /// Find the next enabled index, wrapping around.
 fn next_enabled_index(
     current: usize, count: usize, disabled: &[usize], forward: bool,
 ) -> Option<usize> {
     if count == 0 { return None; }
-    for i in 1..count {
+    for i in 1..=count {
         let idx = if forward {
             (current + i) % count
         } else {
-            (current + count - i) % count
+            (current + count - (i % count)) % count
         };
         if !disabled.contains(&idx) { return Some(idx); }
     }

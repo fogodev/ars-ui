@@ -1,0 +1,53 @@
+---
+source: crates/ars-components/src/layout/toolbar/mod.rs
+expression: "snapshot_attrs(&service(Props::new().id(\"toolbar\").aria_label(\"Formatting tools\")).connect(&|_|\n{}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toolbar",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Formatting tools",
+            ),
+        ),
+        (
+            Aria(
+                Orientation,
+            ),
+            String(
+                "horizontal",
+            ),
+        ),
+        (
+            Dir,
+            String(
+                "ltr",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "toolbar",
+            ),
+        ),
+    ],
+    styles: [],
+}

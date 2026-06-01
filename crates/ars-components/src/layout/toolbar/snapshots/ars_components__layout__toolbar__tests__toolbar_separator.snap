@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/layout/toolbar/mod.rs
+expression: "snapshot_attrs(&service(Props::new()).connect(&|_| {}).separator_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "separator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toolbar",
+            ),
+        ),
+        (
+            Aria(
+                Orientation,
+            ),
+            String(
+                "vertical",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "separator",
+            ),
+        ),
+    ],
+    styles: [],
+}

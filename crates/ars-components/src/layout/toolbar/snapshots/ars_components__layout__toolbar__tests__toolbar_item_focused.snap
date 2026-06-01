@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/layout/toolbar/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).item_attrs(0))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-focused",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "toolbar",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

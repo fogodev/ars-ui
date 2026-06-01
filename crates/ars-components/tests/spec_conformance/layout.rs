@@ -4,7 +4,7 @@
 //! spec's §2 anatomy table and asserts the impl's `Part` enum matches.
 
 use ars_components::layout::{
-    aspect_ratio, center, collapsible, frame, grid, scroll_area, splitter, stack,
+    aspect_ratio, center, collapsible, frame, grid, scroll_area, splitter, stack, toolbar,
 };
 
 use super::helper::assert_anatomy;
@@ -75,6 +75,18 @@ fn splitter_anatomy_matches_spec() {
             (splitter::Part::Root, "root"),
             (splitter::Part::Panel { index: 0 }, "panel"),
             (splitter::Part::Handle { index: 0 }, "handle"),
+        ],
+    );
+}
+
+#[test]
+fn toolbar_anatomy_matches_spec() {
+    assert_anatomy(
+        "toolbar",
+        &[
+            (toolbar::Part::Root, "root"),
+            (toolbar::Part::Item { index: 0 }, "item"),
+            (toolbar::Part::Separator, "separator"),
         ],
     );
 }
