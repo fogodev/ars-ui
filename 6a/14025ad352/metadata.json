@@ -1,0 +1,57 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "6a14025ad352",
+  "strategy": "manual-commit",
+  "branch": "impl-300",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/specialized/color_picker/mod.rs",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_alpha_slider.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_area.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_area_thumb_dragging.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_area_thumb_idle.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_channel_input_rgb.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_channel_slider_hue.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_channel_slider_thumb_alpha_dragging.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_channel_slider_thumb_hue.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_content.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_control.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_eye_dropper_supported.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_eye_dropper_unsupported.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_format_select.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_hex_input.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_hidden_input.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_label.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_root_closed.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_root_disabled.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_root_open.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_root_readonly.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_swatch_group.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_swatch_selected.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_swatch_unselected.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_trigger_closed.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_trigger_disabled.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_trigger_open.snap",
+    "crates/ars-components/src/specialized/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+    "crates/ars-components/tests/spec_conformance/specialized.rs",
+    "crates/ars-core/src/color.rs",
+    "crates/ars-core/src/message_fn.rs",
+    "spec/components/specialized/color-picker.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/6a/14025ad352/0/metadata.json",
+      "transcript": "/6a/14025ad352/0/full.jsonl",
+      "content_hash": "/6a/14025ad352/0/content_hash.txt",
+      "prompt": "/6a/14025ad352/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 37467,
+    "cache_creation_tokens": 1075182,
+    "cache_read_tokens": 58035680,
+    "output_tokens": 206864,
+    "api_call_count": 191
+  }
+}
