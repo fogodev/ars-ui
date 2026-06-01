@@ -202,8 +202,8 @@ impl Default for Props {
             is_rtl: false,
             visible_months: 2,
             page_behavior: PageBehavior::Visible,
-            today: CalendarDate::new_gregorian(2025, 1, 1)
-                .expect("2025-01-01 is a valid Gregorian date"),
+            today: CalendarDate::new_gregorian(2024, 1, 1)
+                .expect("2024-01-01 is a valid Gregorian date"),
             allow_single_date_range: true,
             min_range_days: None,
             max_range_days: None,
@@ -1629,6 +1629,12 @@ impl<'a> Api<'a> {
         self.cell_attrs_inner(date, Some(offset))
     }
 
+    /// Whether `date` is outside the month at `offset`.
+    #[must_use]
+    pub const fn is_outside_month_for(&self, date: &CalendarDate, offset: usize) -> bool {
+        self.ctx.is_outside_month_at_offset(date, offset)
+    }
+
     fn cell_attrs_inner(&self, date: &CalendarDate, offset: Option<usize>) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Cell {
@@ -1758,16 +1764,24 @@ impl<'a> Api<'a> {
             let suffix = (self.ctx.messages.disabled_suffix)(&self.ctx.locale);
 
             format!("{base} {suffix}")
-        } else if self.is_range_start(date) {
-            let suffix = (self.ctx.messages.range_start_suffix)(&self.ctx.locale);
-
-            format!("{base} {suffix}")
-        } else if self.is_range_end(date) {
-            let suffix = (self.ctx.messages.range_end_suffix)(&self.ctx.locale);
-
-            format!("{base} {suffix}")
         } else {
-            base
+            let mut label = base;
+
+            if self.is_range_start(date) {
+                let suffix = (self.ctx.messages.range_start_suffix)(&self.ctx.locale);
+
+                label.push(' ');
+                label.push_str(&suffix);
+            }
+
+            if self.is_range_end(date) {
+                let suffix = (self.ctx.messages.range_end_suffix)(&self.ctx.locale);
+
+                label.push(' ');
+                label.push_str(&suffix);
+            }
+
+            label
         }
     }
 

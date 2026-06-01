@@ -44,6 +44,11 @@ fn attr(attrs: &AttrMap, key: HtmlAttr) -> Option<String> {
 }
 
 #[test]
+fn default_today_matches_spec_contract() {
+    assert_eq!(Props::default().today, date(2024, 1, 1));
+}
+
+#[test]
 fn first_click_sets_anchor_and_second_click_completes_range() {
     let mut svc = service();
 
@@ -149,6 +154,32 @@ fn grid_attrs_mark_range_selection_as_multiselectable() {
         attr(&api.grid_group_attrs(), HtmlAttr::Role).as_deref(),
         Some("group"),
     );
+}
+
+#[test]
+fn api_exposes_offset_specific_outside_month_helper() {
+    let svc = service_with(props().visible_months(2), en_us());
+
+    let api = svc.connect(&|_| {});
+
+    assert!(!api.is_outside_month_for(&date(2024, 1, 15), 0));
+    assert!(api.is_outside_month_for(&date(2024, 1, 15), 1));
+    assert!(!api.is_outside_month_for(&date(2024, 2, 15), 1));
+}
+
+#[test]
+fn same_day_range_label_preserves_start_and_end_suffixes() {
+    let svc = service_with(
+        props().value(Some(range(date(2024, 1, 10), date(2024, 1, 10)))),
+        en_us(),
+    );
+
+    let api = svc.connect(&|_| {});
+    let attrs = api.cell_trigger_attrs(&date(2024, 1, 10));
+    let label = attr(&attrs, HtmlAttr::Aria(AriaAttr::Label)).expect("cell label");
+
+    assert!(label.contains("(range start)"), "{label}");
+    assert!(label.contains("(range end)"), "{label}");
 }
 
 #[test]
