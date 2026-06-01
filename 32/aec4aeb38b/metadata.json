@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "32aec4aeb38b",
+  "strategy": "manual-commit",
+  "branch": "codex/issue-277-marquee-core",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/data_display/marquee/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+    "spec/components/data-display/marquee.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/32/aec4aeb38b/0/metadata.json",
+      "transcript": "/32/aec4aeb38b/0/full.jsonl",
+      "content_hash": "/32/aec4aeb38b/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 125976,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 12504832,
+    "output_tokens": 15904,
+    "api_call_count": 75
+  }
+}

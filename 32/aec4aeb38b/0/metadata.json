@@ -1,0 +1,103 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "32aec4aeb38b",
+  "session_id": "019e80c5-20a2-7542-9a48-e821d5b2c935",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T03:42:22.251088Z",
+  "branch": "codex/issue-277-marquee-core",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/data_display/marquee/mod.rs",
+    "spec/components/data-display/marquee.md",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "f94bbea646cf",
+  "checkpoint_transcript_start": 808,
+  "transcript_lines_at_start": 808,
+  "token_usage": {
+    "input_tokens": 125976,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 12504832,
+    "output_tokens": 15904,
+    "api_call_count": 75
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Implement a framework-agnostic Marquee component core for the ars-ui repository (issue #277), covering state, events, context, messages, attrs, and the connect API, then shepherd it through the automated Codex review process.",
+    "outcome": "PR #705 was opened against fogodev/ars-ui and three Codex review findings were fully resolved: finite loop replay cap enforcement, multi-cause hover/focus pause tracking, and a SyncProps/on_props_changed path for context-backed props. A follow-up commit was pushed with spec, proptest invariant, and machine logic all updated.",
+    "learnings": {
+      "repo": [
+        "PRs that add insta snapshots require the snapshot-reviewed label before Codex will approve them — applied manually before triggering @codex review.",
+        "The review loop is driven by GitHub reactions: Codex signals active review with 👀 and approval by adding 👍; unresolved inline threads must be addressed before 👍 appears.",
+        "Prop-sync across context and attrs uses a dedicated SyncProps event and on_props_changed handler — the same pattern is used in number_input and popover, making it a repo-wide convention.",
+        "cargo xtask spec validate enforces that spec markdown and compiled code snippets stay in sync; spec changes need a matching cargo xtask spec compile-snippets run.",
+        "The full pre-push gate (unit, spec_conformance, proptest, insta, clippy, xtask spec validate, xci) runs as a hook before the commit is finalised."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/marquee/mod.rs",
+          "line": 360,
+          "end_line": 470,
+          "finding": "State/event handling section; finite loop replay guard and multi-cause pause tracking were both missing here before the review fix."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/marquee/mod.rs",
+          "line": 690,
+          "end_line": 780,
+          "finding": "SyncProps event dispatch and on_props_changed implementation added here to sync disabled/motion fields from Service::set_props into context and attrs."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/marquee/mod.rs",
+          "line": 988,
+          "end_line": 1030,
+          "finding": "Test harness uses an exhaustive match on events; adding SyncProps to the production event enum immediately caused a compile error here requiring a new match arm."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+          "line": 344,
+          "end_line": 440,
+          "finding": "Proptest invariant updated to allow hover and focus pause causes to coexist (both may be set simultaneously) while still requiring both to be clear in the Playing state."
+        },
+        {
+          "path": "spec/components/data-display/marquee.md",
+          "line": 30,
+          "end_line": 280,
+          "finding": "Spec described pre-review (buggy) transition behavior for loop exhaustion replay and overlapping pause causes; updated to make prop synchronization, exhausted-loop replay cap, and multi-cause pause part of the formal contract."
+        }
+      ],
+      "workflow": [
+        "Write regression tests first and confirm they are red before patching machine logic — ensures the fix addresses exactly the reported behavior and not something adjacent.",
+        "When adding a new event variant to an exhaustive enum, anticipate compile failures in test harness match arms and fix the exhaustiveness issue as a separate step before observing behavioral test failures.",
+        "Run cargo fmt --check as the final step in the verification suite, not the first — formatting drift is a clean-up concern and running it early adds noise before correctness is established.",
+        "Poll external review systems (Codex, CI) with generous sleep intervals (60–120s) rather than tight loops to avoid hammering endpoints; track both reactions and unresolved threads separately since a dropped 👀 with zero threads means something different than a dropped 👀 with open threads.",
+        "Before patching a component's prop-sync logic, read at least two sibling components' implementations to confirm you're following the established pattern rather than inventing a new one."
+      ]
+    },
+    "friction": [
+      "Codex review took over 8 minutes of active polling (multiple 60s and 120s sleep intervals) before threads appeared — no webhook or notification mechanism to avoid busy-waiting.",
+      "Adding SyncProps to the event enum caused an unexpected compile error in the test harness match arm (lines 988–1030), requiring a separate patch before behavioral test failures could be observed.",
+      "cargo fmt --check discovered formatting drift only after the full verification suite had already passed, adding an extra round-trip of fmt + re-check at the end of an otherwise complete fix cycle.",
+      "The pre-push hook ran silently for an extended period with no output, making it unclear whether it was still running or had stalled."
+    ],
+    "open_items": [
+      "CI matrix jobs (Unit, Release Verification, Adapter, Coverage, feature-flag) were still in progress when the session ended — final green status not confirmed in transcript.",
+      "The Codex review thread resolutions and any follow-on 👍 reaction were not confirmed — the session ends after the fix commit is pushed, before Codex re-reviews."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T03:40:36.539054Z",
+    "agent_lines": 306,
+    "agent_removed": 30,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 306,
+    "total_lines_changed": 336,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
