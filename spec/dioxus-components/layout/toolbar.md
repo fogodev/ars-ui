@@ -80,9 +80,9 @@ pub mod toolbar {
 
 | Adapter prop  | Mode       | Sync trigger            | Machine event / update path | Visible effect                                      | Notes                                      |
 | ------------- | ---------- | ----------------------- | --------------------------- | --------------------------------------------------- | ------------------------------------------ |
-| `orientation` | controlled | rerender with new props | core prop update            | changes arrow-key mapping and separator orientation | must remain stable with rendered structure |
-| `dir`         | controlled | rerender with new props | core prop update            | reverses horizontal navigation in RTL               | applies only to horizontal toolbars        |
-| `disabled`    | controlled | prop change after mount | core prop update            | disables navigation and marks items disabled        | roving focus is frozen while disabled      |
+| `orientation` | controlled | rerender with new props | `SetProps { props }`        | changes arrow-key mapping and separator orientation | must remain stable with rendered structure |
+| `dir`         | controlled | rerender with new props | `SetProps { props }`        | reverses horizontal navigation in RTL               | applies only to horizontal toolbars        |
+| `disabled`    | controlled | prop change after mount | `SetProps { props }`        | disables navigation and marks items disabled        | clears roving focus while disabled         |
 
 | UI event             | Preconditions                     | Machine event / callback path                          | Ordering notes                                                                          | Notes                                    |
 | -------------------- | --------------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------- | ---------------------------------------- |
@@ -92,10 +92,10 @@ pub mod toolbar {
 
 ## 8. Registration and Cleanup Contract
 
-| Registered entity | Registration trigger | Identity key     | Cleanup trigger | Cleanup action                                               | Notes                                    |
-| ----------------- | -------------------- | ---------------- | --------------- | ------------------------------------------------------------ | ---------------------------------------- |
-| item registration | `Item` mount         | composite        | `Item` cleanup  | remove the item from the root registry and recompute indices | registration order must follow DOM order |
-| root context      | `Root` mount         | instance-derived | `Root` cleanup  | drop toolbar context and registry                            | one registry per toolbar                 |
+| Registered entity | Registration trigger | Identity key     | Cleanup trigger | Cleanup action                                                                                               | Notes                                    |
+| ----------------- | -------------------- | ---------------- | --------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------- |
+| item registration | `Item` mount         | composite        | `Item` cleanup  | remove the item from the root registry and send `SetItems { count, disabled_items }` with recomputed indices | registration order must follow DOM order |
+| root context      | `Root` mount         | instance-derived | `Root` cleanup  | drop toolbar context and registry                                                                            | one registry per toolbar                 |
 
 ## 9. Ref and Node Contract
 

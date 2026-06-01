@@ -26,3 +26,6 @@ pub mod splitter;
 
 /// Stack component connect API.
 pub mod stack;
+
+/// Toolbar component machine.
+pub mod toolbar;
