@@ -1,0 +1,17 @@
+<task-notification>
+<task-id>b1yl5ng25</task-id>
+<tool-use-id>toolu_01XhxGoAVVrsEuL3mJ3EL2Ap</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-300/27e71c0c-50a2-4743-a430-d81de5d4c318/tasks/b1yl5ng25.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex round-3 verdict" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bi3r2fkea</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-300/27e71c0c-50a2-4743-a430-d81de5d4c318/tasks/bi3r2fkea.output</output-file>
+<status>completed</status>
+<summary>Background command "Run native coverage gate" completed (exit code 0)</summary>
+</task-notification>
