@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/data_display/marquee/mod.rs
+expression: snapshot_attrs(&api.auto_play_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "auto-play-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "marquee",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Pause scrolling",
+            ),
+        ),
+        (
+            Aria(
+                Pressed,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

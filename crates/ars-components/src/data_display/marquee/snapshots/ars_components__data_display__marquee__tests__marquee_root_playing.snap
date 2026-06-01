@@ -1,0 +1,61 @@
+---
+source: crates/ars-components/src/data_display/marquee/mod.rs
+expression: snapshot_attrs(&api.root_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "marquee",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "playing",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Scrolling content",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "off",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "ticker",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "marquee",
+            ),
+        ),
+    ],
+    styles: [],
+}

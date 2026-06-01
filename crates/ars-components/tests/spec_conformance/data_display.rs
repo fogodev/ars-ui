@@ -3,7 +3,9 @@
 //! Asserts the impl's `Part` enum matches the spec's declared anatomy.
 
 use ars_collections::Key;
-use ars_components::data_display::{meter, progress, rating_group, stat, table, tag_group};
+use ars_components::data_display::{
+    marquee, meter, progress, rating_group, stat, table, tag_group,
+};
 
 use super::helper::assert_anatomy;
 
@@ -115,6 +117,24 @@ fn progress_anatomy_matches_spec() {
             (progress::Part::ValueText, "value-text"),
             (progress::Part::CircleTrack, "circle-track"),
             (progress::Part::CircleRange { radius: 10.0 }, "circle-range"),
+        ],
+    );
+}
+
+#[test]
+fn marquee_anatomy_matches_spec() {
+    assert_anatomy(
+        "marquee",
+        &[
+            (marquee::Part::Root, "root"),
+            (marquee::Part::Content, "content"),
+            (
+                marquee::Part::Edge {
+                    side: marquee::EdgeSide::Start,
+                },
+                "edge",
+            ),
+            (marquee::Part::AutoPlayTrigger, "auto-play-trigger"),
         ],
     );
 }

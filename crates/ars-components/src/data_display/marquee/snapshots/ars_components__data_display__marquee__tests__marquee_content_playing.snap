@@ -1,0 +1,56 @@
+---
+source: crates/ars-components/src/data_display/marquee/mod.rs
+expression: snapshot_attrs(&api.content_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "content",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "marquee",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Custom(
+                "ars-marquee-delay",
+            ),
+            "0.5s",
+        ),
+        (
+            Custom(
+                "ars-marquee-direction",
+            ),
+            "right",
+        ),
+        (
+            Custom(
+                "ars-marquee-gap",
+            ),
+            "16px",
+        ),
+        (
+            Custom(
+                "ars-marquee-play-state",
+            ),
+            "running",
+        ),
+        (
+            Custom(
+                "ars-marquee-speed",
+            ),
+            "72px",
+        ),
+    ],
+}

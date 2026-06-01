@@ -9,6 +9,9 @@ pub mod badge;
 /// Meter component connect API.
 pub mod meter;
 
+/// Marquee component state machine and connect API.
+pub mod marquee;
+
 /// Progress component state machine and connect API.
 pub mod progress;
 
