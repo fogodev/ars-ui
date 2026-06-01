@@ -1028,6 +1028,34 @@ mod tests {
         assert!(service.take_initial_effects().is_empty());
     }
 
+    #[test]
+    fn timer_context_eq_excludes_backend_and_debug_redacts_it() {
+        let props = test_props();
+
+        let (_, ctx) = Machine::init(&props, &Env::default(), &Messages::default());
+
+        // Equality ignores the injected backend (it is a service, not state):
+        // swapping the backend instance leaves the contexts equal.
+        let mut other_backend = ctx.clone();
+
+        other_backend.intl_backend = Arc::new(LocalizedDigitsBackend);
+
+        assert_eq!(ctx, other_backend);
+
+        // ...but a difference in observable state is detected.
+        let mut shifted = ctx.clone();
+
+        shifted.current = Duration::from_secs(5);
+
+        assert_ne!(ctx, shifted);
+
+        // Debug redacts the trait object rather than attempting to print it.
+        let debug = format!("{ctx:?}");
+
+        assert!(debug.contains("timer::Context"));
+        assert!(debug.contains("<dyn IntlBackend>"));
+    }
+
     // ───────────────────── transitions ─────────────────────
 
     #[test]
