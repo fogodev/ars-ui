@@ -77,6 +77,9 @@ type ColorSpaceSwitchedFn = dyn Fn(&str, &Locale) -> String + Send + Sync;
 /// Consumer callback fired once when a drag interaction ends.
 type ChangeEndFn = dyn Fn(ColorValue) + Send + Sync;
 
+/// Consumer callback fired with the new open state on every open/close change.
+type OpenChangeFn = dyn Fn(bool) + Send + Sync;
+
 // ────────────────────────────────────────────────────────────────────
 // State / Event / Effect
 // ────────────────────────────────────────────────────────────────────
@@ -221,6 +224,14 @@ pub enum Event {
 pub enum Effect {
     /// Invoke [`Props::on_change_end`] with the final color (fired on `DragEnd`).
     ChangeEnd,
+
+    /// Notify the consumer that the open state changed (fired on every
+    /// `Closed → Open` / `Open → Closed` transition and on a non-`Closed` initial
+    /// mount). The adapter invokes [`Props::on_open_change`] with the
+    /// post-transition open state (read from [`Api::is_open`]). Mirrors the
+    /// popover/dialog `OpenChange` convention so a controlled parent is always
+    /// notified of user-initiated open/close.
+    OpenChange,
 
     /// Attach the click-outside listener (fired on `Closed → Open` and a
     /// non-`Closed` initial mount). The adapter dispatches
@@ -441,6 +452,12 @@ pub struct Props {
     /// Callback fired once when a drag interaction ends (pointer release on the
     /// area or a channel slider). Use for expensive operations like persisting.
     pub on_change_end: Option<Callback<ChangeEndFn>>,
+
+    /// Callback fired with the new open state whenever the popover opens or
+    /// closes (including user-initiated toggles and Escape/interact-outside).
+    /// A controlled parent uses this to keep its `open` prop in sync; without it
+    /// a controlled `open` cannot observe user-driven open/close.
+    pub on_open_change: Option<Callback<OpenChangeFn>>,
 }
 
 impl Default for Props {
@@ -472,6 +489,7 @@ impl Default for Props {
             dir: Direction::Ltr,
             name: None,
             on_change_end: None,
+            on_open_change: None,
         }
     }
 }
@@ -578,7 +596,16 @@ impl ComponentMessages for Messages {}
 /// across the channel's full range. Both base the new color on the *pending*
 /// value so a controlled drag-in-flight accumulates rather than re-reading the
 /// stale controlled prop.
+///
+/// In RTL the physical x is mirrored (`1 - x`) before mapping, since the visual
+/// picker is flipped horizontally (the left edge is the maximum), matching the
+/// RTL-mirrored keyboard handling and `ColorArea`/`ColorSlider`.
 fn apply_drag_position(ctx: &mut Context, target: DragTarget, x: f64, y: f64) {
+    let x = if ctx.dir == Direction::Rtl {
+        1.0 - x.clamp(0.0, 1.0)
+    } else {
+        x
+    };
     match target {
         DragTarget::Area => set_area(ctx, x, 1.0 - y),
         DragTarget::Channel(channel) => {
@@ -644,8 +671,17 @@ fn set_channel_value(ctx: &mut Context, channel: ColorChannel, value: f64) {
     }
 
     ctx.value.set(with_channel(&base, channel, value));
-    if channel == ColorChannel::Hue {
-        ctx.hue_value = value.clamp(0.0, 360.0);
+    match channel {
+        // Hue edits set the unwrapped cache directly (preserving the 360° endpoint).
+        ColorChannel::Hue => ctx.hue_value = value.clamp(0.0, 360.0),
+        // RGB edits rebuild the color via RGB conversion, which can move the hue,
+        // so re-derive the cache from the result. (Saturation/lightness/brightness/
+        // alpha preserve the stored hue, so their cache — including a 360° endpoint
+        // — is left untouched.)
+        ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => {
+            ctx.hue_value = ctx.value.pending().hue;
+        }
+        _ => {}
     }
 }
 
@@ -681,11 +717,24 @@ fn change_end_effect() -> PendingEffect<Machine> {
     })
 }
 
-/// The named effect intents produced by the open lifecycle. Shared by
-/// `open_plan` (the `Closed → Open` path) and `Machine::initial_effects` (the
-/// booted-open path) so the two entry points stay in lock-step.
-fn open_lifecycle_effects() -> [PendingEffect<Machine>; 2] {
+/// Build the open-change effect that notifies the consumer of the new open
+/// state via [`Props::on_open_change`]. `ctx.open` is the post-transition state.
+fn open_change_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::OpenChange, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_open_change {
+            callback(ctx.open);
+        }
+
+        no_cleanup()
+    })
+}
+
+/// The effects produced by the open lifecycle. Shared by `open_plan` (the
+/// `Closed → Open` path) and `Machine::initial_effects` (the booted-open path)
+/// so the two entry points stay in lock-step.
+fn open_lifecycle_effects() -> [PendingEffect<Machine>; 3] {
     [
+        open_change_effect(),
         PendingEffect::named(Effect::AttachClickOutside),
         PendingEffect::named(Effect::DetectEyedropper),
     ]
@@ -710,6 +759,7 @@ fn close_plan() -> TransitionPlan<Machine> {
         .apply(|ctx: &mut Context| {
             ctx.open = false;
         })
+        .with_effect(open_change_effect())
         .with_effect(PendingEffect::named(Effect::DetachClickOutside))
 }
 
@@ -1023,12 +1073,21 @@ impl ars_core::Machine for Machine {
             (_, Event::SyncValue(value)) => {
                 let value = *value;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    // When the parent echoes back the value we just emitted, keep
+                    // the cached hue so a hue 360° endpoint isn't re-derived to 0°
+                    // (`ColorValue` normalizes 360°→0°). Only re-derive when the
+                    // controlled value genuinely differs from the pending one.
+                    let echoes_pending = value.is_some_and(|color| color == *ctx.value.pending());
+
                     if let Some(color) = value {
                         ctx.value.set(color);
                     }
 
                     ctx.value.sync_controlled(value);
-                    sync_hue_from_color(ctx);
+
+                    if !echoes_pending {
+                        sync_hue_from_color(ctx);
+                    }
                 }))
             }
 
@@ -4276,6 +4335,182 @@ mod tests {
             ..Props::default()
         }));
         assert_eq!(svc.state(), &State::Open);
+    }
+
+    // ── Codex review #706 sixth pass ───────────────────────────────
+
+    #[test]
+    fn open_change_callback_fires_on_open_and_close() {
+        use core::sync::atomic::{AtomicU8, Ordering};
+
+        let log = Arc::new(AtomicU8::new(0)); // bit0 = opened seen, bit1 = closed seen
+        let sink = Arc::clone(&log);
+        let mut svc = service(Props {
+            on_open_change: Some(callback(move |open: bool| {
+                sink.fetch_or(if open { 0b01 } else { 0b10 }, Ordering::SeqCst);
+            })),
+            ..Props::default()
+        });
+
+        let mut opened = svc.send(Event::Open);
+        let names = run_effects(&svc, &mut opened);
+        assert!(names.contains(&Effect::OpenChange));
+
+        let mut closed = svc.send(Event::Close);
+        drop(run_effects(&svc, &mut closed));
+
+        assert_eq!(
+            log.load(Ordering::SeqCst),
+            0b11,
+            "both open and close notified"
+        );
+    }
+
+    #[test]
+    fn open_change_fires_for_user_toggle_so_controlled_parent_is_notified() {
+        use core::sync::atomic::{AtomicBool, Ordering};
+
+        // A controlled picker: a user Toggle still notifies the parent (matching
+        // the popover/dialog optimistic + on_open_change convention) so the
+        // parent can update its `open` prop.
+        let notified = Arc::new(AtomicBool::new(false));
+        let sink = Arc::clone(&notified);
+        let svc = open_service(Props {
+            open: Some(true),
+            on_open_change: Some(callback(move |open: bool| {
+                if !open {
+                    sink.store(true, Ordering::SeqCst);
+                }
+            })),
+            ..Props::default()
+        });
+        let captured = RefCell::new(Vec::new());
+        let send = |event: Event| captured.borrow_mut().push(event);
+        svc.connect(&send).on_trigger_click();
+        assert!(matches!(captured.borrow()[0], Event::Toggle));
+
+        // Drive the Toggle through a fresh controlled service to observe the effect.
+        let mut svc = open_service(Props {
+            open: Some(true),
+            on_open_change: Some(callback(move |open: bool| {
+                if !open {
+                    notified.store(true, Ordering::SeqCst);
+                }
+            })),
+            ..Props::default()
+        });
+        let mut result = svc.send(Event::Toggle);
+        let names = run_effects(&svc, &mut result);
+        assert!(names.contains(&Effect::OpenChange));
+    }
+
+    #[test]
+    fn rtl_drag_mirrors_x_for_area_and_channel() {
+        // LTR: area x=0 → saturation 0. RTL: x=0 (physical left) → saturation 1.
+        let mut ltr = open_service(Props::default());
+        drop(ltr.send(Event::DragStart {
+            target: DragTarget::Area,
+            x: 0.0,
+            y: 0.5,
+        }));
+        assert!((ltr.connect(&|_| {}).value().saturation - 0.0).abs() < 1e-9);
+
+        let mut rtl = open_service(Props {
+            dir: Direction::Rtl,
+            ..Props::default()
+        });
+        drop(rtl.send(Event::DragStart {
+            target: DragTarget::Area,
+            x: 0.0,
+            y: 0.5,
+        }));
+        assert!(
+            (rtl.connect(&|_| {}).value().saturation - 1.0).abs() < 1e-9,
+            "RTL area x=0 selects maximum saturation"
+        );
+
+        // Channel (hue) slider mirrors too: RTL x=0 → hue max (360).
+        let mut rtl_hue = open_service(Props::default());
+        drop(rtl_hue.set_props(Props {
+            id: "color-picker".to_string(),
+            default_open: true,
+            dir: Direction::Rtl,
+            ..Props::default()
+        }));
+        drop(rtl_hue.send(Event::DragStart {
+            target: DragTarget::Channel(ColorChannel::Hue),
+            x: 0.0,
+            y: 0.0,
+        }));
+        assert!(
+            (rtl_hue.connect(&|_| {}).value().hue - 0.0).abs() < 1e-9
+                || rtl_hue.connect(&|_| {}).value().hue >= 359.0,
+            "RTL hue x=0 selects the maximum hue endpoint"
+        );
+    }
+
+    #[test]
+    fn rgb_channel_edit_refreshes_cached_hue() {
+        // Start at pure red (hue 0). Editing blue moves the hue toward magenta;
+        // the hue slider thumb must reflect the new hue, not the stale 0.
+        let mut svc = open_service(Props {
+            color_space: ColorSpace::Rgb,
+            default_value: ColorValue::from_rgb(255, 0, 0),
+            ..Props::default()
+        });
+        drop(svc.send(Event::SetChannel {
+            channel: ColorChannel::Blue,
+            value: 255.0,
+        }));
+        let hue_now: f64 = svc
+            .connect(&|_| {})
+            .channel_slider_thumb_attrs(ColorChannel::Hue)
+            .get(&HtmlAttr::Aria(AriaAttr::ValueNow))
+            .unwrap()
+            .parse()
+            .unwrap();
+        // Red + full blue = magenta (hue ~300).
+        assert!(
+            (hue_now - 300.0).abs() < 1.0,
+            "hue slider must follow the RGB edit, got {hue_now}"
+        );
+    }
+
+    #[test]
+    fn controlled_value_echo_preserves_hue_endpoint() {
+        // Controlled hue drag to the 360° endpoint, then the parent echoes the
+        // same color back: the hue thumb must stay at 360, not jump to 0.
+        let mut svc = open_service(Props {
+            value: Some(ColorValue::from_hsl(180.0, 1.0, 0.5)),
+            ..Props::default()
+        });
+        drop(svc.send(Event::DragStart {
+            target: DragTarget::Channel(ColorChannel::Hue),
+            x: 1.0,
+            y: 0.0,
+        }));
+        assert_eq!(
+            svc.connect(&|_| {})
+                .channel_slider_thumb_attrs(ColorChannel::Hue)
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("360")
+        );
+
+        // Parent echoes back the pending color (hue normalizes to 0 in ColorValue).
+        let echoed = *svc.connect(&|_| {}).value();
+        drop(svc.set_props(Props {
+            id: "color-picker".to_string(),
+            default_open: true,
+            value: Some(echoed),
+            ..Props::default()
+        }));
+        assert_eq!(
+            svc.connect(&|_| {})
+                .channel_slider_thumb_attrs(ColorChannel::Hue)
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("360"),
+            "an echoed controlled value must not collapse the hue endpoint to 0"
+        );
     }
 
     // ── Snapshots: every anatomy part + output-affecting branches ──

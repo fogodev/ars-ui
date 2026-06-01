@@ -4,8 +4,7 @@ category: specialized
 tier: complex
 foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
-related:
-    [angle-slider, color-area, color-field, color-slider, color-swatch, color-swatch-picker, color-wheel]
+related: [angle-slider, color-area, color-field, color-slider, color-swatch, color-swatch-picker, color-wheel]
 references:
     ark-ui: ColorPicker
     react-aria: ColorPicker
@@ -859,6 +858,11 @@ pub struct Props {
     /// the end of the gesture. Use for expensive operations like saving to a
     /// server. The trait-object alias keeps the callback `Send + Sync`.
     pub on_change_end: Option<Callback<dyn Fn(ColorValue) + Send + Sync>>,
+    /// Callback fired with the new open state on every open/close change
+    /// (user toggle, Escape, interact-outside, or controlled-prop change). A
+    /// controlled parent uses this to keep its `open` prop in sync — mirrors the
+    /// popover/dialog `on_open_change` + `Effect::OpenChange` convention.
+    pub on_open_change: Option<Callback<dyn Fn(bool) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -887,6 +891,7 @@ impl Default for Props {
             name: None,
             id: String::new(),
             on_change_end: None,
+            on_open_change: None,
         }
     }
 }
@@ -946,6 +951,10 @@ a core effect closure.
 pub enum Effect {
     /// Invoke `Props::on_change_end` with the final color (fired on `DragEnd`).
     ChangeEnd,
+    /// Notify the consumer of the new open state via `Props::on_open_change`
+    /// (fired on every Closed↔Open transition and a non-Closed initial mount),
+    /// mirroring the popover/dialog `OpenChange` convention.
+    OpenChange,
     /// Attach the click-outside listener (fired on `Closed → Open` and a
     /// non-`Closed` initial mount). The adapter dispatches
     /// `Event::CloseOnInteractOutside` when an outside interaction occurs.
@@ -971,7 +980,11 @@ pub enum Effect {
 /// channel `[1, 0]` (brightness in HSB, lightness otherwise); `Channel` maps x
 /// across the channel's full range. Bases the new color on the *pending* value
 /// so a controlled drag-in-flight accumulates.
+/// In RTL the physical x is mirrored (`1 - x`) before mapping — the visual picker
+/// is flipped horizontally (left edge = maximum), matching the RTL keyboard
+/// handling and `ColorArea`/`ColorSlider`.
 fn apply_drag_position(ctx: &mut Context, target: DragTarget, x: f64, y: f64) {
+    let x = if ctx.dir == Direction::Rtl { 1.0 - x.clamp(0.0, 1.0) } else { x };
     match target {
         DragTarget::Area => set_area(ctx, x, 1.0 - y),
         DragTarget::Channel(channel) => {
@@ -1027,8 +1040,15 @@ fn set_channel_value(ctx: &mut Context, channel: ColorChannel, value: f64) {
         return;
     }
     ctx.value.set(with_channel(&base, channel, value));
-    if channel == ColorChannel::Hue {
-        ctx.hue_value = value.clamp(0.0, 360.0);
+    match channel {
+        // Hue edits set the unwrapped cache directly (preserve the 360° endpoint).
+        ColorChannel::Hue => ctx.hue_value = value.clamp(0.0, 360.0),
+        // RGB edits rebuild via RGB conversion, which can move the hue → re-derive
+        // the cache. (Sat/light/bright/alpha preserve hue, so they leave it alone.)
+        ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => {
+            ctx.hue_value = ctx.value.pending().hue;
+        }
+        _ => {}
     }
 }
 
@@ -1057,11 +1077,23 @@ fn change_end_effect() -> PendingEffect<Machine> {
     })
 }
 
-/// The named effects produced by the open lifecycle. Shared by `open_plan`
+/// Notify the consumer of the new open state (`ctx.open`) via
+/// `Props::on_open_change`.
+fn open_change_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::OpenChange, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_open_change {
+            callback(ctx.open);
+        }
+        no_cleanup()
+    })
+}
+
+/// The effects produced by the open lifecycle. Shared by `open_plan`
 /// (`Closed → Open`) and `Machine::initial_effects` (booted-open) so the two
 /// entry points stay in lock-step.
-fn open_lifecycle_effects() -> [PendingEffect<Machine>; 2] {
+fn open_lifecycle_effects() -> [PendingEffect<Machine>; 3] {
     [
+        open_change_effect(),
         PendingEffect::named(Effect::AttachClickOutside),
         PendingEffect::named(Effect::DetectEyedropper),
     ]
@@ -1078,6 +1110,7 @@ fn open_plan() -> TransitionPlan<Machine> {
 fn close_plan() -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Closed)
         .apply(|ctx: &mut Context| ctx.open = false)
+        .with_effect(open_change_effect())
         .with_effect(PendingEffect::named(Effect::DetachClickOutside))
 }
 
@@ -1295,9 +1328,12 @@ impl ars_core::Machine for Machine {
             (_, Event::SyncValue(value)) => {
                 let value = *value;
                 Some(TransitionPlan::context_only(move |ctx| {
+                    // Keep the cached hue when the parent echoes the value we
+                    // emitted, so a hue 360° endpoint isn't re-derived to 0°.
+                    let echoes_pending = value.is_some_and(|c| c == *ctx.value.pending());
                     if let Some(color) = value { ctx.value.set(color); }
                     ctx.value.sync_controlled(value);
-                    sync_hue_from_color(ctx);
+                    if !echoes_pending { sync_hue_from_color(ctx); }
                 }))
             }
             (_, Event::SetProps) => {
@@ -1824,6 +1860,7 @@ The eyedropper trigger button uses `aria-label` from `messages.eyedropper_label`
 | `showAlpha`                | `show_alpha`              | --                         | --                             | ars-ui exclusive                                                                        |
 | `swatches`                 | `swatches`                | (SwatchGroup children)     | (separate `ColorSwatchPicker`) | ars-ui exposes presets as a `Vec<ColorValue>` prop resolved by `Part::Swatch { index }` |
 | `on_change_end`            | `on_change_end`           | `onValueChangeEnd`         | `onChange`                     | Equivalent intent                                                                       |
+| `onOpenChange`             | `on_open_change`          | `onOpenChange`             | --                             | Equivalent (fired via `Effect::OpenChange`)                                             |
 
 **Gaps:** None worth adopting. `invalid`/`required` are form-level concerns. `closeOnSelect`/`inline` are minor UX preferences best handled in the adapter.
 
@@ -1857,12 +1894,12 @@ The eyedropper trigger button uses `aria-label` from `messages.eyedropper_label`
 
 ### 6.3 Events
 
-| Callback         | ars-ui                      | Ark UI             | React Aria | Notes                  |
-| ---------------- | --------------------------- | ------------------ | ---------- | ---------------------- |
-| Value change     | `Bindable` reactivity       | `onValueChange`    | `onChange` | Equivalent via binding |
-| Value change end | `on_change_end`             | `onValueChangeEnd` | --         | Equivalent             |
-| Open change      | `Bindable<bool>` reactivity | `onOpenChange`     | --         | Equivalent via binding |
-| Format change    | `Event::SetFormat`          | `onFormatChange`   | --         | Equivalent             |
+| Callback         | ars-ui                | Ark UI             | React Aria | Notes                                                            |
+| ---------------- | --------------------- | ------------------ | ---------- | ---------------------------------------------------------------- |
+| Value change     | `Bindable` reactivity | `onValueChange`    | `onChange` | Equivalent via binding                                           |
+| Value change end | `on_change_end`       | `onValueChangeEnd` | --         | Equivalent                                                       |
+| Open change      | `on_open_change`      | `onOpenChange`     | --         | Equivalent (fired via `Effect::OpenChange`, like popover/dialog) |
+| Format change    | `Event::SetFormat`    | `onFormatChange`   | --         | Equivalent                                                       |
 
 **Gaps:** None.
 
