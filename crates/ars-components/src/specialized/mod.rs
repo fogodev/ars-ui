@@ -35,3 +35,6 @@ pub mod file_upload;
 
 /// `QrCode` stateless QR-matrix rendering connect API.
 pub mod qr_code;
+
+/// `Timer` countdown/stopwatch machine and connect API.
+pub mod timer;

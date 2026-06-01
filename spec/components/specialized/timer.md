@@ -63,7 +63,7 @@ pub enum Event {
     /// A single tick interval elapsed.
     Tick,
     /// Set the remaining/elapsed time directly.
-    SetTime(u64),
+    SetTime(Duration),
 }
 ```
 
@@ -72,13 +72,13 @@ pub enum Event {
 ```rust
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
-    /// Current time value in milliseconds.
+    /// Current time value.
     /// For countdown: remaining time. For stopwatch: elapsed time.
-    pub current_ms: u64,
-    /// The target duration in milliseconds (for countdown).
-    pub target_ms: u64,
-    /// Tick interval in milliseconds.
-    pub interval_ms: u32,
+    pub current: Duration,
+    /// The target duration (for countdown).
+    pub target: Duration,
+    /// Tick interval.
+    pub interval: Duration,
     /// Timer mode.
     pub mode: Mode,
     /// Whether auto-start is enabled.
@@ -99,10 +99,10 @@ pub struct Context {
 pub struct Props {
     /// Component instance ID.
     pub id: String,
-    /// Target duration in milliseconds (for countdown mode).
-    pub target_ms: u64,
-    /// Tick interval in milliseconds.
-    pub interval_ms: u32,
+    /// Target duration (for countdown mode).
+    pub target: Duration,
+    /// Tick interval.
+    pub interval: Duration,
     /// Timer mode (countdown or stopwatch).
     pub mode: Mode,
     /// Auto-start when mounted.
@@ -113,8 +113,8 @@ impl Default for Props {
     fn default() -> Self {
         Self {
             id: String::new(),
-            target_ms: 60_000,
-            interval_ms: 1000,
+            target: Duration::from_secs(60),
+            interval: Duration::from_secs(1),
             mode: Mode::Countdown,
             auto_start: false,
         }
@@ -122,7 +122,34 @@ impl Default for Props {
 }
 ```
 
-### 1.5 Full Machine Implementation
+### 1.5 Effects
+
+The recurring tick and the completion announcement are side effects the agnostic core cannot
+perform itself (it has no DOM and no recurring-interval primitive — `PlatformEffects` exposes only
+`set_timeout`). They are therefore emitted as typed **marker effects** that framework adapters
+translate into real platform calls, exactly like `clipboard::Effect::FeedbackTimer` and
+`toast::single::Effect::DurationTimer`.
+
+```rust
+/// Typed effect intents emitted by the timer machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter starts a recurring interval of `Context::interval`
+    /// milliseconds that dispatches `Event::Tick` on each elapse. Emitted on
+    /// initial mount when the timer auto-starts (via `Machine::initial_effects`)
+    /// and on every transition into `State::Running`. Cancelled whenever the
+    /// timer leaves `State::Running` (pause, completion, reset, or restart);
+    /// the adapter no-ops the cancellation when no interval is active.
+    TimerInterval,
+
+    /// Adapter announces the `Messages::completed_announcement` message into a
+    /// polite `aria-live` region. Emitted on the countdown transition into
+    /// `State::Completed`.
+    AnnounceCompleted,
+}
+```
+
+### 1.6 Full Machine Implementation
 
 ```rust
 pub struct Machine;
@@ -133,17 +160,14 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let current_ms = match props.mode {
-            Mode::Countdown => props.target_ms,
-            Mode::Stopwatch => 0,
+        let current = match props.mode {
+            Mode::Countdown => props.target,
+            Mode::Stopwatch => Duration::ZERO,
         };
-
-        let ids = ComponentIds::from_id(&props.id);
-        let locale = env.locale.clone();
-        let messages = messages.clone();
 
         let state = if props.auto_start {
             State::Running
@@ -152,15 +176,29 @@ impl ars_core::Machine for Machine {
         };
 
         (state, Context {
-            current_ms,
-            target_ms: props.target_ms,
-            interval_ms: props.interval_ms,
+            current,
+            target: props.target,
+            interval: props.interval,
             mode: props.mode,
             auto_start: props.auto_start,
-            locale,
-            messages,
-            ids,
+            locale: env.locale.clone(),
+            messages: messages.clone(),
+            ids: ComponentIds::from_id(&props.id),
         })
+    }
+
+    // Auto-started timers boot directly into `Running` without a transition,
+    // so the interval intent is emitted here on first mount.
+    fn initial_effects(
+        state: &Self::State,
+        _ctx: &Self::Context,
+        _props: &Self::Props,
+    ) -> Vec<PendingEffect<Self>> {
+        let mut effects = Vec::new();
+        if matches!(state, State::Running) {
+            effects.push(PendingEffect::named(Effect::TimerInterval));
+        }
+        effects
     }
 
     fn transition(
@@ -170,88 +208,65 @@ impl ars_core::Machine for Machine {
         _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
-            (State::Idle, Event::Start) => {
-                Some(TransitionPlan::to(State::Running).with_named_effect("timer-interval", |ctx, _props, send| {
-                    let interval = ctx.interval_ms;
-                    let timer = set_interval(interval, move || {
-                        send(Event::Tick);
-                    });
-                    Box::new(move || cancel_interval(timer))
-                }))
+            // Idle start, paused resume, and paused start all enter `Running`
+            // and (re)emit the interval intent.
+            (State::Idle, Event::Start)
+            | (State::Paused, Event::Resume | Event::Start) => {
+                Some(TransitionPlan::to(State::Running)
+                    .with_effect(PendingEffect::named(Effect::TimerInterval)))
             }
 
-            (State::Running, Event::Tick) => {
-                match ctx.mode {
-                    Mode::Countdown => {
-                        let new_ms = ctx.current_ms.saturating_sub(ctx.interval_ms as u64);
-                        if new_ms == 0 {
-                            Some(TransitionPlan::to(State::Completed).apply(|ctx| {
-                                ctx.current_ms = 0;
-                            }).with_named_effect("announce", |ctx, _props, _send| {
-                                let platform = use_platform_effects();
-                                platform.announce(&(ctx.messages.completed_announcement)(&ctx.locale));
-                                no_cleanup()
-                            }))
-                        } else {
-                            Some(TransitionPlan::context_only(move |ctx| {
-                                ctx.current_ms = new_ms;
-                            }))
-                        }
-                    }
-                    Mode::Stopwatch => {
-                        let interval = ctx.interval_ms as u64;
+            (State::Running, Event::Tick) => match ctx.mode {
+                Mode::Countdown => {
+                    let new = ctx.current.saturating_sub(ctx.interval);
+                    if new.is_zero() {
+                        Some(TransitionPlan::to(State::Completed)
+                            .apply(|ctx| { ctx.current = Duration::ZERO; })
+                            .cancel_effect(Effect::TimerInterval)
+                            .with_effect(PendingEffect::named(Effect::AnnounceCompleted)))
+                    } else {
                         Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.current_ms += interval;
+                            ctx.current = new;
                         }))
                     }
                 }
-            }
+                Mode::Stopwatch => {
+                    let interval = ctx.interval;
+                    Some(TransitionPlan::context_only(move |ctx| {
+                        ctx.current = ctx.current.saturating_add(interval);
+                    }))
+                }
+            },
 
             (State::Running, Event::Pause) => {
-                Some(TransitionPlan::to(State::Paused))
-            }
-
-            (State::Paused, Event::Resume)
-            | (State::Paused, Event::Start) => {
-                Some(TransitionPlan::to(State::Running).with_named_effect("timer-interval", |ctx, _props, send| {
-                    let interval = ctx.interval_ms;
-                    let timer = set_interval(interval, move || {
-                        send(Event::Tick);
-                    });
-                    Box::new(move || cancel_interval(timer))
-                }))
+                Some(TransitionPlan::to(State::Paused).cancel_effect(Effect::TimerInterval))
             }
 
             (_, Event::Reset) => {
-                let initial_ms = match ctx.mode {
-                    Mode::Countdown => ctx.target_ms,
-                    Mode::Stopwatch => 0,
+                let initial = match ctx.mode {
+                    Mode::Countdown => ctx.target,
+                    Mode::Stopwatch => Duration::ZERO,
                 };
-                Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
-                    ctx.current_ms = initial_ms;
-                }))
+                Some(TransitionPlan::to(State::Idle)
+                    .apply(move |ctx| { ctx.current = initial; })
+                    .cancel_effect(Effect::TimerInterval))
             }
 
             (_, Event::Restart) => {
-                let initial_ms = match ctx.mode {
-                    Mode::Countdown => ctx.target_ms,
-                    Mode::Stopwatch => 0,
+                let initial = match ctx.mode {
+                    Mode::Countdown => ctx.target,
+                    Mode::Stopwatch => Duration::ZERO,
                 };
-                Some(TransitionPlan::to(State::Running).apply(move |ctx| {
-                    ctx.current_ms = initial_ms;
-                }).with_named_effect("timer-interval", |ctx, _props, send| {
-                    let interval = ctx.interval_ms;
-                    let timer = set_interval(interval, move || {
-                        send(Event::Tick);
-                    });
-                    Box::new(move || cancel_interval(timer))
-                }))
+                Some(TransitionPlan::to(State::Running)
+                    .apply(move |ctx| { ctx.current = initial; })
+                    .cancel_effect(Effect::TimerInterval)
+                    .with_effect(PendingEffect::named(Effect::TimerInterval)))
             }
 
-            (_, Event::SetTime(ms)) => {
-                let ms = *ms;
+            (_, Event::SetTime(duration)) => {
+                let duration = *duration;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.current_ms = ms;
+                    ctx.current = duration;
                 }))
             }
 
@@ -270,7 +285,7 @@ impl ars_core::Machine for Machine {
 }
 ```
 
-### 1.6 Connect / API
+### 1.7 Connect / API
 
 ```rust
 #[derive(ComponentPart)]
@@ -298,11 +313,11 @@ impl<'a> Api<'a> {
     pub fn is_paused(&self) -> bool { *self.state == State::Paused }
     pub fn is_completed(&self) -> bool { *self.state == State::Completed }
     pub fn is_idle(&self) -> bool { *self.state == State::Idle }
-    pub fn current_ms(&self) -> u64 { self.ctx.current_ms }
+    pub fn current(&self) -> Duration { self.ctx.current }
 
     /// Current time broken into hours, minutes, seconds, milliseconds.
     pub fn display_time(&self) -> (u64, u64, u64, u64) {
-        let ms = self.ctx.current_ms;
+        let ms = self.ctx.current.as_millis() as u64;
         let hours = ms / 3_600_000;
         let minutes = (ms % 3_600_000) / 60_000;
         let seconds = (ms % 60_000) / 1_000;
@@ -312,10 +327,11 @@ impl<'a> Api<'a> {
 
     /// Progress as a fraction [0.0, 1.0] (countdown only).
     pub fn progress(&self) -> f64 {
-        if self.ctx.target_ms == 0 { return 0.0; }
+        if self.ctx.target.is_zero() { return 0.0; }
+        let fraction = self.ctx.current.as_secs_f64() / self.ctx.target.as_secs_f64();
         match self.ctx.mode {
-            Mode::Countdown => 1.0 - (self.ctx.current_ms as f64 / self.ctx.target_ms as f64),
-            Mode::Stopwatch => self.ctx.current_ms as f64 / self.ctx.target_ms as f64,
+            Mode::Countdown => 1.0 - fraction,
+            Mode::Stopwatch => fraction,
         }
     }
 
@@ -570,9 +586,9 @@ impl ComponentMessages for Messages {}
 | ------------------ | ---------------------------- | --------------------- | ----------------------------------- |
 | `autoStart`        | `auto_start`                 | `autoStart`           | Equivalent                          |
 | `countdown` / mode | `mode` (Countdown/Stopwatch) | `countdown` (boolean) | Equivalent (ars-ui uses enum)       |
-| `interval`         | `interval_ms`                | `interval`            | Equivalent                          |
+| `interval`         | `interval` (`Duration`)      | `interval`            | Equivalent (ars-ui uses `Duration`) |
 | `startMs`          | --                           | `startMs`             | Ark can start from arbitrary offset |
-| `targetMs`         | `target_ms`                  | `targetMs`            | Equivalent                          |
+| `targetMs`         | `target` (`Duration`)        | `targetMs`            | Equivalent (ars-ui uses `Duration`) |
 
 **Gaps:** None. `startMs` is niche; ars-ui can achieve via `Event::SetTime`.
 
