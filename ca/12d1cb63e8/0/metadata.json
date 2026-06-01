@@ -1,0 +1,112 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "ca12d1cb63e8",
+  "session_id": "019e80c5-8e5f-7291-ba97-21da7035e74c",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T03:30:35.62919Z",
+  "branch": "codex/issue-287-range-calendar-core",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/range_calendar/tests.rs",
+    "crates/ars-components/src/date_time/range_calendar/mod.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "e8bb3635d736",
+  "checkpoint_transcript_start": 761,
+  "transcript_lines_at_start": 761,
+  "token_usage": {
+    "input_tokens": 79982,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 12129280,
+    "output_tokens": 12421,
+    "api_call_count": 72
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement the framework-agnostic RangeCalendar core component for the ars-ui library (Issue #287), covering two-click range selection, hover preview, keyboard navigation, ARIA attributes, and span validation, then open a PR and see it through Codex review.",
+    "outcome": "PR #704 was opened and all major CI lanes went green. Codex surfaced two real bugs (interior-unavailable-date bypass and stale pending-anchor after prop sync); both were fixed with regression tests and a focused patch. The fix commit was staged and committed; push and thread resolution were the remaining steps at transcript end.",
+    "learnings": {
+      "repo": [
+        "The repo uses `cargo insta` for snapshot testing and requires a `snapshot-reviewed` label on PRs before the Snapshot Change Check CI job passes — the label must be applied before the workflow run starts or the job will fail.",
+        "CI is split into many parallel lanes: Formatting, Clippy, Adapter Parity, Error Variant Coverage, Mutual Exclusion, Adapter Tests, browser/integration, per-framework feature-flag jobs (Dioxus, Leptos), Unit Tests, Coverage, and Release Verification.",
+        "Codex review is triggered by posting `@codex review` as a PR comment and signals active review with an 'eyes' reaction; feedback arrives as GitHub review threads.",
+        "The project uses `cargo xtask spec validate` for spec conformance and `cargo xci --profile fast` for cross-crate integration checks.",
+        "RangeCalendar reuses the existing Calendar grid machinery and lives under `crates/ars-components/src/date_time/range_calendar/`.",
+        "Commit co-author convention for Codex-reviewed fixes: `Co-authored-by: Codex <codex@openai.com>`."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/mod.rs",
+          "line": 560,
+          "end_line": 630,
+          "finding": "DateRange struct and date arithmetic utilities (days_until, add_days) are defined here; reused by range validation logic."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/mod.rs",
+          "line": 620,
+          "end_line": 690,
+          "finding": "range_span_constraints / range_is_allowed logic — original implementation only checked endpoints and span length, not interior unavailable dates; patched to iterate the full contiguous range."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/mod.rs",
+          "line": 740,
+          "end_line": 770,
+          "finding": "on_cell_hover / HoverDate handling — pending hover state was not cleared when constraint props changed and made the anchor invalid."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/mod.rs",
+          "line": 900,
+          "end_line": 1015,
+          "finding": "on_props_changed / SyncProps — original prop sync did not revalidate the pending anchor or hover state; patched to clear both when the anchor date is rejected by the updated unavailable predicate."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/mod.rs",
+          "line": 1010,
+          "end_line": 1135,
+          "finding": "apply_select_date core state machine — second-click path that completes a range selection; was the entry point for the interior-unavailable bug fix."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/tests.rs",
+          "line": 180,
+          "end_line": 310,
+          "finding": "Existing test suite structure; three new regression tests added: unavailable_dates_inside_pending_range_block_completion, constraint_sync_clears_pending_anchor_and_hover_when_anchor_becomes_invalid, unavailable_sync_clears_pending_anchor_when_predicate_rejects_it."
+        }
+      ],
+      "workflow": [
+        "Write regression tests before patching — confirm they fail on the current implementation, then fix; this validates the repro before the fix obscures it.",
+        "When a CI job fails due to a timing race (label not applied before workflow trigger), rerun the specific failed job rather than pushing a new commit.",
+        "Rerunning a GitHub Actions job via the API is blocked while the parent workflow run is still active — wait for the run to complete first.",
+        "Poll Codex review status via both reactions API (eyes = reviewing, rocket/+1 = approved) and GraphQL reviewThreads query; reactions confirm pickup before threads appear.",
+        "Run the full verification matrix (unit, snapshot, spec-conformance, proptest, clippy, fmt, coverage, xci) before committing a review fix to avoid a second review cycle."
+      ]
+    },
+    "friction": [
+      "Snapshot Change Check CI job failed due to a label-timing race: the `snapshot-reviewed` label was applied after the workflow had already started, so the job saw the PR without the label.",
+      "GitHub Actions API blocked the job rerun attempt because the parent workflow run was still in progress — required a manual wait loop.",
+      "Long CI tail (Coverage, Release Verification, Dioxus feature flags) required multiple multi-minute polling intervals before the run was complete enough to rerun the failed snapshot job.",
+      "Transcript ends before the fix push and Codex thread resolution were confirmed complete."
+    ],
+    "open_items": [
+      "Push the fix commit (`Fix RangeCalendar pending range validation`) to origin and verify CI passes on the second run.",
+      "Reply to and resolve both Codex review threads after the push.",
+      "Rerun the Snapshot Change Check job (which failed due to label timing) once the new workflow run completes.",
+      "Confirm Coverage and Release Verification lanes pass on the fix commit.",
+      "Codex approval / merge not yet confirmed — PR #704 still in review state at transcript end."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T03:29:30.286913Z",
+    "agent_lines": 129,
+    "agent_removed": 1,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 129,
+    "total_lines_changed": 130,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
