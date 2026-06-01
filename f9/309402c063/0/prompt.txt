@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>b77fo4i7x</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-294/5bc925b4-160c-4dbe-8b86-2e569a259845/tasks/b77fo4i7x.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex pass 4 + Coverage/CRAP gate" completed (exit code 0)</summary>
+</task-notification>
