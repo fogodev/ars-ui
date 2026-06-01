@@ -57,7 +57,7 @@ AttrMap {
                 ValueMax,
             ),
             String(
-                "1",
+                "100",
             ),
         ),
         (
@@ -73,7 +73,7 @@ AttrMap {
                 ValueNow,
             ),
             String(
-                "0",
+                "50",
             ),
         ),
         (

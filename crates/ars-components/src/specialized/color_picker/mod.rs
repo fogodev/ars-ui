@@ -1699,11 +1699,29 @@ impl Api<'_> {
             _ => (self.ctx.messages.hue_label)(&self.ctx.locale),
         };
 
+        // Alpha lives in `0..=1`, so report `aria-valuenow`/min/max as a 0–100
+        // percentage — `{:.0}` on the raw fraction would round every partial
+        // alpha to 0 or 1 and mislead screen readers. Hue stays in whole degrees.
+        let (value_now, value_min, value_max) = if channel == ColorChannel::Alpha {
+            (value * 100.0, 0.0, 100.0)
+        } else {
+            (value, min, max)
+        };
+
         attrs
             .set(HtmlAttr::Aria(AriaAttr::Label), label)
-            .set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{value:.0}"))
-            .set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{min:.0}"))
-            .set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{max:.0}"))
+            .set(
+                HtmlAttr::Aria(AriaAttr::ValueNow),
+                format!("{value_now:.0}"),
+            )
+            .set(
+                HtmlAttr::Aria(AriaAttr::ValueMin),
+                format!("{value_min:.0}"),
+            )
+            .set(
+                HtmlAttr::Aria(AriaAttr::ValueMax),
+                format!("{value_max:.0}"),
+            )
             .set(HtmlAttr::Aria(AriaAttr::Orientation), "horizontal");
 
         let pct = if (max - min).abs() > f64::EPSILON {
@@ -1880,7 +1898,15 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Type, "text")
-            .set(HtmlAttr::InputMode, "text");
+            .set(HtmlAttr::InputMode, "text")
+            // Populate the current hex value (8-digit when show_alpha and the
+            // color is translucent) so adapters sourcing input props from the
+            // connect attrs show the existing color instead of a blank field —
+            // matching the channel inputs and avoiding duplicated formatting.
+            .set(
+                HtmlAttr::Value,
+                self.ctx.value.pending().to_hex(self.ctx.show_alpha),
+            );
 
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -4170,6 +4196,86 @@ mod tests {
                 "{space:?} should announce '{label}', got '{announcement}'"
             );
         }
+    }
+
+    // ── Codex review #706 fifth pass ───────────────────────────────
+
+    #[test]
+    fn alpha_slider_thumb_reports_fractional_value_as_percent() {
+        // A 50% alpha must announce aria-valuenow="50" (range 0..100), not "0"
+        // from rounding the 0..1 fraction.
+        let svc = open_service(Props {
+            default_value: ColorValue::new(0.0, 1.0, 0.5, 0.5),
+            ..Props::default()
+        });
+        let thumb = svc
+            .connect(&|_| {})
+            .channel_slider_thumb_attrs(ColorChannel::Alpha);
+        assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::ValueNow)), Some("50"));
+        assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::ValueMin)), Some("0"));
+        assert_eq!(thumb.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("100"));
+        // Hue still reports whole degrees.
+        let hue = svc
+            .connect(&|_| {})
+            .channel_slider_thumb_attrs(ColorChannel::Hue);
+        assert_eq!(hue.get(&HtmlAttr::Aria(AriaAttr::ValueMax)), Some("360"));
+    }
+
+    #[test]
+    fn hex_input_exposes_current_value() {
+        let svc = open_service(Props {
+            default_value: ColorValue::from_hsl(0.0, 1.0, 0.5), // opaque red
+            ..Props::default()
+        });
+        assert_eq!(
+            svc.connect(&|_| {}).hex_input_attrs().get(&HtmlAttr::Value),
+            Some("#ff0000")
+        );
+
+        // Translucent + show_alpha → 8-digit hex.
+        let translucent = open_service(Props {
+            default_value: ColorValue::new(0.0, 1.0, 0.5, 0.5),
+            show_alpha: true,
+            ..Props::default()
+        });
+        assert_eq!(
+            translucent
+                .connect(&|_| {})
+                .hex_input_attrs()
+                .get(&HtmlAttr::Value)
+                .map(str::len),
+            Some(9)
+        );
+    }
+
+    #[test]
+    fn controlled_open_none_to_some_forces_state() {
+        // Uncontrolled picker the user opened; the parent then takes control with
+        // open: Some(false). `None != Some(false)` is true, so on_props_changed
+        // emits Close and the picker closes on the first controlled render.
+        let mut svc = service(Props::default());
+        drop(svc.send(Event::Open));
+        assert_eq!(svc.state(), &State::Open);
+
+        drop(svc.set_props(Props {
+            id: "color-picker".to_string(),
+            open: Some(false),
+            ..Props::default()
+        }));
+        assert_eq!(
+            svc.state(),
+            &State::Closed,
+            "taking control with open: Some(false) must close the picker"
+        );
+
+        // And the reverse: uncontrolled-closed → controlled open: Some(true).
+        let mut svc = service(Props::default());
+        drop(svc.set_props(Props {
+            id: "color-picker".to_string(),
+            open: Some(true),
+            ..Props::default()
+        }));
+        assert_eq!(svc.state(), &State::Open);
     }
 
     // ── Snapshots: every anatomy part + output-affecting branches ──

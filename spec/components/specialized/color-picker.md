@@ -5,15 +5,7 @@ tier: complex
 foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related:
-    [
-        angle-slider,
-        color-area,
-        color-field,
-        color-slider,
-        color-swatch,
-        color-swatch-picker,
-        color-wheel,
-    ]
+    [angle-slider, color-area, color-field, color-slider, color-swatch, color-swatch-picker, color-wheel]
 references:
     ark-ui: ColorPicker
     react-aria: ColorPicker
@@ -1561,7 +1553,12 @@ Highlights of the part attribute surface:
   `max`, `aria-label`, the thumb-position custom property, and `data-ars-dragging`
   for the matching channel; `tabindex="-1"` + `aria-disabled` when disabled. The
   hue thumb reports the unwrapped `Context::hue_value` so it stays at the 360°
-  endpoint instead of wrapping to 0°.
+  endpoint instead of wrapping to 0°; the alpha thumb reports `aria-valuenow`/
+  `min`/`max` as a `0`–`100` percentage (its `0..=1` value rounded with `{:.0}`
+  would otherwise collapse every partial alpha to 0/1).
+- **`hex_input_attrs`** — `type="text"`, `inputmode="text"`, the current
+  `to_hex(show_alpha)` `value` (8-digit when translucent and `show_alpha`), and
+  `disabled`/`readonly` mirrors.
 - **`swatch_attrs(index)`** — `type="button"`, `role="button"`, `data-ars-index`,
   `tabindex` (`-1` + `aria-disabled` when disabled), and (when `index` is in
   range) `aria-label` from `messages.swatch_label`, the `--ars-swatch-color`
@@ -1660,7 +1657,7 @@ ColorPicker
 | `Swatch`             | `<button>`              | no       | `type="button"`, `role="button"`, `tabindex` (`0`, `-1` when disabled), `aria-label`, `data-ars-selected`, `data-ars-index`, `aria-disabled` when disabled              |
 | `FormatSelect`       | `<select>` / `<button>` | no       | `aria-label`, `disabled` + `aria-disabled` when disabled                                                                                                                |
 | `ChannelInput`       | `<input>`               | no       | `type="text"`, `inputmode="numeric"`, `value` (current channel value), `data-ars-channel`, `data-ars-channel-index`                                                     |
-| `HexInput`           | `<input>`               | no       | `type="text"`, `inputmode="text"`                                                                                                                                       |
+| `HexInput`           | `<input>`               | no       | `type="text"`, `inputmode="text"`, `value` (current hex)                                                                                                                |
 | `EyeDropperTrigger`  | `<button>`              | no       | `type="button"`, `aria-label`, `hidden` (when unsupported)                                                                                                              |
 | `HiddenInput`        | `<input type="hidden">` | yes      | `name`, `value`                                                                                                                                                         |
 

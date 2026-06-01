@@ -32,6 +32,12 @@ AttrMap {
                 "text",
             ),
         ),
+        (
+            Value,
+            String(
+                "#ff0000",
+            ),
+        ),
     ],
     styles: [],
 }
