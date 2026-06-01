@@ -89,8 +89,14 @@ pub struct Context {
     pub messages: Messages,
     /// Component instance IDs.
     pub ids: ComponentIds,
+    /// Backend used for locale-aware digit formatting of the displayed time.
+    pub intl_backend: Arc<dyn IntlBackend>,
 }
 ```
+
+`Context` therefore implements `Clone` only via derive; `Debug` and `PartialEq`
+are provided manually and exclude `intl_backend` (an injected service, not
+observable state), mirroring `TimeField`.
 
 ### 1.4 Props
 
@@ -184,6 +190,7 @@ impl ars_core::Machine for Machine {
             locale: env.locale.clone(),
             messages: messages.clone(),
             ids: ComponentIds::from_id(&props.id),
+            intl_backend: Arc::clone(&env.intl_backend),
         })
     }
 
@@ -325,23 +332,38 @@ impl<'a> Api<'a> {
         (hours, minutes, seconds, millis)
     }
 
-    /// Progress as a fraction [0.0, 1.0] (countdown only).
+    /// Progress as a fraction [0.0, 1.0].
+    ///
+    /// Clamped so an over-target stopwatch or out-of-range `SetTime` never
+    /// produces a value outside [0.0, 1.0] (which would break the progressbar
+    /// `aria-valuenow`/`valuemin`/`valuemax` semantics).
     pub fn progress(&self) -> f64 {
         if self.ctx.target.is_zero() { return 0.0; }
         let fraction = self.ctx.current.as_secs_f64() / self.ctx.target.as_secs_f64();
-        match self.ctx.mode {
+        let progress = match self.ctx.mode {
             Mode::Countdown => 1.0 - fraction,
             Mode::Stopwatch => fraction,
-        }
+        };
+        progress.clamp(0.0, 1.0)
     }
 
     /// Formatted time string (HH:MM:SS or MM:SS).
+    ///
+    /// Digits are rendered through `intl_backend.format_segment_digits` so
+    /// non-ASCII numbering systems are honored; the colon separator is fixed.
     pub fn formatted_time(&self) -> String {
-        let (h, m, s, _) = self.display_time();
-        if h > 0 {
-            format!("{:02}:{:02}:{:02}", h, m, s)
+        let (hours, minutes, seconds, _) = self.display_time();
+        let width = NonZeroU8::new(2).expect("segment width is non-zero");
+        let segment = |value: u64| {
+            u32::try_from(value).map_or_else(
+                |_| value.to_string(),
+                |value| self.ctx.intl_backend.format_segment_digits(value, width, &self.ctx.locale),
+            )
+        };
+        if hours > 0 {
+            format!("{}:{}:{}", segment(hours), segment(minutes), segment(seconds))
         } else {
-            format!("{:02}:{:02}", m, s)
+            format!("{}:{}", segment(minutes), segment(seconds))
         }
     }
 
@@ -405,6 +427,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::StartTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), if self.is_paused() {
             (self.ctx.messages.resume_label)(&self.ctx.locale)
         } else {
@@ -421,6 +444,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::PauseTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.pause_label)(&self.ctx.locale));
         if !self.is_running() {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -433,6 +457,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ResetTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.reset_label)(&self.ctx.locale));
         if self.is_idle() {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -493,16 +518,16 @@ Timer
 └── Separator        (optional — decorative colon between time segments)
 ```
 
-| Part         | Element    | Key Attributes                                       |
-| ------------ | ---------- | ---------------------------------------------------- |
-| Root         | `<div>`    | `role="timer"`, `aria-live="polite"`, `aria-atomic`  |
-| Label        | `<label>`  | `id` for association                                 |
-| Display      | `<span>`   | `aria-hidden="true"` (Root handles live region)      |
-| Progress     | `<div>`    | `role="progressbar"`, `aria-valuenow/min/max`        |
-| StartTrigger | `<button>` | `aria-label` (Start/Resume), `disabled` when running |
-| PauseTrigger | `<button>` | `aria-label` (Pause), `disabled` when not running    |
-| ResetTrigger | `<button>` | `aria-label` (Reset), `disabled` when idle           |
-| Separator    | `<span>`   | `aria-hidden="true"` (decorative)                    |
+| Part         | Element    | Key Attributes                                                        |
+| ------------ | ---------- | --------------------------------------------------------------------- |
+| Root         | `<div>`    | `role="timer"`, `aria-live="polite"`, `aria-atomic`                   |
+| Label        | `<label>`  | `id` for association                                                  |
+| Display      | `<span>`   | `aria-hidden="true"` (Root handles live region)                       |
+| Progress     | `<div>`    | `role="progressbar"`, `aria-valuenow/min/max`                         |
+| StartTrigger | `<button>` | `type="button"`, `aria-label` (Start/Resume), `disabled` when running |
+| PauseTrigger | `<button>` | `type="button"`, `aria-label` (Pause), `disabled` when not running    |
+| ResetTrigger | `<button>` | `type="button"`, `aria-label` (Reset), `disabled` when idle           |
+| Separator    | `<span>`   | `aria-hidden="true"` (decorative)                                     |
 
 ## 3. Accessibility
 

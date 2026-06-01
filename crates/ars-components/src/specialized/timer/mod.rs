@@ -11,15 +11,16 @@
 //! that dispatches `Event::Tick`, and translate `Effect::AnnounceCompleted`
 //! into a live-region announcement.
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, string::String, sync::Arc, vec::Vec};
 use core::{
     fmt::{self, Debug},
+    num::NonZeroU8,
     time::Duration,
 };
 
 use ars_core::{
     AriaAttr, AttrMap, ComponentIds, ComponentMessages, ComponentPart, ConnectApi, CssProperty,
-    Env, HasId, HtmlAttr, Locale, MessageFn, PendingEffect, TransitionPlan,
+    Env, HasId, HtmlAttr, IntlBackend, Locale, MessageFn, PendingEffect, TransitionPlan,
 };
 
 /// Timer mode.
@@ -75,7 +76,12 @@ pub enum Event {
 }
 
 /// Context for the `Timer` component.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// Cloneable but not `Debug`/`PartialEq`-derivable because [`Context::intl_backend`]
+/// is a trait object; both impls are provided manually and exclude the backend
+/// (it is an injected service, not observable state), mirroring
+/// [`time_field`](crate::date_time::time_field).
+#[derive(Clone)]
 pub struct Context {
     /// Current time value. For countdown this is the remaining time; for
     /// stopwatch this is the elapsed time.
@@ -101,6 +107,38 @@ pub struct Context {
 
     /// Component instance IDs.
     pub ids: ComponentIds,
+
+    /// Backend used for locale-aware digit formatting of the displayed time.
+    pub intl_backend: Arc<dyn IntlBackend>,
+}
+
+impl Debug for Context {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("timer::Context")
+            .field("current", &self.current)
+            .field("target", &self.target)
+            .field("interval", &self.interval)
+            .field("mode", &self.mode)
+            .field("auto_start", &self.auto_start)
+            .field("locale", &self.locale)
+            .field("messages", &self.messages)
+            .field("ids", &self.ids)
+            .field("intl_backend", &"<dyn IntlBackend>")
+            .finish()
+    }
+}
+
+impl PartialEq for Context {
+    fn eq(&self, other: &Self) -> bool {
+        self.current == other.current
+            && self.target == other.target
+            && self.interval == other.interval
+            && self.mode == other.mode
+            && self.auto_start == other.auto_start
+            && self.locale == other.locale
+            && self.messages == other.messages
+            && self.ids == other.ids
+    }
 }
 
 /// Props for the `Timer` component.
@@ -297,6 +335,7 @@ impl ars_core::Machine for Machine {
                 locale: env.locale.clone(),
                 messages: messages.clone(),
                 ids: ComponentIds::from_id(&props.id),
+                intl_backend: Arc::clone(&env.intl_backend),
             },
         )
     }
@@ -505,7 +544,10 @@ impl Api<'_> {
     ///
     /// For countdown this is the fraction of [`Context::target`] already
     /// elapsed; for stopwatch this is the elapsed time as a fraction of
-    /// [`Context::target`].
+    /// [`Context::target`]. The result is clamped to `[0.0, 1.0]` so an
+    /// over-target stopwatch or an out-of-range [`Event::SetTime`] never yields
+    /// a value outside the documented range (which would otherwise break the
+    /// `progressbar` `aria-valuenow`/`valuemin`/`valuemax` semantics).
     #[must_use]
     pub fn progress(&self) -> f64 {
         if self.ctx.target.is_zero() {
@@ -514,21 +556,45 @@ impl Api<'_> {
 
         let fraction = self.ctx.current.as_secs_f64() / self.ctx.target.as_secs_f64();
 
-        match self.ctx.mode {
+        let progress = match self.ctx.mode {
             Mode::Countdown => 1.0 - fraction,
             Mode::Stopwatch => fraction,
-        }
+        };
+
+        progress.clamp(0.0, 1.0)
     }
 
     /// Formatted time string (`HH:MM:SS` when hours are present, else `MM:SS`).
+    ///
+    /// Digits are rendered through [`Context::intl_backend`] so non-ASCII
+    /// numbering systems (e.g. Arabic-Indic) are honored when a localizing
+    /// backend is provided; the default
+    /// [`StubIntlBackend`](ars_core::StubIntlBackend) yields ASCII digits.
     #[must_use]
     pub fn formatted_time(&self) -> String {
         let (hours, minutes, seconds, _millis) = self.display_time();
 
+        let format_segment = |value: u64| {
+            let width = NonZeroU8::new(2).expect("segment width is non-zero");
+            u32::try_from(value).map_or_else(
+                |_| value.to_string(),
+                |value| {
+                    self.ctx
+                        .intl_backend
+                        .format_segment_digits(value, width, &self.ctx.locale)
+                },
+            )
+        };
+
         if hours > 0 {
-            format!("{hours:02}:{minutes:02}:{seconds:02}")
+            format!(
+                "{}:{}:{}",
+                format_segment(hours),
+                format_segment(minutes),
+                format_segment(seconds)
+            )
         } else {
-            format!("{minutes:02}:{seconds:02}")
+            format!("{}:{}", format_segment(minutes), format_segment(seconds))
         }
     }
 
@@ -625,6 +691,7 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
+            .set(HtmlAttr::Type, "button")
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 if self.is_paused() {
@@ -650,6 +717,7 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
+            .set(HtmlAttr::Type, "button")
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.pause_label)(&self.ctx.locale),
@@ -671,6 +739,7 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
+            .set(HtmlAttr::Type, "button")
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.reset_label)(&self.ctx.locale),
@@ -757,10 +826,82 @@ mod tests {
     use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
     use std::sync::Mutex;
 
-    use ars_core::{Machine as _, Service};
+    use ars_core::{Machine as _, Service, StubIntlBackend};
+    use ars_i18n::{HourCycle, WeekInfo, Weekday};
     use insta::assert_snapshot;
 
     use super::*;
+
+    /// Test backend that prefixes segment digits with `loc-` so we can assert
+    /// `formatted_time`/`aria-label` actually route through the locale backend
+    /// rather than hard-coding ASCII. Mirrors `time_field`'s test double.
+    struct LocalizedDigitsBackend;
+
+    impl IntlBackend for LocalizedDigitsBackend {
+        fn weekday_short_label(&self, weekday: Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_short_label(weekday, locale)
+        }
+
+        fn weekday_long_label(&self, weekday: Weekday, locale: &Locale) -> String {
+            StubIntlBackend.weekday_long_label(weekday, locale)
+        }
+
+        fn month_long_name(&self, month: u8, locale: &Locale) -> String {
+            StubIntlBackend.month_long_name(month, locale)
+        }
+
+        fn day_period_label(&self, is_pm: bool, locale: &Locale) -> String {
+            StubIntlBackend.day_period_label(is_pm, locale)
+        }
+
+        fn day_period_from_char(&self, ch: char, locale: &Locale) -> Option<bool> {
+            StubIntlBackend.day_period_from_char(ch, locale)
+        }
+
+        fn format_segment_digits(
+            &self,
+            value: u32,
+            min_digits: NonZeroU8,
+            _locale: &Locale,
+        ) -> String {
+            let width = usize::from(min_digits.get());
+            format!("loc-{value:0>width$}")
+        }
+
+        fn hour_cycle(&self, locale: &Locale) -> HourCycle {
+            StubIntlBackend.hour_cycle(locale)
+        }
+
+        fn week_info(&self, locale: &Locale) -> WeekInfo {
+            StubIntlBackend.week_info(locale)
+        }
+    }
+
+    /// Leaks an [`Api`] whose context carries a localizing backend, for digit
+    /// routing assertions.
+    fn api_with_localized_backend(current: Duration) -> Api<'static> {
+        let env = Env::new(
+            Locale::parse("ar").expect("`ar` is a valid BCP-47 tag"),
+            Arc::new(LocalizedDigitsBackend),
+        );
+        let props = Box::leak(Box::new(
+            Props::new().id("timer").target(Duration::from_secs(60)),
+        ));
+        let messages = Messages::default();
+        let (_, mut ctx) = Machine::init(props, &env, &messages);
+        ctx.current = current;
+
+        let ctx = Box::leak(Box::new(ctx));
+        let state = Box::leak(Box::new(State::Running));
+        let send = Box::leak(Box::new(|_: Event| {}));
+
+        Api {
+            state,
+            ctx,
+            props,
+            send,
+        }
+    }
 
     fn test_props() -> Props {
         Props::new().id("timer")
@@ -1395,6 +1536,78 @@ mod tests {
             api.reset_trigger_attrs()
         );
         assert_eq!(api.part_attrs(Part::Separator), api.separator_attrs());
+    }
+
+    #[test]
+    fn timer_progress_clamped_to_unit_range() {
+        // Stopwatch past its target: raw fraction 2.0 clamps to 1.0.
+        let stopwatch = api_for(
+            State::Running,
+            Duration::from_secs(2),
+            Mode::Stopwatch,
+            Duration::from_secs(1),
+        );
+        assert!((stopwatch.progress() - 1.0).abs() < 1e-9);
+        assert_eq!(
+            stopwatch
+                .progress_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("100")
+        );
+
+        // Countdown whose current exceeds target (e.g. via an out-of-range
+        // SetTime): raw -1.0 clamps to 0.0 instead of rendering "-100".
+        let countdown = api_for(
+            State::Running,
+            Duration::from_secs(2),
+            Mode::Countdown,
+            Duration::from_secs(1),
+        );
+        assert!((countdown.progress() - 0.0).abs() < 1e-9);
+        assert_eq!(
+            countdown
+                .progress_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("0")
+        );
+    }
+
+    #[test]
+    fn timer_triggers_are_type_button() {
+        let api = api_for(
+            State::Running,
+            Duration::from_secs(30),
+            Mode::Countdown,
+            Duration::from_secs(60),
+        );
+
+        assert_eq!(
+            api.start_trigger_attrs().get(&HtmlAttr::Type),
+            Some("button")
+        );
+        assert_eq!(
+            api.pause_trigger_attrs().get(&HtmlAttr::Type),
+            Some("button")
+        );
+        assert_eq!(
+            api.reset_trigger_attrs().get(&HtmlAttr::Type),
+            Some("button")
+        );
+    }
+
+    #[test]
+    fn timer_formatted_time_routes_digits_through_intl_backend() {
+        // 90s -> 01:30; the localizing backend prefixes each segment with `loc-`.
+        let api = api_with_localized_backend(Duration::from_secs(90));
+
+        assert_eq!(api.formatted_time(), "loc-01:loc-30");
+
+        // The root `aria-label` is sourced from `formatted_time`, so it inherits
+        // the localized digits too.
+        assert_eq!(
+            api.root_attrs().get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("loc-01:loc-30")
+        );
     }
 
     // ─────────────────────── snapshots ───────────────────────
