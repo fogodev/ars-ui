@@ -249,7 +249,7 @@ impl ars_core::Machine for Machine {
                 }))
             }
             (State::Paused, Event::HoverOut) if ctx.paused_by_hover => {
-                Some(TransitionPlan::to(if ctx.paused_by_focus {
+                Some(TransitionPlan::to(if ctx.paused_by_focus || finite_loop_exhausted(ctx) {
                     State::Paused
                 } else {
                     State::Playing
@@ -272,7 +272,7 @@ impl ars_core::Machine for Machine {
                 }))
             }
             (State::Paused, Event::FocusOut) if ctx.paused_by_focus => {
-                Some(TransitionPlan::to(if ctx.paused_by_hover {
+                Some(TransitionPlan::to(if ctx.paused_by_hover || finite_loop_exhausted(ctx) {
                     State::Paused
                 } else {
                     State::Playing

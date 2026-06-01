@@ -436,7 +436,7 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Paused, Event::HoverOut) if ctx.paused_by_hover => Some(
-                TransitionPlan::to(if ctx.paused_by_focus {
+                TransitionPlan::to(if ctx.paused_by_focus || finite_loop_exhausted(ctx) {
                     State::Paused
                 } else {
                     State::Playing
@@ -461,7 +461,7 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Paused, Event::FocusOut) if ctx.paused_by_focus => Some(
-                TransitionPlan::to(if ctx.paused_by_hover {
+                TransitionPlan::to(if ctx.paused_by_hover || finite_loop_exhausted(ctx) {
                     State::Paused
                 } else {
                     State::Playing
@@ -1027,6 +1027,49 @@ mod tests {
 
         assert!(!changed(&marquee.send(Event::Play)));
         assert_eq!(marquee.state(), &State::Paused);
+    }
+
+    #[test]
+    fn marquee_interaction_end_keeps_loop_exhausted_after_loop_count_shrink() {
+        let mut hover = service(Props::new().id("ticker"));
+
+        for _ in 0..5 {
+            assert!(changed(&hover.send(Event::LoopComplete)));
+        }
+
+        assert!(changed(&hover.send(Event::HoverIn)));
+        assert_eq!(hover.state(), &State::Paused);
+        assert!(hover.context().paused_by_hover);
+
+        drop(hover.set_props(Props::new().id("ticker").loop_count(5)));
+
+        assert_eq!(hover.state(), &State::Paused);
+        assert_eq!(hover.context().current_loop, 5);
+        assert!(hover.context().paused_by_hover);
+
+        assert!(changed(&hover.send(Event::HoverOut)));
+        assert_eq!(hover.state(), &State::Paused);
+        assert!(!hover.context().paused_by_hover);
+
+        let mut focus = service(Props::new().id("ticker"));
+
+        for _ in 0..5 {
+            assert!(changed(&focus.send(Event::LoopComplete)));
+        }
+
+        assert!(changed(&focus.send(Event::FocusIn)));
+        assert_eq!(focus.state(), &State::Paused);
+        assert!(focus.context().paused_by_focus);
+
+        drop(focus.set_props(Props::new().id("ticker").loop_count(5)));
+
+        assert_eq!(focus.state(), &State::Paused);
+        assert_eq!(focus.context().current_loop, 5);
+        assert!(focus.context().paused_by_focus);
+
+        assert!(changed(&focus.send(Event::FocusOut)));
+        assert_eq!(focus.state(), &State::Paused);
+        assert!(!focus.context().paused_by_focus);
     }
 
     #[test]
