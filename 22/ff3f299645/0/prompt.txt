@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>b07ig80aa</task-id>
+<tool-use-id>toolu_01NdJdSrEfoDTVmnshmt6Skn</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-300/27e71c0c-50a2-4743-a430-d81de5d4c318/tasks/b07ig80aa.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex review until terminal verdict" completed (exit code 0)</summary>
+</task-notification>

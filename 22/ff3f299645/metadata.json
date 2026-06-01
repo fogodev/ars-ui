@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "22ff3f299645",
+  "strategy": "manual-commit",
+  "branch": "impl-300",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/specialized/color_picker/mod.rs",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_trigger_closed.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_trigger_disabled.snap",
+    "crates/ars-components/src/specialized/color_picker/snapshots/ars_components__specialized__color_picker__tests__color_picker_trigger_open.snap",
+    "spec/components/specialized/color-picker.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/22/ff3f299645/0/metadata.json",
+      "transcript": "/22/ff3f299645/0/full.jsonl",
+      "content_hash": "/22/ff3f299645/0/content_hash.txt",
+      "prompt": "/22/ff3f299645/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 4396,
+    "cache_creation_tokens": 538519,
+    "cache_read_tokens": 29053903,
+    "output_tokens": 31337,
+    "api_call_count": 60
+  }
+}
