@@ -1,0 +1,41 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "de41ebc8ded5",
+  "strategy": "manual-commit",
+  "branch": "codex/issue-232-segment-group-core",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/selection/mod.rs",
+    "crates/ars-components/src/selection/segment_group/mod.rs",
+    "crates/ars-components/src/selection/segment_group/snapshots/ars_components__selection__segment_group__tests__segment_group_hidden_input_empty.snap",
+    "crates/ars-components/src/selection/segment_group/snapshots/ars_components__selection__segment_group__tests__segment_group_hidden_input_selected.snap",
+    "crates/ars-components/src/selection/segment_group/snapshots/ars_components__selection__segment_group__tests__segment_group_indicator_empty.snap",
+    "crates/ars-components/src/selection/segment_group/snapshots/ars_components__selection__segment_group__tests__segment_group_indicator_selected.snap",
+    "crates/ars-components/src/selection/segment_group/snapshots/ars_components__selection__segment_group__tests__segment_group_item_disabled.snap",
+    "crates/ars-components/src/selection/segment_group/snapshots/ars_components__selection__segment_group__tests__segment_group_item_focused_keyboard.snap",
+    "crates/ars-components/src/selection/segment_group/snapshots/ars_components__selection__segment_group__tests__segment_group_item_selected.snap",
+    "crates/ars-components/src/selection/segment_group/snapshots/ars_components__selection__segment_group__tests__segment_group_item_text_selected.snap",
+    "crates/ars-components/src/selection/segment_group/snapshots/ars_components__selection__segment_group__tests__segment_group_item_unselected.snap",
+    "crates/ars-components/src/selection/segment_group/snapshots/ars_components__selection__segment_group__tests__segment_group_root_vertical_disabled_invalid_readonly.snap",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "crates/ars-components/tests/spec_conformance/selection.rs",
+    "spec/components/selection/segment-group.md",
+    "spec/dioxus-components/selection/segment-group.md",
+    "spec/leptos-components/selection/segment-group.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/de/41ebc8ded5/0/metadata.json",
+      "transcript": "/de/41ebc8ded5/0/full.jsonl",
+      "content_hash": "/de/41ebc8ded5/0/content_hash.txt",
+      "prompt": "/de/41ebc8ded5/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 817831,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 24190592,
+    "output_tokens": 52277,
+    "api_call_count": 176
+  }
+}
