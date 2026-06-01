@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/specialized/color_picker/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-picker",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "closed",
+            ),
+        ),
+        (
+            Dir,
+            String(
+                "ltr",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,65 @@
+---
+source: crates/ars-components/src/specialized/color_picker/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_|\n{}).channel_input_attrs(ColorChannel::Red, 0))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-channel",
+            ),
+            String(
+                "red",
+            ),
+        ),
+        (
+            Data(
+                "ars-channel-index",
+            ),
+            String(
+                "0",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "channel-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-picker",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cp-channel-0",
+            ),
+        ),
+        (
+            InputMode,
+            String(
+                "numeric",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "text",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "255",
+            ),
+        ),
+    ],
+    styles: [],
+}

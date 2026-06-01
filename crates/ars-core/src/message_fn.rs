@@ -225,6 +225,40 @@ impl<F: Fn(&str, &str, &str, &Locale) -> String + Send + Sync + 'static> From<F>
     }
 }
 
+/// `From` impl for `MessageFn<dyn Fn(&ColorValue, &Locale) -> String + Send + Sync>`.
+///
+/// Used by `ColorPicker::Messages::swatch_label` and `::color_name` to label a
+/// preset swatch and to produce the perceptual color name for accessibility.
+impl<F: Fn(&crate::color::ColorValue, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(&crate::color::ColorValue, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
+/// `From` impl for
+/// `MessageFn<dyn Fn(&ColorValue, ColorFormat, &Locale) -> String + Send + Sync>`.
+///
+/// Used by `ColorPicker::Messages::color_announcement` to format the debounced
+/// `aria-live` color announcement in the active text format.
+impl<
+    F: Fn(&crate::color::ColorValue, crate::color::ColorFormat, &Locale) -> String
+        + Send
+        + Sync
+        + 'static,
+> From<F>
+    for MessageFn<
+        dyn Fn(&crate::color::ColorValue, crate::color::ColorFormat, &Locale) -> String
+            + Send
+            + Sync,
+    >
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
 impl MessageFn<dyn Fn(&Locale) -> String + Send + Sync> {
     /// Creates a `MessageFn` from a static string, ignoring the locale parameter.
     ///

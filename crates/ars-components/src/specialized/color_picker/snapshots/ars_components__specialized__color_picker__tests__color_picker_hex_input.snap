@@ -1,0 +1,43 @@
+---
+source: crates/ars-components/src/specialized/color_picker/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).hex_input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "hex-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-picker",
+            ),
+        ),
+        (
+            InputMode,
+            String(
+                "text",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "text",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "#ff0000",
+            ),
+        ),
+    ],
+    styles: [],
+}

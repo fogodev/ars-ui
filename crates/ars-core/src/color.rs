@@ -171,6 +171,28 @@ impl ColorValue {
         (self.hue, hsb_saturation, brightness)
     }
 
+    /// Create from an HSB/HSV triplet with full alpha.
+    ///
+    /// `hue` is in degrees; `saturation` and `brightness` are the HSB-space
+    /// components in `[0.0, 1.0]`. The result round-trips with [`to_hsb`](Self::to_hsb)
+    /// within floating-point tolerance. Inverse of the HSV→HSL conversion: the
+    /// stored lightness is `brightness · (1 − saturation/2)` and the stored HSL
+    /// saturation is recovered from the two.
+    #[must_use]
+    pub fn from_hsb(hue: f64, saturation: f64, brightness: f64) -> Self {
+        let saturation = saturation.clamp(0.0, 1.0);
+        let brightness = brightness.clamp(0.0, 1.0);
+
+        let lightness = brightness * (1.0 - saturation / 2.0);
+        let hsl_saturation = if lightness <= 0.0 || lightness >= 1.0 {
+            0.0
+        } else {
+            (brightness - lightness) / fmin(lightness, 1.0 - lightness)
+        };
+
+        Self::new(hue, hsl_saturation, lightness, 1.0)
+    }
+
     /// Create from RGB values (0-255).
     #[must_use]
     pub fn from_rgb(red: u8, green: u8, blue: u8) -> Self {
@@ -542,7 +564,7 @@ pub enum ColorSpace {
 
 /// Individual color channel identifier, used by `ColorArea`, `ColorSlider`,
 /// `ColorField`, and `ColorPicker` for per-channel operations.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum ColorChannel {
     /// The hue channel (0-360 degrees).
     #[default]
@@ -1122,6 +1144,34 @@ mod tests {
         );
 
         assert!((channel_value(&dimmed, ColorChannel::Brightness) - 0.5).abs() < 0.02);
+    }
+
+    #[test]
+    fn from_hsb_round_trips_with_to_hsb() {
+        // A spread of HSB triplets must survive from_hsb -> to_hsb intact.
+        for &(h, s, v) in &[
+            (0.0, 1.0, 1.0),   // pure red
+            (210.0, 0.5, 0.4), // muted blue
+            (120.0, 0.8, 0.7), // green
+            (0.0, 0.0, 0.0),   // black (saturation irrelevant)
+            (0.0, 0.0, 1.0),   // white
+            (300.0, 0.3, 0.9), // pale magenta
+        ] {
+            let (rh, rs, rv) = ColorValue::from_hsb(h, s, v).to_hsb();
+            assert!((rv - v).abs() < 1e-6, "brightness {v} -> {rv}");
+            // Saturation/hue are only meaningful when brightness is non-zero.
+            if v > 0.0 {
+                assert!((rs - s).abs() < 1e-6, "saturation {s} -> {rs}");
+                if s > 0.0 {
+                    assert!((rh - h).abs() < 1e-6, "hue {h} -> {rh}");
+                }
+            }
+        }
+
+        // Out-of-range inputs are clamped, full alpha by default.
+        let clamped = ColorValue::from_hsb(0.0, 2.0, -1.0);
+        assert!((clamped.alpha - 1.0).abs() < 1e-9);
+        assert_eq!(clamped.to_hsb().2, 0.0);
     }
 
     #[test]
