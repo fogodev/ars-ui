@@ -542,7 +542,7 @@ pub enum ColorSpace {
 
 /// Individual color channel identifier, used by `ColorArea`, `ColorSlider`,
 /// `ColorField`, and `ColorPicker` for per-channel operations.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum ColorChannel {
     /// The hue channel (0-360 degrees).
     #[default]

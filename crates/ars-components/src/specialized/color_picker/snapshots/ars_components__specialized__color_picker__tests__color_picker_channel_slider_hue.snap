@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/specialized/color_picker/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).channel_slider_attrs(ColorChannel::Hue))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-channel",
+            ),
+            String(
+                "hue",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "channel-slider",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-picker",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cp-hue-slider",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}

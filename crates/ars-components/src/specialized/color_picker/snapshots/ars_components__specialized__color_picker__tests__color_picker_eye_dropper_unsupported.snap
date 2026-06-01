@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/specialized/color_picker/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).eye_dropper_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "eye-dropper-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-picker",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Pick color from screen",
+            ),
+        ),
+        (
+            Hidden,
+            Bool(
+                true,
+            ),
+        ),
+    ],
+    styles: [],
+}

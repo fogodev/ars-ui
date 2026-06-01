@@ -366,7 +366,11 @@ impl Default for ColorSpace {
 
 /// Individual color channel identifier, used by ColorArea, ColorSlider,
 /// and ColorPicker for per-channel operations.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+///
+/// `Hash` is derived so the channel can parameterize a `ComponentPart` variant
+/// (e.g. `ColorPicker`'s `Part::ChannelSlider { channel }`), which requires
+/// `Eq + Hash`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum ColorChannel {
     /// The hue channel.
     #[default]
@@ -685,12 +689,25 @@ pub enum Event {
         /// The step.
         step: f64,
     },
-    /// Close on interact outside.
+    /// Close on interact outside (suppressed while dragging).
     CloseOnInteractOutside,
     /// Close on escape.
     CloseOnEscape,
+    /// Adapter-reported browser EyeDropper API availability. Sent in response to
+    /// the [`Effect::DetectEyedropper`] intent emitted when the picker opens.
+    SetEyedropperSupported(bool),
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 ```
+
+`Event::EyedropperRequest` only produces the `Effect::InvokeEyedropper` intent
+when `eyedropper_supported` is `true` and the component is not read-only.
+Controlled `open` changes are driven by `Open`/`Close` (see
+[§1.7](#17-full-machine-implementation) `on_props_changed`), so no dedicated
+open-sync event is needed.
 
 ### 1.3 Context
 
@@ -724,46 +741,34 @@ pub struct Context {
     pub channel_step: f64,
     /// Large step (Shift+Arrow or PageUp/PageDown).
     pub channel_large_step: f64,
-    /// Component instance IDs.
-    pub id: ComponentId,
-    /// The id of the trigger element.
-    pub trigger_id: String,
-    /// The id of the content element.
-    pub content_id: String,
-    /// The id of the area element.
-    pub area_id: String,
-    /// The id of the area thumb element.
-    pub area_thumb_id: String,
-    /// The id of the hue slider element.
-    pub hue_slider_id: String,
-    /// The id of the alpha slider element.
-    pub alpha_slider_id: String,
-    /// The id of the swatch trigger element.
-    pub swatch_trigger_id: String,
-    /// The id of the label element.
-    pub label_id: String,
-    /// The id of the format select element.
-    pub format_select_id: String,
-    /// The ids of the channel input elements.
-    pub channel_input_ids: [String; 4], // R/H, G/S, B/L, A
-    /// Text direction for RTL-aware keyboard navigation.
-    pub dir: Direction,
     /// Active color space for the picker controls.
     pub color_space: ColorSpace,
+    /// Preset swatch colors rendered in the swatch group.
+    pub swatches: Vec<ColorValue>,
+    /// Text direction for RTL-aware keyboard navigation.
+    pub dir: Direction,
     /// Locale for internationalized messages.
     pub locale: Locale,
     /// Resolved translatable messages.
     pub messages: Messages,
+    /// Component instance IDs. Part ids are derived on demand via
+    /// `ids.part("trigger")` / `ids.item("channel", &index)` — the same
+    /// convention as every sibling color component — rather than precomputed
+    /// into the context. The string ids exist purely for ARIA wiring and
+    /// hydration-stable `id` attributes, never as a substitute for live handles.
+    pub ids: ComponentIds,
 }
 
 impl Context {
-    /// Returns the channels available in the current color space.
-    pub fn channels(&self) -> &[ColorChannel] {
+    /// Returns the channels available in the current color space, in display
+    /// order. (HWB maps onto the HSL channel triplet for the per-channel inputs.)
+    pub const fn channels(&self) -> &'static [ColorChannel] {
         match self.color_space {
             ColorSpace::Rgb => &[ColorChannel::Red, ColorChannel::Green, ColorChannel::Blue],
-            ColorSpace::Hsl => &[ColorChannel::Hue, ColorChannel::Saturation, ColorChannel::Lightness],
+            ColorSpace::Hsl | ColorSpace::Hwb => {
+                &[ColorChannel::Hue, ColorChannel::Saturation, ColorChannel::Lightness]
+            }
             ColorSpace::Hsb => &[ColorChannel::Hue, ColorChannel::Saturation, ColorChannel::Brightness],
-            ColorSpace::Hwb => &[ColorChannel::Hue, ColorChannel::Saturation, ColorChannel::Lightness], // HWB mapped
         }
     }
 }
@@ -804,6 +809,9 @@ pub struct Props {
     /// Color space for the picker controls.
     /// Default: `ColorSpace::Hsl`.
     pub color_space: ColorSpace,
+    /// Preset swatch colors rendered in the swatch group. Resolved by
+    /// `Part::Swatch { index }` / `Api::swatch_attrs(index)`.
+    pub swatches: Vec<ColorValue>,
     /// Text direction for RTL-aware keyboard navigation and layout.
     /// Default: `Direction::Ltr`.
     pub dir: Direction,
@@ -811,10 +819,11 @@ pub struct Props {
     pub name: Option<String>,
     /// Component instance ID.
     pub id: String,
-    /// Callback fired when a drag interaction ends (pointerup on area/slider/wheel).
-    /// Unlike continuous change callbacks, this fires once at the end of the gesture.
-    /// Use for expensive operations like saving to a server.
-    pub on_change_end: Option<Callback<ColorValue>>,
+    /// Callback fired once when a drag interaction ends (pointerup on the area or
+    /// a channel slider). Unlike continuous change callbacks, this fires once at
+    /// the end of the gesture. Use for expensive operations like saving to a
+    /// server. The trait-object alias keeps the callback `Send + Sync`.
+    pub on_change_end: Option<Callback<dyn Fn(ColorValue) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -838,6 +847,7 @@ impl Default for Props {
             channel_step: 1.0,
             channel_large_step: 10.0,
             color_space: ColorSpace::default(),
+            swatches: Vec::new(),
             dir: Direction::Ltr,
             name: None,
             id: String::new(),
@@ -883,25 +893,110 @@ fn is_open(ctx: &Context, _props: &Props) -> bool {
 
 ### 1.7 Full Machine Implementation
 
+The machine follows the canonical sibling conventions: controlled/uncontrolled
+`value` and `open` are held in `Bindable`s, side effects are emitted as a typed
+`Effect` enum (the agnostic core never touches the DOM or browser APIs), and
+parent prop changes flow back through `on_props_changed`. Pointer drag is
+**adapter-driven**: the adapter measures the dragged surface and sends
+already-normalized `(x, y)` in `0..=1` via `DragStart`/`DragMove`/`DragEnd`,
+exactly as `ColorArea`/`ColorSlider` do, so no element measurement happens inside
+a core effect closure.
+
 ```rust
-/// Apply a pointer position to the color value for the given drag target.
-/// For Area: x maps to saturation, y maps to lightness (inverted: top=light).
-/// For Channel: x maps to the channel's full range via `with_channel()`.
+/// Typed identifier for the named side effects the machine emits. Adapters
+/// dispatch on these exhaustively; the core never performs the work itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Invoke `Props::on_change_end` with the final color (fired on `DragEnd`).
+    ChangeEnd,
+    /// Attach the click-outside listener (fired on `Closed → Open` and a
+    /// non-`Closed` initial mount). The adapter dispatches
+    /// `Event::CloseOnInteractOutside` when an outside interaction occurs.
+    AttachClickOutside,
+    /// Detach the click-outside listener (fired on `Open → Closed`).
+    DetachClickOutside,
+    /// Detect browser EyeDropper support (fired on `Closed → Open` and a
+    /// non-`Closed` initial mount). The adapter performs the
+    /// `"EyeDropper" in window` check and reports the result via
+    /// `Event::SetEyedropperSupported`.
+    DetectEyedropper,
+    /// Open the browser EyeDropper (fired on `EyedropperRequest`). The adapter
+    /// calls `EyeDropper.open()` from the originating user gesture and reports
+    /// the outcome via `Event::EyedropperResult`.
+    InvokeEyedropper,
+    /// Announce the active color-space change via an `aria-live` region. The
+    /// adapter reads the text from `Api::color_space_announcement`.
+    AnnounceColorSpace,
+}
+
+/// Apply an adapter-normalized pointer position to the color value for the given
+/// drag target. `Area` maps x→saturation `[0, 1]` and y→lightness `[1, 0]`
+/// (top = lightest); `Channel` maps x across the channel's full range. Both base
+/// the new color on the *pending* value so a controlled drag-in-flight
+/// accumulates rather than re-reading the stale controlled prop.
 fn apply_drag_position(ctx: &mut Context, target: DragTarget, x: f64, y: f64) {
-    let current = ctx.value.get().clone();
+    let current = *ctx.value.pending();
     match target {
         DragTarget::Area => {
-            // x maps to saturation [0.0, 1.0], y maps to lightness [1.0, 0.0]
-            let s = x.clamp(0.0, 1.0);
-            let l = (1.0 - y).clamp(0.0, 1.0);
-            ctx.value.set(ColorValue::new(current.hue, s, l, current.alpha));
+            let saturation = x.clamp(0.0, 1.0);
+            let lightness = (1.0 - y).clamp(0.0, 1.0);
+            ctx.value.set(ColorValue::new(current.hue, saturation, lightness, current.alpha));
         }
-        DragTarget::Channel(ch) => {
-            let (min, max) = channel_range(ch);
+        DragTarget::Channel(channel) => {
+            let (min, max) = channel_range(channel);
             let value = min + x.clamp(0.0, 1.0) * (max - min);
-            ctx.value.set(with_channel(&current, ch, value));
+            ctx.value.set(with_channel(&current, channel, value));
         }
     }
+}
+
+/// Invoke `Props::on_change_end` with the pending (drag-staged) color.
+fn change_end_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_change_end {
+            callback(*ctx.value.pending());
+        }
+        no_cleanup()
+    })
+}
+
+/// The named effects produced by the open lifecycle. Shared by `open_plan`
+/// (`Closed → Open`) and `Machine::initial_effects` (booted-open) so the two
+/// entry points stay in lock-step.
+fn open_lifecycle_effects() -> [PendingEffect<Machine>; 2] {
+    [
+        PendingEffect::named(Effect::AttachClickOutside),
+        PendingEffect::named(Effect::DetectEyedropper),
+    ]
+}
+
+fn open_plan() -> TransitionPlan<Machine> {
+    let mut plan = TransitionPlan::to(State::Open).apply(|ctx: &mut Context| ctx.open.set(true));
+    for effect in open_lifecycle_effects() {
+        plan = plan.with_effect(effect);
+    }
+    plan
+}
+
+fn close_plan() -> TransitionPlan<Machine> {
+    TransitionPlan::to(State::Closed)
+        .apply(|ctx: &mut Context| ctx.open.set(false))
+        .with_effect(PendingEffect::named(Effect::DetachClickOutside))
+}
+
+/// Whether any context-backed non-`value`/`open` prop changed (drives `SetProps`).
+fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
+    old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.close_on_interact_outside != new.close_on_interact_outside
+        || old.close_on_escape != new.close_on_escape
+        || old.show_alpha != new.show_alpha
+        || old.color_space != new.color_space
+        || old.swatches != new.swatches
+        || old.dir != new.dir
+        || old.positioning != new.positioning
+        || (old.channel_step - new.channel_step).abs() > f64::EPSILON
+        || (old.channel_large_step - new.channel_large_step).abs() > f64::EPSILON
 }
 
 /// The machine for the `ColorPicker` component.
@@ -913,63 +1008,40 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let value = match &props.value {
-            Some(v) => Bindable::controlled(v.clone()),
-            None => Bindable::uncontrolled(props.default_value.clone()),
+        let value = match props.value {
+            Some(color) => Bindable::controlled(color),
+            None => Bindable::uncontrolled(props.default_value),
         };
-
         let open = match props.open {
-            Some(v) => Bindable::controlled(v),
+            Some(open) => Bindable::controlled(open),
             None => Bindable::uncontrolled(props.default_open),
         };
-
-        let state = if *open.get() {
-            State::Open
-        } else {
-            State::Closed
-        };
-
-        let ids = ComponentIds::from_id(&props.id);
-        let locale = env.locale.clone();
-        let messages = messages.clone();
+        let state = if *open.get() { State::Open } else { State::Closed };
 
         (state, Context {
             value,
-            format: props.default_format,
             open,
+            format: props.default_format,
             disabled: props.disabled,
             readonly: props.readonly,
             close_on_interact_outside: props.close_on_interact_outside,
             close_on_escape: props.close_on_escape,
             show_alpha: props.show_alpha,
-            eyedropper_supported: false, // Detected at runtime via Effect
+            eyedropper_supported: false, // adapter reports via SetEyedropperSupported
             focused_part: None,
             positioning: props.positioning.clone(),
             channel_step: props.channel_step,
             channel_large_step: props.channel_large_step,
-            id: ids.id().to_string().into(),
-            trigger_id: ids.part("trigger"),
-            content_id: ids.part("content"),
-            area_id: ids.part("area"),
-            area_thumb_id: ids.part("area-thumb"),
-            hue_slider_id: ids.part("hue-slider"),
-            alpha_slider_id: ids.part("alpha-slider"),
-            swatch_trigger_id: ids.part("swatch-trigger"),
-            label_id: ids.part("label"),
-            format_select_id: ids.part("format-select"),
-            channel_input_ids: [
-                ids.part("channel-0"),
-                ids.part("channel-1"),
-                ids.part("channel-2"),
-                ids.part("channel-3"),
-            ],
-            dir: props.dir,
             color_space: props.color_space,
-            locale,
-            messages,
+            swatches: props.swatches.clone(),
+            dir: props.dir,
+            locale: env.locale.clone(),
+            messages: messages.clone(),
+            ids: ComponentIds::from_id(&props.id),
         })
     }
 
@@ -979,238 +1051,168 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // Global guard: disabled components ignore all events except Focus/Blur.
+        // A disabled picker ignores interaction but still tracks focus and
+        // accepts parent-driven prop/value syncs (so it can be re-enabled).
         if ctx.disabled {
-            return match event {
-                Event::Focus { part } => {
-                    let part = *part;
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.focused_part = Some(part);
-                    }))
-                }
-                Event::Blur { .. } => {
-                    Some(TransitionPlan::context_only(|ctx| {
-                        ctx.focused_part = None;
-                    }))
-                }
-                _ => None,
-            };
+            match event {
+                Event::Focus { .. } | Event::Blur { .. } | Event::SyncValue(_) | Event::SetProps => {}
+                _ => return None,
+            }
         }
 
         match (state, event) {
-            // --- Closed state ---
-            (State::Closed, Event::Open)
-            | (State::Closed, Event::Toggle) => {
-                Some(TransitionPlan::to(State::Open).apply(|ctx| {
-                    ctx.open.set(true);
-                }).with_named_effect("click-outside", |ctx, _props, send| {
-                    let content_id = ctx.content_id.clone();
-                    let trigger_id = ctx.trigger_id.clone();
-                    let cleanup = add_click_outside_listener_multi(
-                        &[&content_id, &trigger_id],
-                        move || {
-                            send(Event::CloseOnInteractOutside);
-                        },
-                    );
-                    cleanup
-                }).with_named_effect("detect-eyedropper", |ctx, _props, _send| {
-                    // Check if EyeDropper API is available
-                    let supported = is_eyedropper_available();
-                    // Store result -- in practice this would set context
-                    no_cleanup()
-                }))
-            }
+            (State::Closed, Event::Open | Event::Toggle) => Some(open_plan()),
+            (State::Open, Event::Close | Event::Toggle) => Some(close_plan()),
 
-            // --- Open state ---
-            (State::Open, Event::Close)
-            | (State::Open, Event::Toggle) => {
-                Some(TransitionPlan::to(State::Closed).apply(|ctx| {
-                    ctx.open.set(false);
-                }))
+            (State::Open, Event::CloseOnInteractOutside) if ctx.close_on_interact_outside => {
+                Some(close_plan())
             }
-
-            (State::Open, Event::CloseOnInteractOutside) => {
-                if ctx.close_on_interact_outside {
-                    Some(TransitionPlan::to(State::Closed).apply(|ctx| {
-                        ctx.open.set(false);
-                    }))
-                } else {
-                    None
-                }
-            }
-
-            // When dragging, InteractOutside is suppressed -- the user is still
-            // interacting with the picker via pointer capture
-            (State::Dragging { .. }, Event::CloseOnInteractOutside) => {
-                None // Suppress during drag
-            }
-
-            (State::Open, Event::CloseOnEscape) => {
-                if ctx.close_on_escape {
-                    Some(TransitionPlan::to(State::Closed).apply(|ctx| {
-                        ctx.open.set(false);
-                    }))
-                } else {
-                    None
-                }
-            }
+            // Interact-outside is suppressed during a drag (pointer capture active).
+            (State::Dragging { .. }, Event::CloseOnInteractOutside) => None,
+            (State::Open, Event::CloseOnEscape) if ctx.close_on_escape => Some(close_plan()),
 
             (State::Open, Event::DragStart { target, x, y }) => {
                 if ctx.readonly { return None; }
-                let target = *target;
-                let x = *x;
-                let y = *y;
-                Some(TransitionPlan::to(State::Dragging { target }).apply(move |ctx| {
-                    apply_drag_position(ctx, target, x, y);
-                }).with_named_effect("drag-listeners", move |_ctx, _props, send| {
-                    let platform = use_platform_effects();
-                    let send_move = send.clone();
-                    let send_up = send.clone();
-                    platform.track_pointer_drag(
-                        Box::new(move |x, y| { send_move.call_if_alive(Event::DragMove { x, y }); }),
-                        Box::new(move || { send_up.call_if_alive(Event::DragEnd); }),
-                    )
-                }))
+                let (target, x, y) = (*target, *x, *y);
+                Some(TransitionPlan::to(State::Dragging { target })
+                    .apply(move |ctx| apply_drag_position(ctx, target, x, y)))
             }
-
-            // --- Dragging state ---
             (State::Dragging { target }, Event::DragMove { x, y }) => {
-                let target = *target;
-
-                let x = *x;
-                let y = *y;
-
-                Some(TransitionPlan::context_only(move |ctx| {
-                    apply_drag_position(ctx, target, x, y);
-                }))
-            }
-
-            (State::Dragging { .. }, Event::DragEnd) => {
-                let final_color = ctx.value.get().clone();
-                Some(TransitionPlan::to(State::Open)
-                    .with_effect(PendingEffect::new("on-change-end", move |_ctx, props, _send| {
-                        if let Some(ref cb) = props.on_change_end {
-                            cb.call(final_color);
-                        }
-                        no_cleanup()
-                    })))
-            }
-
-            // --- Events valid in any state (including Closed/Idle) ---
-            (State::Closed, Event::SetColor(color))
-            | (State::Open, Event::SetColor(color))
-            | (State::Dragging { .. }, Event::SetColor(color)) => {
                 if ctx.readonly { return None; }
-
-                let color = color.clone();
-
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.value.set(color);
-                }))
+                let (target, x, y) = (*target, *x, *y);
+                Some(TransitionPlan::context_only(move |ctx| apply_drag_position(ctx, target, x, y)))
+            }
+            (State::Dragging { .. }, Event::DragEnd) => {
+                Some(TransitionPlan::to(State::Open).with_effect(change_end_effect()))
             }
 
+            (_, Event::SetColor(color)) => {
+                if ctx.readonly { return None; }
+                let color = *color;
+                Some(TransitionPlan::context_only(move |ctx| ctx.value.set(color)))
+            }
             (State::Open, Event::SetChannel { channel, value }) => {
                 if ctx.readonly { return None; }
-
-                let channel = *channel;
-
-                let value = *value;
-
+                let (channel, value) = (*channel, *value);
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    ctx.value.set(with_channel(color, channel, value));
+                    let color = *ctx.value.pending();
+                    ctx.value.set(with_channel(&color, channel, value));
                 }))
             }
-
             (_, Event::SetFormat(format)) => {
                 let format = *format;
-
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.format = format;
-                }))
+                Some(TransitionPlan::context_only(move |ctx| ctx.format = format))
             }
-
             (_, Event::ChangeColorSpace(new_space)) => {
                 let new_space = *new_space;
-
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.color_space = new_space;
-                }).with_named_effect("announce-color-space", move |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    let text = (ctx.messages.color_space_switched)(
-                        &format!("{:?}", new_space), &ctx.locale);
-                    platform.announce(&text);
-                    no_cleanup()
-                }))
+                Some(TransitionPlan::context_only(move |ctx| ctx.color_space = new_space)
+                    .with_effect(PendingEffect::named(Effect::AnnounceColorSpace)))
             }
 
             (State::Open, Event::ChannelIncrement { channel, step }) => {
                 if ctx.readonly { return None; }
-
-                let channel = *channel;
-
-                let step = *step;
-
+                let (channel, step) = (*channel, *step);
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    let current = channel_value(color, channel);
+                    let color = *ctx.value.pending();
                     let (_, max) = channel_range(channel);
-                    let next = (current + step).min(max);
-                    ctx.value.set(with_channel(color, channel, next));
+                    let next = (channel_value(&color, channel) + step).min(max);
+                    ctx.value.set(with_channel(&color, channel, next));
                 }))
             }
-
             (State::Open, Event::ChannelDecrement { channel, step }) => {
                 if ctx.readonly { return None; }
-
-                let channel = *channel;
-
-                let step = *step;
-
+                let (channel, step) = (*channel, *step);
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    let current = channel_value(color, channel);
+                    let color = *ctx.value.pending();
                     let (min, _) = channel_range(channel);
-                    let next = (current - step).max(min);
-                    ctx.value.set(with_channel(color, channel, next));
+                    let next = (channel_value(&color, channel) - step).max(min);
+                    ctx.value.set(with_channel(&color, channel, next));
                 }))
             }
 
             (State::Open, Event::EyedropperRequest) => {
                 if !ctx.eyedropper_supported || ctx.readonly { return None; }
-
-                Some(TransitionPlan::context_only(|_ctx| {
-                }).with_named_effect("eyedropper", |_ctx, _props, send| {
-                    let cleanup = invoke_eyedropper(move |result| {
-                        send(Event::EyedropperResult(result));
-                    });
-                    cleanup
-                }))
+                Some(TransitionPlan::context_only(|_ctx| {})
+                    .with_effect(PendingEffect::named(Effect::InvokeEyedropper)))
             }
-
             (_, Event::EyedropperResult(Some(color))) => {
-                let color = color.clone();
-
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.value.set(color);
-                }))
+                if ctx.readonly { return None; }
+                let color = *color;
+                Some(TransitionPlan::context_only(move |ctx| ctx.value.set(color)))
+            }
+            (_, Event::SetEyedropperSupported(supported)) => {
+                let supported = *supported;
+                Some(TransitionPlan::context_only(move |ctx| ctx.eyedropper_supported = supported))
             }
 
             (_, Event::Focus { part }) => {
                 let part = *part;
-
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.focused_part = Some(part);
-                }))
+                Some(TransitionPlan::context_only(move |ctx| ctx.focused_part = Some(part)))
+            }
+            (_, Event::Blur { .. }) => {
+                Some(TransitionPlan::context_only(|ctx| ctx.focused_part = None))
             }
 
-            (_, Event::Blur { .. }) => {
-                Some(TransitionPlan::context_only(|ctx| {
-                    ctx.focused_part = None;
+            (_, Event::SyncValue(value)) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    if let Some(color) = value { ctx.value.set(color); }
+                    ctx.value.sync_controlled(value);
+                }))
+            }
+            (_, Event::SetProps) => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.close_on_interact_outside = props.close_on_interact_outside;
+                    ctx.close_on_escape = props.close_on_escape;
+                    ctx.show_alpha = props.show_alpha;
+                    ctx.color_space = props.color_space;
+                    ctx.swatches = props.swatches;
+                    ctx.dir = props.dir;
+                    ctx.positioning = props.positioning;
+                    ctx.channel_step = props.channel_step;
+                    ctx.channel_large_step = props.channel_large_step;
                 }))
             }
 
             _ => None,
+        }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        // The id is baked into Context::ids (and every aria-* relationship that
+        // points at it) at init; allowing it to change would break ARIA wiring.
+        assert_eq!(old.id, new.id, "color_picker::Props.id must remain stable after init");
+
+        let mut events = Vec::new();
+        // A controlled `open` flip drives the same Open/Close transition the user
+        // would, so the lifecycle effects fire identically.
+        if let (was, Some(now)) = (old.open, new.open) && was != Some(now) {
+            events.push(if now { Event::Open } else { Event::Close });
+        }
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+        if context_relevant_props_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+        events
+    }
+
+    fn initial_effects(
+        state: &Self::State,
+        _context: &Self::Context,
+        _props: &Self::Props,
+    ) -> Vec<PendingEffect<Self>> {
+        // A `default_open`/controlled-open boot returns `State::Open` from `init`,
+        // so the `Closed → Open` plan never runs. Mirror its lifecycle effects so
+        // adapters drive identical wiring on first mount via `take_initial_effects`.
+        if matches!(state, State::Open) {
+            open_lifecycle_effects().into_iter().collect()
+        } else {
+            Vec::new()
         }
     }
 
@@ -1238,12 +1240,19 @@ pub enum Part {
     Content,
     Area,
     AreaThumb,
+    /// A channel slider container, parameterized by channel.
     ChannelSlider { channel: ColorChannel },
+    /// A channel slider thumb, parameterized by channel.
     ChannelSliderThumb { channel: ColorChannel },
     AlphaSlider,
     SwatchGroup,
-    Swatch { index: usize, color: ColorValue },
+    /// A preset swatch button. The color is resolved from `Context::swatches`
+    /// at `index`; `ColorValue` is not `Eq`/`Hash` (it holds `f64`s), which
+    /// `ComponentPart` requires, so the variant carries only the index — the
+    /// same pattern as `color_swatch_picker::Part::Item`.
+    Swatch { index: usize },
     FormatSelect,
+    /// A channel text input, parameterized by channel and display index.
     ChannelInput { channel: ColorChannel, index: usize },
     HexInput,
     EyeDropperTrigger,
@@ -1252,414 +1261,136 @@ pub enum Part {
 
 /// The connect API for the `ColorPicker` component.
 pub struct Api<'a> {
-    /// The current state of the component.
     state: &'a State,
-    /// The context of the component.
     ctx: &'a Context,
-    /// The props of the component.
     props: &'a Props,
-    /// The send function to send events to the component.
     send: &'a dyn Fn(Event),
 }
 
-impl<'a> Api<'a> {
+impl Api<'_> {
     // --- Computed state ---
 
-    /// Whether the component is open.
-    pub fn is_open(&self) -> bool {
+    /// Whether the popover is open.
+    pub const fn is_open(&self) -> bool {
         !matches!(self.state, State::Closed)
     }
 
-    /// Whether the component is dragging.
-    pub fn is_dragging(&self) -> bool {
+    /// Whether a thumb is currently being dragged.
+    pub const fn is_dragging(&self) -> bool {
         matches!(self.state, State::Dragging { .. })
     }
 
-    /// The current value of the component.
+    /// The current color value (the pending value, so controlled drags-in-flight
+    /// are reflected).
     pub fn value(&self) -> &ColorValue {
-        self.ctx.value.get()
+        self.ctx.value.pending()
     }
 
-    /// The current value of the component as a string.
+    /// The current color value formatted as a string in the active format.
     pub fn value_as_string(&self) -> String {
+        let color = self.ctx.value.pending();
         match self.ctx.format {
-            ColorFormat::Hex => self.ctx.value.get().to_hex(self.ctx.show_alpha),
-            ColorFormat::Hsl => self.ctx.value.get().to_css_hsl(),
+            ColorFormat::Hex => color.to_hex(self.ctx.show_alpha),
+            ColorFormat::Hsl => color.to_css_hsl(),
             ColorFormat::Rgb => {
-                let (r, g, b) = self.ctx.value.get().to_rgb();
-                if self.ctx.show_alpha && self.ctx.value.get().alpha < 1.0 {
-                    format!("rgba({}, {}, {}, {:.2})", r, g, b, self.ctx.value.get().alpha)
+                let (r, g, b) = color.to_rgb();
+                if self.ctx.show_alpha && color.alpha < 1.0 {
+                    format!("rgba({r}, {g}, {b}, {:.2})", color.alpha)
                 } else {
-                    format!("rgb({}, {}, {})", r, g, b)
+                    format!("rgb({r}, {g}, {b})")
                 }
             }
             ColorFormat::Hsb => {
-                let (h, s, b) = self.ctx.value.get().to_hsb();
-                format!("hsb({:.0}, {:.1}%, {:.1}%)", h, s * 100.0, b * 100.0)
+                let (h, s, b) = color.to_hsb();
+                format!("hsb({h:.0}, {:.1}%, {:.1}%)", s * 100.0, b * 100.0)
             }
         }
     }
 
-    /// The current format of the component.
-    pub fn format(&self) -> ColorFormat {
-        self.ctx.format
+    /// The active text format.
+    pub const fn format(&self) -> ColorFormat { self.ctx.format }
+
+    /// The active color space.
+    pub const fn color_space(&self) -> ColorSpace { self.ctx.color_space }
+
+    /// A human-readable name for the current color (e.g. `"dark vibrant blue"`).
+    pub fn color_name(&self) -> String {
+        (self.ctx.messages.color_name)(self.ctx.value.pending(), &self.ctx.locale)
+    }
+
+    /// The debounced `aria-live` announcement for the current color (see §3.3).
+    pub fn color_announcement(&self) -> String {
+        (self.ctx.messages.color_announcement)(self.ctx.value.pending(), self.ctx.format, &self.ctx.locale)
+    }
+
+    /// The `aria-live` announcement for the active color space, used by the
+    /// `Effect::AnnounceColorSpace` adapter handler.
+    pub fn color_space_announcement(&self) -> String {
+        (self.ctx.messages.color_space_switched)(&format!("{:?}", self.ctx.color_space), &self.ctx.locale)
     }
 
     // --- Imperative actions ---
 
-    /// Open the component.
-    pub fn open(&self) {
-        (self.send)(Event::Open);
-    }
-
-    /// Close the component.
-    pub fn close(&self) {
-        (self.send)(Event::Close);
-    }
-
-    /// Set the value of the component.
-    pub fn set_value(&self, color: ColorValue) {
-        (self.send)(Event::SetColor(color));
-    }
-
-    /// Set the format of the component.
-    pub fn set_format(&self, format: ColorFormat) {
-        (self.send)(Event::SetFormat(format));
-    }
-
-    // --- Part attrs ---
-
-    /// The attributes for the root element.
-    pub fn root_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Data("ars-state"), if self.is_open() { "open" } else { "closed" });
-        if self.ctx.disabled {
-            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
-        }
-        if self.ctx.readonly {
-            attrs.set_bool(HtmlAttr::Data("ars-readonly"), true);
-        }
-        attrs
-    }
-
-    /// The attributes for the label element.
-    pub fn label_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Label.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.label_id);
-        attrs.set(HtmlAttr::For, &self.ctx.trigger_id);
-        attrs
-    }
-
-    /// The attributes for the control element.
-    pub fn control_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Control.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs
-    }
-
-    /// Returns a human-readable name for the current color (e.g., "dark vibrant blue").
-    /// Used as an accessible description or display text.
-    pub fn color_name(&self) -> String {
-        (self.ctx.messages.color_name)(self.ctx.value.get(), &self.ctx.locale)
-    }
-
-    /// Returns the announcement text for the current color in the given format.
-    /// The adapter uses this for debounced `aria-live="polite"` announcements
-    /// during keyboard-driven color adjustments (see §3.3).
-    pub fn color_announcement(&self) -> String {
-        (self.ctx.messages.color_announcement)(self.ctx.value.get(), self.ctx.format, &self.ctx.locale)
-    }
-
-    /// The attributes for the trigger element.
-    pub fn trigger_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Trigger.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.trigger_id);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.trigger_label)(&self.ctx.locale));
-        attrs.set(HtmlAttr::Aria(AriaAttr::HasPopup), "dialog");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if self.is_open() { "true" } else { "false" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), &self.ctx.content_id);
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), &self.ctx.label_id);
-        if self.ctx.disabled {
-            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
-            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
-        }
-        // Event handlers (click/keydown to toggle) are typed methods on the Api struct.
-        attrs
-    }
-
-    /// The attributes for the content element.
-    pub fn content_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Content.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.content_id);
-        attrs.set(HtmlAttr::Role, "dialog");
-        attrs.set(HtmlAttr::Data("ars-state"), if self.is_open() { "open" } else { "closed" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), &self.ctx.label_id);
-        // Event handlers (keydown for Escape) are typed methods on the Api struct.
-        attrs
-    }
-
-    /// The attributes for the area element.
-    pub fn area_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Area.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.area_id);
-        attrs.set(HtmlAttr::Role, "group");
-        // Background gradient is the hue at full saturation
-        let color = self.ctx.value.get();
-        let bg = format!("hsl({:.0}, 100%, 50%)", color.hue);
-        attrs.set_style(CssProperty::Custom("ars-color-picker-area-bg"), bg);
-        // Event handlers (pointerdown to start drag) are typed methods on the Api struct.
-        attrs
-    }
-
-    /// 2D Color Area keyboard navigation:
-    /// - Left/Right -> change saturation (default step 1%, Shift step 10%)
-    /// - Up/Down -> change lightness (default step 1%, Shift step 10%)
-    /// Uses `role="application"` because `role="slider"` is 1D only.
-    // Note: JAWS treats role="application" as a pass-through and does not synthesize
-    // keyboard patterns. JAWS users rely on aria-roledescription="color area" and
-    // aria-valuetext for orientation. Consider adding aria-keyshortcuts to document
-    // available keyboard controls (Arrow keys for saturation/lightness adjustment).
-    pub fn area_thumb_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::AreaThumb.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.area_thumb_id);
-        attrs.set(HtmlAttr::Role, "application");
-        attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), (self.ctx.messages.area_role_description)(&self.ctx.locale));
-        attrs.set(HtmlAttr::TabIndex, "0");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.area_label)(&self.ctx.locale));
-        let color = self.ctx.value.get();
-        let sat_text = (self.ctx.messages.channel_value_text)(
-            (self.ctx.messages.saturation_label)(&self.ctx.locale),
-            &format!("{:.0}%", (color.saturation * 100.0).round()),
-            "",
-            &self.ctx.locale,
-        );
-        let light_text = (self.ctx.messages.channel_value_text)(
-            (self.ctx.messages.lightness_label)(&self.ctx.locale),
-            &format!("{:.0}%", (color.lightness * 100.0).round()),
-            "",
-            &self.ctx.locale,
-        );
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), format!("{}, {}", sat_text, light_text));
-        if self.is_dragging() {
-            attrs.set_bool(HtmlAttr::Data("ars-dragging"), true);
-        }
-        let color = self.ctx.value.get();
-        attrs.set_style(CssProperty::Custom("ars-color-picker-area-thumb-x"), format!("{}%", color.saturation * 100.0));
-        attrs.set_style(CssProperty::Custom("ars-color-picker-area-thumb-y"), format!("{}%", (1.0 - color.lightness) * 100.0));
-        attrs.set_style(CssProperty::BackgroundColor, color.to_css_hsl());
-        attrs.set(HtmlAttr::Aria(AriaAttr::KeyShortcuts), "ArrowUp ArrowDown ArrowLeft ArrowRight");
-        // Event handlers (keydown for arrow keys, focus, blur) are typed methods on the Api struct.
-        attrs
-    }
-
-    /// Attributes for a channel slider container. `channel` identifies which
-    /// channel this slider controls (e.g., `ColorChannel::Hue`).
-    pub fn channel_slider_attrs(&self, channel: ColorChannel) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ChannelSlider { channel }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        let slider_id = match channel {
-            ColorChannel::Hue => &self.ctx.hue_slider_id,
-            ColorChannel::Alpha => &self.ctx.alpha_slider_id,
-            _ => &self.ctx.hue_slider_id, // fallback
-        };
-        attrs.set(HtmlAttr::Id, slider_id);
-        attrs.set(HtmlAttr::Role, "group");
-        attrs.set(HtmlAttr::Data("ars-channel"), match channel {
-            ColorChannel::Hue => "hue",
-            ColorChannel::Alpha => "alpha",
-            _ => "hue",
-        });
-        attrs
-    }
-
-    /// Attributes for the channel slider thumb (the draggable handle).
-    pub fn channel_slider_thumb_attrs(&self, channel: ColorChannel) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ChannelSliderThumb { channel }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Role, "slider");
-        attrs.set(HtmlAttr::TabIndex, "0");
-        attrs.set(HtmlAttr::Data("ars-channel"), match channel {
-            ColorChannel::Hue => "hue",
-            ColorChannel::Alpha => "alpha",
-            _ => "hue",
-        });
-        let color = self.ctx.value.get();
-        let value = channel_value(color, channel);
-        let (min, max) = channel_range(channel);
-        let label = match channel {
-            ColorChannel::Hue => (self.ctx.messages.hue_label)(&self.ctx.locale),
-            ColorChannel::Alpha => (self.ctx.messages.alpha_label)(&self.ctx.locale),
-            _ => (self.ctx.messages.hue_label)(&self.ctx.locale),
-        };
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{:.0}", value));
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{:.0}", min));
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{:.0}", max));
-        attrs.set(HtmlAttr::Aria(AriaAttr::Orientation), "horizontal");
-        let pct = if (max - min).abs() > f64::EPSILON { (value - min) / (max - min) * 100.0 } else { 0.0 };
-        attrs.set_style(CssProperty::Custom("ars-color-picker-channel-thumb-position"), format!("{:.1}%", pct));
-        if matches!(self.state, State::Dragging { target: DragTarget::Channel(c) } if *c == channel) {
-            attrs.set_bool(HtmlAttr::Data("ars-dragging"), true);
-        }
-        // Event handlers (keydown for arrow/Home/End channel adjustment) are typed methods on the Api struct.
-        attrs
-    }
-
-    /// Attributes for the alpha slider container.
-    pub fn alpha_slider_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::AlphaSlider.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.alpha_slider_id);
-        attrs.set(HtmlAttr::Role, "group");
-        attrs.set(HtmlAttr::Data("ars-channel"), "alpha");
-        attrs
-    }
-
-    /// The attributes for the swatch group element.
-    pub fn swatch_group_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::SwatchGroup.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Role, "group");
-        attrs
-    }
-
-    /// The attributes for a swatch trigger element.
-    pub fn swatch_attrs(&self, index: usize, color: &ColorValue) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] =
-            Part::Swatch { index, color: *color }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Role, "button");
-        attrs.set(HtmlAttr::TabIndex, "0");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.swatch_label)(color, &self.ctx.locale));
-        let is_selected = self.ctx.value.get() == color;
-        if is_selected {
-            attrs.set_bool(HtmlAttr::Data("ars-selected"), true);
-        }
-        attrs.set_style(CssProperty::Custom("ars-swatch-color"), color.to_css_hsl());
-        attrs.set(HtmlAttr::Data("ars-index"), index.to_string());
-        // Event handlers (click to set swatch color) are typed methods on the Api struct.
-        attrs
-    }
-
-    /// The attributes for the format select element.
-    pub fn format_select_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::FormatSelect.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.ctx.format_select_id);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.format_toggle_label)(&self.ctx.locale));
-        // Event handlers (change to cycle format) are typed methods on the Api struct.
-        attrs
-    }
-
-    /// The attributes for a channel input element.
-    pub fn channel_input_attrs(&self, channel: ColorChannel, index: usize) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] =
-            Part::ChannelInput { channel, index }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        let id = &self.ctx.channel_input_ids[index.min(3)];
-        attrs.set(HtmlAttr::Id, id);
-        attrs.set(HtmlAttr::Type, "text");
-        attrs.set(HtmlAttr::InputMode, "numeric");
-        attrs.set(HtmlAttr::Data("ars-channel-index"), index.to_string());
-        if self.ctx.disabled {
-            attrs.set_bool(HtmlAttr::Disabled, true);
-        }
-        if self.ctx.readonly {
-            attrs.set_bool(HtmlAttr::ReadOnly, true);
-        }
-        attrs
-    }
-
-    /// The attributes for the hex input element.
-    pub fn hex_input_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::HexInput.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Type, "text");
-        attrs.set(HtmlAttr::InputMode, "text");
-        if self.ctx.disabled {
-            attrs.set_bool(HtmlAttr::Disabled, true);
-        }
-        if self.ctx.readonly {
-            attrs.set_bool(HtmlAttr::ReadOnly, true);
-        }
-        attrs
-    }
-
-    /// The attributes for the eye dropper trigger element.
-    pub fn eye_dropper_trigger_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::EyeDropperTrigger.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.eyedropper_label)(&self.ctx.locale));
-        if !self.ctx.eyedropper_supported {
-            attrs.set_bool(HtmlAttr::Hidden, true);
-        }
-        if self.ctx.disabled || self.ctx.readonly {
-            attrs.set_bool(HtmlAttr::Disabled, true);
-        }
-        // Event handlers (click to request eyedropper) are typed methods on the Api struct.
-        attrs
-    }
-
-    // **Browser support:** The EyeDropper API is Chromium-only (Chrome 95+, Edge 95+).
-    // `eyedropper_supported` MUST be set via runtime detection (`"EyeDropper" in window`).
-    // When `false`, the EyeDropper trigger MUST NOT be rendered.
-    // The adapter MUST call `EyeDropper.open()` directly from a click event handler
-    // (within user gesture, not from an async callback) to satisfy the transient
-    // activation requirement. The API is not available in Firefox or Safari.
-
-    /// The attributes for the hidden input element.
-    pub fn hidden_input_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::HiddenInput.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Type, "hidden");
-        if let Some(ref name) = self.props.name {
-            attrs.set(HtmlAttr::Name, name);
-        }
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(self.ctx.show_alpha));
-        attrs
-    }
+    pub fn open(&self) { (self.send)(Event::Open); }
+    pub fn close(&self) { (self.send)(Event::Close); }
+    pub fn set_value(&self, color: ColorValue) { (self.send)(Event::SetColor(color)); }
+    pub fn set_format(&self, format: ColorFormat) { (self.send)(Event::SetFormat(format)); }
 }
+```
 
+Each `*_attrs` method emits the part's `data-ars-scope`/`data-ars-part` tokens
+(via `Part::data_attrs()`) plus the ARIA/`data-ars-*` attributes and CSS custom
+properties listed in [§2](#2-anatomy) and [§3](#3-accessibility). Element ids are
+derived on demand from `ctx.ids` — `ids.part("trigger")`, `ids.part("content")`,
+`ids.part("area-thumb")`, `ids.part("hue-slider")`, `ids.part("alpha-slider")`,
+`ids.part("label")`, `ids.part("format-select")`, and `ids.item("channel", &index)`
+for the channel inputs — rather than precomputed into the context.
+
+Highlights of the part attribute surface:
+
+- **`trigger_attrs`** — `aria-haspopup="dialog"`, `aria-expanded`,
+  `aria-controls` (content id), `aria-labelledby` (label id), and `aria-label`
+  from `messages.trigger_label`; `aria-disabled="true"` + `data-ars-disabled` when
+  disabled.
+- **`content_attrs`** — `role="dialog"`, `aria-labelledby` (label id),
+  `data-ars-state` = `open`/`closed`.
+- **`area_attrs`** — `role="group"` plus the `--ars-color-picker-area-bg` hue
+  backdrop custom property.
+- **`area_thumb_attrs`** — `role="application"`, `aria-roledescription`,
+  `aria-label`, a composed saturation/lightness `aria-valuetext`,
+  `aria-keyshortcuts`, thumb-position custom properties, `tabindex` (`-1` when
+  disabled), and `data-ars-dragging` while dragging.
+- **`channel_slider_attrs(channel)` / `channel_slider_thumb_attrs(channel)`** —
+  `role="group"` / `role="slider"` with `data-ars-channel`, `aria-valuenow`/`min`/
+  `max`, `aria-label`, the thumb-position custom property, and `data-ars-dragging`
+  for the matching channel.
+- **`swatch_attrs(index)`** — `role="button"`, `data-ars-index`, and (when `index`
+  is in range) `aria-label` from `messages.swatch_label`, the `--ars-swatch-color`
+  custom property, and `data-ars-selected` when the swatch equals the current
+  value. An out-of-range index yields the base attributes only.
+- **`channel_input_attrs(channel, index)`** — `type="text"`, `inputmode="numeric"`,
+  `data-ars-channel`/`data-ars-channel-index`, the channel id, and
+  `disabled`/`readonly` mirrors.
+- **`eye_dropper_trigger_attrs`** — `aria-label`; `hidden` when
+  `eyedropper_supported` is `false`; `disabled` when disabled or read-only.
+- **`hidden_input_attrs`** — `type="hidden"`, optional `name`, and the canonical
+  hex `value` (8-digit when `show_alpha` and translucent); `disabled` omits it
+  from submission.
+
+The `Api` also exposes typed event-dispatch helpers so adapters never hand-build
+events: `on_trigger_click` / `on_trigger_keydown` (Enter/Space → `Toggle`),
+`on_content_keydown` (Escape → `CloseOnEscape`), `on_area_pointer_down(x, y)` and
+`on_channel_slider_pointer_down(channel, x)` (→ `DragStart`),
+`on_area_thumb_keydown(data, shift)` (arrows → saturation/lightness
+`ChannelIncrement`/`Decrement`, RTL-mirrored on the x-axis),
+`on_channel_slider_keydown(channel, data, shift)` (arrows + Home/End),
+`on_swatch_click(index)` (→ `SetColor`), and `on_eyedropper_click` (→
+`EyedropperRequest`). Keyboard steps for the fractional channels (saturation,
+lightness, brightness, alpha) come from `channel_step_default` so a single arrow
+press is a perceptible 1%/10% nudge; the configured `channel_step` /
+`channel_large_step` apply to the wider hue and RGB ranges.
+
+```rust
 impl ConnectApi for Api<'_> {
     type Part = Part;
 
@@ -1676,7 +1407,7 @@ impl ConnectApi for Api<'_> {
             Part::ChannelSliderThumb { channel } => self.channel_slider_thumb_attrs(channel),
             Part::AlphaSlider => self.alpha_slider_attrs(),
             Part::SwatchGroup => self.swatch_group_attrs(),
-            Part::Swatch { index, color } => self.swatch_attrs(index, &color),
+            Part::Swatch { index } => self.swatch_attrs(index),
             Part::FormatSelect => self.format_select_attrs(),
             Part::ChannelInput { channel, index } => self.channel_input_attrs(channel, index),
             Part::HexInput => self.hex_input_attrs(),
@@ -1710,25 +1441,25 @@ ColorPicker
 └── HiddenInput                 (required — for form submission)
 ```
 
-| Part                 | Element                 | Required | Key Attributes                                                                 |
-| -------------------- | ----------------------- | -------- | ------------------------------------------------------------------------------ |
-| `Root`               | `<div>`                 | yes      | `data-ars-state`, `data-ars-disabled`, `data-ars-readonly`                     |
-| `Label`              | `<label>`               | yes      | `for` (trigger ID)                                                             |
-| `Control`            | `<div>`                 | yes      |                                                                                |
-| `Trigger`            | `<button>`              | yes      | `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`, `aria-labelledby`  |
-| `Content`            | `<div>`                 | yes      | `role="dialog"`, `aria-labelledby`, `data-ars-state`                           |
-| `Area`               | `<div>`                 | yes      | `role="group"`                                                                 |
-| `AreaThumb`          | `<div>`                 | yes      | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex="0"` |
-| `ChannelSlider`      | `<div>`                 | yes      | `role="group"`, `data-ars-channel`                                             |
-| `ChannelSliderThumb` | `<div>`                 | yes      | `role="slider"`, `tabindex="0"`, `aria-valuenow`, `aria-label`                 |
-| `AlphaSlider`        | `<div>`                 | no       | `role="group"`, `data-ars-channel="alpha"`                                     |
-| `SwatchGroup`        | `<div>`                 | no       | `role="group"`                                                                 |
-| `Swatch`             | `<button>`              | no       | `role="button"`, `aria-label`, `data-ars-selected`, `data-ars-index`           |
-| `FormatSelect`       | `<select>` / `<button>` | no       | `aria-label`                                                                   |
-| `ChannelInput`       | `<input>`               | no       | `type="text"`, `inputmode="numeric"`, `data-ars-channel-index`                 |
-| `HexInput`           | `<input>`               | no       | `type="text"`, `inputmode="text"`                                              |
-| `EyeDropperTrigger`  | `<button>`              | no       | `aria-label`, `hidden` (when unsupported)                                      |
-| `HiddenInput`        | `<input type="hidden">` | yes      | `name`, `value`                                                                |
+| Part                 | Element                 | Required | Key Attributes                                                                     |
+| -------------------- | ----------------------- | -------- | ---------------------------------------------------------------------------------- |
+| `Root`               | `<div>`                 | yes      | `data-ars-state`, `data-ars-disabled`, `data-ars-readonly`                         |
+| `Label`              | `<label>`               | yes      | `for` (trigger ID)                                                                 |
+| `Control`            | `<div>`                 | yes      |                                                                                    |
+| `Trigger`            | `<button>`              | yes      | `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`, `aria-labelledby`      |
+| `Content`            | `<div>`                 | yes      | `role="dialog"`, `aria-labelledby`, `data-ars-state`                               |
+| `Area`               | `<div>`                 | yes      | `role="group"`                                                                     |
+| `AreaThumb`          | `<div>`                 | yes      | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex="0"`     |
+| `ChannelSlider`      | `<div>`                 | yes      | `role="group"`, `data-ars-channel`                                                 |
+| `ChannelSliderThumb` | `<div>`                 | yes      | `role="slider"`, `tabindex="0"`, `aria-valuenow`, `aria-label`                     |
+| `AlphaSlider`        | `<div>`                 | no       | `role="group"`, `data-ars-channel="alpha"`                                         |
+| `SwatchGroup`        | `<div>`                 | no       | `role="group"`                                                                     |
+| `Swatch`             | `<button>`              | no       | `role="button"`, `aria-label`, `data-ars-selected`, `data-ars-index`               |
+| `FormatSelect`       | `<select>` / `<button>` | no       | `aria-label`                                                                       |
+| `ChannelInput`       | `<input>`               | no       | `type="text"`, `inputmode="numeric"`, `data-ars-channel`, `data-ars-channel-index` |
+| `HexInput`           | `<input>`               | no       | `type="text"`, `inputmode="text"`                                                  |
+| `EyeDropperTrigger`  | `<button>`              | no       | `aria-label`, `hidden` (when unsupported)                                          |
+| `HiddenInput`        | `<input type="hidden">` | yes      | `name`, `value`                                                                    |
 
 ## 3. Accessibility
 
@@ -1780,7 +1511,9 @@ When switching color spaces (via `Event::ChangeColorSpace`), an `aria-live="poli
 ### 4.1 Messages
 
 ```rust
-#[derive(Clone, Debug)]
+// `PartialEq` is derived (via `MessageFn`'s pointer-identity `PartialEq`) because
+// `Context` embeds `Messages` and derives `PartialEq`.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     pub trigger_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub area_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
@@ -1850,7 +1583,7 @@ The EyeDropper API integration is a browser-dependent variant that adds screen c
 
 ### 5.1 Behavior
 
-- The `eyedropper_supported` context field is set via runtime detection (`"EyeDropper" in window`) during the `detect-eyedropper` effect when the picker opens.
+- The `eyedropper_supported` context field starts `false`. When the picker opens, the machine emits the `Effect::DetectEyedropper` intent; the adapter performs the `"EyeDropper" in window` runtime detection (the core never touches `window`) and reports the result back via `Event::SetEyedropperSupported(bool)`.
 - When `eyedropper_supported` is `false`, the `EyeDropperTrigger` part is hidden (`hidden` attribute set).
 - `Event::EyedropperRequest` is only processed when `eyedropper_supported` is `true` and the component is not `readonly`.
 - The adapter calls `EyeDropper.open()` directly from a click event handler (within user gesture, not from an async callback) to satisfy the transient activation requirement.
@@ -1872,22 +1605,23 @@ The eyedropper trigger button uses `aria-label` from `messages.eyedropper_label`
 
 ### 6.1 Props
 
-| Feature                    | ars-ui                    | Ark UI                     | React Aria               | Notes                                                        |
-| -------------------------- | ------------------------- | -------------------------- | ------------------------ | ------------------------------------------------------------ |
-| `value` / `defaultValue`   | `value` / `default_value` | `value` / `defaultValue`   | `value` / `defaultValue` | Equivalent                                                   |
-| `format` / `defaultFormat` | `default_format`          | `format` / `defaultFormat` | --                       | Ark has controlled format; ars-ui uses `Event::SetFormat`    |
-| `open` / `defaultOpen`     | `open` / `default_open`   | `open` / `defaultOpen`     | --                       | Equivalent                                                   |
-| `disabled`                 | `disabled`                | `disabled`                 | --                       | Equivalent                                                   |
-| `readOnly`                 | `readonly`                | `readOnly`                 | --                       | Equivalent                                                   |
-| `invalid`                  | --                        | `invalid`                  | --                       | Ark-only; ars-ui validates at form level                     |
-| `required`                 | --                        | `required`                 | --                       | Ark-only; ars-ui validates at form level                     |
-| `closeOnSelect`            | --                        | `closeOnSelect`            | --                       | Ark-only; ars-ui leaves swatch selection behavior to adapter |
-| `inline`                   | --                        | `inline`                   | --                       | Ark-only; ars-ui renders via open state                      |
-| `name`                     | `name`                    | `name`                     | --                       | Equivalent                                                   |
-| `positioning`              | `positioning`             | `positioning`              | --                       | Equivalent                                                   |
-| `colorSpace`               | `color_space`             | --                         | --                       | ars-ui exclusive                                             |
-| `showAlpha`                | `show_alpha`              | --                         | --                       | ars-ui exclusive                                             |
-| `on_change_end`            | `on_change_end`           | `onValueChangeEnd`         | `onChange`               | Equivalent intent                                            |
+| Feature                    | ars-ui                    | Ark UI                     | React Aria                     | Notes                                                                                   |
+| -------------------------- | ------------------------- | -------------------------- | ------------------------------ | --------------------------------------------------------------------------------------- |
+| `value` / `defaultValue`   | `value` / `default_value` | `value` / `defaultValue`   | `value` / `defaultValue`       | Equivalent                                                                              |
+| `format` / `defaultFormat` | `default_format`          | `format` / `defaultFormat` | --                             | Ark has controlled format; ars-ui uses `Event::SetFormat`                               |
+| `open` / `defaultOpen`     | `open` / `default_open`   | `open` / `defaultOpen`     | --                             | Equivalent                                                                              |
+| `disabled`                 | `disabled`                | `disabled`                 | --                             | Equivalent                                                                              |
+| `readOnly`                 | `readonly`                | `readOnly`                 | --                             | Equivalent                                                                              |
+| `invalid`                  | --                        | `invalid`                  | --                             | Ark-only; ars-ui validates at form level                                                |
+| `required`                 | --                        | `required`                 | --                             | Ark-only; ars-ui validates at form level                                                |
+| `closeOnSelect`            | --                        | `closeOnSelect`            | --                             | Ark-only; ars-ui leaves swatch selection behavior to adapter                            |
+| `inline`                   | --                        | `inline`                   | --                             | Ark-only; ars-ui renders via open state                                                 |
+| `name`                     | `name`                    | `name`                     | --                             | Equivalent                                                                              |
+| `positioning`              | `positioning`             | `positioning`              | --                             | Equivalent                                                                              |
+| `colorSpace`               | `color_space`             | --                         | --                             | ars-ui exclusive                                                                        |
+| `showAlpha`                | `show_alpha`              | --                         | --                             | ars-ui exclusive                                                                        |
+| `swatches`                 | `swatches`                | (SwatchGroup children)     | (separate `ColorSwatchPicker`) | ars-ui exposes presets as a `Vec<ColorValue>` prop resolved by `Part::Swatch { index }` |
+| `on_change_end`            | `on_change_end`           | `onValueChangeEnd`         | `onChange`                     | Equivalent intent                                                                       |
 
 **Gaps:** None worth adopting. `invalid`/`required` are form-level concerns. `closeOnSelect`/`inline` are minor UX preferences best handled in the adapter.
 

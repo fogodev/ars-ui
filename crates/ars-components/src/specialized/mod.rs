@@ -12,6 +12,9 @@ pub mod color_area;
 /// `ColorField` color-value text input machine and connect API.
 pub mod color_field;
 
+/// `ColorPicker` complex orchestrator machine and connect API.
+pub mod color_picker;
+
 /// `ColorSlider` 1D single-channel color slider machine and connect API.
 pub mod color_slider;
 

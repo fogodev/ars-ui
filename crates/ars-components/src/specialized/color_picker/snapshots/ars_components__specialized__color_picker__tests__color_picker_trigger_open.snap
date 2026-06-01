@@ -1,0 +1,71 @@
+---
+source: crates/ars-components/src/specialized/color_picker/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-picker",
+            ),
+        ),
+        (
+            Aria(
+                Expanded,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                HasPopup,
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Pick a color",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "cp-label",
+            ),
+        ),
+        (
+            Aria(
+                Controls,
+            ),
+            String(
+                "cp-content",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cp-trigger",
+            ),
+        ),
+    ],
+    styles: [],
+}

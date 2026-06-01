@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/specialized/color_picker/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).alpha_slider_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-channel",
+            ),
+            String(
+                "alpha",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "alpha-slider",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-picker",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cp-alpha-slider",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}

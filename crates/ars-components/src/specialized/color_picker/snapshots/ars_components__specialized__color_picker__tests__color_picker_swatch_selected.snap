@@ -1,0 +1,68 @@
+---
+source: crates/ars-components/src/specialized/color_picker/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).swatch_attrs(0))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-index",
+            ),
+            String(
+                "0",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "swatch",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-picker",
+            ),
+        ),
+        (
+            Data(
+                "ars-selected",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Select color #ff0000",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "button",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Custom(
+                "ars-swatch-color",
+            ),
+            "hsl(0, 100.0%, 50.0%)",
+        ),
+    ],
+}

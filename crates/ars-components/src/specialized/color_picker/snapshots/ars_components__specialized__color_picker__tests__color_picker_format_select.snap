@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/specialized/color_picker/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).format_select_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "format-select",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-picker",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Toggle color format",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cp-format-select",
+            ),
+        ),
+    ],
+    styles: [],
+}

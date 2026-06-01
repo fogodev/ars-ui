@@ -1,0 +1,92 @@
+---
+source: crates/ars-components/src/specialized/color_picker/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).area_thumb_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "area-thumb",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-picker",
+            ),
+        ),
+        (
+            Aria(
+                KeyShortcuts,
+            ),
+            String(
+                "ArrowUp ArrowDown ArrowLeft ArrowRight",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Color area selector",
+            ),
+        ),
+        (
+            Aria(
+                RoleDescription,
+            ),
+            String(
+                "color area",
+            ),
+        ),
+        (
+            Aria(
+                ValueText,
+            ),
+            String(
+                "Saturation: 75%, Lightness: 40%",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cp-area-thumb",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "application",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Custom(
+                "ars-color-picker-area-thumb-x",
+            ),
+            "75.0%",
+        ),
+        (
+            Custom(
+                "ars-color-picker-area-thumb-y",
+            ),
+            "60.0%",
+        ),
+        (
+            BackgroundColor,
+            "hsl(120, 75.0%, 40.0%)",
+        ),
+    ],
+}
