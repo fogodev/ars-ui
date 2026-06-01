@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/data_display/marquee/mod.rs
+expression: "snapshot_attrs(&api.edge_attrs(&EdgeSide::Start))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "edge",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "marquee",
+            ),
+        ),
+        (
+            Data(
+                "ars-side",
+            ),
+            String(
+                "start",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

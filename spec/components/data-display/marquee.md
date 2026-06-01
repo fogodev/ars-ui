@@ -34,7 +34,7 @@ pub enum State {
 
 ```rust
 /// Events for the Marquee component.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// Start or resume scrolling.
     Play,
@@ -57,9 +57,10 @@ pub enum Event {
 
 ```rust
 /// Scroll direction.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Direction {
     /// The marquee is scrolling from left to right.
+    #[default]
     Left,
     /// The marquee is scrolling from right to left.
     Right,
@@ -159,7 +160,10 @@ impl Default for Props {
 ### 1.5 Full Machine Implementation
 
 ```rust
-use ars_core::{TransitionPlan, ComponentIds, AttrMap, Bindable};
+use ars_core::{
+    AriaAttr, AttrMap, ComponentIds, ComponentMessages, ComponentPart, ConnectApi,
+    CssProperty, Env, HasId, HtmlAttr, Locale, MessageFn, NoEffect, TransitionPlan,
+};
 
 /// Machine for the Marquee component.
 pub struct Machine;
@@ -170,6 +174,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props   = Props;
     type Messages = Messages;
+    type Effect = NoEffect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -249,15 +254,14 @@ impl ars_core::Machine for Machine {
             // Loop completion
             (State::Playing, Event::LoopComplete) => {
                 let exhausted = ctx.loop_count
-                    .map(|max| ctx.current_loop + 1 >= max)
-                    .unwrap_or(false);
+                    .is_some_and(|max| ctx.current_loop.saturating_add(1) >= max);
                 if exhausted {
                     Some(TransitionPlan::to(State::Paused).apply(|ctx| {
-                        ctx.current_loop += 1;
+                        ctx.current_loop = ctx.current_loop.saturating_add(1);
                     }))
                 } else {
                     Some(TransitionPlan::context_only(|ctx| {
-                        ctx.current_loop += 1;
+                        ctx.current_loop = ctx.current_loop.saturating_add(1);
                     }))
                 }
             }
@@ -290,9 +294,10 @@ pub enum Part {
 }
 
 /// Which edge of the marquee viewport a gradient overlay is placed on.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum EdgeSide {
     /// The start edge (left in LTR, right in RTL, top for vertical).
+    #[default]
     Start,
     /// The end edge (right in LTR, left in RTL, bottom for vertical).
     End,
