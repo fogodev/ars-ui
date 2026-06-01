@@ -63,6 +63,10 @@ pub enum Event {
     Focus { is_keyboard: bool },
     /// Focus left the thumb.
     Blur,
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 ```
 
@@ -73,6 +77,16 @@ pub enum Event {
 pub struct Context {
     /// The current color value (controlled or uncontrolled).
     pub value: Bindable<ColorValue>,
+    /// The x-axis channel value in channel units, kept *unwrapped*.
+    ///
+    /// Source of truth for the x thumb position and value text. [`ColorValue`]
+    /// normalizes hue into `[0, 360)`, so reading a hue axis back from the color
+    /// would collapse the 360° endpoint onto 0°; tracking it here keeps the
+    /// endpoint distinct. See [`Context::y_value`](Self::y_value).
+    pub x_value: f64,
+    /// The y-axis channel value in channel units, kept unwrapped (see
+    /// [`x_value`](Self::x_value)).
+    pub y_value: f64,
     /// Which channel the x-axis controls.
     pub x_channel: ColorChannel,
     /// Which channel the y-axis controls.
@@ -128,7 +142,7 @@ pub struct Props {
     /// Name attribute for the hidden form input.
     pub name: Option<String>,
     /// Fired on `Event::DragEnd` / pointer release.
-    pub on_change_end: Option<Callback<ColorValue>>,
+    pub on_change_end: Option<Callback<dyn Fn(ColorValue) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -153,17 +167,87 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
-```rust
-/// Apply normalized (x, y) coordinates to both channels.
+```rust,no_check
+/// Apply normalized (x, y) coordinates to both channels (y is inverted: top = max).
 fn apply_area_position(ctx: &mut Context, x: f64, y: f64) {
-    let color = ctx.value.get();
     let (x_min, x_max) = channel_range(ctx.x_channel);
     let (y_min, y_max) = channel_range(ctx.y_channel);
-    let x_val = x_min + x.clamp(0.0, 1.0) * (x_max - x_min);
+    // RTL renders the minimum x on the right and mirrors the x-axis arrows, so
+    // the incoming physical x is inverted to match (left edge selects max).
+    let x_norm = x.clamp(0.0, 1.0);
+    let x_norm = if ctx.dir == Direction::Rtl {
+        1.0 - x_norm
+    } else {
+        x_norm
+    };
+    let x_val = x_min + x_norm * (x_max - x_min);
     // y is inverted: top=max, bottom=min
     let y_val = y_max - y.clamp(0.0, 1.0) * (y_max - y_min);
-    let updated = with_channel(color, ctx.x_channel, x_val);
+
+    ctx.x_value = x_val;
+    ctx.y_value = y_val;
+
+    // Apply both channels from the pending color in a single read. Reading
+    // `get()` in controlled mode returns the stale prop, and reading the bindable
+    // twice (as two `set_*_value` calls) would discard the first change.
+    let color = *ctx.value.pending();
+    let updated = with_channel(&color, ctx.x_channel, x_val);
     ctx.value.set(with_channel(&updated, ctx.y_channel, y_val));
+}
+
+/// Set the x-axis channel value (unwrapped) and derive the color from it.
+///
+/// Bases the new color on the *pending* value so a prior single-axis change
+/// (e.g. an earlier `IncrementY`) is preserved in controlled mode, where
+/// `get()` still returns the unchanged controlled prop.
+fn set_x_value(ctx: &mut Context, value: f64) {
+    ctx.x_value = value;
+    let color = *ctx.value.pending();
+    ctx.value.set(with_channel(&color, ctx.x_channel, value));
+}
+
+/// Set the y-axis channel value (unwrapped) and derive the color from it.
+///
+/// Bases the new color on the *pending* value (see [`set_x_value`]).
+fn set_y_value(ctx: &mut Context, value: f64) {
+    ctx.y_value = value;
+    let color = *ctx.value.pending();
+    ctx.value.set(with_channel(&color, ctx.y_channel, value));
+}
+
+/// Format a single channel reading for `aria-valuetext`, including the channel
+/// name and a channel-appropriate unit (degrees for hue, raw for the 8-bit RGB
+/// channels, a percentage for the fractional channels).
+fn format_axis_reading(channel: ColorChannel, value: f64) -> String {
+    let name = format!("{channel:?}").to_lowercase();
+    match channel {
+        ColorChannel::Hue => format!("{name} {value:.0}°"),
+        ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => {
+            format!("{name} {value:.0}")
+        }
+        _ => format!("{name} {:.0}%", value * 100.0),
+    }
+}
+
+/// Typed identifier for side effects emitted by the machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Invoke `Props::on_change_end`.
+    ChangeEnd,
+}
+
+/// Build the change-end effect that invokes `Props::on_change_end`.
+///
+/// Reports the *pending* value staged during the drag rather than the
+/// controlled `get()` value, which in controlled mode still holds the stale
+/// pre-drag color until the parent syncs the new value back through its prop.
+fn change_end_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_change_end {
+            callback(*ctx.value.pending());
+        }
+        no_cleanup()
+    })
 }
 
 pub struct Machine;
@@ -174,6 +258,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -181,12 +266,16 @@ impl ars_core::Machine for Machine {
             Some(v) => Bindable::controlled(v.clone()),
             None => Bindable::uncontrolled(props.default_value.clone()),
         };
+        let x_value = channel_value(value.get(), props.x_channel);
+        let y_value = channel_value(value.get(), props.y_channel);
         let ids = ComponentIds::from_id(&props.id);
         let locale = env.locale.clone();
         let messages = messages.clone();
 
         (State::Idle, Context {
             value,
+            x_value,
+            y_value,
             x_channel: props.x_channel,
             y_channel: props.y_channel,
             disabled: props.disabled,
@@ -206,44 +295,46 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        // A disabled area ignores value-changing input but still tracks focus
+        // and accepts parent-driven prop syncs (so it can be re-enabled).
+        // `DragEnd` is allowed through so a drag in flight when the parent
+        // disabled the control can still terminate cleanly.
         if ctx.disabled {
-            return match event {
-                Event::Focus { is_keyboard } => {
-                    let kb = *is_keyboard;
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.focused = true;
-                        ctx.focus_visible = kb;
-                    }))
-                }
-                Event::Blur => Some(TransitionPlan::context_only(|ctx| {
-                    ctx.focused = false;
-                    ctx.focus_visible = false;
-                })),
-                _ => None,
-            };
+            match event {
+                Event::DragStart { .. }
+                | Event::DragMove { .. }
+                | Event::IncrementX { .. }
+                | Event::DecrementX { .. }
+                | Event::IncrementY { .. }
+                | Event::DecrementY { .. }
+                | Event::SetXToMin
+                | Event::SetXToMax
+                | Event::SetYToMin
+                | Event::SetYToMax => return None,
+                _ => {}
+            }
         }
 
         match (state, event) {
+            // The adapter resolves normalized (x, y) and drives DragMove/DragEnd
+            // from its own pointer listeners; the core only updates the value.
             (State::Idle, Event::DragStart { x, y }) => {
                 if ctx.readonly { return None; }
                 let x = *x;
                 let y = *y;
                 Some(TransitionPlan::to(State::Dragging).apply(move |ctx| {
                     apply_area_position(ctx, x, y);
-                }).with_named_effect("drag-listeners", move |_ctx, _props, send| {
-                    let platform = use_platform_effects();
-                    let send_move = send.clone();
-                    let send_up = send.clone();
-                    platform.track_pointer_drag(
-                        Box::new(move |x, y| { send_move.call_if_alive(Event::DragMove { x, y }); }),
-                        Box::new(move || { send_up.call_if_alive(Event::DragEnd); }),
-                    )
                 }))
             }
 
             (State::Dragging, Event::DragMove { x, y }) => {
+                // Readonly toggled mid-drag must stop further value changes
+                // (disabled is already handled by the guard above); DragEnd
+                // still terminates the drag.
+                if ctx.readonly { return None; }
+
                 let x = *x;
                 let y = *y;
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -252,17 +343,15 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Dragging, Event::DragEnd) => {
-                Some(TransitionPlan::to(State::Idle))
+                Some(TransitionPlan::to(State::Idle).with_effect(change_end_effect()))
             }
 
             (_, Event::IncrementX { step }) => {
                 if ctx.readonly { return None; }
                 let step = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    let current = channel_value(color, ctx.x_channel);
                     let (_, max) = channel_range(ctx.x_channel);
-                    ctx.value.set(with_channel(color, ctx.x_channel, (current + step).min(max)));
+                    set_x_value(ctx, (ctx.x_value + step).min(max));
                 }))
             }
 
@@ -270,10 +359,8 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly { return None; }
                 let step = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    let current = channel_value(color, ctx.x_channel);
                     let (min, _) = channel_range(ctx.x_channel);
-                    ctx.value.set(with_channel(color, ctx.x_channel, (current - step).max(min)));
+                    set_x_value(ctx, (ctx.x_value - step).max(min));
                 }))
             }
 
@@ -281,10 +368,8 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly { return None; }
                 let step = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    let current = channel_value(color, ctx.y_channel);
                     let (_, max) = channel_range(ctx.y_channel);
-                    ctx.value.set(with_channel(color, ctx.y_channel, (current + step).min(max)));
+                    set_y_value(ctx, (ctx.y_value + step).min(max));
                 }))
             }
 
@@ -292,46 +377,40 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly { return None; }
                 let step = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    let current = channel_value(color, ctx.y_channel);
                     let (min, _) = channel_range(ctx.y_channel);
-                    ctx.value.set(with_channel(color, ctx.y_channel, (current - step).max(min)));
+                    set_y_value(ctx, (ctx.y_value - step).max(min));
                 }))
             }
 
             (_, Event::SetXToMin) => {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get();
                     let (min, _) = channel_range(ctx.x_channel);
-                    ctx.value.set(with_channel(color, ctx.x_channel, min));
+                    set_x_value(ctx, min);
                 }))
             }
 
             (_, Event::SetXToMax) => {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get();
                     let (_, max) = channel_range(ctx.x_channel);
-                    ctx.value.set(with_channel(color, ctx.x_channel, max));
+                    set_x_value(ctx, max);
                 }))
             }
 
             (_, Event::SetYToMin) => {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get();
                     let (min, _) = channel_range(ctx.y_channel);
-                    ctx.value.set(with_channel(color, ctx.y_channel, min));
+                    set_y_value(ctx, min);
                 }))
             }
 
             (_, Event::SetYToMax) => {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get();
                     let (_, max) = channel_range(ctx.y_channel);
-                    ctx.value.set(with_channel(color, ctx.y_channel, max));
+                    set_y_value(ctx, max);
                 }))
             }
 
@@ -350,8 +429,71 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (_, Event::SyncValue(value)) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(move |ctx| match value {
+                    Some(color) => {
+                        // Keep the cached axis values when the parent echoes the
+                        // value we emitted, so a hue 360° endpoint isn't
+                        // re-derived back to 0° (the color normalizes 360°->0°).
+                        let echoes_pending = color == *ctx.value.pending();
+                        ctx.value.set(color);
+                        ctx.value.sync_controlled(Some(color));
+                        if !echoes_pending {
+                            ctx.x_value = channel_value(&color, ctx.x_channel);
+                            ctx.y_value = channel_value(&color, ctx.y_channel);
+                        }
+                    }
+                    None => ctx.value.sync_controlled(None),
+                }))
+            }
+
+            (_, Event::SetProps) => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    let x_channel_changed = ctx.x_channel != props.x_channel;
+                    let y_channel_changed = ctx.y_channel != props.y_channel;
+
+                    ctx.x_channel = props.x_channel;
+                    ctx.y_channel = props.y_channel;
+                    ctx.step = props.step;
+                    ctx.large_step = props.large_step;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.dir = props.dir;
+
+                    // A new axis channel means the cached axis value refers to the
+                    // old channel; re-derive it from the current color.
+                    if x_channel_changed {
+                        ctx.x_value = channel_value(ctx.value.get(), ctx.x_channel);
+                    }
+                    if y_channel_changed {
+                        ctx.y_value = channel_value(ctx.value.get(), ctx.y_channel);
+                    }
+                }))
+            }
+
             _ => None,
         }
+    }
+
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_area::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -362,6 +504,20 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name` is omitted: it is read live from `Props` in `hidden_input_attrs`
+/// rather than cached in the context.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.x_channel != new.x_channel
+        || old.y_channel != new.y_channel
+        || (old.step - new.step).abs() > f64::EPSILON
+        || (old.large_step - new.large_step).abs() > f64::EPSILON
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.dir != new.dir
 }
 ```
 
@@ -411,9 +567,37 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Background.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        let color = self.ctx.value.get();
+        // Pending color so the background tracks an in-progress controlled drag.
+        let color = self.ctx.value.pending();
+        // Dominant hue backdrop (kept for the default saturation×lightness case).
         let bg = format!("hsl({:.0}, 100%, 50%)", color.hue);
         attrs.set_style(CssProperty::Custom("ars-color-area-bg"), bg);
+
+        // Expose the configured axes plus the four corner colors so the adapter
+        // can render a 2D gradient that matches *any* x/y channel pair, not just
+        // the default surface. Corners are emitted in visual order (top = the
+        // y-axis maximum since y is inverted; left/right follow the RTL x flip).
+        let (x_min, x_max) = channel_range(self.ctx.x_channel);
+        let (y_min, y_max) = channel_range(self.ctx.y_channel);
+        let (left_x, right_x) = if self.ctx.dir == Direction::Rtl {
+            (x_max, x_min)
+        } else {
+            (x_min, x_max)
+        };
+        let corner = |x_value: f64, y_value: f64| {
+            let with_x = with_channel(color, self.ctx.x_channel, x_value);
+            with_channel(&with_x, self.ctx.y_channel, y_value).to_css_hsl()
+        };
+        attrs
+            .set(HtmlAttr::Data("ars-x-channel"),
+                format!("{:?}", self.ctx.x_channel).to_lowercase())
+            .set(HtmlAttr::Data("ars-y-channel"),
+                format!("{:?}", self.ctx.y_channel).to_lowercase())
+            .set_style(CssProperty::Custom("ars-color-area-corner-tl"), corner(left_x, y_max))
+            .set_style(CssProperty::Custom("ars-color-area-corner-tr"), corner(right_x, y_max))
+            .set_style(CssProperty::Custom("ars-color-area-corner-bl"), corner(left_x, y_min))
+            .set_style(CssProperty::Custom("ars-color-area-corner-br"), corner(right_x, y_min));
+
         attrs
     }
 
@@ -425,23 +609,36 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("thumb"));
         attrs.set(HtmlAttr::Role, "application");
         attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), (self.ctx.messages.role_description)(&self.ctx.locale));
-        attrs.set(HtmlAttr::TabIndex, "0");
+        // A disabled control must stay out of the tab order.
+        attrs.set(HtmlAttr::TabIndex, if self.ctx.disabled { "-1" } else { "0" });
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.label)(&self.ctx.locale));
+        if self.ctx.disabled {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
 
-        let color = self.ctx.value.get();
-        let x_val = channel_value(color, self.ctx.x_channel);
-        let y_val = channel_value(color, self.ctx.y_channel);
+        // Pending color so the thumb background and color name match the
+        // in-progress drag in controlled mode.
+        let color = self.ctx.value.pending();
+        // Unwrapped axis values keep hue endpoints (360°) distinct from 0°.
+        let x_val = self.ctx.x_value;
+        let y_val = self.ctx.y_value;
         let (x_min, x_max) = channel_range(self.ctx.x_channel);
         let (y_min, y_max) = channel_range(self.ctx.y_channel);
 
-        let x_name = format!("{:?}", self.ctx.x_channel).to_lowercase();
-        let y_name = format!("{:?}", self.ctx.y_channel).to_lowercase();
+        let x_reading = format_axis_reading(self.ctx.x_channel, x_val);
+        let y_reading = format_axis_reading(self.ctx.y_channel, y_val);
+        let color_name = color.color_name_en();
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueText),
-            (self.ctx.messages.value_text)(x_val, y_val, &x_name, &y_name, &self.ctx.locale));
+            (self.ctx.messages.value_text)(&x_reading, &y_reading, &color_name, &self.ctx.locale));
 
-        let x_pct = if (x_max - x_min).abs() > f64::EPSILON {
+        let mut x_pct = if (x_max - x_min).abs() > f64::EPSILON {
             (x_val - x_min) / (x_max - x_min) * 100.0
         } else { 0.0 };
+        // RTL flips the x gradient horizontally (min on the right), matching the
+        // mirrored x-axis arrow handling in `on_thumb_keydown`.
+        if self.ctx.dir == Direction::Rtl {
+            x_pct = 100.0 - x_pct;
+        }
         let y_pct = if (y_max - y_min).abs() > f64::EPSILON {
             (1.0 - (y_val - y_min) / (y_max - y_min)) * 100.0
         } else { 0.0 };
@@ -468,7 +665,11 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.props.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_hex(true));
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         attrs
     }
 
@@ -516,21 +717,21 @@ ColorArea
 └── HiddenInput  (optional — <input type="hidden">, form submission)
 ```
 
-| Part        | Element   | Key Attributes                                                                 |
-| ----------- | --------- | ------------------------------------------------------------------------------ |
-| Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-dragging`                       |
-| Background  | `<div>`   | gradient background via CSS custom property                                    |
-| Thumb       | `<div>`   | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex="0"` |
-| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color)                                   |
+| Part        | Element   | Key Attributes                                                                                                                                                                                                               |
+| ----------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-dragging`                                                                                                                                                                     |
+| Background  | `<div>`   | hue backdrop via `--ars-color-area-bg`; `data-ars-x-channel` / `data-ars-y-channel` (lowercased channel names); four corner colors `--ars-color-area-corner-tl/tr/bl/br` for rendering a 2D surface for any x/y channel pair |
+| Thumb       | `<div>`   | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled)                                                                               |
+| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled — omitted from form submission)                                                                                                                      |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Part  | Role          | Properties                                                                                    |
-| ----- | ------------- | --------------------------------------------------------------------------------------------- |
-| Root  | `group`       | groups area components                                                                        |
-| Thumb | `application` | `aria-roledescription="2d color picker"`, `aria-valuetext`, `aria-label`, `aria-keyshortcuts` |
+| Part  | Role          | Properties                                                                                                                     |
+| ----- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Root  | `group`       | groups area components                                                                                                         |
+| Thumb | `application` | `aria-roledescription="2d color picker"`, `aria-valuetext`, `aria-label`, `aria-keyshortcuts`, `aria-disabled` (when disabled) |
 
 `aria-valuetext` MUST include a human-readable color name from `color_name_parts()`, not raw numeric values (e.g., `"dark vibrant blue, saturation 80%, lightness 50%"`).
 
@@ -561,8 +762,11 @@ pub struct Messages {
     pub label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Role description for screen readers. Default: `"2d color picker"`.
     pub role_description: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    /// Formats both channel values for aria-valuetext.
-    pub value_text: MessageFn<dyn Fn(f64, f64, &str, &str, &Locale) -> String + Send + Sync>,
+    /// Formats the `aria-valuetext`. Arguments: `x_axis_reading` (channel-aware,
+    /// e.g. `"saturation 80%"` or `"hue 180°"`), `y_axis_reading`, `color_name`,
+    /// `locale`. Readings are preformatted per channel so non-fractional channels
+    /// (hue/RGB) are not mis-rendered as percentages.
+    pub value_text: MessageFn<dyn Fn(&str, &str, &str, &Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
@@ -570,9 +774,11 @@ impl Default for Messages {
         Self {
             label: MessageFn::static_str("Color area"),
             role_description: MessageFn::static_str("2d color picker"),
-            value_text: MessageFn::new(|x, y, x_name, y_name, _locale| {
-                format!("{} {:.0}%, {} {:.0}%", x_name, x * 100.0, y_name, y * 100.0)
-            }),
+            value_text: MessageFn::new(
+                |x_reading: &str, y_reading: &str, color_name: &str, _locale: &Locale| {
+                    format!("{color_name}, {x_reading}, {y_reading}")
+                },
+            ),
         }
     }
 }
@@ -580,11 +786,11 @@ impl Default for Messages {
 impl ComponentMessages for Messages {}
 ```
 
-| Key                           | Default (en-US)                        | Purpose                    |
-| ----------------------------- | -------------------------------------- | -------------------------- |
-| `color_area.label`            | `"Color area"`                         | Thumb aria-label           |
-| `color_area.role_description` | `"2d color picker"`                    | Thumb aria-roledescription |
-| `color_area.value_text`       | `"{x_channel} {x}%, {y_channel} {y}%"` | Thumb aria-valuetext       |
+| Key                           | Default (en-US)                                                                                                    | Purpose                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------- |
+| `color_area.label`            | `"Color area"`                                                                                                     | Thumb aria-label           |
+| `color_area.role_description` | `"2d color picker"`                                                                                                | Thumb aria-roledescription |
+| `color_area.value_text`       | `"{color_name}, {x_reading}, {y_reading}"` (each reading is channel-aware, e.g. `"saturation 80%"` / `"hue 180°"`) | Thumb aria-valuetext       |
 
 - **RTL**: x-axis gradient flips horizontally; ArrowLeft increments, ArrowRight decrements.
 - **Number formatting**: Channel values respect locale decimal separators.

@@ -79,6 +79,10 @@ pub enum Event {
     },
     /// Focus left the thumb.
     Blur,
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 ```
 
@@ -90,6 +94,13 @@ pub enum Event {
 pub struct Context {
     /// The value of the color wheel.
     pub value: Bindable<ColorValue>,
+    /// The hue value in degrees, kept *unwrapped*.
+    ///
+    /// Source of truth for `aria-valuenow`, the value text, and the thumb angle.
+    /// [`ColorValue`] normalizes hue into `[0, 360)` (so the stored color never
+    /// holds `360`), but the End/`SetToMax` endpoint exposes `360°` here so the
+    /// slider value can reach `aria-valuemax`. The derived color stays normalized.
+    pub hue_value: f64,
     /// Whether the color wheel is disabled.
     pub disabled: bool,
     /// Whether the color wheel is readonly.
@@ -138,7 +149,7 @@ pub struct Props {
     /// The name of the color wheel.
     pub name: Option<String>,
     /// Fired on `Event::DragEnd` / pointer release.
-    pub on_change_end: Option<Callback<ColorValue>>,
+    pub on_change_end: Option<Callback<dyn Fn(ColorValue) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -161,12 +172,47 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
-```rust
+```rust,no_check
+// `f64::rem_euclid` is std-only; use the libm-backed `core_maths` version so the
+// module compiles under `#![no_std]` (matching `ars-core::color`).
+use core_maths::CoreFloat;
+
 /// Apply a normalized angle (0..1) to the hue value.
 fn apply_wheel_angle(ctx: &mut Context, angle: f64) {
+    // A full revolution returns to the top, so drags stay in `[0, 360)`.
     let hue = (angle.clamp(0.0, 1.0) * 360.0) % 360.0;
-    let color = ctx.value.get().clone();
-    ctx.value.set(ColorValue { hue, ..color });
+    set_hue(ctx, hue);
+}
+
+/// Set the hue value (kept unwrapped) and derive the normalized stored color.
+///
+/// [`ColorValue::new`] normalizes the hue into `[0, 360)`, so the stored color
+/// never violates that invariant even when `hue` is the `360°` endpoint.
+fn set_hue(ctx: &mut Context, hue: f64) {
+    ctx.hue_value = hue;
+    let color = *ctx.value.get();
+    ctx.value.set(ColorValue::new(hue, color.saturation, color.lightness, color.alpha));
+}
+
+/// Typed identifier for side effects emitted by the machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Invoke `Props::on_change_end`.
+    ChangeEnd,
+}
+
+/// Build the change-end effect that invokes `Props::on_change_end`.
+///
+/// Reports the *pending* value staged during the drag rather than the
+/// controlled `get()` value, which in controlled mode still holds the stale
+/// pre-drag color until the parent syncs the new value back through its prop.
+fn change_end_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_change_end {
+            callback(*ctx.value.pending());
+        }
+        no_cleanup()
+    })
 }
 
 /// The machine for the `ColorWheel` component.
@@ -178,6 +224,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -186,12 +233,14 @@ impl ars_core::Machine for Machine {
             None => Bindable::uncontrolled(props.default_value.clone()),
         };
 
+        let hue_value = value.get().hue;
         let ids = ComponentIds::from_id(&props.id);
         let locale = env.locale.clone();
         let messages = messages.clone();
 
         (State::Idle, Context {
             value,
+            hue_value,
             disabled: props.disabled,
             readonly: props.readonly,
             focused: false,
@@ -209,9 +258,10 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // Focus/Blur always pass through regardless of disabled/readonly.
+        // Focus/Blur and parent-driven prop syncs always pass through regardless
+        // of disabled/readonly (a disabled wheel must still be re-enableable).
         match event {
             Event::Focus { is_keyboard } => {
                 let ik = *is_keyboard;
@@ -226,16 +276,40 @@ impl ars_core::Machine for Machine {
                     ctx.focus_visible = false;
                 }));
             }
+            Event::SyncValue(value) => {
+                let value = *value;
+                return Some(TransitionPlan::context_only(move |ctx| match value {
+                    Some(color) => {
+                        // Keep the cached hue when the parent echoes the value
+                        // we emitted, so a 360° endpoint isn't re-derived to 0°
+                        // (the stored color normalizes 360° -> 0°).
+                        let echoes_pending = color == *ctx.value.pending();
+                        ctx.value.set(color);
+                        ctx.value.sync_controlled(Some(color));
+                        if !echoes_pending {
+                            ctx.hue_value = color.hue;
+                        }
+                    }
+                    None => ctx.value.sync_controlled(None),
+                }));
+            }
+            Event::SetProps => {
+                let props = props.clone();
+                return Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.step = props.step;
+                    ctx.large_step = props.large_step;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.dir = props.dir;
+                }));
+            }
             _ => {}
         }
 
-        // Disabled blocks all value-changing events.
-        if ctx.disabled {
-            return None;
-        }
-
-        // Readonly blocks drag and value adjustments.
-        if ctx.readonly {
+        // Disabled and read-only both block value-changing events, except
+        // `DragEnd`: a drag in flight when the control was disabled must still
+        // be able to terminate cleanly (exit `Dragging`, fire change-end).
+        if (ctx.disabled || ctx.readonly) && !matches!(event, Event::DragEnd) {
             return None;
         }
 
@@ -255,52 +329,61 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Dragging, Event::DragEnd) => {
-                let final_color = ctx.value.get().clone();
-                Some(TransitionPlan::to(State::Idle)
-                    .with_effect(PendingEffect::new("on-change-end", move |_ctx, props, _send| {
-                        if let Some(ref cb) = props.on_change_end {
-                            cb.call(final_color);
-                        }
-                        no_cleanup()
-                    })))
+                Some(TransitionPlan::to(State::Idle).with_effect(change_end_effect()))
             }
 
             (_, Event::Increment { step }) => {
                 let s = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let hue = ctx.value.get().hue;
-                    let new_hue = (hue + s) % 360.0;
-                    let color = ctx.value.get().clone();
-                    ctx.value.set(ColorValue { hue: new_hue, ..color });
+                    // `rem_euclid` keeps the hue non-negative for custom steps > 360.
+                    set_hue(ctx, CoreFloat::rem_euclid(ctx.hue_value + s, 360.0));
                 }))
             }
 
             (_, Event::Decrement { step }) => {
                 let s = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let hue = ctx.value.get().hue;
-                    let new_hue = (hue - s + 360.0) % 360.0;
-                    let color = ctx.value.get().clone();
-                    ctx.value.set(ColorValue { hue: new_hue, ..color });
+                    // `rem_euclid` keeps the hue non-negative for custom steps > 360.
+                    set_hue(ctx, CoreFloat::rem_euclid(ctx.hue_value - s, 360.0));
                 }))
             }
 
             (_, Event::SetToMin) => {
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get().clone();
-                    ctx.value.set(ColorValue { hue: 0.0, ..color });
+                    set_hue(ctx, 0.0);
                 }))
             }
 
             (_, Event::SetToMax) => {
+                // 360° is the same ring position as 0°, but exposing it keeps
+                // aria-valuenow able to reach aria-valuemax; the stored color
+                // hue is normalized to 0° by `set_hue`.
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get().clone();
-                    ctx.value.set(ColorValue { hue: 360.0, ..color });
+                    set_hue(ctx, 360.0);
                 }))
             }
 
             _ => None,
         }
+    }
+
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_wheel::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -311,6 +394,18 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name` is omitted: it is read live from `Props` in `hidden_input_attrs`
+/// rather than cached in the context.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    (old.step - new.step).abs() > f64::EPSILON
+        || (old.large_step - new.large_step).abs() > f64::EPSILON
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.dir != new.dir
 }
 ```
 
@@ -339,7 +434,7 @@ impl<'a> Api<'a> {
 
     /// Current hue formatted for display.
     pub fn formatted_value(&self) -> String {
-        (self.ctx.messages.value_text)(self.ctx.value.get().hue, &self.ctx.locale)
+        (self.ctx.messages.value_text)(self.ctx.hue_value, &self.ctx.locale)
     }
 
     pub fn root_attrs(&self) -> AttrMap {
@@ -373,15 +468,20 @@ impl<'a> Api<'a> {
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("thumb"));
         attrs.set(HtmlAttr::Role, "slider");
-        attrs.set(HtmlAttr::TabIndex, "0");
+        // A disabled control must stay out of the tab order.
+        attrs.set(HtmlAttr::TabIndex, if self.ctx.disabled { "-1" } else { "0" });
+        if self.ctx.disabled {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
 
-        let hue = self.ctx.value.get().hue;
+        // Unwrapped hue so the 360° endpoint reaches aria-valuemax (the stored
+        // color is normalized; 360° and 0° are the same ring position).
+        let hue = self.ctx.hue_value;
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{:.0}", hue));
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), "0");
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), "360");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.label)(&self.ctx.locale));
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), self.formatted_value());
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
 
         attrs.set_style(CssProperty::Custom("ars-color-wheel-thumb-angle"),
             format!("{}deg", hue));
@@ -400,7 +500,13 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.props.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        // Pending color so the submitted value matches the in-progress drag in
+        // controlled mode (the thumb already tracks the pending hue_value).
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_hex(true));
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         attrs
     }
 
@@ -450,28 +556,28 @@ ColorWheel
 └── HiddenInput   (optional -- <input type="hidden">)
 ```
 
-| Part        | Element   | Key Attributes                                           |
-| ----------- | --------- | -------------------------------------------------------- |
-| Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-readonly` |
-| Track       | `<div>`   | conic-gradient background via CSS custom property        |
-| Thumb       | `<div>`   | `role="slider"`, `aria-valuenow/min/max`, `tabindex="0"` |
-| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color)             |
+| Part        | Element   | Key Attributes                                                                                                           |
+| ----------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Root        | `<div>`   | `role="group"`, `data-ars-disabled`, `data-ars-readonly`                                                                 |
+| Track       | `<div>`   | conic-gradient background via CSS custom property                                                                        |
+| Thumb       | `<div>`   | `role="slider"`, `aria-valuenow/min/max`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled) |
+| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled -- omitted from form submission)                 |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Attribute                         | Element | Value                          |
-| --------------------------------- | ------- | ------------------------------ |
-| `role="group"`                    | Root    | Groups wheel components        |
-| `role="slider"`                   | Thumb   | Standard 1D ARIA slider        |
-| `aria-valuenow`                   | Thumb   | Current hue (0-360)            |
-| `aria-valuemin` / `aria-valuemax` | Thumb   | `"0"` / `"360"`                |
-| `aria-label`                      | Thumb   | From messages (default: "Hue") |
-| `aria-valuetext`                  | Thumb   | Formatted hue (e.g., "180")    |
-| `aria-labelledby`                 | Thumb   | Label element ID               |
-| `tabindex="0"`                    | Thumb   | Focusable                      |
-| `data-ars-focus-visible`          | Thumb   | When keyboard-focused          |
+| Attribute                         | Element | Value                            |
+| --------------------------------- | ------- | -------------------------------- |
+| `role="group"`                    | Root    | Groups wheel components          |
+| `role="slider"`                   | Thumb   | Standard 1D ARIA slider          |
+| `aria-valuenow`                   | Thumb   | Current hue (0-360)              |
+| `aria-valuemin` / `aria-valuemax` | Thumb   | `"0"` / `"360"`                  |
+| `aria-label`                      | Thumb   | From messages (default: "Hue")   |
+| `aria-valuetext`                  | Thumb   | Formatted hue (e.g., "180")      |
+| `tabindex`                        | Thumb   | `"-1"` when disabled, else `"0"` |
+| `aria-disabled`                   | Thumb   | `"true"` when disabled           |
+| `data-ars-focus-visible`          | Thumb   | When keyboard-focused            |
 
 No `aria-orientation` -- circular geometry has no h/v distinction.
 Arrow keys do NOT flip for RTL -- angular direction is universal.

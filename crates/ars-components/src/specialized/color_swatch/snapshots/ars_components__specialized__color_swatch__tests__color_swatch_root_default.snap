@@ -1,0 +1,54 @@
+---
+source: crates/ars-components/src/specialized/color_swatch/mod.rs
+expression: "snapshot_attrs(&api(&Props::default()).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-swatch",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "light vibrant red",
+            ),
+        ),
+        (
+            Aria(
+                RoleDescription,
+            ),
+            String(
+                "color swatch",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "img",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Custom(
+                "ars-swatch-color",
+            ),
+            "hsl(0, 100.0%, 50.0%)",
+        ),
+    ],
+}

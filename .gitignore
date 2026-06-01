@@ -22,3 +22,6 @@ mutant-runs/
 
 # Playwright-cli tool
 .playwright-cli
+
+# Local Claude scheduler state (must never be committed)
+.claude/scheduled_tasks.lock

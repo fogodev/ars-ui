@@ -72,6 +72,10 @@ pub enum Event {
         /// The key that was pressed.
         key: KeyboardKey,
     },
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<f64>),
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 ```
 
@@ -133,7 +137,7 @@ pub struct Props {
     /// The ID of the form element the component is associated with.
     pub form: Option<String>,
     /// Fired on `Event::DragEnd` / pointer release.
-    pub on_change_end: Option<Callback<f64>>,
+    pub on_change_end: Option<Callback<dyn Fn(f64) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -157,29 +161,67 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
-```rust
-use ars_core::{TransitionPlan, ComponentIds, AttrMap, Bindable};
+```rust,no_check
+use ars_core::{AttrMap, Bindable, ComponentIds, PendingEffect, TransitionPlan, no_cleanup};
+// `f64::atan2`/`round`/`rem_euclid` are std-only; use the libm-backed `core_maths`
+// versions so the module compiles under `#![no_std]` (matching `ars-core::color`).
+use core_maths::CoreFloat;
 
 /// Compute angle from pointer position relative to the center of the track.
 /// Returns degrees with 0 degrees at the top (12 o'clock), increasing clockwise.
 fn compute_angle(center: (f64, f64), pointer: (f64, f64)) -> f64 {
     let dx = pointer.0 - center.0;
     let dy = pointer.1 - center.1;
-    let radians = dy.atan2(dx);
-    let degrees = radians.to_degrees();
+    let degrees = CoreFloat::atan2(dy, dx) * (180.0 / core::f64::consts::PI);
     // Normalize to 0..360, with 0 at top (12 o'clock)
-    (degrees + 90.0).rem_euclid(360.0)
+    CoreFloat::rem_euclid(degrees + 90.0, 360.0)
 }
 
 /// Snap an angle to the nearest step.
 fn snap_to_step(angle: f64, step: f64) -> f64 {
-    (angle / step).round() * step
+    CoreFloat::round(angle / step) * step
 }
 
 /// Wrap a value into the range [min, max).
 fn wrap_value(value: f64, min: f64, max: f64) -> f64 {
     let range = max - min;
-    ((value - min).rem_euclid(range)) + min
+    if !range.is_finite() || range <= 0.0 {
+        return min;
+    }
+    CoreFloat::rem_euclid(value - min, range) + min
+}
+
+/// Clamp `value` to `[min, max]` without panicking on malformed bounds.
+///
+/// `min`/`max` are public props with no enforced invariant, so a `min > max`
+/// or non-finite bound would make [`f64::clamp`] panic. In that case the value
+/// is returned unclamped rather than crashing the component.
+fn clamp_to_range(value: f64, min: f64, max: f64) -> f64 {
+    if !min.is_finite() || !max.is_finite() || min > max {
+        return value;
+    }
+    value.clamp(min, max)
+}
+
+/// Typed identifier for side effects emitted by the machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Invoke `Props::on_change_end`.
+    ChangeEnd,
+}
+
+/// Build the change-end effect that invokes `Props::on_change_end`.
+///
+/// Reports the *pending* value staged during the drag rather than the
+/// controlled `get()` value, which in controlled mode still holds the stale
+/// pre-drag angle until the parent syncs the new value back through its prop.
+fn change_end_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_change_end {
+            callback(*ctx.value.pending());
+        }
+        no_cleanup()
+    })
 }
 
 /// The machine for the AngleSlider component.
@@ -191,6 +233,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -221,72 +264,75 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // Disabled blocks all except Focus/Blur.
-        if ctx.disabled {
-            match event {
-                Event::Focus { is_keyboard } => {
-                    let ik = *is_keyboard;
-                    return Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                        ctx.focused = true;
-                        ctx.focus_visible = ik;
-                    }));
-                }
-                Event::Blur => {
-                    return Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                        ctx.focused = false;
-                        ctx.focus_visible = false;
-                    }));
-                }
-                _ => return None,
+        // Parent-driven prop syncs always apply, even when disabled/readonly,
+        // so the control can be re-enabled and its controlled value updated.
+        match event {
+            Event::SyncValue(value) => {
+                let value = *value;
+                return Some(TransitionPlan::context_only(move |ctx| match value {
+                    Some(angle) => {
+                        ctx.value.set(angle);
+                        ctx.value.sync_controlled(Some(angle));
+                    }
+                    None => ctx.value.sync_controlled(None),
+                }));
             }
+            Event::SetProps => {
+                let props = props.clone();
+                return Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.step = props.step;
+                    ctx.min = props.min;
+                    ctx.max = props.max;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+
+                    // Re-clamp the current value to the new bounds so an
+                    // out-of-range angle is not exposed via aria-valuenow / the
+                    // hidden input until the next interaction.
+                    let clamped = clamp_to_range(*ctx.value.get(), ctx.min, ctx.max);
+                    ctx.value.set(clamped);
+                    if ctx.value.is_controlled() {
+                        ctx.value.sync_controlled(Some(clamped));
+                    }
+                }));
+            }
+            _ => {}
         }
 
-        // Readonly blocks drag and value changes.
-        if ctx.readonly {
+        // Disabled and read-only both block value-changing input. Focus/Blur
+        // (handled in the main match) and `DragEnd` still pass through so a drag
+        // in flight when the control was disabled can terminate cleanly.
+        if ctx.disabled || ctx.readonly {
             match event {
-                Event::Focus { is_keyboard } => {
-                    let ik = *is_keyboard;
-                    return Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                        ctx.focused = true;
-                        ctx.focus_visible = ik;
-                    }));
-                }
-                Event::Blur => {
-                    return Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                        ctx.focused = false;
-                        ctx.focus_visible = false;
-                    }));
-                }
-                _ => return None,
+                Event::DragStart { .. }
+                | Event::DragMove { .. }
+                | Event::Increment
+                | Event::Decrement
+                | Event::SetValue { .. }
+                | Event::KeyDown { .. } => return None,
+                _ => {}
             }
         }
 
         match (state, event) {
             // Drag lifecycle
             (State::Idle | State::Focused, Event::DragStart { angle }) => {
-                let snapped = snap_to_step(*angle, ctx.step).clamp(ctx.min, ctx.max);
+                let snapped = clamp_to_range(snap_to_step(*angle, ctx.step), ctx.min, ctx.max);
                 Some(TransitionPlan::to(State::Dragging).apply(move |ctx| {
                     ctx.value.set(snapped);
                 }))
             }
             (State::Dragging, Event::DragMove { angle }) => {
-                let snapped = snap_to_step(*angle, ctx.step).clamp(ctx.min, ctx.max);
+                let snapped = clamp_to_range(snap_to_step(*angle, ctx.step), ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(snapped);
                 }))
             }
             (State::Dragging, Event::DragEnd) => {
-                let final_value = *ctx.value.get();
                 let next_state = if ctx.focused { State::Focused } else { State::Idle };
-                Some(TransitionPlan::to(next_state)
-                    .with_effect(PendingEffect::new("on-change-end", move |_ctx, props, _send| {
-                        if let Some(ref cb) = props.on_change_end {
-                            cb.call(final_value);
-                        }
-                        no_cleanup()
-                    })))
+                Some(TransitionPlan::to(next_state).with_effect(change_end_effect()))
             }
 
             // Focus lifecycle
@@ -306,19 +352,22 @@ impl ars_core::Machine for Machine {
 
             // Value adjustments
             (_, Event::Increment) => {
-                let new_val = wrap_value(ctx.value.get() + ctx.step, ctx.min, ctx.max);
+                // Accumulate from the pending value so repeated controlled steps
+                // before a parent `SyncValue` advance instead of recomputing from
+                // the stale prop.
+                let new_val = wrap_value(ctx.value.pending() + ctx.step, ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(new_val);
                 }))
             }
             (_, Event::Decrement) => {
-                let new_val = wrap_value(ctx.value.get() - ctx.step, ctx.min, ctx.max);
+                let new_val = wrap_value(ctx.value.pending() - ctx.step, ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(new_val);
                 }))
             }
             (_, Event::SetValue { angle }) => {
-                let clamped = angle.clamp(ctx.min, ctx.max);
+                let clamped = clamp_to_range(*angle, ctx.min, ctx.max);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.value.set(clamped);
                 }))
@@ -326,49 +375,48 @@ impl ars_core::Machine for Machine {
 
             // Keyboard
             (State::Focused, Event::KeyDown { key }) => {
-                match key {
+                let large_step = ctx.step * 10.0;
+                // Accumulate relative steps from the pending value (see Increment).
+                let current = *ctx.value.pending();
+                let new_val = match key {
                     KeyboardKey::ArrowRight | KeyboardKey::ArrowUp => {
-                        let new_val = wrap_value(ctx.value.get() + ctx.step, ctx.min, ctx.max);
-                        Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.value.set(new_val);
-                        }))
+                        wrap_value(current + ctx.step, ctx.min, ctx.max)
                     }
                     KeyboardKey::ArrowLeft | KeyboardKey::ArrowDown => {
-                        let new_val = wrap_value(ctx.value.get() - ctx.step, ctx.min, ctx.max);
-                        Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.value.set(new_val);
-                        }))
+                        wrap_value(current - ctx.step, ctx.min, ctx.max)
                     }
-                    KeyboardKey::Home => {
-                        Some(TransitionPlan::context_only(|ctx| {
-                            ctx.value.set(ctx.min);
-                        }))
-                    }
-                    KeyboardKey::End => {
-                        Some(TransitionPlan::context_only(|ctx| {
-                            ctx.value.set(ctx.max);
-                        }))
-                    }
-                    KeyboardKey::PageUp => {
-                        let large_step = ctx.step * 10.0;
-                        let new_val = wrap_value(ctx.value.get() + large_step, ctx.min, ctx.max);
-                        Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.value.set(new_val);
-                        }))
-                    }
-                    KeyboardKey::PageDown => {
-                        let large_step = ctx.step * 10.0;
-                        let new_val = wrap_value(ctx.value.get() - large_step, ctx.min, ctx.max);
-                        Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.value.set(new_val);
-                        }))
-                    }
-                    _ => None,
-                }
+                    KeyboardKey::Home => ctx.min,
+                    KeyboardKey::End => ctx.max,
+                    KeyboardKey::PageUp => wrap_value(current + large_step, ctx.min, ctx.max),
+                    KeyboardKey::PageDown => wrap_value(current - large_step, ctx.min, ctx.max),
+                    _ => return None,
+                };
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.value.set(new_val);
+                }))
             }
 
             _ => None,
         }
+    }
+
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "angle_slider::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -380,13 +428,30 @@ impl ars_core::Machine for Machine {
         Api { state, ctx, props, send }
     }
 }
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name`/`form` are omitted: they are read live from `Props` in
+/// `hidden_input_attrs` rather than cached in the context.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    (old.step - new.step).abs() > f64::EPSILON
+        || (old.min - new.min).abs() > f64::EPSILON
+        || (old.max - new.max).abs() > f64::EPSILON
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+}
 ```
 
 ### 1.6 Connect / API
 
-```rust
-#[derive(ComponentPart)]
-#[scope = "angle-slider"]
+The `Marker { value: f64 }` variant carries an `f64`, which is not `Eq`/`Hash`,
+so `Part` cannot use `#[derive(ComponentPart)]` (the trait requires `Eq + Hash`).
+It hand-rolls `PartialEq`/`Eq`/`Hash` comparing/hashing that field via
+[`f64::to_bits`] and a manual `ComponentPart` impl, matching the `Slider`
+convention.
+
+```rust,no_check
+#[derive(Clone, Debug)]
 pub enum Part {
     Root,
     Control,
@@ -399,6 +464,18 @@ pub enum Part {
     HiddenInput,
 }
 
+impl PartialEq for Part {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Marker { value: a }, Self::Marker { value: b }) => a.to_bits() == b.to_bits(),
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+impl Eq for Part {}
+// `Hash` hashes the discriminant plus `value.to_bits()` for `Marker`; the
+// manual `ComponentPart` impl provides `scope()`, `name()`, `all()`, `ROOT`.
+
 pub struct Api<'a> {
     state: &'a State,
     ctx: &'a Context,
@@ -407,9 +484,19 @@ pub struct Api<'a> {
 }
 
 impl<'a> Api<'a> {
-    /// Current angle value.
+    /// Current angle value (the controlled prop, when controlled).
     pub fn value(&self) -> f64 {
-        self.ctx.value.get()
+        *self.ctx.value.get()
+    }
+
+    /// The angle to render (ARIA + rotation).
+    ///
+    /// Uses the *pending* value so a controlled slider visibly and accessibly
+    /// moves during a drag / keyboard adjustment, before the parent round-trips
+    /// the new value back through `SyncValue`. In uncontrolled mode this equals
+    /// [`value`](Self::value).
+    fn display_value(&self) -> f64 {
+        *self.ctx.value.pending()
     }
 
     /// Set the angle value programmatically.
@@ -429,7 +516,7 @@ impl<'a> Api<'a> {
 
     /// Formatted value text (e.g., "45 degrees").
     pub fn formatted_value(&self) -> String {
-        (self.ctx.messages.value_text)(self.value(), &self.ctx.locale)
+        (self.ctx.messages.value_text)(self.display_value(), &self.ctx.locale)
     }
 
     pub fn root_attrs(&self) -> AttrMap {
@@ -488,16 +575,17 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "slider");
-        attrs.set(HtmlAttr::TabIndex, "0");
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), self.value().to_string());
+        // A disabled control must stay out of the tab order.
+        attrs.set(HtmlAttr::TabIndex, if self.ctx.disabled { "-1" } else { "0" });
+        attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), self.display_value().to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), self.ctx.min.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), self.ctx.max.to_string());
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), self.formatted_value());
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.label)(&self.ctx.locale));
         // CSS custom property for thumb rotation.
-        attrs.set_style(CssProperty::Custom("ars-angle-value"), format!("{}", self.value()));
+        attrs.set_style(CssProperty::Custom("ars-angle-value"), format!("{}", self.display_value()));
         attrs.set_style(CssProperty::Custom("ars-angle-thumb-rotation"),
-            format!("{}deg", self.value()));
+            format!("{}deg", self.display_value()));
         if self.ctx.disabled {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
@@ -565,9 +653,13 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.props.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_string());
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_string());
         if let Some(ref form) = self.props.form {
             attrs.set(HtmlAttr::Form, form);
+        }
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
         }
         attrs.set(HtmlAttr::TabIndex, "-1");
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
@@ -609,17 +701,17 @@ AngleSlider
 └── HiddenInput      (optional -- <input type="hidden">, form submission)
 ```
 
-| Part        | Element                 | Key Attributes                                           |
-| ----------- | ----------------------- | -------------------------------------------------------- |
-| Root        | `<div>`                 | `role="group"`, `data-ars-state`, `data-ars-disabled`    |
-| Control     | `<div>`                 | Wraps track and thumb                                    |
-| Track       | `<div>`                 | Circular track background                                |
-| Range       | `<div>`                 | Filled arc indicator showing current value               |
-| Thumb       | `<div>`                 | `role="slider"`, `aria-valuenow/min/max`, `tabindex="0"` |
-| ValueText   | `<output>`              | `aria-live="off"`, displays formatted angle              |
-| MarkerGroup | `<div>`                 | `role="presentation"`, container for markers             |
-| Marker      | `<div>`                 | Positioned by angle via CSS custom property              |
-| HiddenInput | `<input type="hidden">` | Form submission value                                    |
+| Part        | Element                 | Key Attributes                                                                                                           |
+| ----------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Root        | `<div>`                 | `role="group"`, `data-ars-state`, `data-ars-disabled`                                                                    |
+| Control     | `<div>`                 | Wraps track and thumb                                                                                                    |
+| Track       | `<div>`                 | Circular track background                                                                                                |
+| Range       | `<div>`                 | Filled arc indicator showing current value                                                                               |
+| Thumb       | `<div>`                 | `role="slider"`, `aria-valuenow/min/max`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled) |
+| ValueText   | `<output>`              | `aria-live="off"`, displays formatted angle                                                                              |
+| MarkerGroup | `<div>`                 | `role="presentation"`, container for markers                                                                             |
+| Marker      | `<div>`                 | Positioned by angle via CSS custom property                                                                              |
+| HiddenInput | `<input type="hidden">` | Form submission value, `disabled` (when disabled -- omitted from form submission)                                        |
 
 **9 parts total.**
 
@@ -635,7 +727,8 @@ AngleSlider
 | `aria-valuemin` / `aria-valuemax` | Thumb   | `"0"` / `"360"`                      |
 | `aria-valuetext`                  | Thumb   | Formatted angle (e.g., "45 degrees") |
 | `aria-label`                      | Thumb   | From messages (default: "Angle")     |
-| `tabindex="0"`                    | Thumb   | Focusable                            |
+| `tabindex`                        | Thumb   | `"-1"` when disabled, else `"0"`     |
+| `aria-disabled`                   | Thumb   | `"true"` when disabled               |
 | `data-ars-focus-visible`          | Thumb   | When keyboard-focused                |
 
 No `aria-orientation` -- circular geometry has no h/v distinction.

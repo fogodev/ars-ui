@@ -6,8 +6,8 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: [color-swatch-picker, color-picker]
 references:
-  ark-ui: ColorPicker
-  react-aria: ColorSwatch
+    ark-ui: ColorPicker
+    react-aria: ColorSwatch
 ---
 
 # ColorSwatch
@@ -22,11 +22,12 @@ from the shared color types.
 
 ### 1.1 Props
 
-```rust
-use crate::color_picker::ColorValue;
-use crate::machine::{AttrMap, ComponentIds};
+```rust,no_check
+use ars_core::color::ColorValue;
+use ars_core::{AttrMap, ComponentPart, ConnectApi, CssProperty, Env, HtmlAttr};
+use ars_core::AriaAttr;
 
-#[derive(Clone, Debug, PartialEq, HasId)]
+#[derive(Clone, Debug, PartialEq, ars_core::HasId)]
 pub struct Props {
     /// Component instance ID.
     pub id: String,
@@ -63,17 +64,13 @@ pub enum Part {
 
 pub struct Api<'a> {
     props: &'a Props,
-    id: String,
     locale: Locale,
     messages: Messages,
 }
 
 impl<'a> Api<'a> {
     pub fn new(props: &'a Props, env: &Env, messages: &Messages) -> Self {
-        let id = if props.id.is_empty() { generate_id() } else { props.id.clone() };
-        let locale = env.locale.clone();
-        let messages = messages.clone();
-        Self { props, id, locale, messages }
+        Self { props, locale: env.locale.clone(), messages: messages.clone() }
     }
 
     /// The resolved accessible color name — either the explicit override or
@@ -92,11 +89,17 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.id);
+        // The instance id is consumer-supplied; emit it only when non-empty
+        // (there is no auto-id generator — `ColorSwatchPicker` supplies ids via
+        // `ComponentIds::item("swatch", index)`).
+        if !self.props.id.is_empty() {
+            attrs.set(HtmlAttr::Id, self.props.id.clone());
+        }
         attrs.set(HtmlAttr::Role, "img");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), self.color_name());
         attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), (self.messages.role_description)(&self.locale));
-        attrs.set_style(CssProperty::Custom("--ars-swatch-color"), self.props.color.to_css_hsl());
+        // `CssProperty::Custom` renders as `--{name}`, so the name omits the leading dashes.
+        attrs.set_style(CssProperty::Custom("ars-swatch-color"), self.props.color.to_css_hsl());
         attrs
     }
 

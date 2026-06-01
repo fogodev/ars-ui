@@ -1,0 +1,53 @@
+---
+source: crates/ars-components/src/specialized/angle_slider/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-dragging",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "angle-slider",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "dragging",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "as",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}

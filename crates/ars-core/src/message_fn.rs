@@ -121,6 +121,18 @@ impl<F: Fn(&str, &Locale) -> String + Send + Sync + 'static> From<F>
     }
 }
 
+/// `From` impl for `MessageFn<dyn Fn(&str, &str, &Locale) -> String + Send + Sync>`.
+///
+/// Used by `ColorSlider::Messages::value_text` to format a `aria-valuetext` from
+/// the channel reading and the perceptual color name.
+impl<F: Fn(&str, &str, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(&str, &str, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
 /// `From` impl for `MessageFn<dyn Fn(usize, &str, &Locale) -> String + Send + Sync>`.
 impl<F: Fn(usize, &str, &Locale) -> String + Send + Sync + 'static> From<F>
     for MessageFn<dyn Fn(usize, &str, &Locale) -> String + Send + Sync>
@@ -158,6 +170,55 @@ impl<F: Fn(&str, usize, usize, &Locale) -> String + Send + Sync + 'static> From<
 /// count — e.g. `pin_input::Messages::ordinal_label`'s `"Digit {n} of {total}"`.
 impl<F: Fn(usize, usize, &Locale) -> String + Send + Sync + 'static> From<F>
     for MessageFn<dyn Fn(usize, usize, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
+/// `From` impl for `MessageFn<dyn Fn(&ColorNameParts, &Locale) -> String + Send + Sync>`.
+///
+/// Used by `ColorSwatch::Messages::format_name` to assemble a localized,
+/// reordered accessible name from the English [`ColorNameParts`](crate::color::ColorNameParts).
+impl<F: Fn(&crate::color::ColorNameParts, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(&crate::color::ColorNameParts, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
+/// `From` impl for `MessageFn<dyn Fn(ColorChannel, &Locale) -> String + Send + Sync>`.
+///
+/// Used by `ColorField::Messages::channel_label` to label a single-channel input.
+impl<F: Fn(crate::color::ColorChannel, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(crate::color::ColorChannel, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
+/// `From` impl for `MessageFn<dyn Fn(ColorChannel, f64, &Locale) -> String + Send + Sync>`.
+///
+/// Used by `ColorField::Messages::channel_value_text` to format a channel value
+/// for `aria-valuetext`.
+impl<F: Fn(crate::color::ColorChannel, f64, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(crate::color::ColorChannel, f64, &Locale) -> String + Send + Sync>
+{
+    fn from(f: F) -> Self {
+        MessageFn(Arc::new(f))
+    }
+}
+
+/// `From` impl for
+/// `MessageFn<dyn Fn(&str, &str, &str, &Locale) -> String + Send + Sync>`.
+///
+/// Used by `ColorArea::Messages::value_text` to format a 2D `aria-valuetext`
+/// from two preformatted, channel-aware axis readings and the perceptual color
+/// name.
+impl<F: Fn(&str, &str, &str, &Locale) -> String + Send + Sync + 'static> From<F>
+    for MessageFn<dyn Fn(&str, &str, &str, &Locale) -> String + Send + Sync>
 {
     fn from(f: F) -> Self {
         MessageFn(Arc::new(f))

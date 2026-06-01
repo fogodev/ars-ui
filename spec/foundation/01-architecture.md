@@ -2394,6 +2394,21 @@ impl<T: BindableValue> Bindable<T> {
     pub const fn get_mut_owned(&mut self) -> &mut T {
         &mut self.internal
     }
+
+    /// Returns the internal (pending) value, ignoring any controlled override.
+    ///
+    /// Unlike [`get`](Self::get) — which returns the controlled value when the
+    /// bindable is controlled — this always returns the value staged via
+    /// [`set`](Self::set), i.e. the value the component would commit. Use this
+    /// when reporting a just-computed result to the parent (for example the
+    /// final value passed to an `on_change_end` callback at the end of a drag):
+    /// in controlled mode the parent has not yet round-tripped the new value
+    /// back through its prop, so [`get`](Self::get) would still return the stale
+    /// controlled value.
+    #[must_use]
+    pub const fn pending(&self) -> &T {
+        &self.internal
+    }
 }
 ```
 

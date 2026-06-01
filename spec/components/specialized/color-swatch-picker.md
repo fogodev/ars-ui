@@ -54,7 +54,10 @@ pub enum State {
 
 ```rust
 /// The events for the `ColorSwatchPicker` component.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// `Eq` is not derived because `SyncValue` carries a [`ColorValue`], whose
+/// `f64` channels are only `PartialEq`.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event {
     /// Focus entered the picker.
     Focus {
@@ -80,6 +83,10 @@ pub enum Event {
     FocusFirst,
     /// Jump to the last swatch.
     FocusLast,
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+    /// Refresh cached output props (colors, layout, columns, disabled).
+    SetProps,
 }
 ```
 
@@ -166,6 +173,8 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    // Selection flows through `Bindable`; no named effects are emitted.
+    type Effect = ars_core::NoEffect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -197,18 +206,45 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled {
-            return None;
-        }
+        // Parent-driven prop syncs always apply, even when disabled or empty, so
+        // the picker can be re-enabled or populated. `Blur` also passes through
+        // so focus disabled/emptied mid-interaction can still be cleaned up;
+        // every other event is ignored in those states.
+        let always_allowed = matches!(event, Event::SyncValue(_) | Event::SetProps | Event::Blur);
 
-        let len = ctx.colors.len();
-        if len == 0 {
+        if !always_allowed && (ctx.disabled || ctx.colors.is_empty()) {
             return None;
         }
 
         match event {
+            Event::SyncValue(value) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(move |ctx| match value {
+                    Some(color) => {
+                        ctx.value.set(color);
+                        ctx.value.sync_controlled(Some(color));
+                    }
+                    None => ctx.value.sync_controlled(None),
+                }))
+            }
+
+            Event::SetProps => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.colors = props.colors.clone();
+                    ctx.layout = props.layout;
+                    ctx.columns = props.columns;
+                    ctx.disabled = props.disabled;
+
+                    // Drop focus if it now points past the (possibly shorter) list.
+                    if ctx.focused_index.is_some_and(|index| index >= ctx.colors.len()) {
+                        ctx.focused_index = None;
+                    }
+                }))
+            }
+
             Event::Focus { is_keyboard } => {
                 let kb = *is_keyboard;
 
@@ -265,7 +301,9 @@ impl ars_core::Machine for Machine {
 
                 if ctx.layout != SwatchPickerLayout::Grid { return None; }
 
-                let cols = ctx.columns;
+                // `columns` is a public prop with no non-zero invariant; clamp to
+                // at least one so a row move always advances.
+                let cols = ctx.columns.max(1);
 
                 Some(TransitionPlan::context_only(move |ctx| {
                     let current = ctx.focused_index.unwrap_or(0);
@@ -279,7 +317,8 @@ impl ars_core::Machine for Machine {
 
                 if ctx.layout != SwatchPickerLayout::Grid { return None; }
 
-                let cols = ctx.columns;
+                // Clamp columns to at least one (see `FocusUp`).
+                let cols = ctx.columns.max(1);
 
                 Some(TransitionPlan::context_only(move |ctx| {
                     let current = ctx.focused_index.unwrap_or(0);
@@ -305,6 +344,25 @@ impl ars_core::Machine for Machine {
         }
     }
 
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_swatch_picker::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
+    }
+
     fn connect<'a>(
         state: &'a Self::State,
         ctx: &'a Self::Context,
@@ -313,6 +371,17 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name` is omitted: it is read live from `Props` in `hidden_input_attrs`
+/// rather than cached in the context.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.colors != new.colors
+        || old.layout != new.layout
+        || old.columns != new.columns
+        || old.disabled != new.disabled
 }
 ```
 
@@ -335,6 +404,37 @@ pub struct Api<'a> {
 }
 
 impl<'a> Api<'a> {
+    /// The currently selected color.
+    ///
+    /// Reports the *pending* value so a selection is reflected consistently
+    /// (selected styling, the hidden input, and this accessor) even in controlled
+    /// mode, where the controlled prop only updates via `SyncValue`.
+    pub const fn value(&self) -> &ColorValue {
+        self.ctx.value.pending()
+    }
+
+    /// The index of the single roving-tabbable swatch.
+    ///
+    /// While a swatch is focused this is the focused index. In the idle state
+    /// (`focused_index == None`) it is the selected swatch, or the first swatch
+    /// when nothing is selected, so the picker is reachable with the Tab key
+    /// before focus has entered it. Returns `None` only when the picker is
+    /// disabled or empty (every item then stays `tabindex="-1"`).
+    pub fn tabbable_index(&self) -> Option<usize> {
+        if self.ctx.disabled || self.ctx.colors.is_empty() {
+            return None;
+        }
+
+        if let Some(index) = self.ctx.focused_index {
+            return Some(index);
+        }
+
+        let value = *self.ctx.value.pending();
+        let selected = self.ctx.colors.iter().position(|c| *c == value);
+
+        Some(selected.unwrap_or(0))
+    }
+
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
@@ -374,16 +474,23 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Role, "option");
 
         let is_selected = index < self.ctx.colors.len()
-            && self.ctx.colors[index] == self.ctx.value.get();
+            && self.ctx.colors[index] == *self.ctx.value.pending();
         attrs.set(HtmlAttr::Aria(AriaAttr::Selected),
             if is_selected { "true" } else { "false" });
         if is_selected {
             attrs.set_bool(HtmlAttr::Data("ars-selected"), true);
         }
 
-        let is_focused = self.ctx.focused_index == Some(index);
-        // Roving tabindex
-        attrs.set(HtmlAttr::TabIndex, if is_focused { "0" } else { "-1" });
+        // Focused styling only applies while focus is actually within the picker;
+        // `focused_index` is retained across blur (for roving tabindex and to
+        // restore the position on re-entry), so gate the visual state on
+        // `State::Focused` to avoid stale `data-ars-focused` after tabbing away.
+        let is_focused =
+            matches!(self.state, State::Focused) && self.ctx.focused_index == Some(index);
+        // Roving tabindex: the focused item is tabbable, or — before focus has
+        // entered — the selected/first item, so keyboard users can Tab in.
+        let is_tabbable = self.tabbable_index() == Some(index);
+        attrs.set(HtmlAttr::TabIndex, if is_tabbable { "0" } else { "-1" });
         if is_focused {
             attrs.set_bool(HtmlAttr::Data("ars-focused"), true);
         }
@@ -400,12 +507,13 @@ impl<'a> Api<'a> {
         } else {
             ColorValue::default()
         };
+        // `color_swatch::Messages` is supplied to the embedded swatch's
+        // `Api::new` by the adapter, not carried in `Props`.
         color_swatch::Props {
-            id: self.ctx.ids.item("swatch", index),
+            id: self.ctx.ids.item("swatch", &index),
             color,
             color_name: None,
             respect_alpha: true,
-            messages: color_swatch::ColorSwatchMessages::default(),
         }
     }
 
@@ -420,7 +528,11 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.props.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_hex(true));
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         attrs
     }
 
@@ -493,25 +605,25 @@ ColorSwatchPicker
 └── HiddenInput  (optional -- <input type="hidden">, form submission)
 ```
 
-| Part        | Element   | Key Attributes                                             |
-| ----------- | --------- | ---------------------------------------------------------- |
-| Root        | `<div>`   | `role="listbox"`, `aria-label`, `aria-orientation` (stack) |
-| Item        | `<div>`   | `role="option"`, `aria-selected`, roving `tabindex`        |
-| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color)               |
+| Part        | Element   | Key Attributes                                                                                           |
+| ----------- | --------- | -------------------------------------------------------------------------------------------------------- |
+| Root        | `<div>`   | `role="listbox"`, `aria-label`, `aria-orientation` (stack)                                               |
+| Item        | `<div>`   | `role="option"`, `aria-selected`, roving `tabindex`                                                      |
+| HiddenInput | `<input>` | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled -- omitted from form submission) |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Attribute          | Element | Value                                                 |
-| ------------------ | ------- | ----------------------------------------------------- |
-| `role="listbox"`   | Root    | ARIA listbox pattern                                  |
-| `aria-label`       | Root    | From `messages.label` (default: "Color swatches")     |
-| `aria-orientation` | Root    | `"horizontal"` for Stack layout; unset for Grid       |
-| `aria-disabled`    | Root    | `"true"` when disabled                                |
-| `role="option"`    | Item    | Individual swatch option                              |
-| `aria-selected`    | Item    | `"true"` when this item's color is the selected value |
-| `tabindex`         | Item    | Roving: `"0"` on focused item, `"-1"` on others       |
+| Attribute          | Element | Value                                                                                                                                                                                                                                                                                     |
+| ------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `role="listbox"`   | Root    | ARIA listbox pattern                                                                                                                                                                                                                                                                      |
+| `aria-label`       | Root    | From `messages.label` (default: "Color swatches")                                                                                                                                                                                                                                         |
+| `aria-orientation` | Root    | `"horizontal"` for Stack layout; unset for Grid                                                                                                                                                                                                                                           |
+| `aria-disabled`    | Root    | `"true"` when disabled                                                                                                                                                                                                                                                                    |
+| `role="option"`    | Item    | Individual swatch option                                                                                                                                                                                                                                                                  |
+| `aria-selected`    | Item    | `"true"` when this item's color is the selected value                                                                                                                                                                                                                                     |
+| `tabindex`         | Item    | Roving: `"0"` on the tabbable item, `"-1"` on others. The tabbable item is the focused item; in the idle state it is the selected item, or the first item when none is selected, so the picker is keyboard-reachable before focus enters. Disabled/empty pickers expose no tabbable item. |
 
 ### 3.2 Keyboard Interaction
 

@@ -54,6 +54,10 @@ pub enum Event {
     Focus { is_keyboard: bool },
     /// Focus left the thumb.
     Blur,
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 ```
 
@@ -64,6 +68,15 @@ pub enum Event {
 pub struct Context {
     /// The current color value (controlled or uncontrolled).
     pub value: Bindable<ColorValue>,
+    /// The slider's linear channel value in channel units (degrees for hue,
+    /// `0..=1` for fractional channels, `0..=255` for RGB).
+    ///
+    /// This is the source of truth for the thumb position and `aria-valuenow`,
+    /// and is kept *unwrapped* so the hue endpoint can reach `360°` distinctly.
+    /// [`ColorValue`] normalizes hue into `[0, 360)` (360° stores as 0°/red), so
+    /// reading the channel back from the color would otherwise collapse the max
+    /// endpoint onto the minimum.
+    pub slider_value: f64,
     /// Which channel this slider controls.
     pub channel: ColorChannel,
     /// Slider orientation.
@@ -119,7 +132,7 @@ pub struct Props {
     /// Name attribute for the hidden form input.
     pub name: Option<String>,
     /// Fired on `Event::DragEnd` / pointer release.
-    pub on_change_end: Option<Callback<ColorValue>>,
+    pub on_change_end: Option<Callback<dyn Fn(ColorValue) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -144,13 +157,53 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
-```rust
+```rust,no_check
 /// Apply a normalized position (0..1) to the channel value.
+///
+/// A horizontal RTL slider renders the minimum on the right and mirrors its
+/// arrow keys, so the incoming physical position is inverted to match (dragging
+/// the left edge selects the maximum).
 fn apply_slider_position(ctx: &mut Context, position: f64) {
-    let color = ctx.value.get();
     let (min, max) = channel_range(ctx.channel);
-    let value = min + position.clamp(0.0, 1.0) * (max - min);
-    ctx.value.set(with_channel(color, ctx.channel, value));
+    let clamped = position.clamp(0.0, 1.0);
+    let effective = if ctx.orientation == Orientation::Horizontal && ctx.dir == Direction::Rtl {
+        1.0 - clamped
+    } else {
+        clamped
+    };
+    set_channel_value(ctx, min + effective * (max - min));
+}
+
+/// Set the slider's channel value (in channel units) and derive the color.
+///
+/// `slider_value` is stored unwrapped so the hue endpoint stays distinct; the
+/// color is derived via [`with_channel`], which normalizes hue (360° → red).
+fn set_channel_value(ctx: &mut Context, value: f64) {
+    ctx.slider_value = value;
+    let color = *ctx.value.get();
+    ctx.value.set(with_channel(&color, ctx.channel, value));
+}
+
+/// Typed identifier for side effects emitted by the machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Invoke `Props::on_change_end`.
+    ChangeEnd,
+}
+
+/// Build the change-end effect that invokes `Props::on_change_end`.
+///
+/// Reports the *pending* value (the one staged during the drag) rather than the
+/// controlled `get()` value: in controlled mode the parent has not yet synced
+/// the new value back through its prop, so `get()` would still return the stale
+/// pre-drag color.
+fn change_end_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::ChangeEnd, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_change_end {
+            callback(*ctx.value.pending());
+        }
+        no_cleanup()
+    })
 }
 
 pub struct Machine;
@@ -161,6 +214,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -168,12 +222,14 @@ impl ars_core::Machine for Machine {
             Some(v) => Bindable::controlled(v.clone()),
             None => Bindable::uncontrolled(props.default_value.clone()),
         };
+        let slider_value = channel_value(value.get(), props.channel);
         let ids = ComponentIds::from_id(&props.id);
         let locale = env.locale.clone();
         let messages = messages.clone();
 
         (State::Idle, Context {
             value,
+            slider_value,
             channel: props.channel,
             orientation: props.orientation,
             disabled: props.disabled,
@@ -193,43 +249,41 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        // A disabled slider ignores value-changing input but still tracks focus
+        // and accepts parent-driven prop syncs (so it can be re-enabled).
+        // `DragEnd` is allowed through so a drag in flight when the parent
+        // disabled the control can still terminate cleanly.
         if ctx.disabled {
-            return match event {
-                Event::Focus { is_keyboard } => {
-                    let kb = *is_keyboard;
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.focused = true;
-                        ctx.focus_visible = kb;
-                    }))
-                }
-                Event::Blur => Some(TransitionPlan::context_only(|ctx| {
-                    ctx.focused = false;
-                    ctx.focus_visible = false;
-                })),
-                _ => None,
-            };
+            match event {
+                Event::DragStart { .. }
+                | Event::DragMove { .. }
+                | Event::Increment { .. }
+                | Event::Decrement { .. }
+                | Event::SetToMin
+                | Event::SetToMax => return None,
+                _ => {}
+            }
         }
 
         match (state, event) {
+            // The adapter resolves the normalized position and drives
+            // DragMove/DragEnd from its own pointer listeners.
             (State::Idle, Event::DragStart { position }) => {
                 if ctx.readonly { return None; }
                 let pos = *position;
                 Some(TransitionPlan::to(State::Dragging).apply(move |ctx| {
                     apply_slider_position(ctx, pos);
-                }).with_named_effect("drag-listeners", move |_ctx, _props, send| {
-                    let platform = use_platform_effects();
-                    let send_move = send.clone();
-                    let send_up = send.clone();
-                    platform.track_pointer_drag(
-                        Box::new(move |x, y| { send_move.call_if_alive(Event::DragMove { position: x }); }),
-                        Box::new(move || { send_up.call_if_alive(Event::DragEnd); }),
-                    )
                 }))
             }
 
             (State::Dragging, Event::DragMove { position }) => {
+                // Readonly toggled mid-drag must stop further value changes
+                // (disabled is already handled by the guard above); DragEnd
+                // still terminates the drag.
+                if ctx.readonly { return None; }
+
                 let pos = *position;
                 Some(TransitionPlan::context_only(move |ctx| {
                     apply_slider_position(ctx, pos);
@@ -237,17 +291,15 @@ impl ars_core::Machine for Machine {
             }
 
             (State::Dragging, Event::DragEnd) => {
-                Some(TransitionPlan::to(State::Idle))
+                Some(TransitionPlan::to(State::Idle).with_effect(change_end_effect()))
             }
 
             (_, Event::Increment { step }) => {
                 if ctx.readonly { return None; }
                 let step = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    let current = channel_value(color, ctx.channel);
                     let (_, max) = channel_range(ctx.channel);
-                    ctx.value.set(with_channel(color, ctx.channel, (current + step).min(max)));
+                    set_channel_value(ctx, (ctx.slider_value + step).min(max));
                 }))
             }
 
@@ -255,28 +307,24 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly { return None; }
                 let step = *step;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let color = ctx.value.get();
-                    let current = channel_value(color, ctx.channel);
                     let (min, _) = channel_range(ctx.channel);
-                    ctx.value.set(with_channel(color, ctx.channel, (current - step).max(min)));
+                    set_channel_value(ctx, (ctx.slider_value - step).max(min));
                 }))
             }
 
             (_, Event::SetToMin) => {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get();
                     let (min, _) = channel_range(ctx.channel);
-                    ctx.value.set(with_channel(color, ctx.channel, min));
+                    set_channel_value(ctx, min);
                 }))
             }
 
             (_, Event::SetToMax) => {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::context_only(|ctx| {
-                    let color = ctx.value.get();
                     let (_, max) = channel_range(ctx.channel);
-                    ctx.value.set(with_channel(color, ctx.channel, max));
+                    set_channel_value(ctx, max);
                 }))
             }
 
@@ -295,8 +343,67 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
+            (_, Event::SyncValue(value)) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(move |ctx| match value {
+                    Some(color) => {
+                        // If the parent is echoing the value we just emitted,
+                        // keep the cached slider value so a hue 360° endpoint
+                        // isn't re-derived back to 0° (the color normalizes
+                        // 360° -> 0°). Only re-derive for a genuinely new color.
+                        let echoes_pending = color == *ctx.value.pending();
+                        ctx.value.set(color);
+                        ctx.value.sync_controlled(Some(color));
+                        if !echoes_pending {
+                            ctx.slider_value = channel_value(&color, ctx.channel);
+                        }
+                    }
+                    None => ctx.value.sync_controlled(None),
+                }))
+            }
+
+            (_, Event::SetProps) => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx| {
+                    let channel_changed = ctx.channel != props.channel;
+
+                    ctx.channel = props.channel;
+                    ctx.orientation = props.orientation;
+                    ctx.step = props.step;
+                    ctx.large_step = props.large_step;
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.dir = props.dir;
+
+                    // A new channel means the cached slider value refers to the
+                    // old channel; re-derive it from the current color.
+                    if channel_changed {
+                        ctx.slider_value = channel_value(ctx.value.get(), ctx.channel);
+                    }
+                }))
+            }
+
             _ => None,
         }
+    }
+
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_slider::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn connect<'a>(
@@ -307,6 +414,20 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+///
+/// `name` is omitted: it is read live from `Props` in `hidden_input_attrs`
+/// rather than cached in the context, so a name-only change needs no resync.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.channel != new.channel
+        || old.orientation != new.orientation
+        || (old.step - new.step).abs() > f64::EPSILON
+        || (old.large_step - new.large_step).abs() > f64::EPSILON
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.dir != new.dir
 }
 ```
 
@@ -337,8 +458,8 @@ impl<'a> Api<'a> {
 
     /// Current channel value formatted for display.
     pub fn formatted_value(&self) -> String {
-        let color = self.ctx.value.get();
-        let val = channel_value(color, self.ctx.channel);
+        // Use the unwrapped slider value so the hue endpoint reads "360°".
+        let val = self.ctx.slider_value;
         match self.ctx.channel {
             ColorChannel::Hue => format!("{:.0}°", val),
             ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => format!("{:.0}", val),
@@ -376,21 +497,39 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Track.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        let color = self.ctx.value.get();
+        // Use the pending color so the gradient matches the in-progress drag
+        // position in controlled mode (where `get()` returns the stale prop).
+        let color = self.ctx.value.pending();
+        // The gradient must run along the slider's travel axis, matching the
+        // thumb position: vertical sliders ramp bottom→top (`to top`), and a
+        // horizontal RTL slider (minimum on the right) ramps `to left`.
+        let to_edge = if self.ctx.orientation == Orientation::Vertical {
+            "to top"
+        } else if self.ctx.dir == Direction::Rtl {
+            "to left"
+        } else {
+            "to right"
+        };
         let gradient = match self.ctx.channel {
-            ColorChannel::Hue => "linear-gradient(to right, \
+            ColorChannel::Hue => format!(
+                "linear-gradient({to_edge}, \
                 hsl(0,100%,50%), hsl(60,100%,50%), hsl(120,100%,50%), \
                 hsl(180,100%,50%), hsl(240,100%,50%), hsl(300,100%,50%), \
-                hsl(360,100%,50%))".to_string(),
+                hsl(360,100%,50%))"
+            ),
             ColorChannel::Alpha => format!(
-                "linear-gradient(to right, transparent, {})",
+                // Fade from the *same* color at alpha 0 to alpha 1, so the track
+                // previews only opacity. `transparent` is transparent black and
+                // would make non-black colors fade through gray.
+                "linear-gradient({to_edge}, {}, {})",
+                ColorValue::new(color.hue, color.saturation, color.lightness, 0.0).to_css_hsl(),
                 ColorValue::new(color.hue, color.saturation, color.lightness, 1.0).to_css_hsl()
             ),
             _ => {
                 let (min, max) = channel_range(self.ctx.channel);
                 let start = with_channel(color, self.ctx.channel, min);
                 let end = with_channel(color, self.ctx.channel, max);
-                format!("linear-gradient(to right, {}, {})", start.to_css_hsl(), end.to_css_hsl())
+                format!("linear-gradient({to_edge}, {}, {})", start.to_css_hsl(), end.to_css_hsl())
             }
         };
         attrs.set_style(CssProperty::Custom("ars-color-slider-track-bg"), gradient);
@@ -404,10 +543,18 @@ impl<'a> Api<'a> {
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("thumb"));
         attrs.set(HtmlAttr::Role, "slider");
-        attrs.set(HtmlAttr::TabIndex, "0");
+        // A disabled control must stay out of the tab order.
+        attrs.set(HtmlAttr::TabIndex, if self.ctx.disabled { "-1" } else { "0" });
+        if self.ctx.disabled {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
 
-        let color = self.ctx.value.get();
-        let val = channel_value(color, self.ctx.channel);
+        // Pending color so the thumb background and the valuetext color name
+        // match the in-progress drag (controlled `get()` returns the old prop).
+        let color = self.ctx.value.pending();
+        // The unwrapped slider value drives aria-valuenow and the thumb position
+        // so the hue endpoint stays at 360° instead of wrapping to 0°.
+        let val = self.ctx.slider_value;
         let (min, max) = channel_range(self.ctx.channel);
 
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{:.2}", val));
@@ -416,10 +563,20 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Orientation),
             if self.ctx.orientation == Orientation::Vertical { "vertical" } else { "horizontal" });
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.label)(&self.ctx.locale));
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), (self.ctx.messages.value_text)(val, &self.ctx.locale));
+        // Channel-aware reading ("hue 180°") plus the perceptual color name, as
+        // required by spec §3.1 (e.g. "hue 180°, dark vibrant blue").
+        let channel_name = format!("{:?}", self.ctx.channel).to_lowercase();
+        let reading = format!("{channel_name} {}", self.formatted_value());
+        let color_name = color.color_name_en();
+        attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), (self.ctx.messages.value_text)(&reading, &color_name, &self.ctx.locale));
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
 
-        let pct = if (max - min).abs() > f64::EPSILON { (val - min) / (max - min) * 100.0 } else { 0.0 };
+        let mut pct = if (max - min).abs() > f64::EPSILON { (val - min) / (max - min) * 100.0 } else { 0.0 };
+        // A horizontal RTL slider flips its axis (min on the right), matching the
+        // mirrored arrow-key handling in `on_thumb_keydown`.
+        if self.ctx.orientation == Orientation::Horizontal && self.ctx.dir == Direction::Rtl {
+            pct = 100.0 - pct;
+        }
         attrs.set_style(CssProperty::Custom("ars-color-slider-thumb-position"), format!("{:.1}%", pct));
         attrs.set_style(CssProperty::BackgroundColor, color.to_css_hsl());
 
@@ -447,7 +604,11 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.props.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        attrs.set(HtmlAttr::Value, self.ctx.value.get().to_hex(true));
+        attrs.set(HtmlAttr::Value, self.ctx.value.pending().to_hex(true));
+        // A disabled control must be omitted from form submission.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         attrs
     }
 
@@ -497,24 +658,24 @@ ColorSlider
 └── HiddenInput   (optional — <input type="hidden">, form submission)
 ```
 
-| Part        | Element    | Key Attributes                                                               |
-| ----------- | ---------- | ---------------------------------------------------------------------------- |
-| Root        | `<div>`    | `role="group"`, `data-ars-channel`, `data-ars-orientation`                   |
-| Label       | `<label>`  | `id`, `for` (thumb id)                                                       |
-| Track       | `<div>`    | gradient background via CSS custom property                                  |
-| Thumb       | `<div>`    | `role="slider"`, `aria-valuenow/min/max`, `aria-orientation`, `tabindex="0"` |
-| Output      | `<output>` | `for` (thumb id), `aria-live="off"`                                          |
-| HiddenInput | `<input>`  | `type="hidden"`, `name`, `value` (hex color)                                 |
+| Part        | Element    | Key Attributes                                                                                                                               |
+| ----------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root        | `<div>`    | `role="group"`, `data-ars-channel`, `data-ars-orientation`                                                                                   |
+| Label       | `<label>`  | `id`, `for` (thumb id)                                                                                                                       |
+| Track       | `<div>`    | gradient background via CSS custom property                                                                                                  |
+| Thumb       | `<div>`    | `role="slider"`, `aria-valuenow/min/max`, `aria-orientation`, `tabindex` (`"-1"` when disabled, else `"0"`), `aria-disabled` (when disabled) |
+| Output      | `<output>` | `for` (thumb id), `aria-live="off"`                                                                                                          |
+| HiddenInput | `<input>`  | `type="hidden"`, `name`, `value` (hex color), `disabled` (when disabled — omitted from form submission)                                      |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Part   | Role     | Properties                                                                                                               |
-| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Root   | `group`  | groups slider components                                                                                                 |
-| Thumb  | `slider` | `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, `aria-orientation`, `aria-label`, `aria-valuetext`, `aria-labelledby` |
-| Output | —        | `aria-live="off"` (prevents double-announcement with valuetext)                                                          |
+| Part   | Role     | Properties                                                                                                                                                |
+| ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root   | `group`  | groups slider components                                                                                                                                  |
+| Thumb  | `slider` | `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, `aria-orientation`, `aria-label`, `aria-valuetext`, `aria-labelledby`, `aria-disabled` (when disabled) |
+| Output | —        | `aria-live="off"` (prevents double-announcement with valuetext)                                                                                           |
 
 `aria-valuetext` MUST include a human-readable color name from `color_name_parts()`, not raw numeric values (e.g., `"hue 180°, dark vibrant blue"`).
 
@@ -541,15 +702,18 @@ ColorSlider
 pub struct Messages {
     /// Label for the slider. Default: `"Color channel"`.
     pub label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    /// Formats the channel value for aria-valuetext.
-    pub value_text: MessageFn<dyn Fn(f64, &Locale) -> String + Send + Sync>,
+    /// Formats the `aria-valuetext`. Arguments: `reading` (channel-aware, e.g.
+    /// `"hue 180°"`) and `color_name` (the perceptual color name), plus `locale`.
+    pub value_text: MessageFn<dyn Fn(&str, &str, &Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
     fn default() -> Self {
         Self {
             label: MessageFn::static_str("Color channel"),
-            value_text: MessageFn::new(|val, _locale| format!("{val:.0}")),
+            value_text: MessageFn::new(|reading: &str, color_name: &str, _locale: &Locale| {
+                format!("{reading}, {color_name}")
+            }),
         }
     }
 }
@@ -557,10 +721,10 @@ impl Default for Messages {
 impl ComponentMessages for Messages {}
 ```
 
-| Key                       | Default (en-US)                  | Purpose              |
-| ------------------------- | -------------------------------- | -------------------- |
-| `color_slider.label`      | `"Color channel"` (per-instance) | Thumb aria-label     |
-| `color_slider.value_text` | Channel-specific formatting      | Thumb aria-valuetext |
+| Key                       | Default (en-US)                                                    | Purpose              |
+| ------------------------- | ------------------------------------------------------------------ | -------------------- |
+| `color_slider.label`      | `"Color channel"` (per-instance)                                   | Thumb aria-label     |
+| `color_slider.value_text` | `"{reading}, {color_name}"` (e.g. `"hue 180°, dark vibrant blue"`) | Thumb aria-valuetext |
 
 - **RTL**: Horizontal slider direction flips; ArrowLeft increments, ArrowRight decrements.
 - **Number formatting**: Channel values respect locale decimal separators.

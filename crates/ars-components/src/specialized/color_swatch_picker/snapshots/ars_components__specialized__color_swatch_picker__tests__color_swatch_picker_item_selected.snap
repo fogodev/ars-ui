@@ -1,0 +1,59 @@
+---
+source: crates/ars-components/src/specialized/color_swatch_picker/mod.rs
+expression: "snapshot_attrs(&svc.connect(&|_| {}).item_attrs(1))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "color-swatch-picker",
+            ),
+        ),
+        (
+            Data(
+                "ars-selected",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Aria(
+                Selected,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "csp-item-1",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "option",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

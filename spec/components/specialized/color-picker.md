@@ -30,11 +30,13 @@ and includes an optional EyeDropper browser API integration.
 The internal color representation is `ColorValue` (HSL + alpha). All other spaces are
 computed on demand via conversion methods on `ColorValue`.
 
-```rust
-// crates/ars-core/src/components/color_picker.rs
-
-use crate::{Bindable, ComponentId};
-use crate::machine::{Machine, TransitionPlan, ComponentIds, AttrMap};
+```rust,no_check
+// crates/ars-core/src/color.rs
+//
+// The shared color value types live in `ars-core` (flat `color` module,
+// re-exported at the crate root) so every color component — ColorSwatch,
+// ColorField, ColorArea, ColorSlider, ColorWheel, ColorSwatchPicker, and
+// ColorPicker — consumes them as `ars_core::color::{ColorValue, ColorChannel, …}`.
 
 /// A color value stored in HSL with alpha. All other formats are computed.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,16 +53,22 @@ pub struct ColorValue {
 
 impl ColorValue {
     /// Create a new `ColorValue` from the given hue, saturation, lightness, and alpha.
+    ///
+    /// Hue is wrapped into `[0, 360)`; saturation, lightness, and alpha are
+    /// clamped to `[0.0, 1.0]`. Non-finite inputs (`NaN`/`inf`) are coerced to
+    /// `0.0` so the result is always a valid color.
     pub fn new(hue: f64, saturation: f64, lightness: f64, alpha: f64) -> Self {
-        debug_assert!(hue.is_finite(), "hue must be finite");
-        debug_assert!(saturation.is_finite(), "saturation must be finite");
-        debug_assert!(lightness.is_finite(), "lightness must be finite");
-        debug_assert!(alpha.is_finite(), "alpha must be finite");
+        // Coerce non-finite inputs to `0.0` so the type's invariants (finite
+        // components, hue in `[0, 360)`, others in `[0, 1]`) hold in release
+        // builds too — otherwise `NaN`/`inf` would leak into generated CSS and
+        // ARIA. Parsers already reject non-finite user input; this guards the
+        // public constructor against programmatic non-finite values.
+        let finite = |value: f64| if value.is_finite() { value } else { 0.0 };
         Self {
-            hue: hue.rem_euclid(360.0),
-            saturation: saturation.clamp(0.0, 1.0),
-            lightness: lightness.clamp(0.0, 1.0),
-            alpha: alpha.clamp(0.0, 1.0),
+            hue: finite(hue).rem_euclid(360.0),
+            saturation: finite(saturation).clamp(0.0, 1.0),
+            lightness: finite(lightness).clamp(0.0, 1.0),
+            alpha: finite(alpha).clamp(0.0, 1.0),
         }
     }
 
@@ -163,7 +171,17 @@ impl ColorValue {
 
     /// Parse a hex string ("#rrggbb" or "#rrggbbaa").
     pub fn from_hex(hex: &str) -> Option<Self> {
-        let hex = hex.trim_start_matches('#');
+        // Strip at most one leading `#`. `trim_start_matches` would swallow
+        // extra markers, accepting malformed input like `##3366ff`.
+        let hex = hex.strip_prefix('#').unwrap_or(hex);
+
+        // Hex digits are ASCII. Reject non-ASCII early so the byte-indexed
+        // slices below cannot land on a non-char boundary and panic (a
+        // multi-byte string such as `ああ` is exactly 6 bytes).
+        if !hex.is_ascii() {
+            return None;
+        }
+
         match hex.len() {
             6 => {
                 let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
@@ -264,40 +282,37 @@ pub struct ColorNameParts {
 }
 
 impl ColorValue {
-    /// Returns localized color description parts for accessibility.
-    /// Parts include lightness ("light"/"dark"), saturation ("vivid"/"muted"),
-    /// and hue name ("blue", "red", etc.) in the given locale.
+    /// Returns English color-description parts for accessibility.
     ///
-    /// Algorithm:
-    /// 1. Convert HSL -> sRGB -> OKLCH (perceptually uniform lightness).
-    /// 2. Map OKLCH lightness to 5 levels: very dark (0-0.2), dark (0.2-0.4),
-    ///    medium/omitted (0.4-0.6), light (0.6-0.8), very light (0.8-1.0).
-    /// 3. Map OKLCH chroma: grayish (0-0.04), moderate/omitted (0.04-0.12),
-    ///    vibrant (>0.12). If lightness > 0.7 and chroma moderate -> "pale".
-    /// 4. Map OKLCH hue angle to 13 named hues: red, red-orange, orange,
-    ///    yellow-orange, yellow, yellow-green, green, cyan-green, cyan,
-    ///    cyan-blue, blue, purple, magenta.
-    /// 5. Special-case: near-zero chroma -> "gray"/"white"/"black" by lightness.
+    /// The parts are English keys (e.g. lightness `"dark"`, chroma `"vibrant"`,
+    /// hue `"blue"`); a component's `format_name` message maps and reorders them
+    /// per locale (English: `"{lightness} {chroma} {hue}"`, Italian:
+    /// `"{hue} {chroma} {lightness}"`). Keeping the keys English here decouples
+    /// `ColorValue` from any single component's `Messages`.
     ///
-    /// Returns parts so i18n can reorder (e.g., English: "{lightness} {chroma}
-    /// {hue}", Italian: "{hue} {chroma} {lightness}").
-    /// Delegate to locale-aware color naming from Messages/CLDR.
-    pub fn color_name_parts(&self, locale: &Locale, messages: &Messages) -> ColorNameParts {
-        // OKLCH classification to determine lightness_level, saturation_level, hue_bucket
-        // then delegate to messages for localized strings
-        let (lightness_level, saturation_level, hue_bucket) = self.oklch_classify();
+    /// Classification runs in OKLCH (perceptually uniform):
+    /// 1. Convert HSL -> sRGB -> OKLab -> OKLCH (Björn Ottosson's transform).
+    /// 2. Lightness -> 5 levels: very dark (0-0.2), dark (0.2-0.4),
+    ///    medium/`""` (0.4-0.6), light (0.6-0.8), very light (>=0.8).
+    /// 3. Chroma: grayish (<0.04), moderate/`""` (0.04-0.12), vibrant (>0.12).
+    ///    Moderate chroma with light lightness reads as "pale".
+    /// 4. Hue angle -> 13 named hues: red, red-orange, orange, yellow-orange,
+    ///    yellow, yellow-green, green, cyan-green, cyan, cyan-blue, blue,
+    ///    purple, magenta.
+    /// 5. Near-zero chroma collapses to "gray"/"white"/"black" by lightness.
+    pub fn color_name_parts(&self) -> ColorNameParts {
+        let (lightness, chroma, hue) = self.oklch_classify();
         ColorNameParts {
-            lightness: (messages.lightness_label)(lightness_level),
-            chroma: (messages.saturation_label)(saturation_level),
-            hue: (messages.hue_name)(hue_bucket),
+            lightness: lightness.to_string(),
+            chroma: chroma.to_string(),
+            hue: hue.to_string(),
         }
     }
 
-    /// Convenience: format as English-order string "dark vibrant blue".
-    /// Joins non-empty parts with spaces.
+    /// Convenience: format as an English-order string such as "dark vibrant blue".
+    /// Joins the non-empty parts with single spaces.
     pub fn color_name_en(&self) -> String {
-        // Fallback English-only path for tests and non-localized contexts
-        let parts = self.color_name_parts_en();
+        let parts = self.color_name_parts();
         [parts.lightness.as_str(), parts.chroma.as_str(), parts.hue.as_str()]
             .iter()
             .filter(|s| !s.is_empty())
@@ -486,18 +501,22 @@ fn parse_hsl_args(inner: &str, has_alpha: bool) -> Option<ColorValue> {
     Some(ColorValue::new(h, s, l, a.clamp(0.0, 1.0)))
 }
 
-/// Parse "h, s%, b%" inside hsb().
-fn parse_hsb_args(inner: &str) -> Option<ColorValue> {
+/// Parse "h, s%, b%" inside hsb() or "h, s%, b%, a" inside hsba().
+fn parse_hsb_args(inner: &str, has_alpha: bool) -> Option<ColorValue> {
     let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
-    if parts.len() != 3 { return None; }
+    let expected = if has_alpha { 4 } else { 3 };
+    if parts.len() != expected { return None; }
     let h: f64 = parts[0].parse().ok()?;
-    let s: f64 = parts[1].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0;
-    let b: f64 = parts[2].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0;
+    // Clamp the HSB channels to `0..=1` before the conversion so out-of-range
+    // input (e.g. `200%`) doesn't skew lightness/saturation and lose the hue.
+    let s: f64 = (parts[1].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0).clamp(0.0, 1.0);
+    let b: f64 = (parts[2].strip_suffix('%')?.trim().parse::<f64>().ok()? / 100.0).clamp(0.0, 1.0);
+    let a: f64 = if has_alpha { parts[3].parse().ok()? } else { 1.0 };
     // Convert HSB -> HSL: lightness = b * (1 - s/2)
     let l = b * (1.0 - s / 2.0);
     let sl = if l > 0.0 && l < 1.0 { (b - l) / l.min(1.0 - l) } else { 0.0 };
 
-    Some(ColorValue::new(h, sl, l, 1.0))
+    Some(ColorValue::new(h, sl, l, a.clamp(0.0, 1.0)))
 }
 
 /// Parse a user-typed string into a ColorValue.
@@ -520,8 +539,11 @@ pub fn parse_color_string(input: &str) -> Option<ColorValue> {
     if let Some(inner) = strip_fn_call(trimmed, "hsl") {
         return parse_hsl_args(inner, false);
     }
+    if let Some(inner) = strip_fn_call(trimmed, "hsba") {
+        return parse_hsb_args(inner, true);
+    }
     if let Some(inner) = strip_fn_call(trimmed, "hsb") {
-        return parse_hsb_args(inner);
+        return parse_hsb_args(inner, false);
     }
 
     None
@@ -542,7 +564,13 @@ pub fn format_color_string(color: &ColorValue, format: ColorFormat) -> String {
         ColorFormat::Hsl => color.to_css_hsl(),
         ColorFormat::Hsb => {
             let (h, s, b) = color.to_hsb();
-            format!("hsb({:.0}, {:.1}%, {:.1}%)", h, s * 100.0, b * 100.0)
+            // Emit `hsba(...)` for translucent colors so alpha round-trips
+            // through the parser instead of being silently dropped to opaque.
+            if color.alpha < 1.0 {
+                format!("hsba({:.0}, {:.1}%, {:.1}%, {:.2})", h, s * 100.0, b * 100.0, color.alpha)
+            } else {
+                format!("hsb({:.0}, {:.1}%, {:.1}%)", h, s * 100.0, b * 100.0)
+            }
         }
     }
 }

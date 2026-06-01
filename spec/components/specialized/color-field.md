@@ -61,6 +61,9 @@ pub enum Event {
     SetValue(ColorValue),
     /// Programmatic invalid state.
     SetInvalid(bool),
+    /// Adapter signal that a description part is (or is no longer) rendered,
+    /// toggling whether the input's `aria-describedby` references it.
+    SetHasDescription(bool),
     /// Channel mode: increment by step (ArrowUp).
     Increment,
     /// Channel mode: decrement by step (ArrowDown).
@@ -77,6 +80,10 @@ pub enum Event {
     CompositionStart,
     /// IME composition ended.
     CompositionEnd,
+    /// Controlled-value sync from the parent after `Service::set_props`.
+    SyncValue(Option<ColorValue>),
+    /// Refresh cached output props after `Service::set_props`.
+    SetProps,
 }
 ```
 
@@ -107,8 +114,14 @@ pub struct Context {
     pub disabled: bool,
     /// Whether the component is read-only.
     pub readonly: bool,
-    /// Whether the current value is invalid.
+    /// Whether the value is invalid per *external* validation (the `invalid`
+    /// prop / `SetInvalid`). Kept separate from `parse_error` so a prop refresh
+    /// cannot clear a parser-derived error.
     pub invalid: bool,
+    /// Whether the last commit failed to parse (or an empty required field was
+    /// committed). Parser-derived, owned by the machine — `SetProps` must not
+    /// clear it. The effective invalid state is `invalid || parse_error`.
+    pub parse_error: bool,
     /// Whether a value is required.
     pub required: bool,
     /// Whether IME composition is in progress.
@@ -184,80 +197,107 @@ impl Default for Props {
 ### 1.5 Full Machine Implementation
 
 ```rust
+/// Whether a channel is shown and entered as a percentage (`0-100`) rather than
+/// its underlying `0..=1` fractional range.
+///
+/// Hue (degrees) and the 8-bit RGB channels are shown and entered as their raw
+/// numeric value; saturation, lightness, brightness, and alpha are shown and
+/// entered as percentages. Display formatting and commit parsing must agree on
+/// this scaling, otherwise typed percentages clamp directly into the fractional
+/// range (e.g. `50` -> `50.clamp(0, 1) == 1.0`).
+const fn channel_is_percentage(channel: ColorChannel) -> bool {
+    !matches!(
+        channel,
+        ColorChannel::Hue | ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue
+    )
+}
+
 /// Format a color value for display in the input.
 fn format_value(
     color: &ColorValue,
     channel: Option<ColorChannel>,
     color_format: ColorFormat,
 ) -> String {
-    match channel {
-        Some(ch) => {
-            let val = channel_value(color, ch);
-            match ch {
-                ColorChannel::Hue => format!("{:.0}", val),
-                ColorChannel::Red | ColorChannel::Green | ColorChannel::Blue => {
-                    format!("{:.0}", val)
-                }
-                _ => format!("{:.0}", val * 100.0),
-            }
+    if let Some(ch) = channel {
+        let val = channel_value(color, ch);
+
+        if channel_is_percentage(ch) {
+            format!("{:.0}", val * 100.0)
+        } else {
+            format!("{val:.0}")
         }
-        None => format_color_string(color, color_format),
+    } else {
+        format_color_string(color, color_format)
     }
 }
 
-/// Parse `input_text` and update `value`; reset `input_text` to formatted value.
-/// Sets `invalid` if parsing fails.
+/// Parse `input_text` and update `value`; reset `input_text` to the formatted
+/// value. Sets the parser-derived `parse_error` flag when parsing fails.
 fn commit_input(ctx: &mut Context) {
-    match ctx.channel {
-        Some(ch) => {
-            // Channel mode: parse as f64.
-            match ctx.input_text.trim().parse::<f64>() {
-                Ok(raw) => {
-                    let (min, max) = channel_range(ch);
-                    let clamped = raw.clamp(min, max);
-                    if let Some(color) = ctx.value.get() {
-                        let new_color = with_channel(color, ch, clamped);
-                        ctx.value.set(Some(new_color.clone()));
-                        ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
-                        ctx.invalid = false;
-                    }
-                }
-                Err(_) => {
-                    ctx.invalid = true;
-                }
+    if let Some(ch) = ctx.channel {
+        // Channel mode: parse as f64. Reject non-finite input (`NaN`/`inf`),
+        // which `f64::parse` accepts but must not flow into a `ColorValue`.
+        if let Some(raw) = ctx
+            .input_text
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())
+        {
+            let (min, max) = channel_range(ch);
+
+            // Percentage channels are entered as 0-100 but stored as 0..=1.
+            let scaled = if channel_is_percentage(ch) {
+                raw / 100.0
+            } else {
+                raw
+            };
+
+            let clamped = scaled.clamp(min, max);
+
+            if let Some(color) = ctx.value.pending() {
+                let new_color = with_channel(color, ch, clamped);
+
+                ctx.value.set(Some(new_color));
+                ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
+                ctx.parse_error = false;
             }
+        } else {
+            ctx.parse_error = true;
         }
-        None => {
-            // Whole-color mode: parse via parse_color_string.
-            if ctx.input_text.trim().is_empty() {
-                ctx.value.set(None);
-                ctx.invalid = ctx.required;
-                return;
-            }
-            match parse_color_string(&ctx.input_text) {
-                Some(color) => {
-                    ctx.value.set(Some(color.clone()));
-                    ctx.input_text = format_color_string(&color, ctx.color_format);
-                    ctx.invalid = false;
-                }
-                None => {
-                    ctx.invalid = true;
-                }
-            }
+    } else {
+        // Whole-color mode: parse via parse_color_string.
+        if ctx.input_text.trim().is_empty() {
+            ctx.value.set(None);
+            ctx.parse_error = ctx.required;
+
+            return;
+        }
+
+        if let Some(color) = parse_color_string(&ctx.input_text) {
+            ctx.value.set(Some(color));
+            ctx.input_text = format_color_string(&color, ctx.color_format);
+            ctx.parse_error = false;
+        } else {
+            ctx.parse_error = true;
         }
     }
 }
 
 /// Adjust the channel value by `delta` (positive or negative), clamped to range.
+///
+/// Reads the *pending* color so repeated controlled steps accumulate (each press
+/// builds on the last staged value, not the stale controlled prop).
 fn adjust_channel(ctx: &mut Context, delta: f64) {
-    if let (Some(ch), Some(color)) = (ctx.channel, ctx.value.get()) {
+    if let (Some(ch), Some(color)) = (ctx.channel, *ctx.value.pending()) {
+        let color = &color;
         let current = channel_value(color, ch);
         let (min, max) = channel_range(ch);
         let new_val = (current + delta).clamp(min, max);
         let new_color = with_channel(color, ch, new_val);
         ctx.value.set(Some(new_color.clone()));
         ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
-        ctx.invalid = false;
+        ctx.parse_error = false;
     }
 }
 
@@ -270,12 +310,22 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    // ColorField emits no named effects (value changes flow through `Bindable`).
+    type Effect = ars_core::NoEffect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
         let value = match &props.value {
             Some(v) => Bindable::controlled(Some(v.clone())),
-            None => Bindable::uncontrolled(props.default_value.clone()),
+            None => {
+                // A channel field is an ARIA spinbutton: it needs a base color to
+                // expose a valid value and to accept keyboard steps / commits.
+                // Seed an initial color in channel mode when none was supplied.
+                let seed = props
+                    .default_value
+                    .or_else(|| props.channel.map(|_| ColorValue::default()));
+                Bindable::uncontrolled(seed)
+            }
         };
 
         let step = props.step.unwrap_or_else(|| {
@@ -305,6 +355,7 @@ impl ars_core::Machine for Machine {
             disabled: props.disabled,
             readonly: props.readonly,
             invalid: props.invalid,
+            parse_error: false,
             required: props.required,
             is_composing: false,
             has_description: false,
@@ -316,46 +367,130 @@ impl ars_core::Machine for Machine {
     }
 
     fn transition(
-        state: &Self::State,
+        _state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // During IME composition, suppress all keyboard shortcuts.
+        // During IME composition, suppress all keyboard shortcuts. Parent-driven
+        // prop syncs (`SyncValue`/`SetProps`) fall through to the main match so a
+        // controlled field stays in step with its props even mid-composition.
         if ctx.is_composing {
-            return match event {
-                Event::CompositionEnd => Some(TransitionPlan::context_only(|ctx| {
-                    ctx.is_composing = false;
-                })),
-                Event::Change(text) => {
-                    let t = text.clone();
-                    Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.input_text = t;
-                    }))
+            match event {
+                Event::CompositionEnd => {
+                    return Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                        ctx.is_composing = false;
+                    }));
                 }
-                _ => None,
-            };
+
+                Event::Change(text) => {
+                    // An inert (read-only/disabled) field must not accept edits,
+                    // even mid-composition where this branch runs before the
+                    // guards below.
+                    if ctx.readonly || ctx.disabled {
+                        return None;
+                    }
+
+                    let next_text = text.clone();
+                    return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.input_text = next_text;
+                    }));
+                }
+
+                Event::SyncValue(_) | Event::SetProps | Event::SetHasDescription(_) => {}
+
+                _ => return None,
+            }
         }
 
+        // A disabled field tracks focus but ignores edits. Prop syncs still apply
+        // (so the field can be re-enabled), falling through to the main match.
         if ctx.disabled {
-            return match event {
+            match event {
                 Event::Focus { is_keyboard } => {
                     let kb = *is_keyboard;
-
-                    Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                        ctx.focused = true;
-                        ctx.focus_visible = kb;
-                    }))
+                    return Some(TransitionPlan::to(State::Focused).apply(
+                        move |ctx: &mut Context| {
+                            ctx.focused = true;
+                            ctx.focus_visible = kb;
+                        },
+                    ));
                 }
-                Event::Blur => Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    ctx.focused = false;
-                    ctx.focus_visible = false;
-                })),
-                _ => None,
-            };
+
+                Event::Blur => {
+                    return Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
+                        ctx.focused = false;
+                        ctx.focus_visible = false;
+                    }));
+                }
+
+                Event::SyncValue(_) | Event::SetProps | Event::SetHasDescription(_) => {}
+
+                _ => return None,
+            }
         }
 
         match event {
+            Event::SyncValue(value) => {
+                let value = *value;
+                Some(TransitionPlan::context_only(
+                    move |ctx: &mut Context| match value {
+                        Some(color) => {
+                            ctx.value.set(Some(color));
+                            ctx.value.sync_controlled(Some(Some(color)));
+
+                            if !ctx.focused {
+                                ctx.input_text =
+                                    format_value(&color, ctx.channel, ctx.color_format);
+                            }
+
+                            // A synced value clears only the parser-derived
+                            // error; the external `invalid` prop is owned by the
+                            // parent (via `SetProps`/`SetInvalid`) and must not be
+                            // cleared here, or a value update that keeps
+                            // `invalid: true` would wrongly drop the invalid state.
+                            ctx.parse_error = false;
+                        }
+                        None => ctx.value.sync_controlled(None),
+                    },
+                ))
+            }
+
+            Event::SetProps => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let step = props
+                        .step
+                        .unwrap_or_else(|| props.channel.map_or(1.0, channel_step_default));
+
+                    ctx.channel = props.channel;
+                    ctx.color_format = props.color_format;
+                    ctx.step = step;
+                    ctx.large_step = props.large_step.unwrap_or(step * 10.0);
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.invalid = props.invalid;
+                    ctx.required = props.required;
+                    ctx.name = props.name.clone();
+
+                    // Switching an empty field into channel mode at runtime needs
+                    // the same base-color seed as `init`, so the spinbutton stays
+                    // usable and accessible (mirrors the seed in `init`).
+                    if ctx.channel.is_some() && ctx.value.pending().is_none() {
+                        ctx.value.set(Some(ColorValue::default()));
+                    }
+
+                    // Re-render the input in the new channel/format unless the
+                    // user is mid-edit. `SyncValue` (which runs before this on a
+                    // combined update) formatted with the old representation.
+                    if !ctx.focused {
+                        ctx.input_text = (*ctx.value.pending())
+                            .map(|color| format_value(&color, ctx.channel, ctx.color_format))
+                            .unwrap_or_default();
+                    }
+                }))
+            }
+
             Event::Focus { is_keyboard } => {
                 let kb = *is_keyboard;
 
@@ -367,13 +502,22 @@ impl ars_core::Machine for Machine {
 
             Event::Blur => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    commit_input(ctx);
+                    // A read-only field must never mutate its value on blur.
+                    if !ctx.readonly {
+                        commit_input(ctx);
+                    }
                     ctx.focused = false;
                     ctx.focus_visible = false;
                 }))
             }
 
             Event::Change(text) => {
+                // Read-only fields ignore edits so input text cannot diverge from
+                // the committed value (and cannot be committed later on blur).
+                if ctx.readonly {
+                    return None;
+                }
+
                 let t = text.clone();
 
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -397,7 +541,9 @@ impl ars_core::Machine for Machine {
                         ctx.input_text = format_value(&c, ctx.channel, ctx.color_format);
                     }
                     ctx.value.set(Some(c));
-                    ctx.invalid = false;
+                    // Clear only the parser-derived error; external `invalid` is
+                    // controlled by the parent (`SetInvalid`/the `invalid` prop).
+                    ctx.parse_error = false;
                 }))
             }
 
@@ -406,6 +552,14 @@ impl ars_core::Machine for Machine {
 
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.invalid = inv;
+                }))
+            }
+
+            Event::SetHasDescription(has_description) => {
+                let has_description = *has_description;
+
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_description = has_description;
                 }))
             }
 
@@ -453,12 +607,14 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly || ctx.channel.is_none() { return None; }
 
                 Some(TransitionPlan::context_only(|ctx| {
-                    if let (Some(ch), Some(color)) = (ctx.channel, ctx.value.get()) {
+                    // Read the pending color so the snap builds on the staged value.
+                    if let (Some(ch), Some(color)) = (ctx.channel, *ctx.value.pending()) {
+                        let color = &color;
                         let (_, max) = channel_range(ch);
                         let new_color = with_channel(color, ch, max);
                         ctx.value.set(Some(new_color.clone()));
                         ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
-                        ctx.invalid = false;
+                        ctx.parse_error = false;
                     }
                 }))
             }
@@ -467,12 +623,14 @@ impl ars_core::Machine for Machine {
                 if ctx.readonly || ctx.channel.is_none() { return None; }
 
                 Some(TransitionPlan::context_only(|ctx| {
-                    if let (Some(ch), Some(color)) = (ctx.channel, ctx.value.get()) {
+                    // Read the pending color so the snap builds on the staged value.
+                    if let (Some(ch), Some(color)) = (ctx.channel, *ctx.value.pending()) {
+                        let color = &color;
                         let (min, _) = channel_range(ch);
                         let new_color = with_channel(color, ch, min);
                         ctx.value.set(Some(new_color.clone()));
                         ctx.input_text = format_value(&new_color, ctx.channel, ctx.color_format);
-                        ctx.invalid = false;
+                        ctx.parse_error = false;
                     }
                 }))
             }
@@ -491,6 +649,25 @@ impl ars_core::Machine for Machine {
         }
     }
 
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "color_field::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SyncValue(new.value));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
+    }
+
     fn connect<'a>(
         state: &'a Self::State,
         ctx: &'a Self::Context,
@@ -498,6 +675,28 @@ impl ars_core::Machine for Machine {
         send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
+    }
+}
+
+/// Whether any cached output prop changed and the context needs refreshing.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.channel != new.channel
+        || old.color_format != new.color_format
+        || old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.invalid != new.invalid
+        || old.required != new.required
+        || old.name != new.name
+        || option_f64_changed(old.step, new.step)
+        || option_f64_changed(old.large_step, new.large_step)
+}
+
+/// Compares two optional `f64` step values without a direct float `==`.
+fn option_f64_changed(old: Option<f64>, new: Option<f64>) -> bool {
+    match (old, new) {
+        (Some(old), Some(new)) => (old - new).abs() > f64::EPSILON,
+        (None, None) => false,
+        _ => true,
     }
 }
 ```
@@ -534,9 +733,19 @@ impl<'a> Api<'a> {
         matches!(self.state, State::Focused)
     }
 
+    /// The effective invalid state: external validation (`invalid` prop /
+    /// `SetInvalid`) OR a parser-derived error from the last commit.
+    pub const fn is_invalid(&self) -> bool {
+        self.ctx.invalid || self.ctx.parse_error
+    }
+
     /// The current value of the component.
-    pub fn value(&self) -> Option<&ColorValue> {
-        self.ctx.value.get().as_ref()
+    ///
+    /// Reports the *pending* value so a committed edit is reflected consistently
+    /// (matching the displayed text, channel ARIA, and the hidden input) even in
+    /// controlled mode, where the controlled prop only updates via `SyncValue`.
+    pub const fn value(&self) -> Option<&ColorValue> {
+        self.ctx.value.pending().as_ref()
     }
 
     /// The current input text of the component.
@@ -556,7 +765,7 @@ impl<'a> Api<'a> {
         if self.ctx.readonly {
             attrs.set_bool(HtmlAttr::Data("ars-readonly"), true);
         }
-        if self.ctx.invalid {
+        if self.is_invalid() {
             attrs.set_bool(HtmlAttr::Data("ars-invalid"), true);
         }
         if self.ctx.focused {
@@ -597,12 +806,15 @@ impl<'a> Api<'a> {
                 // Channel mode: numeric spinbutton
                 attrs.set(HtmlAttr::Role, "spinbutton");
                 attrs.set(HtmlAttr::InputMode, "numeric");
-                if let Some(color) = self.ctx.value.get() {
+                if let Some(color) = self.ctx.value.pending() {
                     let val = channel_value(color, ch);
                     let (min, max) = channel_range(ch);
-                    attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{:.2}", val));
-                    attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{:.2}", min));
-                    attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{:.2}", max));
+                    // Percentage channels display/commit as 0-100, so the spinbutton
+                    // ARIA range must match (the stored channel range is 0..=1).
+                    let scale = if channel_is_percentage(ch) { 100.0 } else { 1.0 };
+                    attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{:.2}", val * scale));
+                    attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{:.2}", min * scale));
+                    attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{:.2}", max * scale));
                     attrs.set(HtmlAttr::Aria(AriaAttr::ValueText),
                         (self.ctx.messages.channel_value_text)(ch, val, &self.ctx.locale));
                 }
@@ -619,13 +831,14 @@ impl<'a> Api<'a> {
 
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
 
-        if self.ctx.invalid {
+        if self.is_invalid() {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
         }
         if self.ctx.required {
             attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
         if self.ctx.readonly {
+            attrs.set_bool(HtmlAttr::ReadOnly, true);
             attrs.set_bool(HtmlAttr::Aria(AriaAttr::ReadOnly), true);
         }
         if self.ctx.disabled {
@@ -638,7 +851,7 @@ impl<'a> Api<'a> {
         if self.ctx.has_description {
             describedby.push(self.ctx.ids.part("description"));
         }
-        if self.ctx.invalid {
+        if self.is_invalid() {
             describedby.push(self.ctx.ids.part("error-message"));
         }
         if !describedby.is_empty() {
@@ -685,8 +898,17 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.ctx.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        if let Some(color) = self.ctx.value.get() {
+        // Only submit a value when the field is valid. While invalid, the stored
+        // color is the last *valid* value, which no longer matches the visible
+        // input — submitting it would send a stale color.
+        if let Some(color) = (*self.ctx.value.pending()).filter(|_| !self.is_invalid()) {
             attrs.set(HtmlAttr::Value, color.to_hex(true));
+        }
+        // A disabled control is omitted from form submission — and so is an
+        // invalid one, so the field round-trips as absent rather than as an
+        // empty `name=` carrying the stale last-valid color.
+        if self.ctx.disabled || self.is_invalid() {
+            attrs.set_bool(HtmlAttr::Disabled, true);
         }
         attrs
     }
@@ -709,8 +931,13 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown on the input element.
+    ///
+    /// Shortcuts are suppressed while an IME composition is in progress — both
+    /// when the machine already knows (`ctx.is_composing`) and when the event
+    /// itself reports composing (`data.is_composing`), in case the keydown
+    /// arrives before the `CompositionStart` event reaches the machine.
     pub fn on_input_keydown(&self, data: &KeyboardEventData) {
-        if self.ctx.is_composing { return; }
+        if self.ctx.is_composing || data.is_composing { return; }
         match data.key {
             KeyboardKey::Enter => (self.send)(Event::Commit),
             KeyboardKey::ArrowUp if self.ctx.channel.is_some() => (self.send)(Event::Increment),
@@ -762,35 +989,35 @@ ColorField
 └── HiddenInput      (<input>)      (required — type="hidden", submits hex)
 ```
 
-| Part         | Element   | Key Attributes                                                                        |
-| ------------ | --------- | ------------------------------------------------------------------------------------- |
-| Root         | `<div>`   | `data-ars-disabled`, `data-ars-readonly`, `data-ars-invalid`, `data-ars-focused`      |
-| Label        | `<label>` | `for` pointing to Input                                                               |
-| Input        | `<input>` | `type="text"`, `aria-labelledby`, `aria-invalid`, `aria-required`, `aria-describedby` |
-| Description  | `<div>`   | Referenced by Input `aria-describedby`                                                |
-| ErrorMessage | `<div>`   | `role="alert"`, referenced by Input `aria-describedby`                                |
-| HiddenInput  | `<input>` | `type="hidden"`, `name`, `value` (hex)                                                |
+| Part         | Element   | Key Attributes                                                                                                                                                                                                                                              |
+| ------------ | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root         | `<div>`   | `data-ars-disabled`, `data-ars-readonly`, `data-ars-invalid` (effective invalid: external `invalid` prop **or** parser-derived `parse_error`; a prop refresh preserves the parser error), `data-ars-focused`                                                |
+| Label        | `<label>` | `for` pointing to Input                                                                                                                                                                                                                                     |
+| Input        | `<input>` | `type="text"`, `aria-labelledby`, `aria-invalid`, `aria-required`, `aria-describedby`, native `readonly` (when read-only)                                                                                                                                   |
+| Description  | `<div>`   | Referenced by Input `aria-describedby`                                                                                                                                                                                                                      |
+| ErrorMessage | `<div>`   | `role="alert"`, referenced by Input `aria-describedby`                                                                                                                                                                                                      |
+| HiddenInput  | `<input>` | `type="hidden"`, `name`, `value` (hex; omitted while invalid so a stale last-valid color is not submitted), `disabled` (when disabled **or invalid** — omitted from form submission so an invalid field round-trips as absent rather than an empty `name=`) |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Attribute / Behaviour             | Element                  | Value                                          |
-| --------------------------------- | ------------------------ | ---------------------------------------------- |
-| `role="spinbutton"`               | Input (channel mode)     | ARIA spinbutton pattern                        |
-| `inputmode="numeric"`             | Input (channel mode)     | Numeric keyboard on mobile                     |
-| `inputmode="text"`                | Input (whole-color mode) | Text keyboard on mobile                        |
-| `aria-valuenow`                   | Input (channel mode)     | Current channel value                          |
-| `aria-valuemin` / `aria-valuemax` | Input (channel mode)     | From `channel_range(channel)`                  |
-| `aria-valuetext`                  | Input (channel mode)     | Localized formatted channel value              |
-| `aria-label`                      | Input (channel mode)     | Channel name (from messages)                   |
-| `aria-labelledby`                 | Input                    | Label element ID                               |
-| `aria-invalid`                    | Input                    | `"true"` when parse failed or external invalid |
-| `aria-required`                   | Input                    | `"true"` when required                         |
-| `aria-readonly`                   | Input                    | When read-only                                 |
-| `aria-disabled` / `disabled`      | Input                    | When disabled                                  |
-| `aria-describedby`                | Input                    | Description + ErrorMessage IDs                 |
-| `role="alert"`                    | ErrorMessage             | Live error announcement                        |
+| Attribute / Behaviour             | Element                  | Value                                                                                                                                                                                                                                                                     |
+| --------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `role="spinbutton"`               | Input (channel mode)     | ARIA spinbutton pattern                                                                                                                                                                                                                                                   |
+| `inputmode="numeric"`             | Input (channel mode)     | Numeric keyboard on mobile                                                                                                                                                                                                                                                |
+| `inputmode="text"`                | Input (whole-color mode) | Text keyboard on mobile                                                                                                                                                                                                                                                   |
+| `aria-valuenow`                   | Input (channel mode)     | Current channel value, scaled to the visible 0-100 range for percentage channels                                                                                                                                                                                          |
+| `aria-valuemin` / `aria-valuemax` | Input (channel mode)     | From `channel_range(channel)`, scaled to 0-100 for percentage channels (saturation/lightness/brightness/alpha)                                                                                                                                                            |
+| `aria-valuetext`                  | Input (channel mode)     | Localized formatted channel value                                                                                                                                                                                                                                         |
+| `aria-label`                      | Input (channel mode)     | Channel name (from messages)                                                                                                                                                                                                                                              |
+| `aria-labelledby`                 | Input                    | Label element ID                                                                                                                                                                                                                                                          |
+| `aria-invalid`                    | Input                    | `"true"` for the effective invalid state — the external `invalid` prop / `SetInvalid` **or** the parser-derived `parse_error` (`invalid \|\| parse_error`). A prop refresh (`SetProps`) updates only the external part and preserves a parser error from the last commit. |
+| `aria-required`                   | Input                    | `"true"` when required                                                                                                                                                                                                                                                    |
+| `aria-readonly` / `readonly`      | Input                    | When read-only (both the native attribute and `aria-readonly` are set)                                                                                                                                                                                                    |
+| `aria-disabled` / `disabled`      | Input                    | When disabled                                                                                                                                                                                                                                                             |
+| `aria-describedby`                | Input                    | Description + ErrorMessage IDs (kept in sync via `SetHasDescription`, which is honored even while the field is disabled or mid-IME-composition)                                                                                                                           |
+| `role="alert"`                    | ErrorMessage             | Live error announcement                                                                                                                                                                                                                                                   |
 
 ### 3.2 Keyboard Interaction
 
