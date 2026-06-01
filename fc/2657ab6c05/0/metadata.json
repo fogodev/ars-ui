@@ -1,0 +1,80 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "fc2657ab6c05",
+  "session_id": "019e80c5-8e5f-7291-ba97-21da7035e74c",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T04:25:17.534829Z",
+  "branch": "codex/issue-287-range-calendar-core",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/range_calendar/tests.rs",
+    "crates/ars-components/src/date_time/range_calendar/mod.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "e8bb3635d736",
+  "checkpoint_transcript_start": 2197,
+  "transcript_lines_at_start": 2197,
+  "token_usage": {
+    "input_tokens": 43798,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 10008448,
+    "output_tokens": 4819,
+    "api_call_count": 45
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Address Codex review feedback on PR #704 in the ars-ui repo by fixing three review threads and pushing the resulting commit, then monitor CI and respond to any follow-up findings.",
+    "outcome": "All three original review threads were resolved with commit f599d408, CI passed, and a follow-up Codex finding about static unavailable dates not being checked during range validation was fixed with an additional regression test and committed.",
+    "learnings": {
+      "repo": [
+        "RangeCalendar has a `Context::unavailable_dates` field that drives `is_date_unavailable`, `aria-disabled`, and `data-ars-unavailable` attributes; static list must be wired through this context to affect all three.",
+        "Offset-aware triggers with outside-month duplicate cells must opt out of the roving tab stop to avoid sharing focus management with the canonical in-month cell.",
+        "Leptos and Dioxus RangeCalendar adapter prop specs must explicitly mirror `allow_single_date_range`, `min_range_days`, and `max_range_days` from core props.",
+        "Range validation had an early-return shortcut that skipped scanning static unavailable dates when a dynamic predicate existed; this was a latent bug requiring both sources to be checked independently."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/mod.rs",
+          "line": 1140,
+          "end_line": 1180,
+          "finding": "Range validation logic contained an early-return that bypassed static unavailable date checks when a dynamic predicate was present; fixed to only skip when both sources are absent."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/range_calendar/tests.rs",
+          "line": 260,
+          "end_line": 330,
+          "finding": "Regression test `static_unavailable_dates_inside_range_block_validation` added to cover the case where static unavailable dates within a selected range should block validation even when no dynamic predicate exists."
+        }
+      ],
+      "workflow": [
+        "Resolving GitHub PR review threads via GraphQL mutations allows combining reply and resolve in a single API call.",
+        "Triggering Codex re-review is done by posting `@codex review` as an issue comment, and review-in-progress state is indicated by an eyes reaction on the trigger comment.",
+        "CI pipeline has distinct fast lanes (format, snapshot labels, Clippy) and slow lanes (unit/feature/coverage/release/Dioxus feature flags); fast lanes complete in under 2 minutes, slow lanes take 5-10+ minutes.",
+        "Writing a failing regression test before applying the fix is the correct approach to validate that the test actually catches the bug."
+      ]
+    },
+    "friction": [
+      "Long CI wait times required multiple sleep-and-poll cycles totaling ~10+ minutes before all checks completed.",
+      "Codex review introduced a follow-up finding mid-session after CI had already started, requiring an additional fix-test-commit cycle."
+    ],
+    "open_items": [
+      "Codex review outcome on the final commit (fixing static unavailable range validation) was not yet confirmed in the transcript; review may still be in progress.",
+      "Full CI matrix result for the final commit was not yet available at transcript end."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T04:24:58.714279Z",
+    "agent_lines": 12,
+    "agent_removed": 1,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 12,
+    "total_lines_changed": 13,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
