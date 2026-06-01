@@ -1,0 +1,92 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3951d1c7b5e9",
+  "session_id": "5bc925b4-160c-4dbe-8b86-2e569a259845",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T22:05:49.931771Z",
+  "branch": "impl-294",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/specialized/timer/mod.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "9c66ed89a877",
+  "checkpoint_transcript_start": 824,
+  "transcript_lines_at_start": 824,
+  "token_usage": {
+    "input_tokens": 8818,
+    "cache_creation_tokens": 43225,
+    "cache_read_tokens": 9394738,
+    "output_tokens": 18769,
+    "api_call_count": 21
+  },
+  "session_metrics": {
+    "turn_count": 9
+  },
+  "summary": {
+    "intent": "Complete the CI green-light for PR #707 (timer component implementation for issue #294) after Codex approved, so the PR is ready for the user to merge.",
+    "outcome": "Identified and fixed a CRAP gate regression in `Context::eq` (0% coverage, CC=8 → CRAP=72) by adding a targeted test, restored full CI green, and pushed the fix — leaving the merge decision to the user.",
+    "learnings": {
+      "repo": [
+        "The CRAP gate runs only in the full Coverage CI job (native+wasm pipeline), not in xci-fast, so CRAP regressions cannot be caught locally with the fast runner.",
+        "The CRAP gate matches functions by (file, function, line) against a baseline; a new uncovered function with high cyclomatic complexity will regress even if total coverage is otherwise healthy.",
+        "CRAP formula is CC² × (1 − coverage)³ + CC; at 100% coverage it collapses to CC, so covering a function fully eliminates the exponential penalty.",
+        "The timer component uses a Duration-based, marker-effect model and is tested with unit, snapshot, proptest, conformance, and doctest suites."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/specialized/timer/mod.rs",
+          "line": 132,
+          "finding": "Manual `impl PartialEq for Context` with CC=8 and 0% coverage caused a CRAP score of 72 (well above threshold), triggering the only CI gate failure. Adding a test for `Context::eq` and `Context::fmt` (Debug) brought coverage to 100%, dropping CRAP to 8."
+        }
+      ],
+      "workflow": [
+        "When an AI reviewer (Codex) approves a PR and a new commit is pushed, the prior approval is superseded and a fresh review pass is required.",
+        "Polling CI in the background and reading structured gate output (threshold tables, per-function CRAP deltas) is necessary to isolate regressions that fast local runners miss.",
+        "The merge/close-issue action was explicitly kept as a human decision; the assistant confined itself to making the PR merge-ready."
+      ]
+    },
+    "friction": [
+      "The CRAP gate is absent from xci-fast, creating a blind spot: the regression was only discoverable after a full CI run, adding a round-trip delay after Codex approval.",
+      "The Coverage CI job runs a native+wasm pipeline that is slower than xci-fast and cannot be fully replicated locally, making iteration on coverage regressions expensive.",
+      "The CRAP output's 'line' column refers to the delta value (+57), not a source line, which initially made isolating the regressed function ambiguous."
+    ],
+    "open_items": [
+      "Merge PR #707 and close issue #294 — explicitly deferred to the user.",
+      "A new Codex review pass is needed because the CRAP-fix commit superseded the pass-2 approval.",
+      "Consider adding a lightweight CRAP pre-check (native-only, timer crate only) to xci-fast so coverage regressions are caught before CI."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T22:04:54.902198Z",
+    "agent_lines": 16,
+    "agent_removed": 0,
+    "human_added": 12,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 28,
+    "total_lines_changed": 28,
+    "agent_percentage": 57.14285714285714,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 6,
+      "user_lines_removed": 0,
+      "agent_lines_added": 22,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "crates/ars-components/src/specialized/timer/mod.rs": 6
+      }
+    }
+  ]
+}
