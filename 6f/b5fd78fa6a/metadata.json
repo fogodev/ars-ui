@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "6fb5fd78fa6a",
+  "strategy": "manual-commit",
+  "branch": "impl-294",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/specialized/timer/mod.rs",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_pause_trigger_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_pause_trigger_running_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_reset_trigger_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_reset_trigger_running_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_start_trigger_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_start_trigger_paused_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_start_trigger_running_snapshot.snap",
+    "spec/components/specialized/timer.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/6f/b5fd78fa6a/0/metadata.json",
+      "transcript": "/6f/b5fd78fa6a/0/full.jsonl",
+      "content_hash": "/6f/b5fd78fa6a/0/content_hash.txt",
+      "prompt": "/6f/b5fd78fa6a/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 6997,
+    "cache_creation_tokens": 465418,
+    "cache_read_tokens": 20037207,
+    "output_tokens": 43944,
+    "api_call_count": 52
+  }
+}
