@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d2bcf2dbc395",
+  "strategy": "manual-commit",
+  "branch": "codex/issue-276-toolbar-core",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/layout/toolbar/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/layout.rs",
+    "spec/components/layout/toolbar.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d2/bcf2dbc395/0/metadata.json",
+      "transcript": "/d2/bcf2dbc395/0/full.jsonl",
+      "content_hash": "/d2/bcf2dbc395/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 98861,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 4734848,
+    "output_tokens": 8966,
+    "api_call_count": 61
+  }
+}
