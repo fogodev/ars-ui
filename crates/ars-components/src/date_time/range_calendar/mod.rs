@@ -492,6 +492,9 @@ pub struct Context {
     /// Date marked as today.
     pub today: CalendarDate,
 
+    /// Static dates marked unavailable for the visible range.
+    pub unavailable_dates: Vec<CalendarDate>,
+
     /// Predicate marking dates unavailable.
     pub is_date_unavailable_fn: Option<IsDateUnavailableFn>,
 
@@ -536,6 +539,7 @@ impl Debug for Context {
             .field("readonly", &self.readonly)
             .field("show_week_numbers", &self.show_week_numbers)
             .field("today", &self.today)
+            .field("unavailable_dates", &self.unavailable_dates)
             .field(
                 "is_date_unavailable_fn",
                 &self.is_date_unavailable_fn.as_ref().map(|_| "<callback>"),
@@ -577,6 +581,10 @@ impl Context {
     /// Whether `date` is marked unavailable.
     #[must_use]
     pub fn is_date_unavailable(&self, date: &CalendarDate) -> bool {
+        if self.unavailable_dates.contains(date) {
+            return true;
+        }
+
         self.is_date_unavailable_fn
             .as_ref()
             .is_some_and(|predicate| predicate(date))
@@ -898,6 +906,7 @@ impl ars_core::Machine for Machine {
             readonly: props.readonly,
             show_week_numbers: props.show_week_numbers,
             today: props.today.clone(),
+            unavailable_dates: Vec::new(),
             is_date_unavailable_fn: props.is_date_unavailable.clone(),
             allow_single_date_range: props.allow_single_date_range,
             min_range_days: props.min_range_days,
@@ -1696,7 +1705,8 @@ impl<'a> Api<'a> {
 
         let disabled = self.is_disabled(date);
         let unavailable = self.is_unavailable(date);
-        let focused = &self.ctx.focused_date == date;
+        let focused = &self.ctx.focused_date == date
+            && !offset.is_some_and(|offset| self.ctx.is_outside_month_at_offset(date, offset));
 
         attrs.set(HtmlAttr::TabIndex, if focused { "0" } else { "-1" });
 

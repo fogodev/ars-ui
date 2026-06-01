@@ -183,6 +183,30 @@ fn same_day_range_label_preserves_start_and_end_suffixes() {
 }
 
 #[test]
+fn duplicate_outside_month_cell_does_not_share_roving_tab_stop() {
+    let svc = service_with(props().today(date(2024, 1, 31)).visible_months(2), en_us());
+
+    let api = svc.connect(&|_| {});
+
+    assert_eq!(
+        attr(
+            &api.cell_trigger_attrs_for(&date(2024, 1, 31), 0),
+            HtmlAttr::TabIndex,
+        )
+        .as_deref(),
+        Some("0"),
+    );
+    assert_eq!(
+        attr(
+            &api.cell_trigger_attrs_for(&date(2024, 1, 31), 1),
+            HtmlAttr::TabIndex,
+        )
+        .as_deref(),
+        Some("-1"),
+    );
+}
+
+#[test]
 fn keyboard_enter_and_space_follow_two_step_range_selection() {
     let mut svc = service();
 
@@ -249,6 +273,30 @@ fn min_max_and_unavailable_dates_block_selection() {
     }));
 
     assert_eq!(svc.context().anchor_date, None);
+}
+
+#[test]
+fn static_unavailable_dates_drive_context_and_trigger_attrs() {
+    let svc = service();
+    let mut ctx = svc.context().clone();
+
+    ctx.unavailable_dates = vec![date(2024, 1, 12)];
+
+    assert!(ctx.is_date_unavailable(&date(2024, 1, 12)));
+
+    let state = State::Idle;
+    let props = props();
+    let api = Api::new(&state, &ctx, &props, &|_| {});
+    let attrs = api.cell_trigger_attrs(&date(2024, 1, 12));
+
+    assert_eq!(
+        attr(&attrs, HtmlAttr::Aria(AriaAttr::Disabled)).as_deref(),
+        Some("true"),
+    );
+    assert_eq!(
+        attr(&attrs, HtmlAttr::Data("ars-unavailable")).as_deref(),
+        Some("true"),
+    );
 }
 
 #[test]

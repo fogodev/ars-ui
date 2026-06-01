@@ -27,6 +27,9 @@ pub fn RangeCalendar(
     #[prop(optional)] visible_months: usize,
     #[prop(optional)] page_behavior: calendar::PageBehavior,
     #[prop(optional)] show_week_numbers: bool,
+    #[prop(default = true)] allow_single_date_range: bool,
+    #[prop(optional)] min_range_days: Option<u32>,
+    #[prop(optional)] max_range_days: Option<u32>,
     #[prop(optional)] on_value_change: Option<Callback<Option<DateRange>>>,
 ) -> impl IntoView
 ```
@@ -36,6 +39,7 @@ The adapter keeps the full range-selection machine and surfaces only machine-com
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with the core range calendar contract, including anchor, preview, and normalized range semantics.
+- Range constraint props map directly to the core `allow_single_date_range`, `min_range_days`, and `max_range_days` fields.
 - Part parity: full parity with the same part set as `Calendar`, plus range-specific data attrs on cell triggers.
 - Known adapter deviations: none beyond Leptos event and ref mechanics.
 
