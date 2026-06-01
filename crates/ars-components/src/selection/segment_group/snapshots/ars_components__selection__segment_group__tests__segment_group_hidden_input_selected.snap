@@ -1,0 +1,63 @@
+---
+source: crates/ars-components/src/selection/segment_group/mod.rs
+expression: "snapshot_attrs(&Service::<Machine>::new(props().name(\"view\").form(\"settings-form\"),\n&Env::default(), &Messages,).connect(&|_| {}).hidden_input_attrs(),)"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "hidden-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "segment-group",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Form,
+            String(
+                "settings-form",
+            ),
+        ),
+        (
+            Name,
+            String(
+                "view",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "hidden",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "grid",
+            ),
+        ),
+    ],
+    styles: [],
+}

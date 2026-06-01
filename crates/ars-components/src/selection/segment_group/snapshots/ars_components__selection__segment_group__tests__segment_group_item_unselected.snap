@@ -1,0 +1,73 @@
+---
+source: crates/ars-components/src/selection/segment_group/mod.rs
+expression: "snapshot_attrs(&selected.connect(&|_| {}).item_attrs(&key(\"list\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "segment-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "unchecked",
+            ),
+        ),
+        (
+            Data(
+                "ars-value",
+            ),
+            String(
+                "list",
+            ),
+        ),
+        (
+            Aria(
+                Checked,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "view-mode-item-list",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "radio",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

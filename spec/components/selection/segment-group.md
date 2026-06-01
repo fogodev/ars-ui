@@ -58,6 +58,16 @@ pub enum Event {
     FocusFirst,
     /// Focus the last enabled segment.
     FocusLast,
+    /// Register a mounted segment value in logical DOM order.
+    RegisterItem(Key),
+    /// Unregister a mounted segment value.
+    UnregisterItem(Key),
+    /// Synchronize controlled value props.
+    SetValue(Option<Key>),
+    /// Synchronize context-backed props.
+    SetProps,
+    /// Restore the selected value to `Props::default_value`.
+    Reset,
 }
 ```
 
@@ -85,12 +95,10 @@ pub struct Context {
     pub loop_focus: bool,
     /// Ordered list of segment definitions for navigation.
     pub items: Vec<Segment>,
-    /// Resolved locale for message formatting.
-    pub locale: Locale,
+    /// Mounted segment values in logical DOM order.
+    pub registered_items: Vec<Key>,
     /// Component IDs for part identification.
     pub ids: ComponentIds,
-    /// Resolved messages for accessibility labels.
-    pub messages: Messages,
 }
 
 /// Definition of a single segment within the group.
@@ -135,7 +143,10 @@ pub struct Props {
     pub dir: Direction,
     /// Whether focus wraps from last to first and vice versa.
     pub loop_focus: bool,
-    // Change callbacks provided by the adapter layer.
+    /// Ordered segment definitions used for attrs and fallback navigation.
+    pub items: Vec<Segment>,
+    /// Called when user intent requests a new selected value.
+    pub on_value_change: Option<Callback<dyn Fn(Option<Key>) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -152,12 +163,14 @@ impl Default for Props {
             orientation: Orientation::Horizontal,
             dir: Direction::Ltr,
             loop_focus: true,
+            items: Vec::new(),
+            on_value_change: None,
         }
     }
 }
 ```
 
-### 1.5 Full Machine Implementation
+### 1.5 Machine Behaviour
 
 ```rust
 /// Machine for the SegmentGroup component.
@@ -168,201 +181,28 @@ impl ars_core::Machine for Machine {
     type Event = Event;
     type Context = Context;
     type Props = Props;
-    type Api<'a> = Api<'a>;
     type Messages = Messages;
-
-    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let state = State::Idle;
-        let locale = env.locale.clone();
-        let messages = messages.clone();
-        let ctx = Context {
-            value: match &props.value {
-                Some(v) => Bindable::controlled(Some(v.clone())),
-                None => Bindable::uncontrolled(props.default_value.clone()),
-            },
-            focused_item: None,
-            focus_visible: false,
-            disabled: props.disabled,
-            readonly: props.readonly,
-            orientation: props.orientation,
-            dir: props.dir,
-            loop_focus: props.loop_focus,
-            items: Vec::new(),
-            locale,
-            ids: ComponentIds::from_id(&props.id),
-            messages,
-        };
-        (state, ctx)
-    }
-
-    fn transition(
-        state: &Self::State,
-        event: &Self::Event,
-        ctx: &Self::Context,
-        props: &Self::Props,
-    ) -> Option<TransitionPlan<Self>> {
-        // Guard: disabled or readonly blocks value changes
-        if ctx.disabled || ctx.readonly {
-            match event {
-                Event::SelectValue(_) => return None,
-                _ => {}
-            }
-        }
-
-        match event {
-            Event::SelectValue(val) => {
-                // Skip if the target segment is disabled
-                if ctx.items.iter().any(|i| i.value == *val && i.disabled) {
-                    return None;
-                }
-                // Skip if already selected
-                if ctx.value.get().as_ref() == Some(val) {
-                    return None;
-                }
-                let val = val.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.value.set(Some(val));
-                }))
-            }
-
-            Event::FocusItem { item, is_keyboard } => {
-                let item_clone = item.clone();
-                let is_kb = *is_keyboard;
-                Some(TransitionPlan::to(State::Focused {
-                    item: item.clone(),
-                }).apply(move |ctx| {
-                    ctx.focused_item = Some(item_clone);
-                    ctx.focus_visible = is_kb;
-                }))
-            }
-
-            Event::Blur => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    ctx.focused_item = None;
-                    ctx.focus_visible = false;
-                }))
-            }
-
-            Event::FocusNext => {
-                let next = navigate_segments(&ctx.items, &ctx.focused_item, 1, ctx.loop_focus);
-                if let Some(val) = next {
-                    let val_clone = val.clone();
-                    Some(TransitionPlan::to(State::Focused { item: val }).apply(move |ctx| {
-                        ctx.focused_item = Some(val_clone);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(ref key) = ctx.focused_item {
-                            let platform = use_platform_effects();
-                            let item_id = ctx.ids.item("item", &key);
-                            platform.focus_element_by_id(&item_id);
-                        }
-                        no_cleanup()
-                    })))
-                } else {
-                    None
-                }
-            }
-
-            Event::FocusPrev => {
-                let prev = navigate_segments(&ctx.items, &ctx.focused_item, -1, ctx.loop_focus);
-                if let Some(val) = prev {
-                    let val_clone = val.clone();
-                    Some(TransitionPlan::to(State::Focused { item: val }).apply(move |ctx| {
-                        ctx.focused_item = Some(val_clone);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(ref key) = ctx.focused_item {
-                            let platform = use_platform_effects();
-                            let item_id = ctx.ids.item("item", &key);
-                            platform.focus_element_by_id(&item_id);
-                        }
-                        no_cleanup()
-                    })))
-                } else {
-                    None
-                }
-            }
-
-            Event::FocusFirst => {
-                let first = ctx.items.iter().find(|i| !i.disabled).map(|i| i.value.clone());
-                if let Some(val) = first {
-                    let val_clone = val.clone();
-                    Some(TransitionPlan::to(State::Focused { item: val }).apply(move |ctx| {
-                        ctx.focused_item = Some(val_clone);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(first) = ctx.items.iter().find(|i| !i.disabled) {
-                            let platform = use_platform_effects();
-                            let item_id = ctx.ids.item("item", &first.value);
-                            platform.focus_element_by_id(&item_id);
-                        }
-                        no_cleanup()
-                    })))
-                } else {
-                    None
-                }
-            }
-
-            Event::FocusLast => {
-                let last = ctx.items.iter().rev().find(|i| !i.disabled).map(|i| i.value.clone());
-                if let Some(val) = last {
-                    let val_clone = val.clone();
-                    Some(TransitionPlan::to(State::Focused { item: val }).apply(move |ctx| {
-                        ctx.focused_item = Some(val_clone);
-                    }).with_effect(PendingEffect::new("focus_element", |ctx, _props, _send| {
-                        if let Some(last) = ctx.items.iter().rev().find(|i| !i.disabled) {
-                            let platform = use_platform_effects();
-                            let item_id = ctx.ids.item("item", &last.value);
-                            platform.focus_element_by_id(&item_id);
-                        }
-                        no_cleanup()
-                    })))
-                } else {
-                    None
-                }
-            }
-
-            _ => None,
-        }
-    }
-
-    fn connect<'a>(
-        state: &'a Self::State,
-        ctx: &'a Self::Context,
-        props: &'a Self::Props,
-        send: &'a dyn Fn(Self::Event),
-    ) -> Self::Api<'a> {
-        Api { state, ctx, props, send }
-    }
+    type Effect = Effect;
+    type Api<'a> = Api<'a>;
 }
 
-/// Navigate forward/backward through non-disabled segments.
-fn navigate_segments(
-    items: &[Segment],
-    current: &Option<Key>,
-    direction: i32,
-    wrap: bool,
-) -> Option<Key> {
-    let enabled: Vec<&Segment> = items.iter().filter(|i| !i.disabled).collect();
-    if enabled.is_empty() { return None; }
-
-    let current_idx = current.as_ref()
-        .and_then(|c| enabled.iter().position(|i| &i.value == c));
-
-    let next_idx = match current_idx {
-        Some(idx) => {
-            let new = idx as i32 + direction;
-            if wrap {
-                Some(new.rem_euclid(enabled.len() as i32) as usize)
-            } else if new >= 0 && (new as usize) < enabled.len() {
-                Some(new as usize)
-            } else {
-                None
-            }
-        }
-        None => Some(if direction > 0 { 0 } else { enabled.len() - 1 }),
-    };
-
-    next_idx.map(|i| enabled[i].value.clone())
+/// Typed effect intents emitted by the SegmentGroup machine.
+pub enum Effect {
+    /// Adapter invokes `Props::on_value_change` with the requested value.
+    ValueChange,
+    /// Adapter moves DOM focus to the item keyed by `Context::focused_item`.
+    FocusItem,
 }
 ```
+
+Machine behaviour:
+
+- `SelectValue` is ignored when the group is disabled or readonly, when the target segment is disabled, or when the requested value is already selected.
+- Uncontrolled selection updates `Context::value` and emits `Effect::ValueChange`; controlled selection emits `Effect::ValueChange` without committing the requested value.
+- `FocusItem`, `FocusNext`, `FocusPrev`, `FocusFirst`, and `FocusLast` only target enabled segment values.
+- Arrow-key focus events emit `Effect::FocusItem`; the agnostic core does not focus or measure DOM elements by ID.
+- `RegisterItem` and `UnregisterItem` maintain mounted logical order for adapter focus movement. When no items are registered, navigation falls back to `Props::items` order.
+- `SetValue`, `SetProps`, and `Reset` keep controlled props, props-derived context, form reset behaviour, and item disabled state synchronized.
 
 ### 1.6 Connect / API
 
@@ -430,11 +270,11 @@ impl<'a> Api<'a> {
     }
 
     /// Attributes for a single segment item.
-    pub fn item_attrs(&self, item_value: &Key, item_disabled: bool) -> AttrMap {
+    pub fn item_attrs(&self, item_value: &Key) -> AttrMap {
         let item_id = self.ctx.ids.item("item", item_value);
         let is_selected = self.ctx.value.get().as_ref() == Some(item_value);
         let is_focused = self.ctx.focused_item.as_ref() == Some(item_value);
-        let is_disabled = self.ctx.disabled || item_disabled;
+        let is_disabled = self.ctx.disabled || self.ctx.items.iter().any(|i| i.value == *item_value && i.disabled);
 
         // Roving tabindex: selected item (or first enabled if none selected) gets 0
         let is_tabbable = if self.ctx.value.get().is_some() {
@@ -546,7 +386,7 @@ impl ConnectApi for Api<'_> {
     fn part_attrs(&self, part: Part) -> AttrMap {
         match part {
             Part::Root => self.root_attrs(),
-            Part::Item { ref value } => self.item_attrs(value, false),
+            Part::Item { ref value } => self.item_attrs(value),
             Part::ItemText { ref value } => self.item_text_attrs(value),
             Part::Indicator => self.indicator_attrs(),
             Part::HiddenInput => self.hidden_input_attrs(),
@@ -595,14 +435,14 @@ impl ConnectApi for Api<'_> {
 
 ### 3.2 Keyboard Interaction
 
-| Key                    | Action                         |
-| ---------------------- | ------------------------------ |
-| ArrowDown / ArrowRight | Focus next enabled segment     |
-| ArrowUp / ArrowLeft    | Focus previous enabled segment |
-| Home                   | Focus first enabled segment    |
-| End                    | Focus last enabled segment     |
-| Space / Enter          | Select focused segment         |
-| Tab                    | Move focus into/out of group   |
+| Key                    | Action                                                 |
+| ---------------------- | ------------------------------------------------------ |
+| ArrowRight / ArrowLeft | Focus next/previous enabled segment in horizontal mode |
+| ArrowDown / ArrowUp    | Focus next/previous enabled segment in vertical mode   |
+| Home                   | Focus first enabled segment                            |
+| End                    | Focus last enabled segment                             |
+| Space / Enter          | Select focused segment                                 |
+| Tab                    | Move focus into/out of group                           |
 
 **Roving tabindex**: The selected segment (or the first enabled segment if none is selected) receives `tabindex="0"`. All other segments receive `tabindex="-1"`. This ensures Tab enters the group on the selected item and the user navigates within the group using arrow keys.
 
@@ -673,29 +513,27 @@ In Windows High Contrast Mode (`@media (forced-colors: active)`), the indicator 
 | Direction (RTL)               | `dir`                     | --                       | ars-ui explicit; Ark UI inherits from context |
 | Loop focus                    | `loop_focus`              | --                       | ars-ui exclusive                              |
 | Required                      | --                        | `required`               | Ark UI has it; ars-ui does not                |
-| On value change               | via `Bindable`            | `onValueChange`          | --                                            |
+| On value change               | `on_value_change`         | `onValueChange`          | --                                            |
 
 **Gaps:** `required` prop is present in Ark UI but missing from ars-ui SegmentGroup. However, SegmentGroup always has a selected value (it is semantically a RadioGroup where one option is always active), making `required` redundant in practice. No action needed.
 
 ### 7.2 Anatomy
 
-| Part            | ars-ui            | Ark UI            | Notes                        |
-| --------------- | ----------------- | ----------------- | ---------------------------- |
-| Root            | `Root`            | `Root`            | --                           |
-| Label           | `Label`           | `Label`           | --                           |
-| Indicator       | `Indicator`       | `Indicator`       | Animated selection highlight |
-| Item            | `Item`            | `Item`            | --                           |
-| ItemText        | `ItemText`        | `ItemText`        | --                           |
-| ItemControl     | `ItemControl`     | `ItemControl`     | Hidden radio input visual    |
-| ItemHiddenInput | `ItemHiddenInput` | `ItemHiddenInput` | Form submission              |
+| Part        | ars-ui        | Ark UI        | Notes                        |
+| ----------- | ------------- | ------------- | ---------------------------- |
+| Root        | `Root`        | `Root`        | --                           |
+| Indicator   | `Indicator`   | `Indicator`   | Animated selection highlight |
+| Item        | `Item`        | `Item`        | --                           |
+| ItemText    | `ItemText`    | `ItemText`    | --                           |
+| HiddenInput | `HiddenInput` | `HiddenInput` | Form submission              |
 
 **Gaps:** None.
 
 ### 7.3 Events
 
-| Callback     | ars-ui         | Ark UI          | Notes |
-| ------------ | -------------- | --------------- | ----- |
-| Value change | via `Bindable` | `onValueChange` | --    |
+| Callback     | ars-ui            | Ark UI          | Notes |
+| ------------ | ----------------- | --------------- | ----- |
+| Value change | `on_value_change` | `onValueChange` | --    |
 
 **Gaps:** None.
 
