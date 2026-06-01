@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/specialized/qr_code/mod.rs
+expression: "snapshot_attrs(&api(&props, None).pattern_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "pattern",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "qr-code",
+            ),
+        ),
+    ],
+    styles: [],
+}

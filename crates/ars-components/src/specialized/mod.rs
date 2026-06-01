@@ -29,3 +29,6 @@ pub mod contextual_help;
 
 /// File upload component machine.
 pub mod file_upload;
+
+/// `QrCode` stateless QR-matrix rendering connect API.
+pub mod qr_code;

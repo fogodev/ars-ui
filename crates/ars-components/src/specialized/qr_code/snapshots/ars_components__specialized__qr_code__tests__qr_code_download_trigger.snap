@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/specialized/qr_code/mod.rs
+expression: "snapshot_attrs(&api(&props, None).download_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "download-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "qr-code",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Download QR code",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

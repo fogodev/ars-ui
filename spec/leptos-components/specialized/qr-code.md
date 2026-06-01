@@ -170,7 +170,10 @@ Leptos can render the QR pattern as stable SVG children and wire the download tr
 ```rust
 #[component]
 pub fn QrCode(value: String) -> impl IntoView {
-    let api = qr_code::Api::new(&qr_code::Props { value, ..Default::default() });
+    let props = qr_code::Props { value, ..Default::default() };
+    // The adapter owns encoding: encode the value into a matrix, then inject it.
+    let matrix = encode_matrix(&props.value, props.error_correction);
+    let api = qr_code::Api::new(&props, matrix, &env, &messages);
     view! {
         <div {..api.root_attrs()}>
             <svg {..api.pattern_attrs()} />

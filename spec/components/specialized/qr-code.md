@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, interactions]
 shared_deps: []
 related: []
 references:
-  ark-ui: QrCode
+    ark-ui: QrCode
 ---
 
 # QrCode
@@ -32,7 +32,7 @@ pub enum QrErrorCorrection {
 }
 
 /// The QR code matrix — a 2D grid of modules (black/white cells).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QrMatrix {
     /// Row-major module data. `true` = dark module.
     pub modules: Vec<Vec<bool>>,
@@ -45,7 +45,7 @@ impl QrMatrix {
     ///
     /// QR matrix generation is delegated to the `qrcode` crate in the adapter
     /// layer (`ars-dom`). The core spec defines the rendering contract only.
-    pub fn new(modules: Vec<Vec<bool>>) -> Self {
+    pub const fn new(modules: Vec<Vec<bool>>) -> Self {
         let size = modules.len();
         Self { modules, size }
     }
@@ -118,30 +118,31 @@ pub enum Part {
 pub struct Api<'a> {
     props: &'a Props,
     matrix: Option<QrMatrix>,
-    id: String,
     locale: Locale,
     messages: Messages,
 }
 
 impl<'a> Api<'a> {
-    pub fn new(props: &'a Props, env: &Env, messages: &Messages) -> Self {
-        let matrix = QrMatrix::generate(&props.value, props.error_correction);
-        let id = if props.id.is_empty() { generate_id() } else { props.id.clone() };
+    /// QR matrix generation is adapter-owned: the agnostic core defines only the
+    /// rendering contract, so the caller (the framework adapter) encodes
+    /// `props.value` and injects the resulting `matrix`. It is `None` until the
+    /// adapter has produced it; the core renders whatever it is given.
+    pub fn new(props: &'a Props, matrix: Option<QrMatrix>, env: &Env, messages: &Messages) -> Self {
         let locale = env.locale.clone();
         let messages = messages.clone();
-        Self { props, matrix, id, locale, messages }
+        Self { props, matrix, locale, messages }
     }
 
-    pub fn matrix(&self) -> Option<&QrMatrix> {
+    pub const fn matrix(&self) -> Option<&QrMatrix> {
         self.matrix.as_ref()
     }
 
     /// Total pixel size of the rendered QR code (including quiet zone).
+    /// Returns `0.0` when no matrix has been supplied.
     pub fn pixel_size(&self) -> f64 {
-        if let Some(ref m) = self.matrix {
-            (m.size + self.props.quiet_zone * 2) as f64 * self.props.module_size
-        } else {
-            0.0
+        match &self.matrix {
+            Some(matrix) => (matrix.size + self.props.quiet_zone * 2) as f64 * self.props.module_size,
+            None => 0.0,
         }
     }
 
@@ -150,7 +151,10 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, &self.id);
+        // The id is adapter-supplied; emit it only when set (no in-core id generation).
+        if !self.props.id.is_empty() {
+            attrs.set(HtmlAttr::Id, self.props.id.clone());
+        }
         attrs.set(HtmlAttr::Role, "img");
         let label = if self.props.value.starts_with("http://") || self.props.value.starts_with("https://") {
             (self.messages.link_label)(&self.props.value, &self.locale)
@@ -159,8 +163,8 @@ impl<'a> Api<'a> {
         };
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
         let size = self.pixel_size();
-        attrs.set_style(CssProperty::Width, format!("{}px", size));
-        attrs.set_style(CssProperty::Height, format!("{}px", size));
+        attrs.set_style(CssProperty::Width, format!("{size}px"));
+        attrs.set_style(CssProperty::Height, format!("{size}px"));
         attrs
     }
 
@@ -185,8 +189,8 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Overlay.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        if let Some(ref src) = self.props.overlay_src {
-            attrs.set(HtmlAttr::Src, src);
+        if let Some(src) = &self.props.overlay_src {
+            attrs.set(HtmlAttr::Src, src.clone());
         }
         attrs
     }

@@ -1,9 +1,11 @@
-//! Property-based state-machine tests for the specialized color components.
+//! Property-based tests for the specialized components.
 //!
-//! Each block feeds an arbitrary event sequence through a machine and asserts
-//! the component's core invariants always hold: stored values stay in range,
-//! states stay within the declared set, and `connect()` never panics. Run in
-//! the nightly `extended-proptest` job; `#[ignore]`d in the fast tier.
+//! The color-machine blocks feed an arbitrary event sequence through a machine
+//! and assert the component's core invariants always hold: stored values stay
+//! in range, states stay within the declared set, and `connect()` never panics.
+//! The stateless `QrCode` block instead pins its prop->attr mapping across the
+//! whole input space. Run in the nightly `extended-proptest` job; `#[ignore]`d
+//! in the fast tier.
 
 // ────────────────────────────────────────────────────────────────────
 // ColorArea
@@ -348,6 +350,228 @@ mod color_swatch_picker_proptests {
                 .expect("root exposes data-ars-state");
 
             prop_assert!(state == "idle" || state == "focused");
+        }
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// QrCode (stateless — pins the prop->attr mapping over the input space)
+// ────────────────────────────────────────────────────────────────────
+
+mod qr_code_proptests {
+    use ars_components::specialized::qr_code::{
+        Api, Messages, Part, Props, QrErrorCorrection, QrMatrix,
+    };
+    use ars_core::{AriaAttr, ConnectApi, CssProperty, Env, HtmlAttr};
+    use proptest::prelude::*;
+
+    fn arb_error_correction() -> impl Strategy<Value = QrErrorCorrection> {
+        prop_oneof![
+            Just(QrErrorCorrection::Low),
+            Just(QrErrorCorrection::Medium),
+            Just(QrErrorCorrection::Quartile),
+            Just(QrErrorCorrection::High),
+        ]
+    }
+
+    /// A mix of plain text and URL values so the link-label branch is exercised.
+    fn arb_value() -> impl Strategy<Value = String> {
+        prop_oneof![
+            "[a-zA-Z0-9 ]{0,24}",
+            r"https://[a-z]{1,12}\.[a-z]{2,4}",
+            r"http://[a-z]{1,12}\.[a-z]{2,4}",
+        ]
+    }
+
+    prop_compose! {
+        fn arb_props()(
+            id in "[a-z]{0,8}",
+            value in arb_value(),
+            error_correction in arb_error_correction(),
+            module_size in 1.0f64..20.0,
+            quiet_zone in 0usize..10,
+            overlay_src in proptest::option::of("[a-z./]{1,16}"),
+            overlay_size in 0.0f64..0.5,
+        ) -> Props {
+            Props {
+                id,
+                value,
+                error_correction,
+                module_size,
+                quiet_zone,
+                overlay_src,
+                overlay_size,
+                ..Props::default()
+            }
+        }
+    }
+
+    prop_compose! {
+        /// A square matrix of `n` rows of `n` modules, so `size == n`.
+        fn arb_matrix()(n in 1usize..10)(
+            rows in prop::collection::vec(
+                prop::collection::vec(any::<bool>(), n..=n),
+                n..=n,
+            ),
+        ) -> QrMatrix {
+            QrMatrix::new(rows)
+        }
+    }
+
+    fn arb_opt_matrix() -> impl Strategy<Value = Option<QrMatrix>> {
+        proptest::option::of(arb_matrix())
+    }
+
+    proptest! {
+        #![proptest_config(super::super::common::proptest_config())]
+
+        /// `part_attrs(p)` always equals the dedicated `*_attrs()` method.
+        #[test]
+        #[ignore = "proptest — nightly extended-proptest job"]
+        fn qr_part_dispatch_equals_attrs(
+            props in arb_props(),
+            matrix in arb_opt_matrix(),
+        ) {
+            let api = Api::new(&props, matrix, &Env::default(), &Messages::default());
+
+            prop_assert_eq!(api.part_attrs(Part::Root), api.root_attrs());
+            prop_assert_eq!(api.part_attrs(Part::Frame), api.frame_attrs());
+            prop_assert_eq!(api.part_attrs(Part::Pattern), api.pattern_attrs());
+            prop_assert_eq!(api.part_attrs(Part::Overlay), api.overlay_attrs());
+            prop_assert_eq!(
+                api.part_attrs(Part::DownloadTrigger),
+                api.download_trigger_attrs()
+            );
+        }
+
+        /// The root always carries the scope/part contract plus `role="img"`.
+        #[test]
+        #[ignore = "proptest — nightly extended-proptest job"]
+        fn qr_root_always_has_scope_part_role(
+            props in arb_props(),
+            matrix in arb_opt_matrix(),
+        ) {
+            let attrs =
+                Api::new(&props, matrix, &Env::default(), &Messages::default()).root_attrs();
+
+            prop_assert_eq!(attrs.get(&HtmlAttr::Data("ars-scope")), Some("qr-code"));
+            prop_assert_eq!(attrs.get(&HtmlAttr::Data("ars-part")), Some("root"));
+            prop_assert_eq!(attrs.get(&HtmlAttr::Role), Some("img"));
+        }
+
+        /// The aria-label uses the link template iff the value is an http(s) URL.
+        #[test]
+        #[ignore = "proptest — nightly extended-proptest job"]
+        fn qr_label_follows_url_branch(
+            props in arb_props(),
+            matrix in arb_opt_matrix(),
+        ) {
+            let is_url =
+                props.value.starts_with("http://") || props.value.starts_with("https://");
+
+            let expected = if is_url {
+                format!("QR code linking to {}", props.value)
+            } else {
+                format!("QR code: {}", props.value)
+            };
+
+            let attrs =
+                Api::new(&props, matrix, &Env::default(), &Messages::default()).root_attrs();
+
+            prop_assert_eq!(
+                attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
+                Some(expected.as_str())
+            );
+        }
+
+        /// The root `id` is emitted exactly when `props.id` is non-empty.
+        #[test]
+        #[ignore = "proptest — nightly extended-proptest job"]
+        fn qr_id_emitted_iff_non_empty(
+            props in arb_props(),
+            matrix in arb_opt_matrix(),
+        ) {
+            let id = props.id.clone();
+
+            let attrs =
+                Api::new(&props, matrix, &Env::default(), &Messages::default()).root_attrs();
+
+            if id.is_empty() {
+                prop_assert_eq!(attrs.get(&HtmlAttr::Id), None);
+            } else {
+                prop_assert_eq!(attrs.get(&HtmlAttr::Id), Some(id.as_str()));
+            }
+        }
+
+        /// `pixel_size` follows the quiet-zone formula (or `0.0` with no matrix),
+        /// and the width/height styles render that size in pixels.
+        #[test]
+        #[ignore = "proptest — nightly extended-proptest job"]
+        fn qr_pixel_size_matches_formula_and_dimensions(
+            props in arb_props(),
+            matrix in arb_opt_matrix(),
+        ) {
+            let api = Api::new(&props, matrix, &Env::default(), &Messages::default());
+
+            let expected = match api.matrix() {
+                Some(matrix) => {
+                    (matrix.size + props.quiet_zone * 2) as f64 * props.module_size
+                }
+
+                None => 0.0,
+            };
+
+            prop_assert!((api.pixel_size() - expected).abs() < f64::EPSILON);
+
+            let attrs = api.root_attrs();
+            let pixels = format!("{expected}px");
+
+            prop_assert_eq!(
+                attrs
+                    .styles()
+                    .iter()
+                    .find(|(prop, _)| *prop == CssProperty::Width)
+                    .map(|(_, value)| value.as_str()),
+                Some(pixels.as_str())
+            );
+            prop_assert_eq!(
+                attrs
+                    .styles()
+                    .iter()
+                    .find(|(prop, _)| *prop == CssProperty::Height)
+                    .map(|(_, value)| value.as_str()),
+                Some(pixels.as_str())
+            );
+        }
+
+        /// The overlay `src` is emitted exactly when `overlay_src` is set.
+        #[test]
+        #[ignore = "proptest — nightly extended-proptest job"]
+        fn qr_overlay_src_emitted_iff_present(props in arb_props()) {
+            let overlay = props.overlay_src.clone();
+
+            let attrs =
+                Api::new(&props, None, &Env::default(), &Messages::default()).overlay_attrs();
+
+            if let Some(src) = overlay {
+                prop_assert_eq!(attrs.get(&HtmlAttr::Src), Some(src.as_str()));
+            } else {
+                prop_assert_eq!(attrs.get(&HtmlAttr::Src), None);
+            }
+        }
+
+        /// The download trigger is always a labelled button regardless of props.
+        #[test]
+        #[ignore = "proptest — nightly extended-proptest job"]
+        fn qr_download_trigger_is_labelled_button(props in arb_props()) {
+            let attrs = Api::new(&props, None, &Env::default(), &Messages::default())
+                .download_trigger_attrs();
+
+            prop_assert_eq!(attrs.get(&HtmlAttr::Type), Some("button"));
+            prop_assert_eq!(
+                attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
+                Some("Download QR code")
+            );
         }
     }
 }
