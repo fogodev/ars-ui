@@ -189,6 +189,14 @@ fn assert_toolbar_invariants(service: &Service<toolbar::Machine>) -> TestCaseRes
         prop_assert!(!ctx.disabled_items.contains(&index));
     }
 
+    if !ctx.disabled {
+        let first_enabled = (0..ctx.item_count).find(|index| !ctx.disabled_items.contains(index));
+
+        if first_enabled.is_some() {
+            prop_assert!(ctx.focused_index.is_some());
+        }
+    }
+
     let api = service.connect(&|_| {});
 
     let root = api.root_attrs();

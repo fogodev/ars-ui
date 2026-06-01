@@ -67,7 +67,7 @@ pub enum Event {
 /// Runtime context for the `Toolbar` state machine.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Context {
-    /// Index of the currently focused item, which receives `tabindex="0"`.
+    /// Index of the roving focus target, which receives `tabindex="0"`.
     pub focused_index: Option<usize>,
 
     /// Toolbar orientation for ARIA and arrow-key handling.
@@ -246,6 +246,13 @@ impl ars_core::Machine for Machine {
 
                     if ctx.disabled {
                         ctx.focused_index = None;
+                    } else {
+                        ctx.focused_index = roving_target(
+                            ctx.focused_index,
+                            ctx.item_count,
+                            &ctx.disabled_items,
+                            false,
+                        );
                     }
                 }))
             }
@@ -341,13 +348,7 @@ fn set_items_plan(
 ) -> Option<TransitionPlan<Machine>> {
     let disabled_items = normalized_disabled_items(count, disabled_items);
 
-    let focused_index = if ctx.disabled {
-        None
-    } else {
-        ctx.focused_index
-            .filter(|index| can_focus_index(count, &disabled_items, *index))
-            .or_else(|| first_enabled_index(count, &disabled_items))
-    };
+    let focused_index = roving_target(ctx.focused_index, count, &disabled_items, ctx.disabled);
 
     if ctx.item_count == count
         && ctx.disabled_items == disabled_items
@@ -378,6 +379,21 @@ fn normalized_disabled_items(count: usize, disabled_items: &[usize]) -> Vec<usiz
 
 fn can_focus_index(count: usize, disabled: &[usize], index: usize) -> bool {
     index < count && !disabled.contains(&index)
+}
+
+fn roving_target(
+    current: Option<usize>,
+    count: usize,
+    disabled: &[usize],
+    toolbar_disabled: bool,
+) -> Option<usize> {
+    if toolbar_disabled {
+        None
+    } else {
+        current
+            .filter(|index| can_focus_index(count, disabled, *index))
+            .or_else(|| first_enabled_index(count, disabled))
+    }
 }
 
 fn focus_if_changed(ctx: &Context, target: Option<usize>) -> Option<TransitionPlan<Machine>> {
@@ -882,6 +898,31 @@ mod tests {
         );
         assert_eq!(attrs.get(&HtmlAttr::Dir), Some("rtl"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+    }
+
+    #[test]
+    fn re_enabling_toolbar_restores_roving_target() {
+        let mut service = service(Props::new().id("toolbar").disabled(true));
+
+        assert_eq!(service.context().focused_index, None);
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .item_attrs(0)
+                .get(&HtmlAttr::TabIndex),
+            Some("-1")
+        );
+
+        drop(service.set_props(Props::new().id("toolbar")));
+
+        assert_eq!(service.context().focused_index, Some(0));
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .item_attrs(0)
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
     }
 
     #[test]

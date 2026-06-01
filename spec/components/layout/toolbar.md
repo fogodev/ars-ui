@@ -72,8 +72,7 @@ pub enum Event {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
     /// Index of the currently focused item (roving tabindex target).
-    /// `None` when no item has been focused yet (first Tab into toolbar
-    /// focuses the first enabled item).
+    /// `None` when the toolbar is disabled or has no enabled items.
     pub focused_index: Option<usize>,
     /// Toolbar orientation.
     pub orientation: Orientation,
@@ -167,13 +166,8 @@ impl ars_core::Machine for Machine {
             Event::SetItems { count, disabled_items } => {
                 let count = *count;
                 let disabled_items = normalize_disabled_items(count, disabled_items);
-                let focused_index = if ctx.disabled {
-                    None
-                } else {
-                    ctx.focused_index
-                        .filter(|index| index < count && !disabled_items.contains(index))
-                        .or_else(|| first_enabled_index(count, &disabled_items))
-                };
+                let focused_index =
+                    roving_target(ctx.focused_index, count, &disabled_items, ctx.disabled);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.item_count = count;
                     ctx.disabled_items = disabled_items;
@@ -188,6 +182,13 @@ impl ars_core::Machine for Machine {
                     ctx.disabled = props.disabled;
                     if ctx.disabled {
                         ctx.focused_index = None;
+                    } else {
+                        ctx.focused_index = roving_target(
+                            ctx.focused_index,
+                            ctx.item_count,
+                            &ctx.disabled_items,
+                            false,
+                        );
                     }
                 }))
             }
@@ -272,6 +273,21 @@ fn normalize_disabled_items(count: usize, disabled: &[usize]) -> Vec<usize> {
     disabled.sort_unstable();
     disabled.dedup();
     disabled
+}
+
+fn roving_target(
+    current: Option<usize>,
+    count: usize,
+    disabled: &[usize],
+    toolbar_disabled: bool,
+) -> Option<usize> {
+    if toolbar_disabled {
+        None
+    } else {
+        current
+            .filter(|index| index < count && !disabled.contains(index))
+            .or_else(|| first_enabled_index(count, disabled))
+    }
 }
 
 /// Find the next enabled index, wrapping around.
