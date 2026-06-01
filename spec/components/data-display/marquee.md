@@ -228,6 +228,12 @@ impl ars_core::Machine for Machine {
             (State::Playing, Event::Pause) => {
                 Some(TransitionPlan::to(State::Paused))
             }
+            (State::Paused, Event::Pause) if ctx.paused_by_hover || ctx.paused_by_focus => {
+                Some(TransitionPlan::context_only(|ctx| {
+                    ctx.paused_by_hover = false;
+                    ctx.paused_by_focus = false;
+                }))
+            }
 
             // Hover-triggered pause
             (State::Playing, Event::HoverIn) if ctx.pause_on_hover => {
@@ -235,7 +241,9 @@ impl ars_core::Machine for Machine {
                     ctx.paused_by_hover = true;
                 }))
             }
-            (State::Paused, Event::HoverIn) if ctx.pause_on_hover && !ctx.paused_by_hover => {
+            (State::Paused, Event::HoverIn)
+                if ctx.pause_on_hover && ctx.paused_by_focus && !ctx.paused_by_hover =>
+            {
                 Some(TransitionPlan::context_only(|ctx| {
                     ctx.paused_by_hover = true;
                 }))
@@ -256,7 +264,9 @@ impl ars_core::Machine for Machine {
                     ctx.paused_by_focus = true;
                 }))
             }
-            (State::Paused, Event::FocusIn) if ctx.pause_on_focus && !ctx.paused_by_focus => {
+            (State::Paused, Event::FocusIn)
+                if ctx.pause_on_focus && ctx.paused_by_hover && !ctx.paused_by_focus =>
+            {
                 Some(TransitionPlan::context_only(|ctx| {
                     ctx.paused_by_focus = true;
                 }))
@@ -287,7 +297,13 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::SyncProps) => {
-                let next_state = if props.disabled || props.loop_count == Some(0) {
+                let next_current_loop = props
+                    .loop_count
+                    .map_or(ctx.current_loop, |max| ctx.current_loop.min(max));
+                let finite_loop_exhausted = props
+                    .loop_count
+                    .is_some_and(|max| next_current_loop >= max);
+                let next_state = if props.disabled || finite_loop_exhausted {
                     State::Paused
                 } else {
                     state.clone()
@@ -310,7 +326,7 @@ impl ars_core::Machine for Machine {
                     ctx.loop_count = loop_count;
                     ctx.auto_fill = auto_fill;
                     ctx.delay = delay;
-                    ctx.current_loop = loop_count.map_or(ctx.current_loop, |max| ctx.current_loop.min(max));
+                    ctx.current_loop = next_current_loop;
                     ctx.disabled = disabled;
                     if !pause_on_hover || disabled {
                         ctx.paused_by_hover = false;
