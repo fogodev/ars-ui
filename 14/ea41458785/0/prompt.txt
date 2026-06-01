@@ -1,0 +1,65 @@
+Implement task #277
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Implement Marquee Agnostic Core
+
+**Summary**
+- Implement issue `#277` as a framework-agnostic `Marquee` core in `crates/ars-components`, with no Leptos/Dioxus adapter work.
+- Follow the spec at `spec/components/data-display/marquee.md`: `Playing`/`Paused` machine, hover/focus pause flags, loop counting, ARIA/data attributes, CSS custom properties, localized labels, and the four anatomy parts.
+- Treat reduced motion as adapter input: the core will support `Event::Pause` and paused `content_attrs()` output; adapters remain responsible for `matchMedia`.
+
+**Key Changes**
+- Add `crates/ars-components/src/data_display/marquee/mod.rs` and export it from `crates/ars-components/src/data_display/mod.rs`.
+- Public API to add:
+  - `State::{Playing, Paused}`
+  - `Event::{Play, Pause, HoverIn, HoverOut, FocusIn, FocusOut, LoopComplete}`
+  - `Direction::{Left, Right, Up, Down}`
+  - `Props`, `Context`, `Messages`, `Machine`, `Api<'a>`
+  - `Part::{Root, Content, Edge { side }, AutoPlayTrigger}` and `EdgeSide::{Start, End}`
+- Use `ars_core::NoEffect`, `ComponentMessages`, `ComponentPart`, `ConnectApi`, `Env`, `HtmlAttr`, `AriaAttr`, `CssProperty`, `Locale`, `MessageFn`, and `TransitionPlan`.
+- Add builder methods on `Props` matching existing `ars-components` convention, while keeping the spec fields/defaults exact.
+- Derive any extra `Eq`/`Hash` traits required by `ComponentPart` for payload parts; this is a compile-bound addition, not a semantic API deviation.
+- Do not add new dependencies or adapter feature wiring.
+
+**Test Plan**
+- Add failing tests first in the new module for:
+  - initial `Playing` vs `Paused` from `auto_play` and `disabled`
+  - explicit `play()` / `pause()` event flow
+  - hover and focus pause/resume only when enabled
+  - loop counting and pause when `loop_count` is exhausted
+  - speed, direction, gap, delay, and play-state CSS custom properties
+  - root `role="marquee"`, `aria-live`, disabled attrs, and localized `aria-label`
+  - autoplay trigger label/pressed/disabled attrs
+  - edge attrs for start/end
+  - reduced-motion simulation by sending `Event::Pause`
+- Add snapshot tests for every anatomy part and each output-affecting branch required by the issue.
+- Add spec-conformance coverage in `crates/ars-components/tests/spec_conformance/data_display.rs` for Marquee anatomy.
+- Add a focused proptest module under `crates/ars-components/tests/proptest_state_machines/data_display.rs` to assert loop count, disabled no-op behavior, and paused-by-hover/focus flags stay coherent across event sequences.
+- Verification commands:
+  - `cargo test -p ars-components --lib -- data_display::marquee`
+  - `cargo test -p ars-components --test spec_conformance -- data_display`
+  - `cargo test -p ars-components --test proptest_state_machines -- data_display::marquee`
+  - `cargo insta test -p ars-components --lib --unreferenced=reject -- marquee`
+  - `cargo clippy -p ars-components --all-targets --all-features -- -D warnings`
+  - `cargo xtask spec validate`
+  - after implementation audit and user approval: `cargo xci --profile fast`
+
+**Execution Notes**
+- At implementation start, move issue `#277` to `In Progress`.
+- Use TDD: write each named test, verify it fails for the missing component, then implement the smallest code to pass.
+- Run `.agents/skills/post-implementation-audit/SKILL.md` after named tests pass and land all findings in the same PR.
+- Present the final diff for user review before any commit.
+- Only after user approval: run `cargo xci --profile fast`, commit with the Codex co-author trailer, push a PR targeting `main` with `Closes #277`.
+- Because snapshots will be added, apply the `snapshot-reviewed` label after opening/updating the PR.
+- Invoke `.agents/skills/waiting-for-codex-review/SKILL.md` after the first push and after every subsequent push until Codex leaves 👍 and CI is green.
+
+**Assumptions**
+- No spec changes are needed unless implementation exposes a concrete spec mismatch during audit.
+- No adapter code, examples, or native element-handle logic belongs in this task.
+- The core should not query `prefers-reduced-motion`; it only needs deterministic paused-state behavior that adapters can trigger.
+
+---
+
+Didn't we have any improvement to port back to the spec?

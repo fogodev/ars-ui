@@ -1,0 +1,128 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "14ea41458785",
+  "session_id": "019e80c5-20a2-7542-9a48-e821d5b2c935",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T03:19:49.633189Z",
+  "branch": "codex/issue-277-marquee-core",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/data_display/marquee/mod.rs",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_auto_play_trigger_paused.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_auto_play_trigger_playing.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_content_paused.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_content_playing.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_edge_end.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_edge_start.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_root_paused.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_root_playing.snap",
+    "crates/ars-components/src/data_display/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+    "crates/ars-components/tests/spec_conformance/data_display.rs",
+    "spec/components/data-display/marquee.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "f94bbea646cf",
+  "token_usage": {
+    "input_tokens": 739714,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 22588288,
+    "output_tokens": 36250,
+    "api_call_count": 158
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Implement issue #277 (Marquee agnostic core) in the ars-ui Rust UI component library, following TDD practices and repo conventions for state machine components.",
+    "outcome": "Fully implemented the Marquee core component with state machine, events, parts, ARIA/CSS attributes, localization, and comprehensive tests (unit, spec-conformance, proptest). Committed after passing the cargo xci pre-push gate (8018 unit tests, 91%+ line coverage). Push and PR creation were not completed in the session.",
+    "learnings": {
+      "repo": [
+        "Components follow a consistent pattern: NoEffect, Service-driven inline tests, ComponentPart data attributes, and insta snapshots.",
+        "cargo xci --profile fast is the mandatory pre-push gate with 10 steps: fmt, clippy, nextest, i18n slices, integration, adapter checks, spec snippet compilation, error coverage, mutual exclusion, snapshot-count, native coverage.",
+        "Proptests are marked #[ignore] by convention for nightly-only runs.",
+        "The snapshot-reviewed label must be applied to PRs that add snapshots.",
+        "The .agents/skills/waiting-for-codex-review/SKILL.md skill must be invoked after every push until Codex approves.",
+        "Moving GitHub Project v2 items requires resolving project/field/option IDs via the gh CLI before mutation.",
+        "cargo insta test --unreferenced=reject cannot be used project-wide because many pre-existing unreferenced snapshots exist in unrelated components; --unreferenced=warn is the safe fallback.",
+        "insta auto-stages accepted snapshot files; during no-commit-until-review phases these must be manually unstaged with git restore --staged."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/marquee/mod.rs",
+          "finding": "Implements State::{Playing,Paused}, Event::{Play,Pause,HoverIn,HoverOut,FocusIn,FocusOut,LoopComplete}, Direction, EdgeSide, Props, Context, Messages, Machine, Api, and Part::{Root,Content,EdgeSide variant,AutoPlayTrigger} using ars_core primitives."
+        },
+        {
+          "path": "spec/components/data-display/marquee.md",
+          "finding": "Spec had multiple omissions backported from implementation: missing type Effect = NoEffect, stale Bindable import, missing Eq on Event, missing Copy/Default/Eq/Hash on Direction and EdgeSide, and loop completion example needed saturating_add for overflow safety."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+          "finding": "Proptest module for Marquee added here, marked #[ignore] per repo nightly convention."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/data_display.rs",
+          "finding": "Spec-conformance anatomy coverage for Marquee added to this existing file."
+        }
+      ],
+      "workflow": [
+        "TDD flow: write failing tests first, implement to pass, audit for spec drift, fix formatting, rerun gate.",
+        "Post-implementation audit is necessary — extra non-spec event-dispatch helpers and extra data attributes can creep in and must be removed before commit.",
+        "cargo fmt --all --check should be run before cargo xci to catch formatting issues early; xci will catch them anyway but fixing first saves a full gate run.",
+        "When accepting insta snapshots mid-session without committing, use git restore --staged on snapshot files to keep the working tree clean for review."
+      ]
+    },
+    "friction": [
+      "cargo insta test --unreferenced=reject fails repo-wide due to many pre-existing unreferenced snapshots in unrelated components, forcing use of --unreferenced=warn instead.",
+      "insta auto-stages snapshot files after acceptance, requiring manual git restore --staged to unstage them during a no-commit-until-review phase.",
+      "GitHub Project v2 item moves require multi-step ID resolution via gh CLI before the actual mutation, adding friction to issue tracking updates.",
+      "The spec at spec/components/data-display/marquee.md had multiple correctness issues (missing derives, stale imports, missing type alias, unsafe arithmetic) that had to be discovered during implementation and backported."
+    ],
+    "open_items": [
+      "Push the commit to remote and create the pull request (not completed in session).",
+      "Apply the snapshot-reviewed label to the PR once created.",
+      "Invoke the .agents/skills/waiting-for-codex-review/SKILL.md skill after pushing to initiate Codex review loop.",
+      "Pre-existing unreferenced snapshots in other components should be cleaned up at some point to allow --unreferenced=reject to be used safely repo-wide."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T03:18:27.315738Z",
+    "agent_lines": 1529,
+    "agent_removed": 9,
+    "human_added": 24,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1553,
+    "total_lines_changed": 1562,
+    "agent_percentage": 98.46350832266324,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1528,
+      "agent_lines_removed": 1
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 12,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1541,
+      "agent_lines_removed": 9,
+      "user_added_per_file": {
+        "crates/ars-components/src/data_display/marquee/mod.rs": 10,
+        "crates/ars-components/tests/proptest_state_machines/data_display.rs": 2
+      }
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "14ea41458785",
+  "strategy": "manual-commit",
+  "branch": "codex/issue-277-marquee-core",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/data_display/marquee/mod.rs",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_auto_play_trigger_paused.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_auto_play_trigger_playing.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_content_paused.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_content_playing.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_edge_end.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_edge_start.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_root_paused.snap",
+    "crates/ars-components/src/data_display/marquee/snapshots/ars_components__data_display__marquee__tests__marquee_root_playing.snap",
+    "crates/ars-components/src/data_display/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+    "crates/ars-components/tests/spec_conformance/data_display.rs",
+    "spec/components/data-display/marquee.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/14/ea41458785/0/metadata.json",
+      "transcript": "/14/ea41458785/0/full.jsonl",
+      "content_hash": "/14/ea41458785/0/content_hash.txt",
+      "prompt": "/14/ea41458785/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 739714,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 22588288,
+    "output_tokens": 36250,
+    "api_call_count": 158
+  }
+}
