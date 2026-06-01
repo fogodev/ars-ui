@@ -1,0 +1,37 @@
+---
+source: crates/ars-components/src/specialized/qr_code/mod.rs
+expression: "snapshot_attrs(&api(&props, None).overlay_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "overlay",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "qr-code",
+            ),
+        ),
+        (
+            Alt,
+            String(
+                "",
+            ),
+        ),
+        (
+            Src,
+            String(
+                "/logo.png",
+            ),
+        ),
+    ],
+    styles: [],
+}
