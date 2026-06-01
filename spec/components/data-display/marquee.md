@@ -303,8 +303,18 @@ impl ars_core::Machine for Machine {
                 let finite_loop_exhausted = props
                     .loop_count
                     .is_some_and(|max| next_current_loop >= max);
+                let remaining_hover_pause =
+                    ctx.paused_by_hover && props.pause_on_hover && !props.disabled;
+                let remaining_focus_pause =
+                    ctx.paused_by_focus && props.pause_on_focus && !props.disabled;
                 let next_state = if props.disabled || finite_loop_exhausted {
                     State::Paused
+                } else if ctx.paused_by_hover || ctx.paused_by_focus {
+                    if remaining_hover_pause || remaining_focus_pause {
+                        State::Paused
+                    } else {
+                        State::Playing
+                    }
                 } else {
                     state.clone()
                 };

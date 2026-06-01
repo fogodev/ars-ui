@@ -494,8 +494,18 @@ impl ars_core::Machine for Machine {
                     .map_or(ctx.current_loop, |max| ctx.current_loop.min(max));
                 let finite_loop_exhausted =
                     props.loop_count.is_some_and(|max| next_current_loop >= max);
+                let remaining_hover_pause =
+                    ctx.paused_by_hover && props.pause_on_hover && !props.disabled;
+                let remaining_focus_pause =
+                    ctx.paused_by_focus && props.pause_on_focus && !props.disabled;
                 let next_state = if props.disabled || finite_loop_exhausted {
                     State::Paused
+                } else if ctx.paused_by_hover || ctx.paused_by_focus {
+                    if remaining_hover_pause || remaining_focus_pause {
+                        State::Paused
+                    } else {
+                        State::Playing
+                    }
                 } else {
                     state.clone()
                 };
@@ -1017,6 +1027,50 @@ mod tests {
 
         assert!(!changed(&marquee.send(Event::Play)));
         assert_eq!(marquee.state(), &State::Paused);
+    }
+
+    #[test]
+    fn marquee_set_props_resumes_when_clearing_only_interaction_pause_policy() {
+        let mut hover = service(Props::new().id("ticker"));
+
+        assert!(changed(&hover.send(Event::HoverIn)));
+        assert_eq!(hover.state(), &State::Paused);
+        assert!(hover.context().paused_by_hover);
+
+        drop(hover.set_props(Props::new().id("ticker").pause_on_hover(false)));
+
+        assert_eq!(hover.state(), &State::Playing);
+        assert!(!hover.context().paused_by_hover);
+        assert!(!hover.context().pause_on_hover);
+
+        let mut focus = service(Props::new().id("ticker"));
+
+        assert!(changed(&focus.send(Event::FocusIn)));
+        assert_eq!(focus.state(), &State::Paused);
+        assert!(focus.context().paused_by_focus);
+
+        drop(focus.set_props(Props::new().id("ticker").pause_on_focus(false)));
+
+        assert_eq!(focus.state(), &State::Playing);
+        assert!(!focus.context().paused_by_focus);
+        assert!(!focus.context().pause_on_focus);
+    }
+
+    #[test]
+    fn marquee_set_props_keeps_paused_when_clearing_one_of_multiple_interaction_causes() {
+        let mut marquee = service(Props::new().id("ticker"));
+
+        assert!(changed(&marquee.send(Event::HoverIn)));
+        assert!(changed(&marquee.send(Event::FocusIn)));
+        assert_eq!(marquee.state(), &State::Paused);
+        assert!(marquee.context().paused_by_hover);
+        assert!(marquee.context().paused_by_focus);
+
+        drop(marquee.set_props(Props::new().id("ticker").pause_on_hover(false)));
+
+        assert_eq!(marquee.state(), &State::Paused);
+        assert!(!marquee.context().paused_by_hover);
+        assert!(marquee.context().paused_by_focus);
     }
 
     #[test]
