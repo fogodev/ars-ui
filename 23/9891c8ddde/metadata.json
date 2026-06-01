@@ -1,0 +1,46 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "239891c8ddde",
+  "strategy": "manual-commit",
+  "branch": "impl-294",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "crates/ars-components/src/specialized/mod.rs",
+    "crates/ars-components/src/specialized/timer/mod.rs",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_display_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_label_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_pause_trigger_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_pause_trigger_running_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_progress_completed_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_progress_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_reset_trigger_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_reset_trigger_running_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_completed_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_paused_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_running_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_with_hours_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_separator_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_start_trigger_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_start_trigger_paused_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_start_trigger_running_snapshot.snap",
+    "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+    "crates/ars-components/tests/spec_conformance/specialized.rs",
+    "spec/components/specialized/timer.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/23/9891c8ddde/0/metadata.json",
+      "transcript": "/23/9891c8ddde/0/full.jsonl",
+      "content_hash": "/23/9891c8ddde/0/content_hash.txt",
+      "prompt": "/23/9891c8ddde/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 38640,
+    "cache_creation_tokens": 1016746,
+    "cache_read_tokens": 29681305,
+    "output_tokens": 150464,
+    "api_call_count": 141
+  }
+}

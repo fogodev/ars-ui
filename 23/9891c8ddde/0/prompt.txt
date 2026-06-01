@@ -1,0 +1,29 @@
+Implement task #294
+
+---
+
+<ide_selection>The user selected the lines 70 to 85 from /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-294/crates/ars-components/src/specialized/timer/mod.rs:
+    /// Set the remaining/elapsed time directly, in milliseconds.
+    SetTime(u64),
+}
+
+/// Context for the `Timer` component.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Context {
+    /// Current time value in milliseconds. For countdown this is the remaining
+    /// time; for stopwatch this is the elapsed time.
+    pub current_ms: u64,
+
+    /// The target duration in milliseconds (for countdown).
+    pub target_ms: u64,
+
+    /// Tick interval in milliseconds.
+    pub interval_ms: u32,
+
+This may or may not be related to the current task.</ide_selection>
+Let's keep our standard and use `Duration` for time related fields, never u32 or u64 for milliseconds
+
+---
+
+<ide_opened_file>The user opened the file /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-294/crates/ars-components/src/specialized/timer/mod.rs in the IDE. This may or may not be related to the current task.</ide_opened_file>
+I reviewed here, let's commit and push a PR to github

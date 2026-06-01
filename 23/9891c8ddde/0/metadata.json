@@ -1,0 +1,148 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "239891c8ddde",
+  "session_id": "5bc925b4-160c-4dbe-8b86-2e569a259845",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T20:49:50.235845Z",
+  "branch": "impl-294",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "crates/ars-components/src/specialized/mod.rs",
+    "crates/ars-components/src/specialized/timer/mod.rs",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_display_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_label_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_pause_trigger_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_pause_trigger_running_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_progress_completed_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_progress_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_reset_trigger_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_reset_trigger_running_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_completed_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_paused_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_running_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_with_hours_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_separator_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_start_trigger_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_start_trigger_paused_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_start_trigger_running_snapshot.snap",
+    "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+    "crates/ars-components/tests/spec_conformance/specialized.rs",
+    "spec/components/specialized/timer.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "2c8e5637ecbb",
+  "token_usage": {
+    "input_tokens": 38640,
+    "cache_creation_tokens": 1016746,
+    "cache_read_tokens": 29681305,
+    "output_tokens": 150464,
+    "api_call_count": 141
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Implement the Timer specialized component (task #294) in the ars-ui Rust codebase, including the state machine, effects, tests, spec conformance, and property-based tests.",
+    "outcome": "The Timer component was fully implemented using Duration types throughout, all 46 unit/snapshot tests pass, proptest invariants pass, spec was synchronized to match the codebase's Effect enum pattern, doc warnings were resolved, coverage hit 99.10% region, and the work was committed and a PR pushed.",
+    "learnings": {
+      "repo": [
+        "The Effect pattern uses a typed Effect enum with marker effects (e.g., DurationTimer, TimerInterval) owned by the adapter—not string names or set_interval/cancel_interval APIs. Adapters implement the recurring timer themselves.",
+        "initial_effects (overriding take_initial_effects) is the canonical way to emit mount-time effects like starting a timer interval; cancel_effect is used to cancel them.",
+        "CLAUDE.md mandates resolving spec/code drift in the same PR—spec sections must be updated to match the implemented pattern.",
+        "Spec snippet compilation uses a pure syn syntax check (no type or lint checking), so API example blocks are valid as long as they parse.",
+        "Unreferenced insta snapshot warnings from bare `cargo insta test` without --features are a pre-existing artifact of i18n-feature-gated snapshots, not a real issue.",
+        "Module-level //! doc comments cannot link to enum variants (e.g., Effect::TimerInterval)—only the enum type itself resolves. Variant references must be demoted to plain code spans.",
+        "The convention for time-related fields is core::time::Duration, not u32/u64 milliseconds. search_input::Props.debounce and scroll_area::Props.hide_delay already use Duration; clipboard/toast/navigation_menu are older and out of scope.",
+        "Clippy lints enabled: cast_lossless, uninlined_format_args, missing_const_for_fn. cast_precision_loss is NOT enabled, so u64 as f64 is allowed."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/specialized/timer/mod.rs",
+          "finding": "SetTime is an unconditional context-sync event (mirrors clipboard/toast pattern), so it can set a nonzero current while the machine is in the Completed state. Proptest per-step invariants must allow for this."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/clipboard/mod.rs",
+          "finding": "Canonical reference for the typed Effect enum + marker effect + initial_effects + cancel_effect pattern that Timer was required to follow."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+          "finding": "SetTime invariant had to be relaxed after proptest found that Completed state can have nonzero current due to unconditional context sync."
+        },
+        {
+          "path": "xtask/src/spec/compile_snippets.rs",
+          "finding": "The spec snippet compilation gate is a pure syn syntax check with no type or lint checking, so spec code blocks only need to parse, not compile cleanly."
+        }
+      ],
+      "workflow": [
+        "Running clippy with --all-targets catches test-code lints (unused imports, let _ drops) that per-crate clippy misses.",
+        "xci-fast is the pre-push gate (~10-15 min); it runs 10 gates including coverage checks and must pass before committing/pushing.",
+        "Parallel agent exploration of component structure, core APIs, and test patterns simultaneously is effective for large codebase onboarding before writing code.",
+        "Proptest is a useful complement to snapshot tests—it surfaced a real semantic edge case (unconditional SetTime in Completed state) that handwritten unit tests missed.",
+        "Coverage reports can pinpoint uncovered production lines; the only acceptable uncovered region is no-op test callback code per CLAUDE.md.",
+        "Saving durable conventions (e.g., Duration over _ms integers) to memory files ensures future components default to the correct pattern without repeating the discovery."
+      ]
+    },
+    "friction": [
+      "Spec/code drift: the spec used nonexistent set_interval/cancel_interval APIs and string effect names instead of the typed Effect enum pattern—required significant investigation before writing any code.",
+      "Module-level //! doc comments cannot link to enum variants, requiring two rounds of doc warning fixes to demote variant links to plain code spans.",
+      "Clippy flagged Idle→Start and Paused→Resume/Start match arms as identical duplicate arms, requiring a match restructure mid-implementation.",
+      "Proptest surfaced a real semantic issue with the SetTime invariant that required understanding the unconditional context-sync pattern before the fix was obvious.",
+      "i18n-feature-gated snapshot warnings from bare `cargo insta test` are a pre-existing noise source in test output that can be mistaken for real failures."
+    ],
+    "open_items": [
+      "Older components (clipboard, toast, navigation_menu) still use _ms integer fields for time—migration to Duration is out of scope for this PR but noted as technical debt.",
+      "Timer adapter implementations (the code that actually owns the recurring interval in each platform adapter) were not part of this PR scope.",
+      "PlatformEffects::set_timeout still takes delay_ms: u32—a candidate for Duration migration in a future sweep."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T20:45:43.257988Z",
+    "agent_lines": 2522,
+    "agent_removed": 98,
+    "human_added": 56,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 2578,
+    "total_lines_changed": 2676,
+    "agent_percentage": 97.90732436472346,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 4,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2389,
+      "agent_lines_removed": 63,
+      "user_added_per_file": {
+        "crates/ars-components/tests/proptest_state_machines/specialized.rs": 4
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 52,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2526,
+      "agent_lines_removed": 98,
+      "user_added_per_file": {
+        "crates/ars-components/src/specialized/timer/mod.rs": 52
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2578,
+      "agent_lines_removed": 98
+    }
+  ]
+}
