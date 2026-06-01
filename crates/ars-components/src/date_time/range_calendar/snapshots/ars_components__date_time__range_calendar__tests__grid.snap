@@ -1,0 +1,53 @@
+---
+source: crates/ars-components/src/date_time/range_calendar/tests.rs
+expression: snapshot_attrs(&api.grid_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "grid",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "range-calendar",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "range-cal-heading",
+            ),
+        ),
+        (
+            Aria(
+                MultiSelectable,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "range-cal-grid",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "grid",
+            ),
+        ),
+    ],
+    styles: [],
+}

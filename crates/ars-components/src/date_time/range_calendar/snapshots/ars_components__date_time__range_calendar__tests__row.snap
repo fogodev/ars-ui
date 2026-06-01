@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/date_time/range_calendar/tests.rs
+expression: snapshot_attrs(&api.row_attrs(0))
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "row",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "range-calendar",
+            ),
+        ),
+        (
+            Data(
+                "ars-week-index",
+            ),
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

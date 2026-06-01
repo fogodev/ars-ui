@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/date_time/range_calendar/tests.rs
+expression: snapshot_attrs(&api.next_trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "next-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "range-calendar",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Next 2 months",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "range-cal-next-trigger",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

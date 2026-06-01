@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/date_time/range_calendar/tests.rs
+expression: snapshot_attrs(&api.heading_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "heading",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "range-calendar",
+            ),
+        ),
+        (
+            Aria(
+                Atomic,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "range-cal-heading",
+            ),
+        ),
+    ],
+    styles: [],
+}

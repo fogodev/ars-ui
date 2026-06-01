@@ -1,0 +1,37 @@
+---
+source: crates/ars-components/src/date_time/range_calendar/tests.rs
+expression: "snapshot_attrs(&api.head_cell_attrs(Weekday::Sunday))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "head-cell",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "range-calendar",
+            ),
+        ),
+        (
+            Abbr,
+            String(
+                "Sunday",
+            ),
+        ),
+        (
+            Scope,
+            String(
+                "col",
+            ),
+        ),
+    ],
+    styles: [],
+}

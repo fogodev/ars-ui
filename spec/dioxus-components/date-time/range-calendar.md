@@ -36,6 +36,12 @@ pub struct RangeCalendarProps {
     pub page_behavior: calendar::PageBehavior,
     #[props(default = false)]
     pub show_week_numbers: bool,
+    #[props(default = true)]
+    pub allow_single_date_range: bool,
+    #[props(optional)]
+    pub min_range_days: Option<u32>,
+    #[props(optional)]
+    pub max_range_days: Option<u32>,
     #[props(optional)]
     pub on_value_change: Option<EventHandler<Option<DateRange>>>,
 }
@@ -48,7 +54,7 @@ Plain props remain preferred; the controlled range uses `Signal` only when post-
 
 ## 3. Mapping to Core Component Contract
 
-- Props parity: full parity with the core range calendar contract.
+- Props parity: full parity with the core range calendar contract, including `allow_single_date_range`, `min_range_days`, and `max_range_days`.
 - Part parity: full parity with the same part set as `Calendar`, plus range-specific data attrs and preview semantics on cell triggers.
 - Known adapter deviations: desktop/mobile hosts may expose logical equivalents for DOM-specific attrs and announcements.
 
@@ -165,12 +171,13 @@ Plain props remain preferred; the controlled range uses `Signal` only when post-
 
 - Do not compute in-range and hover-range styling outside the machine snapshot.
 - Do not keep stale hover preview after selection completion.
-- Do not treat every in-range cell as an endpoint for accessibility.
+- Do not derive selection styling locally; every confirmed in-range cell receives machine-owned `aria-selected` while endpoint shape comes from `data-ars-range-start` / `data-ars-range-end`.
 
 ## 19. Consumer Expectations and Guarantees
 
 - Consumers may assume endpoint, in-range, and preview state stay coherent.
 - Consumers may assume first click sets an anchor without completing the range.
+- Consumers may assume `allow_single_date_range`, `min_range_days`, and `max_range_days` are enforced by the core machine before a pending range is committed.
 - Consumers must not assume every host exposes browser-native hover semantics.
 
 ## 20. Platform Support Matrix
