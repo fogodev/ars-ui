@@ -1,0 +1,76 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "b06a0cc91145",
+  "session_id": "019e80c6-598f-7d31-b875-7bc81e3463c5",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T02:30:34.852707Z",
+  "branch": "codex/issue-276-toolbar-core",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/layout/toolbar/mod.rs",
+    "spec/components/layout/toolbar.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "4ddc81facd94",
+  "checkpoint_transcript_start": 883,
+  "transcript_lines_at_start": 883,
+  "token_usage": {
+    "input_tokens": 146148,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 7239936,
+    "output_tokens": 9025,
+    "api_call_count": 59
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement a framework-agnostic Toolbar core component (issue #276) including state machine, roving tabindex, keyboard navigation, RTL/vertical routing, and separator attrs, with full test coverage.",
+    "outcome": "PR #701 was opened against main, the snapshot-reviewed label was applied, CI ran (snapshot check failed due to a labeling race and was rerun), and a Codex review P1 bug (roving tabindex not seeded on fresh toolbar) was identified and fixed with a follow-up commit.",
+    "learnings": {
+      "repo": [
+        "The repo uses a `snapshot-reviewed` label that must be applied to PRs before CI runs the Snapshot Change Check workflow; missing it causes a predictable CI failure unrelated to snapshot content.",
+        "Codex review is triggered by posting `@codex review` as a PR comment and signals activity with a 👀 reaction; results appear as review threads rather than issue comments.",
+        "The spec lives at spec/components/layout/toolbar.md and must be kept in sync with implementation; cargo xtask spec validate enforces this.",
+        "The project uses cargo insta for snapshot testing with --unreferenced=reject enforced on i18n feature builds.",
+        "cargo xci --profile fast is the fast integration check command for the project."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/toolbar/mod.rs",
+          "line": 230,
+          "end_line": 400,
+          "finding": "SetItems/item registration did not seed the roving tabindex target for a freshly-created enabled toolbar, leaving every item at tabindex=-1 until explicit focus. Fix: seed first enabled rendered item during registration when no valid current target exists."
+        }
+      ],
+      "workflow": [
+        "GitHub Actions won't rerun a failed job until the entire workflow run completes; attempting early rerun silently does nothing.",
+        "When a label-gated CI check fails due to a race (label applied after workflow triggered), the correct fix is to wait for the full run to finish, then rerun only the failed jobs.",
+        "Co-authoring Codex-suggested fixes with 'Co-authored-by: Codex <codex@openai.com>' is the established convention in this repo."
+      ]
+    },
+    "friction": [
+      "The snapshot-reviewed label must be manually applied after PR creation; there is no automation to do it pre-CI, causing a predictable labeling-race CI failure on every PR that touches snapshots.",
+      "GitHub's rerun-failed-jobs API silently no-ops if the workflow is still in progress, requiring a poll-and-wait loop before the rerun actually takes effect.",
+      "Codex review results are not surfaced as issue comments, requiring a GraphQL query against reviewThreads to detect completion and read findings."
+    ],
+    "open_items": [
+      "Verify that the rerun of the Snapshot Change Check CI job passes after the labeling race fix.",
+      "Confirm Codex review is satisfied after the roving tabindex seed fix is pushed.",
+      "Consider automating snapshot-reviewed label application in CI or via a pre-push hook to eliminate the labeling race."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T02:29:19.190624Z",
+    "agent_lines": 33,
+    "agent_removed": 8,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 33,
+    "total_lines_changed": 41,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
