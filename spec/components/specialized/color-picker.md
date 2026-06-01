@@ -991,7 +991,9 @@ fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
         || old.close_on_interact_outside != new.close_on_interact_outside
         || old.close_on_escape != new.close_on_escape
         || old.show_alpha != new.show_alpha
-        || old.color_space != new.color_space
+        // `color_space` is intentionally excluded — it is owned by
+        // `ChangeColorSpace` (a prop change routes through that event in
+        // `on_props_changed`) so `SetProps` cannot clobber a runtime switch.
         || old.swatches != new.swatches
         || old.dir != new.dir
         || old.positioning != new.positioning
@@ -1051,25 +1053,37 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // A disabled picker ignores interaction but still tracks focus and
-        // accepts parent-driven prop/value syncs (so it can be re-enabled).
+        // A disabled picker ignores user interaction but still tracks focus and
+        // accepts parent-driven syncs. Controlled `open` changes arrive as
+        // `Open`/`Close`, so those pass through too — otherwise a disabled,
+        // controlled picker could never be opened/closed by its parent.
         if ctx.disabled {
             match event {
-                Event::Focus { .. } | Event::Blur { .. } | Event::SyncValue(_) | Event::SetProps => {}
+                Event::Open | Event::Close
+                | Event::Focus { .. } | Event::Blur { .. }
+                | Event::SyncValue(_) | Event::SetProps => {}
                 _ => return None,
             }
         }
 
         match (state, event) {
             (State::Closed, Event::Open | Event::Toggle) => Some(open_plan()),
-            (State::Open, Event::Close | Event::Toggle) => Some(close_plan()),
+
+            // An explicit close is honored from `Dragging` too (parent-controlled
+            // `open: false`, `Api::close()`, `Toggle`, Escape): abandon the drag
+            // and close rather than get stuck open. Interact-outside stays
+            // suppressed during pointer capture (see the dedicated arm below).
+            (State::Open | State::Dragging { .. }, Event::Close | Event::Toggle) => {
+                Some(close_plan())
+            }
 
             (State::Open, Event::CloseOnInteractOutside) if ctx.close_on_interact_outside => {
                 Some(close_plan())
             }
             // Interact-outside is suppressed during a drag (pointer capture active).
             (State::Dragging { .. }, Event::CloseOnInteractOutside) => None,
-            (State::Open, Event::CloseOnEscape) if ctx.close_on_escape => Some(close_plan()),
+            (State::Open | State::Dragging { .. }, Event::CloseOnEscape)
+                if ctx.close_on_escape => Some(close_plan()),
 
             (State::Open, Event::DragStart { target, x, y }) => {
                 if ctx.readonly { return None; }
@@ -1168,7 +1182,7 @@ impl ars_core::Machine for Machine {
                     ctx.close_on_interact_outside = props.close_on_interact_outside;
                     ctx.close_on_escape = props.close_on_escape;
                     ctx.show_alpha = props.show_alpha;
-                    ctx.color_space = props.color_space;
+                    // `color_space` is owned by `ChangeColorSpace`, not synced here.
                     ctx.swatches = props.swatches;
                     ctx.dir = props.dir;
                     ctx.positioning = props.positioning;
@@ -1194,6 +1208,12 @@ impl ars_core::Machine for Machine {
         }
         if old.value != new.value {
             events.push(Event::SyncValue(new.value));
+        }
+        // A controlled `color_space` prop change routes through the same event a
+        // runtime switch uses, so it announces/remaps consistently and SetProps
+        // never has to touch `color_space` (which would clobber a runtime switch).
+        if old.color_space != new.color_space {
+            events.push(Event::ChangeColorSpace(new.color_space));
         }
         if context_relevant_props_changed(old, new) {
             events.push(Event::SetProps);
@@ -1348,7 +1368,8 @@ for the channel inputs — rather than precomputed into the context.
 
 Highlights of the part attribute surface:
 
-- **`trigger_attrs`** — `aria-haspopup="dialog"`, `aria-expanded`,
+- **`trigger_attrs`** — `type="button"` (so a real `<button>` in a form toggles
+  rather than submits), `aria-haspopup="dialog"`, `aria-expanded`,
   `aria-controls` (content id), `aria-labelledby` (label id), and `aria-label`
   from `messages.trigger_label`; `aria-disabled="true"` + `data-ars-disabled` when
   disabled.
@@ -1441,51 +1462,51 @@ ColorPicker
 └── HiddenInput                 (required — for form submission)
 ```
 
-| Part                 | Element                 | Required | Key Attributes                                                                     |
-| -------------------- | ----------------------- | -------- | ---------------------------------------------------------------------------------- |
-| `Root`               | `<div>`                 | yes      | `data-ars-state`, `data-ars-disabled`, `data-ars-readonly`                         |
-| `Label`              | `<label>`               | yes      | `for` (trigger ID)                                                                 |
-| `Control`            | `<div>`                 | yes      |                                                                                    |
-| `Trigger`            | `<button>`              | yes      | `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`, `aria-labelledby`      |
-| `Content`            | `<div>`                 | yes      | `role="dialog"`, `aria-labelledby`, `data-ars-state`                               |
-| `Area`               | `<div>`                 | yes      | `role="group"`                                                                     |
-| `AreaThumb`          | `<div>`                 | yes      | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex="0"`     |
-| `ChannelSlider`      | `<div>`                 | yes      | `role="group"`, `data-ars-channel`                                                 |
-| `ChannelSliderThumb` | `<div>`                 | yes      | `role="slider"`, `tabindex="0"`, `aria-valuenow`, `aria-label`                     |
-| `AlphaSlider`        | `<div>`                 | no       | `role="group"`, `data-ars-channel="alpha"`                                         |
-| `SwatchGroup`        | `<div>`                 | no       | `role="group"`                                                                     |
-| `Swatch`             | `<button>`              | no       | `role="button"`, `aria-label`, `data-ars-selected`, `data-ars-index`               |
-| `FormatSelect`       | `<select>` / `<button>` | no       | `aria-label`                                                                       |
-| `ChannelInput`       | `<input>`               | no       | `type="text"`, `inputmode="numeric"`, `data-ars-channel`, `data-ars-channel-index` |
-| `HexInput`           | `<input>`               | no       | `type="text"`, `inputmode="text"`                                                  |
-| `EyeDropperTrigger`  | `<button>`              | no       | `aria-label`, `hidden` (when unsupported)                                          |
-| `HiddenInput`        | `<input type="hidden">` | yes      | `name`, `value`                                                                    |
+| Part                 | Element                 | Required | Key Attributes                                                                                                                            |
+| -------------------- | ----------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `Root`               | `<div>`                 | yes      | `data-ars-state`, `data-ars-disabled`, `data-ars-readonly`                                                                                |
+| `Label`              | `<label>`               | yes      | `for` (trigger ID)                                                                                                                        |
+| `Control`            | `<div>`                 | yes      |                                                                                                                                           |
+| `Trigger`            | `<button>`              | yes      | `type="button"`, `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`, `aria-labelledby`                                            |
+| `Content`            | `<div>`                 | yes      | `role="dialog"`, `aria-labelledby`, `data-ars-state`                                                                                      |
+| `Area`               | `<div>`                 | yes      | `role="group"`                                                                                                                            |
+| `AreaThumb`          | `<div>`                 | yes      | `role="application"`, `aria-roledescription`, `aria-valuetext`, `tabindex="0"`                                                            |
+| `ChannelSlider`      | `<div>`                 | yes      | `role="group"`, `data-ars-channel`                                                                                                        |
+| `ChannelSliderThumb` | `<div>`                 | yes      | `role="slider"`, `tabindex` (`0`, `-1` when disabled), `aria-valuenow`, `aria-label`, `aria-disabled` when disabled                       |
+| `AlphaSlider`        | `<div>`                 | no       | `role="group"`, `data-ars-channel="alpha"`                                                                                                |
+| `SwatchGroup`        | `<div>`                 | no       | `role="group"`                                                                                                                            |
+| `Swatch`             | `<button>`              | no       | `role="button"`, `tabindex` (`0`, `-1` when disabled), `aria-label`, `data-ars-selected`, `data-ars-index`, `aria-disabled` when disabled |
+| `FormatSelect`       | `<select>` / `<button>` | no       | `aria-label`                                                                                                                              |
+| `ChannelInput`       | `<input>`               | no       | `type="text"`, `inputmode="numeric"`, `data-ars-channel`, `data-ars-channel-index`                                                        |
+| `HexInput`           | `<input>`               | no       | `type="text"`, `inputmode="text"`                                                                                                         |
+| `EyeDropperTrigger`  | `<button>`              | no       | `aria-label`, `hidden` (when unsupported)                                                                                                 |
+| `HiddenInput`        | `<input type="hidden">` | yes      | `name`, `value`                                                                                                                           |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Attribute / Behaviour               | Element                | Value                         |
-| ----------------------------------- | ---------------------- | ----------------------------- |
-| `role="dialog"`                     | `Content`              | Popover container             |
-| `aria-haspopup="dialog"`            | `Trigger`              | Indicates popover             |
-| `aria-expanded`                     | `Trigger`              | `"true"` / `"false"`          |
-| `aria-controls`                     | `Trigger`              | Content ID                    |
-| `aria-labelledby`                   | `Content`, `Trigger`   | Label ID                      |
-| `role="application"`                | `AreaThumb`            | 2D color area interaction     |
-| `aria-roledescription="color area"` | `AreaThumb`            | Describes the 2D area control |
-| `role="slider"`                     | Channel slider thumbs  | Slider interaction            |
-| `aria-valuenow`                     | Channel slider thumbs  | Current numeric value         |
-| `aria-valuemin` / `aria-valuemax`   | Channel slider thumbs  | Channel range                 |
-| `aria-valuetext`                    | `AreaThumb`            | Formatted color string        |
-| `aria-label`                        | `AreaThumb`            | `"Color area selector"`       |
-| `aria-label`                        | Channel slider thumbs  | `"Hue"`, `"Alpha"`            |
-| `aria-label`                        | `EyeDropperTrigger`    | `"Pick color from screen"`    |
-| `aria-label`                        | `FormatSelect`         | `"Toggle color format"`       |
-| `aria-label`                        | `Swatch`               | `"Select color #rrggbb"`      |
-| `aria-live="polite"`                | Value text live region | Announces color changes       |
-| `aria-disabled="true"`              | `Trigger`              | When disabled                 |
-| `aria-keyshortcuts`                 | `AreaThumb`            | Documents arrow key controls  |
+| Attribute / Behaviour               | Element                                                 | Value                                              |
+| ----------------------------------- | ------------------------------------------------------- | -------------------------------------------------- |
+| `role="dialog"`                     | `Content`                                               | Popover container                                  |
+| `aria-haspopup="dialog"`            | `Trigger`                                               | Indicates popover                                  |
+| `aria-expanded`                     | `Trigger`                                               | `"true"` / `"false"`                               |
+| `aria-controls`                     | `Trigger`                                               | Content ID                                         |
+| `aria-labelledby`                   | `Content`, `Trigger`                                    | Label ID                                           |
+| `role="application"`                | `AreaThumb`                                             | 2D color area interaction                          |
+| `aria-roledescription="color area"` | `AreaThumb`                                             | Describes the 2D area control                      |
+| `role="slider"`                     | Channel slider thumbs                                   | Slider interaction                                 |
+| `aria-valuenow`                     | Channel slider thumbs                                   | Current numeric value                              |
+| `aria-valuemin` / `aria-valuemax`   | Channel slider thumbs                                   | Channel range                                      |
+| `aria-valuetext`                    | `AreaThumb`                                             | Formatted color string                             |
+| `aria-label`                        | `AreaThumb`                                             | `"Color area selector"`                            |
+| `aria-label`                        | Channel slider thumbs                                   | `"Hue"`, `"Alpha"`                                 |
+| `aria-label`                        | `EyeDropperTrigger`                                     | `"Pick color from screen"`                         |
+| `aria-label`                        | `FormatSelect`                                          | `"Toggle color format"`                            |
+| `aria-label`                        | `Swatch`                                                | `"Select color #rrggbb"`                           |
+| `aria-live="polite"`                | Value text live region                                  | Announces color changes                            |
+| `aria-disabled="true"`              | `Trigger`, `AreaThumb`, channel slider thumbs, `Swatch` | When disabled (these also drop to `tabindex="-1"`) |
+| `aria-keyshortcuts`                 | `AreaThumb`                                             | Documents arrow key controls                       |
 
 ### 3.2 Keyboard Interaction
 

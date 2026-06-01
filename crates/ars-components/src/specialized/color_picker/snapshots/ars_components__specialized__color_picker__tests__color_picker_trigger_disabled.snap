@@ -82,6 +82,12 @@ AttrMap {
                 "cp-trigger",
             ),
         ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
     ],
     styles: [],
 }

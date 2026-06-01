@@ -583,15 +583,17 @@ fn close_plan() -> TransitionPlan<Machine> {
         .with_effect(PendingEffect::named(Effect::DetachClickOutside))
 }
 
-/// Whether any context-backed non-`value`/`open` prop changed and the context
-/// needs refreshing via [`Event::SetProps`].
+/// Whether any context-backed prop that `SetProps` owns changed and the context
+/// needs refreshing. Excludes `value`/`open` (driven by `SyncValue`/`Open`/
+/// `Close`) and `color_space` (driven by `ChangeColorSpace`), each of which has
+/// its own dedicated sync path so an unrelated `SetProps` cannot clobber a
+/// runtime change.
 fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
     old.disabled != new.disabled
         || old.readonly != new.readonly
         || old.close_on_interact_outside != new.close_on_interact_outside
         || old.close_on_escape != new.close_on_escape
         || old.show_alpha != new.show_alpha
-        || old.color_space != new.color_space
         || old.swatches != new.swatches
         || old.dir != new.dir
         || old.positioning != new.positioning
@@ -670,11 +672,16 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // A disabled picker ignores interaction but still tracks focus and
-        // accepts parent-driven prop/value syncs (so it can be re-enabled).
+        // A disabled picker ignores user interaction but still tracks focus and
+        // accepts parent-driven syncs (so it can be re-enabled). Controlled
+        // `open` changes arrive as `Open`/`Close` (see `on_props_changed`), so
+        // those pass through too — otherwise a disabled, controlled picker could
+        // never be opened or closed by its parent.
         if ctx.disabled {
             match event {
-                Event::Focus { .. }
+                Event::Open
+                | Event::Close
+                | Event::Focus { .. }
                 | Event::Blur { .. }
                 | Event::SyncValue(_)
                 | Event::SetProps => {}
@@ -686,7 +693,14 @@ impl ars_core::Machine for Machine {
             // --- Open / close lifecycle ---
             (State::Closed, Event::Open | Event::Toggle) => Some(open_plan()),
 
-            (State::Open, Event::Close | Event::Toggle) => Some(close_plan()),
+            // An explicit close request is honored from `Dragging` too: a
+            // parent-controlled `open: false`, `Api::close()`, `Toggle`, or
+            // Escape must abandon the in-flight drag and close rather than leave
+            // the picker stuck open. (Interact-outside stays suppressed during
+            // pointer capture — see the dedicated arm below.)
+            (State::Open | State::Dragging { .. }, Event::Close | Event::Toggle) => {
+                Some(close_plan())
+            }
 
             (State::Open, Event::CloseOnInteractOutside) if ctx.close_on_interact_outside => {
                 Some(close_plan())
@@ -702,7 +716,9 @@ impl ars_core::Machine for Machine {
             )]
             (State::Dragging { .. }, Event::CloseOnInteractOutside) => None,
 
-            (State::Open, Event::CloseOnEscape) if ctx.close_on_escape => Some(close_plan()),
+            (State::Open | State::Dragging { .. }, Event::CloseOnEscape) if ctx.close_on_escape => {
+                Some(close_plan())
+            }
 
             // --- Drag lifecycle ---
             (State::Open, Event::DragStart { target, x, y }) => {
@@ -866,7 +882,10 @@ impl ars_core::Machine for Machine {
                     ctx.close_on_interact_outside = props.close_on_interact_outside;
                     ctx.close_on_escape = props.close_on_escape;
                     ctx.show_alpha = props.show_alpha;
-                    ctx.color_space = props.color_space;
+                    // `color_space` is intentionally NOT synced here — it is
+                    // owned by `ChangeColorSpace` (prop changes are routed
+                    // through that event in `on_props_changed`) so an unrelated
+                    // prop update cannot revert a runtime color-space switch.
                     ctx.swatches = props.swatches;
                     ctx.dir = props.dir;
                     ctx.positioning = props.positioning;
@@ -900,6 +919,14 @@ impl ars_core::Machine for Machine {
 
         if old.value != new.value {
             events.push(Event::SyncValue(new.value));
+        }
+
+        // A controlled `color_space` prop change is routed through the same
+        // event a runtime switch uses, so it announces and remaps consistently
+        // and `SetProps` never has to touch `color_space` (which would clobber a
+        // runtime switch on any unrelated prop update).
+        if old.color_space != new.color_space {
+            events.push(Event::ChangeColorSpace(new.color_space));
         }
 
         if context_relevant_props_changed(old, new) {
@@ -1227,6 +1254,10 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Id, self.ctx.ids.part("trigger"))
+            // `type="button"` so a trigger rendered as a real `<button>` inside
+            // a form toggles the popover instead of submitting the form (the
+            // HTML default). Mirrors the sibling popover trigger.
+            .set(HtmlAttr::Type, "button")
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.trigger_label)(&self.ctx.locale),
@@ -1403,8 +1434,18 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Role, "slider")
-            .set(HtmlAttr::TabIndex, "0")
+            // A disabled control must stay out of the tab order, mirroring the
+            // area thumb, so keyboard / AT users cannot focus a slider whose
+            // events the machine drops.
+            .set(
+                HtmlAttr::TabIndex,
+                if self.ctx.disabled { "-1" } else { "0" },
+            )
             .set(HtmlAttr::Data("ars-channel"), channel_token(channel));
+
+        if self.ctx.disabled {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
 
         let color = self.ctx.value.pending();
         let value = channel_value(color, channel);
@@ -1483,8 +1524,17 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Role, "button")
-            .set(HtmlAttr::TabIndex, "0")
+            // A disabled picker keeps its swatches out of the tab order too,
+            // matching the area and channel thumbs.
+            .set(
+                HtmlAttr::TabIndex,
+                if self.ctx.disabled { "-1" } else { "0" },
+            )
             .set(HtmlAttr::Data("ars-index"), index.to_string());
+
+        if self.ctx.disabled {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
 
         if let Some(color) = self.ctx.swatches.get(index) {
             attrs.set(
@@ -2517,26 +2567,57 @@ mod tests {
     // ── Disabled / readonly ────────────────────────────────────────
 
     #[test]
-    fn disabled_picker_ignores_interaction_but_tracks_focus() {
+    fn disabled_picker_ignores_user_interaction_but_tracks_focus() {
         let mut svc = service(Props {
             disabled: true,
             ..Props::default()
         });
 
-        drop(svc.send(Event::Open));
-
-        assert_eq!(svc.state(), &State::Closed, "disabled picker stays closed");
+        // User-initiated toggle is ignored while disabled.
+        drop(svc.send(Event::Toggle));
+        assert_eq!(
+            svc.state(),
+            &State::Closed,
+            "disabled picker ignores a user toggle"
+        );
 
         drop(svc.send(Event::Focus { part: "trigger" }));
-
         assert_eq!(svc.context().focused_part, Some("trigger"));
 
         let trigger = svc.connect(&|_| {}).trigger_attrs();
-
         assert_eq!(
             trigger.get(&HtmlAttr::Aria(AriaAttr::Disabled)),
             Some("true")
         );
+    }
+
+    #[test]
+    fn disabled_picker_still_honors_controlled_open_sync() {
+        // A controlled, disabled picker must reflect parent-driven open changes
+        // (which arrive as `Open`/`Close`) even though user interaction is
+        // blocked — otherwise it would be stuck until re-enabled.
+        let mut svc = service(Props {
+            disabled: true,
+            open: Some(true),
+            ..Props::default()
+        });
+        assert_eq!(svc.state(), &State::Open);
+
+        drop(svc.set_props(Props {
+            id: "color-picker".to_string(),
+            disabled: true,
+            open: Some(false),
+            ..Props::default()
+        }));
+        assert_eq!(svc.state(), &State::Closed);
+
+        drop(svc.set_props(Props {
+            id: "color-picker".to_string(),
+            disabled: true,
+            open: Some(true),
+            ..Props::default()
+        }));
+        assert_eq!(svc.state(), &State::Open);
     }
 
     #[test]
@@ -2766,18 +2847,24 @@ mod tests {
 
         let _dbg = format!("{api:?}");
 
-        // Disabled walk: interaction blocked, focus tracked, syncs pass through.
+        // Disabled walk: user interaction blocked, focus tracked, controlled
+        // open/value syncs pass through.
         let mut disabled = service(Props {
             id: "cp".into(),
             disabled: true,
             ..Props::default()
         });
 
-        drop(disabled.send(Event::Open));
+        drop(disabled.send(Event::Toggle)); // user toggle ignored
+        assert_eq!(disabled.state(), &State::Closed);
         drop(disabled.send(Event::Focus { part: "trigger" }));
         drop(disabled.send(Event::Blur { part: "trigger" }));
         drop(disabled.send(Event::SyncValue(Some(ColorValue::default()))));
 
+        // Controlled open sync is honored even while disabled.
+        drop(disabled.send(Event::Open));
+        assert_eq!(disabled.state(), &State::Open);
+        drop(disabled.send(Event::Close));
         assert_eq!(disabled.state(), &State::Closed);
     }
 
@@ -3248,6 +3335,134 @@ mod tests {
         // RTL flips the horizontal arrows: ArrowRight decrements, ArrowLeft increments.
         assert!(matches!(events[0], Event::ChannelDecrement { .. }));
         assert!(matches!(events[1], Event::ChannelIncrement { .. }));
+    }
+
+    // ── Codex review #706: lifecycle / prop-sync / a11y fixes ──────
+
+    #[test]
+    fn runtime_color_space_survives_unrelated_set_props() {
+        // A runtime ChangeColorSpace must not be reverted by a later SetProps
+        // triggered by an unrelated prop change (e.g. `dir`).
+        let mut svc = service(Props::default()); // default color_space = Hsl
+        drop(svc.send(Event::ChangeColorSpace(ColorSpace::Rgb)));
+        assert_eq!(svc.connect(&|_| {}).color_space(), ColorSpace::Rgb);
+
+        drop(svc.set_props(Props {
+            id: "color-picker".to_string(),
+            dir: Direction::Rtl, // unrelated change; color_space prop unchanged (Hsl)
+            ..Props::default()
+        }));
+        assert_eq!(
+            svc.connect(&|_| {}).color_space(),
+            ColorSpace::Rgb,
+            "runtime color-space switch must survive an unrelated prop sync"
+        );
+        assert_eq!(svc.context().dir, Direction::Rtl);
+    }
+
+    #[test]
+    fn controlled_color_space_prop_change_applies_and_announces() {
+        let mut svc = service(Props::default());
+        let mut result = svc.set_props(Props {
+            id: "color-picker".to_string(),
+            color_space: ColorSpace::Hsb,
+            ..Props::default()
+        });
+        let names = run_effects(&svc, &mut result);
+        assert_eq!(svc.connect(&|_| {}).color_space(), ColorSpace::Hsb);
+        assert!(
+            names.contains(&Effect::AnnounceColorSpace),
+            "a controlled color-space prop change announces like a runtime switch"
+        );
+    }
+
+    #[test]
+    fn explicit_close_requests_resolve_from_dragging_state() {
+        // Close
+        let mut svc = open_service(Props::default());
+        drop(svc.send(Event::DragStart {
+            target: DragTarget::Area,
+            x: 0.5,
+            y: 0.5,
+        }));
+        assert!(matches!(svc.state(), State::Dragging { .. }));
+        let mut closed = svc.send(Event::Close);
+        assert_eq!(svc.state(), &State::Closed);
+        assert!(
+            run_effects(&svc, &mut closed).contains(&Effect::DetachClickOutside),
+            "closing from a drag still emits the close-lifecycle effects"
+        );
+
+        // Escape
+        let mut svc = open_service(Props::default());
+        drop(svc.send(Event::DragStart {
+            target: DragTarget::Channel(ColorChannel::Hue),
+            x: 0.5,
+            y: 0.0,
+        }));
+        drop(svc.send(Event::CloseOnEscape));
+        assert_eq!(svc.state(), &State::Closed);
+
+        // Parent-controlled open -> false while dragging.
+        let mut svc = service(Props {
+            open: Some(true),
+            ..Props::default()
+        });
+        drop(svc.send(Event::DragStart {
+            target: DragTarget::Area,
+            x: 0.2,
+            y: 0.2,
+        }));
+        assert!(matches!(svc.state(), State::Dragging { .. }));
+        drop(svc.set_props(Props {
+            id: "color-picker".to_string(),
+            open: Some(false),
+            ..Props::default()
+        }));
+        assert_eq!(svc.state(), &State::Closed);
+    }
+
+    #[test]
+    fn trigger_is_type_button_to_avoid_form_submission() {
+        let svc = service(Props::default());
+        assert_eq!(
+            svc.connect(&|_| {}).trigger_attrs().get(&HtmlAttr::Type),
+            Some("button")
+        );
+    }
+
+    #[test]
+    fn disabled_thumbs_and_swatches_leave_tab_order() {
+        let svc = service(Props {
+            disabled: true,
+            swatches: alloc::vec![ColorValue::default()],
+            ..Props::default()
+        });
+        let api = svc.connect(&|_| {});
+
+        let hue_thumb = api.channel_slider_thumb_attrs(ColorChannel::Hue);
+        assert_eq!(hue_thumb.get(&HtmlAttr::TabIndex), Some("-1"));
+        assert_eq!(
+            hue_thumb.get(&HtmlAttr::Aria(AriaAttr::Disabled)),
+            Some("true")
+        );
+
+        let swatch = api.swatch_attrs(0);
+        assert_eq!(swatch.get(&HtmlAttr::TabIndex), Some("-1"));
+        assert_eq!(
+            swatch.get(&HtmlAttr::Aria(AriaAttr::Disabled)),
+            Some("true")
+        );
+
+        // Enabled controls remain focusable.
+        let enabled = open_service(Props::default());
+        assert_eq!(
+            enabled
+                .connect(&|_| {})
+                .channel_slider_thumb_attrs(ColorChannel::Hue)
+                .get(&HtmlAttr::TabIndex),
+            Some("0")
+        );
     }
 
     // ── Snapshots: every anatomy part + output-affecting branches ──
