@@ -1,0 +1,149 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "59c1afbb2321",
+  "session_id": "1f28245f-ab38-40e8-8c17-f578e8fb3a40",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-01T02:58:24.282267Z",
+  "branch": "impl-288",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/specialized/mod.rs",
+    "crates/ars-components/src/specialized/qr_code/mod.rs",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_download_trigger.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_frame.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_overlay_with_src.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_overlay_without_src.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_pattern.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_root_default.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_root_no_matrix.snap",
+    "crates/ars-components/src/specialized/qr_code/snapshots/ars_components__specialized__qr_code__tests__qr_code_root_url_with_id.snap",
+    "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+    "crates/ars-components/tests/spec_conformance/specialized.rs",
+    "spec/components/specialized/qr-code.md",
+    "spec/dioxus-components/specialized/qr-code.md",
+    "spec/leptos-components/specialized/qr-code.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "6cefed81748c",
+  "token_usage": {
+    "input_tokens": 40887,
+    "cache_creation_tokens": 525840,
+    "cache_read_tokens": 14154953,
+    "output_tokens": 89063,
+    "api_call_count": 93
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Implement task #288: a QrCode agnostic core component in ars-components (Rust, no_std) that renders a QR matrix supplied by the caller, including accessible labeling, error-correction level, sizing, colors, optional center overlay, and download trigger.",
+    "outcome": "Fully implemented the stateless QrCode connect API mirroring the color_swatch pattern, with spec sync across core and adapter specs, 12 unit tests, 8 snapshots, 7 proptests, 1 doctest, and 1 spec-conformance test. All gates passed (cargo xci-fast, clippy, spec validate) and the PR was committed and pushed closing #288.",
+    "learnings": {
+      "repo": [
+        "ars-components is no_std by default (std is a feature, uses alloc) — this rules out generation crates living in the core layer without a feature gate.",
+        "color_swatch is the canonical stateless-specialized component analog: Api<'a> borrowing props, role='img' + aria-label, the real id pattern (if !props.id.is_empty()), no generate_id() helper.",
+        "The real id pattern across all components is `if !props.id.is_empty()` — generate_id() does not exist despite appearing in the spec.",
+        "Adapter specs explicitly own QR encoding via the qrcode crate in ars-dom; the agnostic core injects Option<QrMatrix> rather than generating it.",
+        "Proptests for stateless components live in tests/proptest_state_machines/specialized.rs and are marked #[ignore] for the nightly extended-proptest CI job — separator is a precedent for stateless components requiring them.",
+        "Snapshot orphan-check false positives occur for highlight when run without --features i18n; the correct command is --features i18n --unreferenced=reject.",
+        "cargo xci-fast is the pre-push gate (10 fast-profile checks including instrumented coverage rebuild, ~10-15 min).",
+        "Adapter sketches in spec/leptos-components and spec/dioxus-components are intentionally loose pseudo-code, consistent with the color_swatch sketch convention.",
+        "QrMatrix::get uses .unwrap_or(false) as a release-build defensive guard; debug_assert covers it in tests — leave it per the equivalent-defensive-guard guidance.",
+        "foreground/background/overlay_size props are stored in Props but not emitted as core attrs; they feed adapter-owned Pattern/Overlay rendering, matching the spec design."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/specialized/qr_code/mod.rs",
+          "finding": "pixel_size formula: quiet_zone * 2 + modules * module_size — e.g. 44px = (3+4*2)*4 and 56px = (3+2*2)*8; returns 0.0 when no matrix is injected."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/qr_code/mod.rs",
+          "finding": "Api::new takes 4 args (props, matrix: Option<QrMatrix>, env, messages) — the spec originally had a 2-arg form calling a non-existent QrMatrix::generate, which was corrected in-task."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/mod.rs",
+          "finding": "Module declarations are ordered alphabetically; qr_code (q) inserts after file_upload (f)."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+          "finding": "arb_value() must mix plain text and http/https URLs so the link-label URL branch is actually exercised; arb_matrix() builds square n×n grids so size == n holds."
+        },
+        {
+          "path": "spec/components/specialized/qr-code.md",
+          "finding": "Spec had two drift points vs the implementation: (1) Api::new called QrMatrix::generate which was never defined; (2) referenced generate_id() which doesn't exist. Both corrected in-task."
+        }
+      ],
+      "workflow": [
+        "Post-implementation audit runs in 3 phases: Phase 1 (spec/impl drift), Phase 2 (missing wiring — catalog, feature gates, adapter refs, prelude, manifest), Phase 3 (coverage and test breadth). No findings deferred.",
+        "Spec sync is done in-task for the implementing PR — not deferred to a follow-up — so spec and impl match at merge time.",
+        "GitHub project board item moved to In Progress before writing code, not after.",
+        "Snapshots generated with --accept after a first compile-and-run confirms the tests pass; then reviewed manually before accepting.",
+        "cargo xci-fast run as background task with ScheduleWakeup fallback; notified on completion before committing.",
+        "Audit correctly distinguishes pre-existing warnings/orphans (doc warnings, highlight snapshots) from new regressions by checking file provenance."
+      ]
+    },
+    "friction": [
+      "Spec drift in two places: Api::new called a non-existent QrMatrix::generate, and referenced generate_id() which doesn't exist — required explicit resolution and user confirmation before proceeding.",
+      "Audit Phase 3 initially missed proptests for the stateless QrCode component by incorrectly claiming stateless peers carry no proptests — user caught this; separator is a clear precedent.",
+      "Snapshot orphan check emits false positives for highlight feature-gated tests when run without --features i18n, requiring a second run with the feature flag to confirm clean state.",
+      "cargo xci-fast takes ~10-15 minutes, requiring a background task + wake-up mechanism rather than an inline await."
+    ],
+    "open_items": [
+      "Adapter implementation for QrCode in ars-dom: actual QR matrix encoding via the qrcode crate is intentionally deferred to a future ars-dom adapter task.",
+      "foreground/background/overlay_size props are defined in Props but rendering is fully adapter-owned — no core attrs emitted; the adapter task must consume these.",
+      "118 pre-existing doc warnings across ars-components are unrelated to QrCode and were not addressed in this PR."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-01T02:57:09.924925Z",
+    "agent_lines": 1139,
+    "agent_removed": 19,
+    "human_added": 108,
+    "human_modified": 11,
+    "human_removed": 0,
+    "total_committed": 1253,
+    "total_lines_changed": 1277,
+    "agent_percentage": 90.68128425998434,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 8,
+      "user_lines_removed": 1,
+      "agent_lines_added": 978,
+      "agent_lines_removed": 19,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 7,
+        "spec/components/specialized/qr-code.md": 1
+      },
+      "user_removed_per_file": {
+        "spec/components/specialized/qr-code.md": 1
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 66,
+      "user_lines_removed": 5,
+      "agent_lines_added": 1205,
+      "agent_lines_removed": 25,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 7,
+        "crates/ars-components/src/specialized/qr_code/mod.rs": 53,
+        "crates/ars-components/tests/proptest_state_machines/specialized.rs": 6
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/specialized/qr_code/mod.rs": 2,
+        "crates/ars-components/tests/proptest_state_machines/specialized.rs": 3
+      }
+    }
+  ]
+}
