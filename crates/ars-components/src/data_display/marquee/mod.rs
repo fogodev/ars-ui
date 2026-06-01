@@ -45,6 +45,9 @@ pub enum Event {
 
     /// One full loop of the content completed.
     LoopComplete,
+
+    /// Synchronize context-backed values after props change.
+    SyncProps,
 }
 
 /// Scroll direction for the `Marquee` content.
@@ -358,7 +361,7 @@ impl ars_core::Machine for Machine {
         env: &Env,
         messages: &Self::Messages,
     ) -> (Self::State, Self::Context) {
-        let state = if props.auto_play && !props.disabled {
+        let state = if props.auto_play && !props.disabled && props.loop_count != Some(0) {
             State::Playing
         } else {
             State::Paused
@@ -390,19 +393,19 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled {
+        if ctx.disabled && !matches!(event, Event::SyncProps) {
             return None;
         }
 
         match (state, event) {
-            (State::Paused, Event::Play) => Some(TransitionPlan::to(State::Playing).apply(
-                |ctx: &mut Context| {
+            (State::Paused, Event::Play) if !finite_loop_exhausted(ctx) => Some(
+                TransitionPlan::to(State::Playing).apply(|ctx: &mut Context| {
                     ctx.paused_by_hover = false;
                     ctx.paused_by_focus = false;
-                },
-            )),
+                }),
+            ),
 
             (State::Playing, Event::Pause) => Some(TransitionPlan::to(State::Paused).apply(
                 |ctx: &mut Context| {
@@ -417,8 +420,19 @@ impl ars_core::Machine for Machine {
                 }),
             ),
 
+            (State::Paused, Event::HoverIn) if ctx.pause_on_hover && !ctx.paused_by_hover => {
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.paused_by_hover = true;
+                }))
+            }
+
             (State::Paused, Event::HoverOut) if ctx.paused_by_hover => Some(
-                TransitionPlan::to(State::Playing).apply(|ctx: &mut Context| {
+                TransitionPlan::to(if ctx.paused_by_focus {
+                    State::Paused
+                } else {
+                    State::Playing
+                })
+                .apply(|ctx: &mut Context| {
                     ctx.paused_by_hover = false;
                 }),
             ),
@@ -429,31 +443,92 @@ impl ars_core::Machine for Machine {
                 }),
             ),
 
+            (State::Paused, Event::FocusIn) if ctx.pause_on_focus && !ctx.paused_by_focus => {
+                Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.paused_by_focus = true;
+                }))
+            }
+
             (State::Paused, Event::FocusOut) if ctx.paused_by_focus => Some(
-                TransitionPlan::to(State::Playing).apply(|ctx: &mut Context| {
+                TransitionPlan::to(if ctx.paused_by_hover {
+                    State::Paused
+                } else {
+                    State::Playing
+                })
+                .apply(|ctx: &mut Context| {
                     ctx.paused_by_focus = false;
                 }),
             ),
 
             (State::Playing, Event::LoopComplete) => {
-                let exhausted = ctx
-                    .loop_count
-                    .is_some_and(|max| ctx.current_loop.saturating_add(1) >= max);
+                let next_loop = next_loop_count(ctx);
+                let exhausted = ctx.loop_count.is_some_and(|max| next_loop >= max);
 
                 if exhausted {
                     Some(
-                        TransitionPlan::to(State::Paused).apply(|ctx: &mut Context| {
-                            ctx.current_loop = ctx.current_loop.saturating_add(1);
+                        TransitionPlan::to(State::Paused).apply(move |ctx: &mut Context| {
+                            ctx.current_loop = next_loop;
                         }),
                     )
                 } else {
-                    Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                        ctx.current_loop = ctx.current_loop.saturating_add(1);
+                    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.current_loop = next_loop;
                     }))
                 }
             }
 
+            (_, Event::SyncProps) => {
+                let next_state = if props.disabled || props.loop_count == Some(0) {
+                    State::Paused
+                } else {
+                    state.clone()
+                };
+                let speed = props.speed;
+                let direction = props.direction;
+                let gap = props.gap;
+                let pause_on_hover = props.pause_on_hover;
+                let pause_on_focus = props.pause_on_focus;
+                let loop_count = props.loop_count;
+                let auto_fill = props.auto_fill;
+                let delay = props.delay;
+                let disabled = props.disabled;
+                Some(
+                    TransitionPlan::to(next_state).apply(move |ctx: &mut Context| {
+                        ctx.speed = speed;
+                        ctx.direction = direction;
+                        ctx.gap = gap;
+                        ctx.pause_on_hover = pause_on_hover;
+                        ctx.pause_on_focus = pause_on_focus;
+                        ctx.loop_count = loop_count;
+                        ctx.auto_fill = auto_fill;
+                        ctx.delay = delay;
+                        ctx.current_loop =
+                            loop_count.map_or(ctx.current_loop, |max| ctx.current_loop.min(max));
+                        ctx.disabled = disabled;
+                        if !pause_on_hover || disabled {
+                            ctx.paused_by_hover = false;
+                        }
+                        if !pause_on_focus || disabled {
+                            ctx.paused_by_focus = false;
+                        }
+                    }),
+                )
+            }
+
             _ => None,
+        }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "marquee::Props.id must remain stable after init"
+        );
+
+        if context_relevant_props_changed(old, new) {
+            vec![Event::SyncProps]
+        } else {
+            Vec::new()
         }
     }
 
@@ -470,6 +545,27 @@ impl ars_core::Machine for Machine {
             send,
         }
     }
+}
+
+fn next_loop_count(ctx: &Context) -> usize {
+    let next = ctx.current_loop.saturating_add(1);
+    ctx.loop_count.map_or(next, |max| next.min(max))
+}
+
+fn finite_loop_exhausted(ctx: &Context) -> bool {
+    ctx.loop_count.is_some_and(|max| ctx.current_loop >= max)
+}
+
+fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
+    old.speed != new.speed
+        || old.direction != new.direction
+        || old.gap != new.gap
+        || old.pause_on_hover != new.pause_on_hover
+        || old.pause_on_focus != new.pause_on_focus
+        || old.loop_count != new.loop_count
+        || old.auto_fill != new.auto_fill
+        || old.delay != new.delay
+        || old.disabled != new.disabled
 }
 
 /// API for the `Marquee` component.
@@ -762,6 +858,98 @@ mod tests {
     }
 
     #[test]
+    fn marquee_play_does_not_restart_after_finite_loop_count_is_exhausted() {
+        let mut marquee = service(Props::new().id("ticker").loop_count(1));
+
+        assert!(changed(&marquee.send(Event::LoopComplete)));
+        assert_eq!(marquee.state(), &State::Paused);
+        assert_eq!(marquee.context().current_loop, 1);
+
+        assert!(!changed(&marquee.send(Event::Play)));
+        assert_eq!(marquee.state(), &State::Paused);
+        assert_eq!(marquee.context().current_loop, 1);
+
+        assert!(!changed(&marquee.send(Event::LoopComplete)));
+        assert_eq!(marquee.context().current_loop, 1);
+    }
+
+    #[test]
+    fn marquee_hover_and_focus_pause_causes_must_all_clear_before_resume() {
+        let mut marquee = service(Props::new().id("ticker"));
+
+        assert!(changed(&marquee.send(Event::HoverIn)));
+        assert_eq!(marquee.state(), &State::Paused);
+        assert!(marquee.context().paused_by_hover);
+
+        assert!(changed(&marquee.send(Event::FocusIn)));
+        assert_eq!(marquee.state(), &State::Paused);
+        assert!(marquee.context().paused_by_hover);
+        assert!(marquee.context().paused_by_focus);
+
+        assert!(changed(&marquee.send(Event::HoverOut)));
+        assert_eq!(marquee.state(), &State::Paused);
+        assert!(!marquee.context().paused_by_hover);
+        assert!(marquee.context().paused_by_focus);
+
+        assert!(changed(&marquee.send(Event::FocusOut)));
+        assert_eq!(marquee.state(), &State::Playing);
+        assert!(!marquee.context().paused_by_hover);
+        assert!(!marquee.context().paused_by_focus);
+    }
+
+    #[test]
+    fn marquee_set_props_syncs_context_backed_values_and_disabled_state() {
+        let mut marquee = service(Props::new().id("ticker"));
+
+        drop(
+            marquee.set_props(
+                Props::new()
+                    .id("ticker")
+                    .speed(120.0)
+                    .direction(Direction::Down)
+                    .gap(12.0)
+                    .delay(0.5)
+                    .pause_on_hover(false)
+                    .pause_on_focus(false)
+                    .loop_count(3)
+                    .auto_fill(true)
+                    .disabled(true),
+            ),
+        );
+
+        assert_eq!(marquee.state(), &State::Paused);
+        assert_eq!(marquee.context().speed, 120.0);
+        assert_eq!(marquee.context().direction, Direction::Down);
+        assert_eq!(marquee.context().gap, 12.0);
+        assert_eq!(marquee.context().delay, 0.5);
+        assert!(!marquee.context().pause_on_hover);
+        assert!(!marquee.context().pause_on_focus);
+        assert_eq!(marquee.context().loop_count, Some(3));
+        assert!(marquee.context().auto_fill);
+        assert!(marquee.context().disabled);
+
+        let api = marquee.connect(&|_| {});
+        let root_attrs = api.root_attrs();
+        let content_attrs = api.content_attrs();
+
+        assert_eq!(
+            root_attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)),
+            Some("true")
+        );
+        assert_eq!(
+            style(&content_attrs, &CssProperty::Custom("ars-marquee-speed")),
+            Some("120px")
+        );
+        assert_eq!(
+            style(
+                &content_attrs,
+                &CssProperty::Custom("ars-marquee-direction")
+            ),
+            Some("down")
+        );
+    }
+
+    #[test]
     fn marquee_disabled_ignores_runtime_events() {
         let mut marquee = service(Props::new().id("ticker").disabled(true));
 
@@ -925,6 +1113,9 @@ mod tests {
             }
             Event::LoopComplete => {
                 sent.fetch_or(64, Ordering::SeqCst);
+            }
+            Event::SyncProps => {
+                sent.fetch_or(128, Ordering::SeqCst);
             }
         };
 

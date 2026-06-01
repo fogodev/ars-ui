@@ -383,6 +383,7 @@ mod marquee_proptests {
             Just(marquee::Event::FocusIn),
             Just(marquee::Event::FocusOut),
             Just(marquee::Event::LoopComplete),
+            Just(marquee::Event::SyncProps),
         ]
     }
 
@@ -408,8 +409,6 @@ mod marquee_proptests {
                 drop(service.send(event));
 
                 let ctx = service.context();
-
-                prop_assert!(!(ctx.paused_by_hover && ctx.paused_by_focus));
 
                 if *service.state() == marquee::State::Playing {
                     prop_assert!(!ctx.paused_by_hover);

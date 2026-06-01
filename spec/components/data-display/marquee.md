@@ -50,6 +50,8 @@ pub enum Event {
     FocusOut,
     /// One full loop of the content completed.
     LoopComplete,
+    /// Synchronize context-backed values after props change.
+    SyncProps,
 }
 ```
 
@@ -181,7 +183,7 @@ impl ars_core::Machine for Machine {
         let locale = env.locale.clone();
         let messages = messages.clone();
         let ids = ComponentIds::from_id(&props.id);
-        let initial = if props.auto_play && !props.disabled {
+        let initial = if props.auto_play && !props.disabled && props.loop_count != Some(0) {
             State::Playing
         } else {
             State::Paused
@@ -209,15 +211,15 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled {
+        if ctx.disabled && !matches!(event, Event::SyncProps) {
             return None;
         }
 
         match (state, event) {
             // Explicit play/pause
-            (State::Paused, Event::Play) => {
+            (State::Paused, Event::Play) if !finite_loop_exhausted(ctx) => {
                 Some(TransitionPlan::to(State::Playing).apply(|ctx| {
                     ctx.paused_by_hover = false;
                     ctx.paused_by_focus = false;
@@ -233,8 +235,17 @@ impl ars_core::Machine for Machine {
                     ctx.paused_by_hover = true;
                 }))
             }
+            (State::Paused, Event::HoverIn) if ctx.pause_on_hover && !ctx.paused_by_hover => {
+                Some(TransitionPlan::context_only(|ctx| {
+                    ctx.paused_by_hover = true;
+                }))
+            }
             (State::Paused, Event::HoverOut) if ctx.paused_by_hover => {
-                Some(TransitionPlan::to(State::Playing).apply(|ctx| {
+                Some(TransitionPlan::to(if ctx.paused_by_focus {
+                    State::Paused
+                } else {
+                    State::Playing
+                }).apply(|ctx| {
                     ctx.paused_by_hover = false;
                 }))
             }
@@ -245,28 +256,82 @@ impl ars_core::Machine for Machine {
                     ctx.paused_by_focus = true;
                 }))
             }
+            (State::Paused, Event::FocusIn) if ctx.pause_on_focus && !ctx.paused_by_focus => {
+                Some(TransitionPlan::context_only(|ctx| {
+                    ctx.paused_by_focus = true;
+                }))
+            }
             (State::Paused, Event::FocusOut) if ctx.paused_by_focus => {
-                Some(TransitionPlan::to(State::Playing).apply(|ctx| {
+                Some(TransitionPlan::to(if ctx.paused_by_hover {
+                    State::Paused
+                } else {
+                    State::Playing
+                }).apply(|ctx| {
                     ctx.paused_by_focus = false;
                 }))
             }
 
             // Loop completion
             (State::Playing, Event::LoopComplete) => {
-                let exhausted = ctx.loop_count
-                    .is_some_and(|max| ctx.current_loop.saturating_add(1) >= max);
+                let next_loop = next_loop_count(ctx);
+                let exhausted = ctx.loop_count.is_some_and(|max| next_loop >= max);
                 if exhausted {
-                    Some(TransitionPlan::to(State::Paused).apply(|ctx| {
-                        ctx.current_loop = ctx.current_loop.saturating_add(1);
+                    Some(TransitionPlan::to(State::Paused).apply(move |ctx| {
+                        ctx.current_loop = next_loop;
                     }))
                 } else {
-                    Some(TransitionPlan::context_only(|ctx| {
-                        ctx.current_loop = ctx.current_loop.saturating_add(1);
+                    Some(TransitionPlan::context_only(move |ctx| {
+                        ctx.current_loop = next_loop;
                     }))
                 }
             }
 
+            (_, Event::SyncProps) => {
+                let next_state = if props.disabled || props.loop_count == Some(0) {
+                    State::Paused
+                } else {
+                    state.clone()
+                };
+                let speed = props.speed;
+                let direction = props.direction;
+                let gap = props.gap;
+                let pause_on_hover = props.pause_on_hover;
+                let pause_on_focus = props.pause_on_focus;
+                let loop_count = props.loop_count;
+                let auto_fill = props.auto_fill;
+                let delay = props.delay;
+                let disabled = props.disabled;
+                Some(TransitionPlan::to(next_state).apply(move |ctx| {
+                    ctx.speed = speed;
+                    ctx.direction = direction;
+                    ctx.gap = gap;
+                    ctx.pause_on_hover = pause_on_hover;
+                    ctx.pause_on_focus = pause_on_focus;
+                    ctx.loop_count = loop_count;
+                    ctx.auto_fill = auto_fill;
+                    ctx.delay = delay;
+                    ctx.current_loop = loop_count.map_or(ctx.current_loop, |max| ctx.current_loop.min(max));
+                    ctx.disabled = disabled;
+                    if !pause_on_hover || disabled {
+                        ctx.paused_by_hover = false;
+                    }
+                    if !pause_on_focus || disabled {
+                        ctx.paused_by_focus = false;
+                    }
+                }))
+            }
+
             _ => None,
+        }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(old.id, new.id, "marquee::Props.id must remain stable after init");
+
+        if context_relevant_props_changed(old, new) {
+            vec![Event::SyncProps]
+        } else {
+            Vec::new()
         }
     }
 
@@ -278,6 +343,27 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+fn next_loop_count(ctx: &Context) -> usize {
+    let next = ctx.current_loop.saturating_add(1);
+    ctx.loop_count.map_or(next, |max| next.min(max))
+}
+
+fn finite_loop_exhausted(ctx: &Context) -> bool {
+    ctx.loop_count.is_some_and(|max| ctx.current_loop >= max)
+}
+
+fn context_relevant_props_changed(old: &Props, new: &Props) -> bool {
+    old.speed != new.speed
+        || old.direction != new.direction
+        || old.gap != new.gap
+        || old.pause_on_hover != new.pause_on_hover
+        || old.pause_on_focus != new.pause_on_focus
+        || old.loop_count != new.loop_count
+        || old.auto_fill != new.auto_fill
+        || old.delay != new.delay
+        || old.disabled != new.disabled
 }
 ```
 
