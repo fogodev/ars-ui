@@ -1,7 +1,6 @@
 //! Unit and snapshot tests for the `RangeCalendar` component.
 
 use alloc::{format, string::String, sync::Arc};
-
 use std::sync::Mutex;
 
 use ars_core::{
