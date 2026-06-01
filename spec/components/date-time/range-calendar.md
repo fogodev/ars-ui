@@ -114,7 +114,7 @@ pub struct Context {
     /// Static list of unavailable dates (pre-computed for the visible month range).
     pub unavailable_dates: Vec<CalendarDate>,
     /// User-provided predicate for dynamic unavailability checks.
-    pub is_date_unavailable_fn: Option<fn(&CalendarDate) -> bool>,
+    pub is_date_unavailable_fn: Option<IsDateUnavailableFn>,
     /// Component IDs.
     pub ids: ComponentIds,
     /// Number of months displayed side-by-side. Default: 2 (common for range pickers).
@@ -174,6 +174,9 @@ impl Context {
 ### 1.4 Props
 
 ```rust
+/// Predicate type for marking dates unavailable.
+pub type IsDateUnavailableFn = Callback<dyn for<'a> Fn(&'a CalendarDate) -> bool + Send + Sync>;
+
 /// Props for the RangeCalendar component.
 #[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
@@ -194,7 +197,7 @@ pub struct Props {
     pub readonly: bool,
     /// Predicate returning true for dates that should be marked unavailable.
     /// Unavailable dates are focusable but not selectable.
-    pub is_date_unavailable: Option<fn(&CalendarDate) -> bool>,
+    pub is_date_unavailable: Option<IsDateUnavailableFn>,
     /// Explicit override of the locale's default first day of week.
     pub first_day_of_week: Option<Weekday>,
     /// Whether to display ISO week numbers.
@@ -207,6 +210,13 @@ pub struct Props {
     pub page_behavior: PageBehavior,
     /// The "today" date, injected by the adapter for testability.
     pub today: CalendarDate,
+    /// Whether a range whose start and end are the same date is valid.
+    /// Default: true.
+    pub allow_single_date_range: bool,
+    /// Minimum inclusive range length in calendar days. `None` means no minimum.
+    pub min_range_days: Option<u32>,
+    /// Maximum inclusive range length in calendar days. `None` means no maximum.
+    pub max_range_days: Option<u32>,
 }
 
 impl Default for Props {
@@ -226,6 +236,9 @@ impl Default for Props {
             visible_months: 2,
             page_behavior: PageBehavior::Visible,
             today: CalendarDate::new_gregorian(2024, nzu8(1), nzu8(1)),
+            allow_single_date_range: true,
+            min_range_days: None,
+            max_range_days: None,
         }
     }
 }
@@ -252,6 +265,14 @@ Range selection follows a two-click workflow:
 4. **Subsequent click**: Starts a new range -- sets a new `anchor_date`, clears the previous range value, and repeats from step 1.
 
 **Keyboard selection** follows the same two-click model: pressing Enter or Space on a focused date triggers `SelectDate`, functioning identically to a pointer click.
+
+**Range length constraints** are checked only when the second click would
+complete a range. The inclusive range length is `start.days_until(end) + 1`,
+so a same-day range has length 1. When `allow_single_date_range` is `false`,
+same-day completion is rejected. When `min_range_days` or `max_range_days` is
+set, the completed range must fall within those inclusive bounds. Rejected
+second clicks leave `anchor_date` intact and do not write `ctx.value`, allowing
+the user to choose another end date without restarting the range.
 
 ### 1.7 Range Context Helpers
 
@@ -643,8 +664,8 @@ pub enum Part {
     HeadRow,
     HeadCell { day: Weekday },
     Row { week_index: usize },
-    Cell { date: CalendarDate },
-    CellTrigger { date: CalendarDate },
+    Cell { date: CalendarDate, offset: usize },
+    CellTrigger { date: CalendarDate, offset: usize },
 }
 
 /// API for the RangeCalendar component.
@@ -836,12 +857,12 @@ impl<'a> Api<'a> {
     pub fn cell_attrs(&self, date: &CalendarDate) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] =
-            Part::Cell { date: date.clone() }.data_attrs();
+            Part::Cell { date: date.clone(), offset: 0 }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "gridcell");
 
-        if self.ctx.is_range_start(date) || self.ctx.is_range_end(date) {
+        if self.ctx.is_in_range(date) {
             attrs.set(HtmlAttr::Aria(AriaAttr::Selected), "true");
         }
         if self.ctx.is_outside_visible_month(date) {
@@ -859,7 +880,7 @@ impl<'a> Api<'a> {
     pub fn cell_trigger_attrs(&self, date: &CalendarDate) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] =
-            Part::CellTrigger { date: date.clone() }.data_attrs();
+            Part::CellTrigger { date: date.clone(), offset: 0 }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
 
@@ -872,10 +893,12 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::TabIndex, if is_focused { "0" } else { "-1" });
 
         if disabled || unavailable {
-            attrs.set_bool(HtmlAttr::Disabled, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
-        if self.ctx.is_range_start(date) || self.ctx.is_range_end(date) {
+        if disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
+        if self.ctx.is_in_range(date) {
             attrs.set(HtmlAttr::Aria(AriaAttr::Selected), "true");
         }
         if is_today {
@@ -1199,7 +1222,7 @@ These attributes enable CSS styling for range backgrounds, rounded endpoints, an
 | -------------------- | ----------------------- | ------------------------------------------------------------------------------------------- |
 | `Grid`               | `role="grid"`           | `aria-labelledby` points to `Heading`; `aria-multiselectable="true"` always set             |
 | `HeadCell`           | `<th scope="col">`      | `abbr` attribute holds full weekday name                                                    |
-| `Cell`               | `role="gridcell"`       | `aria-selected` on range start/end dates                                                    |
+| `Cell`               | `role="gridcell"`       | `aria-selected` on every date inside the confirmed range                                    |
 | `CellTrigger`        | `<button>`              | `aria-label` = full date string with range position suffix; `aria-disabled` when restricted |
 | `Heading`            | --                      | `aria-live="polite"` + `aria-atomic="true"` for month changes                               |
 | `PrevTrigger`        | `<button>`              | `aria-label="Previous month"` (or `"Previous N months"` for multi-step)                     |

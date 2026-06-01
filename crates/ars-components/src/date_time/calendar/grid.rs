@@ -19,7 +19,7 @@ use ars_i18n::{CalendarDate, Weekday};
 /// helper isolates that conversion so every grid call site uses the same
 /// convention.
 #[must_use]
-pub(super) const fn weekday_sunday_zero(weekday: Weekday) -> u8 {
+pub(crate) const fn weekday_sunday_zero(weekday: Weekday) -> u8 {
     match weekday {
         Weekday::Sunday => 0,
         Weekday::Monday => 1,
@@ -35,7 +35,7 @@ pub(super) const fn weekday_sunday_zero(weekday: Weekday) -> u8 {
 /// month, normalising the result to the 1..=12 month range with a year
 /// adjustment.
 #[must_use]
-pub(super) const fn month_year_at_offset(
+pub(crate) const fn month_year_at_offset(
     visible_month: u8,
     visible_year: i32,
     offset: usize,
@@ -51,7 +51,7 @@ pub(super) const fn month_year_at_offset(
 /// Advances `(month, year)` by `n` months (signed), normalising the month
 /// back into the 1..=12 range.
 #[must_use]
-pub(super) const fn advance_month(visible_month: u8, visible_year: i32, n: i32) -> (u8, i32) {
+pub(crate) const fn advance_month(visible_month: u8, visible_year: i32, n: i32) -> (u8, i32) {
     let raw_index = visible_month as i64 - 1 + n as i64;
 
     let normalised_month = raw_index.rem_euclid(12) as u8 + 1;
@@ -72,7 +72,7 @@ pub(super) const fn advance_month(visible_month: u8, visible_year: i32, n: i32) 
 /// empty in that case, signalling that the adapter should render an empty
 /// grid for the boundary month rather than panic.
 #[must_use]
-pub(super) fn weeks_for(
+pub(crate) fn weeks_for(
     visible_month: u8,
     visible_year: i32,
     first_day_of_week: Weekday,
@@ -135,7 +135,7 @@ fn build_week(start: &CalendarDate) -> Option<[CalendarDate; 7]> {
 /// Whether `date` belongs to a different `(month, year)` than the month at
 /// the given visible-month offset.
 #[must_use]
-pub(super) const fn is_outside_month_at_offset(
+pub(crate) const fn is_outside_month_at_offset(
     date: &CalendarDate,
     visible_month: u8,
     visible_year: i32,
@@ -149,7 +149,7 @@ pub(super) const fn is_outside_month_at_offset(
 /// Whether `date` falls within any of the `visible_months` months starting
 /// at `(visible_month, visible_year)`.
 #[must_use]
-pub(super) fn is_in_visible_range(
+pub(crate) fn is_in_visible_range(
     date: &CalendarDate,
     visible_month: u8,
     visible_year: i32,
@@ -166,7 +166,7 @@ pub(super) fn is_in_visible_range(
 /// `(weekday, sunday_zero_index)` pairs so callers can fetch labels from the
 /// `IntlBackend` without re-deriving the index.
 #[must_use]
-pub(super) fn ordered_weekdays(first_day_of_week: Weekday) -> [Weekday; 7] {
+pub(crate) fn ordered_weekdays(first_day_of_week: Weekday) -> [Weekday; 7] {
     let start = weekday_sunday_zero(first_day_of_week);
 
     let mut out = [Weekday::Sunday; 7];

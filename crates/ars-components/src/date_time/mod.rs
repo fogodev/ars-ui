@@ -9,5 +9,8 @@ pub mod date_field;
 /// DatePicker machine.
 pub mod date_picker;
 
+/// RangeCalendar machine.
+pub mod range_calendar;
+
 /// TimeField machine.
 pub mod time_field;

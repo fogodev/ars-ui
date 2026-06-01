@@ -84,7 +84,7 @@ ars-ui targets **112 components (including 1 internal utility: Dismissable) and 
 | **TimeField**       |   —    |     Y      |    P2    | Segmented time input (hour/minute/period)    |
 | **DateRangePicker** |   —    |     Y      |    P2    | Two date fields + range calendar             |
 | **DateRangeField**  |   —    |     Y      |    P2    | Inline two-field range input without popover |
-| **RangeCalendar**   |   —    |     Y      |    P2    | See Calendar with `is_range: true` prop      |
+| **RangeCalendar**   |   —    |     Y      |    P2    | Two-click date range grid with hover preview |
 | **DateTimePicker**  |   Y    |     —      |    P2    | Combined date and time picker                |
 
 ## 7. Data Display Components

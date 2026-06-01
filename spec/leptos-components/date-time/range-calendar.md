@@ -152,12 +152,13 @@ The adapter keeps the full range-selection machine and surfaces only machine-com
 
 - Do not compute in-range and hover-range styling outside the machine-derived snapshot.
 - Do not keep stale hover preview after selection completion.
-- Do not treat every selected cell as `aria-selected`; only range endpoints expose selection semantics.
+- Do not derive selection styling locally; every confirmed in-range cell receives machine-owned `aria-selected` while endpoint shape comes from `data-ars-range-start` / `data-ars-range-end`.
 
 ## 19. Consumer Expectations and Guarantees
 
 - Consumers may assume range start, range end, in-range, and hover-range attrs are mutually coherent.
 - Consumers may assume the first click sets an anchor without immediately completing the range.
+- Consumers may assume `allow_single_date_range`, `min_range_days`, and `max_range_days` are enforced by the core machine before a pending range is committed.
 - Consumers must not assume hover preview is available during SSR.
 
 ## 20. Platform Support Matrix
