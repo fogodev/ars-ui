@@ -1,0 +1,107 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8d52381f7975",
+  "session_id": "dd441a93-8791-4c38-b72c-c5a3afd87f1b",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-02T13:19:49.333155Z",
+  "branch": "impl-292",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+    "spec/components/date-time/date-time-picker.md",
+    "crates/ars-components/src/date_time/date_time_picker/tests.rs"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "0c2a34cd89be",
+  "checkpoint_transcript_start": 1359,
+  "transcript_lines_at_start": 1359,
+  "token_usage": {
+    "input_tokens": 5180,
+    "cache_creation_tokens": 777503,
+    "cache_read_tokens": 33503008,
+    "output_tokens": 33008,
+    "api_call_count": 49
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Fix 6 pass-2 Codex review findings in the DateTimePicker component, covering calendar fidelity, day-range clamping, dialog accessibility naming, and spec todo!() placeholder removal.",
+    "outcome": "All 6 findings resolved: calendar conversion in calendar_props and sync_props, day-range refresh in init/rebuild_date_segments/set_segment_value, aria-label via content_label message, spec todo!() arms filled in. 131 tests pass, all 10 xci-fast gates green, committed and pushed.",
+    "learnings": {
+      "repo": [
+        "CalendarDate::to_calendar exists for converting dates between calendar systems — used in calendar_props and sync_props to maintain fidelity when the calendar prop changes.",
+        "IntlBackend::days_in_month provides the correct max-day bound for a given year/month in any calendar system.",
+        "DatePicker uses a content_label message key to set the aria-label on its dialog content — mirrors the same pattern as DateField.",
+        "Day-range must be refreshed in three places: init, rebuild_date_segments, and set_segment_value to stay consistent across all mutation paths.",
+        "Codex runs in passes; pass-2 surfaces findings introduced or missed by pass-1 fixes, including regressions like todo!() placeholders added during the prior fix round.",
+        "Snapshot tests capture aria-label changes — adding content_label broke the 'content' snapshot which needed regeneration and acceptance."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "calendar_props must convert min/max/value dates via to_calendar(ctx.calendar) so they match the active calendar system."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "sync_props must detect a calendar change as a structural change and re-derive date_value in the new calendar, not just copy the old value."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "refresh_day_range added to Context and called in init (after context construction), rebuild_date_segments, and set_segment_value."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/tests.rs",
+          "finding": "value.get() returns &Option<...> — accessing the inner value requires .as_ref() before pattern matching or unwrapping."
+        },
+        {
+          "path": "spec/components/date-time/date-time-picker.md",
+          "finding": "Section §1.7 had todo!() placeholders for segment focus/editing arms — these are a no-deferral violation and must be filled with real implementation bodies before committing."
+        }
+      ],
+      "workflow": [
+        "Multi-pass Codex review catches regressions introduced by earlier fix rounds — treat each pass as potentially surfacing new issues, not just confirming prior ones.",
+        "After accepting a snapshot update, always re-run the full test suite to confirm only the intended change was captured.",
+        "xci-fast (10 gates) is the pre-push verification gate; all must be green before committing.",
+        "Resolve and reply to Codex threads after pushing the fix, then re-trigger Codex for the next pass."
+      ]
+    },
+    "friction": [
+      "API socket connection closed unexpectedly mid-session, interrupting work just before the test-writing step — required a manual 'Continue' prompt to resume.",
+      "Test compile error: value.get() returning &Option<...> instead of Option<...> caused a fixup round after the initial test addition."
+    ],
+    "open_items": [
+      "Codex pass-3 may surface additional findings after the pass-2 fixes are reviewed — threads were replied to and Codex re-triggered but results are pending."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-02T13:19:25.19889Z",
+    "agent_lines": 112,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 8,
+    "human_removed": 28,
+    "total_committed": 120,
+    "total_lines_changed": 148,
+    "agent_percentage": 75.67567567567568,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 225,
+      "user_lines_removed": 36,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "crates/ars-components/src/date_time/date_time_picker/mod.rs": 108,
+        "spec/components/date-time/date-time-picker.md": 117
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/date_time/date_time_picker/mod.rs": 11,
+        "spec/components/date-time/date-time-picker.md": 25
+      }
+    }
+  ]
+}
