@@ -29,7 +29,8 @@ pub fn execute(
     let core_issue_index = IssueIndex::load_core()?;
     let mut out = String::new();
 
-    let components = if component == "all" {
+    let all_components = component == "all";
+    let components = if all_components {
         root.manifest.components.keys().cloned().collect::<Vec<_>>()
     } else {
         vec![manifest::find_component_key(&root.manifest, component)?]
@@ -43,9 +44,10 @@ pub fn execute(
     .expect("write to String");
 
     for name in components {
-        let Some(issue) = issue_index.by_component.get(&name) else {
+        let issue = issue_index.by_component.get(&name);
+        if issue.is_none() && all_components {
             continue;
-        };
+        }
 
         let comp = &root.manifest.components[&name];
         let expected = expected_blockers(
@@ -55,7 +57,11 @@ pub fn execute(
             &issue_index,
             &core_issue_index,
         )?;
-        let current = issue_blocked_by(issue.number)?;
+        let current = if let Some(issue) = issue {
+            issue_blocked_by(issue.number)?
+        } else {
+            Vec::new()
+        };
         let expected_numbers = expected
             .iter()
             .map(|blocker| blocker.number)
@@ -71,7 +77,16 @@ pub fn execute(
             .collect::<Vec<_>>();
 
         writeln!(out).expect("write to String");
-        writeln!(out, "## #{} {}", issue.number, issue.title).expect("write to String");
+        if let Some(issue) = issue {
+            writeln!(out, "## #{} {}", issue.number, issue.title).expect("write to String");
+        } else {
+            writeln!(out, "## (adapter issue not found)").expect("write to String");
+            writeln!(
+                out,
+                "adapter_issue_status: missing from GitHub search; report is draft-only"
+            )
+            .expect("write to String");
+        }
         writeln!(out, "component: {name}").expect("write to String");
         writeln!(
             out,
@@ -118,6 +133,12 @@ pub fn execute(
         write_boundary_notes(&mut out, comp, adapter_filter);
 
         if !dry_run {
+            let Some(issue) = issue else {
+                return Err(Error::FrontmatterError(format!(
+                    "cannot apply issue dependencies for '{name}' because no {adapter} adapter issue was found"
+                )));
+            };
+
             for blocker in expected {
                 if missing.contains(&blocker.number) {
                     add_blocked_by(issue.number, blocker.id)?;

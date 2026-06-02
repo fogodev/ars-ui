@@ -172,7 +172,7 @@ pub fn execute(root: &SpecRoot) -> Result<String, Error> {
 fn validate_component_dependencies(root: &SpecRoot, errors: &mut Vec<String>) {
     let components = &root.manifest.components;
     let valid_frameworks = BTreeSet::from(["leptos", "dioxus"]);
-    let mut blocking_edges = BTreeMap::<String, Vec<String>>::new();
+    let mut blocking_edges_by_framework = BTreeMap::<String, BTreeMap<String, Vec<String>>>::new();
 
     for (name, comp) in components {
         for dep in &comp.component_deps {
@@ -225,36 +225,48 @@ fn validate_component_dependencies(root: &SpecRoot, errors: &mut Vec<String>) {
             }
 
             if component_deps::is_blocking(dep.kind, dep.blocking) {
-                if dep.component == *name {
-                    errors.push(format!(
-                        "[{name}] {} component_dep cannot point to itself",
-                        dep.kind
-                    ));
-                }
+                for framework in &dep.frameworks {
+                    if !valid_frameworks.contains(framework.as_str()) {
+                        continue;
+                    }
 
-                blocking_edges
-                    .entry(name.clone())
-                    .or_default()
-                    .push(dep.component.clone());
+                    if dep.component == *name {
+                        errors.push(format!(
+                            "[{name}] {} component_dep cannot point to itself for {framework}",
+                            dep.kind
+                        ));
+                    }
+
+                    blocking_edges_by_framework
+                        .entry(framework.clone())
+                        .or_default()
+                        .entry(name.clone())
+                        .or_default()
+                        .push(dep.component.clone());
+                }
             }
         }
     }
 
-    for start in components.keys() {
-        let mut visiting = BTreeSet::new();
-        let mut visited = BTreeSet::new();
-        detect_blocking_cycle(
-            start,
-            start,
-            &blocking_edges,
-            &mut visiting,
-            &mut visited,
-            errors,
-        );
+    for (framework, blocking_edges) in &blocking_edges_by_framework {
+        for start in components.keys() {
+            let mut visiting = BTreeSet::new();
+            let mut visited = BTreeSet::new();
+            detect_blocking_cycle(
+                framework,
+                start,
+                start,
+                blocking_edges,
+                &mut visiting,
+                &mut visited,
+                errors,
+            );
+        }
     }
 }
 
 fn detect_blocking_cycle(
+    framework: &str,
     start: &str,
     current: &str,
     edges: &BTreeMap<String, Vec<String>>,
@@ -270,13 +282,13 @@ fn detect_blocking_cycle(
         for next in nexts {
             if next == start {
                 errors.push(format!(
-                    "[{start}] blocking component_deps contain a cycle through '{current}'"
+                    "[{start}] {framework} blocking component_deps contain a cycle through '{current}'"
                 ));
                 continue;
             }
 
             if !visited.contains(next) {
-                detect_blocking_cycle(start, next, edges, visiting, visited, errors);
+                detect_blocking_cycle(framework, start, next, edges, visiting, visited, errors);
             }
         }
     }
@@ -306,18 +318,27 @@ mod tests {
         }
     }
 
+    fn dependency_with_frameworks(
+        component: &str,
+        kind: ComponentDependencyKind,
+        blocking: bool,
+        frameworks: Vec<&str>,
+    ) -> ComponentDependency {
+        ComponentDependency {
+            component: component.to_owned(),
+            kind,
+            frameworks: frameworks.into_iter().map(ToString::to_string).collect(),
+            blocking,
+            reason: "test dependency".to_owned(),
+        }
+    }
+
     fn dependency(
         component: &str,
         kind: ComponentDependencyKind,
         blocking: bool,
     ) -> ComponentDependency {
-        ComponentDependency {
-            component: component.to_owned(),
-            kind,
-            frameworks: vec!["leptos".to_owned()],
-            blocking,
-            reason: "test dependency".to_owned(),
-        }
+        dependency_with_frameworks(component, kind, blocking, vec!["leptos"])
     }
 
     fn root_with(components: BTreeMap<String, Component>) -> SpecRoot {
@@ -385,6 +406,38 @@ mod tests {
         assert!(
             errors.iter().any(|error| error.contains("contain a cycle")),
             "expected blocking cycle error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn blocking_cycles_are_scoped_per_adapter() {
+        let mut components = BTreeMap::new();
+        components.insert(
+            "dialog".to_owned(),
+            component(vec![dependency_with_frameworks(
+                "drawer",
+                ComponentDependencyKind::Composes,
+                true,
+                vec!["leptos"],
+            )]),
+        );
+        components.insert(
+            "drawer".to_owned(),
+            component(vec![dependency_with_frameworks(
+                "dialog",
+                ComponentDependencyKind::Composes,
+                true,
+                vec!["dioxus"],
+            )]),
+        );
+        let root = root_with(components);
+        let mut errors = Vec::new();
+
+        validate_component_dependencies(&root, &mut errors);
+
+        assert!(
+            !errors.iter().any(|error| error.contains("contain a cycle")),
+            "opposite framework-specific edges are not one adapter cycle: {errors:?}"
         );
     }
 }
