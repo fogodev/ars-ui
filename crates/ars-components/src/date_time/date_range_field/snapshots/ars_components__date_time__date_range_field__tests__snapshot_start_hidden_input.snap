@@ -1,0 +1,27 @@
+---
+source: crates/ars-components/src/date_time/date_range_field/tests.rs
+expression: snapshot_attrs(&api.start_hidden_input_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Name,
+            String(
+                "check-in",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "hidden",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "2025-06-01",
+            ),
+        ),
+    ],
+    styles: [],
+}

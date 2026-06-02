@@ -3,8 +3,8 @@
 //! Asserts each date-time component's `Part` enum matches the spec anatomy.
 
 use ars_components::date_time::{
-    calendar, date_field::DateSegmentKind, date_picker, date_time_picker, range_calendar,
-    time_field,
+    calendar, date_field::DateSegmentKind, date_picker, date_range_field, date_time_picker,
+    range_calendar, time_field,
 };
 use ars_i18n::{CalendarDate, Weekday};
 
@@ -170,6 +170,23 @@ fn date_time_picker_anatomy_matches_spec() {
             (date_time_picker::Part::Description, "description"),
             (date_time_picker::Part::ErrorMessage, "error-message"),
             (date_time_picker::Part::HiddenInput, "hidden-input"),
+        ],
+    );
+}
+
+#[test]
+fn date_range_field_anatomy_matches_spec() {
+    assert_anatomy(
+        "date-range-field",
+        &[
+            (date_range_field::Part::Root, "root"),
+            (date_range_field::Part::Label, "label"),
+            (date_range_field::Part::StartField, "start-field"),
+            (date_range_field::Part::Separator, "separator"),
+            (date_range_field::Part::EndField, "end-field"),
+            (date_range_field::Part::Description, "description"),
+            (date_range_field::Part::ErrorMessage, "error-message"),
+            (date_range_field::Part::HiddenInput, "hidden-input"),
         ],
     );
 }
