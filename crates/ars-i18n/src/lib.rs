@@ -61,7 +61,7 @@ pub use collation::{CollationFormat, CollationOptions, CollationStrength, String
 pub use date::{
     DateFormatter, DateFormatterOptions, DateFormatterPart, DateFormatterPartKind, DateOrder,
     DateRangeFormatterPart, DateRangePartSource, FormatLength, MonthFormat, NumericWidth,
-    ResolvedDateFormatterOptions, TextWidth, TimeZoneNameFormat, date_order,
+    ResolvedDateFormatterOptions, TextWidth, TimeZoneNameFormat, date_field_separator, date_order,
 };
 #[cfg(feature = "std")]
 pub use detect::locale_from_accept_language;

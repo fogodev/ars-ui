@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/date_time/date_time_picker/tests.rs
+expression: snapshot_attrs(&api.positioner_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "positioner",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "date-time-picker",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "date-time-picker-positioner",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/date_time/date_time_picker/tests.rs
+expression: snapshot_attrs(&api.date_segment_group_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "date-segment-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "date-time-picker",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Date",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -55,7 +55,7 @@ use ars_core::{
     AriaAttr, AttrMap, Bindable, Callback, ComponentIds, ComponentMessages, ComponentPart,
     ConnectApi, Env, HtmlAttr, Locale, MessageFn, PendingEffect, TransitionPlan,
 };
-use ars_i18n::{CalendarDate, DateOrder, date_order, normalize_digits};
+use ars_i18n::{CalendarDate, DateOrder, date_field_separator, date_order, normalize_digits};
 use ars_interactions::{KeyboardEventData, KeyboardKey};
 
 use super::calendar;
@@ -422,10 +422,25 @@ enum DateField {
 /// uses the same source). The field separator stays a small locale heuristic
 /// (`.` for German and Korean, `/` elsewhere), mirroring `date_field`'s literal.
 fn default_format_for_locale(locale: &Locale) -> String {
-    let separator = match (locale.language(), locale.region()) {
-        ("de", Some("DE")) | ("ko", Some("KR")) => '.',
-        _ => '/',
-    };
+    // The single-character pattern model takes the first *visible* char of the
+    // canonical CLDR-derived inter-field separator (e.g. `ko-KR`'s `. ` degrades
+    // to `.`). RTL locales prefix the literal with a bidi mark (e.g. `ar-EG`
+    // yields `\u{200f}/`), so skip directionality/format marks and whitespace to
+    // land on the real delimiter. [`ars_i18n::date_field_separator`] is the
+    // shared source the segmented `date_field`/`date_time_picker` inputs use in full.
+    let separator = date_field_separator(locale)
+        .chars()
+        .find(|candidate| {
+            !candidate.is_whitespace()
+                && !candidate.is_control()
+                // Bidirectional / general format marks (LRM, RLM, ALM, etc.).
+                && !matches!(
+                    *candidate,
+                    '\u{200e}' | '\u{200f}' | '\u{061c}' | '\u{202a}'..='\u{202e}'
+                        | '\u{2066}'..='\u{2069}'
+                )
+        })
+        .unwrap_or('/');
 
     let order: [&str; 3] = match date_order(locale) {
         DateOrder::MonthDayYear => ["MM", "dd", "yyyy"],

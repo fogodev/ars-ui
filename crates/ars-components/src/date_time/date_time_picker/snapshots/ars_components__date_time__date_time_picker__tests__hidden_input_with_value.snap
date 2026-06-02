@@ -1,0 +1,43 @@
+---
+source: crates/ars-components/src/date_time/date_time_picker/tests.rs
+expression: snapshot_attrs(&api.hidden_input_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "hidden-input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "date-time-picker",
+            ),
+        ),
+        (
+            Name,
+            String(
+                "appointment",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "hidden",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "2024-03-15T14:30:00",
+            ),
+        ),
+    ],
+    styles: [],
+}

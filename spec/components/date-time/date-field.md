@@ -964,7 +964,11 @@ pub struct LocaleSeparators {
 
 impl LocaleSeparators {
     pub fn for_locale(locale: &Locale) -> Self {
-        // Production: ICU4X pattern parsing extracts exact separator strings.
+        // The canonical inter-field separator is `ars_i18n::date_field_separator`
+        // (CLDR via ICU4X / browser `Intl`, with a `(language, region)` fallback),
+        // shared with `date_picker`/`date_time_picker`. The implementation builds
+        // its literal segments from that single separator; the per-position `Vec`
+        // here is the spec's richer model for locales with non-uniform separators.
         let locale_tag = locale.to_bcp47();
         let seps = match locale_tag.as_str() {
             "de-DE" | "de-AT" | "nl-NL" | "pl-PL" | "ru-RU" | "cs-CZ"

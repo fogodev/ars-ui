@@ -29,7 +29,7 @@ use ars_core::{
 };
 use ars_i18n::{
     CalendarDate, CalendarDateFields, CalendarSystem, DateField as CalendarDateField, DateOrder,
-    Era, calendar::CycleOptions, date_order,
+    Era, calendar::CycleOptions, date_field_separator, date_order,
 };
 use ars_interactions::KeyboardEventData;
 pub use segment::{DateSegment, DateSegmentKind};
@@ -2096,7 +2096,7 @@ fn build_segments(ctx: &Context) -> Vec<DateSegment> {
             SegmentPatternPart::Segment(kind) => kind,
 
             SegmentPatternPart::Literal(literal) => {
-                segments.push(DateSegment::new_literal(literal));
+                segments.push(DateSegment::new_literal(&literal));
 
                 continue;
             }
@@ -2164,50 +2164,50 @@ fn non_editable_segment_text(
             .intl_backend
             .weekday_short_label(date.weekday(), &ctx.locale),
 
-        (DateSegmentKind::Literal, _) => literal_for_locale(&ctx.locale).to_string(),
+        (DateSegmentKind::Literal, _) => date_field_separator(&ctx.locale),
 
         _ => kind.aria_label(&ctx.messages, &ctx.locale),
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum SegmentPatternPart {
     Segment(DateSegmentKind),
-    Literal(&'static str),
+    Literal(String),
 }
 
 fn segment_pattern(ctx: &Context) -> Vec<SegmentPatternPart> {
     if let Some(order) = &ctx.segment_order {
-        return intersperse_segments(order.iter().copied(), literal_for_locale(&ctx.locale));
+        return intersperse_segments(order.iter().copied(), &date_field_separator(&ctx.locale));
     }
 
     if ctx.calendar == CalendarSystem::Japanese {
         return vec![
             SegmentPatternPart::Segment(DateSegmentKind::Era),
             SegmentPatternPart::Segment(DateSegmentKind::Year),
-            SegmentPatternPart::Literal("年"),
+            SegmentPatternPart::Literal("年".to_string()),
             SegmentPatternPart::Segment(DateSegmentKind::Month),
-            SegmentPatternPart::Literal("月"),
+            SegmentPatternPart::Literal("月".to_string()),
             SegmentPatternPart::Segment(DateSegmentKind::Day),
-            SegmentPatternPart::Literal("日"),
+            SegmentPatternPart::Literal("日".to_string()),
         ];
     }
 
     intersperse_segments(
         segment_order_for_locale(&ctx.locale, ctx.calendar),
-        literal_for_locale(&ctx.locale),
+        &date_field_separator(&ctx.locale),
     )
 }
 
 fn intersperse_segments(
     order: impl IntoIterator<Item = DateSegmentKind>,
-    literal: &'static str,
+    literal: &str,
 ) -> Vec<SegmentPatternPart> {
     let mut pattern = Vec::new();
 
     for (index, kind) in order.into_iter().enumerate() {
         if index > 0 {
-            pattern.push(SegmentPatternPart::Literal(literal));
+            pattern.push(SegmentPatternPart::Literal(literal.to_string()));
         }
 
         pattern.push(SegmentPatternPart::Segment(kind));
@@ -2247,14 +2247,6 @@ fn segment_order_for_locale(locale: &Locale, calendar: CalendarSystem) -> Vec<Da
             DateSegmentKind::Month,
             DateSegmentKind::Day,
         ],
-    }
-}
-
-fn literal_for_locale(locale: &Locale) -> &'static str {
-    match (locale.language(), locale.region()) {
-        ("de", Some("DE")) => ".",
-        ("ko", Some("KR")) => ". ",
-        _ => "/",
     }
 }
 
