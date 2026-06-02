@@ -534,7 +534,9 @@ impl ars_core::Machine for Machine {
                 let date = date.clone();
                 Some(TransitionPlan::to(State::Focused)
                     .apply(move |ctx| {
-                        ctx.date_value = Some(date.clone());
+                        // Project a (possibly foreign-calendar) selection into
+                        // the active calendar before caching.
+                        ctx.date_value = Some(project_date(&date, ctx.calendar));
                         ctx.open = false;
                         ctx.is_touched = true;
                         ctx.date_segments = build_date_segments(&ctx.locale, Some(&date));
@@ -733,7 +735,10 @@ impl ars_core::Machine for Machine {
 > day-period typing through `IntlBackend::day_period_from_char` (localized AM/PM
 > labels, with an ASCII `a`/`p` fallback). `sync_props` clears the staged value
 > when a controlled picker becomes uncontrolled (`props.value` `Some(_)` → `None`),
-> matching `time_field`.
+> matching `time_field`. `format_iso8601` composes `CalendarDate::to_iso8601` with
+> `Time::to_iso8601`, preserving fractional seconds, and `format_announcement`
+> renders the spoken selected value through the `intl_backend` (localized digits
+> and day-period label) so it matches the visible segments.
 
 ### 1.8 Connect / API
 
@@ -810,7 +815,8 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("label"));
-        attrs.set(HtmlAttr::For, self.ctx.ids.part("control"));
+        // No `for`: the Control is a `role="group"`, not a labelable control, so
+        // `for` would be invalid; the group is named via its own `aria-labelledby`.
         attrs
     }
 
@@ -882,7 +888,14 @@ impl<'a> Api<'a> {
 
         attrs.set(HtmlAttr::Id, self.ctx.ids.item("segment", &seg.kind.data_name()));
         attrs.set(HtmlAttr::Role, "spinbutton");
-        attrs.set(HtmlAttr::TabIndex, if self.ctx.disabled { "-1" } else { "0" });
+        // Roving tab stop (matching date_field/time_field): only the focused
+        // segment — or the first editable when none is focused — is a Tab stop,
+        // so native Tab order doesn't bypass the machine-managed traversal.
+        let is_tab_stop = !self.ctx.disabled
+            && (self.ctx.focused_segment == Some(seg.kind)
+                || (self.ctx.focused_segment.is_none()
+                    && self.ctx.first_editable() == Some(seg.kind)));
+        attrs.set(HtmlAttr::TabIndex, if is_tab_stop { "0" } else { "-1" });
         attrs.set(HtmlAttr::Data("ars-segment"), seg.kind.data_name());
         // Segment ARIA labels resolve from this component's per-segment Messages
         // fields (see §4.1), not from a borrowed `date_field::Messages`.
@@ -1250,7 +1263,7 @@ DateTimePicker (en-US, closed, Minute granularity, H12)
 | `Control`          | `<div>`                 | yes      | `role="group"`, `aria-labelledby`                            |
 | `DateSegmentGroup` | `<div>`                 | yes      | `role="group"`, `aria-label="Date"`                          |
 | `TimeSegmentGroup` | `<div>`                 | yes      | `role="group"`, `aria-label="Time"`                          |
-| `Segment`          | `<div>`                 | yes      | `role="spinbutton"`, `tabindex="0"`, `aria-valuenow/min/max` |
+| `Segment`          | `<div>`                 | yes      | `role="spinbutton"`, roving tabstop, `aria-valuenow/min/max` |
 | `Literal`          | `<span>`                | yes      | `aria-hidden="true"`                                         |
 | `Separator`        | `<span>`                | yes      | `aria-hidden="true"`                                         |
 | `Trigger`          | `<button>`              | yes      | `aria-label`, `aria-expanded`, `aria-controls`               |

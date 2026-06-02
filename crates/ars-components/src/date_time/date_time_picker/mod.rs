@@ -1212,7 +1212,10 @@ impl ars_core::Machine for Machine {
                 Some(
                     TransitionPlan::to(State::Focused)
                         .apply(move |ctx: &mut Context| {
-                            ctx.date_value = Some(date.clone());
+                            // Project a (possibly foreign-calendar) selection into
+                            // the active calendar before caching, so the next
+                            // publish reassembles the same ISO date.
+                            ctx.date_value = Some(project_date(&date, ctx.calendar));
                             ctx.open = false;
                             ctx.is_touched = true;
 
@@ -1622,11 +1625,13 @@ impl<'a> Api<'a> {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Label.data_attrs();
 
+        // No `for`: the `Control` target is a `role="group"`, not a labelable
+        // form control, so `for` would be invalid and clicking the label would
+        // not focus anything. The group is named via its own `aria-labelledby`.
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
-            .set(HtmlAttr::Id, self.ctx.ids.part("label"))
-            .set(HtmlAttr::For, self.ctx.ids.part("control"));
+            .set(HtmlAttr::Id, self.ctx.ids.part("label"));
 
         attrs
     }
@@ -1722,6 +1727,15 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] =
             (Part::Segment { kind: *kind }).data_attrs();
 
+        // Roving tab stop (matching `date_field`/`time_field`): only the focused
+        // segment — or the first editable segment when none is focused — is a
+        // `Tab` stop, so native Tab order doesn't bypass the machine-managed
+        // segment traversal (buffer commit, last-segment → trigger).
+        let is_tab_stop = !self.ctx.disabled
+            && (self.ctx.focused_segment == Some(segment.kind)
+                || (self.ctx.focused_segment.is_none()
+                    && self.ctx.first_editable() == Some(segment.kind)));
+
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
@@ -1730,10 +1744,7 @@ impl<'a> Api<'a> {
                 self.ctx.ids.item("segment", &segment.kind.data_name()),
             )
             .set(HtmlAttr::Role, "spinbutton")
-            .set(
-                HtmlAttr::TabIndex,
-                if self.ctx.disabled { "-1" } else { "0" },
-            )
+            .set(HtmlAttr::TabIndex, if is_tab_stop { "0" } else { "-1" })
             .set(HtmlAttr::Data("ars-segment"), segment.kind.data_name())
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
@@ -2637,14 +2648,12 @@ fn clamp_datetime(
 /// ([`CalendarDate::to_iso8601`]), not the display fields, so a non-Gregorian
 /// selected value still submits the spec-promised ISO 8601 datetime.
 fn format_iso8601(datetime: &CalendarDateTime) -> String {
-    let time = datetime.time();
-
+    // Compose canonical ISO date + time; `Time::to_iso8601` preserves any
+    // fractional seconds so the hidden input matches `selected_value()` exactly.
     format!(
-        "{}T{:02}:{:02}:{:02}",
+        "{}T{}",
         datetime.date().to_iso8601(),
-        time.hour(),
-        time.minute(),
-        time.second(),
+        datetime.time().to_iso8601(),
     )
 }
 
@@ -2656,27 +2665,44 @@ fn format_announcement(ctx: &Context) -> Option<String> {
 
     let separator = date_field_separator(&ctx.locale);
 
-    let (year, month, day) = (date.year(), date.month(), date.day());
+    // Localize numeric fields and the day-period label through the intl backend
+    // so the spoken announcement matches the (localized) visible segments,
+    // rather than emitting ASCII digits / hard-coded AM/PM.
+    let digits = |value: i32, width: u8| match u32::try_from(value) {
+        Ok(value) => ctx.intl_backend.format_segment_digits(
+            value,
+            NonZeroU8::new(width).expect("segment width is non-zero"),
+            &ctx.locale,
+        ),
+        Err(_) => value.to_string(),
+    };
+
+    let (year, month, day) = (
+        digits(date.year(), 4),
+        digits(i32::from(date.month()), 2),
+        digits(i32::from(date.day()), 2),
+    );
 
     let date_str = match date_order(&ctx.locale) {
-        DateOrder::MonthDayYear => format!("{month:02}{separator}{day:02}{separator}{year:04}"),
-        DateOrder::DayMonthYear => format!("{day:02}{separator}{month:02}{separator}{year:04}"),
-        DateOrder::YearMonthDay => format!("{year:04}{separator}{month:02}{separator}{day:02}"),
+        DateOrder::MonthDayYear => format!("{month}{separator}{day}{separator}{year}"),
+        DateOrder::DayMonthYear => format!("{day}{separator}{month}{separator}{year}"),
+        DateOrder::YearMonthDay => format!("{year}{separator}{month}{separator}{day}"),
     };
 
     let mut time_str = format!(
-        "{:02}:{:02}",
-        display_hour(*time, ctx.hour_cycle),
-        time.minute()
+        "{}:{}",
+        digits(display_hour(*time, ctx.hour_cycle), 2),
+        digits(i32::from(time.minute()), 2),
     );
 
     if ctx.granularity >= TimeGranularity::Second {
-        time_str.push_str(&format!(":{:02}", time.second()));
+        time_str.push(':');
+        time_str.push_str(&digits(i32::from(time.second()), 2));
     }
 
     if has_day_period(ctx.hour_cycle) {
         time_str.push(' ');
-        time_str.push_str(if is_pm(*time) { "PM" } else { "AM" });
+        time_str.push_str(&ctx.intl_backend.day_period_label(is_pm(*time), &ctx.locale));
     }
 
     Some(format!("{date_str} {time_str}"))

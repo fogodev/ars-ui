@@ -1651,6 +1651,80 @@ fn month_range_follows_calendar_leap_year() {
 }
 
 #[test]
+fn segments_use_roving_tab_stops() {
+    let svc = service();
+    let api = svc.connect(&|_| {});
+
+    // With no segment focused, only the first editable segment (Month in en-US)
+    // is a tab stop; the others are `-1`.
+    assert_eq!(
+        attr(
+            &api.segment_attrs(&DateSegmentKind::Month),
+            HtmlAttr::TabIndex
+        )
+        .as_deref(),
+        Some("0")
+    );
+    assert_eq!(
+        attr(
+            &api.segment_attrs(&DateSegmentKind::Hour),
+            HtmlAttr::TabIndex
+        )
+        .as_deref(),
+        Some("-1")
+    );
+
+    // Focusing a segment makes it the sole tab stop.
+    let mut svc = service();
+    drop(svc.send(Event::FocusSegment(DateSegmentKind::Hour)));
+    let api = svc.connect(&|_| {});
+    assert_eq!(
+        attr(
+            &api.segment_attrs(&DateSegmentKind::Hour),
+            HtmlAttr::TabIndex
+        )
+        .as_deref(),
+        Some("0")
+    );
+    assert_eq!(
+        attr(
+            &api.segment_attrs(&DateSegmentKind::Month),
+            HtmlAttr::TabIndex
+        )
+        .as_deref(),
+        Some("-1")
+    );
+}
+
+#[test]
+fn label_has_no_for_target() {
+    let svc = service();
+    let api = svc.connect(&|_| {});
+    // The control is a role=group (not labelable); the label omits `for`.
+    assert_eq!(attr(&api.label_attrs(), HtmlAttr::For), None);
+}
+
+#[test]
+fn hidden_input_preserves_fractional_seconds() {
+    let value = CalendarDateTime::new(
+        date(2024, 3, 15),
+        Time::new(14, 30, 45, 500).expect("valid time"),
+    );
+    let svc = service_with(
+        Props {
+            default_value: Some(value),
+            ..props()
+        },
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+    assert_eq!(
+        attr(&api.hidden_input_attrs(), HtmlAttr::Value).as_deref(),
+        Some("2024-03-15T14:30:45.5")
+    );
+}
+
+#[test]
 fn month_segment_announces_localized_name() {
     let svc = service_with(
         Props {

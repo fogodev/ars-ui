@@ -26,12 +26,6 @@ AttrMap {
                 "date-time-picker-label",
             ),
         ),
-        (
-            For,
-            String(
-                "date-time-picker-control",
-            ),
-        ),
     ],
     styles: [],
 }
