@@ -318,7 +318,7 @@ GridList
 | Part              | Element                                                                      | Key Attributes                                                                                                                                                                                                                                                                                           |
 | ----------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Root`            | `<div>`                                                                      | `role="grid"`, `tabindex="0"` in enabled composite mode, `tabindex="-1"` in disabled composite mode, `aria-label`, `aria-multiselectable`, `data-ars-state`, `data-ars-disabled`                                                                                                                         |
-| `Row`             | `<div>`                                                                      | `role="row"`, `aria-selected`, `data-ars-key`, `data-ars-selected`                                                                                                                                                                                                                                       |
+| `Row`             | `<div>`                                                                      | `role="row"` and `aria-selected` in composite mode, `role="listitem"` without `aria-selected` in non-composite mode, `data-ars-key`, `data-ars-selected`                                                                                                                                                 |
 | `Cell`            | `<div>` or `<a>` (when enabled href)                                         | `role="gridcell"` and `aria-selected` in composite mode, `tabindex="-1"` in composite mode, independent `tabindex="0"` in non-composite mode, `aria-disabled`, `aria-roledescription` (when draggable), `data-ars-key`, `data-ars-selected`, `data-ars-focus-visible`, `href` (when enabled and present) |
 | `LoadingSentinel` | `<div>` (optional, after last Row; rendered only when `on_load_more` is set) | `aria-hidden="true"`, `tabindex="-1"`, `data-ars-loading` (when loading)                                                                                                                                                                                                                                 |
 | `DragHandle`      | `<button>`                                                                   | `role="button"`, `aria-label`, `aria-disabled`, `tabindex`                                                                                                                                                                                                                                               |
@@ -334,10 +334,11 @@ GridList
 - **Composite tab stop**: In `composite: true`, the enabled root is the single tab stop and cells
   use `tabindex="-1"` while `aria-activedescendant` names the active cell. Disabled composite
   roots use `tabindex="-1"`. In `composite: false`, each enabled cell is an independent tab stop.
-- **Selection announcement**: `aria-selected` on rows reflects selection state. Composite cells
-  also expose `aria-selected` because they have `role="gridcell"`. Non-composite cell hosts omit
-  cell-level `aria-selected`; the row/listitem carries the selection state. When `selection_mode`
-  is `Multiple`, the root has `aria-multiselectable="true"`.
+- **Selection announcement**: In composite mode, `aria-selected` on rows reflects selection state.
+  Composite cells also expose `aria-selected` because they have `role="gridcell"`. Non-composite
+  listitems and cell hosts omit `aria-selected`; adapters style selected non-composite items from
+  `data-ars-selected` or use a selectable adapter-level pattern when AT selection announcement is
+  required. When `selection_mode` is `Multiple`, the root has `aria-multiselectable="true"`.
 - **Disabled items**: `aria-disabled="true"` on individual cells. Disabled items are skipped
   during 2D navigation when possible, but remain discoverable by AT.
 - **`aria-activedescendant`**: The root element sets `aria-activedescendant` to the ID of the

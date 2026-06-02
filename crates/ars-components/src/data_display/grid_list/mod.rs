@@ -371,6 +371,9 @@ pub struct Context {
     /// True when focus was keyboard-initiated.
     pub focus_visible: bool,
 
+    /// Anchor key used to extend repeated Shift+Arrow range selection.
+    pub range_anchor_key: Option<Key>,
+
     /// Selection mode for grid items.
     pub selection_mode: selection::Mode,
 
@@ -526,6 +529,7 @@ impl ars_core::Machine for Machine {
                 columns,
                 focused_key: None,
                 focus_visible: false,
+                range_anchor_key: None,
                 selection_mode: props.selection_mode,
                 selection_behavior: props.selection_behavior,
                 selected_keys: match &props.selected_keys {
@@ -595,6 +599,7 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
                     ctx.focused_key = key;
                     ctx.focus_visible = is_keyboard && ctx.focused_key.is_some();
+                    ctx.range_anchor_key = None;
                 }))
             }
 
@@ -656,7 +661,7 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                selection_plan(selected)
+                selection_plan_with_anchor(selected, Some(from.clone()))
             }
 
             Event::SelectAll => {
@@ -749,6 +754,7 @@ impl ars_core::Machine for Machine {
                         if let Some(key) = target {
                             ctx.focused_key = Some(key);
                             ctx.focus_visible = true;
+                            ctx.range_anchor_key = None;
                         }
                     }),
                 )
@@ -922,7 +928,7 @@ impl Api<'_> {
             },
         );
 
-        if self.context.selection_mode != selection::Mode::None {
+        if self.context.composite && self.context.selection_mode != selection::Mode::None {
             let selected = selected_keys_source(self.context).contains(key);
 
             attrs.set(
@@ -933,6 +939,10 @@ impl Api<'_> {
             if selected {
                 attrs.set_bool(HtmlAttr::Data("ars-selected"), true);
             }
+        }
+
+        if !self.context.composite && selected_keys_source(self.context).contains(key) {
+            attrs.set_bool(HtmlAttr::Data("ars-selected"), true);
         }
 
         attrs
@@ -1181,9 +1191,17 @@ impl Api<'_> {
             && self.context.selection_mode == selection::Mode::Multiple
             && let Some(target) = navigation_target_from_key(self.context, key, direction)
         {
+            let anchor = self
+                .context
+                .range_anchor_key
+                .as_ref()
+                .filter(|anchor| enabled_item(self.context, anchor).is_some())
+                .cloned()
+                .unwrap_or_else(|| key.clone());
+
             (self.send)(focus_event);
             (self.send)(Event::SelectRange {
-                from: key.clone(),
+                from: anchor,
                 to: target,
             });
 
@@ -1295,6 +1313,12 @@ fn enabled_keys(items: &StaticCollection<ItemDef>, disabled_keys: &BTreeSet<Key>
         .collect()
 }
 
+fn item_key_present(items: &StaticCollection<ItemDef>, key: &Key) -> bool {
+    items
+        .get(key)
+        .is_some_and(|node| node.is_focusable() && node.value.is_some())
+}
+
 fn filter_selection(
     keys: &BTreeSet<Key>,
     items: &StaticCollection<ItemDef>,
@@ -1303,7 +1327,7 @@ fn filter_selection(
 ) -> BTreeSet<Key> {
     let mut selected = keys
         .iter()
-        .filter(|key| items.contains_key(key) && !disabled_keys.contains(key))
+        .filter(|key| item_key_present(items, key) && !disabled_keys.contains(key))
         .cloned()
         .collect();
 
@@ -1337,13 +1361,21 @@ fn selected_keys_source(context: &Context) -> &BTreeSet<Key> {
         .unwrap_or_else(|| context.selected_keys.get())
 }
 
-fn selection_plan(mut selected: BTreeSet<Key>) -> Option<TransitionPlan<Machine>> {
+fn selection_plan(selected: BTreeSet<Key>) -> Option<TransitionPlan<Machine>> {
+    selection_plan_with_anchor(selected, None)
+}
+
+fn selection_plan_with_anchor(
+    mut selected: BTreeSet<Key>,
+    range_anchor_key: Option<Key>,
+) -> Option<TransitionPlan<Machine>> {
     Some(
         TransitionPlan::context_only(move |ctx: &mut Context| {
             normalize_selection(&mut selected, ctx.selection_mode);
 
             ctx.requested_selected_keys = Some(selected.clone());
             ctx.selected_keys.set(selected);
+            ctx.range_anchor_key = range_anchor_key.clone();
         })
         .with_named_effect(Effect::SelectionChange, |_ctx, _props, _send| {
             ars_core::no_cleanup()
@@ -1380,6 +1412,7 @@ fn focus_key_plan(key: Key) -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Focused).apply(move |ctx: &mut Context| {
         ctx.focused_key = Some(key);
         ctx.focus_visible = true;
+        ctx.range_anchor_key = None;
     })
 }
 
@@ -1387,6 +1420,7 @@ fn blur_plan() -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
         ctx.focused_key = None;
         ctx.focus_visible = false;
+        ctx.range_anchor_key = None;
     })
 }
 
@@ -1494,7 +1528,7 @@ fn sync_props_plan(context: &Context, props: &Props) -> TransitionPlan<Machine> 
         context
             .focused_key
             .as_ref()
-            .filter(|key| props.items.contains_key(key) && !disabled_keys.contains(key))
+            .filter(|key| item_key_present(&props.items, key) && !disabled_keys.contains(key))
             .cloned()
     };
 
@@ -1519,6 +1553,7 @@ fn sync_props_plan(context: &Context, props: &Props) -> TransitionPlan<Machine> 
         ctx.columns = columns;
         ctx.focused_key = focused_key;
         ctx.focus_visible = ctx.focused_key.is_some() && ctx.focus_visible;
+        ctx.range_anchor_key = None;
         ctx.selection_mode = selection_mode;
         ctx.selection_behavior = selection_behavior;
         ctx.disabled = disabled;
@@ -1551,7 +1586,7 @@ mod tests {
     use core::{cell::RefCell, num::NonZero};
     use std::sync::Mutex;
 
-    use ars_collections::{Key, StaticCollection, selection};
+    use ars_collections::{CollectionBuilder, Key, StaticCollection, selection};
     use ars_core::{
         AriaAttr, AttrMap, Callback, ConnectApi, Env, HtmlAttr, SafeUrl, Service, StrongSend,
     };
@@ -1590,6 +1625,16 @@ mod tests {
             (key("delta"), "Delta".into(), item("delta", "Delta", false)),
             (key("echo"), "Echo".into(), item("echo", "Echo", false)),
         ])
+    }
+
+    fn sectioned_items() -> StaticCollection<ItemDef> {
+        CollectionBuilder::new()
+            .section(key("section"), "Section")
+            .item(key("alpha"), "Alpha", item("alpha", "Alpha", false))
+            .end_section()
+            .separator()
+            .item(key("gamma"), "Gamma", item("gamma", "Gamma", false))
+            .build()
     }
 
     fn selected(keys: &[&str]) -> BTreeSet<Key> {
@@ -1674,14 +1719,14 @@ mod tests {
 
         props.composite = false;
 
-        let mut service = service(props);
+        let mut grid = service(props);
 
-        drop(service.send(Event::Focus {
+        drop(grid.send(Event::Focus {
             key: Some(key("gamma")),
             is_keyboard: true,
         }));
 
-        let api = service.connect(&|_| {});
+        let api = grid.connect(&|_| {});
 
         assert_snapshot!(
             "grid_list_root_non_composite",
@@ -1704,6 +1749,39 @@ mod tests {
             api.cell_attrs(&key("gamma"))
                 .get(&HtmlAttr::Aria(AriaAttr::Selected))
                 .is_none()
+        );
+        assert!(
+            api.row_attrs(&key("gamma"))
+                .get(&HtmlAttr::Aria(AriaAttr::Selected))
+                .is_none()
+        );
+        assert!(
+            api.row_attrs(&key("gamma"))
+                .get(&HtmlAttr::Data("ars-selected"))
+                .is_none()
+        );
+
+        let selected = service(
+            Props::new()
+                .id("cards-selected")
+                .items(items())
+                .selection_mode(selection::Mode::Single)
+                .default_selected_keys(selected(&["gamma"]))
+                .composite(false),
+        );
+        let selected_api = selected.connect(&|_| {});
+
+        assert!(
+            selected_api
+                .row_attrs(&key("gamma"))
+                .get(&HtmlAttr::Aria(AriaAttr::Selected))
+                .is_none()
+        );
+        assert_eq!(
+            selected_api
+                .row_attrs(&key("gamma"))
+                .get(&HtmlAttr::Data("ars-selected")),
+            Some("true")
         );
     }
 
@@ -1962,6 +2040,38 @@ mod tests {
         assert!(!ctx.dnd_enabled);
         assert_eq!(ctx.requested_selected_keys, None);
         assert_eq!(ctx.selected_keys.get(), &selected(&["zeta"]));
+    }
+
+    #[test]
+    fn structural_collection_keys_are_rejected_from_selected_state() {
+        let mut grid = service(
+            Props::new()
+                .id("grid")
+                .items(sectioned_items())
+                .selection_mode(selection::Mode::Multiple)
+                .default_selected_keys(selected(&[
+                    "section",
+                    "section-header",
+                    "separator-3",
+                    "alpha",
+                    "gamma",
+                ])),
+        );
+
+        assert_eq!(
+            grid.context().selected_keys.get(),
+            &selected(&["alpha", "gamma"])
+        );
+
+        let next = Props::new()
+            .id("grid")
+            .items(sectioned_items())
+            .selection_mode(selection::Mode::Multiple)
+            .selected_keys(selected(&["section", "section-header", "alpha"]));
+
+        drop(grid.set_props(next));
+
+        assert_eq!(grid.context().selected_keys.get(), &selected(&["alpha"]));
     }
 
     #[test]
@@ -2463,6 +2573,49 @@ mod tests {
                 Event::SelectRange {
                     from: key("delta"),
                     to: key("gamma"),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn keyboard_helper_preserves_shift_range_anchor_across_repeated_arrows() {
+        let captured = RefCell::new(Vec::new());
+        let send = |event| captured.borrow_mut().push(event);
+        let mut grid = service(
+            Props::new()
+                .id("grid")
+                .items(items())
+                .columns(NonZero::new(2).expect("non-zero columns"))
+                .selection_mode(selection::Mode::Multiple),
+        );
+
+        drop(grid.send(Event::Focus {
+            key: Some(key("alpha")),
+            is_keyboard: true,
+        }));
+        drop(grid.send(Event::FocusDown));
+        drop(grid.send(Event::SelectRange {
+            from: key("alpha"),
+            to: key("gamma"),
+        }));
+
+        let mut shift_right = keyboard(KeyboardKey::ArrowRight, None);
+
+        shift_right.shift_key = true;
+        grid.connect(&send).on_cell_keydown_at(
+            &key("gamma"),
+            &shift_right,
+            Duration::from_millis(10),
+        );
+
+        assert_eq!(
+            captured.into_inner(),
+            vec![
+                Event::FocusRight,
+                Event::SelectRange {
+                    from: key("alpha"),
+                    to: key("delta"),
                 },
             ]
         );
