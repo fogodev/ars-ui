@@ -5670,7 +5670,7 @@ crates/ars-collections/
     announcements.rs        # CollectionChangeAnnouncement, CollectionMessages
     selection.rs            # selection::Mode, selection::Behavior, selection::Set,
                             #   selection::State, selection::DisabledBehavior, selection::OnAction
-    typeahead.rs            # typeahead::State, TYPEAHEAD_TIMEOUT_MS
+    typeahead.rs            # typeahead::State, TYPEAHEAD_TIMEOUT
     navigation.rs           # next_enabled_key, prev_enabled_key, first_enabled_key, last_enabled_key
     async_collection.rs     # AsyncLoadingState, AsyncCollection<T>
     async_loader.rs         # AsyncLoader trait, LoadResult, CollectionError
@@ -5812,7 +5812,10 @@ assert!(collapsed.nodes().all(|n| n.key != Key::str("apple"))); // not in visibl
 ### 9.4 Type-Ahead Navigation
 
 ```rust,no_check
-use ars_collections::{typeahead, StaticCollection, Key};
+use std::{collections::BTreeSet, time::Duration};
+
+use ars_collections::{DisabledBehavior, Key, StaticCollection, typeahead};
+use ars_core::Locale;
 
 let collection = StaticCollection::new([
     (Key::int(0), "Apple".into(),      ()),
@@ -5824,14 +5827,31 @@ let collection = StaticCollection::new([
 
 let state = typeahead::State::default();
 let focus = Some(Key::int(0));
+let disabled_keys = BTreeSet::new();
 
 // Type "b" — should jump to Banana (the first item starting with "b" after Apple).
 let locale = Locale::parse("en-US").expect("valid locale");
-let (state, found) = state.process_char('b', 1000, focus.as_ref(), &collection, &locale);
+let (state, found) = state.process_char_with_locale(
+    'b',
+    Duration::from_millis(1000),
+    focus.as_ref(),
+    &collection,
+    &locale,
+    &disabled_keys,
+    DisabledBehavior::Skip,
+);
 assert_eq!(found, Some(Key::int(2))); // Banana
 
 // Type "l" quickly (within 500 ms) — accumulated query is "bl" → Blueberry.
-let (_, found) = state.process_char('l', 1200, Some(Key::int(2)).as_ref(), &collection, &locale);
+let (_, found) = state.process_char_with_locale(
+    'l',
+    Duration::from_millis(1200),
+    Some(Key::int(2)).as_ref(),
+    &collection,
+    &locale,
+    &disabled_keys,
+    DisabledBehavior::Skip,
+);
 assert_eq!(found, Some(Key::int(3))); // Blueberry
 ```
 

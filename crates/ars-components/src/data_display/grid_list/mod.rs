@@ -579,7 +579,7 @@ impl ars_core::Machine for Machine {
         match event {
             Event::Focus { key, is_keyboard } => {
                 let key = if let Some(key) = key {
-                    enabled_item(context, key).map(|item| item.key.clone())
+                    Some(enabled_item(context, key)?.key.clone())
                 } else {
                     first_enabled_key(&context.items, &context.disabled_keys)
                 };
@@ -646,6 +646,9 @@ impl ars_core::Machine for Machine {
                 if context.selection_mode != selection::Mode::Multiple {
                     return None;
                 }
+
+                enabled_item(context, from)?;
+                enabled_item(context, to)?;
 
                 let selected = range_keys(context, from, to)?;
 
@@ -2166,6 +2169,11 @@ mod tests {
             to: key("alpha"),
         }));
 
+        drop(multiple.send(Event::SelectRange {
+            from: key("beta"),
+            to: key("delta"),
+        }));
+
         assert_eq!(
             multiple.context().selected_keys.get(),
             &selected(&["alpha", "gamma", "delta"])
@@ -2204,6 +2212,16 @@ mod tests {
         drop(boundary.send(Event::FocusLast));
 
         assert_eq!(boundary.context().focused_key, Some(key("echo")));
+
+        for invalid_key in [key("beta"), key("missing")] {
+            drop(boundary.send(Event::Focus {
+                key: Some(invalid_key),
+                is_keyboard: true,
+            }));
+
+            assert_eq!(boundary.context().focused_key, Some(key("echo")));
+            assert!(boundary.context().focus_visible);
+        }
 
         drop(boundary.send(Event::FocusDown));
 

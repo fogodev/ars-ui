@@ -1643,8 +1643,11 @@ fn set_all_len_returns_zero() {
 ### 13.3 Typeahead
 
 ```rust
-use ars_collections::typeahead::{State as TypeaheadState, TYPEAHEAD_TIMEOUT_MS};
-use ars_collections::{CollectionBuilder, Collection, Key};
+use core::time::Duration;
+use std::collections::BTreeSet;
+
+use ars_collections::typeahead::{State as TypeaheadState, TYPEAHEAD_TIMEOUT};
+use ars_collections::{CollectionBuilder, Collection, DisabledBehavior, Key};
 
 #[test]
 fn single_char_match_returns_matching_key() {
@@ -1654,7 +1657,15 @@ fn single_char_match_returns_matching_key() {
         .item(Key::from("g"), "Gamma", ())
         .build();
     let state = TypeaheadState::default();
-    let (new_state, matched) = state.process_char('b', 0, None, &col);
+    let disabled_keys = BTreeSet::new();
+    let (new_state, matched) = state.process_char(
+        'b',
+        Duration::ZERO,
+        None,
+        &col,
+        &disabled_keys,
+        DisabledBehavior::Skip,
+    );
     assert_eq!(matched, Some(Key::from("b")), "typing 'b' must match Beta");
     assert_eq!(new_state.search, "b");
 }
@@ -1666,8 +1677,23 @@ fn multi_char_accumulates_within_timeout() {
         .item(Key::from("am"), "Amaranth", ())
         .build();
     let state = TypeaheadState::default();
-    let (state, _) = state.process_char('a', 0, None, &col);
-    let (state, matched) = state.process_char('m', 100, None, &col); // within 500ms
+    let disabled_keys = BTreeSet::new();
+    let (state, _) = state.process_char(
+        'a',
+        Duration::ZERO,
+        None,
+        &col,
+        &disabled_keys,
+        DisabledBehavior::Skip,
+    );
+    let (state, matched) = state.process_char(
+        'm',
+        Duration::from_millis(100),
+        None,
+        &col,
+        &disabled_keys,
+        DisabledBehavior::Skip,
+    ); // within 500ms
     assert_eq!(matched, Some(Key::from("am")), "typing 'am' must match Amaranth");
     assert_eq!(state.search, "am");
 }
@@ -1679,9 +1705,24 @@ fn timeout_resets_search() {
         .item(Key::from("b"), "Beta", ())
         .build();
     let state = TypeaheadState::default();
-    let (state, _) = state.process_char('a', 0, None, &col);
+    let disabled_keys = BTreeSet::new();
+    let (state, _) = state.process_char(
+        'a',
+        Duration::ZERO,
+        None,
+        &col,
+        &disabled_keys,
+        DisabledBehavior::Skip,
+    );
     // Wait beyond timeout
-    let (state, matched) = state.process_char('b', TYPEAHEAD_TIMEOUT_MS + 1, None, &col);
+    let (state, matched) = state.process_char(
+        'b',
+        TYPEAHEAD_TIMEOUT + Duration::from_millis(1),
+        None,
+        &col,
+        &disabled_keys,
+        DisabledBehavior::Skip,
+    );
     assert_eq!(matched, Some(Key::from("b")), "after timeout, 'b' must start fresh search");
     assert_eq!(state.search, "b", "search buffer must be reset");
 }
@@ -1695,7 +1736,15 @@ fn wrap_around_search() {
         .build();
     let state = TypeaheadState::default();
     // Start from "a2", search for 'a' — should wrap to "a" (Alpha)
-    let (_, matched) = state.process_char('a', 0, Some(&Key::from("a2")), &col);
+    let disabled_keys = BTreeSet::new();
+    let (_, matched) = state.process_char(
+        'a',
+        Duration::ZERO,
+        Some(&Key::from("a2")),
+        &col,
+        &disabled_keys,
+        DisabledBehavior::Skip,
+    );
     assert_eq!(matched, Some(Key::from("a")), "search must wrap to first match after current");
 }
 
@@ -1705,7 +1754,15 @@ fn no_match_returns_none() {
         .item(Key::from("a"), "Alpha", ())
         .build();
     let state = TypeaheadState::default();
-    let (new_state, matched) = state.process_char('z', 0, None, &col);
+    let disabled_keys = BTreeSet::new();
+    let (new_state, matched) = state.process_char(
+        'z',
+        Duration::ZERO,
+        None,
+        &col,
+        &disabled_keys,
+        DisabledBehavior::Skip,
+    );
     assert!(matched.is_none(), "no matching item must return None");
     assert_eq!(new_state.search, "z", "search buffer must still update");
 }
@@ -1719,7 +1776,16 @@ fn typeahead_with_locale_matches_locale_aware() {
         .item(Key::from("ä-item"), "Äpfel", ())
         .build();
     let state = TypeaheadState::default();
-    let (_, matched) = state.process_char('ä', 0, None, &col, &locale);
+    let disabled_keys = BTreeSet::new();
+    let (_, matched) = state.process_char_with_locale(
+        'ä',
+        Duration::ZERO,
+        None,
+        &col,
+        &locale,
+        &disabled_keys,
+        DisabledBehavior::Skip,
+    );
     assert_eq!(matched, Some(Key::from("ä-item")),
         "i18n typeahead should match locale-aware characters");
 }
