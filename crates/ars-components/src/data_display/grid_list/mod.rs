@@ -622,7 +622,7 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                let selected_source = selected_keys_source(context);
+                let selected_source = interaction_selected_keys(context);
 
                 if selected_source.contains(key) {
                     if context.disallow_empty_selection && selected_source.len() <= 1 {
@@ -680,7 +680,7 @@ impl ars_core::Machine for Machine {
 
             Event::ClearSelection => {
                 if context.selection_mode == selection::Mode::None
-                    || selected_keys_source(context).is_empty()
+                    || interaction_selected_keys(context).is_empty()
                     || context.disallow_empty_selection
                 {
                     return None;
@@ -926,7 +926,7 @@ impl Api<'_> {
         );
 
         if self.context.composite && self.context.selection_mode != selection::Mode::None {
-            let selected = selected_keys_source(self.context).contains(key);
+            let selected = rendered_selected_keys(self.context).contains(key);
 
             attrs.set(
                 HtmlAttr::Aria(AriaAttr::Selected),
@@ -938,7 +938,7 @@ impl Api<'_> {
             }
         }
 
-        if !self.context.composite && selected_keys_source(self.context).contains(key) {
+        if !self.context.composite && rendered_selected_keys(self.context).contains(key) {
             attrs.set_bool(HtmlAttr::Data("ars-selected"), true);
         }
 
@@ -963,7 +963,7 @@ impl Api<'_> {
         }
 
         let focused = self.context.focused_key.as_ref() == Some(key);
-        let selected = selected_keys_source(self.context).contains(key);
+        let selected = rendered_selected_keys(self.context).contains(key);
         let disabled =
             is_disabled_key(self.context, key) || !item_key_present(&self.context.items, key);
 
@@ -1379,11 +1379,15 @@ fn normalize_selection(selected: &mut BTreeSet<Key>, mode: selection::Mode) {
     }
 }
 
-fn selected_keys_source(context: &Context) -> &BTreeSet<Key> {
+fn interaction_selected_keys(context: &Context) -> &BTreeSet<Key> {
     context
         .requested_selected_keys
         .as_ref()
         .unwrap_or_else(|| context.selected_keys.get())
+}
+
+fn rendered_selected_keys(context: &Context) -> &BTreeSet<Key> {
+    context.selected_keys.get()
 }
 
 fn selection_plan(selected: BTreeSet<Key>) -> Option<TransitionPlan<Machine>> {
@@ -2076,6 +2080,41 @@ mod tests {
         assert!(!ctx.dnd_enabled);
         assert_eq!(ctx.requested_selected_keys, None);
         assert_eq!(ctx.selected_keys.get(), &selected(&["zeta"]));
+    }
+
+    #[test]
+    fn controlled_selection_attrs_render_bound_value_not_pending_request() {
+        let mut grid = service(
+            Props::new()
+                .id("grid")
+                .items(items())
+                .selection_mode(selection::Mode::Multiple)
+                .selected_keys(selected(&["alpha"])),
+        );
+
+        drop(grid.send(Event::ToggleSelect(key("gamma"))));
+
+        let api = grid.connect(&|_| {});
+
+        assert_eq!(
+            api.requested_selected_keys(),
+            Some(&selected(&["alpha", "gamma"]))
+        );
+        assert_eq!(
+            api.cell_attrs(&key("alpha"))
+                .get(&HtmlAttr::Aria(AriaAttr::Selected)),
+            Some("true")
+        );
+        assert_eq!(
+            api.cell_attrs(&key("gamma"))
+                .get(&HtmlAttr::Aria(AriaAttr::Selected)),
+            Some("false")
+        );
+        assert_eq!(
+            api.row_attrs(&key("gamma"))
+                .get(&HtmlAttr::Data("ars-selected")),
+            None
+        );
     }
 
     #[test]
