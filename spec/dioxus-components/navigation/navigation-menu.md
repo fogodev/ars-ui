@@ -22,8 +22,8 @@ pub struct NavigationMenuProps {
     #[props(optional)]
     pub default_value: Option<Key>,
     pub items: Vec<navigation_menu::ItemDef>,
-    pub delay_ms: u32,
-    pub skip_delay_ms: u32,
+    pub delay: Duration,
+    pub skip_delay: Duration,
     pub orientation: Orientation,
     pub dir: Direction,
     #[props(default = false)]
@@ -76,20 +76,20 @@ The adapter owns timer handles, ordered trigger registration, content handoff in
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                                                    | Mode       | Sync trigger            | Machine event / update path      | Visible effect                                           | Notes                                            |
-| --------------------------------------------------------------- | ---------- | ----------------------- | -------------------------------- | -------------------------------------------------------- | ------------------------------------------------ |
-| `value`                                                         | controlled | prop change after mount | `Open(key)` or `Close` sync path | updates active trigger, content, viewport, and indicator | no controlled/uncontrolled switching after mount |
-| `delay_ms`, `skip_delay_ms`, `orientation`, `dir`, `loop_focus` | controlled | rerender with new props | core prop rebuild                | updates timers and focus movement                        | timer handles must read latest values            |
-| `with_indicator`, `with_viewport`                               | controlled | rerender with new props | adapter structural policy        | toggles indicator and viewport parts                     | active content contract stays explicit           |
+| Adapter prop                                              | Mode       | Sync trigger            | Machine event / update path      | Visible effect                                           | Notes                                            |
+| --------------------------------------------------------- | ---------- | ----------------------- | -------------------------------- | -------------------------------------------------------- | ------------------------------------------------ |
+| `value`                                                   | controlled | prop change after mount | `Open(key)` or `Close` sync path | updates active trigger, content, viewport, and indicator | no controlled/uncontrolled switching after mount |
+| `delay`, `skip_delay`, `orientation`, `dir`, `loop_focus` | controlled | rerender with new props | core prop rebuild                | updates timers and focus movement                        | timer handles must read latest values            |
+| `with_indicator`, `with_viewport`                         | controlled | rerender with new props | adapter structural policy        | toggles indicator and viewport parts                     | active content contract stays explicit           |
 
 | UI event                             | Preconditions               | Machine event / callback path                  | Ordering notes                                              | Notes                                           |
 | ------------------------------------ | --------------------------- | ---------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------- |
-| trigger pointer enter                | trigger has content         | `PointerEnter(key, now_ms)`                    | adapter starts open-delay or skip-delay path                | contentless direct-link items bypass open logic |
+| trigger pointer enter                | trigger has content         | `PointerEnter(key, now)`                       | adapter starts open-delay or skip-delay path                | contentless direct-link items bypass open logic |
 | trigger pointer leave                | open or pending item exists | `PointerLeave`                                 | close timer may be deferred while pointer is in content     | timer ownership is adapter-side                 |
-| trigger click or keyboard activation | trigger has content         | `Open(key)` or `Close(now_ms)`                 | keyboard open path is immediate                             | direct links follow native navigation           |
+| trigger click or keyboard activation | trigger has content         | `Open(key)` or `Close(now)`                    | keyboard open path is immediate                             | direct links follow native navigation           |
 | trigger focus and roving keys        | enabled triggers exist      | focus events and `FocusNext`/`FocusPrev` paths | focus restoration after Escape targets the trigger registry | RTL swaps only horizontal siblings              |
 | content pointer enter/leave          | active content exists       | content enter or leave events                  | cancels or starts close delay                               | viewport handoff must preserve these boundaries |
-| Escape                               | content open                | `EscapeKey(now_ms)`                            | closes then restores focus to owning trigger                | focus restore is adapter-owned                  |
+| Escape                               | content open                | `EscapeKey(now)`                               | closes then restores focus to owning trigger                | focus restore is adapter-owned                  |
 
 ## 8. Registration and Cleanup Contract
 

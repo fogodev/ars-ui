@@ -1,0 +1,61 @@
+---
+source: crates/ars-components/src/data_display/grid_list/mod.rs
+expression: "snapshot_attrs(&api.cell_attrs(&key(\"gamma\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-focus-visible",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-key",
+            ),
+            String(
+                "gamma",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "cell",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "grid-list",
+            ),
+        ),
+        (
+            Aria(
+                Selected,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cards-cell-gamma",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

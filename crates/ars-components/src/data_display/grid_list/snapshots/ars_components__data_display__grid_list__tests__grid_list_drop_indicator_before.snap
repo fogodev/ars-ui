@@ -1,0 +1,49 @@
+---
+source: crates/ars-components/src/data_display/grid_list/mod.rs
+expression: "snapshot_attrs(&api.drop_indicator_attrs(&CollectionDropTarget\n{ key: key(\"gamma\"), position: DropPosition::Before, }))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-drop-position",
+            ),
+            String(
+                "before",
+            ),
+        ),
+        (
+            Data(
+                "ars-drop-target",
+            ),
+            String(
+                "grid-cell-gamma",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "drop-indicator",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "grid-list",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

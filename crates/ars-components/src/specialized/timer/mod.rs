@@ -117,6 +117,22 @@ pub struct Context {
     pub intl_backend: Arc<dyn IntlBackend>,
 }
 
+/// Locale-ready display segments derived from the timer's current duration.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DisplayTime {
+    /// Whole hours in the current timer value.
+    pub hours: u128,
+
+    /// Minute segment after removing whole hours.
+    pub minutes: u8,
+
+    /// Second segment after removing whole minutes.
+    pub seconds: u8,
+
+    /// Millisecond segment after removing whole seconds.
+    pub milliseconds: u16,
+}
+
 impl Debug for Context {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("timer::Context")
@@ -635,15 +651,20 @@ impl Api<'_> {
 
     /// Current time broken into hours, minutes, seconds, and milliseconds.
     #[must_use]
-    pub const fn display_time(&self) -> (u64, u64, u64, u64) {
-        let total_ms = self.ctx.current.as_millis() as u64;
+    pub const fn display_time(&self) -> DisplayTime {
+        let total_ms = self.ctx.current.as_millis();
 
         let hours = total_ms / 3_600_000;
-        let minutes = (total_ms % 3_600_000) / 60_000;
-        let seconds = (total_ms % 60_000) / 1_000;
-        let millis = total_ms % 1_000;
+        let minutes = ((total_ms % 3_600_000) / 60_000) as u8;
+        let seconds = ((total_ms % 60_000) / 1_000) as u8;
+        let milliseconds = (total_ms % 1_000) as u16;
 
-        (hours, minutes, seconds, millis)
+        DisplayTime {
+            hours,
+            minutes,
+            seconds,
+            milliseconds,
+        }
     }
 
     /// Progress as a fraction in `[0.0, 1.0]`.
@@ -681,9 +702,9 @@ impl Api<'_> {
     /// [`StubIntlBackend`](ars_core::StubIntlBackend) yields ASCII digits.
     #[must_use]
     pub fn formatted_time(&self) -> String {
-        let (hours, minutes, seconds, _millis) = self.display_time();
+        let display_time = self.display_time();
 
-        let format_segment = |value: u64| {
+        let format_segment = |value: u128| {
             let width = NonZeroU8::new(2).expect("segment width is non-zero");
             u32::try_from(value).map_or_else(
                 |_| value.to_string(),
@@ -695,15 +716,19 @@ impl Api<'_> {
             )
         };
 
-        if hours > 0 {
+        if display_time.hours > 0 {
             format!(
                 "{}:{}:{}",
-                format_segment(hours),
-                format_segment(minutes),
-                format_segment(seconds)
+                format_segment(display_time.hours),
+                format_segment(u128::from(display_time.minutes)),
+                format_segment(u128::from(display_time.seconds))
             )
         } else {
-            format!("{}:{}", format_segment(minutes), format_segment(seconds))
+            format!(
+                "{}:{}",
+                format_segment(u128::from(display_time.minutes)),
+                format_segment(u128::from(display_time.seconds))
+            )
         }
     }
 
@@ -1680,13 +1705,29 @@ mod tests {
 
         let api = api_for(State::Running, value, Mode::Countdown, value);
 
-        assert_eq!(api.display_time(), (1, 1, 1, 0));
+        assert_eq!(
+            api.display_time(),
+            DisplayTime {
+                hours: 1,
+                minutes: 1,
+                seconds: 1,
+                milliseconds: 0,
+            }
+        );
 
         let value = Duration::from_millis(90_500);
 
         let api = api_for(State::Running, value, Mode::Countdown, value);
 
-        assert_eq!(api.display_time(), (0, 1, 30, 500));
+        assert_eq!(
+            api.display_time(),
+            DisplayTime {
+                hours: 0,
+                minutes: 1,
+                seconds: 30,
+                milliseconds: 500,
+            }
+        );
     }
 
     #[test]

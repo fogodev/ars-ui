@@ -10,7 +10,10 @@ use alloc::{
     string::{String, ToString},
     sync::Arc,
 };
-use core::fmt::{self, Debug};
+use core::{
+    fmt::{self, Debug},
+    time::Duration,
+};
 
 use ars_i18n::Locale;
 
@@ -44,7 +47,7 @@ impl Debug for TimerHandle {
     }
 }
 
-/// Debounced async validator — waits for `delay_ms` of inactivity before
+/// Debounced async validator waits for `delay` of inactivity before
 /// delegating to the inner [`AsyncValidator`](super::async_validator::AsyncValidator).
 ///
 /// Each call to [`validate_debounced`](Self::validate_debounced) cancels any
@@ -54,8 +57,8 @@ pub struct DebouncedAsyncValidator {
     /// The inner async validator to delegate to after the debounce delay.
     pub validator: BoxedAsyncValidator,
 
-    /// Debounce delay in milliseconds.
-    pub delay_ms: u32,
+    /// Debounce delay.
+    pub delay: Duration,
 
     /// Adapter-provided callback that spawns an async future to completion.
     ///
@@ -74,12 +77,12 @@ impl DebouncedAsyncValidator {
     #[must_use]
     pub fn new(
         validator: BoxedAsyncValidator,
-        delay_ms: u32,
+        delay: Duration,
         spawn_async_validation: Arc<dyn Fn(BoxedAsyncValidator, Value, OwnedContext) + Send + Sync>,
     ) -> Self {
         Self {
             validator,
-            delay_ms,
+            delay,
             spawn_async_validation,
             pending_timer: None,
         }
@@ -87,7 +90,7 @@ impl DebouncedAsyncValidator {
 
     /// Cancel any pending debounce timer and start a new one.
     ///
-    /// After `delay_ms`, delegates to the inner
+    /// After `delay`, delegates to the inner
     /// [`AsyncValidator::validate_async`](super::async_validator::AsyncValidator::validate_async).
     /// The adapter provides [`TimerHandle`] via its platform timer abstraction
     /// (e.g., `setTimeout` on WASM, `tokio::time::sleep` on native).
@@ -104,7 +107,7 @@ impl DebouncedAsyncValidator {
         name: &str,
         form_values: &BTreeMap<String, Value>,
         locale: Option<&Locale>,
-        spawn_timer: impl FnOnce(u32, Box<dyn FnOnce()>) -> TimerHandle,
+        spawn_timer: impl FnOnce(Duration, Box<dyn FnOnce()>) -> TimerHandle,
     ) {
         // Cancel previous pending validation.
         if let Some(handle) = self.pending_timer.take() {
@@ -124,7 +127,7 @@ impl DebouncedAsyncValidator {
         let spawn_async = Arc::clone(&self.spawn_async_validation);
 
         self.pending_timer = Some(spawn_timer(
-            self.delay_ms,
+            self.delay,
             Box::new(move || {
                 // After delay, spawn the async validator. The spawn callback
                 // takes ownership of all data and constructs the Context
@@ -146,7 +149,7 @@ impl Drop for DebouncedAsyncValidator {
 impl Debug for DebouncedAsyncValidator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DebouncedAsyncValidator")
-            .field("delay_ms", &self.delay_ms)
+            .field("delay", &self.delay)
             .field("has_pending_timer", &self.pending_timer.is_some())
             .finish_non_exhaustive()
     }
@@ -191,7 +194,8 @@ mod tests {
 
         let spawn_async = Arc::new(|_v: BoxedAsyncValidator, _val: Value, _ctx: OwnedContext| {});
 
-        let mut debounced = DebouncedAsyncValidator::new(validator, 200, spawn_async);
+        let mut debounced =
+            DebouncedAsyncValidator::new(validator, Duration::from_millis(200), spawn_async);
 
         let value = Value::Text("a".to_string());
 
@@ -205,7 +209,7 @@ mod tests {
             ctx.field_name,
             ctx.form_values,
             ctx.locale,
-            |_delay_ms, _callback| {
+            |_delay, _callback| {
                 let cc = Arc::clone(&cancel_count_1);
                 TimerHandle::new(Box::new(move || {
                     cc.fetch_add(1, Ordering::Relaxed);
@@ -227,7 +231,7 @@ mod tests {
             ctx.field_name,
             ctx.form_values,
             ctx.locale,
-            |_delay_ms, _callback| {
+            |_delay, _callback| {
                 let cc = Arc::clone(&cancel_count_2);
                 TimerHandle::new(Box::new(move || {
                     cc.fetch_add(1, Ordering::Relaxed);
@@ -244,13 +248,14 @@ mod tests {
 
     #[test]
     fn debounced_schedules_timer() {
-        let captured_delay = Arc::new(AtomicU32::new(0));
+        let captured_delay = Arc::new(Mutex::new(None::<Duration>));
 
         let validator = Arc::new(StubAsyncValidator) as BoxedAsyncValidator;
 
         let spawn_async = Arc::new(|_v: BoxedAsyncValidator, _val: Value, _ctx: OwnedContext| {});
 
-        let mut debounced = DebouncedAsyncValidator::new(validator, 300, spawn_async);
+        let mut debounced =
+            DebouncedAsyncValidator::new(validator, Duration::from_millis(300), spawn_async);
 
         let value = Value::Text("test".to_string());
 
@@ -263,13 +268,16 @@ mod tests {
             ctx.field_name,
             ctx.form_values,
             ctx.locale,
-            |delay_ms, _callback| {
-                captured.store(delay_ms, Ordering::Relaxed);
+            |delay, _callback| {
+                *captured.lock().expect("lock poisoned") = Some(delay);
                 TimerHandle::new(Box::new(|| {}))
             },
         );
 
-        assert_eq!(captured_delay.load(Ordering::Relaxed), 300);
+        assert_eq!(
+            *captured_delay.lock().expect("lock poisoned"),
+            Some(Duration::from_millis(300))
+        );
     }
 
     #[test]
@@ -286,7 +294,8 @@ mod tests {
                     Some((val.to_string_for_validation(), ctx.field_name.clone()));
             });
 
-        let mut debounced = DebouncedAsyncValidator::new(validator, 100, spawn_async);
+        let mut debounced =
+            DebouncedAsyncValidator::new(validator, Duration::from_millis(100), spawn_async);
 
         let value = Value::Text("hello".to_string());
 
@@ -299,7 +308,7 @@ mod tests {
             ctx.field_name,
             ctx.form_values,
             ctx.locale,
-            |_delay_ms, callback| {
+            |_delay, callback| {
                 timer_callback = Some(callback);
                 TimerHandle::new(Box::new(|| {}))
             },
@@ -329,7 +338,8 @@ mod tests {
                 *spawned_clone.lock().expect("lock poisoned") = Some(ctx);
             });
 
-        let mut debounced = DebouncedAsyncValidator::new(validator, 100, spawn_async);
+        let mut debounced =
+            DebouncedAsyncValidator::new(validator, Duration::from_millis(100), spawn_async);
 
         let value = Value::Text("test".to_string());
 
@@ -347,7 +357,7 @@ mod tests {
             "username",
             &form_values,
             Some(&locale),
-            |_delay_ms, callback| {
+            |_delay, callback| {
                 timer_callback = Some(callback);
                 TimerHandle::new(Box::new(|| {}))
             },
@@ -413,7 +423,8 @@ mod tests {
                     .push(val.to_string_for_validation());
             });
 
-        let mut debounced = DebouncedAsyncValidator::new(validator, 100, spawn_async);
+        let mut debounced =
+            DebouncedAsyncValidator::new(validator, Duration::from_millis(100), spawn_async);
 
         let ctx = Context::standalone("field");
 
@@ -427,7 +438,7 @@ mod tests {
             ctx.field_name,
             ctx.form_values,
             ctx.locale,
-            |_delay_ms, callback| {
+            |_delay, callback| {
                 first_callback = Some(callback);
                 TimerHandle::new(Box::new(|| {}))
             },
@@ -443,7 +454,7 @@ mod tests {
             ctx.field_name,
             ctx.form_values,
             ctx.locale,
-            |_delay_ms, callback| {
+            |_delay, callback| {
                 second_callback = Some(callback);
                 TimerHandle::new(Box::new(|| {}))
             },
@@ -476,7 +487,8 @@ mod tests {
 
         let spawn_async = Arc::new(|_v: BoxedAsyncValidator, _val: Value, _ctx: OwnedContext| {});
 
-        let debounced = DebouncedAsyncValidator::new(validator, 250, spawn_async);
+        let debounced =
+            DebouncedAsyncValidator::new(validator, Duration::from_millis(250), spawn_async);
 
         let debug = format!("{debounced:?}");
 
@@ -484,10 +496,7 @@ mod tests {
             debug.contains("DebouncedAsyncValidator"),
             "Debug output should contain type name"
         );
-        assert!(
-            debug.contains("250"),
-            "Debug output should contain delay_ms"
-        );
+        assert!(debug.contains("250"), "Debug output should contain delay");
     }
 
     #[test]
@@ -498,7 +507,8 @@ mod tests {
 
         let spawn_async = Arc::new(|_v: BoxedAsyncValidator, _val: Value, _ctx: OwnedContext| {});
 
-        let mut debounced = DebouncedAsyncValidator::new(validator, 100, spawn_async);
+        let mut debounced =
+            DebouncedAsyncValidator::new(validator, Duration::from_millis(100), spawn_async);
 
         let ctx = Context::standalone("field");
 
@@ -508,7 +518,7 @@ mod tests {
             ctx.field_name,
             ctx.form_values,
             ctx.locale,
-            |_delay_ms, _callback| {
+            |_delay, _callback| {
                 let flag = Arc::clone(&cancelled_clone);
                 TimerHandle::new(Box::new(move || {
                     flag.store(true, Ordering::Relaxed);

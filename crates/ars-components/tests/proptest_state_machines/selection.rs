@@ -1,6 +1,6 @@
 //! Property-based tests for selection component state machines.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, time::Duration};
 
 use ars_collections::{Collection, CollectionBuilder, Key, selection};
 use ars_components::selection::{
@@ -392,8 +392,14 @@ fn arb_menu_event() -> impl Strategy<Value = menu::Event> {
         Just(menu::Event::HighlightLast),
         Just(menu::Event::CloseSubmenu),
         Just(menu::Event::ClickOutside),
-        Just(menu::Event::TypeaheadSearch('b', 100)),
-        Just(menu::Event::TypeaheadSearch('d', 700)),
+        Just(menu::Event::TypeaheadSearch(
+            'b',
+            Duration::from_millis(100)
+        )),
+        Just(menu::Event::TypeaheadSearch(
+            'd',
+            Duration::from_millis(700)
+        )),
         arb_key().prop_map(|value| menu::Event::SelectRadioItem {
             group: "density".into(),
             value,
@@ -416,8 +422,14 @@ fn arb_context_menu_event() -> impl Strategy<Value = context_menu::Event> {
         Just(context_menu::Event::HighlightLast),
         Just(context_menu::Event::CloseSubmenu),
         Just(context_menu::Event::ClickOutside),
-        Just(context_menu::Event::TypeaheadSearch('b', 100)),
-        Just(context_menu::Event::TypeaheadSearch('d', 700)),
+        Just(context_menu::Event::TypeaheadSearch(
+            'b',
+            Duration::from_millis(100)
+        )),
+        Just(context_menu::Event::TypeaheadSearch(
+            'd',
+            Duration::from_millis(700)
+        )),
         arb_key().prop_map(|value| context_menu::Event::SelectRadioItem {
             group: "density".into(),
             value,
@@ -926,7 +938,7 @@ proptest! {
         let props = autocomplete::Props::new()
             .id("autocomplete")
             .items(autocomplete_collection())
-            .debounce(core::time::Duration::from_millis(50));
+            .debounce(Duration::from_millis(50));
 
         let mut service = Service::<autocomplete::Machine>::new(
             props,

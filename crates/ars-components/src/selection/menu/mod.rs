@@ -6,7 +6,10 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use core::fmt::{self, Debug};
+use core::{
+    fmt::{self, Debug},
+    time::Duration,
+};
 
 use ars_collections::{
     Collection, DisabledBehavior, Key, Node, StaticCollection,
@@ -133,8 +136,8 @@ pub enum Event {
     /// Close due to an outside click.
     ClickOutside,
 
-    /// Search by type-ahead character and timestamp.
-    TypeaheadSearch(char, u64),
+    /// Search by type-ahead character and monotonic timestamp.
+    TypeaheadSearch(char, Duration),
 
     /// Replace the item collection dynamically.
     UpdateItems(StaticCollection<Item>),
@@ -564,10 +567,10 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            (State::Open, Event::TypeaheadSearch(ch, now_ms)) => {
+            (State::Open, Event::TypeaheadSearch(ch, now)) => {
                 let (typeahead, found) = ctx.typeahead.process_char_with_locale(
                     *ch,
-                    *now_ms,
+                    *now,
                     ctx.highlighted_key.as_ref(),
                     &ctx.items,
                     &ctx.locale,
@@ -977,9 +980,9 @@ impl Api<'_> {
         data: &KeyboardEventData,
         ctrl: bool,
         meta: bool,
-        now_ms: u64,
+        now: Duration,
     ) {
-        self.on_trigger_keydown_impl(data, ctrl, meta, Some(now_ms));
+        self.on_trigger_keydown_impl(data, ctrl, meta, Some(now));
     }
 
     /// Dispatches content keydown events.
@@ -993,9 +996,9 @@ impl Api<'_> {
         data: &KeyboardEventData,
         ctrl: bool,
         meta: bool,
-        now_ms: u64,
+        now: Duration,
     ) {
-        self.on_content_keydown_impl(data, ctrl, meta, Some(now_ms));
+        self.on_content_keydown_impl(data, ctrl, meta, Some(now));
     }
 
     /// Dispatches an item click event.
@@ -1020,7 +1023,7 @@ impl Api<'_> {
         data: &KeyboardEventData,
         ctrl: bool,
         meta: bool,
-        now_ms: Option<u64>,
+        now: Option<Duration>,
     ) {
         match data.key {
             KeyboardKey::ArrowDown | KeyboardKey::Enter | KeyboardKey::Space => {
@@ -1032,7 +1035,7 @@ impl Api<'_> {
             _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
                 (self.send)(Event::TypeaheadSearch(
                     data.character.expect("checked"),
-                    typeahead_time(now_ms, &self.ctx.typeahead),
+                    typeahead_time(now, &self.ctx.typeahead),
                 ));
             }
 
@@ -1045,7 +1048,7 @@ impl Api<'_> {
         data: &KeyboardEventData,
         ctrl: bool,
         meta: bool,
-        now_ms: Option<u64>,
+        now: Option<Duration>,
     ) {
         match data.key {
             KeyboardKey::ArrowDown => (self.send)(Event::HighlightNext),
@@ -1087,7 +1090,7 @@ impl Api<'_> {
             _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
                 (self.send)(Event::TypeaheadSearch(
                     data.character.expect("checked"),
-                    typeahead_time(now_ms, &self.ctx.typeahead),
+                    typeahead_time(now, &self.ctx.typeahead),
                 ));
             }
 
@@ -1480,31 +1483,29 @@ fn submenu_close_key(ctx: &Context) -> KeyboardKey {
     }
 }
 
-fn typeahead_time(now_ms: Option<u64>, state: &typeahead::State) -> u64 {
-    now_ms.unwrap_or_else(|| {
-        current_time_ms().unwrap_or_else(|| state.last_key_time_ms.saturating_add(1))
+fn typeahead_time(now: Option<Duration>, state: &typeahead::State) -> Duration {
+    now.unwrap_or_else(|| {
+        current_time()
+            .unwrap_or_else(|| state.last_key_time.saturating_add(Duration::from_millis(1)))
     })
 }
 
 #[cfg(feature = "std")]
-fn current_time_ms() -> Option<u64> {
-    let millis = std::time::SystemTime::now()
+fn current_time() -> Option<Duration> {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_millis();
-
-    Some(u64::try_from(millis).unwrap_or(u64::MAX))
+        .ok()
 }
 
 #[cfg(not(feature = "std"))]
-const fn current_time_ms() -> Option<u64> {
+const fn current_time() -> Option<Duration> {
     None
 }
 
 #[cfg(test)]
 mod tests {
     use alloc::{collections::BTreeSet, format, sync::Arc, vec, vec::Vec};
-    use core::cell::RefCell;
+    use core::{cell::RefCell, time::Duration};
     use std::sync::Mutex;
 
     use ars_collections::{Collection, CollectionBuilder, DisabledBehavior, Key, NodeType};
@@ -1990,11 +1991,11 @@ mod tests {
         let mut menu = service(Props::new().id("menu"));
 
         drop(menu.send(Event::Open));
-        drop(menu.send(Event::TypeaheadSearch('b', 100)));
+        drop(menu.send(Event::TypeaheadSearch('b', Duration::from_millis(100))));
 
         assert_eq!(menu.context().highlighted_key, Some(key("bravo")));
 
-        drop(menu.send(Event::TypeaheadSearch('d', 700)));
+        drop(menu.send(Event::TypeaheadSearch('d', Duration::from_millis(700))));
 
         assert_eq!(menu.context().highlighted_key, Some(key("delta")));
     }
@@ -2497,13 +2498,13 @@ mod tests {
                 &keyboard(KeyboardKey::Unidentified, Some('b')),
                 false,
                 false,
-                100,
+                Duration::from_millis(100),
             );
             api.on_content_keydown_at(
                 &keyboard(KeyboardKey::Unidentified, Some('d')),
                 false,
                 false,
-                200,
+                Duration::from_millis(200),
             );
         }
 
@@ -2511,10 +2512,16 @@ mod tests {
 
         assert!(matches!(
             captured[0],
-            Event::TypeaheadSearch('b', timestamp) if timestamp > 0
+            Event::TypeaheadSearch('b', timestamp) if timestamp > Duration::ZERO
         ));
-        assert_eq!(captured[1], Event::TypeaheadSearch('b', 100));
-        assert_eq!(captured[2], Event::TypeaheadSearch('d', 200));
+        assert_eq!(
+            captured[1],
+            Event::TypeaheadSearch('b', Duration::from_millis(100))
+        );
+        assert_eq!(
+            captured[2],
+            Event::TypeaheadSearch('d', Duration::from_millis(200))
+        );
     }
 
     #[test]
@@ -2522,7 +2529,7 @@ mod tests {
         let mut menu = service(Props::new().id("menu"));
 
         drop(menu.send(Event::Open));
-        drop(menu.send(Event::TypeaheadSearch('b', 100)));
+        drop(menu.send(Event::TypeaheadSearch('b', Duration::from_millis(100))));
 
         let captured = captured_events(&menu, |api| {
             api.on_content_keydown(
@@ -2534,7 +2541,8 @@ mod tests {
 
         assert!(matches!(
             captured.as_slice(),
-            [Event::TypeaheadSearch('d', timestamp)] if timestamp.saturating_sub(100) > 500
+            [Event::TypeaheadSearch('d', timestamp)]
+                if timestamp.saturating_sub(Duration::from_millis(100)) > Duration::from_millis(500)
         ));
     }
 

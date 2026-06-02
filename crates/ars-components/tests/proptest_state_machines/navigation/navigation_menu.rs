@@ -1,5 +1,7 @@
 //! Property-based tests for the `navigation/navigation_menu` state machine.
 
+use core::time::Duration;
+
 use ars_collections::Key;
 use ars_components::navigation::navigation_menu;
 use ars_core::{AriaAttr, Env, HtmlAttr, Service};
@@ -22,18 +24,18 @@ fn arb_nm_props() -> impl Strategy<Value = navigation_menu::Props> {
     (
         prop::option::of(prop::option::of(arb_nm_key())),
         prop::option::of(arb_nm_key()),
-        0u32..400,
-        0u32..400,
+        0u64..400,
+        0u64..400,
         arb_orientation(),
         arb_direction(),
         any::<bool>(),
     )
         .prop_map(
-            |(value, default_value, delay_ms, skip_delay_ms, orientation, dir, loop_focus)| {
+            |(value, default_value, delay, skip_delay, orientation, dir, loop_focus)| {
                 let mut props = navigation_menu::Props::new()
                     .id("nav")
-                    .delay_ms(delay_ms)
-                    .skip_delay_ms(skip_delay_ms)
+                    .delay(Duration::from_millis(delay))
+                    .skip_delay(Duration::from_millis(skip_delay))
                     .orientation(orientation)
                     .dir(dir)
                     .loop_focus(loop_focus);
@@ -56,8 +58,9 @@ fn arb_nm_event() -> impl Strategy<Value = navigation_menu::Event> {
 
     prop_oneof![
         arb_nm_key().prop_map(Event::Open),
-        (0u64..4000).prop_map(Event::Close),
-        (arb_nm_key(), 0u64..4000).prop_map(|(key, now)| Event::PointerEnter(key, now)),
+        (0u64..4000).prop_map(|now| Event::Close(Duration::from_millis(now))),
+        (arb_nm_key(), 0u64..4000)
+            .prop_map(|(key, now)| Event::PointerEnter(key, Duration::from_millis(now))),
         Just(Event::PointerLeave),
         (arb_nm_key(), any::<bool>())
             .prop_map(|(item, is_keyboard)| Event::FocusTrigger { item, is_keyboard }),
@@ -65,10 +68,10 @@ fn arb_nm_event() -> impl Strategy<Value = navigation_menu::Event> {
         Just(Event::FocusPrev),
         Just(Event::FocusFirst),
         Just(Event::FocusLast),
-        (0u64..4000).prop_map(Event::SelectLink),
-        (0u64..4000).prop_map(Event::EscapeKey),
+        (0u64..4000).prop_map(|now| Event::SelectLink(Duration::from_millis(now))),
+        (0u64..4000).prop_map(|now| Event::EscapeKey(Duration::from_millis(now))),
         arb_nm_key().prop_map(Event::OpenTimerFired),
-        (0u64..4000).prop_map(Event::CloseTimerFired),
+        (0u64..4000).prop_map(|now| Event::CloseTimerFired(Duration::from_millis(now))),
         Just(Event::ContentPointerEnter),
         Just(Event::ContentPointerLeave),
         arb_direction().prop_map(Event::SetDirection),

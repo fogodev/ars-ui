@@ -168,13 +168,13 @@ impl InstalledFakeTimers {
 
 #[cfg(target_arch = "wasm32")]
 fn advance_fake_timer_state(state: &Rc<WasmRefCell<FakeTimerState>>, duration: Duration) {
-    let target_ms = {
+    let target = {
         let state = state.borrow();
-        state.target_ms_after(duration)
+        state.target_after(duration)
     };
 
     loop {
-        let next_timer = { state.borrow_mut().take_next_due_timer(target_ms) };
+        let next_timer = { state.borrow_mut().take_next_due_timer(target) };
         let Some((timer_id, entry)) = next_timer else {
             break;
         };
@@ -187,13 +187,13 @@ fn advance_fake_timer_state(state: &Rc<WasmRefCell<FakeTimerState>>, duration: D
         state.borrow_mut().finish_timer(timer_id, entry);
     }
 
-    state.borrow_mut().current_ms = target_ms;
+    state.borrow_mut().current = target;
 }
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Default)]
 struct FakeTimerState {
-    current_ms: u64,
+    current: Duration,
     next_id: u32,
     timers: BTreeMap<u32, FakeTimerEntry>,
     canceled_during_fire: BTreeSet<u32>,
@@ -202,12 +202,12 @@ struct FakeTimerState {
 
 #[cfg(target_arch = "wasm32")]
 impl FakeTimerState {
-    fn schedule(&mut self, callback: JsValue, delay: &JsValue, interval: Option<u64>) -> u32 {
+    fn schedule(&mut self, callback: JsValue, delay: &JsValue, interval: Option<Duration>) -> u32 {
         let callback = callback
             .dyn_into::<js_sys::Function>()
             .expect("fake timers only support function callbacks");
 
-        let delay_ms = normalize_timer_delay(delay);
+        let delay = normalize_timer_delay(delay);
 
         self.next_id = self.next_id.wrapping_add(1).max(1);
 
@@ -216,8 +216,8 @@ impl FakeTimerState {
         self.timers.insert(
             id,
             FakeTimerEntry {
-                due_ms: self.current_ms.saturating_add(delay_ms),
-                interval_ms: interval,
+                due: self.current.saturating_add(delay),
+                interval,
                 callback,
             },
         );
@@ -237,15 +237,14 @@ impl FakeTimerState {
         }
     }
 
-    fn target_ms_after(&self, duration: Duration) -> u64 {
-        self.current_ms
-            .saturating_add(duration.as_millis().try_into().unwrap_or(u64::MAX))
+    fn target_after(&self, duration: Duration) -> Duration {
+        self.current.saturating_add(duration)
     }
 
-    fn take_next_due_timer(&mut self, target_ms: u64) -> Option<(u32, FakeTimerEntry)> {
-        let (timer_id, due_ms) = self.next_due_timer(target_ms)?;
+    fn take_next_due_timer(&mut self, target: Duration) -> Option<(u32, FakeTimerEntry)> {
+        let (timer_id, due) = self.next_due_timer(target)?;
 
-        self.current_ms = due_ms;
+        self.current = due;
         self.firing = Some(timer_id);
 
         Some((
@@ -259,14 +258,16 @@ impl FakeTimerState {
     fn finish_timer(&mut self, timer_id: u32, entry: FakeTimerEntry) {
         self.firing = None;
 
-        if let Some(interval_ms) = entry.interval_ms
+        if let Some(interval) = entry.interval
             && !self.canceled_during_fire.remove(&timer_id)
         {
             self.timers.insert(
                 timer_id,
                 FakeTimerEntry {
-                    due_ms: self.current_ms.saturating_add(interval_ms.max(1)),
-                    interval_ms: Some(interval_ms),
+                    due: self
+                        .current
+                        .saturating_add(interval.max(Duration::from_millis(1))),
+                    interval: Some(interval),
                     callback: entry.callback,
                 },
             );
@@ -274,26 +275,26 @@ impl FakeTimerState {
     }
 
     fn clear(&mut self) {
-        self.current_ms = 0;
+        self.current = Duration::ZERO;
         self.next_id = 0;
         self.timers.clear();
         self.canceled_during_fire.clear();
         self.firing = None;
     }
 
-    fn next_due_timer(&self, target_ms: u64) -> Option<(u32, u64)> {
+    fn next_due_timer(&self, target: Duration) -> Option<(u32, Duration)> {
         self.timers
             .iter()
-            .filter(|(_, entry)| entry.due_ms <= target_ms)
-            .map(|(timer_id, entry)| (*timer_id, entry.due_ms))
-            .min_by_key(|(timer_id, due_ms)| (*due_ms, *timer_id))
+            .filter(|(_, entry)| entry.due <= target)
+            .map(|(timer_id, entry)| (*timer_id, entry.due))
+            .min_by_key(|(timer_id, due)| (*due, *timer_id))
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 struct FakeTimerEntry {
-    due_ms: u64,
-    interval_ms: Option<u64>,
+    due: Duration,
+    interval: Option<Duration>,
     callback: js_sys::Function,
 }
 
@@ -333,11 +334,11 @@ impl FakeTimerHooks {
         let set_interval_state = Rc::clone(state);
         let set_interval = Closure::<dyn FnMut(JsValue, JsValue) -> JsValue>::wrap(Box::new(
             move |callback: JsValue, delay: JsValue| {
-                let delay_ms = normalize_timer_delay(&delay);
+                let delay = normalize_timer_delay(&delay);
                 JsValue::from_f64(f64::from(set_interval_state.borrow_mut().schedule(
                     callback,
                     &delay,
-                    Some(delay_ms),
+                    Some(delay),
                 )))
             },
         ));
@@ -411,13 +412,15 @@ impl FakeTimerHooks {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn normalize_timer_delay(delay: &JsValue) -> u64 {
-    delay
-        .as_f64()
-        .unwrap_or(0.0)
-        .max(0.0)
-        .round()
-        .min(u64::MAX as f64) as u64
+fn normalize_timer_delay(delay: &JsValue) -> Duration {
+    Duration::from_millis(
+        delay
+            .as_f64()
+            .unwrap_or(0.0)
+            .max(0.0)
+            .round()
+            .min(u64::MAX as f64) as u64,
+    )
 }
 
 /// Marker trait for adapter component types mountable by the test harness.

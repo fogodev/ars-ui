@@ -215,6 +215,7 @@ impl Debug for ArsContext {
 #[cfg(test)]
 mod tests {
     use alloc::format;
+    use core::time::Duration;
 
     use super::*;
     use crate::{ModalitySnapshot, NullModalityContext};
@@ -299,7 +300,7 @@ mod tests {
         assert!(!context.disabled());
         assert!(!context.read_only());
         assert_eq!(context.style_strategy(), &StyleStrategy::Inline);
-        assert_eq!(context.platform().now_ms(), 0);
+        assert_eq!(context.platform().now(), Duration::ZERO);
         assert_eq!(context.modality().snapshot(), ModalitySnapshot::default());
         let registries = context.i18n_registries();
         assert_eq!(Arc::strong_count(&registries), 2);

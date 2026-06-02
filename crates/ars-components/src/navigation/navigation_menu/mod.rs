@@ -7,7 +7,10 @@
 //! measurements, viewport animation styles, and z-index allocation.
 
 use alloc::{string::String, vec::Vec};
-use core::fmt::{self, Debug};
+use core::{
+    fmt::{self, Debug},
+    time::Duration,
+};
 
 use ars_collections::Key;
 use ars_core::{
@@ -40,10 +43,10 @@ pub enum Event {
     Open(Key),
 
     /// Close the currently open content panel and record a close timestamp.
-    Close(u64),
+    Close(Duration),
 
     /// Pointer entered a trigger at the supplied adapter timestamp.
-    PointerEnter(Key, u64),
+    PointerEnter(Key, Duration),
 
     /// Pointer left a trigger.
     PointerLeave,
@@ -70,16 +73,16 @@ pub enum Event {
     FocusLast,
 
     /// A link inside the content was selected.
-    SelectLink(u64),
+    SelectLink(Duration),
 
     /// Escape requested submenu dismissal.
-    EscapeKey(u64),
+    EscapeKey(Duration),
 
     /// The adapter-managed open-delay timer fired for the key.
     OpenTimerFired(Key),
 
     /// The adapter-managed close-delay timer fired at the timestamp.
-    CloseTimerFired(u64),
+    CloseTimerFired(Duration),
 
     /// Pointer entered the content area.
     ContentPointerEnter,
@@ -160,11 +163,11 @@ pub struct Props {
     /// Initial open item when uncontrolled.
     pub default_value: Option<Key>,
 
-    /// Delay in milliseconds before a hovered trigger opens.
-    pub delay_ms: u32,
+    /// Delay before a hovered trigger opens.
+    pub delay: Duration,
 
     /// Window after closing during which hovering a new trigger skips delay.
-    pub skip_delay_ms: u32,
+    pub skip_delay: Duration,
 
     /// Layout orientation of the trigger list.
     pub orientation: Orientation,
@@ -185,8 +188,8 @@ impl Default for Props {
             id: String::new(),
             value: None,
             default_value: None,
-            delay_ms: 200,
-            skip_delay_ms: 300,
+            delay: Duration::from_millis(200),
+            skip_delay: Duration::from_millis(300),
             orientation: Orientation::Horizontal,
             dir: Direction::Ltr,
             loop_focus: true,
@@ -237,17 +240,17 @@ impl Props {
         self
     }
 
-    /// Sets [`Self::delay_ms`].
+    /// Sets [`Self::delay`].
     #[must_use]
-    pub const fn delay_ms(mut self, value: u32) -> Self {
-        self.delay_ms = value;
+    pub const fn delay(mut self, value: Duration) -> Self {
+        self.delay = value;
         self
     }
 
-    /// Sets [`Self::skip_delay_ms`].
+    /// Sets [`Self::skip_delay`].
     #[must_use]
-    pub const fn skip_delay_ms(mut self, value: u32) -> Self {
-        self.skip_delay_ms = value;
+    pub const fn skip_delay(mut self, value: Duration) -> Self {
+        self.skip_delay = value;
         self
     }
 
@@ -347,13 +350,13 @@ pub struct Context {
     pub dir: Direction,
 
     /// Delay before a hovered trigger opens.
-    pub delay_ms: u32,
+    pub delay: Duration,
 
     /// Skip-delay window after close.
-    pub skip_delay_ms: u32,
+    pub skip_delay: Duration,
 
     /// Timestamp of the last close event.
-    pub last_close_time: Option<u64>,
+    pub last_close_time: Option<Duration>,
 
     /// Whether the pointer is currently inside the content area.
     pub pointer_in_content: bool,
@@ -506,8 +509,8 @@ impl ars_core::Machine for Machine {
                 focus_visible: false,
                 orientation: props.orientation,
                 dir: props.dir,
-                delay_ms: props.delay_ms,
-                skip_delay_ms: props.skip_delay_ms,
+                delay: props.delay,
+                skip_delay: props.skip_delay,
                 last_close_time: None,
                 pointer_in_content: false,
                 items: Vec::new(),
@@ -532,13 +535,13 @@ impl ars_core::Machine for Machine {
         match (state, event) {
             (_, Event::Open(item)) => open_item_plan(state, ctx, item.clone()),
 
-            (_, Event::Close(now_ms) | Event::SelectLink(now_ms))
+            (_, Event::Close(now) | Event::SelectLink(now))
                 if effective_open_item(state, ctx).is_some() =>
             {
-                Some(close_plan(*now_ms))
+                Some(close_plan(*now))
             }
 
-            (_, Event::PointerEnter(item, now_ms)) => {
+            (_, Event::PointerEnter(item, now)) => {
                 let rendered_open = effective_open_item(state, ctx);
 
                 if rendered_open == Some(item) {
@@ -551,7 +554,7 @@ impl ars_core::Machine for Machine {
                     );
                 }
 
-                if rendered_open.is_some() || in_skip_delay_window(ctx, *now_ms) {
+                if rendered_open.is_some() || in_skip_delay_window(ctx, *now) {
                     open_item_plan(state, ctx, item.clone())
                         .map(|plan| plan.cancel_effect(Effect::CloseDelay))
                 } else {
@@ -604,12 +607,12 @@ impl ars_core::Machine for Machine {
                 )
             }
 
-            (_, Event::CloseTimerFired(now_ms)) if effective_open_item(state, ctx).is_some() => {
+            (_, Event::CloseTimerFired(now)) if effective_open_item(state, ctx).is_some() => {
                 if ctx.pointer_in_content {
                     return None;
                 }
 
-                Some(close_plan(*now_ms).cancel_effect(Effect::CloseDelay))
+                Some(close_plan(*now).cancel_effect(Effect::CloseDelay))
             }
 
             (_, Event::FocusTrigger { item, is_keyboard }) => {
@@ -635,10 +638,10 @@ impl ars_core::Machine for Machine {
                 }
             }
 
-            (_, Event::EscapeKey(now_ms)) => {
+            (_, Event::EscapeKey(now)) => {
                 let item = effective_open_item(state, ctx)?.clone();
                 Some(
-                    close_plan(*now_ms)
+                    close_plan(*now)
                         .apply(move |ctx: &mut Context| {
                             ctx.focused_trigger = Some(item);
                             ctx.focus_visible = true;
@@ -709,13 +712,13 @@ impl ars_core::Machine for Machine {
 
             (_, Event::SyncProps) => {
                 let orientation = props.orientation;
-                let delay_ms = props.delay_ms;
-                let skip_delay_ms = props.skip_delay_ms;
+                let delay = props.delay;
+                let skip_delay = props.skip_delay;
                 let value = props.value.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.orientation = orientation;
-                    ctx.delay_ms = delay_ms;
-                    ctx.skip_delay_ms = skip_delay_ms;
+                    ctx.delay = delay;
+                    ctx.skip_delay = skip_delay;
                     ctx.value.sync_controlled(value);
                 }))
             }
@@ -782,8 +785,8 @@ impl ars_core::Machine for Machine {
         }
 
         let needs_sync_props = old.orientation != new.orientation
-            || old.delay_ms != new.delay_ms
-            || old.skip_delay_ms != new.skip_delay_ms;
+            || old.delay != new.delay
+            || old.skip_delay != new.skip_delay;
 
         let mut emitted_sync_props = false;
 
@@ -1192,8 +1195,8 @@ impl<'a> Api<'a> {
     }
 
     /// Handle pointer enter on a trigger.
-    pub fn on_trigger_pointer_enter(&self, item_key: &Key, now_ms: u64) {
-        (self.send)(Event::PointerEnter(item_key.clone(), now_ms));
+    pub fn on_trigger_pointer_enter(&self, item_key: &Key, now: Duration) {
+        (self.send)(Event::PointerEnter(item_key.clone(), now));
     }
 
     /// Handle pointer leave on a trigger.
@@ -1210,7 +1213,7 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown on a trigger.
-    pub fn on_trigger_keydown(&self, item_key: &Key, data: &KeyboardEventData, now_ms: u64) {
+    pub fn on_trigger_keydown(&self, item_key: &Key, data: &KeyboardEventData, now: Duration) {
         let (prev_key, next_key) = navigation_keys(self.ctx.orientation, self.ctx.dir);
 
         if data.key == next_key {
@@ -1224,7 +1227,7 @@ impl<'a> Api<'a> {
         } else if data.key == KeyboardKey::Enter || data.key == KeyboardKey::Space {
             (self.send)(Event::Open(item_key.clone()));
         } else if data.key == KeyboardKey::Escape {
-            (self.send)(Event::EscapeKey(now_ms));
+            (self.send)(Event::EscapeKey(now));
         } else if self.ctx.orientation == Orientation::Horizontal
             && (data.key == KeyboardKey::ArrowDown || data.key == KeyboardKey::ArrowUp)
         {
@@ -1243,15 +1246,15 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown inside the content area.
-    pub fn on_content_keydown(&self, data: &KeyboardEventData, now_ms: u64) {
+    pub fn on_content_keydown(&self, data: &KeyboardEventData, now: Duration) {
         if data.key == KeyboardKey::Escape {
-            (self.send)(Event::EscapeKey(now_ms));
+            (self.send)(Event::EscapeKey(now));
         }
     }
 
     /// Handle click on a link inside the content.
-    pub fn on_link_select(&self, now_ms: u64) {
-        (self.send)(Event::SelectLink(now_ms));
+    pub fn on_link_select(&self, now: Duration) {
+        (self.send)(Event::SelectLink(now));
     }
 
     fn trigger_tab_index(&self, item_key: &Key) -> &'static str {
@@ -1310,9 +1313,9 @@ impl ConnectApi for Api<'_> {
     }
 }
 
-fn in_skip_delay_window(ctx: &Context, now_ms: u64) -> bool {
+fn in_skip_delay_window(ctx: &Context, now: Duration) -> bool {
     if let Some(last_close_time) = ctx.last_close_time {
-        now_ms.saturating_sub(last_close_time) < u64::from(ctx.skip_delay_ms)
+        now.saturating_sub(last_close_time) < ctx.skip_delay
     } else {
         false
     }
@@ -1368,14 +1371,14 @@ fn open_to_plan(previous: Option<Key>, item: Key) -> TransitionPlan<Machine> {
         .with_effect(value_change_effect(next_value))
 }
 
-fn close_plan(now_ms: u64) -> TransitionPlan<Machine> {
+fn close_plan(now: Duration) -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Idle)
         .apply(move |ctx: &mut Context| {
             ctx.previous_item = ctx.value.get().clone();
             ctx.value.set(None);
             ctx.pointer_in_content = false;
             ctx.pending_open_item = None;
-            ctx.last_close_time = Some(now_ms);
+            ctx.last_close_time = Some(now);
         })
         .cancel_effect(Effect::OpenDelay)
         .cancel_effect(Effect::CloseDelay)
@@ -1496,7 +1499,7 @@ fn content_dom_id(ids: &ComponentIds, key: &Key) -> String {
 #[cfg(test)]
 mod tests {
     use alloc::{string::String, vec, vec::Vec};
-    use core::cell::RefCell;
+    use core::{cell::RefCell, time::Duration};
 
     use ars_collections::Key;
     use ars_core::{
@@ -1514,6 +1517,10 @@ mod tests {
 
     fn key(value: &str) -> Key {
         Key::str(value)
+    }
+
+    fn ms(value: u64) -> Duration {
+        Duration::from_millis(value)
     }
 
     fn props() -> Props {
@@ -1599,14 +1606,14 @@ mod tests {
             .id("nav")
             .value(Some(key("docs")))
             .default_value(key("blog"))
-            .delay_ms(450)
+            .delay(ms(450))
             .uncontrolled()
             .no_default_value();
 
         assert_eq!(props.id, "nav");
         assert_eq!(props.value, None);
         assert_eq!(props.default_value, None);
-        assert_eq!(props.delay_ms, 450);
+        assert_eq!(props.delay, ms(450));
     }
 
     #[test]
@@ -1625,11 +1632,11 @@ mod tests {
     fn close_event_closes_and_records_last_close_time() {
         let mut service = service(props().default_value(key("docs")));
 
-        let result = service.send(Event::Close(50));
+        let result = service.send(Event::Close(ms(50)));
 
         assert_eq!(*service.state(), State::Idle);
         assert_eq!(service.context().previous_item, Some(key("docs")));
-        assert_eq!(service.context().last_close_time, Some(50));
+        assert_eq!(service.context().last_close_time, Some(ms(50)));
         assert_eq!(service.context().value.get(), &None);
         assert_eq!(effect_names(&result), vec![Effect::ValueChange]);
     }
@@ -1638,7 +1645,7 @@ mod tests {
     fn pointer_enter_idle_emits_open_delay_without_opening() {
         let mut service = service(props());
 
-        let result = service.send(Event::PointerEnter(key("docs"), 10));
+        let result = service.send(Event::PointerEnter(key("docs"), ms(10)));
 
         assert_eq!(*service.state(), State::Idle);
         assert_eq!(service.context().pending_open_item, Some(key("docs")));
@@ -1649,7 +1656,7 @@ mod tests {
     fn pointer_leave_idle_clears_pending_open_delay() {
         let mut service = service(props());
 
-        drop(service.send(Event::PointerEnter(key("docs"), 10)));
+        drop(service.send(Event::PointerEnter(key("docs"), ms(10))));
 
         let result = service.send(Event::PointerLeave);
 
@@ -1662,7 +1669,7 @@ mod tests {
     fn open_timer_fired_opens_pending_item() {
         let mut service = service(props());
 
-        drop(service.send(Event::PointerEnter(key("docs"), 10)));
+        drop(service.send(Event::PointerEnter(key("docs"), ms(10))));
         let result = service.send(Event::OpenTimerFired(key("docs")));
 
         assert_eq!(*service.state(), State::Open { item: key("docs") });
@@ -1674,7 +1681,7 @@ mod tests {
     fn stale_open_timer_fired_is_ignored() {
         let mut service = service(props());
 
-        drop(service.send(Event::PointerEnter(key("docs"), 10)));
+        drop(service.send(Event::PointerEnter(key("docs"), ms(10))));
         let result = service.send(Event::OpenTimerFired(key("blog")));
 
         assert_eq!(*service.state(), State::Idle);
@@ -1693,7 +1700,7 @@ mod tests {
     fn pointer_enter_during_open_switches_immediately() {
         let mut service = service(props().default_value(key("docs")));
 
-        let result = service.send(Event::PointerEnter(key("blog"), 10));
+        let result = service.send(Event::PointerEnter(key("blog"), ms(10)));
 
         assert_eq!(*service.state(), State::Open { item: key("blog") });
         assert_eq!(service.context().previous_item, Some(key("docs")));
@@ -1706,7 +1713,7 @@ mod tests {
         let mut service = service(props().default_value(key("docs")));
 
         drop(service.send(Event::PointerLeave));
-        let result = service.send(Event::PointerEnter(key("docs"), 50));
+        let result = service.send(Event::PointerEnter(key("docs"), ms(50)));
 
         assert_eq!(*service.state(), State::Open { item: key("docs") });
         assert!(result.cancel_effects.contains(&Effect::CloseDelay));
@@ -1718,9 +1725,9 @@ mod tests {
         let mut service = service(props());
 
         drop(service.send(Event::Open(key("docs"))));
-        drop(service.send(Event::Close(100)));
+        drop(service.send(Event::Close(ms(100))));
 
-        let result = service.send(Event::PointerEnter(key("blog"), 250));
+        let result = service.send(Event::PointerEnter(key("blog"), ms(250)));
 
         assert_eq!(*service.state(), State::Open { item: key("blog") });
         assert_eq!(effect_names(&result), vec![Effect::ValueChange]);
@@ -1728,12 +1735,12 @@ mod tests {
 
     #[test]
     fn pointer_enter_at_skip_delay_boundary_waits_for_timer() {
-        let mut service = service(props().skip_delay_ms(300));
+        let mut service = service(props().skip_delay(ms(300)));
 
         drop(service.send(Event::Open(key("docs"))));
-        drop(service.send(Event::Close(100)));
+        drop(service.send(Event::Close(ms(100))));
 
-        let result = service.send(Event::PointerEnter(key("blog"), 400));
+        let result = service.send(Event::PointerEnter(key("blog"), ms(400)));
 
         assert_eq!(*service.state(), State::Idle);
         assert_eq!(service.context().pending_open_item, Some(key("blog")));
@@ -1754,7 +1761,7 @@ mod tests {
     fn pointer_leave_uses_rendered_controlled_open_item() {
         let mut service = service(props().value(Some(key("docs"))));
 
-        drop(service.send(Event::Close(100)));
+        drop(service.send(Event::Close(ms(100))));
         let result = service.send(Event::PointerLeave);
 
         assert_eq!(*service.state(), State::Idle);
@@ -1778,7 +1785,7 @@ mod tests {
 
         drop(service.send(Event::ContentPointerEnter));
 
-        let result = service.send(Event::CloseTimerFired(200));
+        let result = service.send(Event::CloseTimerFired(ms(200)));
 
         assert_eq!(*service.state(), State::Open { item: key("docs") });
         assert!(result.pending_effects.is_empty());
@@ -1792,10 +1799,10 @@ mod tests {
         drop(service.send(Event::ContentPointerEnter));
         drop(service.send(Event::ContentPointerLeave));
 
-        let result = service.send(Event::CloseTimerFired(200));
+        let result = service.send(Event::CloseTimerFired(ms(200)));
 
         assert_eq!(*service.state(), State::Idle);
-        assert_eq!(service.context().last_close_time, Some(200));
+        assert_eq!(service.context().last_close_time, Some(ms(200)));
         assert_eq!(effect_names(&result), vec![Effect::ValueChange]);
     }
 
@@ -1803,10 +1810,10 @@ mod tests {
     fn select_link_closes_menu() {
         let mut service = service(props().default_value(key("docs")));
 
-        let result = service.send(Event::SelectLink(300));
+        let result = service.send(Event::SelectLink(ms(300)));
 
         assert_eq!(*service.state(), State::Idle);
-        assert_eq!(service.context().last_close_time, Some(300));
+        assert_eq!(service.context().last_close_time, Some(ms(300)));
         assert_eq!(effect_names(&result), vec![Effect::ValueChange]);
     }
 
@@ -1814,12 +1821,12 @@ mod tests {
     fn select_link_uses_rendered_controlled_open_item() {
         let mut service = service(props().value(Some(key("docs"))));
 
-        drop(service.send(Event::Close(100)));
-        let result = service.send(Event::SelectLink(300));
+        drop(service.send(Event::Close(ms(100))));
+        let result = service.send(Event::SelectLink(ms(300)));
 
         assert_eq!(*service.state(), State::Idle);
         assert_eq!(connect_noop(&service).open_item(), Some(&key("docs")));
-        assert_eq!(service.context().last_close_time, Some(300));
+        assert_eq!(service.context().last_close_time, Some(ms(300)));
         assert_eq!(effect_names(&result), vec![Effect::ValueChange]);
     }
 
@@ -1827,7 +1834,7 @@ mod tests {
     fn escape_key_closes_and_emits_focus_trigger() {
         let mut service = service(props().default_value(key("docs")));
 
-        let result = service.send(Event::EscapeKey(400));
+        let result = service.send(Event::EscapeKey(ms(400)));
 
         assert_eq!(*service.state(), State::Idle);
         assert_eq!(service.context().focused_trigger, Some(key("docs")));
@@ -1845,7 +1852,7 @@ mod tests {
         );
 
         drop(service.send(Event::Open(key("blog"))));
-        let result = service.send(Event::EscapeKey(400));
+        let result = service.send(Event::EscapeKey(ms(400)));
 
         assert_eq!(service.context().focused_trigger, Some(key("docs")));
         assert_eq!(
@@ -1914,8 +1921,8 @@ mod tests {
 
         let api = service.connect(&send);
 
-        api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowRight), 0);
-        api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft), 0);
+        api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowRight), ms(0));
+        api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft), ms(0));
 
         assert_eq!(
             recorder.into_inner(),
@@ -2085,7 +2092,7 @@ mod tests {
     fn set_items_replacement_cancels_pending_open_delay() {
         let mut service = service_with_items(props(), &[key("a"), key("b")]);
 
-        drop(service.send(Event::PointerEnter(key("b"), 10)));
+        drop(service.send(Event::PointerEnter(key("b"), ms(10))));
         let result = service.send(Event::SetItems(vec![key("a"), key("b")]));
 
         assert_eq!(service.context().pending_open_item, None);
@@ -2193,10 +2200,10 @@ mod tests {
         let mut service = service(props().dir(Direction::Auto));
 
         drop(service.send(Event::SetDirection(Direction::Rtl)));
-        service.set_props(props().dir(Direction::Auto).delay_ms(500));
+        service.set_props(props().dir(Direction::Auto).delay(ms(500)));
 
         assert_eq!(service.context().dir, Direction::Rtl);
-        assert_eq!(service.context().delay_ms, 500);
+        assert_eq!(service.context().delay, ms(500));
     }
 
     #[test]
@@ -2274,11 +2281,11 @@ mod tests {
                 ..base.clone()
             },
             Props {
-                delay_ms: 450,
+                delay: ms(450),
                 ..base.clone()
             },
             Props {
-                skip_delay_ms: 900,
+                skip_delay: ms(900),
                 ..base.clone()
             },
         ] {
@@ -2311,15 +2318,15 @@ mod tests {
                 .id("nav")
                 .orientation(Orientation::Vertical)
                 .dir(Direction::Rtl)
-                .delay_ms(500)
-                .skip_delay_ms(700)
+                .delay(ms(500))
+                .skip_delay(ms(700))
                 .loop_focus(false),
         );
 
         assert_eq!(service.context().orientation, Orientation::Vertical);
         assert_eq!(service.context().dir, Direction::Rtl);
-        assert_eq!(service.context().delay_ms, 500);
-        assert_eq!(service.context().skip_delay_ms, 700);
+        assert_eq!(service.context().delay, ms(500));
+        assert_eq!(service.context().skip_delay, ms(700));
         assert!(!service.props().loop_focus);
     }
 
@@ -2565,18 +2572,18 @@ mod tests {
         {
             let api = service.connect(&send);
 
-            api.on_trigger_pointer_enter(&key("a"), 10);
+            api.on_trigger_pointer_enter(&key("a"), ms(10));
             api.on_trigger_pointer_leave();
             api.on_trigger_focus(&key("a"), true);
             api.on_content_pointer_enter();
             api.on_content_pointer_leave();
-            api.on_link_select(20);
+            api.on_link_select(ms(20));
         }
 
         assert_eq!(
             recorder.into_inner(),
             vec![
-                Event::PointerEnter(key("a"), 10),
+                Event::PointerEnter(key("a"), ms(10)),
                 Event::PointerLeave,
                 Event::FocusTrigger {
                     item: key("a"),
@@ -2584,7 +2591,7 @@ mod tests {
                 },
                 Event::ContentPointerEnter,
                 Event::ContentPointerLeave,
-                Event::SelectLink(20),
+                Event::SelectLink(ms(20)),
             ]
         );
     }
@@ -2599,15 +2606,15 @@ mod tests {
         {
             let api = service.connect(&send);
 
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowRight), 700);
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft), 700);
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Home), 700);
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::End), 700);
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Enter), 700);
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Space), 700);
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Escape), 700);
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowDown), 700);
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Backspace), 700);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowRight), ms(700));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft), ms(700));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Home), ms(700));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::End), ms(700));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Enter), ms(700));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Space), ms(700));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Escape), ms(700));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowDown), ms(700));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::Backspace), ms(700));
         }
 
         assert_eq!(
@@ -2619,7 +2626,7 @@ mod tests {
                 Event::FocusLast,
                 Event::Open(key("a")),
                 Event::Open(key("a")),
-                Event::EscapeKey(700),
+                Event::EscapeKey(ms(700)),
                 Event::Open(key("a")),
             ]
         );
@@ -2635,7 +2642,7 @@ mod tests {
         {
             let api = service.connect(&send);
 
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowDown), 0);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowDown), ms(0));
         }
 
         assert_eq!(recorder.into_inner(), vec![Event::Open(key("a"))]);
@@ -2651,9 +2658,9 @@ mod tests {
         {
             let api = service.connect(&send);
 
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowDown), 0);
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowUp), 0);
-            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft), 0);
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowDown), ms(0));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowUp), ms(0));
+            api.on_trigger_keydown(&key("a"), &keyboard(KeyboardKey::ArrowLeft), ms(0));
         }
 
         assert_eq!(
@@ -2672,14 +2679,14 @@ mod tests {
         {
             let api = service.connect(&send);
 
-            api.on_content_keydown(&keyboard(KeyboardKey::Backspace), 900);
+            api.on_content_keydown(&keyboard(KeyboardKey::Backspace), ms(900));
 
             assert!(recorder.borrow().is_empty());
 
-            api.on_content_keydown(&keyboard(KeyboardKey::Escape), 900);
+            api.on_content_keydown(&keyboard(KeyboardKey::Escape), ms(900));
         }
 
-        assert_eq!(recorder.into_inner(), vec![Event::EscapeKey(900)]);
+        assert_eq!(recorder.into_inner(), vec![Event::EscapeKey(ms(900))]);
     }
 
     #[test]
@@ -2816,7 +2823,7 @@ mod tests {
 
         for result in [
             service.send(Event::Open(key("blog"))),
-            service.send(Event::Close(50)),
+            service.send(Event::Close(ms(50))),
         ] {
             for effect in result.pending_effects {
                 let cleanup = effect.run(

@@ -24,10 +24,10 @@ pub struct TooltipProps {
     pub open: Option<Signal<bool>>,
     #[props(optional, default = false)]
     pub default_open: bool,
-    #[props(optional, default = 300)]
-    pub open_delay_ms: u32,
-    #[props(optional, default = 300)]
-    pub close_delay_ms: u32,
+    #[props(optional, default = Duration::from_millis(300))]
+    pub open_delay: Duration,
+    #[props(optional, default = Duration::from_millis(300))]
+    pub close_delay: Duration,
     #[props(optional, default = false)]
     pub disabled: bool,
     #[props(optional, default = false)]
@@ -150,15 +150,15 @@ Portal rendering: Positioner, Content, and Arrow render into the portal root obt
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                                             | Mode                          | Sync trigger              | Machine event / update path                        | Visible effect                  | Notes                                              |
-| -------------------------------------------------------- | ----------------------------- | ------------------------- | -------------------------------------------------- | ------------------------------- | -------------------------------------------------- |
-| `open`                                                   | controlled via `Signal<bool>` | signal change after mount | `Event::Open` or `Event::Close`                    | opens or closes tooltip         | deferred `use_effect` to avoid body-level dispatch |
-| `disabled`                                               | non-reactive                  | render time               | `Context.disabled`                                 | blocks all transitions          | rebuild machine on change                          |
-| `positioning`                                            | non-reactive                  | render time               | `Context.positioning`                              | repositions content             | repositioning runs on open                         |
-| `open_delay_ms` / `close_delay_ms`                       | non-reactive                  | render time               | `Context.open_delay_ms` / `Context.close_delay_ms` | adjusts timer durations         | interactive minimum 200ms enforced by machine      |
-| `close_on_escape` / `close_on_click` / `close_on_scroll` | non-reactive                  | render time               | guards in `transition()`                           | enables or disables close paths | checked per-event in the machine                   |
-| `on_open_change`                                         | callback                      | open state change         | notification after transition                      | consumer notified of open/close | fires after machine settles                        |
-| `touch_auto_hide_ms`                                     | non-reactive                  | render time               | adapter-local timer config                         | auto-hides on touch devices     | minimum 5000ms clamped                             |
+| Adapter prop                                             | Mode                          | Sync trigger              | Machine event / update path                  | Visible effect                  | Notes                                              |
+| -------------------------------------------------------- | ----------------------------- | ------------------------- | -------------------------------------------- | ------------------------------- | -------------------------------------------------- |
+| `open`                                                   | controlled via `Signal<bool>` | signal change after mount | `Event::Open` or `Event::Close`              | opens or closes tooltip         | deferred `use_effect` to avoid body-level dispatch |
+| `disabled`                                               | non-reactive                  | render time               | `Context.disabled`                           | blocks all transitions          | rebuild machine on change                          |
+| `positioning`                                            | non-reactive                  | render time               | `Context.positioning`                        | repositions content             | repositioning runs on open                         |
+| `open_delay` / `close_delay`                             | non-reactive                  | render time               | `Context.open_delay` / `Context.close_delay` | adjusts timer durations         | interactive minimum 200ms enforced by machine      |
+| `close_on_escape` / `close_on_click` / `close_on_scroll` | non-reactive                  | render time               | guards in `transition()`                     | enables or disables close paths | checked per-event in the machine                   |
+| `on_open_change`                                         | callback                      | open state change         | notification after transition                | consumer notified of open/close | fires after machine settles                        |
+| `touch_auto_hide_ms`                                     | non-reactive                  | render time               | adapter-local timer config                   | auto-hides on touch devices     | minimum 5000ms clamped                             |
 
 | UI event                    | Preconditions                              | Machine event / callback path                         | Ordering notes                                            | Notes                                 |
 | --------------------------- | ------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------- | ------------------------------------- |
@@ -375,8 +375,8 @@ pub fn Tooltip(props: TooltipProps) -> Element {
     let core_props = tooltip::Props {
         open: props.open.map(|s| *s.read()),
         default_open: props.default_open,
-        open_delay_ms: props.open_delay_ms,
-        close_delay_ms: props.close_delay_ms,
+        open_delay: props.open_delay,
+        close_delay: props.close_delay,
         disabled: props.disabled,
         interactive: props.interactive,
         on_open_change: props.on_open_change.as_ref().map(|h| {

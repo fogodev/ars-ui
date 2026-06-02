@@ -6,7 +6,10 @@ use alloc::{
     string::{String, ToString as _},
     vec::Vec,
 };
-use core::fmt::{self, Debug};
+use core::{
+    fmt::{self, Debug},
+    time::Duration,
+};
 
 use ars_collections::{
     Collection, DisabledBehavior, Key, Node, StaticCollection,
@@ -91,8 +94,8 @@ pub enum Event {
     /// Clear the current selection.
     DeselectAll,
 
-    /// Search options by type-ahead character and timestamp.
-    TypeaheadSearch(char, u64),
+    /// Search options by type-ahead character and monotonic timestamp.
+    TypeaheadSearch(char, Duration),
 
     /// Clear the type-ahead buffer.
     ClearTypeahead,
@@ -721,12 +724,12 @@ impl ars_core::Machine for Machine {
                 Some(apply_selection_plan(ctx.selection_state.clear()))
             }
 
-            (State::Focused, Event::TypeaheadSearch(ch, now_ms)) => {
+            (State::Focused, Event::TypeaheadSearch(ch, now)) => {
                 if ctx.is_composing {
                     return None;
                 }
 
-                let (typeahead, found) = process_typeahead(ctx, *ch, *now_ms);
+                let (typeahead, found) = process_typeahead(ctx, *ch, *now);
 
                 let highlighted_key = found.or_else(|| ctx.highlighted_key.clone());
 
@@ -1145,9 +1148,9 @@ impl Api<'_> {
         shift: bool,
         ctrl: bool,
         meta: bool,
-        now_ms: u64,
+        now: Duration,
     ) {
-        self.on_keydown_impl(data, shift, ctrl, meta, Some(now_ms));
+        self.on_keydown_impl(data, shift, ctrl, meta, Some(now));
     }
 
     fn on_keydown_impl(
@@ -1156,7 +1159,7 @@ impl Api<'_> {
         shift: bool,
         ctrl: bool,
         meta: bool,
-        now_ms: Option<u64>,
+        now: Option<Duration>,
     ) {
         let key = resolved_arrow_key(data.key, self.ctx.orientation, self.ctx.dir);
 
@@ -1210,7 +1213,7 @@ impl Api<'_> {
             _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
                 (self.send)(Event::TypeaheadSearch(
                     data.character.expect("checked"),
-                    typeahead_time(now_ms, &self.ctx.typeahead),
+                    typeahead_time(now, &self.ctx.typeahead),
                 ));
             }
 
@@ -1537,10 +1540,10 @@ fn selection_is_empty(set: &selection::Set) -> bool {
     }
 }
 
-fn process_typeahead(ctx: &Context, ch: char, now_ms: u64) -> (typeahead::State, Option<Key>) {
+fn process_typeahead(ctx: &Context, ch: char, now: Duration) -> (typeahead::State, Option<Key>) {
     ctx.typeahead.process_char_with_locale(
         ch,
-        now_ms,
+        now,
         ctx.highlighted_key.as_ref(),
         &ctx.items,
         &ctx.locale,
@@ -1628,24 +1631,22 @@ fn is_selectable_key(ctx: &Context, key: &Key) -> bool {
     ctx.items.get(key).is_some_and(Node::is_focusable) && !ctx.selection_state.is_disabled(key)
 }
 
-fn typeahead_time(now_ms: Option<u64>, state: &typeahead::State) -> u64 {
-    now_ms.unwrap_or_else(|| {
-        current_time_ms().unwrap_or_else(|| state.last_key_time_ms.saturating_add(1))
+fn typeahead_time(now: Option<Duration>, state: &typeahead::State) -> Duration {
+    now.unwrap_or_else(|| {
+        current_time()
+            .unwrap_or_else(|| state.last_key_time.saturating_add(Duration::from_millis(1)))
     })
 }
 
 #[cfg(feature = "std")]
-fn current_time_ms() -> Option<u64> {
-    let millis = std::time::SystemTime::now()
+fn current_time() -> Option<Duration> {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_millis();
-
-    Some(u64::try_from(millis).unwrap_or(u64::MAX))
+        .ok()
 }
 
 #[cfg(not(feature = "std"))]
-const fn current_time_ms() -> Option<u64> {
+const fn current_time() -> Option<Duration> {
     None
 }
 
@@ -1670,7 +1671,7 @@ const fn resolved_arrow_key(
 #[cfg(test)]
 mod tests {
     use alloc::{collections::BTreeSet, sync::Arc};
-    use core::cell::RefCell;
+    use core::{cell::RefCell, time::Duration};
     use std::sync::Mutex;
 
     use ars_collections::{CollectionBuilder, DisabledBehavior, Key, selection};
@@ -1892,11 +1893,11 @@ mod tests {
 
         assert_eq!(service.context().highlighted_key, Some(key("charlie")));
 
-        drop(service.send(Event::TypeaheadSearch('b', 100)));
+        drop(service.send(Event::TypeaheadSearch('b', Duration::from_millis(100))));
 
         assert_eq!(service.context().highlighted_key, Some(key("charlie")));
 
-        drop(service.send(Event::TypeaheadSearch('c', 700)));
+        drop(service.send(Event::TypeaheadSearch('c', Duration::from_millis(700))));
 
         assert_eq!(service.context().highlighted_key, Some(key("charlie")));
 
@@ -1915,7 +1916,7 @@ mod tests {
 
         drop(listbox.send(Event::HighlightItem(Some(key("alpha")))));
         drop(listbox.send(Event::Focus { is_keyboard: true }));
-        drop(listbox.send(Event::TypeaheadSearch('b', 100)));
+        drop(listbox.send(Event::TypeaheadSearch('b', Duration::from_millis(100))));
 
         assert_eq!(listbox.context().highlighted_key, None);
         assert_eq!(listbox.context().typeahead.search, "");
@@ -2095,7 +2096,7 @@ mod tests {
                 false,
                 false,
                 false,
-                100,
+                Duration::from_millis(100),
             );
         }
         let events = sent.borrow();
@@ -2103,14 +2104,17 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert!(matches!(
             events[0],
-            Event::TypeaheadSearch('b', timestamp) if timestamp > 0
+            Event::TypeaheadSearch('b', timestamp) if timestamp > Duration::ZERO
         ));
-        assert_eq!(events[1], Event::TypeaheadSearch('b', 100));
+        assert_eq!(
+            events[1],
+            Event::TypeaheadSearch('b', Duration::from_millis(100))
+        );
         drop(events);
         for event in sent.take() {
             drop(listbox.send(event));
         }
-        let first_time = listbox.context().typeahead.last_key_time_ms;
+        let first_time = listbox.context().typeahead.last_key_time;
         let sent = RefCell::new(Vec::new());
         {
             let send = |event| {
@@ -2122,15 +2126,18 @@ mod tests {
                 false,
                 false,
                 false,
-                1_000,
+                Duration::from_millis(1_000),
             );
         }
         for event in sent.take() {
             drop(listbox.send(event));
         }
 
-        assert_eq!(first_time, 100);
-        assert_eq!(listbox.context().typeahead.last_key_time_ms, 1_000);
+        assert_eq!(first_time, Duration::from_millis(100));
+        assert_eq!(
+            listbox.context().typeahead.last_key_time,
+            Duration::from_millis(1_000)
+        );
     }
 
     #[test]
@@ -2155,12 +2162,12 @@ mod tests {
         assert_eq!(service.context().highlighted_key, Some(key("alpha")));
 
         drop(service.send(Event::CompositionStart));
-        drop(service.send(Event::TypeaheadSearch('c', 100)));
+        drop(service.send(Event::TypeaheadSearch('c', Duration::from_millis(100))));
 
         assert_eq!(service.context().highlighted_key, Some(key("alpha")));
 
         drop(service.send(Event::CompositionEnd));
-        drop(service.send(Event::TypeaheadSearch('c', 700)));
+        drop(service.send(Event::TypeaheadSearch('c', Duration::from_millis(700))));
 
         assert_eq!(service.context().highlighted_key, Some(key("charlie")));
     }
@@ -2370,13 +2377,13 @@ mod tests {
         );
         assert!(matches!(
             captured[15],
-            Event::TypeaheadSearch('a', timestamp) if timestamp > 0
+            Event::TypeaheadSearch('a', timestamp) if timestamp > Duration::ZERO
         ));
         assert_eq!(captured[16], Event::SelectAll);
         assert_eq!(captured[17], Event::SelectAll);
         assert!(matches!(
             captured[18],
-            Event::TypeaheadSearch('b', timestamp) if timestamp > 0
+            Event::TypeaheadSearch('b', timestamp) if timestamp > Duration::ZERO
         ));
     }
 

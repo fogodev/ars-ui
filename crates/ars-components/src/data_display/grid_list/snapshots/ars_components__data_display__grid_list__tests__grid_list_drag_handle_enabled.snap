@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/data_display/grid_list/mod.rs
+expression: "snapshot_attrs(&api.drag_handle_attrs(&key(\"alpha\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "drag-handle",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "grid-list",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Drag Alpha",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "button",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

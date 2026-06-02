@@ -2369,8 +2369,8 @@ pub const TYPEAHEAD_TIMEOUT: Duration = Duration::from_millis(500);
 pub struct State {
     /// The accumulated search string, e.g. `"ban"` after typing B, A, N.
     pub search: String,
-    /// Timestamp (in milliseconds since epoch) of the last contributing keypress.
-    pub last_key_time_ms: u64,
+    /// Monotonic timestamp of the last contributing keypress.
+    pub last_key_time: Duration,
     /// The key that was focused when the current search started.
     pub search_start_key: Option<Key>,
 }
@@ -2380,7 +2380,7 @@ impl State {
     pub fn process_char<T, C: Collection<T>>(
         &self,
         ch: char,
-        now_ms: u64,
+        now: Duration,
         current_focus: Option<&Key>,
         collection: &C,
         disabled_keys: &BTreeSet<Key>,
@@ -2597,7 +2597,7 @@ pub struct LiveAnnouncer {
     /// Delay before clearing the live region content (ms). Default: 7000.
     /// Prevents the announcement from being re-read when screen reader focus
     /// enters the live region.
-    clear_delay_ms: u32,
+    clear_delay: Duration,
 }
 
 impl LiveAnnouncer {
@@ -2609,7 +2609,7 @@ impl LiveAnnouncer {
             active_priority: None,
             voiceover_toggle: false,
             last_message: None,
-            clear_delay_ms: 7000,
+            clear_delay: 7000,
         }
     }
 
@@ -2691,7 +2691,7 @@ impl LiveAnnouncer {
         //    insert a new <span> element with the announcement text as a child
         //    of the live region. Node insertion triggers more reliable screen
         //    reader detection than textContent replacement (especially NVDA).
-        // 3. After clear_delay_ms, remove the <span> to clean up.
+        // 3. After clear_delay, remove the <span> to clean up.
         // 4. Adapter-managed queue helpers call notify_announced() after the
         //    coordinated live region update completes. Best-effort one-shot
         //    PlatformEffects announcements may skip queue coordination.
@@ -2752,7 +2752,7 @@ When updating live regions, the **method of DOM mutation** and **timing** critic
 **Timing Requirements:**
 
 - Wait **100–300ms** before adding content to a live region after clearing it. Shorter delays (e.g., `setTimeout(0)`) may be swallowed by some screen readers.
-- The `LiveAnnouncer.clear_delay_ms` (default 7000ms) controls how long content remains in the region before cleanup.
+- The `LiveAnnouncer.clear_delay` (default 7000ms) controls how long content remains in the region before cleanup.
 
 **Priority Guidelines:**
 

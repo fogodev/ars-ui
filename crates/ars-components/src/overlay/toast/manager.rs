@@ -477,12 +477,11 @@ pub enum Event {
     /// Dismiss every visible toast. Emits [`Effect::DismissAllToasts`].
     DismissAll,
 
-    /// Adapter heartbeat — drains the next announcement entry if at least
-    /// 500 ms have elapsed since the last drain. Carries the current
-    /// adapter-clock timestamp (ms) so the gate is enforced atomically.
+    /// Adapter heartbeat drains the next announcement entry if at least
+    /// 500 ms have elapsed since the last drain.
     DrainAnnouncement {
-        /// Current adapter-clock timestamp in milliseconds.
-        now_ms: u64,
+        /// Current adapter-clock timestamp.
+        now: Duration,
     },
 
     /// Per-toast machine reported `State::Dismissed` (or its `remove_delay`
@@ -523,10 +522,10 @@ pub struct ManagerContext {
     /// [`Event::DrainAnnouncement`] in priority + FIFO order.
     pub announcement_queue: VecDeque<(String, AnnouncePriority)>,
 
-    /// Adapter clock timestamp (ms) of the most recent announcement drain.
+    /// Adapter clock timestamp of the most recent announcement drain.
     /// Updated through [`Event::DrainAnnouncement`] so the next drain can
     /// enforce the §4.2 500 ms gap.
-    pub last_announcement_at: Option<u64>,
+    pub last_announcement_at: Option<Duration>,
 
     /// Maximum number of simultaneously visible toasts.
     pub max_visible: usize,
@@ -933,7 +932,7 @@ impl ars_core::Machine for Machine {
                 .with_effect(PendingEffect::named(Effect::DismissAllToasts)),
             ),
 
-            Event::DrainAnnouncement { now_ms } => Some(plan_drain_announcement(ctx, *now_ms)),
+            Event::DrainAnnouncement { now } => Some(plan_drain_announcement(ctx, *now)),
 
             Event::SetVisibility(visible) => match (*visible, state) {
                 // Page hidden, manager active → pause for visibility.
@@ -1446,12 +1445,12 @@ fn plan_hide_queue_advance(ctx: &ManagerContext, id: String) -> TransitionPlan<M
     plan
 }
 
-fn plan_drain_announcement(ctx: &ManagerContext, now_ms: u64) -> TransitionPlan<Machine> {
-    const MIN_GAP_MS: u64 = 500;
+fn plan_drain_announcement(ctx: &ManagerContext, now: Duration) -> TransitionPlan<Machine> {
+    const MIN_GAP: Duration = Duration::from_millis(500);
 
     let due = ctx
         .last_announcement_at
-        .is_none_or(|last| now_ms.saturating_sub(last) >= MIN_GAP_MS);
+        .is_none_or(|last| now.saturating_sub(last) >= MIN_GAP);
 
     if ctx.announcement_queue.is_empty() {
         // Nothing pending — true noop. Adapters that schedule the
@@ -1462,7 +1461,7 @@ fn plan_drain_announcement(ctx: &ManagerContext, now_ms: u64) -> TransitionPlan<
     if !due {
         // Queue non-empty but the gap has not elapsed yet (timer
         // jitter, an adapter that drains more aggressively than 500ms,
-        // or a truncated `now_ms`). Adapters implement
+        // or a truncated `now`). Adapters implement
         // `ScheduleAnnouncement` as a one-shot heartbeat trigger —
         // without re-emitting it here the only reschedule signal is
         // dropped and the queue never drains, so later toasts never
@@ -1492,7 +1491,7 @@ fn plan_drain_announcement(ctx: &ManagerContext, now_ms: u64) -> TransitionPlan<
             ctx.announcement_queue.remove(head_idx);
         }
 
-        ctx.last_announcement_at = Some(now_ms);
+        ctx.last_announcement_at = Some(now);
     })
     .with_effect(PendingEffect::named(intent));
 
@@ -1900,10 +1899,9 @@ impl Api<'_> {
         (self.send)(Event::ResumeAll);
     }
 
-    /// Dispatches a `DrainAnnouncement` event with the adapter's current
-    /// clock timestamp (ms).
-    pub fn drain_announcement(&self, now_ms: u64) {
-        (self.send)(Event::DrainAnnouncement { now_ms });
+    /// Dispatches a `DrainAnnouncement` event with the adapter's current timestamp.
+    pub fn drain_announcement(&self, now: Duration) {
+        (self.send)(Event::DrainAnnouncement { now });
     }
 }
 
@@ -1974,6 +1972,10 @@ mod tests {
 
     fn fresh_service(props: Props) -> Service<Machine> {
         Service::<Machine>::new(props, &Env::default(), &Messages::default())
+    }
+
+    fn ms(value: u64) -> Duration {
+        Duration::from_millis(value)
     }
 
     fn add_config(kind: Kind, title: &str) -> Config {
@@ -2289,7 +2291,7 @@ mod tests {
         assert_eq!(service.context().announcement_queue.len(), 1);
 
         // The adapter heartbeat fires DrainAnnouncement → ONE announce.
-        let drain_result = service.send(Event::DrainAnnouncement { now_ms: 0 });
+        let drain_result = service.send(Event::DrainAnnouncement { now: ms(0) });
         let drain_effects = effect_names(&drain_result);
 
         assert_eq!(
@@ -2304,7 +2306,7 @@ mod tests {
 
         // Subsequent drains (within or beyond the gap) emit nothing —
         // the toast is announced exactly once total.
-        let stale = service.send(Event::DrainAnnouncement { now_ms: 1_000 });
+        let stale = service.send(Event::DrainAnnouncement { now: ms(1_000) });
 
         assert!(stale.pending_effects.is_empty());
     }
@@ -2779,7 +2781,7 @@ mod tests {
 
         // Drain the heartbeat once — exactly one Announce* effect, not
         // five, so the screen reader speaks the toast once.
-        let result = service.send(Event::DrainAnnouncement { now_ms: 0 });
+        let result = service.send(Event::DrainAnnouncement { now: ms(0) });
 
         let announce_count = result
             .pending_effects
@@ -2806,7 +2808,7 @@ mod tests {
         let id = service.context().toasts[0].id.clone();
 
         // Drain the initial announcement so the queue is empty.
-        drop(service.send(Event::DrainAnnouncement { now_ms: 0 }));
+        drop(service.send(Event::DrainAnnouncement { now: ms(0) }));
         assert!(service.context().announcement_queue.is_empty());
 
         // Two Updates: first Info (polite), then Error (assertive).
@@ -3268,8 +3270,8 @@ mod tests {
         drop(service.send(Event::Add(add_config(Kind::Info, "queued").id("q1"))));
 
         // Drain announcements so we can see what Update emits.
-        drop(service.send(Event::DrainAnnouncement { now_ms: 0 }));
-        drop(service.send(Event::DrainAnnouncement { now_ms: 1_000 }));
+        drop(service.send(Event::DrainAnnouncement { now: ms(0) }));
+        drop(service.send(Event::DrainAnnouncement { now: ms(1_000) }));
 
         assert!(service.context().announcement_queue.is_empty());
 
@@ -3431,7 +3433,7 @@ mod tests {
 
         // A subsequent drain emits no announce effect — there's nothing
         // left to announce.
-        let drain = service.send(Event::DrainAnnouncement { now_ms: 0 });
+        let drain = service.send(Event::DrainAnnouncement { now: ms(0) });
 
         assert!(drain.pending_effects.is_empty());
     }
@@ -3887,13 +3889,13 @@ mod tests {
         // Two announcements queued.
         assert_eq!(service.context().announcement_queue.len(), 2);
 
-        let result = service.send(Event::DrainAnnouncement { now_ms: 0 });
+        let result = service.send(Event::DrainAnnouncement { now: ms(0) });
 
         assert!(effect_names(&result).contains(&Effect::AnnounceAssertive));
         assert_eq!(service.context().announcement_queue.len(), 1);
 
         // Bump the clock past the 500 ms gap.
-        let result = service.send(Event::DrainAnnouncement { now_ms: 750 });
+        let result = service.send(Event::DrainAnnouncement { now: ms(750) });
 
         assert!(effect_names(&result).contains(&Effect::AnnouncePolite));
         assert!(service.context().announcement_queue.is_empty());
@@ -3907,7 +3909,7 @@ mod tests {
         drop(service.send(Event::Add(add_config(Kind::Info, "b"))));
 
         // First drain at t=0 succeeds.
-        drop(service.send(Event::DrainAnnouncement { now_ms: 0 }));
+        drop(service.send(Event::DrainAnnouncement { now: ms(0) }));
 
         assert_eq!(service.context().announcement_queue.len(), 1);
 
@@ -3916,7 +3918,7 @@ mod tests {
         // re-emit `Effect::ScheduleAnnouncement` so the adapter — which
         // implements the heartbeat as a one-shot — knows to schedule
         // another tick. Without this the queue would never drain.
-        let result = service.send(Event::DrainAnnouncement { now_ms: 200 });
+        let result = service.send(Event::DrainAnnouncement { now: ms(200) });
 
         assert_eq!(
             effect_names(&result),
@@ -3927,7 +3929,7 @@ mod tests {
         assert_eq!(service.context().announcement_queue.len(), 1);
 
         // At t=500ms it succeeds.
-        let result = service.send(Event::DrainAnnouncement { now_ms: 500 });
+        let result = service.send(Event::DrainAnnouncement { now: ms(500) });
 
         assert!(effect_names(&result).contains(&Effect::AnnouncePolite));
         assert!(service.context().announcement_queue.is_empty());
@@ -3942,7 +3944,7 @@ mod tests {
         let mut service = fresh_service(test_props());
 
         drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
-        drop(service.send(Event::DrainAnnouncement { now_ms: 0 }));
+        drop(service.send(Event::DrainAnnouncement { now: ms(0) }));
 
         // Now: queue empty? no — we added one toast which announces
         // immediately on the heartbeat, so after t=0 queue is empty.
@@ -3955,7 +3957,7 @@ mod tests {
 
         assert!(!queue_before.is_empty());
 
-        let result = service.send(Event::DrainAnnouncement { now_ms: 100 });
+        let result = service.send(Event::DrainAnnouncement { now: ms(100) });
 
         assert_eq!(
             effect_names(&result),
@@ -3972,7 +3974,7 @@ mod tests {
     fn drain_announcement_with_empty_queue_is_noop() {
         let mut service = fresh_service(test_props());
 
-        let result = service.send(Event::DrainAnnouncement { now_ms: 0 });
+        let result = service.send(Event::DrainAnnouncement { now: ms(0) });
 
         assert!(!result.state_changed);
         assert!(!result.context_changed);
@@ -3989,11 +3991,11 @@ mod tests {
         let mut service = fresh_service(test_props());
 
         drop(service.send(Event::Add(add_config(Kind::Info, "a"))));
-        drop(service.send(Event::DrainAnnouncement { now_ms: 0 }));
+        drop(service.send(Event::DrainAnnouncement { now: ms(0) }));
 
         assert!(service.context().announcement_queue.is_empty());
 
-        let result = service.send(Event::DrainAnnouncement { now_ms: 200 });
+        let result = service.send(Event::DrainAnnouncement { now: ms(200) });
 
         assert!(!result.state_changed);
         assert!(!result.context_changed);
@@ -4009,16 +4011,16 @@ mod tests {
 
         let mut drained = Vec::new();
 
-        let mut now = 0_u64;
+        let mut now = Duration::ZERO;
 
         for _ in 0..2 {
-            let result = service.send(Event::DrainAnnouncement { now_ms: now });
+            let result = service.send(Event::DrainAnnouncement { now });
 
             for effect in result.pending_effects {
                 drained.push(effect.name);
             }
 
-            now += 500;
+            now += ms(500);
         }
 
         // Both announcements must drain in insertion order; both are polite.
@@ -4210,7 +4212,7 @@ mod tests {
         api.dismiss_all();
         api.pause_all();
         api.resume_all();
-        api.drain_announcement(123);
+        api.drain_announcement(ms(123));
 
         let events = sent.borrow();
 
@@ -4222,8 +4224,8 @@ mod tests {
         assert!(matches!(events[4], Event::PauseAll));
         assert!(matches!(events[5], Event::ResumeAll));
         assert!(
-            matches!(events[6], Event::DrainAnnouncement { now_ms: 123 }),
-            "expected DrainAnnouncement with now_ms=123, got {:?}",
+            matches!(events[6], Event::DrainAnnouncement { now } if now == ms(123)),
+            "expected DrainAnnouncement with now=123ms, got {:?}",
             events[6]
         );
     }
@@ -4520,7 +4522,7 @@ mod tests {
 
         // Drain pending announcement so the schedule effect on the
         // promotion path fires deterministically.
-        drop(service.send(Event::DrainAnnouncement { now_ms: 1_000 }));
+        drop(service.send(Event::DrainAnnouncement { now: ms(1_000) }));
 
         assert!(service.context().announcement_queue.is_empty());
 
@@ -4549,7 +4551,7 @@ mod tests {
         drop(service.send(Event::Add(add_config(Kind::Info, "live"))));
         drop(service.send(Event::Add(add_config(Kind::Info, "queued"))));
 
-        drop(service.send(Event::DrainAnnouncement { now_ms: 1_000 }));
+        drop(service.send(Event::DrainAnnouncement { now: ms(1_000) }));
 
         assert!(service.context().announcement_queue.is_empty());
 
@@ -4617,7 +4619,7 @@ mod tests {
 
         assert_eq!(service.context().announcement_queue.len(), 2);
 
-        let result = service.send(Event::DrainAnnouncement { now_ms: 0 });
+        let result = service.send(Event::DrainAnnouncement { now: ms(0) });
 
         assert!(
             effect_names(&result).contains(&Effect::ScheduleAnnouncement),
@@ -4637,7 +4639,7 @@ mod tests {
 
         assert_eq!(service.context().announcement_queue.len(), 1);
 
-        let result = service.send(Event::DrainAnnouncement { now_ms: 0 });
+        let result = service.send(Event::DrainAnnouncement { now: ms(0) });
 
         assert!(
             !effect_names(&result).contains(&Effect::ScheduleAnnouncement),

@@ -1,7 +1,10 @@
 //! Clipboard component state machine and connect API.
 
 use alloc::{string::String, vec::Vec};
-use core::fmt::{self, Debug, Display};
+use core::{
+    fmt::{self, Debug, Display},
+    time::Duration,
+};
 
 use ars_core::{
     AriaAttr, AttrMap, Bindable, Callback, ComponentIds, ComponentMessages, ComponentPart,
@@ -87,8 +90,8 @@ pub struct Context {
     /// The text to copy, controlled by the parent or internally owned.
     pub value: Bindable<String>,
 
-    /// How long copied/error feedback remains visible, in milliseconds.
-    pub feedback_duration_ms: u32,
+    /// How long copied/error feedback remains visible.
+    pub feedback_duration: Duration,
 
     /// Whether copy intent is disabled.
     pub disabled: bool,
@@ -118,8 +121,8 @@ pub struct Props {
     /// Default text copied by the trigger in uncontrolled mode.
     pub default_value: String,
 
-    /// Duration to show copied/error feedback, in milliseconds.
-    pub feedback_duration_ms: u32,
+    /// Duration to show copied/error feedback.
+    pub feedback_duration: Duration,
 
     /// Disabled state.
     pub disabled: bool,
@@ -134,7 +137,7 @@ impl Default for Props {
             id: String::new(),
             value: None,
             default_value: String::new(),
-            feedback_duration_ms: 2_000,
+            feedback_duration: Duration::from_secs(2),
             disabled: false,
             on_copy: None,
         }
@@ -176,10 +179,10 @@ impl Props {
         self
     }
 
-    /// Sets [`feedback_duration_ms`](Self::feedback_duration_ms).
+    /// Sets [`feedback_duration`](Self::feedback_duration).
     #[must_use]
-    pub const fn feedback_duration_ms(mut self, duration: u32) -> Self {
-        self.feedback_duration_ms = duration;
+    pub const fn feedback_duration(mut self, duration: Duration) -> Self {
+        self.feedback_duration = duration;
         self
     }
 
@@ -273,7 +276,7 @@ impl ars_core::Machine for Machine {
                 } else {
                     Bindable::uncontrolled(props.default_value.clone())
                 },
-                feedback_duration_ms: props.feedback_duration_ms,
+                feedback_duration: props.feedback_duration,
                 disabled: props.disabled,
                 error: None,
                 locale: env.locale.clone(),
@@ -338,11 +341,11 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::SetProps) => Some(TransitionPlan::context_only({
-                let feedback_duration_ms = props.feedback_duration_ms;
+                let feedback_duration = props.feedback_duration;
                 let disabled = props.disabled;
 
                 move |ctx: &mut Context| {
-                    ctx.feedback_duration_ms = feedback_duration_ms;
+                    ctx.feedback_duration = feedback_duration;
                     ctx.disabled = disabled;
                 }
             })),
@@ -363,7 +366,7 @@ impl ars_core::Machine for Machine {
             events.push(Event::SetValue(new.value.clone()));
         }
 
-        if old.feedback_duration_ms != new.feedback_duration_ms || old.disabled != new.disabled {
+        if old.feedback_duration != new.feedback_duration || old.disabled != new.disabled {
             events.push(Event::SetProps);
         }
 
@@ -721,7 +724,7 @@ mod tests {
         assert_eq!(props.id, "");
         assert_eq!(props.value, None);
         assert_eq!(props.default_value, "");
-        assert_eq!(props.feedback_duration_ms, 2_000);
+        assert_eq!(props.feedback_duration, Duration::from_secs(2));
         assert!(!props.disabled);
         assert!(props.on_copy.is_none());
     }
@@ -733,14 +736,14 @@ mod tests {
             .value("controlled")
             .uncontrolled()
             .default_value("fallback")
-            .feedback_duration_ms(750)
+            .feedback_duration(Duration::from_millis(750))
             .disabled(true)
             .on_copy(callback(|_: (String, WeakSend<Event>)| {}));
 
         assert_eq!(props.id, "clip");
         assert_eq!(props.value, None);
         assert_eq!(props.default_value, "fallback");
-        assert_eq!(props.feedback_duration_ms, 750);
+        assert_eq!(props.feedback_duration, Duration::from_millis(750));
         assert!(props.disabled);
         assert!(props.on_copy.is_some());
     }
@@ -760,7 +763,7 @@ mod tests {
         assert_eq!(service.state(), &State::Idle);
         assert_eq!(service.context().value.get(), "copy me");
         assert!(!service.context().value.is_controlled());
-        assert_eq!(service.context().feedback_duration_ms, 2_000);
+        assert_eq!(service.context().feedback_duration, Duration::from_secs(2));
         assert!(!service.context().disabled);
         assert_eq!(service.context().error, None);
         assert_eq!(service.context().ids.id(), "clip");
@@ -900,14 +903,17 @@ mod tests {
             Props::new()
                 .id("clip")
                 .value("updated")
-                .feedback_duration_ms(300)
+                .feedback_duration(Duration::from_millis(300))
                 .disabled(true),
         );
 
         assert!(result.context_changed);
         assert_eq!(service.context().value.get(), "updated");
         assert!(service.context().value.is_controlled());
-        assert_eq!(service.context().feedback_duration_ms, 300);
+        assert_eq!(
+            service.context().feedback_duration,
+            Duration::from_millis(300)
+        );
         assert!(service.context().disabled);
         assert!(result.pending_effects.is_empty());
     }
@@ -933,7 +939,7 @@ mod tests {
             <Machine as ars_core::Machine>::on_props_changed(
                 &base,
                 &Props {
-                    feedback_duration_ms: 750,
+                    feedback_duration: Duration::from_millis(750),
                     ..base.clone()
                 },
             ),

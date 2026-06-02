@@ -19,11 +19,11 @@ This spec maps the core [`Timer`](../../components/specialized/timer.md) contrac
 pub struct TimerProps {
     pub mode: TimerMode,
     #[props(optional)]
-    pub duration_ms: Option<u64>,
+    pub target: Duration,
     #[props(optional)]
     pub auto_start: Option<bool>,
     #[props(optional)]
-    pub tick_interval_ms: Option<u32>,
+    pub interval: Option<Duration>,
     #[props(optional)]
     pub label: Option<String>,
     #[props(optional)]
@@ -67,9 +67,9 @@ pub fn Timer(props: TimerProps) -> Element
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                                            | Mode       | Sync trigger | Machine event / update path | Visible effect                            | Notes                                |
-| ------------------------------------------------------- | ---------- | ------------ | --------------------------- | ----------------------------------------- | ------------------------------------ |
-| `mode`, `duration_ms`, `tick_interval_ms`, `auto_start` | controlled | rerender     | prop rebuild                | changes timing rules and initial behavior | timer effect must read latest values |
+| Adapter prop                               | Mode       | Sync trigger | Machine event / update path | Visible effect                            | Notes                                |
+| ------------------------------------------ | ---------- | ------------ | --------------------------- | ----------------------------------------- | ------------------------------------ |
+| `mode`, `target`, `interval`, `auto_start` | controlled | rerender     | prop rebuild                | changes timing rules and initial behavior | timer effect must read latest values |
 
 | UI event              | Preconditions             | Machine event / callback path | Ordering notes                                     | Notes                                         |
 | --------------------- | ------------------------- | ----------------------------- | -------------------------------------------------- | --------------------------------------------- |

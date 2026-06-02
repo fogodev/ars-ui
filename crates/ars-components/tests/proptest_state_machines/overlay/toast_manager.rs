@@ -119,7 +119,9 @@ fn arb_toast_manager_event() -> impl Strategy<Value = core_toast_manager::Event>
         Just(core_toast_manager::Event::PauseAll),
         Just(core_toast_manager::Event::ResumeAll),
         Just(core_toast_manager::Event::DismissAll),
-        (0_u64..=10_000).prop_map(|now_ms| core_toast_manager::Event::DrainAnnouncement { now_ms }),
+        (0_u64..=10_000).prop_map(|now| core_toast_manager::Event::DrainAnnouncement {
+            now: Duration::from_millis(now),
+        }),
         any::<bool>().prop_map(core_toast_manager::Event::SetVisibility),
         Just(core_toast_manager::Event::SyncProps),
     ]

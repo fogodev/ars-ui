@@ -1297,10 +1297,10 @@ impl TimerHandle {
     }
 }
 
-/// Debounced async validator — waits for `delay_ms` of inactivity before calling.
+/// Debounced async validator — waits for `delay` of inactivity before calling.
 pub struct DebouncedAsyncValidator {
     pub validator: BoxedAsyncValidator,
-    pub delay_ms: u32,
+    pub delay: Duration,
     /// Adapter-provided callback that spawns an async future to completion.
     /// On native: wraps `tokio::spawn`; on WASM: wraps `wasm_bindgen_futures::spawn_local`.
     /// The callback takes ownership of the `OwnedContext` and the future,
@@ -1315,19 +1315,19 @@ impl DebouncedAsyncValidator {
     /// Creates a new debounced validator wrapping the given inner validator.
     pub fn new(
         validator: BoxedAsyncValidator,
-        delay_ms: u32,
+        delay: Duration,
         spawn_async_validation: Arc<dyn Fn(BoxedAsyncValidator, Value, OwnedContext) + Send + Sync>,
     ) -> Self {
         Self {
             validator,
-            delay_ms,
+            delay,
             spawn_async_validation,
             pending_timer: None,
         }
     }
 
     /// Cancel any pending debounce timer and start a new one.
-    /// After `delay_ms`, delegates to the inner `AsyncValidator::validate_async`.
+    /// After `delay`, delegates to the inner `AsyncValidator::validate_async`.
     /// The adapter provides `TimerHandle` via its platform timer abstraction
     /// (e.g., `setTimeout` on WASM, `tokio::time::sleep` on native).
     ///
@@ -1343,7 +1343,7 @@ impl DebouncedAsyncValidator {
         name: &str,
         form_values: &BTreeMap<String, Value>,
         locale: Option<&Locale>,
-        spawn_timer: impl FnOnce(u32, Box<dyn FnOnce()>) -> TimerHandle,
+        spawn_timer: impl FnOnce(Duration, Box<dyn FnOnce()>) -> TimerHandle,
     ) {
         // Cancel previous pending validation
         if let Some(handle) = self.pending_timer.take() {
@@ -1357,7 +1357,7 @@ impl DebouncedAsyncValidator {
             locale: locale.cloned(),
         };
         let spawn_async = Arc::clone(&self.spawn_async_validation);
-        self.pending_timer = Some(spawn_timer(self.delay_ms, Box::new(move || {
+        self.pending_timer = Some(spawn_timer(self.delay, Box::new(move || {
             // After delay, spawn the async validator. The spawn callback takes
             // ownership of all data and constructs the Context internally,
             // ensuring the future's lifetime is satisfied.

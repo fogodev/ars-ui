@@ -3,7 +3,7 @@
 //! every anatomy part across its output-affecting state/prop/context branches.
 
 use alloc::{collections::BTreeSet, string::ToString, vec, vec::Vec};
-use core::cell::RefCell;
+use core::{cell::RefCell, time::Duration};
 use std::sync::{Arc, Mutex};
 
 use ars_collections::{
@@ -501,7 +501,7 @@ fn focus_sets_focus_visible_and_blur_clears_it() {
 fn typeahead_jumps_to_matching_node_case_insensitive() {
     let mut service = service(props());
 
-    drop(service.send(Event::TypeaheadSearch('g', 1))); // Grains
+    drop(service.send(Event::TypeaheadSearch('g', Duration::from_millis(1)))); // Grains
 
     assert_eq!(service.context().focused_node, Some(key(7)));
 }
@@ -511,7 +511,7 @@ fn typeahead_searches_after_focused_and_wraps() {
     let mut service = service(props());
 
     drop(service.send(Event::FocusNode(key(1)))); // Fruits
-    drop(service.send(Event::TypeaheadSearch('b', 1))); // Banana (after Fruits)
+    drop(service.send(Event::TypeaheadSearch('b', Duration::from_millis(1)))); // Banana (after Fruits)
 
     assert_eq!(service.context().focused_node, Some(key(3)));
 }
@@ -521,7 +521,7 @@ fn typeahead_no_match_keeps_focus() {
     let mut service = service(props());
 
     drop(service.send(Event::FocusNode(key(1))));
-    drop(service.send(Event::TypeaheadSearch('z', 1))); // no match
+    drop(service.send(Event::TypeaheadSearch('z', Duration::from_millis(1)))); // no match
 
     // The buffer updates, but focus does not move.
     assert_eq!(service.context().focused_node, Some(key(1)));
@@ -533,7 +533,7 @@ fn typeahead_skips_nodes_hidden_under_collapsed_parents() {
     // to it (the shared matcher only scans visible nodes).
     let mut service = service(props());
 
-    drop(service.send(Event::TypeaheadSearch('c', 1)));
+    drop(service.send(Event::TypeaheadSearch('c', Duration::from_millis(1))));
 
     assert_eq!(service.context().focused_node, None);
 }
@@ -542,7 +542,7 @@ fn typeahead_skips_nodes_hidden_under_collapsed_parents() {
 fn typeahead_clear_resets_buffer() {
     let mut service = service(props());
 
-    drop(service.send(Event::TypeaheadSearch('g', 1)));
+    drop(service.send(Event::TypeaheadSearch('g', Duration::from_millis(1))));
 
     assert!(!service.context().typeahead.search.is_empty());
 
@@ -771,7 +771,10 @@ fn keydown_printable_triggers_typeahead() {
     let events = dispatch_key(&service, &key(1), &printable('b'));
 
     assert!(
-        matches!(events.as_slice(), [Event::TypeaheadSearch('b', now_ms)] if *now_ms > 0),
+        matches!(
+            events.as_slice(),
+            [Event::TypeaheadSearch('b', now)] if *now > Duration::ZERO
+        ),
         "printable key dispatches TypeaheadSearch with a clock timestamp: {events:?}"
     );
 }
@@ -1142,7 +1145,7 @@ fn drop_ignored_when_dnd_disabled() {
 fn typeahead_on_empty_tree_does_not_focus() {
     let mut service = empty_service();
 
-    drop(service.send(Event::TypeaheadSearch('a', 1)));
+    drop(service.send(Event::TypeaheadSearch('a', Duration::from_millis(1))));
     assert_eq!(service.context().focused_node, None);
 }
 
@@ -1355,7 +1358,7 @@ fn typeahead_starts_strictly_after_focused_node() {
     let mut service = service(props().items(items));
 
     drop(service.send(Event::FocusNode(key(1)))); // Apple
-    drop(service.send(Event::TypeaheadSearch('a', 1)));
+    drop(service.send(Event::TypeaheadSearch('a', Duration::from_millis(1))));
 
     assert_eq!(service.context().focused_node, Some(key(2))); // Avocado, not Apple
 }
@@ -1578,7 +1581,7 @@ fn typeahead_matches_collection_text_value() {
 
     let mut service = service(props().items(items));
 
-    drop(service.send(Event::TypeaheadSearch('a', 1))); // matches "Apricot"
+    drop(service.send(Event::TypeaheadSearch('a', Duration::from_millis(1)))); // matches "Apricot"
 
     assert_eq!(service.context().focused_node, Some(key(1)));
 }
@@ -1905,7 +1908,7 @@ fn controlled_multi_selection_is_clamped_under_single_mode() {
 fn blur_resets_typeahead_buffer() {
     let mut service = service(props());
 
-    drop(service.send(Event::TypeaheadSearch('g', 1)));
+    drop(service.send(Event::TypeaheadSearch('g', Duration::from_millis(1))));
 
     assert!(!service.context().typeahead.search.is_empty());
 
@@ -1941,7 +1944,7 @@ fn typeahead_reaches_disabled_nodes() {
     // (FocusOnly), even though it remains non-selectable.
     let mut service = service(props().items(disabled_items()));
 
-    drop(service.send(Event::TypeaheadSearch('a', 1)));
+    drop(service.send(Event::TypeaheadSearch('a', Duration::from_millis(1))));
 
     assert_eq!(service.context().focused_node, Some(key(2)));
 }
@@ -1977,7 +1980,7 @@ fn typeahead_respects_live_expansion_state() {
     let mut service = service(props());
 
     drop(service.send(Event::ExpandNode(key(4))));
-    drop(service.send(Event::TypeaheadSearch('c', 1)));
+    drop(service.send(Event::TypeaheadSearch('c', Duration::from_millis(1))));
 
     assert_eq!(service.context().focused_node, Some(key(5)));
 }

@@ -12,6 +12,9 @@ pub mod meter;
 /// Marquee component state machine and connect API.
 pub mod marquee;
 
+/// GridList component state machine and connect API.
+pub mod grid_list;
+
 /// Progress component state machine and connect API.
 pub mod progress;
 

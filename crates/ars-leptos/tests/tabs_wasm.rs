@@ -6,9 +6,12 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicU32, Ordering},
+use std::{
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, Ordering},
+    },
+    time::Duration,
 };
 
 use ars_collections::Key;
@@ -111,8 +114,8 @@ impl PlatformEffects for FocusByIdProbePlatform {
         ars_dom::WebPlatformEffects.focus_body();
     }
 
-    fn set_timeout(&self, delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
-        ars_dom::WebPlatformEffects.set_timeout(delay_ms, callback)
+    fn set_timeout(&self, delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
+        ars_dom::WebPlatformEffects.set_timeout(delay, callback)
     }
 
     fn clear_timeout(&self, handle: TimerHandle) {
@@ -195,8 +198,8 @@ impl PlatformEffects for FocusByIdProbePlatform {
         ars_dom::WebPlatformEffects.is_mac_platform()
     }
 
-    fn now_ms(&self) -> u64 {
-        ars_dom::WebPlatformEffects.now_ms()
+    fn now(&self) -> Duration {
+        ars_dom::WebPlatformEffects.now()
     }
 
     fn get_bounding_rect(&self, id: &str) -> Option<Rect> {
@@ -233,8 +236,8 @@ impl PlatformEffects for MeasurementProbePlatform {
         ars_dom::WebPlatformEffects.focus_body();
     }
 
-    fn set_timeout(&self, delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
-        ars_dom::WebPlatformEffects.set_timeout(delay_ms, callback)
+    fn set_timeout(&self, delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
+        ars_dom::WebPlatformEffects.set_timeout(delay, callback)
     }
 
     fn clear_timeout(&self, handle: TimerHandle) {
@@ -317,8 +320,8 @@ impl PlatformEffects for MeasurementProbePlatform {
         ars_dom::WebPlatformEffects.is_mac_platform()
     }
 
-    fn now_ms(&self) -> u64 {
-        ars_dom::WebPlatformEffects.now_ms()
+    fn now(&self) -> Duration {
+        ars_dom::WebPlatformEffects.now()
     }
 
     fn get_bounding_rect(&self, _id: &str) -> Option<Rect> {

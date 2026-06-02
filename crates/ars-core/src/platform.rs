@@ -15,6 +15,7 @@
 //!   `ArsProvider` is found in the component tree
 
 use alloc::{boxed::Box, string::String, vec::Vec};
+use core::time::Duration;
 
 use ars_i18n::ResolvedDirection;
 
@@ -52,8 +53,8 @@ pub trait PlatformEffects: Send + Sync {
 
     // -- Timers --------------------------------------------------------------
 
-    /// Schedule a callback after `delay_ms` milliseconds. Returns a handle for cancellation.
-    fn set_timeout(&self, delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle;
+    /// Schedule a callback after `delay`. Returns a handle for cancellation.
+    fn set_timeout(&self, delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle;
 
     /// Cancel a previously scheduled timeout.
     fn clear_timeout(&self, handle: TimerHandle);
@@ -145,9 +146,8 @@ pub trait PlatformEffects: Send + Sync {
     /// Returns `true` if the platform is macOS (for modifier key mapping).
     fn is_mac_platform(&self) -> bool;
 
-    /// Returns the current monotonic time in milliseconds (e.g., `performance.now()`
-    /// on web, `Instant::now()` on native). Used for skip-delay window tracking.
-    fn now_ms(&self) -> u64;
+    /// Returns the current monotonic time for skip-delay and debounce calculations.
+    fn now(&self) -> Duration;
 
     /// Get the bounding rectangle of an element by ID.
     fn get_bounding_rect(&self, id: &str) -> Option<Rect>;
@@ -228,7 +228,7 @@ impl PlatformEffects for NullPlatformEffects {
     fn focus_body(&self) {}
 
     #[inline]
-    fn set_timeout(&self, _delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
+    fn set_timeout(&self, _delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
         callback();
 
         TimerHandle::new(0)
@@ -320,8 +320,8 @@ impl PlatformEffects for NullPlatformEffects {
     }
 
     #[inline]
-    fn now_ms(&self) -> u64 {
-        0
+    fn now(&self) -> Duration {
+        Duration::ZERO
     }
 
     #[inline]
@@ -390,7 +390,7 @@ impl PlatformEffects for MissingProviderEffects {
     }
 
     #[inline]
-    fn set_timeout(&self, _delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
+    fn set_timeout(&self, _delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
         Self::warn("set_timeout");
 
         callback();
@@ -522,10 +522,10 @@ impl PlatformEffects for MissingProviderEffects {
     }
 
     #[inline]
-    fn now_ms(&self) -> u64 {
-        Self::warn("now_ms");
+    fn now(&self) -> Duration {
+        Self::warn("now");
 
-        0
+        Duration::ZERO
     }
 
     #[inline]
@@ -581,8 +581,10 @@ mod tests {
 
         let fired_clone = Rc::clone(&fired);
 
-        let _handle =
-            NullPlatformEffects.set_timeout(1000, Box::new(move || fired_clone.set(true)));
+        let _handle = NullPlatformEffects.set_timeout(
+            Duration::from_secs(1),
+            Box::new(move || fired_clone.set(true)),
+        );
 
         assert!(fired.get());
     }
@@ -633,8 +635,8 @@ mod tests {
     }
 
     #[test]
-    fn null_now_ms_returns_zero() {
-        assert_eq!(NullPlatformEffects.now_ms(), 0);
+    fn null_now_returns_zero() {
+        assert_eq!(NullPlatformEffects.now(), Duration::ZERO);
     }
 
     #[test]
@@ -659,8 +661,10 @@ mod tests {
 
         let fired_clone = Rc::clone(&fired);
 
-        let _handle =
-            MissingProviderEffects.set_timeout(500, Box::new(move || fired_clone.set(true)));
+        let _handle = MissingProviderEffects.set_timeout(
+            Duration::from_millis(500),
+            Box::new(move || fired_clone.set(true)),
+        );
 
         assert!(fired.get());
     }
@@ -738,7 +742,7 @@ mod tests {
         reduced_motion_cleanup();
 
         assert!(!MissingProviderEffects.is_mac_platform());
-        assert_eq!(MissingProviderEffects.now_ms(), 0);
+        assert_eq!(MissingProviderEffects.now(), Duration::ZERO);
         assert!(MissingProviderEffects.get_bounding_rect("id").is_none());
     }
 
@@ -758,7 +762,7 @@ mod tests {
 
         platform.focus_body();
 
-        let _handle = platform.set_timeout(0, Box::new(|| {}));
+        let _handle = platform.set_timeout(Duration::ZERO, Box::new(|| {}));
 
         platform.clear_timeout(TimerHandle::new(0));
 
@@ -805,7 +809,7 @@ mod tests {
 
         let _ = platform.is_mac_platform();
 
-        let _ = platform.now_ms();
+        let _ = platform.now();
 
         let _ = platform.get_bounding_rect("id");
 
@@ -837,8 +841,8 @@ mod tests {
         null.focus_element_by_id("a");
         missing.focus_element_by_id("b");
 
-        assert_eq!(null.now_ms(), 0);
-        assert_eq!(missing.now_ms(), 0);
+        assert_eq!(null.now(), Duration::ZERO);
+        assert_eq!(missing.now(), Duration::ZERO);
     }
 
     /// Verify `TimerHandle` is `Copy + Eq + Hash` for use in maps.

@@ -400,8 +400,8 @@ its `Context`.
 The adapter is responsible for scheduling the 500ms timeout cleanup via `PendingEffect`:
 
 ```rust,no_check
-(_, Event::TypeaheadSearch(ch, now_ms)) => {
-    let (new_ta, found) = ctx.typeahead.process_char(*ch, *now_ms,
+(_, Event::TypeaheadSearch(ch, now)) => {
+    let (new_ta, found) = ctx.typeahead.process_char(*ch, *now,
         ctx.highlighted_key.as_ref(), &ctx.items);
     Some(TransitionPlan::context_only(move |ctx| {
         ctx.typeahead = new_ta;

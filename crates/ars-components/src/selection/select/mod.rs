@@ -6,7 +6,10 @@ use alloc::{
     string::{String, ToString as _},
     vec::Vec,
 };
-use core::fmt::{self, Debug};
+use core::{
+    fmt::{self, Debug},
+    time::Duration,
+};
 
 use ars_collections::{
     Collection, DisabledBehavior, Key, Node, StaticCollection,
@@ -81,8 +84,8 @@ pub enum Event {
     /// Highlight the previous enabled item.
     HighlightPrev,
 
-    /// Search by type-ahead character and timestamp.
-    TypeaheadSearch(char, u64),
+    /// Search by type-ahead character and monotonic timestamp.
+    TypeaheadSearch(char, Duration),
 
     /// Mark IME composition active.
     CompositionStart,
@@ -749,12 +752,12 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            (_, Event::TypeaheadSearch(ch, now_ms)) => {
+            (_, Event::TypeaheadSearch(ch, now)) => {
                 if ctx.is_composing {
                     return None;
                 }
 
-                let (typeahead, found) = process_typeahead(ctx, *ch, *now_ms);
+                let (typeahead, found) = process_typeahead(ctx, *ch, *now);
 
                 let highlighted_key = found.or_else(|| ctx.highlighted_key.clone());
 
@@ -1073,9 +1076,9 @@ impl Api<'_> {
         data: &KeyboardEventData,
         ctrl: bool,
         meta: bool,
-        now_ms: u64,
+        now: Duration,
     ) {
-        self.on_trigger_keydown_impl(data, ctrl, meta, Some(now_ms));
+        self.on_trigger_keydown_impl(data, ctrl, meta, Some(now));
     }
 
     fn on_trigger_keydown_impl(
@@ -1083,7 +1086,7 @@ impl Api<'_> {
         data: &KeyboardEventData,
         ctrl: bool,
         meta: bool,
-        now_ms: Option<u64>,
+        now: Option<Duration>,
     ) {
         match data.key {
             KeyboardKey::ArrowDown if self.ctx.open => (self.send)(Event::HighlightNext),
@@ -1111,7 +1114,7 @@ impl Api<'_> {
             {
                 (self.send)(Event::TypeaheadSearch(
                     data.character.expect("checked"),
-                    typeahead_time(now_ms, &self.ctx.typeahead),
+                    typeahead_time(now, &self.ctx.typeahead),
                 ));
             }
 
@@ -1246,9 +1249,9 @@ impl Api<'_> {
         data: &KeyboardEventData,
         ctrl: bool,
         meta: bool,
-        now_ms: u64,
+        now: Duration,
     ) {
-        self.on_content_keydown_impl(data, ctrl, meta, Some(now_ms));
+        self.on_content_keydown_impl(data, ctrl, meta, Some(now));
     }
 
     fn on_content_keydown_impl(
@@ -1256,7 +1259,7 @@ impl Api<'_> {
         data: &KeyboardEventData,
         ctrl: bool,
         meta: bool,
-        now_ms: Option<u64>,
+        now: Option<Duration>,
     ) {
         match data.key {
             KeyboardKey::ArrowDown => (self.send)(Event::HighlightNext),
@@ -1278,7 +1281,7 @@ impl Api<'_> {
             _ if data.character.is_some() && !ctrl && !meta && !data.is_composing => {
                 (self.send)(Event::TypeaheadSearch(
                     data.character.expect("checked"),
-                    typeahead_time(now_ms, &self.ctx.typeahead),
+                    typeahead_time(now, &self.ctx.typeahead),
                 ));
             }
 
@@ -1671,10 +1674,10 @@ fn prev_key(ctx: &Context) -> Option<Key> {
         .or_else(|| last_key(ctx))
 }
 
-fn process_typeahead(ctx: &Context, ch: char, now_ms: u64) -> (typeahead::State, Option<Key>) {
+fn process_typeahead(ctx: &Context, ch: char, now: Duration) -> (typeahead::State, Option<Key>) {
     ctx.typeahead.process_char_with_locale(
         ch,
-        now_ms,
+        now,
         ctx.highlighted_key.as_ref(),
         &ctx.items,
         &ctx.locale,
@@ -1828,31 +1831,29 @@ fn serialize_selection(selection: &selection::Set) -> String {
     }
 }
 
-fn typeahead_time(now_ms: Option<u64>, state: &typeahead::State) -> u64 {
-    now_ms.unwrap_or_else(|| {
-        current_time_ms().unwrap_or_else(|| state.last_key_time_ms.saturating_add(1))
+fn typeahead_time(now: Option<Duration>, state: &typeahead::State) -> Duration {
+    now.unwrap_or_else(|| {
+        current_time()
+            .unwrap_or_else(|| state.last_key_time.saturating_add(Duration::from_millis(1)))
     })
 }
 
 #[cfg(feature = "std")]
-fn current_time_ms() -> Option<u64> {
-    let millis = std::time::SystemTime::now()
+fn current_time() -> Option<Duration> {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_millis();
-
-    Some(u64::try_from(millis).unwrap_or(u64::MAX))
+        .ok()
 }
 
 #[cfg(not(feature = "std"))]
-const fn current_time_ms() -> Option<u64> {
+const fn current_time() -> Option<Duration> {
     None
 }
 
 #[cfg(test)]
 mod tests {
     use alloc::{collections::BTreeSet, sync::Arc};
-    use core::cell::RefCell;
+    use core::{cell::RefCell, time::Duration};
     use std::sync::Mutex;
 
     use ars_collections::{CollectionBuilder, DisabledBehavior, Key, selection};
@@ -2147,7 +2148,7 @@ mod tests {
         );
         assert!(matches!(
             captured[10],
-            Event::TypeaheadSearch('a', timestamp) if timestamp > 0
+            Event::TypeaheadSearch('a', timestamp) if timestamp > Duration::ZERO
         ));
         assert_eq!(
             &captured[11..15],
@@ -2160,7 +2161,7 @@ mod tests {
         );
         assert!(matches!(
             captured[15],
-            Event::TypeaheadSearch('d', timestamp) if timestamp > 0
+            Event::TypeaheadSearch('d', timestamp) if timestamp > Duration::ZERO
         ));
         assert_eq!(captured[16], Event::Close);
 
@@ -2218,12 +2219,12 @@ mod tests {
                 .disabled_behavior(DisabledBehavior::Skip),
         );
 
-        drop(service.send(Event::TypeaheadSearch('b', 100)));
+        drop(service.send(Event::TypeaheadSearch('b', Duration::from_millis(100))));
 
         assert_eq!(*service.state(), State::Open);
         assert_eq!(service.context().highlighted_key, None);
 
-        drop(service.send(Event::TypeaheadSearch('c', 700)));
+        drop(service.send(Event::TypeaheadSearch('c', Duration::from_millis(700))));
 
         assert_eq!(service.context().highlighted_key, Some(key("charlie")));
 
@@ -2320,7 +2321,7 @@ mod tests {
     fn readonly_select_ignores_typeahead_open_and_highlight() {
         let mut select = make_service(Props::new().id("sel").readonly(true));
 
-        drop(select.send(Event::TypeaheadSearch('b', 100)));
+        drop(select.send(Event::TypeaheadSearch('b', Duration::from_millis(100))));
 
         assert_eq!(select.state(), &State::Closed);
         assert!(!select.context().open);
@@ -2564,7 +2565,7 @@ mod tests {
                 &keyboard(KeyboardKey::Unidentified, Some('b')),
                 false,
                 false,
-                100,
+                Duration::from_millis(100),
             );
         }
         let events = sent.borrow();
@@ -2572,14 +2573,17 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert!(matches!(
             events[0],
-            Event::TypeaheadSearch('b', timestamp) if timestamp > 0
+            Event::TypeaheadSearch('b', timestamp) if timestamp > Duration::ZERO
         ));
-        assert_eq!(events[1], Event::TypeaheadSearch('b', 100));
+        assert_eq!(
+            events[1],
+            Event::TypeaheadSearch('b', Duration::from_millis(100))
+        );
         drop(events);
         for event in sent.take() {
             drop(select.send(event));
         }
-        let first_time = select.context().typeahead.last_key_time_ms;
+        let first_time = select.context().typeahead.last_key_time;
         let sent = RefCell::new(Vec::new());
         {
             let send = |event| {
@@ -2590,15 +2594,18 @@ mod tests {
                 &keyboard(KeyboardKey::Unidentified, Some('r')),
                 false,
                 false,
-                1_000,
+                Duration::from_millis(1_000),
             );
         }
         for event in sent.take() {
             drop(select.send(event));
         }
 
-        assert_eq!(first_time, 100);
-        assert_eq!(select.context().typeahead.last_key_time_ms, 1_000);
+        assert_eq!(first_time, Duration::from_millis(100));
+        assert_eq!(
+            select.context().typeahead.last_key_time,
+            Duration::from_millis(1_000)
+        );
     }
 
     #[test]
@@ -2888,7 +2895,7 @@ mod tests {
 
         assert!(service.context().is_composing);
 
-        drop(service.send(Event::TypeaheadSearch('c', 100)));
+        drop(service.send(Event::TypeaheadSearch('c', Duration::from_millis(100))));
 
         assert_eq!(service.context().highlighted_key, None);
         assert_eq!(*service.state(), State::Closed);

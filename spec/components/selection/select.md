@@ -76,9 +76,9 @@ pub enum Event {
     HighlightNext,
     /// Highlight the previous enabled item.
     HighlightPrev,
-    /// Typeahead search — char + timestamp for typeahead::State.
+    /// Typeahead search — char + monotonic timestamp for typeahead::State.
     /// Suppressed when `ctx.is_composing` is true (IME active).
-    TypeaheadSearch(char, u64),
+    TypeaheadSearch(char, Duration),
     /// IME composition started (CJK, etc.).
     CompositionStart,
     /// IME composition ended.
@@ -555,9 +555,9 @@ impl ars_core::Machine for Machine {
             }
 
             // ── Typeahead ───────────────────────────────────────────
-            (_, Event::TypeaheadSearch(ch, now_ms)) if !ctx.is_composing => {
+            (_, Event::TypeaheadSearch(ch, now)) if !ctx.is_composing => {
                 let (new_ta, found) = ctx.typeahead.process_char(
-                    *ch, *now_ms,
+                    *ch, *now,
                     ctx.highlighted_key.as_ref(),
                     &ctx.items,
                 );

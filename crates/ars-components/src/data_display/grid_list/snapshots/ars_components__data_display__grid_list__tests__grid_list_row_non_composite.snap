@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/data_display/grid_list/mod.rs
+expression: "snapshot_attrs(&api.row_attrs(&key(\"gamma\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-key",
+            ),
+            String(
+                "gamma",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "row",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "grid-list",
+            ),
+        ),
+        (
+            Aria(
+                Selected,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "listitem",
+            ),
+        ),
+    ],
+    styles: [],
+}
