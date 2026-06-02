@@ -1,0 +1,305 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "4e00b804bac9",
+  "session_id": "019e894f-ea37-7c60-ae10-4f6f73f2d25f",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-02T19:51:48.818189Z",
+  "branch": "impl-285",
+  "checkpoints_count": 7,
+  "files_touched": [
+    "crates/ars-a11y/src/announcer.rs",
+    "crates/ars-collections/src/typeahead.rs",
+    "crates/ars-components/src/data_display/grid_list/mod.rs",
+    "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_cell_dnd_enabled.snap",
+    "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_cell_link_selected_focused.snap",
+    "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_cell_non_composite.snap",
+    "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_drag_handle_disabled_item.snap",
+    "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_drag_handle_enabled.snap",
+    "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_drop_indicator_before.snap",
+    "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_empty_root.snap",
+    "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_loading_sentinel.snap",
+    "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_root_grid.snap",
+    "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_root_non_composite.snap",
+    "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_row_non_composite.snap",
+    "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_row_selected.snap",
+    "crates/ars-components/src/data_display/mod.rs",
+    "crates/ars-components/src/navigation/navigation_menu/mod.rs",
+    "crates/ars-components/src/navigation/tree_view/mod.rs",
+    "crates/ars-components/src/navigation/tree_view/tests.rs",
+    "crates/ars-components/src/overlay/toast/manager.rs",
+    "crates/ars-components/src/selection/context_menu/mod.rs",
+    "crates/ars-components/src/selection/listbox/mod.rs",
+    "crates/ars-components/src/selection/menu/mod.rs",
+    "crates/ars-components/src/selection/select/mod.rs",
+    "crates/ars-components/src/specialized/clipboard/mod.rs",
+    "crates/ars-components/src/specialized/timer/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/navigation_menu.rs",
+    "crates/ars-components/tests/proptest_state_machines/navigation/tree_view.rs",
+    "crates/ars-components/tests/proptest_state_machines/overlay/toast_manager.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+    "crates/ars-components/tests/spec_conformance/data_display.rs",
+    "crates/ars-core/src/platform.rs",
+    "crates/ars-core/src/provider.rs",
+    "crates/ars-dioxus/tests/tabs_wasm.rs",
+    "crates/ars-dom/src/platform.rs",
+    "crates/ars-forms/src/validation/debounced.rs",
+    "crates/ars-leptos/tests/tabs_wasm.rs",
+    "crates/ars-test-harness/src/lib.rs",
+    "spec/components/data-display/grid-list.md",
+    "spec/components/input/pin-input.md",
+    "spec/components/navigation/navigation-menu.md",
+    "spec/components/navigation/tree-view.md",
+    "spec/components/overlay/toast.md",
+    "spec/components/selection/_category.md",
+    "spec/components/selection/context-menu.md",
+    "spec/components/selection/listbox.md",
+    "spec/components/selection/menu.md",
+    "spec/components/selection/select.md",
+    "spec/components/specialized/clipboard.md",
+    "spec/dioxus-components/data-display/grid-list.md",
+    "spec/dioxus-components/navigation/navigation-menu.md",
+    "spec/dioxus-components/overlay/tooltip.md",
+    "spec/dioxus-components/specialized/clipboard.md",
+    "spec/dioxus-components/specialized/timer.md",
+    "spec/foundation/01-architecture.md",
+    "spec/foundation/03-accessibility.md",
+    "spec/foundation/06-collections.md",
+    "spec/foundation/07-forms.md",
+    "spec/foundation/08-adapter-leptos.md",
+    "spec/leptos-components/data-display/grid-list.md",
+    "spec/leptos-components/navigation/navigation-menu.md",
+    "spec/leptos-components/overlay/tooltip.md",
+    "spec/leptos-components/specialized/clipboard.md",
+    "spec/leptos-components/specialized/timer.md",
+    "spec/testing/12-advanced.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "2772cf75f86e",
+  "token_usage": {
+    "input_tokens": 1837958,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 46494976,
+    "output_tokens": 143997,
+    "api_call_count": 379
+  },
+  "session_metrics": {
+    "turn_count": 9
+  },
+  "summary": {
+    "intent": "Implement task #285: a framework-agnostic GridList core in `ars-components` covering selection, 2D keyboard navigation, typeahead, ARIA/data attrs, agnostic DnD affordances, and loading sentinel. A follow-up question during review also triggered a codebase-wide migration of raw `u32`/`u64` time fields to `core::time::Duration`.",
+    "outcome": "GridList core was fully implemented, tested (15 unit tests, spec conformance, proptests, 90% branch coverage), and all time-shaped `u32`/`u64` fields across agnostic crates (`ars-core`, `ars-collections`, `ars-forms`, `ars-a11y`, `ars-components`, `ars-test-harness`) were migrated to `Duration`. Specs were synced. A single commit on branch `impl-285` passed `cargo xci --profile fast` and is ready for a PR.",
+    "learnings": {
+      "repo": [
+        "Item `href` must use `SafeUrl` + `sanitize_url()` at output time, not raw `Option<String>`; this is an enforced architecture policy.",
+        "GridList core owns selection, highlight, typeahead, stable IDs, and ARIA/data attrs. Live focus, scroll-into-view, measurement, and DOM drag events are adapter-resolved.",
+        "TreeView is the canonical reference implementation for agnostic DnD attrs/parts; follow its pattern rather than inventing a new shape.",
+        "Agnostic DnD is in scope only when both the GridList spec and existing `ars-collections` DnD APIs define a concrete contract; otherwise spec/code drift must be resolved first.",
+        "`cargo xci --profile fast` is the required pre-commit gate. `cargo xcov` enforces a 90% branch coverage minimum on `ars-components`.",
+        "`cargo xtask spec validate` validates all 340 spec files and is required before committing.",
+        "New snapshots require a `snapshot-reviewed` PR label; `waiting-for-codex-review` must be invoked after each push.",
+        "The `Bindable<BTreeSet<Key>>` pattern in core handles controlled selection with parent-lag: pending user selections are preserved while parent props catch up.",
+        "`Timer::display_time()` previously returned an unlabelled `(u64, u64, u64, u64)` tuple; migrated to a named `DisplayTime` struct."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-core/src/platform.rs",
+          "line": 56,
+          "end_line": 150,
+          "finding": "Previously exposed `set_timeout(delay_ms: u32, ...)` and `now_ms() -> u64`. Both migrated to `Duration`; numeric millisecond conversions now happen only in `ars-dom` at the JS boundary."
+        },
+        {
+          "path": "crates/ars-collections/src/typeahead.rs",
+          "line": 1,
+          "end_line": 220,
+          "finding": "Shared `typeahead::State` field was `last_key_time_ms: u64`; `process_char`/`process_char_with_locale` took `u64`. All migrated to `Duration`, removing the need for a GridList-local wrapper type."
+        },
+        {
+          "path": "crates/ars-dom/src/platform.rs",
+          "line": 216,
+          "end_line": 270,
+          "finding": "JS/CSS boundary: `setTimeout` still requires `i32` ms and CSS animation parsing uses numeric ms internally. The `PlatformEffects` trait now uses `Duration` but the DOM adapter converts to/from numeric at this file boundary only."
+        },
+        {
+          "path": "crates/ars-forms/src/validation/debounced.rs",
+          "line": 58,
+          "end_line": 58,
+          "finding": "`DebouncedAsyncValidator.delay_ms: u32` migrated to `delay: Duration`; the only remaining `AtomicU32` is a cancellation count, not time storage."
+        },
+        {
+          "path": "crates/ars-a11y/src/announcer.rs",
+          "line": 39,
+          "end_line": 39,
+          "finding": "`clear_delay_ms: u32` migrated to `clear_delay: Duration` with `DEFAULT_CLEAR_DELAY` as a `Duration` constant."
+        },
+        {
+          "path": "crates/ars-components/src/overlay/toast/manager.rs",
+          "line": 485,
+          "end_line": 485,
+          "finding": "`DrainAnnouncement { now_ms: u64 }` and `last_announcement_at: Option<u64>` migrated to `Duration`. Numeric `u64` ID counters were intentionally left as-is since they are not time values."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/timer/mod.rs",
+          "line": 638,
+          "end_line": 638,
+          "finding": "`display_time() -> (u64, u64, u64, u64)` replaced with `-> DisplayTime` struct with named `hours`, `minutes`, `seconds`, `millis` fields."
+        },
+        {
+          "path": "crates/ars-components/src/navigation/navigation_menu/mod.rs",
+          "line": 164,
+          "end_line": 164,
+          "finding": "`delay_ms`, `skip_delay_ms`, keydown timestamps, and `last_close_time: Option<u64>` all migrated to `Duration`/`Option<Duration>`."
+        },
+        {
+          "path": "crates/ars-test-harness/src/lib.rs",
+          "line": 170,
+          "end_line": 345,
+          "finding": "Fake virtual-clock fields (`current_ms`, `due_ms`, `interval_ms`) migrated to `Duration`; JS timer handles remain numeric IDs."
+        }
+      ],
+      "workflow": [
+        "A broad Perl `s///g` regex replacement on wildcard match arms like `Event::TypeaheadSearch(_, _)` produced malformed output `(, Duration::from_millis())`. Mechanical renames across pattern-heavy Rust code should use targeted per-file patches or compile-driven iteration, not regex sweeps.",
+        "`cargo insta test --unreferenced=reject -- <filter>` is not safe to use with a test filter: unfiltered snapshots appear unreferenced and cause false failures. Use `--unreferenced=ignore` when running a filtered subset; run the full unfiltered sweep separately.",
+        "Plan DnD scope should distinguish adapter DOM work (out of scope) from agnostic state/events/attrs (in scope when spec defines a concrete contract). A blanket 'DnD out of scope' assumption blocked correct implementation.",
+        "Running `cargo check` on migrated crates before editing specs surfaces API fallout early and keeps spec sync work grounded in actual compile errors.",
+        "When a shared utility type (e.g. `typeahead::State`) exposes a raw numeric field, wrapping it per-component is a short-term band-aid; the real fix is migrating the shared type and updating all consumers in one pass."
+      ]
+    },
+    "friction": [
+      "`cargo insta test -p ars-components --unreferenced=reject` with any test filter misclassifies unrelated package snapshots as unreferenced; no supported flag scopes the unreferenced scan to a subdirectory.",
+      "A broad Perl regex over Rust match arms (`Event::TypeaheadSearch(_, _)`) produced malformed syntax requiring manual repair across five component modules.",
+      "The GridList spec had an internal inconsistency: code examples referenced `props.column_count`/`props.row_count` that were not defined in the Props struct, requiring a design decision during planning.",
+      "The initial plan's DnD assumption was too coarse; a user clarification mid-session was needed before implementation could start, which would have been avoidable with a more precise spec read upfront.",
+      "The `cargo insta` `--glob-filter` flag does not scope the unreferenced scan, making it useless for per-component snapshot validation in a large package."
+    ],
+    "open_items": [
+      "Leptos and Dioxus GridList adapters are explicitly deferred; adapter specs exist but no adapter code was written.",
+      "Pre-existing unreferenced `utility/highlight` snapshots in `ars-components` will cause `cargo insta test --unreferenced=reject` to fail on any focused run; these need to be cleaned up or accepted separately.",
+      "Timer and Tooltip adapter specs now document `Duration` props but the actual Leptos/Dioxus adapter implementations were not updated in this task.",
+      "The CSS animation/transition parser in `ars-dom` still works with numeric milliseconds internally (parsing strings like `125ms`); a typed wrapper for CSS time values was not created.",
+      "Dioxus and Leptos `tabs_wasm` test wrappers were updated to implement the new `Duration`-based `PlatformEffects` trait signatures, but full wasm integration tests were not run as part of this session."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-02T19:50:34.324653Z",
+    "agent_lines": 3977,
+    "agent_removed": 1262,
+    "human_added": 221,
+    "human_modified": 109,
+    "human_removed": 0,
+    "total_committed": 4301,
+    "total_lines_changed": 5569,
+    "agent_percentage": 94.07434009696534,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 5,
+      "user_lines_removed": 9,
+      "agent_lines_added": 3175,
+      "agent_lines_removed": 531,
+      "user_added_per_file": {
+        "crates/ars-components/src/data_display/grid_list/mod.rs": 5
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/data_display/grid_list/mod.rs": 9
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 2,
+      "user_lines_removed": 2,
+      "agent_lines_added": 3246,
+      "agent_lines_removed": 531,
+      "user_added_per_file": {
+        "spec/components/data-display/grid-list.md": 2
+      },
+      "user_removed_per_file": {
+        "spec/components/data-display/grid-list.md": 2
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3248,
+      "agent_lines_removed": 533
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3663,
+      "agent_lines_removed": 823
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3663,
+      "agent_lines_removed": 823
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 89,
+      "user_lines_removed": 86,
+      "agent_lines_added": 4220,
+      "agent_lines_removed": 1295,
+      "user_added_per_file": {
+        "crates/ars-collections/src/typeahead.rs": 20,
+        "crates/ars-dom/src/platform.rs": 4,
+        "spec/components/data-display/grid-list.md": 2,
+        "spec/components/navigation/navigation-menu.md": 2,
+        "spec/components/specialized/clipboard.md": 12,
+        "spec/dioxus-components/navigation/navigation-menu.md": 7,
+        "spec/dioxus-components/overlay/tooltip.md": 9,
+        "spec/dioxus-components/specialized/clipboard.md": 4,
+        "spec/dioxus-components/specialized/timer.md": 2,
+        "spec/leptos-components/navigation/navigation-menu.md": 7,
+        "spec/leptos-components/overlay/tooltip.md": 9,
+        "spec/leptos-components/specialized/clipboard.md": 4,
+        "spec/leptos-components/specialized/timer.md": 2,
+        "spec/testing/12-advanced.md": 5
+      },
+      "user_removed_per_file": {
+        "crates/ars-collections/src/typeahead.rs": 20,
+        "crates/ars-dom/src/platform.rs": 1,
+        "spec/components/data-display/grid-list.md": 2,
+        "spec/components/navigation/navigation-menu.md": 2,
+        "spec/components/specialized/clipboard.md": 12,
+        "spec/dioxus-components/navigation/navigation-menu.md": 7,
+        "spec/dioxus-components/overlay/tooltip.md": 9,
+        "spec/dioxus-components/specialized/clipboard.md": 4,
+        "spec/dioxus-components/specialized/timer.md": 2,
+        "spec/leptos-components/navigation/navigation-menu.md": 7,
+        "spec/leptos-components/overlay/tooltip.md": 9,
+        "spec/leptos-components/specialized/clipboard.md": 4,
+        "spec/leptos-components/specialized/timer.md": 2,
+        "spec/testing/12-advanced.md": 5
+      }
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 117,
+      "user_lines_removed": 6,
+      "agent_lines_added": 4293,
+      "agent_lines_removed": 1365,
+      "user_added_per_file": {
+        "crates/ars-components/src/data_display/grid_list/mod.rs": 117
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/data_display/grid_list/mod.rs": 6
+      }
+    }
+  ]
+}
