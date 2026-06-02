@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>b124dy2ms</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-292/dd441a93-8791-4c38-b72c-c5a3afd87f1b/tasks/b124dy2ms.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex review state until verdict" completed (exit code 0)</summary>
+</task-notification>

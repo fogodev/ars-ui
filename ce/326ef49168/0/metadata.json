@@ -1,0 +1,103 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "ce326ef49168",
+  "session_id": "dd441a93-8791-4c38-b72c-c5a3afd87f1b",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-02T05:11:28.129792Z",
+  "branch": "impl-292",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+    "crates/ars-components/src/date_time/date_time_picker/tests.rs",
+    "spec/components/date-time/date-time-picker.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "26a9795c9128",
+  "checkpoint_transcript_start": 1189,
+  "transcript_lines_at_start": 1189,
+  "token_usage": {
+    "input_tokens": 3576,
+    "cache_creation_tokens": 658917,
+    "cache_read_tokens": 28633465,
+    "output_tokens": 24514,
+    "api_call_count": 44
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Address 6 Codex review findings on the DateTimePicker component implementation, then sync the spec and push the fixes.",
+    "outcome": "All 6 findings fixed (calendar-aware date assembly, canonical ISO hidden input, trigger/clear button types, readonly guard, out-of-range guard), 125 tests passing with regenerated snapshots, spec updated, and changes committed and pushed.",
+    "learnings": {
+      "repo": [
+        "DateTimePicker uses a configured calendar for date assembly — must use CalendarDate::new with the component's calendar, not a hardcoded ISO calendar.",
+        "assemble_date follows a canonical pattern established in DateField; new date components should mirror it exactly.",
+        "DateTimePicker's readonly semantics differ from DatePicker: readonly blocks opening the popover entirely, so disabling the trigger under readonly is correct and per spec §3.1.",
+        "Trigger and clear buttons must carry explicit type=\"button\" to avoid form-submission side effects — this is a sibling convention from DatePicker/DateField.",
+        "format_iso8601 must produce canonical ISO date strings for the hidden input value.",
+        "CalendarSelectDate transition arm requires an out-of-range guard consistent with DatePicker's pattern.",
+        "xci-fast is the pre-push gate (10 CI checks); snapshots must be regenerated and reviewed before it is run.",
+        "Spec lives at spec/components/date-time/date-time-picker.md and is validated with a dedicated lint step."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "assemble_date was fixed to use CalendarDate::new with the configured calendar and CalendarDateFields for field extraction, mirroring DateField's canonical pattern."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "format_iso8601 updated to produce canonical ISO date strings for the hidden input."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "Trigger attrs updated: disabled when readonly (not just aria-disabled), and type=\"button\" added."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "clear_trigger_attrs updated to add type=\"button\"."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "CalendarSelectDate transition arm now includes an out-of-range guard before committing the selected date."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/tests.rs",
+          "finding": "Tests reference date_value via borrow (&context.date_value) not by move, because Context holds it behind a shared reference."
+        }
+      ],
+      "workflow": [
+        "Codex review results are polled via a background task; verdict comes back with per-finding 👍/👀 signals.",
+        "Snapshot tests for HTML attribute changes must be regenerated (UPDATE_EXPECT or equivalent) and the diffs reviewed before accepting.",
+        "Spec must be updated in the same commit as implementation changes to keep them in sync.",
+        "Spec has a dedicated validation step that should be run before committing."
+      ]
+    },
+    "friction": [
+      "Initial test run failed because date_value was moved out of a borrowed Context — required switching to a borrow, which was a minor but blocking compile error.",
+      "Multiple rounds of Read → Edit were needed on mod.rs because the file is large and each fix required re-reading a different section to get the correct old_string context."
+    ],
+    "open_items": []
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-02T05:11:05.418691Z",
+    "agent_lines": 185,
+    "agent_removed": 16,
+    "human_added": 30,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 215,
+    "total_lines_changed": 231,
+    "agent_percentage": 87.01298701298701,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
