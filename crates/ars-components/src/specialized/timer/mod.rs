@@ -496,22 +496,35 @@ impl ars_core::Machine for Machine {
                             .cancel_effect(Effect::TimerInterval),
                     )
                 } else {
-                    // While idle the displayed value mirrors the (new) initial;
-                    // once running/paused the in-progress `current` is kept.
-                    let reset_current = matches!(state, State::Idle);
+                    // Reconfiguring a completed timer to a now-runnable config
+                    // must leave `Completed`, otherwise the timer renders
+                    // `data-ars-state="completed"` with a disabled start trigger
+                    // (or strands a stopwatch in `Completed`) until manual reset.
+                    let was_completed = matches!(state, State::Completed);
+                    // Idle and (newly-runnable) Completed both mirror the new
+                    // initial; running/paused keep the in-progress `current`.
+                    let reset_current = matches!(state, State::Idle | State::Completed);
                     // A live cadence change must re-arm the adapter interval,
                     // otherwise it keeps firing at the old rate while ticks use
                     // the new interval.
                     let rearm = matches!(state, State::Running) && interval != ctx.interval;
 
-                    let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
+                    let apply = move |ctx: &mut Context| {
                         ctx.target = target;
                         ctx.interval = interval;
                         ctx.mode = mode;
                         if reset_current {
                             ctx.current = initial_duration(mode, target);
                         }
-                    });
+                    };
+
+                    let mut plan = if was_completed {
+                        TransitionPlan::to(State::Idle)
+                            .apply(apply)
+                            .cancel_effect(Effect::TimerInterval)
+                    } else {
+                        TransitionPlan::context_only(apply)
+                    };
 
                     if rearm {
                         plan = plan
@@ -644,7 +657,10 @@ impl Api<'_> {
     #[must_use]
     pub fn progress(&self) -> f64 {
         if self.ctx.target.is_zero() {
-            return 0.0;
+            // A zero-duration countdown is complete on arrival, so it reports
+            // full progress; a zero-target stopwatch has no meaningful target
+            // and is reported as indeterminate (0.0).
+            return if self.is_completed() { 1.0 } else { 0.0 };
         }
 
         let fraction = self.ctx.current.as_secs_f64() / self.ctx.target.as_secs_f64();
@@ -701,6 +717,13 @@ impl Api<'_> {
     }
 
     /// Root element attributes.
+    ///
+    /// The Root is the polite, atomic `aria-live` region. It deliberately does
+    /// **not** carry the formatted time as an `aria-label`: live regions
+    /// announce changes to their *content* (the [`Display`](Part::Display) text),
+    /// not to `aria-label`, so labelling the region with the live value would
+    /// not be announced and would shadow the visible text. Associate an
+    /// accessible name via the optional [`Label`](Part::Label) part.
     #[must_use]
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -712,8 +735,7 @@ impl Api<'_> {
             .set(HtmlAttr::Role, "timer")
             .set(HtmlAttr::Data("ars-state"), self.state_str())
             .set(HtmlAttr::Aria(AriaAttr::Live), "polite")
-            .set(HtmlAttr::Aria(AriaAttr::Atomic), "true")
-            .set(HtmlAttr::Aria(AriaAttr::Label), self.formatted_time());
+            .set(HtmlAttr::Aria(AriaAttr::Atomic), "true");
 
         attrs
     }
@@ -733,6 +755,10 @@ impl Api<'_> {
     }
 
     /// Display element attributes.
+    ///
+    /// The Display holds the visible formatted time and is intentionally **not**
+    /// `aria-hidden`: as the changing content of the Root `aria-live` region it
+    /// is what assistive technology announces on each tick (spec §3.3).
     #[must_use]
     pub fn display_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -741,8 +767,7 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
-            .set(HtmlAttr::Id, self.ctx.ids.part("display"))
-            .set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
+            .set(HtmlAttr::Id, self.ctx.ids.part("display"));
 
         attrs
     }
@@ -1371,6 +1396,53 @@ mod tests {
         assert!(result.pending_effects.is_empty());
     }
 
+    #[test]
+    fn timer_sync_from_completed_to_live_target_returns_to_idle() {
+        // A finished zero-duration countdown reconfigured to a runnable target
+        // must leave Completed so it is startable again (not stranded).
+        let mut service = fresh_service(test_props().target(Duration::ZERO));
+        assert_eq!(service.state(), &State::Completed);
+
+        let result = service.set_props(test_props().target(Duration::from_secs(30)));
+
+        assert_eq!(service.state(), &State::Idle);
+        assert_eq!(service.context().current, Duration::from_secs(30));
+        assert_eq!(result.cancel_effects, vec![Effect::TimerInterval]);
+
+        // Switching a completed timer to stopwatch likewise frees it from Completed.
+        let mut sw = fresh_service(test_props().target(Duration::ZERO));
+        drop(
+            sw.set_props(
+                test_props()
+                    .mode(Mode::Stopwatch)
+                    .target(Duration::from_secs(30)),
+            ),
+        );
+        assert_eq!(sw.state(), &State::Idle);
+        assert_eq!(sw.context().current, Duration::ZERO);
+    }
+
+    #[test]
+    fn timer_completed_zero_target_reports_full_progress() {
+        // A zero-duration countdown sits in Completed; its progress must read as
+        // 100% (not 0%) so the progressbar reflects completion.
+        let service = fresh_service(test_props().target(Duration::ZERO));
+        assert_eq!(service.state(), &State::Completed);
+
+        let api = service.connect(&|_| {});
+        assert!((api.progress() - 1.0).abs() < 1e-9);
+        assert_eq!(
+            api.progress_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::ValueNow)),
+            Some("100")
+        );
+
+        // A zero-target stopwatch has no meaningful target and stays indeterminate.
+        let stopwatch = fresh_service(test_props().mode(Mode::Stopwatch).target(Duration::ZERO));
+        let sw_api = stopwatch.connect(&|_| {});
+        assert!((sw_api.progress() - 0.0).abs() < 1e-9);
+    }
+
     // ───────────────────── transitions ─────────────────────
 
     #[test]
@@ -1675,7 +1747,7 @@ mod tests {
     }
 
     #[test]
-    fn timer_root_attrs_carry_timer_role_live_region_and_label() {
+    fn timer_root_attrs_carry_timer_role_and_live_region() {
         let api = api_for(
             State::Running,
             Duration::from_secs(30),
@@ -1688,8 +1760,23 @@ mod tests {
         assert_eq!(attrs.get(&HtmlAttr::Role), Some("timer"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Live)), Some("polite"));
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Atomic)), Some("true"));
-        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Label)), Some("00:30"));
         assert_eq!(attrs.get(&HtmlAttr::Data("ars-state")), Some("running"));
+        // The live value lives in the Display content, not on the Root label.
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Label)));
+    }
+
+    #[test]
+    fn timer_display_is_not_aria_hidden() {
+        // The Display is the announced content of the Root live region, so it
+        // must remain in the accessibility tree.
+        let attrs = api_for(
+            State::Running,
+            Duration::from_secs(30),
+            Mode::Countdown,
+            Duration::from_secs(60),
+        )
+        .display_attrs();
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::Hidden)));
     }
 
     #[test]
@@ -1941,16 +2028,11 @@ mod tests {
     #[test]
     fn timer_formatted_time_routes_digits_through_intl_backend() {
         // 90s -> 01:30; the localizing backend prefixes each segment with `loc-`.
+        // `formatted_time` is the string adapters render into the Display, which
+        // is the announced live-region content.
         let api = api_with_localized_backend(Duration::from_secs(90));
 
         assert_eq!(api.formatted_time(), "loc-01:loc-30");
-
-        // The root `aria-label` is sourced from `formatted_time`, so it inherits
-        // the localized digits too.
-        assert_eq!(
-            api.root_attrs().get(&HtmlAttr::Aria(AriaAttr::Label)),
-            Some("loc-01:loc-30")
-        );
     }
 
     // ─────────────────────── snapshots ───────────────────────

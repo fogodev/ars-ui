@@ -1,6 +1,6 @@
 ---
 source: crates/ars-components/src/specialized/timer/mod.rs
-expression: "snapshot_attrs(&api_for(State::Running, 3_600_000, Mode::Countdown,\n3_600_000).root_attrs())"
+expression: "snapshot_attrs(&api_for(State::Running, Duration::from_secs(3_600),\nMode::Countdown, Duration::from_secs(3_600),).root_attrs())"
 ---
 AttrMap {
     attrs: [
@@ -26,14 +26,6 @@ AttrMap {
             ),
             String(
                 "running",
-            ),
-        ),
-        (
-            Aria(
-                Label,
-            ),
-            String(
-                "01:00:00",
             ),
         ),
         (

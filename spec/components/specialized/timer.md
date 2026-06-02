@@ -319,18 +319,28 @@ impl ars_core::Machine for Machine {
                         })
                         .cancel_effect(Effect::TimerInterval))
                 } else {
-                    // Idle mirrors the new initial; running/paused keep `current`.
-                    let reset_current = matches!(state, State::Idle);
+                    // Reconfiguring a completed timer to a runnable config must
+                    // leave Completed, else it stays completed/disabled (or a
+                    // stopwatch stuck in Completed) until manual reset.
+                    let was_completed = matches!(state, State::Completed);
+                    // Idle and (newly-runnable) Completed mirror the new initial;
+                    // running/paused keep the in-progress `current`.
+                    let reset_current = matches!(state, State::Idle | State::Completed);
                     // A live cadence change re-arms the adapter interval.
                     let rearm = matches!(state, State::Running) && interval != ctx.interval;
-                    let mut plan = TransitionPlan::context_only(move |ctx| {
+                    let apply = move |ctx: &mut Context| {
                         ctx.target = target;
                         ctx.interval = interval;
                         ctx.mode = mode;
                         if reset_current {
                             ctx.current = initial_duration(mode, target);
                         }
-                    });
+                    };
+                    let mut plan = if was_completed {
+                        TransitionPlan::to(State::Idle).apply(apply).cancel_effect(Effect::TimerInterval)
+                    } else {
+                        TransitionPlan::context_only(apply)
+                    };
                     if rearm {
                         plan = plan
                             .cancel_effect(Effect::TimerInterval)
@@ -419,7 +429,11 @@ impl<'a> Api<'a> {
     /// produces a value outside [0.0, 1.0] (which would break the progressbar
     /// `aria-valuenow`/`valuemin`/`valuemax` semantics).
     pub fn progress(&self) -> f64 {
-        if self.ctx.target.is_zero() { return 0.0; }
+        if self.ctx.target.is_zero() {
+            // A completed zero-duration countdown is fully elapsed (100%); a
+            // zero-target stopwatch is indeterminate (0%).
+            return if self.is_completed() { 1.0 } else { 0.0 };
+        }
         let fraction = self.ctx.current.as_secs_f64() / self.ctx.target.as_secs_f64();
         let progress = match self.ctx.mode {
             Mode::Countdown => 1.0 - fraction,
@@ -457,6 +471,10 @@ impl<'a> Api<'a> {
         }
     }
 
+    // The Root is the polite, atomic aria-live region. It does NOT carry the
+    // formatted time as aria-label: live regions announce changes to their
+    // content (the Display text), not to aria-label. Associate a name via the
+    // optional Label part.
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
@@ -466,7 +484,6 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Data("ars-state"), self.state_str());
         attrs.set(HtmlAttr::Aria(AriaAttr::Live), "polite");
         attrs.set(HtmlAttr::Aria(AriaAttr::Atomic), "true");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), self.formatted_time());
         attrs
     }
 
@@ -479,13 +496,15 @@ impl<'a> Api<'a> {
         attrs
     }
 
+    // The Display holds the visible formatted time and is NOT aria-hidden: as
+    // the changing content of the Root live region it is what assistive tech
+    // announces on each tick (§3.3).
     pub fn display_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Display.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("display"));
-        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs
     }
 
@@ -603,7 +622,7 @@ Timer
 | ------------ | ---------- | --------------------------------------------------------------------- |
 | Root         | `<div>`    | `role="timer"`, `aria-live="polite"`, `aria-atomic`                   |
 | Label        | `<label>`  | `id` for association                                                  |
-| Display      | `<span>`   | `aria-hidden="true"` (Root handles live region)                       |
+| Display      | `<span>`   | visible time; announced as the Root live region's content             |
 | Progress     | `<div>`    | `role="progressbar"`, `aria-valuenow/min/max`                         |
 | StartTrigger | `<button>` | `type="button"`, `aria-label` (Start/Resume), `disabled` when running |
 | PauseTrigger | `<button>` | `type="button"`, `aria-label` (Pause), `disabled` when not running    |
@@ -616,7 +635,7 @@ Timer
 
 | Part         | Role          | Properties                                               |
 | ------------ | ------------- | -------------------------------------------------------- |
-| Root         | `timer`       | `aria-live="polite"`, `aria-atomic="true"`, `aria-label` |
+| Root         | `timer`       | `aria-live="polite"`, `aria-atomic="true"`               |
 | Progress     | `progressbar` | `aria-valuenow`, `aria-valuemin`, `aria-valuemax`        |
 | StartTrigger | `button`      | `aria-label`, `disabled`                                 |
 | PauseTrigger | `button`      | `aria-label`, `disabled`                                 |
@@ -631,7 +650,7 @@ Timer
 
 ### 3.3 Screen Reader Announcements
 
-The Root element has `role="timer"` with `aria-live="polite"` and `aria-atomic="true"`. Time changes are announced periodically. When countdown completes, the `completed_announcement` message is announced.
+The Root element has `role="timer"` with `aria-live="polite"` and `aria-atomic="true"`. The changing time text lives in the `Display` child (which is **not** `aria-hidden`), so it is the live region's content and is announced as it changes — the Root does **not** carry the time as an `aria-label`, because live regions announce content mutations, not `aria-label` changes. Associate an accessible name through the optional `Label` part. When a countdown completes, the `completed_announcement` message is announced.
 
 ## 4. Internationalization
 

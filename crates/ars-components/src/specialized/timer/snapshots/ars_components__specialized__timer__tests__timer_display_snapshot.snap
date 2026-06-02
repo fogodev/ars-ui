@@ -1,6 +1,6 @@
 ---
 source: crates/ars-components/src/specialized/timer/mod.rs
-expression: "snapshot_attrs(&api_for(State::Idle, 60_000, Mode::Countdown,\n60_000).display_attrs())"
+expression: "snapshot_attrs(&countdown_api(State::Idle, 60).display_attrs())"
 ---
 AttrMap {
     attrs: [
@@ -18,14 +18,6 @@ AttrMap {
             ),
             String(
                 "timer",
-            ),
-        ),
-        (
-            Aria(
-                Hidden,
-            ),
-            String(
-                "true",
             ),
         ),
         (
