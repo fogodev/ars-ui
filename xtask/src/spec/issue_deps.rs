@@ -156,7 +156,7 @@ impl IssueIndex {
     fn load_core() -> Result<Self, Error> {
         Self::load_from_search(
             "repo:fogodev/ars-ui is:issue in:title agnostic core",
-            |title| component_from_core_title(title),
+            component_from_core_title,
         )
     }
 

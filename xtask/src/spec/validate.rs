@@ -172,7 +172,7 @@ pub fn execute(root: &SpecRoot) -> Result<String, Error> {
 fn validate_component_dependencies(root: &SpecRoot, errors: &mut Vec<String>) {
     let components = &root.manifest.components;
     let valid_frameworks = BTreeSet::from(["leptos", "dioxus"]);
-    let mut requires_edges = BTreeMap::<String, Vec<String>>::new();
+    let mut blocking_edges = BTreeMap::<String, Vec<String>>::new();
 
     for (name, comp) in components {
         for dep in &comp.component_deps {
@@ -217,24 +217,25 @@ fn validate_component_dependencies(root: &SpecRoot, errors: &mut Vec<String>) {
                 ));
             }
 
-            if dep.kind == ComponentDependencyKind::Requires {
-                if dep.component == *name {
-                    errors.push(format!(
-                        "[{name}] requires component_dep cannot point to itself"
-                    ));
-                }
-
-                requires_edges
-                    .entry(name.clone())
-                    .or_default()
-                    .push(dep.component.clone());
-            }
-
             if !dep.kind.can_block() && component_deps::is_blocking(dep.kind, dep.blocking) {
                 errors.push(format!(
                     "[{name}] {} component_dep '{}' unexpectedly blocks",
                     dep.kind, dep.component
                 ));
+            }
+
+            if component_deps::is_blocking(dep.kind, dep.blocking) {
+                if dep.component == *name {
+                    errors.push(format!(
+                        "[{name}] {} component_dep cannot point to itself",
+                        dep.kind
+                    ));
+                }
+
+                blocking_edges
+                    .entry(name.clone())
+                    .or_default()
+                    .push(dep.component.clone());
             }
         }
     }
@@ -242,10 +243,10 @@ fn validate_component_dependencies(root: &SpecRoot, errors: &mut Vec<String>) {
     for start in components.keys() {
         let mut visiting = BTreeSet::new();
         let mut visited = BTreeSet::new();
-        detect_requires_cycle(
+        detect_blocking_cycle(
             start,
             start,
-            &requires_edges,
+            &blocking_edges,
             &mut visiting,
             &mut visited,
             errors,
@@ -253,7 +254,7 @@ fn validate_component_dependencies(root: &SpecRoot, errors: &mut Vec<String>) {
     }
 }
 
-fn detect_requires_cycle(
+fn detect_blocking_cycle(
     start: &str,
     current: &str,
     edges: &BTreeMap<String, Vec<String>>,
@@ -269,17 +270,121 @@ fn detect_requires_cycle(
         for next in nexts {
             if next == start {
                 errors.push(format!(
-                    "[{start}] requires component_deps contain a cycle through '{current}'"
+                    "[{start}] blocking component_deps contain a cycle through '{current}'"
                 ));
                 continue;
             }
 
             if !visited.contains(next) {
-                detect_requires_cycle(start, next, edges, visiting, visited, errors);
+                detect_blocking_cycle(start, next, edges, visiting, visited, errors);
             }
         }
     }
 
     visiting.remove(current);
     visited.insert(current.to_owned());
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, path::PathBuf};
+
+    use super::validate_component_dependencies;
+    use crate::manifest::{
+        Component, ComponentDependency, ComponentDependencyKind, Manifest, SpecRoot,
+    };
+
+    fn component(component_deps: Vec<ComponentDependency>) -> Component {
+        Component {
+            path: "components/test.md".to_owned(),
+            category: "test".to_owned(),
+            foundation_deps: Vec::new(),
+            shared_deps: Vec::new(),
+            related: Vec::new(),
+            component_deps,
+            internal: false,
+        }
+    }
+
+    fn dependency(
+        component: &str,
+        kind: ComponentDependencyKind,
+        blocking: bool,
+    ) -> ComponentDependency {
+        ComponentDependency {
+            component: component.to_owned(),
+            kind,
+            frameworks: vec!["leptos".to_owned()],
+            blocking,
+            reason: "test dependency".to_owned(),
+        }
+    }
+
+    fn root_with(components: BTreeMap<String, Component>) -> SpecRoot {
+        SpecRoot {
+            path: PathBuf::new(),
+            manifest: Manifest {
+                foundation: BTreeMap::new(),
+                shared: BTreeMap::new(),
+                components,
+                review_profiles: None,
+                leptos_adapters: BTreeMap::new(),
+                dioxus_adapters: BTreeMap::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn blocking_composes_self_dependency_is_rejected() {
+        let mut components = BTreeMap::new();
+        components.insert(
+            "dialog".to_owned(),
+            component(vec![dependency(
+                "dialog",
+                ComponentDependencyKind::Composes,
+                true,
+            )]),
+        );
+        let root = root_with(components);
+        let mut errors = Vec::new();
+
+        validate_component_dependencies(&root, &mut errors);
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("cannot point to itself")),
+            "expected blocking self dependency error, got {errors:?}"
+        );
+    }
+
+    #[test]
+    fn blocking_composes_cycle_is_rejected() {
+        let mut components = BTreeMap::new();
+        components.insert(
+            "dialog".to_owned(),
+            component(vec![dependency(
+                "drawer",
+                ComponentDependencyKind::Composes,
+                true,
+            )]),
+        );
+        components.insert(
+            "drawer".to_owned(),
+            component(vec![dependency(
+                "dialog",
+                ComponentDependencyKind::Composes,
+                true,
+            )]),
+        );
+        let root = root_with(components);
+        let mut errors = Vec::new();
+
+        validate_component_dependencies(&root, &mut errors);
+
+        assert!(
+            errors.iter().any(|error| error.contains("contain a cycle")),
+            "expected blocking cycle error, got {errors:?}"
+        );
+    }
 }

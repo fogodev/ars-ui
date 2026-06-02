@@ -13,6 +13,28 @@ struct Cli {
     command: Command,
 }
 
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::Cli;
+
+    #[test]
+    fn issue_deps_rejects_dry_run_with_apply() {
+        let result = Cli::try_parse_from([
+            "xtask",
+            "spec",
+            "issue-deps",
+            "--adapter",
+            "leptos",
+            "--dry-run",
+            "--apply",
+        ]);
+
+        assert!(result.is_err());
+    }
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Run CI pipeline steps locally (alias: `cargo xci`).
@@ -482,7 +504,7 @@ enum SpecCommand {
         component: String,
 
         /// Print the expected issue dependency changes without mutating GitHub.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "apply")]
         dry_run: bool,
 
         /// Apply missing native GitHub dependencies.
