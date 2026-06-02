@@ -1404,6 +1404,154 @@ fn calendar_select_rejects_out_of_range_date() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Codex review #708 (pass 2): calendar fidelity, init clamp, dialog name,
+// dynamic day range
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn init_clamps_out_of_range_default_value() {
+    let svc = service_with(
+        Props {
+            default_value: Some(datetime(2020, 1, 1, 0, 0, 0)),
+            min_value: Some(datetime(2024, 6, 1, 9, 0, 0)),
+            max_value: Some(datetime(2024, 12, 31, 17, 0, 0)),
+            ..props()
+        },
+        en_us(),
+    );
+
+    // The out-of-range default is clamped at mount, so the hidden input never
+    // exposes a disallowed datetime.
+    assert_eq!(
+        *svc.context().value.get(),
+        Some(datetime(2024, 6, 1, 9, 0, 0))
+    );
+    let api = svc.connect(&|_| {});
+    assert_eq!(
+        attr(&api.hidden_input_attrs(), HtmlAttr::Value).as_deref(),
+        Some("2024-06-01T09:00:00")
+    );
+}
+
+#[test]
+fn content_dialog_has_accessible_name() {
+    let svc = service();
+    let api = svc.connect(&|_| {});
+    assert_eq!(
+        attr(&api.content_attrs(), HtmlAttr::Aria(AriaAttr::Label)).as_deref(),
+        Some("Choose date and time")
+    );
+}
+
+#[test]
+fn calendar_props_project_dates_into_configured_calendar() {
+    let svc = service_with(
+        Props {
+            calendar: CalendarSystem::Buddhist,
+            min_value: Some(datetime(2024, 1, 1, 0, 0, 0)),
+            max_value: Some(datetime(2024, 12, 31, 0, 0, 0)),
+            today: date(2024, 3, 1),
+            ..props()
+        },
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+    let calendar_props = api.calendar_props();
+
+    // `today` and the min/max bounds reach the embedded calendar in the
+    // configured (Buddhist) calendar, not Gregorian.
+    assert_eq!(calendar_props.today.calendar(), CalendarSystem::Buddhist);
+    assert_eq!(
+        calendar_props.min.map(|date| date.calendar()),
+        Some(CalendarSystem::Buddhist)
+    );
+    assert_eq!(
+        calendar_props.max.map(|date| date.calendar()),
+        Some(CalendarSystem::Buddhist)
+    );
+}
+
+#[test]
+fn sync_props_calendar_change_reprojects_date_value() {
+    let mut svc = service_with(
+        Props {
+            default_value: Some(datetime(2024, 3, 15, 14, 0, 0)),
+            ..props()
+        },
+        en_us(),
+    );
+    assert_eq!(
+        svc.context()
+            .date_value
+            .as_ref()
+            .map(CalendarDate::calendar),
+        Some(CalendarSystem::Gregorian)
+    );
+
+    drop(svc.send(Event::SyncProps(Box::new(Props {
+        calendar: CalendarSystem::Buddhist,
+        default_value: Some(datetime(2024, 3, 15, 14, 0, 0)),
+        ..props()
+    }))));
+
+    // The displayed date is re-projected into Buddhist (year 2567), so future
+    // edits assemble in the right calendar instead of reusing stale fields.
+    let date_value = svc.context().date_value.as_ref().expect("date present");
+    assert_eq!(date_value.calendar(), CalendarSystem::Buddhist);
+    assert_eq!(date_value.year(), 2567);
+}
+
+#[test]
+fn day_range_follows_month_length() {
+    // February 2024 is a leap month (29 days): the day segment max is 29 and
+    // incrementing the last day wraps to 1 rather than showing an impossible 30.
+    let mut svc = service_with(
+        Props {
+            default_value: Some(datetime(2024, 2, 29, 12, 0, 0)),
+            ..props()
+        },
+        en_us(),
+    );
+    let day_max = svc
+        .context()
+        .segment(DateSegmentKind::Day)
+        .map(|segment| segment.max);
+    assert_eq!(day_max, Some(29));
+
+    drop(svc.send(Event::IncrementSegment {
+        segment: DateSegmentKind::Day,
+    }));
+    assert_eq!(svc.context().segment_value(DateSegmentKind::Day), Some(1));
+    // The committed value stays consistent with the visible day.
+    assert_eq!(
+        svc.context().value.get().as_ref().map(|dt| dt.date().day()),
+        Some(1)
+    );
+}
+
+#[test]
+fn day_range_clamps_when_month_shortens() {
+    let mut svc = service();
+
+    // Build up 2023-01-31, then switch the month to February (28 days, non-leap):
+    // the day clamps from 31 down to 28.
+    drop(svc.send(Event::SegmentChange {
+        segment: DateSegmentKind::Year,
+        value: 2023,
+    }));
+    drop(svc.send(Event::SegmentChange {
+        segment: DateSegmentKind::Day,
+        value: 31,
+    }));
+    drop(svc.send(Event::SegmentChange {
+        segment: DateSegmentKind::Month,
+        value: 2,
+    }));
+
+    assert_eq!(svc.context().segment_value(DateSegmentKind::Day), Some(28));
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Additional branch coverage: keydown guards, type-ahead edges, sync, format
 // ────────────────────────────────────────────────────────────────────
 

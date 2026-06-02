@@ -652,6 +652,47 @@ impl Context {
             segment.value = Some(value);
             segment.text = format_segment_text(kind, value);
         }
+
+        // The number of days depends on the year/month/calendar, so refresh the
+        // day segment's range whenever either changes (clamping a now-invalid
+        // day, e.g. Feb 30 → 29) so the visible day can never diverge from a
+        // committable date.
+        if matches!(kind, DateSegmentKind::Year | DateSegmentKind::Month) {
+            self.refresh_day_range();
+        }
+    }
+
+    /// Refreshes the day segment's maximum from the current year/month/calendar
+    /// (via the intl backend), clamping a now-out-of-range day value down.
+    fn refresh_day_range(&mut self) {
+        let year = self.segment_value(DateSegmentKind::Year);
+        let month = self
+            .segment_value(DateSegmentKind::Month)
+            .and_then(|month| u8::try_from(month).ok());
+
+        let max = match (year, month) {
+            (Some(year), Some(month)) => {
+                i32::from(
+                    self.intl_backend
+                        .days_in_month(&self.calendar, year, month, None),
+                )
+            }
+            _ => 31,
+        };
+
+        if let Some(segment) = self
+            .date_segments
+            .iter_mut()
+            .find(|segment| segment.kind == DateSegmentKind::Day)
+        {
+            segment.max = max;
+            if let Some(value) = segment.value
+                && value > max
+            {
+                segment.value = Some(max);
+                segment.text = format_segment_text(DateSegmentKind::Day, max);
+            }
+        }
     }
 
     /// Clears a segment value.
@@ -766,9 +807,11 @@ impl Context {
         ))
     }
 
-    /// Recomputes the date segments from the current `date_value` and locale.
+    /// Recomputes the date segments from the current `date_value` and locale,
+    /// then refreshes the day range for the rebuilt year/month.
     fn rebuild_date_segments(&mut self) {
         self.date_segments = build_date_segments(&self.locale, self.date_value.as_ref());
+        self.refresh_day_range();
     }
 
     /// Recomputes the time segments from the current `time_value` and hour cycle.
@@ -826,6 +869,9 @@ pub struct Messages {
 
     /// Label for the day-period segment (default: "AM/PM").
     pub day_period_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+
+    /// Accessible name for the calendar popover dialog (default: "Choose date and time").
+    pub content_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
@@ -845,6 +891,7 @@ impl Default for Messages {
             minute_label: MessageFn::static_str("Minute"),
             second_label: MessageFn::static_str("Second"),
             day_period_label: MessageFn::static_str("AM/PM"),
+            content_label: MessageFn::static_str("Choose date and time"),
         }
     }
 }
@@ -940,15 +987,26 @@ impl ars_core::Machine for Machine {
         env: &Env,
         messages: &Self::Messages,
     ) -> (Self::State, Self::Context) {
+        // Clamp the initial value into `[min, max]` so the hidden input and
+        // segments never present an out-of-range datetime at mount (later
+        // `ValueCommit`/`SyncProps` paths clamp too).
+        let clamp = |value: Option<CalendarDateTime>| {
+            value.map(|dt| clamp_datetime(dt, props.min_value.as_ref(), props.max_value.as_ref()))
+        };
         let value = if let Some(controlled) = &props.value {
-            Bindable::controlled(controlled.clone())
+            Bindable::controlled(clamp(controlled.clone()))
         } else {
-            Bindable::uncontrolled(props.default_value.clone())
+            Bindable::uncontrolled(clamp(props.default_value.clone()))
         };
 
         let locale = env.locale.clone();
 
-        let date_value = value.get().as_ref().map(|dt| dt.date().clone());
+        // Display the date in the configured calendar system.
+        let date_value = value.get().as_ref().map(|dt| {
+            dt.date()
+                .to_calendar(props.calendar)
+                .unwrap_or_else(|_| dt.date().clone())
+        });
         let time_value = value.get().as_ref().map(|dt| *dt.time());
 
         let hour_cycle = props
@@ -986,6 +1044,9 @@ impl ars_core::Machine for Machine {
             visible_months: props.visible_months,
             ids: ComponentIds::from_id(&props.id),
         };
+
+        let mut ctx = ctx;
+        ctx.refresh_day_range();
 
         (State::Idle, ctx)
     }
@@ -1751,6 +1812,12 @@ impl<'a> Api<'a> {
             .set(part_attr, part_val)
             .set(HtmlAttr::Id, self.ctx.ids.part("content"))
             .set(HtmlAttr::Role, "dialog")
+            // Name the dialog so screen-reader users entering the popover hear
+            // useful context (the trigger only labels the button).
+            .set(
+                HtmlAttr::Aria(AriaAttr::Label),
+                (self.ctx.messages.content_label)(&self.ctx.locale),
+            )
             .set(HtmlAttr::Data("ars-state"), self.state_name());
 
         attrs
@@ -1889,16 +1956,33 @@ impl<'a> Api<'a> {
     /// machine as [`Event::CalendarSelectDate`].
     #[must_use]
     pub fn calendar_props(&self) -> calendar::Props {
+        // Project every date the calendar sees into the configured calendar
+        // system so the embedded popover navigates and emits dates in that
+        // calendar (the adapter-injected `today` and the min/max bounds are
+        // otherwise Gregorian).
+        let into_calendar = |date: &CalendarDate| {
+            date.to_calendar(self.ctx.calendar)
+                .unwrap_or_else(|_| date.clone())
+        };
+
         calendar::Props {
             id: format!("{}-calendar", self.ctx.ids.id()),
             value: Some(self.ctx.date_value.clone()),
-            min: self.ctx.min_value.as_ref().map(|dt| dt.date().clone()),
-            max: self.ctx.max_value.as_ref().map(|dt| dt.date().clone()),
+            min: self
+                .ctx
+                .min_value
+                .as_ref()
+                .map(|dt| into_calendar(dt.date())),
+            max: self
+                .ctx
+                .max_value
+                .as_ref()
+                .map(|dt| into_calendar(dt.date())),
             disabled: self.ctx.disabled,
             readonly: self.ctx.readonly,
             is_rtl: self.ctx.is_rtl,
             visible_months: self.ctx.visible_months,
-            today: self.ctx.today.clone(),
+            today: into_calendar(&self.ctx.today),
             ..calendar::Props::default()
         }
     }
@@ -2125,6 +2209,7 @@ fn apply_value(ctx: &mut Context, value: Option<CalendarDateTime>) {
 fn sync_props(ctx: &mut Context, props: &Props) {
     let previous_granularity = ctx.granularity;
     let previous_hour_cycle = ctx.hour_cycle;
+    let previous_calendar = ctx.calendar;
 
     ctx.granularity = props.granularity;
     ctx.hour_cycle = props
@@ -2143,8 +2228,20 @@ fn sync_props(ctx: &mut Context, props: &Props) {
     ctx.visible_months = props.visible_months;
     ctx.ids = ComponentIds::from_id(&props.id);
 
-    let structure_changed =
-        previous_granularity != ctx.granularity || previous_hour_cycle != ctx.hour_cycle;
+    // A calendar change must rebuild/re-derive the date segments — otherwise the
+    // visible fields keep their old-calendar values while edits reassemble them
+    // in the new calendar, committing the wrong ISO date.
+    let structure_changed = previous_granularity != ctx.granularity
+        || previous_hour_cycle != ctx.hour_cycle
+        || previous_calendar != ctx.calendar;
+
+    let calendar = ctx.calendar;
+    // Projects the value's date into the active calendar for display.
+    let date_in_calendar = |dt: &CalendarDateTime| {
+        dt.date()
+            .to_calendar(calendar)
+            .unwrap_or_else(|_| dt.date().clone())
+    };
 
     if let Some(value) = &props.value {
         // Controlled: adopt the parent's value and rebuild.
@@ -2152,7 +2249,7 @@ fn sync_props(ctx: &mut Context, props: &Props) {
             .clone()
             .map(|dt| clamp_datetime(dt, ctx.min_value.as_ref(), ctx.max_value.as_ref()));
 
-        ctx.date_value = clamped.as_ref().map(|dt| dt.date().clone());
+        ctx.date_value = clamped.as_ref().map(&date_in_calendar);
         ctx.time_value = clamped.as_ref().map(|dt| *dt.time());
         ctx.value.set(clamped.clone());
         ctx.value.sync_controlled(Some(clamped));
@@ -2171,7 +2268,7 @@ fn sync_props(ctx: &mut Context, props: &Props) {
 
         let value_changed = clamped != *ctx.value.get();
 
-        ctx.date_value = clamped.as_ref().map(|dt| dt.date().clone());
+        ctx.date_value = clamped.as_ref().map(&date_in_calendar);
         ctx.time_value = clamped.as_ref().map(|dt| *dt.time());
         ctx.value.set(clamped);
 

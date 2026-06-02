@@ -29,6 +29,14 @@ AttrMap {
             ),
         ),
         (
+            Aria(
+                Label,
+            ),
+            String(
+                "Choose date and time",
+            ),
+        ),
+        (
             Id,
             String(
                 "date-time-picker-content",

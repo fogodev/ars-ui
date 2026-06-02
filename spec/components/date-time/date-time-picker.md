@@ -536,21 +536,99 @@ impl ars_core::Machine for Machine {
             }
 
             // ── Segment focus / editing ───────────────────────────────────
-            // `FocusSegment`, `FocusNextSegment`, `FocusPrevSegment` traverse
-            // `all_segments()` (crossing the date↔time boundary), committing the
-            // type buffer on the way. `IncrementSegment`/`DecrementSegment` step
-            // the value (wrapping), `SegmentChange` sets it, and `TypeIntoSegment`
-            // drives the type-ahead buffer (numeric digits auto-advance; the
-            // day-period segment accepts `a`/`p`). Edits call `maybe_publish` and,
-            // for in-progress digits, arm `Effect::TypeBufferCommit`. Each editing
-            // path is guarded by `ctx.readonly`. See the source for full bodies.
+            // Focus traversal crosses the date↔time boundary via `all_segments()`,
+            // committing any pending type buffer on the way.
+            Event::FocusSegment(kind) => {
+                let kind = *kind;
+                if !ctx.segment(kind).is_some_and(|seg| seg.is_editable) { return None; }
+                Some(TransitionPlan::to(State::Focused)
+                    .apply(move |ctx| {
+                        commit_type_buffer(ctx);
+                        ctx.focused_segment = Some(kind);
+                        ctx.type_buffer.clear();
+                    })
+                    .cancel_effect(Effect::TypeBufferCommit))
+            }
 
-            Event::FocusSegment(kind) => { /* commit buffer; focus = kind */ todo!() }
-            Event::FocusNextSegment | Event::FocusPrevSegment => { todo!() }
-            Event::IncrementSegment { .. } | Event::DecrementSegment { .. } => { todo!() }
-            Event::TypeIntoSegment { .. } => { /* type_into_segment(ctx, segment, ch) */ todo!() }
-            Event::TypeBufferCommit { segment } => { /* commit_buffer_for_kind */ todo!() }
-            Event::SegmentChange { .. } => { todo!() }
+            Event::FocusNextSegment => match ctx.focused_segment {
+                Some(current) => {
+                    let next = ctx.next_editable_after(current);
+                    Some(TransitionPlan::to(State::Focused)
+                        .apply(move |ctx| {
+                            commit_type_buffer(ctx);
+                            ctx.type_buffer.clear();
+                            if let Some(next) = next { ctx.focused_segment = Some(next); }
+                        })
+                        .cancel_effect(Effect::TypeBufferCommit))
+                }
+                None => {
+                    let first = ctx.first_editable()?;
+                    Some(TransitionPlan::to(State::Focused)
+                        .apply(move |ctx| { ctx.focused_segment = Some(first); }))
+                }
+            },
+
+            Event::FocusPrevSegment => {
+                let current = ctx.focused_segment?;
+                let previous = ctx.prev_editable_before(current)?;
+                Some(TransitionPlan::to(State::Focused)
+                    .apply(move |ctx| {
+                        commit_type_buffer(ctx);
+                        ctx.type_buffer.clear();
+                        ctx.focused_segment = Some(previous);
+                    })
+                    .cancel_effect(Effect::TypeBufferCommit))
+            }
+
+            // Stepping wraps within the (calendar/month-aware) segment range.
+            Event::IncrementSegment { segment } => {
+                if ctx.readonly { return None; }
+                let kind = *segment;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.type_buffer.clear();
+                    ctx.increment_segment(kind);
+                    ctx.is_touched = true;
+                    sync_sub_value(ctx, kind);
+                    Machine::maybe_publish(ctx);
+                }).cancel_effect(Effect::TypeBufferCommit))
+            }
+
+            Event::DecrementSegment { segment } => {
+                if ctx.readonly { return None; }
+                let kind = *segment;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.type_buffer.clear();
+                    ctx.decrement_segment(kind);
+                    ctx.is_touched = true;
+                    sync_sub_value(ctx, kind);
+                    Machine::maybe_publish(ctx);
+                }).cancel_effect(Effect::TypeBufferCommit))
+            }
+
+            // Type-ahead: numeric digits buffer + auto-advance; the day-period
+            // segment accepts `a`/`p`. See `type_into_segment` below.
+            Event::TypeIntoSegment { segment, ch } => {
+                if ctx.readonly { return None; }
+                type_into_segment(ctx, *segment, *ch)
+            }
+
+            Event::TypeBufferCommit { segment } => {
+                if ctx.readonly { return None; }
+                let kind = *segment;
+                Some(TransitionPlan::context_only(move |ctx| commit_buffer_for_kind(ctx, kind)))
+            }
+
+            Event::SegmentChange { segment, value } => {
+                if ctx.readonly { return None; }
+                let kind = *segment;
+                let value = *value;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.set_segment_value(kind, value);
+                    ctx.is_touched = true;
+                    sync_sub_value(ctx, kind);
+                    Machine::maybe_publish(ctx);
+                }))
+            }
 
             Event::ValueCommit(datetime) => {
                 if ctx.readonly { return None; }
@@ -562,12 +640,28 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            Event::ClearSegment { .. } => { todo!() }
+            Event::ClearSegment { segment } => {
+                if ctx.readonly { return None; }
+                let kind = *segment;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.type_buffer.clear();
+                    ctx.clear_segment_value(kind);
+                    sync_sub_value(ctx, kind);
+                    ctx.value.set(None);
+                }).cancel_effect(Effect::TypeBufferCommit))
+            }
 
             Event::ClearAll => {
                 if ctx.readonly { return None; }
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    // clear every editable segment, reset date_value/time_value/value/focus
+                    let editable = ctx.all_segments()
+                        .filter(|seg| seg.is_editable).map(|seg| seg.kind).collect::<Vec<_>>();
+                    for kind in editable { ctx.clear_segment_value(kind); }
+                    ctx.date_value = None;
+                    ctx.time_value = None;
+                    ctx.value.set(None);
+                    ctx.focused_segment = None;
+                    ctx.type_buffer.clear();
                 }).cancel_effect(Effect::TypeBufferCommit))
             }
 
@@ -609,15 +703,13 @@ impl ars_core::Machine for Machine {
 }
 ```
 
-> The `todo!()` placeholders above stand in for the verbatim segment-editing
-> bodies in `crates/ars-components/src/date_time/date_time_picker/mod.rs`; they
-> are summarized in the preceding comment rather than duplicated here. The
-> supporting free helpers — `build_date_segments` (locale order via
-> `ars_i18n::date_order`), `build_time_segments` (via `date_time::hour_cycle`),
-> `type_into_segment`, `commit_type_buffer`/`commit_buffer_for_kind`,
-> `apply_value`, `sync_props`, `reconcile_state_after_sync`, `clamp_datetime`
-> (date-then-time `compare`), `format_segment_text`, `format_iso8601`, and
-> `format_announcement` — live alongside the machine in that module.
+> The supporting free helpers referenced above — `build_date_segments` (locale
+> order via `ars_i18n::date_order`, separator via `ars_i18n::date_field_separator`),
+> `build_time_segments` (via `date_time::hour_cycle`), `type_into_segment`,
+> `commit_type_buffer`/`commit_buffer_for_kind`, `sync_sub_value`, `apply_value`,
+> `sync_props`, `reconcile_state_after_sync`, `clamp_datetime` (date-then-time
+> `compare`), `format_segment_text`, `format_iso8601`, and `format_announcement` —
+> live alongside the machine in that module.
 
 ### 1.8 Connect / API
 
