@@ -729,7 +729,11 @@ impl ars_core::Machine for Machine {
 > `project_date` reprojects clamped/committed dates back into `ctx.calendar` so
 > the displayed segments and a subsequent edit always agree on the ISO date.
 > `format_segment_text` routes segment digits and day-period labels through the
-> `intl_backend` for locale-correct rendering.
+> `intl_backend` for locale-correct rendering, and `type_into_segment` resolves
+> day-period typing through `IntlBackend::day_period_from_char` (localized AM/PM
+> labels, with an ASCII `a`/`p` fallback). `sync_props` clears the staged value
+> when a controlled picker becomes uncontrolled (`props.value` `Some(_)` → `None`),
+> matching `time_field`.
 
 ### 1.8 Connect / API
 
@@ -894,7 +898,13 @@ impl<'a> Api<'a> {
 
         if let Some(v) = seg.value {
             attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), v.to_string());
-            attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), &seg.text);
+            // Announce a human-readable value (localized month name, AM/PM label,
+            // else the number) via `DateSegment::aria_value_text`, matching
+            // `date_field`, rather than the padded display text.
+            let value_text = seg
+                .aria_value_text(self.ctx.intl_backend.as_ref(), &self.ctx.locale)
+                .unwrap_or_else(|| seg.text.clone());
+            attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), value_text);
         } else {
             attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), &seg.placeholder);
         }

@@ -1747,9 +1747,15 @@ impl<'a> Api<'a> {
         }
 
         if let Some(value) = segment.value {
+            // Announce a human-readable value (localized month name, AM/PM
+            // label, else the number) via `aria_value_text`, mirroring
+            // `date_field`, rather than the raw padded display text.
+            let value_text = segment
+                .aria_value_text(self.ctx.intl_backend.as_ref(), &self.ctx.locale)
+                .unwrap_or_else(|| segment.text.clone());
             attrs
                 .set(HtmlAttr::Aria(AriaAttr::ValueNow), value.to_string())
-                .set(HtmlAttr::Aria(AriaAttr::ValueText), &segment.text);
+                .set(HtmlAttr::Aria(AriaAttr::ValueText), value_text);
         } else {
             attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), &segment.placeholder);
         }
@@ -2171,11 +2177,18 @@ fn type_into_segment(
     ch: char,
 ) -> Option<TransitionPlan<Machine>> {
     if kind == DateSegmentKind::DayPeriod {
-        let value = match ch.to_ascii_lowercase() {
-            'a' => 0,
-            'p' => 1,
-            _ => return None,
-        };
+        // Route through the backend so localized AM/PM labels (whose leading
+        // character is not ASCII `a`/`p`) are recognised, mirroring `time_field`;
+        // fall back to ASCII `a`/`p` when the backend does not map the character.
+        let is_pm = ctx
+            .intl_backend
+            .day_period_from_char(ch, &ctx.locale)
+            .or_else(|| match ch.to_ascii_lowercase() {
+                'a' => Some(false),
+                'p' => Some(true),
+                _ => None,
+            })?;
+        let value = i32::from(is_pm);
 
         let next = ctx.next_editable_after(kind);
 
@@ -2303,6 +2316,7 @@ fn apply_value(ctx: &mut Context, value: Option<CalendarDateTime>) {
 
 /// Re-applies a new props snapshot onto `ctx` (controlled value + scalar fields).
 fn sync_props(ctx: &mut Context, props: &Props) {
+    let was_controlled = ctx.value.is_controlled();
     let previous_granularity = ctx.granularity;
     let previous_hour_cycle = ctx.hour_cycle;
     let previous_calendar = ctx.calendar;
@@ -2352,8 +2366,18 @@ fn sync_props(ctx: &mut Context, props: &Props) {
 
         ctx.rebuild_date_segments();
         ctx.rebuild_time_segments();
+    } else if was_controlled {
+        // Controlled → uncontrolled: the parent relinquished control, so clear
+        // the staged controlled value rather than leaving the field filled with
+        // (and submitting) the stale value (mirrors `time_field`).
+        ctx.value.sync_controlled(None);
+        ctx.value.set(None);
+        ctx.date_value = None;
+        ctx.time_value = None;
+        ctx.rebuild_date_segments();
+        ctx.rebuild_time_segments();
     } else {
-        // Uncontrolled: drop any controlled override, re-clamp the current value.
+        // Uncontrolled throughout: re-clamp the current value in place.
         ctx.value.sync_controlled(None);
 
         let clamped = ctx

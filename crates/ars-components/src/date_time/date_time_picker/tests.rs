@@ -1651,6 +1651,64 @@ fn month_range_follows_calendar_leap_year() {
 }
 
 #[test]
+fn month_segment_announces_localized_name() {
+    let svc = service_with(
+        Props {
+            default_value: Some(datetime(2024, 3, 15, 14, 30, 0)),
+            ..props()
+        },
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+    // aria-valuetext announces the month name, not the padded "03".
+    assert_eq!(
+        attr(
+            &api.segment_attrs(&DateSegmentKind::Month),
+            HtmlAttr::Aria(AriaAttr::ValueText)
+        )
+        .as_deref(),
+        Some("March")
+    );
+}
+
+#[test]
+fn day_period_typing_routes_through_backend() {
+    // The backend maps `a`/`p` (and localized labels) to AM/PM.
+    let mut svc = service();
+    drop(svc.send(Event::TypeIntoSegment {
+        segment: DateSegmentKind::DayPeriod,
+        ch: 'p',
+    }));
+    assert_eq!(
+        svc.context().segment_value(DateSegmentKind::DayPeriod),
+        Some(1)
+    );
+}
+
+#[test]
+fn sync_controlled_to_uncontrolled_clears_stale_value() {
+    let mut svc = service_with(
+        Props {
+            value: Some(Some(datetime(2024, 3, 15, 14, 30, 0))),
+            ..props()
+        },
+        en_us(),
+    );
+    assert_eq!(
+        *svc.context().value.get(),
+        Some(datetime(2024, 3, 15, 14, 30, 0))
+    );
+
+    // Parent relinquishes control (Some(..) -> None): the staged value clears.
+    drop(svc.send(Event::SyncProps(Box::new(props()))));
+
+    assert_eq!(*svc.context().value.get(), None);
+    assert_eq!(svc.context().date_value, None);
+    let api = svc.connect(&|_| {});
+    assert_eq!(attr(&api.hidden_input_attrs(), HtmlAttr::Value), None);
+}
+
+#[test]
 fn focus_next_past_last_segment_clears_focus_and_targets_trigger() {
     let mut svc = service();
 

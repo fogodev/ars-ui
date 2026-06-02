@@ -194,9 +194,14 @@ enum DateField { Year, Month, Day }
 /// month/day/year order and the order matches the sibling `date_field`. The
 /// separator comes from the same canonical source, [`ars_i18n::date_field_separator`]
 /// (shared with `date_field`/`date_time_picker`); the single-character pattern
-/// model takes its first char (`ko-KR`'s `. ` degrades to `.`).
+/// model takes its first *visible* char, skipping the bidi/format marks RTL
+/// locales prefix (e.g. `ar-EG` yields `\u{200f}/`) and whitespace, so `ko-KR`'s
+/// `. ` degrades to `.` and `ar-EG` lands on `/` rather than the invisible mark.
 fn default_format_for_locale(locale: &Locale) -> String {
-    let separator = date_field_separator(locale).chars().next().unwrap_or('/');
+    let separator = date_field_separator(locale)
+        .chars()
+        .find(|c| !c.is_whitespace() && !c.is_control() && !is_bidi_or_format_mark(*c))
+        .unwrap_or('/');
     let order: [&str; 3] = match date_order(locale) {
         DateOrder::MonthDayYear => ["MM", "dd", "yyyy"],
         DateOrder::DayMonthYear => ["dd", "MM", "yyyy"],
