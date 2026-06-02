@@ -53,9 +53,75 @@ pub struct Component {
     #[serde(default)]
     pub related: Vec<String>,
 
+    /// Explicit component dependency metadata used for adapter issue blockers.
+    #[serde(default)]
+    pub component_deps: Vec<ComponentDependency>,
+
     /// Whether this component is internal/unstable.
     #[serde(default)]
     pub internal: bool,
+}
+
+/// A component dependency or documented non-dependency boundary.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct ComponentDependency {
+    /// Component slug from `spec/manifest.toml`.
+    pub component: String,
+
+    /// Dependency relationship kind.
+    pub kind: ComponentDependencyKind,
+
+    /// Framework adapter scope for this dependency.
+    pub frameworks: Vec<String>,
+
+    /// Whether this dependency blocks adapter issue pickup.
+    #[serde(default)]
+    pub blocking: bool,
+
+    /// Human-readable reason for the relationship.
+    pub reason: String,
+}
+
+/// Supported component dependency relationship kinds.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ComponentDependencyKind {
+    /// Hard blocker: the dependency must be completed first.
+    Requires,
+
+    /// Composition relationship. Blocks only when `blocking = true`.
+    Composes,
+
+    /// Explicit non-dependency: the referenced feature belongs elsewhere.
+    Boundary,
+
+    /// Non-blocking conceptual relationship.
+    Related,
+}
+
+impl ComponentDependencyKind {
+    /// Return the manifest spelling for this dependency kind.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Requires => "requires",
+            Self::Composes => "composes",
+            Self::Boundary => "boundary",
+            Self::Related => "related",
+        }
+    }
+
+    /// Return whether this kind can create a native GitHub blocker.
+    #[must_use]
+    pub const fn can_block(self) -> bool {
+        matches!(self, Self::Requires | Self::Composes)
+    }
+}
+
+impl Display for ComponentDependencyKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// A named review profile.

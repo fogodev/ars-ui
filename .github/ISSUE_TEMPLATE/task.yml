@@ -27,7 +27,7 @@ body:
     id: depends_on
     attributes:
       label: Depends on
-      description: Reference prerequisite issues, or say none. Native GitHub issue dependencies should be added after creation.
+      description: Reference prerequisite issues, or say none. For adapter tasks, derive this from `cargo xtask spec issue-deps --adapter <leptos|dioxus> --component <component> --dry-run`. Native GitHub issue dependencies should be added after creation for every hard blocker.
     validations:
       required: true
   - type: dropdown
@@ -109,6 +109,14 @@ body:
       placeholder: If blocked, keep Status in Todo and name the dependency or spec ambiguity.
     validations:
       required: true
+  - type: textarea
+    id: component_dependency_notes
+    attributes:
+      label: Component dependency notes
+      description: For adapter tasks, copy non-blocking `boundary` or `related` notes from `cargo xtask spec component-deps <component> --adapter <framework>`. Say none when there are no component dependency notes.
+      placeholder: "Not a blocker: this interaction belongs to a separate component."
+    validations:
+      required: false
   - type: textarea
     id: eight_point_rationale
     attributes:

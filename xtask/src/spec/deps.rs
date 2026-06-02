@@ -86,5 +86,33 @@ pub fn execute(root: &SpecRoot, component: &str) -> Result<String, Error> {
         writeln!(out).expect("write to String");
     }
 
+    if !comp.component_deps.is_empty() {
+        writeln!(out, "## Component deps").expect("write to String");
+
+        for dep in &comp.component_deps {
+            if let Some(dep_comp) = m.components.get(&dep.component) {
+                writeln!(
+                    out,
+                    "{}  ({}; frameworks: {}; blocking: {}; reason: {})",
+                    dep_comp.path,
+                    dep.kind,
+                    dep.frameworks.join(","),
+                    crate::spec::component_deps::is_blocking(dep.kind, dep.blocking),
+                    dep.reason
+                )
+                .expect("write to String");
+            } else {
+                writeln!(
+                    out,
+                    "# WARNING: unknown component dep '{}' ({})",
+                    dep.component, dep.kind
+                )
+                .expect("write to String");
+            }
+        }
+
+        writeln!(out).expect("write to String");
+    }
+
     Ok(out)
 }

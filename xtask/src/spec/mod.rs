@@ -3,10 +3,12 @@
 pub mod adapters;
 pub mod category;
 pub mod compile_snippets;
+pub mod component_deps;
 pub mod context;
 pub mod deps;
 pub mod digest;
 pub mod info;
+pub mod issue_deps;
 pub mod lint_code;
 pub mod profile;
 pub mod related;
