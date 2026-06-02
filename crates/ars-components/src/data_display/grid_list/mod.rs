@@ -518,7 +518,7 @@ impl ars_core::Machine for Machine {
         env: &Env,
         messages: &Self::Messages,
     ) -> (Self::State, Self::Context) {
-        let columns = resolved_columns(props.columns, props.items.len());
+        let columns = resolved_columns(props.columns, item_count(&props.items));
 
         let disabled_keys = effective_disabled_keys(&props.items, &props.disabled_keys);
 
@@ -814,7 +814,7 @@ impl Api<'_> {
     #[must_use]
     pub fn grid_dimensions(&self) -> String {
         let cols = self.context.columns.get();
-        let rows = self.context.items.len().div_ceil(cols);
+        let rows = item_count(&self.context.items).div_ceil(cols);
 
         (self.context.messages.grid_dimensions)(rows, cols, &self.context.locale)
     }
@@ -822,7 +822,7 @@ impl Api<'_> {
     /// Returns the cell position description for `key`.
     #[must_use]
     pub fn cell_position(&self, key: &Key) -> Option<String> {
-        let index = key_index(&self.context.items, key)?;
+        let index = key_item_index(&self.context.items, key)?;
         let (col, row) = index_to_pos(index, self.context.columns);
 
         Some((self.context.messages.cell_position)(
@@ -835,10 +835,7 @@ impl Api<'_> {
     /// Returns the stable cell ID for `key`.
     #[must_use]
     pub fn cell_id(&self, key: &Key) -> Option<String> {
-        self.context
-            .items
-            .contains_key(key)
-            .then(|| self.context.ids.item("cell", key))
+        item_key_present(&self.context.items, key).then(|| self.context.ids.item("cell", key))
     }
 
     /// Returns the latest user-requested selected keys.
@@ -967,7 +964,8 @@ impl Api<'_> {
 
         let focused = self.context.focused_key.as_ref() == Some(key);
         let selected = selected_keys_source(self.context).contains(key);
-        let disabled = is_disabled_key(self.context, key);
+        let disabled =
+            is_disabled_key(self.context, key) || !item_key_present(&self.context.items, key);
 
         let tabindex = if !disabled && !self.context.composite {
             "0"
@@ -1091,13 +1089,17 @@ impl Api<'_> {
         attrs
     }
 
-    /// Dispatches a keydown event using an accumulating fallback timestamp.
+    /// Dispatches a keydown event using the platform clock when available.
     pub fn on_cell_keydown(&self, key: &Key, data: &KeyboardEventData) {
-        self.on_cell_keydown_at(key, data, fallback_typeahead_timestamp(self.context));
+        self.on_cell_keydown_impl(key, data, None);
     }
 
     /// Dispatches a keydown event for a cell with an adapter-provided timestamp.
     pub fn on_cell_keydown_at(&self, key: &Key, data: &KeyboardEventData, now: Duration) {
+        self.on_cell_keydown_impl(key, data, Some(now));
+    }
+
+    fn on_cell_keydown_impl(&self, key: &Key, data: &KeyboardEventData, now: Option<Duration>) {
         if !self.context.composite {
             match data.key {
                 KeyboardKey::Enter => (self.send)(Event::ItemAction(key.clone())),
@@ -1161,7 +1163,7 @@ impl Api<'_> {
             {
                 (self.send)(Event::TypeaheadSearch {
                     ch: data.character.expect("checked"),
-                    now,
+                    now: typeahead_timestamp(now, self.context),
                 });
             }
 
@@ -1248,8 +1250,31 @@ const fn pos_to_index(col: usize, row: usize, columns: NonZeroUsize) -> usize {
     row.saturating_mul(columns.get()).saturating_add(col)
 }
 
-fn key_index(items: &StaticCollection<ItemDef>, key: &Key) -> Option<usize> {
-    items.get(key).map(|node| node.index)
+fn item_count(items: &StaticCollection<ItemDef>) -> usize {
+    items.nodes().filter(|node| node.value.is_some()).count()
+}
+
+fn key_item_index(items: &StaticCollection<ItemDef>, key: &Key) -> Option<usize> {
+    items
+        .nodes()
+        .filter(|node| node.value.is_some())
+        .position(|node| &node.key == key)
+}
+
+fn item_key_at_index(
+    items: &StaticCollection<ItemDef>,
+    disabled_keys: &BTreeSet<Key>,
+    index: usize,
+) -> Option<Option<Key>> {
+    items
+        .nodes()
+        .filter(|node| node.value.is_some())
+        .nth(index)
+        .map(|node| {
+            (!disabled_keys.contains(&node.key))
+                .then(|| node.value.as_ref().map(|item| item.key.clone()))
+                .flatten()
+        })
 }
 
 fn effective_disabled_keys(
@@ -1390,9 +1415,25 @@ const fn fallback_typeahead_timestamp(context: &Context) -> Duration {
         .saturating_add(Duration::from_millis(1))
 }
 
+fn typeahead_timestamp(now: Option<Duration>, context: &Context) -> Duration {
+    now.unwrap_or_else(|| current_time().unwrap_or_else(|| fallback_typeahead_timestamp(context)))
+}
+
+#[cfg(feature = "std")]
+fn current_time() -> Option<Duration> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+}
+
+#[cfg(not(feature = "std"))]
+const fn current_time() -> Option<Duration> {
+    None
+}
+
 fn range_keys(context: &Context, from: &Key, to: &Key) -> Option<BTreeSet<Key>> {
-    let from = key_index(&context.items, from)?;
-    let to = key_index(&context.items, to)?;
+    let from = key_item_index(&context.items, from)?;
+    let to = key_item_index(&context.items, to)?;
 
     let (start, end) = if from <= to { (from, to) } else { (to, from) };
 
@@ -1400,8 +1441,11 @@ fn range_keys(context: &Context, from: &Key, to: &Key) -> Option<BTreeSet<Key>> 
         context
             .items
             .nodes()
-            .skip(start)
-            .take(end - start + 1)
+            .filter(|node| node.value.is_some())
+            .enumerate()
+            .skip_while(|(index, _node)| *index < start)
+            .take_while(|(index, _node)| *index <= end)
+            .map(|(_index, node)| node)
             .filter(|node| !context.disabled_keys.contains(&node.key))
             .filter_map(|node| node.value.as_ref().map(|item| item.key.clone()))
             .collect(),
@@ -1432,7 +1476,7 @@ fn move_focus_plan(context: &Context, direction: Direction2d) -> Option<Transiti
 }
 
 fn navigation_target_from_key(context: &Context, key: &Key, direction: Direction2d) -> Option<Key> {
-    let current_index = key_index(&context.items, key)?;
+    let current_index = key_item_index(&context.items, key)?;
 
     match direction {
         Direction2d::Up => scan_vertical(context, current_index, false),
@@ -1455,12 +1499,8 @@ fn scan_horizontal(context: &Context, current_index: usize, forward: bool) -> Op
     while next_col < columns {
         let index = pos_to_index(next_col, row, context.columns);
 
-        let node = context.items.get_by_index(index)?;
-
-        if !context.disabled_keys.contains(&node.key)
-            && let Some(item) = &node.value
-        {
-            return Some(item.key.clone());
+        if let Some(key) = item_key_at_index(&context.items, &context.disabled_keys, index)? {
+            return Some(key);
         }
 
         next_col = if forward {
@@ -1484,12 +1524,8 @@ fn scan_vertical(context: &Context, current_index: usize, forward: bool) -> Opti
 
     loop {
         let index = pos_to_index(col, next_row, context.columns);
-        let node = context.items.get_by_index(index)?;
-
-        if !context.disabled_keys.contains(&node.key)
-            && let Some(item) = &node.value
-        {
-            return Some(item.key.clone());
+        if let Some(key) = item_key_at_index(&context.items, &context.disabled_keys, index)? {
+            return Some(key);
         }
 
         next_row = if forward {
@@ -1513,7 +1549,7 @@ fn part_attrs(part: &Part) -> AttrMap {
 
 fn sync_props_plan(context: &Context, props: &Props) -> TransitionPlan<Machine> {
     let disabled_keys = effective_disabled_keys(&props.items, &props.disabled_keys);
-    let columns = resolved_columns(props.columns, props.items.len());
+    let columns = resolved_columns(props.columns, item_count(&props.items));
 
     let selection_mode = props.selection_mode;
 
@@ -2075,6 +2111,37 @@ mod tests {
     }
 
     #[test]
+    fn structural_collection_nodes_do_not_consume_grid_cells() {
+        let mut grid = service(
+            Props::new()
+                .id("grid")
+                .items(sectioned_items())
+                .columns(NonZero::new(2).expect("non-zero columns")),
+        );
+
+        let api = grid.connect(&|_| {});
+
+        assert_eq!(api.grid_dimensions(), "1 rows, 2 columns");
+        assert_eq!(
+            api.cell_position(&key("alpha")).as_deref(),
+            Some("Row 1, Column 1")
+        );
+        assert_eq!(
+            api.cell_position(&key("gamma")).as_deref(),
+            Some("Row 1, Column 2")
+        );
+        assert_eq!(api.cell_position(&key("section")), None);
+
+        drop(grid.send(Event::Focus {
+            key: Some(key("alpha")),
+            is_keyboard: true,
+        }));
+        drop(grid.send(Event::FocusRight));
+
+        assert_eq!(grid.context().focused_key, Some(key("gamma")));
+    }
+
+    #[test]
     fn disabled_grid_rejects_user_mutations_but_blur_still_clears_focus() {
         let mut grid = service(
             Props::new()
@@ -2420,6 +2487,25 @@ mod tests {
                 .get(&HtmlAttr::Id)
                 .is_none()
         );
+
+        let non_composite = service(
+            Props::new()
+                .id("non-composite")
+                .items(items())
+                .composite(false),
+        );
+        let stale_attrs = non_composite.connect(&|_| {}).cell_attrs(&key("missing"));
+
+        assert_eq!(stale_attrs.get(&HtmlAttr::TabIndex), Some("-1"));
+        assert_eq!(
+            stale_attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)),
+            Some("true")
+        );
+        assert_eq!(
+            stale_attrs.get(&HtmlAttr::Data("ars-disabled")),
+            Some("true")
+        );
+
         assert_eq!(
             idle_api
                 .drag_handle_attrs(&key("missing"))
@@ -2645,7 +2731,7 @@ mod tests {
     }
 
     #[test]
-    fn convenience_keydown_uses_accumulating_typeahead_timestamp() {
+    fn convenience_keydown_uses_clock_backed_typeahead_timestamp() {
         let captured = RefCell::new(Vec::new());
         let send = |event| captured.borrow_mut().push(event);
         let mut grid = service(Props::new().id("grid").items(items()));
@@ -2661,13 +2747,18 @@ mod tests {
             &keyboard(KeyboardKey::Unidentified, Some('d')),
         );
 
-        assert_eq!(
-            captured.into_inner(),
-            vec![Event::TypeaheadSearch {
-                ch: 'd',
-                now: Duration::from_millis(101),
-            }]
-        );
+        let events = captured.into_inner();
+
+        assert_eq!(events.len(), 1);
+
+        match events.as_slice() {
+            [Event::TypeaheadSearch { ch: 'd', now }] => {
+                assert!(
+                    now.saturating_sub(Duration::from_millis(100)) > typeahead::TYPEAHEAD_TIMEOUT
+                );
+            }
+            other => panic!("expected typeahead event, got {other:?}"),
+        }
     }
 
     #[test]
