@@ -31,6 +31,7 @@ use alloc::{
 use core::{
     cmp::Ordering,
     fmt::{self, Debug},
+    num::NonZeroU8,
 };
 
 use ars_core::{
@@ -640,17 +641,26 @@ impl Context {
 
     /// Sets and formats a segment value within that segment's valid range.
     pub fn set_segment_value(&mut self, kind: DateSegmentKind, raw: i32) {
-        let segment = self
+        // Resolve the range and localized text up front (immutable borrows of
+        // `intl_backend`/`locale`) before taking the mutable segment borrow.
+        let Some((min, max)) = self
+            .segment(kind)
+            .filter(|segment| segment.is_editable)
+            .map(|segment| (segment.min, segment.max))
+        else {
+            return;
+        };
+        let value = raw.clamp(min, max);
+        let text = format_segment_text(self.intl_backend.as_ref(), &self.locale, kind, value);
+
+        if let Some(segment) = self
             .date_segments
             .iter_mut()
             .chain(self.time_segments.iter_mut())
-            .find(|segment| segment.kind == kind && segment.is_editable);
-
-        if let Some(segment) = segment {
-            let value = raw.clamp(segment.min, segment.max);
-
+            .find(|segment| segment.kind == kind && segment.is_editable)
+        {
             segment.value = Some(value);
-            segment.text = format_segment_text(kind, value);
+            segment.text = text;
         }
 
         // Month/day ranges are calendar- and year-dependent (leap months in
@@ -678,7 +688,7 @@ impl Context {
                     .max_months_in_year(&self.calendar, year, era_code),
             )
         });
-        Self::clamp_segment_max(&mut self.date_segments, DateSegmentKind::Month, month_max);
+        self.set_segment_max(DateSegmentKind::Month, month_max);
 
         // Day range depends on year + (clamped) month.
         let month = self
@@ -693,18 +703,28 @@ impl Context {
             }
             _ => 31,
         };
-        Self::clamp_segment_max(&mut self.date_segments, DateSegmentKind::Day, day_max);
+        self.set_segment_max(DateSegmentKind::Day, day_max);
     }
 
-    /// Sets a date segment's `max`, clamping a now-out-of-range value down.
-    fn clamp_segment_max(segments: &mut [DateSegment], kind: DateSegmentKind, max: i32) {
-        if let Some(segment) = segments.iter_mut().find(|segment| segment.kind == kind) {
+    /// Sets a date segment's `max`, clamping a now-out-of-range value down and
+    /// reformatting its localized text.
+    fn set_segment_max(&mut self, kind: DateSegmentKind, max: i32) {
+        // Compute the clamp text first (immutable borrows) before mutating.
+        let clamp_text = self
+            .segment(kind)
+            .and_then(|segment| segment.value)
+            .filter(|&value| value > max)
+            .map(|_| format_segment_text(self.intl_backend.as_ref(), &self.locale, kind, max));
+
+        if let Some(segment) = self
+            .date_segments
+            .iter_mut()
+            .find(|segment| segment.kind == kind)
+        {
             segment.max = max;
-            if let Some(value) = segment.value
-                && value > max
-            {
+            if let Some(text) = clamp_text {
                 segment.value = Some(max);
-                segment.text = format_segment_text(kind, max);
+                segment.text = text;
             }
         }
     }
@@ -844,14 +864,23 @@ impl Context {
     /// Recomputes the date segments from the current `date_value` and locale,
     /// then refreshes the day range for the rebuilt year/month.
     fn rebuild_date_segments(&mut self) {
-        self.date_segments = build_date_segments(&self.locale, self.date_value.as_ref());
+        self.date_segments = build_date_segments(
+            self.intl_backend.as_ref(),
+            &self.locale,
+            self.date_value.as_ref(),
+        );
         self.refresh_date_ranges();
     }
 
     /// Recomputes the time segments from the current `time_value` and hour cycle.
     fn rebuild_time_segments(&mut self) {
-        self.time_segments =
-            build_time_segments(self.hour_cycle, self.granularity, self.time_value.as_ref());
+        self.time_segments = build_time_segments(
+            self.intl_backend.as_ref(),
+            &self.locale,
+            self.hour_cycle,
+            self.granularity,
+            self.time_value.as_ref(),
+        );
     }
 }
 
@@ -1051,8 +1080,15 @@ impl ars_core::Machine for Machine {
             .hour_cycle
             .unwrap_or_else(|| locale.hour_cycle(env.intl_backend.as_ref()));
 
-        let date_segments = build_date_segments(&locale, date_value.as_ref());
-        let time_segments = build_time_segments(hour_cycle, props.granularity, time_value.as_ref());
+        let date_segments =
+            build_date_segments(env.intl_backend.as_ref(), &locale, date_value.as_ref());
+        let time_segments = build_time_segments(
+            env.intl_backend.as_ref(),
+            &locale,
+            hour_cycle,
+            props.granularity,
+            time_value.as_ref(),
+        );
 
         let ctx = Context {
             value,
@@ -1115,10 +1151,17 @@ impl ars_core::Machine for Machine {
             let next_state = reconcile_state_after_sync(state, &probe);
 
             let clear_focus = next_state != *state && next_state == State::Idle;
+            let open = next_state == State::Open;
 
             return Some(
                 TransitionPlan::to(next_state).apply(move |ctx: &mut Context| {
                     sync_props(ctx, &new_props);
+
+                    // Keep the public `open` flag consistent with the reconciled
+                    // state — otherwise a sync that closes the picker (e.g. it
+                    // became disabled while open) leaves `open == true` while the
+                    // state says closed.
+                    ctx.open = open;
 
                     if clear_focus {
                         ctx.focused_segment = None;
@@ -1203,19 +1246,24 @@ impl ars_core::Machine for Machine {
             Event::FocusNextSegment => {
                 if let Some(current) = ctx.focused_segment {
                     let next = ctx.next_editable_after(current);
-                    Some(
-                        TransitionPlan::to(State::Focused)
-                            .apply(move |ctx: &mut Context| {
-                                commit_type_buffer(ctx);
+                    let mut plan = TransitionPlan::to(State::Focused)
+                        .apply(move |ctx: &mut Context| {
+                            commit_type_buffer(ctx);
+                            ctx.type_buffer.clear();
+                            // `None` past the last segment clears focus rather
+                            // than leaving a stale `focused_segment`/`data-ars-focused`.
+                            ctx.focused_segment = next;
+                        })
+                        .cancel_effect(Effect::TypeBufferCommit);
 
-                                ctx.type_buffer.clear();
+                    // Advancing past the last segment moves focus to the trigger
+                    // (spec §3.2), driven by the adapter via this effect.
+                    if next.is_none() {
+                        plan =
+                            plan.with_effect(PendingEffect::named(Effect::RestoreFocusToTrigger));
+                    }
 
-                                if let Some(next) = next {
-                                    ctx.focused_segment = Some(next);
-                                }
-                            })
-                            .cancel_effect(Effect::TypeBufferCommit),
-                    )
+                    Some(plan)
                 } else {
                     let first = ctx.first_editable()?;
                     Some(
@@ -2352,20 +2400,30 @@ fn reconcile_state_after_sync(state: &State, ctx: &Context) -> State {
 }
 
 /// Builds the locale-ordered date segments for the given date value.
-fn build_date_segments(locale: &Locale, date: Option<&CalendarDate>) -> Vec<DateSegment> {
+fn build_date_segments(
+    backend: &dyn IntlBackend,
+    locale: &Locale,
+    date: Option<&CalendarDate>,
+) -> Vec<DateSegment> {
     let mut year = DateSegment::new_numeric(DateSegmentKind::Year, 1, 9999, "yyyy");
     let mut month = DateSegment::new_numeric(DateSegmentKind::Month, 1, 12, "mm");
     let mut day = DateSegment::new_numeric(DateSegmentKind::Day, 1, 31, "dd");
 
     if let Some(date) = date {
         year.value = Some(date.year());
-        year.text = format_segment_text(DateSegmentKind::Year, date.year());
+        year.text = format_segment_text(backend, locale, DateSegmentKind::Year, date.year());
 
         month.value = Some(i32::from(date.month()));
-        month.text = format_segment_text(DateSegmentKind::Month, i32::from(date.month()));
+        month.text = format_segment_text(
+            backend,
+            locale,
+            DateSegmentKind::Month,
+            i32::from(date.month()),
+        );
 
         day.value = Some(i32::from(date.day()));
-        day.text = format_segment_text(DateSegmentKind::Day, i32::from(date.day()));
+        day.text =
+            format_segment_text(backend, locale, DateSegmentKind::Day, i32::from(date.day()));
     }
 
     let ordered = match date_order(locale) {
@@ -2391,6 +2449,8 @@ fn build_date_segments(locale: &Locale, date: Option<&CalendarDate>) -> Vec<Date
 
 /// Builds the time segments for the given hour cycle, granularity, and value.
 fn build_time_segments(
+    backend: &dyn IntlBackend,
+    locale: &Locale,
     hour_cycle: HourCycle,
     granularity: TimeGranularity,
     time: Option<&Time>,
@@ -2405,7 +2465,7 @@ fn build_time_segments(
         let display = display_hour(*time, hour_cycle);
 
         hour.value = Some(display);
-        hour.text = format_segment_text(DateSegmentKind::Hour, display);
+        hour.text = format_segment_text(backend, locale, DateSegmentKind::Hour, display);
     }
 
     segments.push(hour);
@@ -2419,7 +2479,7 @@ fn build_time_segments(
             let value = i32::from(time.minute());
 
             minute.value = Some(value);
-            minute.text = format_segment_text(DateSegmentKind::Minute, value);
+            minute.text = format_segment_text(backend, locale, DateSegmentKind::Minute, value);
         }
 
         segments.push(minute);
@@ -2434,7 +2494,7 @@ fn build_time_segments(
             let value = i32::from(time.second());
 
             second.value = Some(value);
-            second.text = format_segment_text(DateSegmentKind::Second, value);
+            second.text = format_segment_text(backend, locale, DateSegmentKind::Second, value);
         }
 
         segments.push(second);
@@ -2449,7 +2509,7 @@ fn build_time_segments(
             min: 0,
             max: 1,
             text: String::new(),
-            placeholder: "AM".to_string(),
+            placeholder: backend.day_period_label(false, locale),
             literal: None,
             is_editable: true,
         };
@@ -2458,7 +2518,7 @@ fn build_time_segments(
             let value = i32::from(is_pm(*time));
 
             period.value = Some(value);
-            period.text = format_segment_text(DateSegmentKind::DayPeriod, value);
+            period.text = format_segment_text(backend, locale, DateSegmentKind::DayPeriod, value);
         }
 
         segments.push(period);
@@ -2469,12 +2529,31 @@ fn build_time_segments(
 
 /// Formats a segment value for display: year is 4-wide, day-period is AM/PM,
 /// every other numeric segment is zero-padded to two digits.
-fn format_segment_text(kind: DateSegmentKind, value: i32) -> String {
-    match kind {
-        DateSegmentKind::Year => format!("{value:04}"),
-        DateSegmentKind::DayPeriod => if value == 1 { "PM" } else { "AM" }.to_string(),
-        _ => format!("{value:02}"),
+fn format_segment_text(
+    backend: &dyn IntlBackend,
+    locale: &Locale,
+    kind: DateSegmentKind,
+    value: i32,
+) -> String {
+    // Route through the locale backend (like `time_field`/`date_field`) so
+    // native digit systems and localized day-period labels are honoured.
+    if kind == DateSegmentKind::DayPeriod {
+        return backend.day_period_label(value == 1, locale);
     }
+
+    // Year is zero-padded to 4 digits, every other numeric segment to 2.
+    let min_digits = if kind == DateSegmentKind::Year { 4 } else { 2 };
+
+    u32::try_from(value).map_or_else(
+        |_| value.to_string(),
+        |value| {
+            backend.format_segment_digits(
+                value,
+                NonZeroU8::new(min_digits).expect("segment width is non-zero"),
+                locale,
+            )
+        },
+    )
 }
 
 /// Resolves the ARIA label for a segment from the component messages.

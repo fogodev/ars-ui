@@ -227,8 +227,9 @@ impl Context {
     }
 
     /// Set a segment's value (clamped to its range), formatting the display text
-    /// via `format_segment_text` (year is 4-wide, day-period is AM/PM, the rest
-    /// are zero-padded to two digits).
+    /// via `format_segment_text`, which routes through the `intl_backend` (like
+    /// `time_field`/`date_field`) so native digit systems and localized
+    /// day-period labels are honoured (year is 4-wide, the rest 2-wide).
     pub fn set_segment_value(&mut self, kind: DateSegmentKind, raw: i32) {
         let seg = self.date_segments.iter_mut()
             .chain(self.time_segments.iter_mut())
@@ -491,8 +492,11 @@ impl ars_core::Machine for Machine {
             sync_props(&mut probe, &new_props);
             let next_state = reconcile_state_after_sync(state, &probe);
             let clear_focus = next_state != *state && next_state == State::Idle;
+            let open = next_state == State::Open;
             return Some(TransitionPlan::to(next_state).apply(move |ctx| {
                 sync_props(ctx, &new_props);
+                // Keep the public `open` flag consistent with the reconciled state.
+                ctx.open = open;
                 if clear_focus { ctx.focused_segment = None; ctx.type_buffer.clear(); }
             }));
         }
@@ -557,13 +561,19 @@ impl ars_core::Machine for Machine {
             Event::FocusNextSegment => match ctx.focused_segment {
                 Some(current) => {
                     let next = ctx.next_editable_after(current);
-                    Some(TransitionPlan::to(State::Focused)
+                    let mut plan = TransitionPlan::to(State::Focused)
                         .apply(move |ctx| {
                             commit_type_buffer(ctx);
                             ctx.type_buffer.clear();
-                            if let Some(next) = next { ctx.focused_segment = Some(next); }
+                            // `None` past the last segment clears focus.
+                            ctx.focused_segment = next;
                         })
-                        .cancel_effect(Effect::TypeBufferCommit))
+                        .cancel_effect(Effect::TypeBufferCommit);
+                    // Past the last segment, move focus to the trigger (spec §3.2).
+                    if next.is_none() {
+                        plan = plan.with_effect(PendingEffect::named(Effect::RestoreFocusToTrigger));
+                    }
+                    Some(plan)
                 }
                 None => {
                     let first = ctx.first_editable()?;
@@ -718,6 +728,8 @@ impl ars_core::Machine for Machine {
 > (via the intl backend's `max_months_in_year`/`days_in_month`), and
 > `project_date` reprojects clamped/committed dates back into `ctx.calendar` so
 > the displayed segments and a subsequent edit always agree on the ISO date.
+> `format_segment_text` routes segment digits and day-period labels through the
+> `intl_backend` for locale-correct rendering.
 
 ### 1.8 Connect / API
 

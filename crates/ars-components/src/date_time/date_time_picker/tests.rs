@@ -1651,6 +1651,31 @@ fn month_range_follows_calendar_leap_year() {
 }
 
 #[test]
+fn focus_next_past_last_segment_clears_focus_and_targets_trigger() {
+    let mut svc = service();
+
+    // DayPeriod is the last editable segment in en-US (H12).
+    drop(svc.send(Event::FocusSegment(DateSegmentKind::DayPeriod)));
+    let result = svc.send(Event::FocusNextSegment);
+
+    assert!(effects(result).contains(&Effect::RestoreFocusToTrigger));
+    assert_eq!(svc.context().focused_segment, None);
+}
+
+#[test]
+fn sync_props_disable_while_open_clears_open_flag() {
+    let mut svc = service();
+    drop(svc.send(Event::Open));
+    assert!(svc.context().open);
+
+    drop(svc.send(Event::SyncProps(Box::new(props().disabled(true)))));
+
+    assert_eq!(*svc.state(), State::Idle);
+    // The public `open` flag must track the reconciled state.
+    assert!(!svc.context().open);
+}
+
+#[test]
 fn hidden_input_disabled_when_picker_disabled() {
     let svc = service_with(
         Props {
