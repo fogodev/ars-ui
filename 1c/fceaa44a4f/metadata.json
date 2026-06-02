@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "1cfceaa44a4f",
+  "strategy": "manual-commit",
+  "branch": "impl-294",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/specialized/timer/mod.rs",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_display_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_completed_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_paused_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_running_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_with_hours_snapshot.snap",
+    "spec/components/specialized/timer.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/1c/fceaa44a4f/0/metadata.json",
+      "transcript": "/1c/fceaa44a4f/0/full.jsonl",
+      "content_hash": "/1c/fceaa44a4f/0/content_hash.txt",
+      "prompt": "/1c/fceaa44a4f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 4426,
+    "cache_creation_tokens": 1177305,
+    "cache_read_tokens": 24761645,
+    "output_tokens": 28015,
+    "api_call_count": 45
+  }
+}

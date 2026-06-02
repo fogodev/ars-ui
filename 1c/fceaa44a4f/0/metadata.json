@@ -1,0 +1,62 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "1cfceaa44a4f",
+  "session_id": "5bc925b4-160c-4dbe-8b86-2e569a259845",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-02T00:33:08.090843Z",
+  "branch": "impl-294",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/specialized/timer/mod.rs",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_display_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_completed_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_idle_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_paused_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_running_snapshot.snap",
+    "crates/ars-components/src/specialized/timer/snapshots/ars_components__specialized__timer__tests__timer_root_with_hours_snapshot.snap",
+    "spec/components/specialized/timer.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "82091d0d30bf",
+  "checkpoint_transcript_start": 1159,
+  "transcript_lines_at_start": 1159,
+  "token_usage": {
+    "input_tokens": 4426,
+    "cache_creation_tokens": 1177305,
+    "cache_read_tokens": 24761645,
+    "output_tokens": 28015,
+    "api_call_count": 45
+  },
+  "session_metrics": {
+    "turn_count": 15
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-02T00:32:00.74074Z",
+    "agent_lines": 136,
+    "agent_removed": 83,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 136,
+    "total_lines_changed": 219,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 136,
+      "agent_lines_removed": 83
+    }
+  ]
+}

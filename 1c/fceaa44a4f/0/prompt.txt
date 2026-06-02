@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bwq3xacxt</task-id>
+<tool-use-id>toolu_01U6yW4B1ahbMBMqM6Q7zikj</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-294/5bc925b4-160c-4dbe-8b86-2e569a259845/tasks/bwq3xacxt.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex pass 5 + Coverage/CRAP" completed (exit code 0)</summary>
+</task-notification>
