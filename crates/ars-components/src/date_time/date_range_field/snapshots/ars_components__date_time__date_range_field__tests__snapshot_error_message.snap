@@ -1,0 +1,37 @@
+---
+source: crates/ars-components/src/date_time/date_range_field/tests.rs
+expression: snapshot_attrs(&api.error_message_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "error-message",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "date-range-field",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "trip-error-message",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "alert",
+            ),
+        ),
+    ],
+    styles: [],
+}

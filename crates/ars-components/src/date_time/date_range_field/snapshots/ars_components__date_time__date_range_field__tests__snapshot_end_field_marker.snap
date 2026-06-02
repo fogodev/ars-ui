@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/date_time/date_range_field/tests.rs
+expression: snapshot_attrs(&api.end_field_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "end-field",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "date-range-field",
+            ),
+        ),
+    ],
+    styles: [],
+}

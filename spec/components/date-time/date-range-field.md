@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility, i18n, interactions, forms]
 shared_deps: [date-time-types]
 related: [date-field, date-range-picker]
 references:
-  react-aria: DateRangePicker
+    react-aria: DateRangePicker
 ---
 
 # DateRangeField
@@ -53,11 +53,26 @@ pub enum Event {
 
 ### 1.3 Context
 
+`Context` derives only `Clone` and implements `Debug` manually, because
+`intl_backend` is an `Arc<dyn IntlBackend>` that cannot derive `Debug`/`PartialEq`
+(the `Machine` trait requires `Context: Clone + Debug` only).
+
+The public `value` is the _derived complete_ range — `Some` only when both
+`start_date` and `end_date` are set, always normalized so `start <= end`. The two
+fields are tracked independently so a range can be assembled incrementally as each
+child field changes (an `Option<DateRange>` alone cannot hold a partial, one-sided
+value).
+
 ```rust
 /// Context for the DateRangeField component.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct Context {
+    /// The derived complete range (Some only when both fields are set, always normalized).
     pub value: Bindable<Option<DateRange>>,
+    /// The start field's current value, tracked independently.
+    pub start_date: Option<CalendarDate>,
+    /// The end field's current value, tracked independently.
+    pub end_date: Option<CalendarDate>,
     /// The active field.
     pub active_field: Option<ActiveField>,
     /// The minimum date.
@@ -66,6 +81,8 @@ pub struct Context {
     pub max: Option<CalendarDate>,
     /// The locale.
     pub locale: Locale,
+    /// Backend used for locale-dependent labels in range descriptions.
+    pub intl_backend: Arc<dyn IntlBackend>,
     /// Resolved translatable messages.
     pub messages: Messages,
     /// Whether the component is disabled.
@@ -91,15 +108,40 @@ pub struct Context {
     pub force_leading_zeros: bool,
 }
 
-// Reuses ActiveField from DateRangePicker:
-// pub enum ActiveField { Start, End }
+impl Context {
+    /// Returns `true` when the current range violates the min/max bounds.
+    /// The stored range is always normalized (start <= end), so the only source
+    /// of invalidity is a start earlier than `min` or an end later than `max`.
+    pub fn is_invalid(&self) -> bool {
+        let Some(range) = self.value.get() else { return false };
+        let below_min = self.min.as_ref().is_some_and(|min| {
+            matches!(range.start.compare_within_calendar(min), Some(Ordering::Less))
+        });
+        let above_max = self.max.as_ref().is_some_and(|max| {
+            matches!(range.end.compare_within_calendar(max), Some(Ordering::Greater))
+        });
+        below_min || above_max
+    }
+}
+
+/// Identifies which of the two child fields is currently active.
+///
+/// Owned by `DateRangeField` as the first range component to require it; later
+/// range components (e.g., `DateRangePicker`) reuse this enum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActiveField {
+    /// The start field is active.
+    Start,
+    /// The end field is active.
+    End,
+}
 ```
 
 ### 1.4 Props
 
 ```rust
 /// Props for the DateRangeField component.
-#[derive(Clone, Debug, PartialEq, HasId)]
+#[derive(Clone, Debug, Default, PartialEq, HasId)]
 pub struct Props {
     /// The ID of the component.
     pub id: String,
@@ -130,34 +172,24 @@ pub struct Props {
     /// which uses locale-aware formatting. Passed through to child DateField
     /// instances.
     pub force_leading_zeros: bool,
-}
-
-impl Default for Props {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            value: None,
-            default_value: None,
-            min: None,
-            max: None,
-            disabled: false,
-            readonly: false,
-            required: false,
-            name: None,
-            start_name: None,
-            end_name: None,
-            force_leading_zeros: false,
-        }
-    }
+    /// Whether a Description element is rendered. When true, the root's
+    /// `aria-describedby` references the description part id.
+    pub has_description: bool,
+    /// Whether an ErrorMessage element is rendered. When true, the root's
+    /// `aria-describedby` references the error-message part id.
+    pub has_error_message: bool,
 }
 ```
+
+`Props` derives `Default` (all fields are themselves `Default`). Each field also
+has a `#[must_use]` builder method following the workspace convention.
 
 ### 1.5 Guards
 
-```rust
-fn is_disabled(ctx: &Context) -> bool { ctx.disabled }
-fn is_readonly(ctx: &Context) -> bool { ctx.readonly }
-```
+Guards are inlined in `transition`: a disabled component ignores every event
+(`if ctx.disabled { return None }`), and a read-only component ignores the
+value-mutating events (`SetRange`, `StartValueChange`, `EndValueChange`) while
+still allowing focus tracking.
 
 ### 1.6 Full Machine Implementation
 
@@ -174,17 +206,21 @@ impl ars_core::Machine for Machine {
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let locale = env.locale.clone();
+        let value = match &props.value {
+            Some(v) => Bindable::controlled(v.clone()),
+            None => Bindable::uncontrolled(props.default_value.clone()),
+        };
+        let initial_range = value.get().clone();
         let ctx = Context {
-            value: match &props.value {
-                Some(v) => Bindable::controlled(v.clone()),
-                None => Bindable::uncontrolled(props.default_value.clone()),
-            },
+            start_date: initial_range.as_ref().map(|r| r.start.clone()),
+            end_date: initial_range.as_ref().map(|r| r.end.clone()),
+            value,
             active_field: None,
             min: props.min.clone(),
             max: props.max.clone(),
+            locale: env.locale.clone(),
+            intl_backend: Arc::clone(&env.intl_backend),
             messages: messages.clone(),
-            locale,
             disabled: props.disabled,
             readonly: props.readonly,
             required: props.required,
@@ -192,86 +228,76 @@ impl ars_core::Machine for Machine {
             start_name: props.start_name.clone(),
             end_name: props.end_name.clone(),
             ids: ComponentIds::from_id(&props.id),
-            has_description: false,
-            has_error_message: false,
+            has_description: props.has_description,
+            has_error_message: props.has_error_message,
             force_leading_zeros: props.force_leading_zeros,
         };
         (State::Idle, ctx)
     }
 
     fn transition(
-        state: &Self::State,
+        _state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
         _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if is_disabled(ctx) { return None; }
+        if ctx.disabled { return None; }
 
         match event {
-            Event::FocusStart => {
-                Some(TransitionPlan::to(State::StartFocused).apply(|ctx| {
-                    ctx.active_field = Some(ActiveField::Start);
-                }))
-            }
+            Event::FocusStart => Some(TransitionPlan::to(State::StartFocused)
+                .apply(|ctx: &mut Context| ctx.active_field = Some(ActiveField::Start))),
 
-            Event::FocusEnd => {
-                Some(TransitionPlan::to(State::EndFocused).apply(|ctx| {
-                    ctx.active_field = Some(ActiveField::End);
-                }))
-            }
+            Event::FocusEnd => Some(TransitionPlan::to(State::EndFocused)
+                .apply(|ctx: &mut Context| ctx.active_field = Some(ActiveField::End))),
 
-            Event::BlurAll => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    ctx.active_field = None;
-                }))
-            }
+            Event::BlurAll => Some(TransitionPlan::to(State::Idle)
+                .apply(|ctx: &mut Context| ctx.active_field = None)),
 
             Event::SetRange(range) => {
+                if ctx.readonly { return None; }
                 let range = range.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.start_date = range.as_ref().map(|r| r.start.clone());
+                    ctx.end_date = range.as_ref().map(|r| r.end.clone());
                     ctx.value.set(range);
                 }))
             }
 
             Event::StartValueChange(date) => {
+                if ctx.readonly { return None; }
                 let date = date.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    match (&date, ctx.value.get().as_ref().map(|r| &r.end)) {
-                        (Some(start), Some(end)) => {
-                            ctx.value.set(Some(DateRange::normalized(
-                                start.clone(), end.clone(),
-                            )));
-                        }
-                        (Some(start), None) => {
-                            // Only start set; store partial (no complete range yet)
-                            // Range will complete when end is also set.
-                        }
-                        (None, _) => {
-                            ctx.value.set(None);
-                        }
-                    }
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.start_date = date;
+                    recompute_range(ctx);
                 }))
             }
 
             Event::EndValueChange(date) => {
+                if ctx.readonly { return None; }
                 let date = date.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    match (ctx.value.get().as_ref().map(|r| &r.start), &date) {
-                        (Some(start), Some(end)) => {
-                            ctx.value.set(Some(DateRange::normalized(
-                                start.clone(), end.clone(),
-                            )));
-                        }
-                        (None, Some(end)) => {
-                            // Only end set; store partial.
-                        }
-                        (_, None) => {
-                            ctx.value.set(None);
-                        }
-                    }
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.end_date = date;
+                    recompute_range(ctx);
                 }))
             }
         }
+    }
+}
+
+/// Recomputes the derived complete range from the two field values. When both
+/// fields hold a value the range is normalized (swapping if needed so
+/// `start <= end`) and the normalized order is reflected back into the fields.
+/// When either field is empty the range is incomplete and the value is cleared.
+fn recompute_range(ctx: &mut Context) {
+    match (ctx.start_date.clone(), ctx.end_date.clone()) {
+        (Some(start), Some(end)) => {
+            if let Some(range) = DateRange::normalized(start, end) {
+                ctx.start_date = Some(range.start.clone());
+                ctx.end_date = Some(range.end.clone());
+                ctx.value.set(Some(range));
+            }
+        }
+        _ => ctx.value.set(None),
     }
 }
 ```
@@ -325,15 +351,23 @@ impl<'a> Api<'a> {
         }
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
         if self.ctx.readonly {
             attrs.set_bool(HtmlAttr::Data("ars-readonly"), true);
+            attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true");
         }
         if self.ctx.required {
             attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
+        if self.ctx.is_invalid() {
+            attrs.set_bool(HtmlAttr::Data("ars-invalid"), true);
+        }
         attrs
     }
+
+    /// Returns `true` when the current range violates the min/max bounds.
+    pub fn is_invalid(&self) -> bool { self.ctx.is_invalid() }
 
     /// Attributes for the label element.
     pub fn label_attrs(&self) -> AttrMap {
@@ -361,40 +395,66 @@ impl<'a> Api<'a> {
         (self.ctx.messages.separator_text)(&self.ctx.locale)
     }
 
-    /// Screen reader description of the full date range (e.g., "March 1 to March 15").
-    /// Returns `None` if no complete range is selected.
+    /// Marker attributes (scope + part data hooks) for the start-field wrapper.
+    /// The embedded child DateField is configured via `start_field_props`.
+    pub fn start_field_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::StartField.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        attrs
+    }
+
+    /// Marker attributes (scope + part data hooks) for the end-field wrapper.
+    pub fn end_field_attrs(&self) -> AttrMap {
+        let mut attrs = AttrMap::new();
+        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::EndField.data_attrs();
+        attrs.set(scope_attr, scope_val);
+        attrs.set(part_attr, part_val);
+        attrs
+    }
+
+    /// Screen reader description of the full date range (e.g., "March 1, 2025 to
+    /// March 15, 2025"). Returns `None` if no complete range is selected.
     /// The adapter can use this as an `aria-description` on the root or as a live announcement.
     pub fn range_description(&self) -> Option<String> {
         let range = self.ctx.value.get().as_ref()?;
-        let start = format_date(&range.start, &self.ctx.format, &self.ctx.locale);
-        let end = format_date(&range.end, &self.ctx.format, &self.ctx.locale);
+        let start = format_date_label(&range.start, self.ctx.intl_backend.as_ref(), &self.ctx.locale);
+        let end = format_date_label(&range.end, self.ctx.intl_backend.as_ref(), &self.ctx.locale);
         Some((self.ctx.messages.range_description)(&start, &end, &self.ctx.locale))
     }
 
-    /// Build DateField Props for the start date input.
+    /// Build DateField Props for the start date input. The start field's lower
+    /// bound is the global `min`; its upper bound is the current end date when
+    /// set, otherwise the global `max`, so both global bounds and cross-field
+    /// coordination apply.
     pub fn start_field_props(&self) -> date_field::Props {
         date_field::Props {
             id: self.ctx.ids.part("start"),
-            value: self.ctx.value.get().as_ref().map(|r| Some(r.start.clone())),
-            min: self.ctx.min.clone(),
-            max: self.ctx.value.get().as_ref().map(|r| r.end.clone()),
+            value: Some(self.ctx.start_date.clone()),
+            min_value: self.ctx.min.clone(),
+            max_value: self.ctx.end_date.clone().or_else(|| self.ctx.max.clone()),
             disabled: self.ctx.disabled,
             readonly: self.ctx.readonly,
+            required: self.ctx.required,
             aria_label: Some((self.ctx.messages.start_label)(&self.ctx.locale)),
             force_leading_zeros: self.ctx.force_leading_zeros,
             ..Default::default()
         }
     }
 
-    /// Build DateField Props for the end date input.
+    /// Build DateField Props for the end date input. The end field's upper bound
+    /// is the global `max`; its lower bound is the current start date when set,
+    /// otherwise the global `min`.
     pub fn end_field_props(&self) -> date_field::Props {
         date_field::Props {
             id: self.ctx.ids.part("end"),
-            value: self.ctx.value.get().as_ref().map(|r| Some(r.end.clone())),
-            min: self.ctx.value.get().as_ref().map(|r| r.start.clone()),
-            max: self.ctx.max.clone(),
+            value: Some(self.ctx.end_date.clone()),
+            min_value: self.ctx.start_date.clone().or_else(|| self.ctx.min.clone()),
+            max_value: self.ctx.max.clone(),
             disabled: self.ctx.disabled,
             readonly: self.ctx.readonly,
+            required: self.ctx.required,
             aria_label: Some((self.ctx.messages.end_label)(&self.ctx.locale)),
             force_leading_zeros: self.ctx.force_leading_zeros,
             ..Default::default()
@@ -432,12 +492,9 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.ctx.name {
             attrs.set(HtmlAttr::Name, name);
         }
+        // `DateRange::to_iso8601` already emits the `start/end` interval form.
         let iso_value = match self.ctx.value.get() {
-            Some(range) => format!(
-                "{}/{}",
-                format_iso(&range.start),
-                format_iso(&range.end),
-            ),
+            Some(range) => range.to_iso8601(),
             None => String::new(),
         };
         attrs.set(HtmlAttr::Value, iso_value);
@@ -445,32 +502,40 @@ impl<'a> Api<'a> {
     }
 
     /// Attributes for a separate hidden input carrying the start date.
-    /// Only rendered when `start_name` is set on Props.
+    /// Only meaningful when `start_name` is set on Props.
     pub fn start_hidden_input_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         attrs.set(HtmlAttr::Type, "hidden");
         if let Some(name) = &self.ctx.start_name {
             attrs.set(HtmlAttr::Name, name);
         }
-        if let Some(range) = &self.ctx.value.get() {
-            attrs.set(HtmlAttr::Value, format_iso(&range.start));
-        }
+        let value = match self.ctx.value.get() {
+            Some(range) => range.start.to_iso8601(),
+            None => String::new(),
+        };
+        attrs.set(HtmlAttr::Value, value);
         attrs
     }
 
     /// Attributes for a separate hidden input carrying the end date.
-    /// Only rendered when `end_name` is set on Props.
+    /// Only meaningful when `end_name` is set on Props.
     pub fn end_hidden_input_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         attrs.set(HtmlAttr::Type, "hidden");
         if let Some(name) = &self.ctx.end_name {
             attrs.set(HtmlAttr::Name, name);
         }
-        if let Some(range) = &self.ctx.value.get() {
-            attrs.set(HtmlAttr::Value, format_iso(&range.end));
-        }
+        let value = match self.ctx.value.get() {
+            Some(range) => range.end.to_iso8601(),
+            None => String::new(),
+        };
+        attrs.set(HtmlAttr::Value, value);
         attrs
     }
+
+    // Event dispatch helpers called by adapters: `focus_start`, `focus_end`,
+    // `blur`, `set_range`, `set_start_value`, `set_end_value` — each forwards
+    // the matching `Event` through `send`.
 
     // ── Convenience getters ─────────────────────────────────────────────
 
@@ -478,6 +543,9 @@ impl<'a> Api<'a> {
     pub fn selected_range(&self) -> Option<&DateRange> {
         self.ctx.value.get().as_ref()
     }
+
+    /// The active field, if either currently holds focus.
+    pub fn active_field(&self) -> Option<ActiveField> { self.ctx.active_field }
 
     /// Whether either field is currently focused.
     pub fn is_focused(&self) -> bool {
@@ -501,16 +569,30 @@ impl ConnectApi for Api<'_> {
         match part {
             Part::Root => self.root_attrs(),
             Part::Label => self.label_attrs(),
-            Part::StartField => self.start_field_props().into(), // delegated to DateField
+            Part::StartField => self.start_field_attrs(), // wrapper markers; child via start_field_props
             Part::Separator => self.separator_attrs(),
-            Part::EndField => self.end_field_props().into(), // delegated to DateField
+            Part::EndField => self.end_field_attrs(), // wrapper markers; child via end_field_props
             Part::Description => self.description_attrs(),
             Part::ErrorMessage => self.error_message_attrs(),
             Part::HiddenInput => self.hidden_input_attrs(),
         }
     }
 }
+
+/// Formats a single date as a human-readable label for screen-reader range
+/// descriptions (e.g., "March 1, 2025").
+fn format_date_label(date: &CalendarDate, backend: &dyn IntlBackend, locale: &Locale) -> String {
+    format!("{} {}, {}", backend.month_long_name(date.month(), locale), date.day(), date.year())
+}
 ```
+
+The `StartField` and `EndField` parts carry only the wrapper scope/part data
+hooks. The embedded child `DateField` components are configured through the
+`start_field_props` / `end_field_props` methods, whose `role="group"` sub-group
+and per-field `aria-label` come from the child machine — keeping semantic data
+separate from the rendered child view per the API design standards. Live segment
+focus and caret behavior are resolved by the adapter against native handles keyed
+by logical segment, not by these string ids.
 
 ## 2. Anatomy
 
@@ -578,7 +660,12 @@ DateRangeField (en-US)
 ### 4.1 Messages
 
 ```rust
-#[derive(Clone, Debug)]
+/// Closure type for the range description message (formatted start, formatted
+/// end, locale). A type alias keeps the multi-arg `MessageFn` within clippy's
+/// `type_complexity` budget, matching the convention used by color components.
+type RangeDescriptionFn = dyn Fn(&str, &str, &Locale) -> String + Send + Sync;
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Label for the start date field.
     pub start_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
@@ -587,7 +674,7 @@ pub struct Messages {
     /// Text displayed between start and end fields.
     pub separator_text: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Description of the range for screen readers.
-    pub range_description: MessageFn<dyn Fn(&str, &str, &Locale) -> String + Send + Sync>,
+    pub range_description: MessageFn<RangeDescriptionFn>,
 }
 
 impl Default for Messages {
@@ -689,16 +776,24 @@ React Aria does not have a standalone `DateRangeField` component separate from `
 
 ## Appendix: Testing
 
+`CalendarDate::new_gregorian(year, month, day)` takes plain `u8` month/day and
+returns `Result`; tests use a `date(y, m, d)` helper that `.expect`s the result.
+`DateRange::new`/`DateRange::normalized` return `Option`. Snapshot tests prefixed
+`snapshot_` use `insta::assert_snapshot!`. The full test suite lives in
+`crates/ars-components/src/date_time/date_range_field/tests.rs` (unit + snapshot),
+`tests/spec_conformance/date_time.rs` (anatomy), and
+`tests/proptest_state_machines/date_time.rs` (normalized-range invariants).
+
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn initial_state_is_idle() {
-        let (state, ctx) = Machine::init(&Props::default(), &Env::default(), &Default::default());
-        assert_eq!(state, State::Idle);
-        assert!(ctx.active_field.is_none());
+    fn date(year: i32, month: u8, day: u8) -> CalendarDate {
+        CalendarDate::new_gregorian(year, month, day).expect("valid test date")
+    }
+    fn range(start: CalendarDate, end: CalendarDate) -> DateRange {
+        DateRange::new(start, end).expect("ordered test range")
     }
 
     #[test]
@@ -707,22 +802,18 @@ mod tests {
         let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         let plan = Machine::transition(&state, &Event::FocusStart, &ctx, &props).unwrap();
         assert_eq!(plan.target, Some(State::StartFocused));
-
-        let plan = Machine::transition(&State::StartFocused, &Event::FocusEnd, &ctx, &props).unwrap();
-        assert_eq!(plan.target, Some(State::EndFocused));
-
         let plan = Machine::transition(&State::EndFocused, &Event::BlurAll, &ctx, &props).unwrap();
         assert_eq!(plan.target, Some(State::Idle));
     }
 
     #[test]
-    fn range_validation_normalizes() {
-        let props = Props::default();
-        let (state, mut ctx) = Machine::init(&props, &Env::default(), &Default::default());
-        // Set end first, then start after it — should normalize
-        let end = CalendarDate::new_gregorian(2025, nzu8(1), nzu8(1));
-        let start = CalendarDate::new_gregorian(2025, nzu8(3), nzu8(15));
-        // Simulates setting start > end; normalized should swap
+    fn out_of_order_change_normalizes() {
+        // Setting start after the existing end swaps so start <= end always holds.
+        let props = Props { default_value: Some(range(date(2025, 6, 10), date(2025, 6, 20))), ..Props::default() };
+        let mut svc = Service::<Machine>::new(props, &Env::default(), &Messages::default());
+        drop(svc.send(Event::StartValueChange(Some(date(2025, 6, 25)))));
+        let stored = svc.context().value.get().clone().unwrap();
+        assert_eq!((stored.start, stored.end), (date(2025, 6, 20), date(2025, 6, 25)));
     }
 
     #[test]
@@ -730,23 +821,6 @@ mod tests {
         let props = Props { disabled: true, ..Props::default() };
         let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
         assert!(Machine::transition(&state, &Event::FocusStart, &ctx, &props).is_none());
-    }
-
-    #[test]
-    fn set_range_updates_value() {
-        let props = Props::default();
-        let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
-        let range = DateRange::new(
-            CalendarDate::new_gregorian(2025, nzu8(6), nzu8(1)),
-            CalendarDate::new_gregorian(2025, nzu8(6), nzu8(30)),
-        );
-        let plan = Machine::transition(
-            &state,
-            &Event::SetRange(Some(range)),
-            &ctx,
-            &props,
-        ).unwrap();
-        assert!(plan.target.is_none()); // context-only
     }
 }
 ```
