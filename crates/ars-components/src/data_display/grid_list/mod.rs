@@ -1337,7 +1337,7 @@ fn selection_plan(mut selected: BTreeSet<Key>) -> Option<TransitionPlan<Machine>
     )
 }
 
-fn fallback_typeahead_timestamp(context: &Context) -> Duration {
+const fn fallback_typeahead_timestamp(context: &Context) -> Duration {
     context
         .typeahead
         .last_key_time
@@ -2301,9 +2301,10 @@ mod tests {
     fn keyboard_helper_extends_selection_with_shift_arrow_and_reverses_rtl() {
         let captured = RefCell::new(Vec::new());
         let send = |event| captured.borrow_mut().push(event);
-        let mut env = Env::default();
-
-        env.locale = ars_i18n::locales::ar();
+        let env = Env {
+            locale: ars_i18n::locales::ar(),
+            ..Default::default()
+        };
 
         let grid = Service::<Machine>::new(
             Props::new()
