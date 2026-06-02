@@ -1,0 +1,116 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "fcaacc12dcf2",
+  "session_id": "019e894f-ea37-7c60-ae10-4f6f73f2d25f",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-02T21:37:26.923317Z",
+  "branch": "impl-285",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/data_display/grid_list/mod.rs",
+    "spec/components/data-display/grid-list.md",
+    "crates/ars-components/src/data_display/grid_list/mod.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "2772cf75f86e",
+  "checkpoint_transcript_start": 4397,
+  "transcript_lines_at_start": 4397,
+  "token_usage": {
+    "input_tokens": 95292,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 13074304,
+    "output_tokens": 17518,
+    "api_call_count": 78
+  },
+  "session_metrics": {
+    "turn_count": 9
+  },
+  "summary": {
+    "intent": "Fix three Codex review findings on PR #710 for the GridList component: preserve range-selection anchor for repeated Shift+Arrow, filter structural collection keys from initial/controlled selections, and remove invalid aria-selected from non-composite listitem rows.",
+    "outcome": "All three fixes were implemented with regression tests, the snapshot was updated, spec wording was corrected, and commit 243fd006 (plus a follow-up) was pushed to PR #710 with all Codex threads replied to and resolved.",
+    "learnings": {
+      "repo": [
+        "GridList uses a range_anchor_key on context to preserve the original anchor across repeated Shift+Arrow presses; without it the keyboard helper cannot infer the starting anchor after the first range update.",
+        "Structural collection keys (separator, section, header) must be excluded from both selection filtering and focus filtering to maintain a consistent invariant across init, prop sync, and user events.",
+        "Non-composite listitem rows must not emit aria-selected; selection state is conveyed via data attributes (data-selected) instead.",
+        "The project uses cargo insta for snapshot testing; stale .snap.new files left from failed runs must be manually removed from the git index before committing.",
+        "cargo xcov is the local coverage gate and rebuilds with instrumentation — it is the slowest local check in the CI pipeline.",
+        "cargo xtask spec validate and cargo xtask spec compile-snippets are required spec tooling checks before committing spec changes.",
+        "The project uses @codex review comment triggers on GitHub issues to initiate automated code review passes."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/grid_list/mod.rs",
+          "line": 900,
+          "end_line": 940,
+          "finding": "Context initialization surface where range_anchor_key field was added."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/grid_list/mod.rs",
+          "line": 1168,
+          "end_line": 1192,
+          "finding": "Transition/connect behavior patched to store anchor on SelectRange and clear it on non-range focus moves."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/grid_list/mod.rs",
+          "line": 1288,
+          "end_line": 1320,
+          "finding": "Row attrs logic patched so non-composite rows only emit data-selected, not aria-selected."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/grid_list/mod.rs",
+          "line": 1465,
+          "end_line": 1545,
+          "finding": "Selection helpers updated: filtering now requires a focusable value node, and helpers clear or preserve anchors deliberately."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/grid_list/mod.rs",
+          "line": 2450,
+          "end_line": 2575,
+          "finding": "Repeated Shift+Arrow regression test inserted before the existing range-edge test; second range must extend from the original anchor."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_row_non_composite.snap",
+          "finding": "Snapshot intentionally updated to reflect removal of aria-selected from non-composite row output."
+        },
+        {
+          "path": "spec/components/data-display/grid-list.md",
+          "finding": "Spec wording updated to document that non-composite listitems expose selection via data attributes, not aria-selected."
+        }
+      ],
+      "workflow": [
+        "Patches that span too many changed regions fail to apply cleanly; splitting into smaller, targeted edits against exact current line ranges is more reliable.",
+        "After cargo insta accept, always rerun the focused test suite to confirm the accepted snapshot is the only delta.",
+        "When adding test helpers in the same test function, shadowing the helper name causes compile errors; rename intermediate bindings to avoid shadowing.",
+        "The Codex review loop pattern: push → reply to threads → resolve threads → post @codex review trigger → poll reactions and thread state → fix new findings → repeat.",
+        "CI matrix includes clippy, adapter parity, integration, error coverage, formatting, snapshot, mutual-exclusion, DOM browser, i18n browser, core flags, coverage, unit tests, Leptos feature flags, Dioxus feature flags, and release verification — polling in ~2 minute intervals is appropriate."
+      ]
+    },
+    "friction": [
+      "Large multi-region patch failed to apply cleanly and had to be split into multiple smaller apply_patch calls.",
+      "Stale .snap.new file left from a failed snapshot run was staged in git and had to be manually removed with git restore --staged before committing.",
+      "Non-composite data-selected assertion was initially placed in the wrong test scenario (one that focuses gamma but doesn't select it), requiring a correction pass.",
+      "Helper name shadowing in a test function caused a compile error that required a targeted rename fix.",
+      "Long CI matrix with many parallel jobs meant multiple polling rounds (10+ iterations at ~2 minute intervals) before all checks completed.",
+      "Codex review posted three new finding batches across multiple polling cycles, requiring repeated fix/push/resolve/retrigger loops."
+    ],
+    "open_items": [
+      "Proptest state machine tests for data_display are configured as ignored for the nightly extended job — confirm they are exercised in the full nightly run.",
+      "The focus-filtering invariant (structural keys cannot remain focused) was tightened alongside the selection fix — verify this doesn't regress any focus-restoration edge cases on component unmount/remount.",
+      "Coverage threshold for ars-components was described as passing at the branch threshold — monitor whether new code paths added by these fixes require additional coverage to stay above the threshold long-term."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-02T21:36:53.115969Z",
+    "agent_lines": 332,
+    "agent_removed": 25,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 332,
+    "total_lines_changed": 365,
+    "agent_percentage": 97.80821917808218,
+    "metric_version": 2
+  }
+}
