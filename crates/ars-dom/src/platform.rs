@@ -2194,7 +2194,7 @@ mod wasm_tests {
 
         let fire_count = Rc::clone(&fired);
         let handle = platform.set_timeout(
-            10,
+            Duration::from_millis(10),
             Box::new(move || {
                 fire_count.set(fire_count.get() + 1);
             }),
@@ -2205,7 +2205,7 @@ mod wasm_tests {
 
         let cleared_count = Rc::clone(&fired);
         let cleared_handle = platform.set_timeout(
-            25,
+            Duration::from_millis(25),
             Box::new(move || {
                 cleared_count.set(cleared_count.get() + 1);
             }),
