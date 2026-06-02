@@ -48,6 +48,10 @@ pub enum Event {
     StartValueChange(Option<CalendarDate>),
     /// End field value changed.
     EndValueChange(Option<CalendarDate>),
+    /// Reactive props changed; re-derive context from the new props. Emitted by
+    /// `on_props_changed` so adapter-driven prop updates (controlled `value`,
+    /// `min`/`max`, `disabled`, names, …) reach the context after mount.
+    SyncProps(Box<Props>),
 }
 ```
 
@@ -110,18 +114,27 @@ pub struct Context {
 
 impl Context {
     /// Returns `true` when the current range violates the min/max bounds.
-    /// The stored range is always normalized (start <= end), so the only source
-    /// of invalidity is a start earlier than `min` or an end later than `max`.
+    /// The stored range is always normalized (start <= end), so it lies within
+    /// `[min, max]` iff neither endpoint is out of bounds.
     pub fn is_invalid(&self) -> bool {
         let Some(range) = self.value.get() else { return false };
-        let below_min = self.min.as_ref().is_some_and(|min| {
-            matches!(range.start.compare_within_calendar(min), Some(Ordering::Less))
-        });
-        let above_max = self.max.as_ref().is_some_and(|max| {
-            matches!(range.end.compare_within_calendar(max), Some(Ordering::Greater))
-        });
-        below_min || above_max
+        date_out_of_bounds(Some(&range.start), self.min.as_ref(), self.max.as_ref())
+            || date_out_of_bounds(Some(&range.end), self.min.as_ref(), self.max.as_ref())
     }
+}
+
+/// Returns `true` when `date` is present and outside the inclusive `[min, max]`
+/// bounds (absent bound = unbounded on that side). Shared by `is_invalid` and
+/// the per-field `invalid` flags on the child `DateField` props.
+fn date_out_of_bounds(
+    date: Option<&CalendarDate>,
+    min: Option<&CalendarDate>,
+    max: Option<&CalendarDate>,
+) -> bool {
+    let Some(date) = date else { return false };
+    let below = min.is_some_and(|m| matches!(date.compare_within_calendar(m), Some(Ordering::Less)));
+    let above = max.is_some_and(|m| matches!(date.compare_within_calendar(m), Some(Ordering::Greater)));
+    below || above
 }
 
 /// Identifies which of the two child fields is currently active.
@@ -241,9 +254,15 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         _props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled { return None; }
+        // `SyncProps` must process even when disabled (e.g. to re-enable).
+        if ctx.disabled && !matches!(event, Event::SyncProps(_)) { return None; }
 
         match event {
+            Event::SyncProps(props) => {
+                let props = props.as_ref().clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| sync_props(ctx, &props)))
+            }
+
             Event::FocusStart => Some(TransitionPlan::to(State::StartFocused)
                 .apply(|ctx: &mut Context| ctx.active_field = Some(ActiveField::Start))),
 
@@ -282,22 +301,58 @@ impl ars_core::Machine for Machine {
             }
         }
     }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        debug_assert_eq!(old.id, new.id, "date_range_field::Props.id must remain stable");
+        if old == new { Vec::new() } else { vec![Event::SyncProps(Box::new(new.clone()))] }
+    }
 }
 
 /// Recomputes the derived complete range from the two field values. When both
 /// fields hold a value the range is normalized (swapping if needed so
 /// `start <= end`) and the normalized order is reflected back into the fields.
-/// When either field is empty the range is incomplete and the value is cleared.
+/// When the two dates are not comparable (different calendars/eras supplied via
+/// the setters) `normalized` returns `None` and the derived range is cleared
+/// rather than left stale. When either field is empty the range is incomplete
+/// and the value is cleared.
 fn recompute_range(ctx: &mut Context) {
     match (ctx.start_date.clone(), ctx.end_date.clone()) {
-        (Some(start), Some(end)) => {
-            if let Some(range) = DateRange::normalized(start, end) {
+        (Some(start), Some(end)) => match DateRange::normalized(start, end) {
+            Some(range) => {
                 ctx.start_date = Some(range.start.clone());
                 ctx.end_date = Some(range.end.clone());
                 ctx.value.set(Some(range));
             }
-        }
+            None => ctx.value.set(None),
+        },
         _ => ctx.value.set(None),
+    }
+}
+
+/// Re-derives mutable context fields from changed props. `id` is fixed at
+/// construction. A controlled component (`props.value` is `Some`) reconciles the
+/// controlled override and the per-field working values to the new range; an
+/// uncontrolled component keeps its internal working state and drops any stale
+/// controlled override.
+fn sync_props(ctx: &mut Context, props: &Props) {
+    ctx.min = props.min.clone();
+    ctx.max = props.max.clone();
+    ctx.disabled = props.disabled;
+    ctx.readonly = props.readonly;
+    ctx.required = props.required;
+    ctx.name = props.name.clone();
+    ctx.start_name = props.start_name.clone();
+    ctx.end_name = props.end_name.clone();
+    ctx.has_description = props.has_description;
+    ctx.has_error_message = props.has_error_message;
+    ctx.force_leading_zeros = props.force_leading_zeros;
+
+    if let Some(controlled) = &props.value {
+        ctx.value.sync_controlled(Some(controlled.clone()));
+        ctx.start_date = controlled.as_ref().map(|r| r.start.clone());
+        ctx.end_date = controlled.as_ref().map(|r| r.end.clone());
+    } else {
+        ctx.value.sync_controlled(None);
     }
 }
 ```
@@ -424,37 +479,42 @@ impl<'a> Api<'a> {
         Some((self.ctx.messages.range_description)(&start, &end, &self.ctx.locale))
     }
 
-    /// Build DateField Props for the start date input. The start field's lower
-    /// bound is the global `min`; its upper bound is the current end date when
-    /// set, otherwise the global `max`, so both global bounds and cross-field
-    /// coordination apply.
+    /// Build DateField Props for the start date input. Both child fields are
+    /// bounded only by the global `min`/`max`, never by the opposite endpoint: a
+    /// child `DateField` clamps completed dates to its own bounds, so binding
+    /// the start field's max to the current end would clamp away an out-of-order
+    /// edit before the parent could perform the documented swap. Cross-field
+    /// ordering is enforced by `recompute_range` in the parent. `invalid`
+    /// reflects whether this field's own value lies outside the global bounds.
     pub fn start_field_props(&self) -> date_field::Props {
         date_field::Props {
             id: self.ctx.ids.part("start"),
             value: Some(self.ctx.start_date.clone()),
             min_value: self.ctx.min.clone(),
-            max_value: self.ctx.end_date.clone().or_else(|| self.ctx.max.clone()),
+            max_value: self.ctx.max.clone(),
             disabled: self.ctx.disabled,
             readonly: self.ctx.readonly,
             required: self.ctx.required,
+            invalid: date_out_of_bounds(self.ctx.start_date.as_ref(), self.ctx.min.as_ref(), self.ctx.max.as_ref()),
             aria_label: Some((self.ctx.messages.start_label)(&self.ctx.locale)),
             force_leading_zeros: self.ctx.force_leading_zeros,
             ..Default::default()
         }
     }
 
-    /// Build DateField Props for the end date input. The end field's upper bound
-    /// is the global `max`; its lower bound is the current start date when set,
-    /// otherwise the global `min`.
+    /// Build DateField Props for the end date input. Bounded only by the global
+    /// `min`/`max` for the same reason as `start_field_props`; `invalid` reflects
+    /// whether the end field's own value lies outside the global bounds.
     pub fn end_field_props(&self) -> date_field::Props {
         date_field::Props {
             id: self.ctx.ids.part("end"),
             value: Some(self.ctx.end_date.clone()),
-            min_value: self.ctx.start_date.clone().or_else(|| self.ctx.min.clone()),
+            min_value: self.ctx.min.clone(),
             max_value: self.ctx.max.clone(),
             disabled: self.ctx.disabled,
             readonly: self.ctx.readonly,
             required: self.ctx.required,
+            invalid: date_out_of_bounds(self.ctx.end_date.as_ref(), self.ctx.min.as_ref(), self.ctx.max.as_ref()),
             aria_label: Some((self.ctx.messages.end_label)(&self.ctx.locale)),
             force_leading_zeros: self.ctx.force_leading_zeros,
             ..Default::default()
@@ -492,6 +552,8 @@ impl<'a> Api<'a> {
         if let Some(ref name) = self.ctx.name {
             attrs.set(HtmlAttr::Name, name);
         }
+        // A disabled control is excluded from form submission (mirrors date_picker).
+        if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
         // `DateRange::to_iso8601` already emits the `start/end` interval form.
         let iso_value = match self.ctx.value.get() {
             Some(range) => range.to_iso8601(),
@@ -501,32 +563,36 @@ impl<'a> Api<'a> {
         attrs
     }
 
-    /// Attributes for a separate hidden input carrying the start date.
-    /// Only meaningful when `start_name` is set on Props.
+    /// Attributes for a separate hidden input carrying the start date. Only
+    /// meaningful when `start_name` is set on Props. The value is the start
+    /// field's own date (set even before a complete range exists), so a
+    /// partially-entered range still submits the start date.
     pub fn start_hidden_input_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         attrs.set(HtmlAttr::Type, "hidden");
         if let Some(name) = &self.ctx.start_name {
             attrs.set(HtmlAttr::Name, name);
         }
-        let value = match self.ctx.value.get() {
-            Some(range) => range.start.to_iso8601(),
+        if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
+        let value = match &self.ctx.start_date {
+            Some(start) => start.to_iso8601(),
             None => String::new(),
         };
         attrs.set(HtmlAttr::Value, value);
         attrs
     }
 
-    /// Attributes for a separate hidden input carrying the end date.
-    /// Only meaningful when `end_name` is set on Props.
+    /// Attributes for a separate hidden input carrying the end date. Only
+    /// meaningful when `end_name` is set on Props; uses the end field's own date.
     pub fn end_hidden_input_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         attrs.set(HtmlAttr::Type, "hidden");
         if let Some(name) = &self.ctx.end_name {
             attrs.set(HtmlAttr::Name, name);
         }
-        let value = match self.ctx.value.get() {
-            Some(range) => range.end.to_iso8601(),
+        if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
+        let value = match &self.ctx.end_date {
+            Some(end) => end.to_iso8601(),
             None => String::new(),
         };
         attrs.set(HtmlAttr::Value, value);

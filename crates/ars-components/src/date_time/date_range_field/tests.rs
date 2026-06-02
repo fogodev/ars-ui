@@ -5,10 +5,14 @@
 //! state-machine or connect-API assertion that does not depend on `.snap`
 //! files.
 
-use alloc::{format, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec};
 use core::{cell::RefCell, cmp::Ordering};
 
-use ars_core::{AriaAttr, AttrMap, ComponentPart, ConnectApi, Env, HtmlAttr, Service};
+// `Machine as _` brings the `ars_core::Machine` trait into scope so
+// `Machine::on_props_changed` resolves, without shadowing the local `Machine`.
+use ars_core::{
+    AriaAttr, AttrMap, ComponentPart, ConnectApi, Env, HtmlAttr, Machine as _, Service,
+};
 use ars_i18n::{CalendarDate, DateRange, Locale, StubIntlBackend, locales::en_us};
 use insta::assert_snapshot;
 
@@ -303,6 +307,121 @@ fn clearing_start_clears_range() {
     assert_eq!(*svc.context().value.get(), None);
 }
 
+#[test]
+fn incomparable_dates_clear_the_derived_range() {
+    // Start a valid Gregorian range, then change the start to an ISO-8601 date.
+    // The two dates belong to different calendar systems, so they are not
+    // comparable and `DateRange::normalized` returns `None`; the derived range
+    // must be cleared rather than left stale.
+    let mut svc = service_with(
+        Props {
+            default_value: Some(range(date(2025, 6, 1), date(2025, 6, 15))),
+            ..props()
+        },
+        en_us(),
+    );
+
+    let iso = CalendarDate::new_iso8601(2025, 6, 10).expect("valid ISO date");
+    drop(svc.send(Event::StartValueChange(Some(iso.clone()))));
+
+    assert_eq!(svc.context().start_date, Some(iso));
+    assert_eq!(*svc.context().value.get(), None);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Reactive prop synchronization
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn controlled_value_update_syncs_after_mount() {
+    let mut svc = service_with(
+        Props {
+            value: Some(Some(range(date(2025, 6, 1), date(2025, 6, 15)))),
+            name: Some(String::from("trip-range")),
+            ..props()
+        },
+        en_us(),
+    );
+
+    drop(svc.set_props(Props {
+        value: Some(Some(range(date(2025, 9, 1), date(2025, 9, 30)))),
+        name: Some(String::from("trip-range")),
+        ..props()
+    }));
+
+    let ctx = svc.context();
+    assert_eq!(ctx.start_date, Some(date(2025, 9, 1)));
+    assert_eq!(ctx.end_date, Some(date(2025, 9, 30)));
+    assert_eq!(
+        *ctx.value.get(),
+        Some(range(date(2025, 9, 1), date(2025, 9, 30)))
+    );
+
+    assert_eq!(
+        attr(&svc.connect(&|_| {}).hidden_input_attrs(), HtmlAttr::Value).as_deref(),
+        Some("2025-09-01/2025-09-30")
+    );
+}
+
+#[test]
+fn prop_updates_sync_bounds_flags_and_names() {
+    let mut svc = service();
+
+    drop(svc.set_props(Props {
+        min: Some(date(2025, 1, 1)),
+        max: Some(date(2025, 12, 31)),
+        readonly: true,
+        required: true,
+        name: Some(String::from("range")),
+        has_description: true,
+        ..props()
+    }));
+
+    let ctx = svc.context();
+    assert_eq!(ctx.min, Some(date(2025, 1, 1)));
+    assert_eq!(ctx.max, Some(date(2025, 12, 31)));
+    assert!(ctx.readonly);
+    assert!(ctx.required);
+    assert_eq!(ctx.name.as_deref(), Some("range"));
+    assert!(ctx.has_description);
+}
+
+#[test]
+fn on_props_changed_emits_nothing_when_props_are_unchanged() {
+    let props = Props {
+        min: Some(date(2025, 1, 1)),
+        ..props()
+    };
+
+    assert!(Machine::on_props_changed(&props, &props).is_empty());
+
+    let changed = Props {
+        max: Some(date(2025, 12, 31)),
+        ..props.clone()
+    };
+    assert_eq!(
+        Machine::on_props_changed(&props, &changed),
+        Vec::from([Event::SyncProps(Box::new(changed))])
+    );
+}
+
+#[test]
+fn sync_props_processes_even_when_currently_disabled() {
+    let mut svc = service_with(
+        Props {
+            disabled: true,
+            ..props()
+        },
+        en_us(),
+    );
+
+    // Re-enabling via props must reach the context even though the component
+    // is disabled when the event is processed.
+    drop(svc.set_props(props()));
+
+    assert!(!svc.context().disabled);
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Validation
 // ────────────────────────────────────────────────────────────────────
@@ -523,7 +642,11 @@ fn global_min_max_apply_to_both_fields_when_no_range() {
 }
 
 #[test]
-fn selected_range_constrains_cross_field_bounds() {
+fn child_fields_are_bounded_only_by_global_min_max() {
+    // Both child fields carry the *global* min/max even when a range is
+    // selected — binding the start field's max to the current end (or the end
+    // field's min to the current start) would let the child clamp away an
+    // out-of-order edit before the parent could perform the documented swap.
     let svc = service_with(
         Props {
             min: Some(date(2025, 1, 1)),
@@ -539,13 +662,49 @@ fn selected_range_constrains_cross_field_bounds() {
     let start = api.start_field_props();
     let end = api.end_field_props();
 
-    // Start cannot exceed the current end; end cannot precede the current start.
     assert_eq!(start.min_value, Some(date(2025, 1, 1)));
-    assert_eq!(start.max_value, Some(date(2025, 6, 30)));
-    assert_eq!(end.min_value, Some(date(2025, 6, 1)));
+    assert_eq!(start.max_value, Some(date(2025, 12, 31)));
+    assert_eq!(end.min_value, Some(date(2025, 1, 1)));
     assert_eq!(end.max_value, Some(date(2025, 12, 31)));
     assert_eq!(start.value, Some(Some(date(2025, 6, 1))));
     assert_eq!(end.value, Some(Some(date(2025, 6, 30))));
+}
+
+#[test]
+fn out_of_bounds_endpoints_mark_their_child_field_invalid() {
+    let svc = service_with(
+        Props {
+            min: Some(date(2025, 6, 1)),
+            max: Some(date(2025, 6, 30)),
+            // start below min, end above max (set programmatically).
+            default_value: Some(range(date(2025, 5, 1), date(2025, 7, 15))),
+            ..props()
+        },
+        en_us(),
+    );
+
+    let api = svc.connect(&|_| {});
+
+    assert!(api.start_field_props().invalid);
+    assert!(api.end_field_props().invalid);
+}
+
+#[test]
+fn in_bounds_endpoints_keep_child_fields_valid() {
+    let svc = service_with(
+        Props {
+            min: Some(date(2025, 1, 1)),
+            max: Some(date(2025, 12, 31)),
+            default_value: Some(range(date(2025, 6, 1), date(2025, 6, 30))),
+            ..props()
+        },
+        en_us(),
+    );
+
+    let api = svc.connect(&|_| {});
+
+    assert!(!api.start_field_props().invalid);
+    assert!(!api.end_field_props().invalid);
 }
 
 #[test]
@@ -658,6 +817,59 @@ fn separate_hidden_inputs_are_empty_without_range() {
         attr(&api.end_hidden_input_attrs(), HtmlAttr::Value).as_deref(),
         Some("")
     );
+}
+
+#[test]
+fn separate_hidden_inputs_submit_partial_field_values() {
+    // Only the start has been entered — no complete range yet, but the
+    // per-field start input must still submit the entered start date.
+    let mut svc = service_with(
+        Props {
+            start_name: Some(String::from("check-in")),
+            end_name: Some(String::from("check-out")),
+            ..props()
+        },
+        en_us(),
+    );
+
+    drop(svc.send(Event::StartValueChange(Some(date(2025, 6, 1)))));
+
+    let api = svc.connect(&|_| {});
+
+    assert!(api.selected_range().is_none());
+    assert_eq!(
+        attr(&api.start_hidden_input_attrs(), HtmlAttr::Value).as_deref(),
+        Some("2025-06-01")
+    );
+    assert_eq!(
+        attr(&api.end_hidden_input_attrs(), HtmlAttr::Value).as_deref(),
+        Some("")
+    );
+}
+
+#[test]
+fn disabled_excludes_all_hidden_inputs_from_submission() {
+    let svc = service_with(
+        Props {
+            disabled: true,
+            name: Some(String::from("trip-range")),
+            start_name: Some(String::from("check-in")),
+            end_name: Some(String::from("check-out")),
+            default_value: Some(range(date(2025, 6, 1), date(2025, 6, 15))),
+            ..props()
+        },
+        en_us(),
+    );
+
+    let api = svc.connect(&|_| {});
+
+    for attrs in [
+        api.hidden_input_attrs(),
+        api.start_hidden_input_attrs(),
+        api.end_hidden_input_attrs(),
+    ] {
+        assert_eq!(attr(&attrs, HtmlAttr::Disabled).as_deref(), Some("true"));
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────
