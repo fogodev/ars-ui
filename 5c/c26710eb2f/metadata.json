@@ -1,0 +1,48 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "5cc26710eb2f",
+  "strategy": "manual-commit",
+  "branch": "impl-284",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_range_field/mod.rs",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_description.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_end_field_marker.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_end_hidden_input.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_error_message.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_hidden_input_empty.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_hidden_input_with_range.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_label.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_disabled.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_end_focused.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_idle.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_invalid.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_readonly.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_required.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_start_focused.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_with_description_and_error.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_separator.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_start_field_marker.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_start_hidden_input.snap",
+    "crates/ars-components/src/date_time/date_range_field/tests.rs",
+    "crates/ars-components/src/date_time/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "spec/components/date-time/date-range-field.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/5c/c26710eb2f/0/metadata.json",
+      "transcript": "/5c/c26710eb2f/0/full.jsonl",
+      "content_hash": "/5c/c26710eb2f/0/content_hash.txt",
+      "prompt": "/5c/c26710eb2f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 43989,
+    "cache_creation_tokens": 754763,
+    "cache_read_tokens": 34547477,
+    "output_tokens": 140050,
+    "api_call_count": 161
+  }
+}

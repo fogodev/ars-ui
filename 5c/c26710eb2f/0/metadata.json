@@ -1,0 +1,151 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "5cc26710eb2f",
+  "session_id": "fb08ddb6-3398-445c-880d-6a9528edc184",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-02T17:23:18.409358Z",
+  "branch": "impl-284",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_range_field/mod.rs",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_description.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_end_field_marker.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_end_hidden_input.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_error_message.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_hidden_input_empty.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_hidden_input_with_range.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_label.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_disabled.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_end_focused.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_idle.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_invalid.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_readonly.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_required.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_start_focused.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_root_with_description_and_error.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_separator.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_start_field_marker.snap",
+    "crates/ars-components/src/date_time/date_range_field/snapshots/ars_components__date_time__date_range_field__tests__snapshot_start_hidden_input.snap",
+    "crates/ars-components/src/date_time/date_range_field/tests.rs",
+    "crates/ars-components/src/date_time/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "spec/components/date-time/date-range-field.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "3aeaaf4e5fa6",
+  "token_usage": {
+    "input_tokens": 43989,
+    "cache_creation_tokens": 754763,
+    "cache_read_tokens": 34547477,
+    "output_tokens": 140050,
+    "api_call_count": 161
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement task #284: the agnostic core state machine for a DateRangeField component in a Rust UI component library, following an existing spec and codebase conventions.",
+    "outcome": "Fully implemented `DateRangeField` as a stateful composition of two `DateField` instances with range coordination, 100% line/function coverage, all 10 xci-fast CI gates passing, spec synced to match implementation, and PR committed and pushed.",
+    "learnings": {
+      "repo": [
+        "Components use a Machine trait with `connect` method that returns an `Api` struct; child component config flows through props methods like `start_field_props()`/`end_field_props()` rather than embedding children in the `Part` enum (matching date_picker/date_time_picker patterns).",
+        "Multi-arg MessageFn closures trigger a clippy type-complexity lint; the convention is to define a named type alias (e.g., `type RangeDescriptionFn = MessageFn<(CalendarDate, CalendarDate), String>`).",
+        "The snapshot-count gate auto-detects components by snapshot filename and enforces per-component minimums; adding 18 snapshots for date_range_field passed automatically.",
+        "Unreferenced snapshot check (`insta --unreferenced=reject`) requires `--features i18n` to avoid false positives from the pre-existing `utility/highlight` component tests gated on that feature.",
+        "No date_time modules use `# Examples` doctests — the convention is integration tests only.",
+        "The `DateRange::normalized()` method returns `Option` (not the range directly), and `DateRange::new` requires `u8`/`Result` construction — the spec had used incorrect API shapes.",
+        "`intl_backend` comes from `Env` (not Props/Context), so `range_description` locale formatting must wire through `Env` on the Context, which the spec had omitted.",
+        "The catalog (parity table) is a priority/parity reference, not an implementation tracker — no update needed when implementing an agnostic core.",
+        "Adapter specs for DateRangeField already existed and used `api.start_field_props()`, confirming the design approach before implementation started."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/date_range_field/mod.rs",
+          "finding": "Context must track `start_date: Option<CalendarDate>` and `end_date: Option<CalendarDate>` independently; `value: Option<DateRange>` must be derived from them. The spec's `Option<DateRange>` on Context cannot hold a partial (one-sided) range, making it impossible to complete a range from two separate StartValueChange/EndValueChange events."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_range_field/mod.rs",
+          "line": 493,
+          "end_line": 504,
+          "finding": "Readonly guard on StartValueChange/EndValueChange event handlers was initially untested — discovered via llvm-cov coverage report."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_range_field/mod.rs",
+          "line": 874,
+          "end_line": 895,
+          "finding": "Empty start/end separate hidden inputs (when value is None) were uncovered — discovered via llvm-cov."
+        }
+      ],
+      "workflow": [
+        "Running `cargo xci-fast` as a pre-push gate (10 checks including clippy, conformance, proptest, snapshot-count, spec validate, snippet compile, doc build) before committing prevents CI failures.",
+        "The 3-phase post-implementation audit (spec/impl drift → missing coverage → test gaps) caught a real issue (unused `Api::new`) and 3 coverage gaps that unit tests hadn't exercised.",
+        "llvm-cov per-file coverage with `--show-missing-lines` is the right tool for finding uncovered branches after initial test writing.",
+        "Two consecutive clean audit rounds serves as the convergence criterion for the 'anything missing?' phase.",
+        "Spawning parallel Explore agents to read DateField, DateRange shared types, and recently-added range components simultaneously saved significant time during the initial codebase exploration."
+      ]
+    },
+    "friction": [
+      "The spec had 8 API-drift issues vs the actual Rust codebase (wrong method names like `min`/`max` vs `min_value`/`max_value`, wrong return types, missing Context fields, incorrect date construction APIs) requiring a verification pass before planning.",
+      "`SendResult` field name was `state_changed` not `transitioned` — required reading core lib source to discover.",
+      "The `awk` command in the coverage check leaked into other files' output, requiring a targeted per-file coverage command instead.",
+      "The `insta unreferenced` check aborted (false positive) without `--features i18n`, requiring a follow-up run with the feature flag.",
+      "The `ExitPlanMode` tool required a `ToolSearch` call to load its schema before it could be invoked.",
+      "Multiple sequential read passes on `date_field/mod.rs` were needed to extract different sections (Props, child-composition pattern, ARIA emission) because the file was too large to read in one pass."
+    ],
+    "open_items": [
+      "Adapter implementations (framework-specific bindings) for DateRangeField are not yet written — adapter specs exist but the agnostic core is the only deliverable for #284.",
+      "The `DateRange::normalized()→None` guard (3 missed coverage regions) is intentionally untested — it's a defensive guard for a calendar-mismatch scenario unreachable in single-calendar use.",
+      "The `utility/highlight` component has pre-existing unreferenced snapshots when run without `--features i18n` — a known pre-existing issue unrelated to this PR.",
+      "The `block v0.1.6` transitive-dependency clippy note is a pre-existing crate-wide warning, not introduced by this PR."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-02T17:22:36.733147Z",
+    "agent_lines": 3061,
+    "agent_removed": 110,
+    "human_added": 86,
+    "human_modified": 38,
+    "human_removed": 0,
+    "total_committed": 3185,
+    "total_lines_changed": 3295,
+    "agent_percentage": 96.23672230652504,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 124,
+      "user_lines_removed": 38,
+      "agent_lines_added": 3136,
+      "agent_lines_removed": 147,
+      "user_added_per_file": {
+        "crates/ars-components/src/date_time/date_range_field/mod.rs": 32,
+        "crates/ars-components/src/date_time/date_range_field/tests.rs": 68,
+        "crates/ars-components/tests/proptest_state_machines/date_time.rs": 22,
+        "spec/components/date-time/date-range-field.md": 2
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/date_time/date_range_field/mod.rs": 13,
+        "crates/ars-components/src/date_time/date_range_field/tests.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/date_time.rs": 22,
+        "spec/components/date-time/date-range-field.md": 2
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3223,
+      "agent_lines_removed": 148
+    }
+  ]
+}
