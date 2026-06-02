@@ -1104,6 +1104,18 @@ impl Api<'_> {
             match data.key {
                 KeyboardKey::Enter => (self.send)(Event::ItemAction(key.clone())),
                 KeyboardKey::Space => (self.send)(self.select_key_event(key)),
+                KeyboardKey::Escape
+                    if self.context.escape_key_behavior == EscapeKeyBehavior::ClearSelection =>
+                {
+                    (self.send)(Event::ClearSelection);
+                }
+                _ if data
+                    .character
+                    .is_some_and(|ch| ch.eq_ignore_ascii_case(&'a'))
+                    && (data.ctrl_key || data.meta_key) =>
+                {
+                    (self.send)(Event::SelectAll);
+                }
                 _ => {}
             }
 
@@ -1605,6 +1617,7 @@ fn sync_props_plan(context: &Context, props: &Props) -> TransitionPlan<Machine> 
         ctx.dnd_enabled = dnd_enabled;
         ctx.ids = ids;
         ctx.requested_selected_keys = None;
+        ctx.requested_action_key = None;
         ctx.selected_keys.sync_controlled(controlled_keys.clone());
 
         if controlled_keys.is_none() {
@@ -2285,14 +2298,24 @@ mod tests {
         );
 
         let api = grid.connect(&send);
+        let mut ctrl_a = keyboard(KeyboardKey::Unidentified, Some('a'));
+
+        ctrl_a.ctrl_key = true;
 
         api.on_cell_keydown(&key("alpha"), &keyboard(KeyboardKey::Enter, None));
         api.on_cell_keydown(&key("alpha"), &keyboard(KeyboardKey::Space, Some(' ')));
+        api.on_cell_keydown(&key("alpha"), &keyboard(KeyboardKey::Escape, None));
+        api.on_cell_keydown(&key("alpha"), &ctrl_a);
         api.on_cell_keydown(&key("alpha"), &keyboard(KeyboardKey::ArrowDown, None));
 
         assert_eq!(
             captured.into_inner(),
-            vec![Event::ItemAction(key("alpha")), Event::Select(key("alpha"))]
+            vec![
+                Event::ItemAction(key("alpha")),
+                Event::Select(key("alpha")),
+                Event::ClearSelection,
+                Event::SelectAll,
+            ]
         );
     }
 
@@ -2325,6 +2348,10 @@ mod tests {
         drop(effect.run(grid.context(), grid.props(), send));
 
         assert_eq!(*actions.lock().expect("actions lock"), vec![key("alpha")]);
+
+        drop(grid.set_props(grid.props().clone().loading(true)));
+
+        assert_eq!(grid.connect(&|_| {}).requested_action_key(), None);
     }
 
     #[test]

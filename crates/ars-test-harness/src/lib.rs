@@ -334,11 +334,11 @@ impl FakeTimerHooks {
         let set_interval_state = Rc::clone(state);
         let set_interval = Closure::<dyn FnMut(JsValue, JsValue) -> JsValue>::wrap(Box::new(
             move |callback: JsValue, delay: JsValue| {
-                let delay = normalize_timer_delay(&delay);
+                let interval = normalize_timer_delay(&delay);
                 JsValue::from_f64(f64::from(set_interval_state.borrow_mut().schedule(
                     callback,
                     &delay,
-                    Some(delay),
+                    Some(interval),
                 )))
             },
         ));

@@ -865,7 +865,7 @@ impl<'a> Api<'a> {
             KeyboardKey::Escape => { if self.ctx.open { (self.send)(Event::Close); } }
             _ if let Some(ch) = data.character && !ctrl && !meta => {
                 // Timestamp obtained from the adapter's clock
-                (self.send)(Event::TypeaheadSearch(ch, 0));
+                (self.send)(Event::TypeaheadSearch(ch, core::time::Duration::ZERO));
             }
             _ => {}
         }
@@ -972,7 +972,7 @@ impl<'a> Api<'a> {
             KeyboardKey::Escape => (self.send)(Event::Close),
             _ if let Some(ch) = data.character && !ctrl && !meta => {
                 // Timestamp obtained from the adapter's clock
-                (self.send)(Event::TypeaheadSearch(ch, 0));
+                (self.send)(Event::TypeaheadSearch(ch, core::time::Duration::ZERO));
             }
             _ => {}
         }
