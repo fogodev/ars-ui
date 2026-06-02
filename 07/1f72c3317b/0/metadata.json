@@ -1,0 +1,101 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "071f72c3317b",
+  "session_id": "dd441a93-8791-4c38-b72c-c5a3afd87f1b",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-02T14:42:56.300125Z",
+  "branch": "impl-292",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+    "crates/ars-components/src/date_time/date_picker/mod.rs",
+    "crates/ars-components/src/date_time/date_time_picker/tests.rs",
+    "spec/components/date-time/date-picker.md",
+    "spec/components/date-time/date-time-picker.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "fd117be9da74",
+  "checkpoint_transcript_start": 1870,
+  "transcript_lines_at_start": 1870,
+  "token_usage": {
+    "input_tokens": 2704,
+    "cache_creation_tokens": 831347,
+    "cache_read_tokens": 26164877,
+    "output_tokens": 19517,
+    "api_call_count": 32
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "summary": {
+    "intent": "Fix 4 i18n-parity findings from Codex review pass-5 in the DateTimePicker and DatePicker components, bringing them to parity with sibling components.",
+    "outcome": "All 4 fixes implemented and validated: controlled→uncontrolled transition in sync_props, RTL bidi-mark filtering in DatePicker separator, localized day-period typing, and localized month aria-valuetext. All 10 CI gates green, committed, pushed, and Codex threads resolved.",
+    "learnings": {
+      "repo": [
+        "DateTimePicker and DatePicker have a recurring pattern of lagging behind sibling components (DateField etc.) in i18n parity — Codex multi-pass review catches these gaps systematically.",
+        "aria-valuetext for numeric segments uses unpadded values (e.g. '2' not '02'), matching DateField's aria_value_text behavior.",
+        "DatePicker's default_format_for_locale must strip bidi/control marks (e.g. RTL mark U+200F) from locale-generated separators to produce clean display separators.",
+        "Day-period typing is routed through a dedicated backend path in type_into_segment, separate from numeric segment typing.",
+        "The project uses xci-fast (10 gates) as the pre-commit CI validation step."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "sync_props needed a controlled→uncontrolled transition fix — when value prop is cleared/unset, internal state must be reset accordingly."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "type_into_segment has a dedicated day-period branch that required localized character matching via day_period_from_char."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "segment_attrs aria-valuetext for month/day-period segments should use aria_value_text helper to produce localized display strings."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_picker/mod.rs",
+          "finding": "default_format_for_locale must filter out Unicode bidi and control marks from separator characters extracted from locale format patterns."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/tests.rs",
+          "finding": "Snapshot test for hour segment valuetext changed from padded '02' to unpadded '2' after aria_value_text fix; new test added for month-name aria-valuetext assertion."
+        }
+      ],
+      "workflow": [
+        "Codex multi-pass review (pass-5 in this session) is used as an automated i18n/a11y parity auditor across component siblings.",
+        "Snapshot diffs are reviewed manually before acceptance — only accept when the change matches expected behavior (not just 'tests pass').",
+        "Spec markdown files (spec/components/date-time/*.md) are kept in sync with implementation changes as part of each fix commit.",
+        "After fixes, Codex threads are replied to and resolved, then a new Codex pass is triggered — iterative review loop."
+      ]
+    },
+    "friction": [
+      "Snapshot tests changed as a side effect of the aria_value_text fix, requiring manual diff review and acceptance before the test suite was clean.",
+      "Multiple reads of the same large file (date_time_picker/mod.rs) were needed to locate different fix sites, suggesting the file is large and densely packed."
+    ],
+    "open_items": [
+      "Additional Codex passes may surface further i18n-parity gaps in DateTimePicker/DatePicker — the iterative review loop continues beyond pass-5.",
+      "The controlled→uncontrolled transition pattern in sync_props may exist in other date/time components and should be audited for consistency."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-02T14:42:35.830058Z",
+    "agent_lines": 127,
+    "agent_removed": 16,
+    "human_added": 1,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 128,
+    "total_lines_changed": 145,
+    "agent_percentage": 98.62068965517241,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
