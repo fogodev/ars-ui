@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/specialized/timer/mod.rs
+expression: "snapshot_attrs(&countdown_api(State::Idle, 60).start_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "start-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "timer",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Start timer",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/specialized/timer/mod.rs
+expression: "snapshot_attrs(&api_for(State::Idle, 60_000, Mode::Countdown,\n60_000).label_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "label",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "timer",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "timer-label",
+            ),
+        ),
+    ],
+    styles: [],
+}

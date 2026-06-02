@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/specialized/timer/mod.rs
+expression: "snapshot_attrs(&countdown_api(State::Idle, 60).display_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "display",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "timer",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "timer-display",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -63,7 +63,10 @@ pub enum Event {
     /// A single tick interval elapsed.
     Tick,
     /// Set the remaining/elapsed time directly.
-    SetTime(u64),
+    SetTime(Duration),
+    /// Synchronize the context-backed props (`target`, `interval`, `mode`)
+    /// after a controlled prop update. Emitted by `Machine::on_props_changed`.
+    SyncProps,
 }
 ```
 
@@ -72,13 +75,13 @@ pub enum Event {
 ```rust
 #[derive(Clone, Debug, PartialEq)]
 pub struct Context {
-    /// Current time value in milliseconds.
+    /// Current time value.
     /// For countdown: remaining time. For stopwatch: elapsed time.
-    pub current_ms: u64,
-    /// The target duration in milliseconds (for countdown).
-    pub target_ms: u64,
-    /// Tick interval in milliseconds.
-    pub interval_ms: u32,
+    pub current: Duration,
+    /// The target duration (for countdown).
+    pub target: Duration,
+    /// Tick interval.
+    pub interval: Duration,
     /// Timer mode.
     pub mode: Mode,
     /// Whether auto-start is enabled.
@@ -89,8 +92,14 @@ pub struct Context {
     pub messages: Messages,
     /// Component instance IDs.
     pub ids: ComponentIds,
+    /// Backend used for locale-aware digit formatting of the displayed time.
+    pub intl_backend: Arc<dyn IntlBackend>,
 }
 ```
+
+`Context` therefore implements `Clone` only via derive; `Debug` and `PartialEq`
+are provided manually and exclude `intl_backend` (an injected service, not
+observable state), mirroring `TimeField`.
 
 ### 1.4 Props
 
@@ -99,10 +108,10 @@ pub struct Context {
 pub struct Props {
     /// Component instance ID.
     pub id: String,
-    /// Target duration in milliseconds (for countdown mode).
-    pub target_ms: u64,
-    /// Tick interval in milliseconds.
-    pub interval_ms: u32,
+    /// Target duration (for countdown mode).
+    pub target: Duration,
+    /// Tick interval.
+    pub interval: Duration,
     /// Timer mode (countdown or stopwatch).
     pub mode: Mode,
     /// Auto-start when mounted.
@@ -113,8 +122,8 @@ impl Default for Props {
     fn default() -> Self {
         Self {
             id: String::new(),
-            target_ms: 60_000,
-            interval_ms: 1000,
+            target: Duration::from_secs(60),
+            interval: Duration::from_secs(1),
             mode: Mode::Countdown,
             auto_start: false,
         }
@@ -122,7 +131,34 @@ impl Default for Props {
 }
 ```
 
-### 1.5 Full Machine Implementation
+### 1.5 Effects
+
+The recurring tick and the completion announcement are side effects the agnostic core cannot
+perform itself (it has no DOM and no recurring-interval primitive — `PlatformEffects` exposes only
+`set_timeout`). They are therefore emitted as typed **marker effects** that framework adapters
+translate into real platform calls, exactly like `clipboard::Effect::FeedbackTimer` and
+`toast::single::Effect::DurationTimer`.
+
+```rust
+/// Typed effect intents emitted by the timer machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter starts a recurring interval of `Context::interval`
+    /// milliseconds that dispatches `Event::Tick` on each elapse. Emitted on
+    /// initial mount when the timer auto-starts (via `Machine::initial_effects`)
+    /// and on every transition into `State::Running`. Cancelled whenever the
+    /// timer leaves `State::Running` (pause, completion, reset, or restart);
+    /// the adapter no-ops the cancellation when no interval is active.
+    TimerInterval,
+
+    /// Adapter announces the `Messages::completed_announcement` message into a
+    /// polite `aria-live` region. Emitted on the countdown transition into
+    /// `State::Completed`.
+    AnnounceCompleted,
+}
+```
+
+### 1.6 Full Machine Implementation
 
 ```rust
 pub struct Machine;
@@ -133,126 +169,185 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let current_ms = match props.mode {
-            Mode::Countdown => props.target_ms,
-            Mode::Stopwatch => 0,
+        let current = match props.mode {
+            Mode::Countdown => props.target,
+            Mode::Stopwatch => Duration::ZERO,
         };
 
-        let ids = ComponentIds::from_id(&props.id);
-        let locale = env.locale.clone();
-        let messages = messages.clone();
-
-        let state = if props.auto_start {
+        // A zero-duration countdown is already complete; it must not enter
+        // `Running` (auto_start is ignored in that degenerate case).
+        let state = if is_instantly_complete(props.mode, props.target) {
+            State::Completed
+        } else if props.auto_start {
             State::Running
         } else {
             State::Idle
         };
 
         (state, Context {
-            current_ms,
-            target_ms: props.target_ms,
-            interval_ms: props.interval_ms,
+            current,
+            target: props.target,
+            // A zero interval would make every tick a no-op, so clamp to 1ms.
+            interval: effective_interval(props.interval),
             mode: props.mode,
             auto_start: props.auto_start,
-            locale,
-            messages,
-            ids,
+            locale: env.locale.clone(),
+            messages: messages.clone(),
+            ids: ComponentIds::from_id(&props.id),
+            intl_backend: Arc::clone(&env.intl_backend),
         })
+    }
+
+    // Sync the context-backed props after a controlled update so transitions
+    // (Tick/Reset/Restart/SyncProps) read the latest target/interval/mode.
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(old.id, new.id, "timer::Props.id must remain stable after init");
+        if old.target != new.target || old.interval != new.interval || old.mode != new.mode {
+            vec![Event::SyncProps]
+        } else {
+            Vec::new()
+        }
+    }
+
+    // Auto-started timers boot directly into `Running` without a transition,
+    // so the interval intent is emitted here on first mount.
+    fn initial_effects(
+        state: &Self::State,
+        _ctx: &Self::Context,
+        _props: &Self::Props,
+    ) -> Vec<PendingEffect<Self>> {
+        let mut effects = Vec::new();
+        if matches!(state, State::Running) {
+            effects.push(PendingEffect::named(Effect::TimerInterval));
+        }
+        effects
     }
 
     fn transition(
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
-            (State::Idle, Event::Start) => {
-                Some(TransitionPlan::to(State::Running).with_named_effect("timer-interval", |ctx, _props, send| {
-                    let interval = ctx.interval_ms;
-                    let timer = set_interval(interval, move || {
-                        send(Event::Tick);
-                    });
-                    Box::new(move || cancel_interval(timer))
-                }))
+            // Idle start, paused resume, and paused start all enter `Running`
+            // and (re)emit the interval intent.
+            (State::Idle, Event::Start)
+            | (State::Paused, Event::Resume | Event::Start) => {
+                Some(TransitionPlan::to(State::Running)
+                    .with_effect(PendingEffect::named(Effect::TimerInterval)))
             }
 
-            (State::Running, Event::Tick) => {
-                match ctx.mode {
-                    Mode::Countdown => {
-                        let new_ms = ctx.current_ms.saturating_sub(ctx.interval_ms as u64);
-                        if new_ms == 0 {
-                            Some(TransitionPlan::to(State::Completed).apply(|ctx| {
-                                ctx.current_ms = 0;
-                            }).with_named_effect("announce", |ctx, _props, _send| {
-                                let platform = use_platform_effects();
-                                platform.announce(&(ctx.messages.completed_announcement)(&ctx.locale));
-                                no_cleanup()
-                            }))
-                        } else {
-                            Some(TransitionPlan::context_only(move |ctx| {
-                                ctx.current_ms = new_ms;
-                            }))
-                        }
-                    }
-                    Mode::Stopwatch => {
-                        let interval = ctx.interval_ms as u64;
+            (State::Running, Event::Tick) => match ctx.mode {
+                Mode::Countdown => {
+                    let new = ctx.current.saturating_sub(ctx.interval);
+                    if new.is_zero() {
+                        Some(TransitionPlan::to(State::Completed)
+                            .apply(|ctx| { ctx.current = Duration::ZERO; })
+                            .cancel_effect(Effect::TimerInterval)
+                            .with_effect(PendingEffect::named(Effect::AnnounceCompleted)))
+                    } else {
                         Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.current_ms += interval;
+                            ctx.current = new;
                         }))
                     }
                 }
-            }
+                Mode::Stopwatch => {
+                    let interval = ctx.interval;
+                    Some(TransitionPlan::context_only(move |ctx| {
+                        ctx.current = ctx.current.saturating_add(interval);
+                    }))
+                }
+            },
 
             (State::Running, Event::Pause) => {
-                Some(TransitionPlan::to(State::Paused))
-            }
-
-            (State::Paused, Event::Resume)
-            | (State::Paused, Event::Start) => {
-                Some(TransitionPlan::to(State::Running).with_named_effect("timer-interval", |ctx, _props, send| {
-                    let interval = ctx.interval_ms;
-                    let timer = set_interval(interval, move || {
-                        send(Event::Tick);
-                    });
-                    Box::new(move || cancel_interval(timer))
-                }))
+                Some(TransitionPlan::to(State::Paused).cancel_effect(Effect::TimerInterval))
             }
 
             (_, Event::Reset) => {
-                let initial_ms = match ctx.mode {
-                    Mode::Countdown => ctx.target_ms,
-                    Mode::Stopwatch => 0,
+                let initial = initial_duration(ctx.mode, ctx.target);
+                // A zero-duration countdown resets to Completed, not Idle, so it
+                // cannot be (re)started into a running 00:00.
+                let target_state = if is_instantly_complete(ctx.mode, ctx.target) {
+                    State::Completed
+                } else {
+                    State::Idle
                 };
-                Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
-                    ctx.current_ms = initial_ms;
-                }))
+                Some(TransitionPlan::to(target_state)
+                    .apply(move |ctx| { ctx.current = initial; })
+                    .cancel_effect(Effect::TimerInterval))
             }
 
             (_, Event::Restart) => {
-                let initial_ms = match ctx.mode {
-                    Mode::Countdown => ctx.target_ms,
-                    Mode::Stopwatch => 0,
-                };
-                Some(TransitionPlan::to(State::Running).apply(move |ctx| {
-                    ctx.current_ms = initial_ms;
-                }).with_named_effect("timer-interval", |ctx, _props, send| {
-                    let interval = ctx.interval_ms;
-                    let timer = set_interval(interval, move || {
-                        send(Event::Tick);
-                    });
-                    Box::new(move || cancel_interval(timer))
+                let initial = initial_duration(ctx.mode, ctx.target);
+                // Restarting a zero-duration countdown completes immediately.
+                if is_instantly_complete(ctx.mode, ctx.target) {
+                    Some(TransitionPlan::to(State::Completed)
+                        .apply(move |ctx| { ctx.current = initial; })
+                        .cancel_effect(Effect::TimerInterval))
+                } else {
+                    Some(TransitionPlan::to(State::Running)
+                        .apply(move |ctx| { ctx.current = initial; })
+                        .cancel_effect(Effect::TimerInterval)
+                        .with_effect(PendingEffect::named(Effect::TimerInterval)))
+                }
+            }
+
+            (_, Event::SetTime(duration)) => {
+                let duration = *duration;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.current = duration;
                 }))
             }
 
-            (_, Event::SetTime(ms)) => {
-                let ms = *ms;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.current_ms = ms;
-                }))
+            (_, Event::SyncProps) => {
+                let target = props.target;
+                let interval = effective_interval(props.interval);
+                let mode = props.mode;
+                // Syncing into a zero-duration countdown completes on arrival.
+                if is_instantly_complete(mode, target) {
+                    Some(TransitionPlan::to(State::Completed)
+                        .apply(move |ctx| {
+                            ctx.target = target;
+                            ctx.interval = interval;
+                            ctx.mode = mode;
+                            ctx.current = Duration::ZERO;
+                        })
+                        .cancel_effect(Effect::TimerInterval))
+                } else {
+                    // Reconfiguring a completed timer to a runnable config must
+                    // leave Completed, else it stays completed/disabled (or a
+                    // stopwatch stuck in Completed) until manual reset.
+                    let was_completed = matches!(state, State::Completed);
+                    // Idle and (newly-runnable) Completed mirror the new initial;
+                    // running/paused keep the in-progress `current`.
+                    let reset_current = matches!(state, State::Idle | State::Completed);
+                    // A live cadence change re-arms the adapter interval.
+                    let rearm = matches!(state, State::Running) && interval != ctx.interval;
+                    let apply = move |ctx: &mut Context| {
+                        ctx.target = target;
+                        ctx.interval = interval;
+                        ctx.mode = mode;
+                        if reset_current {
+                            ctx.current = initial_duration(mode, target);
+                        }
+                    };
+                    let mut plan = if was_completed {
+                        TransitionPlan::to(State::Idle).apply(apply).cancel_effect(Effect::TimerInterval)
+                    } else {
+                        TransitionPlan::context_only(apply)
+                    };
+                    if rearm {
+                        plan = plan
+                            .cancel_effect(Effect::TimerInterval)
+                            .with_effect(PendingEffect::named(Effect::TimerInterval));
+                    }
+                    Some(plan)
+                }
             }
 
             _ => None,
@@ -268,9 +363,27 @@ impl ars_core::Machine for Machine {
         Api { state, ctx, props, send }
     }
 }
+
+/// The initial `current` value for a given mode and target.
+const fn initial_duration(mode: Mode, target: Duration) -> Duration {
+    match mode {
+        Mode::Countdown => target,
+        Mode::Stopwatch => Duration::ZERO,
+    }
+}
+
+/// Replaces a zero interval with a 1ms floor so ticks always make progress.
+const fn effective_interval(interval: Duration) -> Duration {
+    if interval.is_zero() { Duration::from_millis(1) } else { interval }
+}
+
+/// Whether a `(mode, target)` describes a countdown that is already complete.
+const fn is_instantly_complete(mode: Mode, target: Duration) -> bool {
+    matches!(mode, Mode::Countdown) && target.is_zero()
+}
 ```
 
-### 1.6 Connect / API
+### 1.7 Connect / API
 
 ```rust
 #[derive(ComponentPart)]
@@ -298,11 +411,11 @@ impl<'a> Api<'a> {
     pub fn is_paused(&self) -> bool { *self.state == State::Paused }
     pub fn is_completed(&self) -> bool { *self.state == State::Completed }
     pub fn is_idle(&self) -> bool { *self.state == State::Idle }
-    pub fn current_ms(&self) -> u64 { self.ctx.current_ms }
+    pub fn current(&self) -> Duration { self.ctx.current }
 
     /// Current time broken into hours, minutes, seconds, milliseconds.
     pub fn display_time(&self) -> (u64, u64, u64, u64) {
-        let ms = self.ctx.current_ms;
+        let ms = self.ctx.current.as_millis() as u64;
         let hours = ms / 3_600_000;
         let minutes = (ms % 3_600_000) / 60_000;
         let seconds = (ms % 60_000) / 1_000;
@@ -310,22 +423,42 @@ impl<'a> Api<'a> {
         (hours, minutes, seconds, millis)
     }
 
-    /// Progress as a fraction [0.0, 1.0] (countdown only).
+    /// Progress as a fraction [0.0, 1.0].
+    ///
+    /// Clamped so an over-target stopwatch or out-of-range `SetTime` never
+    /// produces a value outside [0.0, 1.0] (which would break the progressbar
+    /// `aria-valuenow`/`valuemin`/`valuemax` semantics).
     pub fn progress(&self) -> f64 {
-        if self.ctx.target_ms == 0 { return 0.0; }
-        match self.ctx.mode {
-            Mode::Countdown => 1.0 - (self.ctx.current_ms as f64 / self.ctx.target_ms as f64),
-            Mode::Stopwatch => self.ctx.current_ms as f64 / self.ctx.target_ms as f64,
+        if self.ctx.target.is_zero() {
+            // A completed zero-duration countdown is fully elapsed (100%); a
+            // zero-target stopwatch is indeterminate (0%).
+            return if self.is_completed() { 1.0 } else { 0.0 };
         }
+        let fraction = self.ctx.current.as_secs_f64() / self.ctx.target.as_secs_f64();
+        let progress = match self.ctx.mode {
+            Mode::Countdown => 1.0 - fraction,
+            Mode::Stopwatch => fraction,
+        };
+        progress.clamp(0.0, 1.0)
     }
 
     /// Formatted time string (HH:MM:SS or MM:SS).
+    ///
+    /// Digits are rendered through `intl_backend.format_segment_digits` so
+    /// non-ASCII numbering systems are honored; the colon separator is fixed.
     pub fn formatted_time(&self) -> String {
-        let (h, m, s, _) = self.display_time();
-        if h > 0 {
-            format!("{:02}:{:02}:{:02}", h, m, s)
+        let (hours, minutes, seconds, _) = self.display_time();
+        let width = NonZeroU8::new(2).expect("segment width is non-zero");
+        let segment = |value: u64| {
+            u32::try_from(value).map_or_else(
+                |_| value.to_string(),
+                |value| self.ctx.intl_backend.format_segment_digits(value, width, &self.ctx.locale),
+            )
+        };
+        if hours > 0 {
+            format!("{}:{}:{}", segment(hours), segment(minutes), segment(seconds))
         } else {
-            format!("{:02}:{:02}", m, s)
+            format!("{}:{}", segment(minutes), segment(seconds))
         }
     }
 
@@ -338,6 +471,10 @@ impl<'a> Api<'a> {
         }
     }
 
+    // The Root is the polite, atomic aria-live region. It does NOT carry the
+    // formatted time as aria-label: live regions announce changes to their
+    // content (the Display text), not to aria-label. Associate a name via the
+    // optional Label part.
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
@@ -347,7 +484,6 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Data("ars-state"), self.state_str());
         attrs.set(HtmlAttr::Aria(AriaAttr::Live), "polite");
         attrs.set(HtmlAttr::Aria(AriaAttr::Atomic), "true");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), self.formatted_time());
         attrs
     }
 
@@ -360,13 +496,15 @@ impl<'a> Api<'a> {
         attrs
     }
 
+    // The Display holds the visible formatted time and is NOT aria-hidden: as
+    // the changing content of the Root live region it is what assistive tech
+    // announces on each tick (§3.3).
     pub fn display_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Display.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("display"));
-        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs
     }
 
@@ -389,6 +527,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::StartTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), if self.is_paused() {
             (self.ctx.messages.resume_label)(&self.ctx.locale)
         } else {
@@ -405,6 +544,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::PauseTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.pause_label)(&self.ctx.locale));
         if !self.is_running() {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -417,6 +557,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ResetTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.reset_label)(&self.ctx.locale));
         if self.is_idle() {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -477,16 +618,16 @@ Timer
 └── Separator        (optional — decorative colon between time segments)
 ```
 
-| Part         | Element    | Key Attributes                                       |
-| ------------ | ---------- | ---------------------------------------------------- |
-| Root         | `<div>`    | `role="timer"`, `aria-live="polite"`, `aria-atomic`  |
-| Label        | `<label>`  | `id` for association                                 |
-| Display      | `<span>`   | `aria-hidden="true"` (Root handles live region)      |
-| Progress     | `<div>`    | `role="progressbar"`, `aria-valuenow/min/max`        |
-| StartTrigger | `<button>` | `aria-label` (Start/Resume), `disabled` when running |
-| PauseTrigger | `<button>` | `aria-label` (Pause), `disabled` when not running    |
-| ResetTrigger | `<button>` | `aria-label` (Reset), `disabled` when idle           |
-| Separator    | `<span>`   | `aria-hidden="true"` (decorative)                    |
+| Part         | Element    | Key Attributes                                                        |
+| ------------ | ---------- | --------------------------------------------------------------------- |
+| Root         | `<div>`    | `role="timer"`, `aria-live="polite"`, `aria-atomic`                   |
+| Label        | `<label>`  | `id` for association                                                  |
+| Display      | `<span>`   | visible time; announced as the Root live region's content             |
+| Progress     | `<div>`    | `role="progressbar"`, `aria-valuenow/min/max`                         |
+| StartTrigger | `<button>` | `type="button"`, `aria-label` (Start/Resume), `disabled` when running |
+| PauseTrigger | `<button>` | `type="button"`, `aria-label` (Pause), `disabled` when not running    |
+| ResetTrigger | `<button>` | `type="button"`, `aria-label` (Reset), `disabled` when idle           |
+| Separator    | `<span>`   | `aria-hidden="true"` (decorative)                                     |
 
 ## 3. Accessibility
 
@@ -494,7 +635,7 @@ Timer
 
 | Part         | Role          | Properties                                               |
 | ------------ | ------------- | -------------------------------------------------------- |
-| Root         | `timer`       | `aria-live="polite"`, `aria-atomic="true"`, `aria-label` |
+| Root         | `timer`       | `aria-live="polite"`, `aria-atomic="true"`               |
 | Progress     | `progressbar` | `aria-valuenow`, `aria-valuemin`, `aria-valuemax`        |
 | StartTrigger | `button`      | `aria-label`, `disabled`                                 |
 | PauseTrigger | `button`      | `aria-label`, `disabled`                                 |
@@ -509,7 +650,7 @@ Timer
 
 ### 3.3 Screen Reader Announcements
 
-The Root element has `role="timer"` with `aria-live="polite"` and `aria-atomic="true"`. Time changes are announced periodically. When countdown completes, the `completed_announcement` message is announced.
+The Root element has `role="timer"` with `aria-live="polite"` and `aria-atomic="true"`. The changing time text lives in the `Display` child (which is **not** `aria-hidden`), so it is the live region's content and is announced as it changes — the Root does **not** carry the time as an `aria-label`, because live regions announce content mutations, not `aria-label` changes. Associate an accessible name through the optional `Label` part. When a countdown completes, the `completed_announcement` message is announced.
 
 ## 4. Internationalization
 
@@ -570,9 +711,9 @@ impl ComponentMessages for Messages {}
 | ------------------ | ---------------------------- | --------------------- | ----------------------------------- |
 | `autoStart`        | `auto_start`                 | `autoStart`           | Equivalent                          |
 | `countdown` / mode | `mode` (Countdown/Stopwatch) | `countdown` (boolean) | Equivalent (ars-ui uses enum)       |
-| `interval`         | `interval_ms`                | `interval`            | Equivalent                          |
+| `interval`         | `interval` (`Duration`)      | `interval`            | Equivalent (ars-ui uses `Duration`) |
 | `startMs`          | --                           | `startMs`             | Ark can start from arbitrary offset |
-| `targetMs`         | `target_ms`                  | `targetMs`            | Equivalent                          |
+| `targetMs`         | `target` (`Duration`)        | `targetMs`            | Equivalent (ars-ui uses `Duration`) |
 
 **Gaps:** None. `startMs` is niche; ars-ui can achieve via `Event::SetTime`.
 

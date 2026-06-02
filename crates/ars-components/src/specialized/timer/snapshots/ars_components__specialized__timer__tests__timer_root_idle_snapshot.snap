@@ -1,0 +1,55 @@
+---
+source: crates/ars-components/src/specialized/timer/mod.rs
+expression: "snapshot_attrs(&countdown_api(State::Idle, 60).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "timer",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Aria(
+                Atomic,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "timer",
+            ),
+        ),
+    ],
+    styles: [],
+}

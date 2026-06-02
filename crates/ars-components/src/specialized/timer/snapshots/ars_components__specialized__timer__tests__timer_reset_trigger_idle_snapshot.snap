@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/specialized/timer/mod.rs
+expression: "snapshot_attrs(&countdown_api(State::Idle, 60).reset_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "reset-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "timer",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Reset timer",
+            ),
+        ),
+        (
+            Disabled,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
