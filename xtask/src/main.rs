@@ -453,6 +453,43 @@ enum SpecCommand {
         component: String,
     },
 
+    /// Report component dependency metadata.
+    ComponentDeps {
+        /// Optional positional component name. Use "all" for every component.
+        name: Option<String>,
+
+        /// Component name, or "all".
+        #[arg(long)]
+        component: Option<String>,
+
+        /// Report every component.
+        #[arg(long)]
+        all: bool,
+
+        /// Adapter filter: "leptos" or "dioxus".
+        #[arg(long)]
+        adapter: Option<String>,
+    },
+
+    /// Report or synchronize adapter issue dependency metadata.
+    IssueDeps {
+        /// Adapter filter: "leptos" or "dioxus".
+        #[arg(long)]
+        adapter: String,
+
+        /// Component name, or "all".
+        #[arg(long, default_value = "all")]
+        component: String,
+
+        /// Print the expected issue dependency changes without mutating GitHub.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Apply missing native GitHub dependencies.
+        #[arg(long)]
+        apply: bool,
+    },
+
     /// List files for a review profile.
     Profile {
         /// Profile name (e.g., "accessibility").
@@ -854,6 +891,28 @@ fn main() {
                 SpecCommand::Reverse { shared_type } => spec::reverse::execute(&root, &shared_type),
 
                 SpecCommand::Related { component } => spec::related::execute(&root, &component),
+
+                SpecCommand::ComponentDeps {
+                    name,
+                    component,
+                    all,
+                    adapter,
+                } => {
+                    let component = if all {
+                        Some("all")
+                    } else {
+                        component.as_deref().or(name.as_deref())
+                    };
+
+                    spec::component_deps::execute(&root, component, adapter.as_deref())
+                }
+
+                SpecCommand::IssueDeps {
+                    adapter,
+                    component,
+                    dry_run: _,
+                    apply,
+                } => spec::issue_deps::execute(&root, &adapter, Some(&component), !apply),
 
                 SpecCommand::Profile { name } => spec::profile::execute(&root, &name),
 

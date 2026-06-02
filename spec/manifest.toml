@@ -66,6 +66,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = ["checkbox-group"]
+component_deps  = []
 
 [components.checkbox-group]
 path            = "components/input/checkbox-group.md"
@@ -73,6 +74,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = ["checkbox"]
+component_deps  = []
 
 [components.editable]
 path            = "components/input/editable.md"
@@ -80,6 +82,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.file-trigger]
 path            = "components/input/file-trigger.md"
@@ -87,6 +90,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = ["file-upload"]
+component_deps  = []
 
 [components.number-input]
 path            = "components/input/number-input.md"
@@ -94,6 +98,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.password-input]
 path            = "components/input/password-input.md"
@@ -101,6 +106,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = ["text-field"]
+component_deps  = []
 
 [components.pin-input]
 path            = "components/input/pin-input.md"
@@ -108,6 +114,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.radio-group]
 path            = "components/input/radio-group.md"
@@ -115,6 +122,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.range-slider]
 path            = "components/input/range-slider.md"
@@ -122,6 +130,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = ["slider"]
+component_deps  = []
 
 [components.search-input]
 path            = "components/input/search-input.md"
@@ -129,6 +138,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = ["text-field"]
+component_deps  = []
 
 [components.slider]
 path            = "components/input/slider.md"
@@ -136,6 +146,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = ["range-slider"]
+component_deps  = []
 
 [components.switch]
 path            = "components/input/switch.md"
@@ -143,6 +154,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.text-field]
 path            = "components/input/text-field.md"
@@ -150,6 +162,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = ["textarea", "password-input", "search-input"]
+component_deps  = []
 
 [components.textarea]
 path            = "components/input/textarea.md"
@@ -157,6 +170,7 @@ category        = "input"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = ["text-field"]
+component_deps  = []
 
 # ══════════════════════════════════════════════
 # Components — selection
@@ -168,6 +182,7 @@ category        = "selection"
 foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
 shared_deps     = ["selection-patterns"]
 related         = []
+component_deps  = []
 
 [components.combobox]
 path            = "components/selection/combobox.md"
@@ -175,6 +190,7 @@ category        = "selection"
 foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
 shared_deps     = ["selection-patterns"]
 related         = []
+component_deps  = []
 
 [components.context-menu]
 path            = "components/selection/context-menu.md"
@@ -182,6 +198,7 @@ category        = "selection"
 foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
 shared_deps     = ["selection-patterns"]
 related         = []
+component_deps  = []
 
 [components.listbox]
 path            = "components/selection/listbox.md"
@@ -196,6 +213,7 @@ category        = "selection"
 foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
 shared_deps     = ["selection-patterns"]
 related         = []
+component_deps  = []
 
 [components.menu-bar]
 path            = "components/selection/menu-bar.md"
@@ -203,6 +221,7 @@ category        = "selection"
 foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
 shared_deps     = ["selection-patterns"]
 related         = []
+component_deps  = []
 
 [components.select]
 path            = "components/selection/select.md"
@@ -217,6 +236,7 @@ category        = "selection"
 foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
 shared_deps     = ["selection-patterns"]
 related         = []
+component_deps  = []
 
 [components.segment-group]
 path            = "components/selection/segment-group.md"
@@ -224,6 +244,7 @@ category        = "selection"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = ["radio-group", "toggle-group"]
+component_deps  = []
 
 # ══════════════════════════════════════════════
 # Components — overlay
@@ -235,6 +256,10 @@ category        = "overlay"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["z-index-stacking"]
 related         = ["dialog"]
+component_deps  = [
+    { component = "dialog", kind = "requires", frameworks = ["leptos", "dioxus"], reason = "AlertDialog reuses the modal dialog interaction and semantics contract." },
+    { component = "focus-scope", kind = "requires", frameworks = ["leptos", "dioxus"], reason = "AlertDialog focus trapping depends on FocusScope." },
+]
 
 [components.dialog]
 path            = "components/overlay/dialog.md"
@@ -242,6 +267,9 @@ category        = "overlay"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["z-index-stacking"]
 related         = []
+component_deps  = [
+    { component = "focus-scope", kind = "requires", frameworks = ["leptos", "dioxus"], reason = "Dialog focus trapping depends on FocusScope." },
+]
 
 [components.drawer]
 path            = "components/overlay/drawer.md"
@@ -249,6 +277,9 @@ category        = "overlay"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["z-index-stacking"]
 related         = ["dialog"]
+component_deps  = [
+    { component = "dialog", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "Drawer is a dialog-like overlay surface and should reuse dialog focus and dismissal semantics." },
+]
 
 [components.floating-panel]
 path            = "components/overlay/floating-panel.md"
@@ -256,6 +287,7 @@ category        = "overlay"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["z-index-stacking"]
 related         = []
+component_deps  = []
 
 [components.hover-card]
 path            = "components/overlay/hover-card.md"
@@ -263,6 +295,7 @@ category        = "overlay"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["z-index-stacking"]
 related         = ["popover", "tooltip"]
+component_deps  = []
 
 [components.popover]
 path            = "components/overlay/popover.md"
@@ -270,6 +303,7 @@ category        = "overlay"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["z-index-stacking"]
 related         = ["dialog"]
+component_deps  = []
 
 [components.presence]
 path            = "components/overlay/presence.md"
@@ -277,6 +311,7 @@ category        = "overlay"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.toast]
 path            = "components/overlay/toast.md"
@@ -284,6 +319,7 @@ category        = "overlay"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["z-index-stacking"]
 related         = []
+component_deps  = []
 
 [components.tooltip]
 path            = "components/overlay/tooltip.md"
@@ -291,6 +327,7 @@ category        = "overlay"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["z-index-stacking"]
 related         = ["hover-card"]
+component_deps  = []
 
 [components.tour]
 path            = "components/overlay/tour.md"
@@ -298,6 +335,7 @@ category        = "overlay"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["z-index-stacking"]
 related         = []
+component_deps  = []
 
 # ══════════════════════════════════════════════
 # Components — navigation
@@ -309,6 +347,7 @@ category        = "navigation"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.breadcrumbs]
 path            = "components/navigation/breadcrumbs.md"
@@ -316,6 +355,7 @@ category        = "navigation"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.link]
 path            = "components/navigation/link.md"
@@ -323,6 +363,7 @@ category        = "navigation"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.navigation-menu]
 path            = "components/navigation/navigation-menu.md"
@@ -330,6 +371,7 @@ category        = "navigation"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["z-index-stacking"]
 related         = ["menu", "menu-bar", "tabs"]
+component_deps  = []
 
 [components.pagination]
 path            = "components/navigation/pagination.md"
@@ -337,6 +379,7 @@ category        = "navigation"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.steps]
 path            = "components/navigation/steps.md"
@@ -344,6 +387,7 @@ category        = "navigation"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.tabs]
 path            = "components/navigation/tabs.md"
@@ -351,6 +395,7 @@ category        = "navigation"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.tree-view]
 path            = "components/navigation/tree-view.md"
@@ -358,6 +403,7 @@ category        = "navigation"
 foundation_deps = ["architecture", "accessibility", "interactions", "collections"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 # ══════════════════════════════════════════════
 # Components — date-time
@@ -369,6 +415,7 @@ category        = "date-time"
 foundation_deps = ["architecture", "accessibility", "i18n", "interactions"]
 shared_deps     = ["date-time-types"]
 related         = ["range-calendar", "date-picker", "date-range-picker"]
+component_deps  = []
 
 [components.date-field]
 path            = "components/date-time/date-field.md"
@@ -376,6 +423,7 @@ category        = "date-time"
 foundation_deps = ["architecture", "accessibility", "i18n", "interactions", "forms"]
 shared_deps     = ["date-time-types"]
 related         = ["date-picker", "date-range-field", "time-field"]
+component_deps  = []
 
 [components.date-picker]
 path            = "components/date-time/date-picker.md"
@@ -383,6 +431,13 @@ category        = "date-time"
 foundation_deps = ["architecture", "accessibility", "i18n", "interactions", "forms"]
 shared_deps     = ["date-time-types"]
 related         = ["calendar", "date-field", "date-range-picker"]
+component_deps  = [
+    { component = "calendar", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DatePicker popup selection composes a Calendar adapter." },
+    { component = "date-field", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DatePicker control composes date-field input semantics." },
+    { component = "button", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DatePicker trigger and clear controls should reuse Button semantics." },
+    { component = "field", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DatePicker label, invalid, and description wiring should reuse Field semantics." },
+    { component = "form", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DatePicker native form participation should align with Form integration." },
+]
 
 [components.date-range-field]
 path            = "components/date-time/date-range-field.md"
@@ -390,6 +445,11 @@ category        = "date-time"
 foundation_deps = ["architecture", "accessibility", "i18n", "interactions", "forms"]
 shared_deps     = ["date-time-types"]
 related         = ["date-field", "date-range-picker"]
+component_deps  = [
+    { component = "date-field", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateRangeField composes two DateField-style segmented inputs." },
+    { component = "field", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateRangeField label, invalid, and description wiring should reuse Field semantics." },
+    { component = "form", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateRangeField native form participation should align with Form integration." },
+]
 
 [components.date-range-picker]
 path            = "components/date-time/date-range-picker.md"
@@ -397,6 +457,13 @@ category        = "date-time"
 foundation_deps = ["architecture", "accessibility", "i18n", "interactions", "forms"]
 shared_deps     = ["date-time-types"]
 related         = ["calendar", "range-calendar", "date-field", "date-range-field"]
+component_deps  = [
+    { component = "date-field", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateRangePicker composes start and end DateField adapters." },
+    { component = "range-calendar", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateRangePicker popup range selection composes RangeCalendar." },
+    { component = "button", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateRangePicker trigger and clear controls should reuse Button semantics." },
+    { component = "field", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateRangePicker label, invalid, and description wiring should reuse Field semantics." },
+    { component = "form", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateRangePicker native form participation should align with Form integration." },
+]
 
 [components.date-time-picker]
 path            = "components/date-time/date-time-picker.md"
@@ -404,6 +471,14 @@ category        = "date-time"
 foundation_deps = ["architecture", "accessibility", "i18n", "interactions", "forms"]
 shared_deps     = ["date-time-types"]
 related         = ["date-picker", "time-field", "calendar"]
+component_deps  = [
+    { component = "date-field", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateTimePicker date segments reuse DateField adapter behavior." },
+    { component = "time-field", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateTimePicker time segments reuse TimeField adapter behavior." },
+    { component = "calendar", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateTimePicker popup date selection composes Calendar." },
+    { component = "button", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateTimePicker trigger and clear controls should reuse Button semantics." },
+    { component = "field", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateTimePicker label, invalid, and description wiring should reuse Field semantics." },
+    { component = "form", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "DateTimePicker native form participation should align with Form integration." },
+]
 
 [components.time-field]
 path            = "components/date-time/time-field.md"
@@ -411,6 +486,7 @@ category        = "date-time"
 foundation_deps = ["architecture", "accessibility", "i18n", "interactions", "forms"]
 shared_deps     = ["date-time-types"]
 related         = ["date-field", "date-time-picker"]
+component_deps  = []
 
 [components.range-calendar]
 path            = "components/date-time/range-calendar.md"
@@ -418,6 +494,7 @@ category        = "date-time"
 foundation_deps = ["architecture", "accessibility", "i18n", "interactions"]
 shared_deps     = ["date-time-types"]
 related         = ["calendar", "date-range-picker"]
+component_deps  = []
 
 # ══════════════════════════════════════════════
 # Components — data-display
@@ -429,6 +506,7 @@ category        = "data-display"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.badge]
 path            = "components/data-display/badge.md"
@@ -436,6 +514,7 @@ category        = "data-display"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.grid-list]
 path            = "components/data-display/grid-list.md"
@@ -443,6 +522,7 @@ category        = "data-display"
 foundation_deps = ["architecture", "accessibility", "collections", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.marquee]
 path            = "components/data-display/marquee.md"
@@ -450,6 +530,7 @@ category        = "data-display"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.meter]
 path            = "components/data-display/meter.md"
@@ -457,6 +538,7 @@ category        = "data-display"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.progress]
 path            = "components/data-display/progress.md"
@@ -464,6 +546,7 @@ category        = "data-display"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.rating-group]
 path            = "components/data-display/rating-group.md"
@@ -471,6 +554,7 @@ category        = "data-display"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.skeleton]
 path            = "components/data-display/skeleton.md"
@@ -478,6 +562,7 @@ category        = "data-display"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.stat]
 path            = "components/data-display/stat.md"
@@ -485,6 +570,7 @@ category        = "data-display"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.table]
 path            = "components/data-display/table.md"
@@ -492,6 +578,7 @@ category        = "data-display"
 foundation_deps = ["architecture", "accessibility", "collections", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.tag-group]
 path            = "components/data-display/tag-group.md"
@@ -499,6 +586,7 @@ category        = "data-display"
 foundation_deps = ["architecture", "accessibility", "collections", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 # ══════════════════════════════════════════════
 # Components — layout
@@ -510,6 +598,7 @@ category        = "layout"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.carousel]
 path            = "components/layout/carousel.md"
@@ -517,6 +606,7 @@ category        = "layout"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["layout-shared-types"]
 related         = []
+component_deps  = []
 
 [components.collapsible]
 path            = "components/layout/collapsible.md"
@@ -524,6 +614,7 @@ category        = "layout"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["layout-shared-types"]
 related         = []
+component_deps  = []
 
 [components.portal]
 path            = "components/layout/portal.md"
@@ -531,6 +622,7 @@ category        = "layout"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["layout-shared-types"]
 related         = []
+component_deps  = []
 
 [components.scroll-area]
 path            = "components/layout/scroll-area.md"
@@ -538,6 +630,7 @@ category        = "layout"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["layout-shared-types"]
 related         = []
+component_deps  = []
 
 [components.splitter]
 path            = "components/layout/splitter.md"
@@ -545,6 +638,7 @@ category        = "layout"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["layout-shared-types"]
 related         = []
+component_deps  = []
 
 [components.stack]
 path            = "components/layout/stack.md"
@@ -552,6 +646,7 @@ category        = "layout"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = ["layout-shared-types"]
 related         = ["center", "grid"]
+component_deps  = []
 
 [components.center]
 path            = "components/layout/center.md"
@@ -559,6 +654,7 @@ category        = "layout"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = ["layout-shared-types"]
 related         = ["stack", "grid"]
+component_deps  = []
 
 [components.grid]
 path            = "components/layout/grid.md"
@@ -566,6 +662,7 @@ category        = "layout"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = ["layout-shared-types"]
 related         = ["stack", "center"]
+component_deps  = []
 
 [components.toolbar]
 path            = "components/layout/toolbar.md"
@@ -573,6 +670,7 @@ category        = "layout"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = ["layout-shared-types"]
 related         = []
+component_deps  = []
 
 [components.frame]
 path            = "components/layout/frame.md"
@@ -580,6 +678,7 @@ category        = "layout"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = ["aspect-ratio"]
+component_deps  = []
 
 # ══════════════════════════════════════════════
 # Components — specialized
@@ -591,6 +690,7 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = ["color-picker"]
+component_deps  = []
 
 [components.clipboard]
 path            = "components/specialized/clipboard.md"
@@ -598,6 +698,7 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.color-area]
 path            = "components/specialized/color-area.md"
@@ -605,6 +706,7 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = ["color-picker", "color-slider"]
+component_deps  = []
 
 [components.color-field]
 path            = "components/specialized/color-field.md"
@@ -612,14 +714,15 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = ["color-picker"]
+component_deps  = []
 
 [components.color-picker]
-path = "components/specialized/color-picker.md"
-category = "specialized"
-tier = "complex"
+path            = "components/specialized/color-picker.md"
+category        = "specialized"
+tier            = "complex"
 foundation_deps = ["architecture", "accessibility", "interactions"]
-shared_deps = []
-related = [
+shared_deps     = []
+related         = [
     "color-area",
     "color-slider",
     "color-field",
@@ -628,6 +731,13 @@ related = [
     "color-wheel",
     "angle-slider"
 ]
+component_deps  = [
+    { component = "color-area", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "ColorPicker composes the standalone ColorArea adapter." },
+    { component = "color-slider", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "ColorPicker composes color channel sliders." },
+    { component = "color-wheel", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "ColorPicker may compose hue wheel behavior." },
+    { component = "color-field", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "ColorPicker format and numeric entry should reuse ColorField semantics." },
+    { component = "color-swatch-picker", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "ColorPicker preset swatches should reuse ColorSwatchPicker semantics." },
+]
 
 [components.color-slider]
 path            = "components/specialized/color-slider.md"
@@ -635,6 +745,7 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = ["color-picker", "color-area"]
+component_deps  = []
 
 [components.color-swatch]
 path            = "components/specialized/color-swatch.md"
@@ -642,6 +753,7 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = ["color-swatch-picker", "color-picker"]
+component_deps  = []
 
 [components.color-swatch-picker]
 path            = "components/specialized/color-swatch-picker.md"
@@ -649,6 +761,7 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = ["color-swatch", "color-picker"]
+component_deps  = []
 
 [components.color-wheel]
 path            = "components/specialized/color-wheel.md"
@@ -656,6 +769,7 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = ["color-picker"]
+component_deps  = []
 
 [components.contextual-help]
 path            = "components/specialized/contextual-help.md"
@@ -663,6 +777,9 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = ["popover"]
+component_deps  = [
+    { component = "popover", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "ContextualHelp displays explanatory content through a popover-style overlay." },
+]
 
 [components.file-upload]
 path            = "components/specialized/file-upload.md"
@@ -670,6 +787,10 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = [
+    { component = "drop-zone", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "FileUpload drag-and-drop surface should reuse DropZone behavior." },
+    { component = "file-trigger", kind = "composes", frameworks = ["leptos", "dioxus"], blocking = true, reason = "FileUpload native picker path should reuse FileTrigger behavior." },
+]
 
 [components.image-cropper]
 path            = "components/specialized/image-cropper.md"
@@ -677,6 +798,7 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.qr-code]
 path            = "components/specialized/qr-code.md"
@@ -684,6 +806,7 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.signature-pad]
 path            = "components/specialized/signature-pad.md"
@@ -691,6 +814,7 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.timer]
 path            = "components/specialized/timer.md"
@@ -698,6 +822,7 @@ category        = "specialized"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 # ══════════════════════════════════════════════
 # Components — utility
@@ -709,6 +834,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility", "interactions", "i18n"]
 shared_deps     = []
 related         = ["toggle-group"]
+component_deps  = []
 
 [components.as-child]
 path            = "components/utility/as-child.md"
@@ -716,6 +842,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.button]
 path            = "components/utility/button.md"
@@ -723,6 +850,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = ["toggle-button"]
+component_deps  = []
 
 [components.client-only]
 path            = "components/utility/client-only.md"
@@ -730,6 +858,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.dismissable]
 path            = "components/utility/dismissable.md"
@@ -738,6 +867,7 @@ internal        = true
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.error-boundary]
 path            = "components/utility/error-boundary.md"
@@ -745,6 +875,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = ["ars-provider"]
+component_deps  = []
 
 [components.download-trigger]
 path            = "components/utility/download-trigger.md"
@@ -752,6 +883,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.drop-zone]
 path            = "components/utility/drop-zone.md"
@@ -759,6 +891,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.ars-provider]
 path            = "components/utility/ars-provider.md"
@@ -766,6 +899,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.focus-ring]
 path            = "components/utility/focus-ring.md"
@@ -773,6 +907,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.focus-scope]
 path            = "components/utility/focus-scope.md"
@@ -780,6 +915,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.group]
 path            = "components/utility/group.md"
@@ -787,6 +923,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = ["fieldset", "action-group"]
+component_deps  = []
 
 [components.heading]
 path            = "components/utility/heading.md"
@@ -794,6 +931,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.highlight]
 path            = "components/utility/highlight.md"
@@ -801,6 +939,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.keyboard]
 path            = "components/utility/keyboard.md"
@@ -808,6 +947,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.landmark]
 path            = "components/utility/landmark.md"
@@ -815,6 +955,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.live-region]
 path            = "components/utility/live-region.md"
@@ -822,6 +963,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.separator]
 path            = "components/utility/separator.md"
@@ -829,6 +971,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.swap]
 path            = "components/utility/swap.md"
@@ -836,6 +979,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility", "interactions"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.toggle]
 path            = "components/utility/toggle.md"
@@ -843,6 +987,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = ["toggle-group", "toggle-button"]
+component_deps  = []
 
 [components.visually-hidden]
 path            = "components/utility/visually-hidden.md"
@@ -850,6 +995,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = []
 related         = []
+component_deps  = []
 
 [components.z-index-allocator]
 path            = "components/utility/z-index-allocator.md"
@@ -857,6 +1003,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility"]
 shared_deps     = ["z-index-stacking"]
 related         = []
+component_deps  = []
 
 [components.field]
 path            = "components/utility/field.md"
@@ -864,6 +1011,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility", "forms"]
 shared_deps     = []
 related         = ["fieldset", "form"]
+component_deps  = []
 
 [components.fieldset]
 path            = "components/utility/fieldset.md"
@@ -871,6 +1019,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility", "forms"]
 shared_deps     = []
 related         = ["field", "form"]
+component_deps  = []
 
 [components.toggle-button]
 path            = "components/utility/toggle-button.md"
@@ -878,6 +1027,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms"]
 shared_deps     = []
 related         = ["button", "toggle-group", "toggle"]
+component_deps  = []
 
 [components.toggle-group]
 path            = "components/utility/toggle-group.md"
@@ -885,6 +1035,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility", "interactions", "forms", "collections"]
 shared_deps     = []
 related         = ["toggle-button", "toggle"]
+component_deps  = []
 
 [components.form]
 path            = "components/utility/form.md"
@@ -892,6 +1043,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility", "forms"]
 shared_deps     = []
 related         = ["field", "fieldset", "form-submit"]
+component_deps  = []
 
 [components.form-submit]
 path            = "components/utility/form-submit.md"
@@ -899,6 +1051,7 @@ category        = "utility"
 foundation_deps = ["architecture", "accessibility", "forms"]
 shared_deps     = []
 related         = ["form", "field", "fieldset"]
+component_deps  = []
 
 # ══════════════════════════════════════════════
 # Leptos adapter — per-component files

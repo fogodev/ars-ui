@@ -27,6 +27,23 @@ pub fn execute(root: &SpecRoot, component: &str) -> Result<String, Error> {
 
     writeln!(out, "shared_deps: [{}]", comp.shared_deps.join(", ")).expect("write to String");
     writeln!(out, "related: [{}]", comp.related.join(", ")).expect("write to String");
+    if comp.component_deps.is_empty() {
+        writeln!(out, "component_deps: []").expect("write to String");
+    } else {
+        writeln!(out, "component_deps:").expect("write to String");
+        for dep in &comp.component_deps {
+            writeln!(
+                out,
+                "- component: {}; kind: {}; frameworks: [{}]; blocking: {}; reason: {}",
+                dep.component,
+                dep.kind,
+                dep.frameworks.join(", "),
+                crate::spec::component_deps::is_blocking(dep.kind, dep.blocking),
+                dep.reason
+            )
+            .expect("write to String");
+        }
+    }
 
     if comp.internal {
         writeln!(out, "internal: true").expect("write to String");
