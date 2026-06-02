@@ -1,0 +1,98 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0cc577908810",
+  "session_id": "dd441a93-8791-4c38-b72c-c5a3afd87f1b",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-02T14:16:33.164331Z",
+  "branch": "impl-292",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+    "crates/ars-components/src/date_time/date_time_picker/tests.rs",
+    "spec/components/date-time/date-time-picker.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "9d3eee0bf60c",
+  "checkpoint_transcript_start": 1702,
+  "transcript_lines_at_start": 1702,
+  "token_usage": {
+    "input_tokens": 3241,
+    "cache_creation_tokens": 799730,
+    "cache_read_tokens": 34724032,
+    "output_tokens": 27334,
+    "api_call_count": 44
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "summary": {
+    "intent": "Apply Codex pass-4 findings to the DateTimePicker implementation: route segment formatting through the intl backend for localization parity with TimeField/DateField, clear focus and return to trigger when navigating past the last segment, and reset ctx.open in SyncProps when the picker isn't open.",
+    "outcome": "All 3 pass-4 findings were fixed, tested (138 tests passing), spec synced, all 10 CI gates green, and changes committed/pushed. Codex was re-triggered for pass-5.",
+    "learnings": {
+      "repo": [
+        "StubIntlBackend yields identical en-US output, so localizing through intl_backend produces no snapshot churn in tests — safe to refactor without mass snapshot updates.",
+        "format_segment_text must be routed through intl_backend to stay consistent with how TimeField and DateField format segments; previously it used a simplified/direct path.",
+        "SyncProps apply must explicitly reset ctx.open when the resolved state is not Open — omitting this leaves stale open state after external prop changes.",
+        "FocusNextSegment past the last segment should clear focus and request trigger focus, not silently no-op.",
+        "set_segment_value requires a two-phase borrow split to keep Rust borrows disjoint when updating segment text via backend."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "format_segment_text refactored to accept and use intl_backend parameter; build_date_segments and build_time_segments updated to thread backend through, including localizing placeholders."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "FocusNextSegment handler updated: when idx >= last segment, clear focused_segment and emit trigger-focus event instead of wrapping or stopping."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "SyncProps apply arm now resets ctx.open to false when the resolved open state is not Open."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/tests.rs",
+          "finding": "New tests added for FocusNextSegment-past-last clears focus and SyncProps open reset, bringing total to 138."
+        },
+        {
+          "path": "spec/components/date-time/date-time-picker.md",
+          "finding": "Spec updated to document: backend-routed formatting in set_segment_value and helpers, FocusNextSegment past-last behavior, and SyncProps ctx.open reset."
+        }
+      ],
+      "workflow": [
+        "Iterative Codex review loop: fix pass-N findings → compile → test → spec sync → full CI → commit/push → re-trigger Codex for pass-(N+1).",
+        "xci-fast covers 10 gates and is the gate check before committing; snapshot tests are included and catch unintended formatting changes.",
+        "Codex threads are replied to and resolved after each commit to keep review state clean."
+      ]
+    },
+    "friction": [
+      "format_segment_text had 9 call sites requiring mechanical updates after adding the backend parameter — straightforward but tedious.",
+      "Rust borrow checker required a two-phase rewrite of set_segment_value to avoid simultaneous mutable/immutable borrows when formatting segment text through self."
+    ],
+    "open_items": [
+      "Codex pass-5 triggered — further findings may exist; this session only addressed pass-4.",
+      "No line numbers recorded for the specific edits, making future diffing require re-reading the file."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-02T14:16:10.372837Z",
+    "agent_lines": 167,
+    "agent_removed": 51,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 167,
+    "total_lines_changed": 218,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
