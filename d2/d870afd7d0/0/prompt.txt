@@ -1,0 +1,15 @@
+Implement task #292
+
+---
+
+<ide_selection>The user selected the lines 2250 to 2256 from /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-292/crates/ars-components/src/date_time/date_time_picker/mod.rs:
+/// Returns the date field separator for the locale (`.` for de-DE/ko-KR, else `/`).
+fn date_separator(locale: &Locale) -> &'static str {
+    match (locale.language(), locale.region()) {
+        ("de", Some("DE")) | ("ko", Some("KR")) => ".",
+        _ => "/",
+    }
+}
+
+This may or may not be related to the current task.</ide_selection>
+Do we have a date separator according to Locale defined elsewhere?
