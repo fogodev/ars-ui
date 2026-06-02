@@ -1,0 +1,93 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8d05e47ea46a",
+  "session_id": "dd441a93-8791-4c38-b72c-c5a3afd87f1b",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-02T13:46:25.259777Z",
+  "branch": "impl-292",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+    "crates/ars-components/src/date_time/date_time_picker/tests.rs",
+    "spec/components/date-time/date-time-picker.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "a129419fb178",
+  "checkpoint_transcript_start": 1549,
+  "transcript_lines_at_start": 1549,
+  "token_usage": {
+    "input_tokens": 3160,
+    "cache_creation_tokens": 754792,
+    "cache_read_tokens": 30489279,
+    "output_tokens": 24455,
+    "api_call_count": 41
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Fix 5 non-Gregorian calendar fidelity bugs in the DateTimePicker component identified by a Codex pass-3 review, covering era handling, dynamic month ranges, date reprojection, and disabled hidden input.",
+    "outcome": "All 5 pass-3 findings were implemented and tested: era-aware date assembly, calendar-aware month range clamping, date reprojection in maybe_publish/apply_value, and disabled hidden input propagation. 136 tests pass, all 10 CI gates green, changes committed and pushed.",
+    "learnings": {
+      "repo": [
+        "DateTimePicker uses helpers: current_era_for_assembly, max_months_in_year, days_in_month, CalendarDate::era, and default_era for non-Gregorian calendar support",
+        "refresh_day_range was renamed to refresh_date_ranges to also handle calendar-aware month range updates",
+        "The spec at spec/components/date-time/date-time-picker.md must be kept in sync with implementation changes to assemble_date and helper functions",
+        "Codex review is run in multiple passes (pass-1, pass-2, pass-3) with threads that need to be replied to and resolved after each fix batch"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "assemble_date now takes era parameter via current_era helper; project_date helper added near clamp_datetime for reprojection in maybe_publish and apply_value"
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "finding": "hidden_input_attrs must propagate ctx.disabled to the hidden input element for form submission correctness"
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/tests.rs",
+          "finding": "Tests added for: Hebrew 5784 month max=13, Japanese era preservation, date reprojection, and disabled hidden input — total test count reached 136"
+        },
+        {
+          "path": "spec/components/date-time/date-time-picker.md",
+          "finding": "Spec updated to document era parameter in assemble_date and added notes about dynamic ranges and reprojection in the helpers section"
+        }
+      ],
+      "workflow": [
+        "Codex multi-pass review workflow: poll for verdict, fetch threads, implement fixes, add tests, sync spec, run full CI gate, commit/push, reply/resolve threads, re-trigger Codex",
+        "xci-fast is the fast CI gate command with 10 sub-gates; build must pass before running tests",
+        "TodoWrite is used to track each Codex finding as a task item throughout implementation"
+      ]
+    },
+    "friction": [
+      "Multiple sequential Read calls were needed to locate the exact line ranges for assemble_date, maybe_publish, apply_value, and hidden_input_attrs before editing — the file is large enough that targeted reads were required",
+      "refresh_day_range had multiple call sites (rebuild_date_segments, init) that needed manual renaming after the method was extended and renamed"
+    ],
+    "open_items": [
+      "Codex pass-4 may surface additional findings after the pass-3 fixes are reviewed — re-trigger was queued at end of session",
+      "Era handling and month-range clamping were added reactively; a proactive audit of other calendar-aware paths in the codebase may still be warranted"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-02T13:46:03.551791Z",
+    "agent_lines": 208,
+    "agent_removed": 29,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 208,
+    "total_lines_changed": 237,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
