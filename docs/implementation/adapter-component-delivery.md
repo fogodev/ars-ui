@@ -38,6 +38,27 @@ In particular:
 Start from the assigned GitHub issue, not from an epic. The issue acceptance
 criteria define the delivery scope.
 
+Before moving an adapter task to In Progress, check the component dependency
+metadata:
+
+```bash
+cargo xtask spec component-deps <component> --adapter leptos
+cargo xtask spec component-deps <component> --adapter dioxus
+cargo xtask spec issue-deps --adapter leptos --component <component> --dry-run
+cargo xtask spec issue-deps --adapter dioxus --component <component> --dry-run
+```
+
+Hard blockers come from `spec/manifest.toml` `component_deps` entries with
+`kind = "requires"` or `kind = "composes", blocking = true`, plus the adapter
+foundation dependencies shown by the issue-dependency report. Those blockers
+must exist in both the issue body `Depends on` section and GitHub's native
+`blocked_by` graph before the task is considered pickable.
+
+`kind = "boundary"` entries are not blockers. They document feature ownership
+limits such as "React Aria grid layout belongs to GridList, not Listbox" and
+must appear as issue notes instead of native dependencies. See
+`docs/implementation/adapter-component-dependencies.md`.
+
 Before editing code, read:
 
 - the framework-agnostic component spec under `spec/components/<category>/`;
