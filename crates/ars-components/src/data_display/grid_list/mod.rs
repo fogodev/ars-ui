@@ -23,7 +23,8 @@ use ars_collections::{
 };
 use ars_core::{
     AriaAttr, AttrMap, Bindable, Callback, ComponentIds, ComponentMessages, ComponentPart,
-    ConnectApi, Env, HasId, HtmlAttr, Locale, MessageFn, SafeUrl, TransitionPlan, sanitize_url,
+    ConnectApi, Direction, Env, HasId, HtmlAttr, Locale, MessageFn, SafeUrl, TransitionPlan,
+    sanitize_url,
 };
 use ars_interactions::{KeyboardEventData, KeyboardKey};
 
@@ -113,6 +114,9 @@ pub struct Props {
     /// Callback invoked by adapters when the loading sentinel is reached.
     pub on_load_more: Option<Callback<dyn Fn() + Send + Sync>>,
 
+    /// Callback invoked when an enabled item receives a primary action.
+    pub on_action: Option<Callback<dyn Fn(Key) + Send + Sync>>,
+
     /// Whether a load-more request is currently in flight.
     pub loading: bool,
 
@@ -137,6 +141,7 @@ impl Default for Props {
             escape_key_behavior: EscapeKeyBehavior::ClearSelection,
             composite: true,
             on_load_more: None,
+            on_action: None,
             loading: false,
             dnd_enabled: false,
         }
@@ -245,6 +250,13 @@ impl Props {
     #[must_use]
     pub fn on_load_more(mut self, callback: Callback<dyn Fn() + Send + Sync>) -> Self {
         self.on_load_more = Some(callback);
+        self
+    }
+
+    /// Sets the primary item action callback.
+    #[must_use]
+    pub fn on_action(mut self, callback: Callback<dyn Fn(Key) + Send + Sync>) -> Self {
+        self.on_action = Some(callback);
         self
     }
 
@@ -371,6 +383,9 @@ pub struct Context {
     /// Latest user-requested selected keys for adapter change notification.
     pub requested_selected_keys: Option<BTreeSet<Key>>,
 
+    /// Latest user-requested action key for adapter change notification.
+    pub requested_action_key: Option<Key>,
+
     /// When true, all items are non-interactive.
     pub disabled: bool,
 
@@ -445,6 +460,9 @@ impl ComponentMessages for Messages {}
 pub enum Effect {
     /// Notify adapters that the user requested a selection change.
     SelectionChange,
+
+    /// Notify adapters that the user requested a primary item action.
+    Action,
 }
 
 /// Structural parts exposed by the `GridList` connect API.
@@ -525,6 +543,7 @@ impl ars_core::Machine for Machine {
                     )),
                 },
                 requested_selected_keys: None,
+                requested_action_key: None,
                 disabled: props.disabled,
                 disabled_keys,
                 disallow_empty_selection: props.disallow_empty_selection,
@@ -630,6 +649,10 @@ impl ars_core::Machine for Machine {
 
                 let selected = range_keys(context, from, to)?;
 
+                if selected.is_empty() && context.disallow_empty_selection {
+                    return None;
+                }
+
                 selection_plan(selected)
             }
 
@@ -661,7 +684,24 @@ impl ars_core::Machine for Machine {
             Event::ItemAction(key) => {
                 enabled_item(context, key)?;
 
-                Some(TransitionPlan::context_only(|_ctx: &mut Context| {}))
+                let requested_key = key.clone();
+                let callback_key = key.clone();
+
+                Some(
+                    TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.requested_action_key = Some(requested_key);
+                    })
+                    .with_named_effect(
+                        Effect::Action,
+                        move |_ctx: &Context, props: &Props, _send| {
+                            if let Some(callback) = &props.on_action {
+                                callback(callback_key);
+                            }
+
+                            ars_core::no_cleanup()
+                        },
+                    ),
+                )
             }
 
             Event::FocusUp => move_focus_plan(context, Direction2d::Up),
@@ -798,6 +838,12 @@ impl Api<'_> {
         self.context.requested_selected_keys.as_ref()
     }
 
+    /// Returns the latest user-requested action key.
+    #[must_use]
+    pub const fn requested_action_key(&self) -> Option<&Key> {
+        self.context.requested_action_key.as_ref()
+    }
+
     /// Returns the current item collection.
     #[must_use]
     pub const fn items(&self) -> &StaticCollection<ItemDef> {
@@ -907,20 +953,10 @@ impl Api<'_> {
         let selected = selected_keys_source(self.context).contains(key);
         let disabled = is_disabled_key(self.context, key);
 
-        let tabindex = if disabled {
-            "-1"
-        } else if self.context.composite {
-            if focused
-                || (self.context.focused_key.is_none()
-                    && first_enabled_key(&self.context.items, &self.context.disabled_keys).as_ref()
-                        == Some(key))
-            {
-                "0"
-            } else {
-                "-1"
-            }
-        } else {
+        let tabindex = if !disabled && !self.context.composite {
             "0"
+        } else {
+            "-1"
         };
 
         attrs.set(HtmlAttr::TabIndex, tabindex);
@@ -1038,9 +1074,9 @@ impl Api<'_> {
         attrs
     }
 
-    /// Dispatches a keydown event for a cell using [`Duration::ZERO`] as the timestamp.
+    /// Dispatches a keydown event using a timeout-advancing fallback timestamp.
     pub fn on_cell_keydown(&self, key: &Key, data: &KeyboardEventData) {
-        self.on_cell_keydown_at(key, data, Duration::ZERO);
+        self.on_cell_keydown_at(key, data, fallback_typeahead_timestamp(self.context));
     }
 
     /// Dispatches a keydown event for a cell with an adapter-provided timestamp.
@@ -1048,7 +1084,7 @@ impl Api<'_> {
         if !self.context.composite {
             match data.key {
                 KeyboardKey::Enter => (self.send)(Event::ItemAction(key.clone())),
-                KeyboardKey::Space => (self.send)(selection_event_for_key(self.context, key)),
+                KeyboardKey::Space => (self.send)(Event::ToggleSelect(key.clone())),
                 _ => {}
             }
 
@@ -1056,13 +1092,27 @@ impl Api<'_> {
         }
 
         match data.key {
-            KeyboardKey::ArrowUp => (self.send)(Event::FocusUp),
+            KeyboardKey::ArrowUp => self.dispatch_arrow(key, Direction2d::Up, Event::FocusUp, data),
 
-            KeyboardKey::ArrowDown => (self.send)(Event::FocusDown),
+            KeyboardKey::ArrowDown => {
+                self.dispatch_arrow(key, Direction2d::Down, Event::FocusDown, data);
+            }
 
-            KeyboardKey::ArrowLeft => (self.send)(Event::FocusLeft),
+            KeyboardKey::ArrowLeft if self.is_rtl() => {
+                self.dispatch_arrow(key, Direction2d::Right, Event::FocusRight, data);
+            }
 
-            KeyboardKey::ArrowRight => (self.send)(Event::FocusRight),
+            KeyboardKey::ArrowLeft => {
+                self.dispatch_arrow(key, Direction2d::Left, Event::FocusLeft, data);
+            }
+
+            KeyboardKey::ArrowRight if self.is_rtl() => {
+                self.dispatch_arrow(key, Direction2d::Left, Event::FocusLeft, data);
+            }
+
+            KeyboardKey::ArrowRight => {
+                self.dispatch_arrow(key, Direction2d::Right, Event::FocusRight, data);
+            }
 
             KeyboardKey::Home => (self.send)(Event::FocusFirst),
 
@@ -1070,7 +1120,7 @@ impl Api<'_> {
 
             KeyboardKey::Enter => (self.send)(Event::ItemAction(key.clone())),
 
-            KeyboardKey::Space => (self.send)(selection_event_for_key(self.context, key)),
+            KeyboardKey::Space => (self.send)(Event::ToggleSelect(key.clone())),
 
             KeyboardKey::Escape
                 if self.context.escape_key_behavior == EscapeKeyBehavior::ClearSelection =>
@@ -1100,6 +1150,33 @@ impl Api<'_> {
 
             _ => {}
         }
+    }
+
+    fn is_rtl(&self) -> bool {
+        Direction::from(self.context.locale.direction()) == Direction::Rtl
+    }
+
+    fn dispatch_arrow(
+        &self,
+        key: &Key,
+        direction: Direction2d,
+        focus_event: Event,
+        data: &KeyboardEventData,
+    ) {
+        if data.shift_key
+            && self.context.selection_mode == selection::Mode::Multiple
+            && let Some(target) = navigation_target_from_key(self.context, key, direction)
+        {
+            (self.send)(focus_event);
+            (self.send)(Event::SelectRange {
+                from: key.clone(),
+                to: target,
+            });
+
+            return;
+        }
+
+        (self.send)(focus_event);
     }
 }
 
@@ -1260,6 +1337,13 @@ fn selection_plan(mut selected: BTreeSet<Key>) -> Option<TransitionPlan<Machine>
     )
 }
 
+fn fallback_typeahead_timestamp(context: &Context) -> Duration {
+    context
+        .typeahead
+        .last_key_time
+        .saturating_add(typeahead::TYPEAHEAD_TIMEOUT)
+}
+
 fn range_keys(context: &Context, from: &Key, to: &Key) -> Option<BTreeSet<Key>> {
     let from = key_index(&context.items, from)?;
     let to = key_index(&context.items, to)?;
@@ -1294,16 +1378,20 @@ fn blur_plan() -> TransitionPlan<Machine> {
 
 fn move_focus_plan(context: &Context, direction: Direction2d) -> Option<TransitionPlan<Machine>> {
     let current = context.focused_key.as_ref()?;
-    let current_index = key_index(&context.items, current)?;
+    let target = navigation_target_from_key(context, current, direction)?;
 
-    let target = match direction {
+    Some(focus_key_plan(target))
+}
+
+fn navigation_target_from_key(context: &Context, key: &Key, direction: Direction2d) -> Option<Key> {
+    let current_index = key_index(&context.items, key)?;
+
+    match direction {
         Direction2d::Up => scan_vertical(context, current_index, false),
         Direction2d::Down => scan_vertical(context, current_index, true),
         Direction2d::Left => scan_horizontal(context, current_index, false),
         Direction2d::Right => scan_horizontal(context, current_index, true),
-    }?;
-
-    Some(focus_key_plan(target))
+    }
 }
 
 fn scan_horizontal(context: &Context, current_index: usize, forward: bool) -> Option<Key> {
@@ -1364,14 +1452,6 @@ fn scan_vertical(context: &Context, current_index: usize, forward: bool) -> Opti
     }
 }
 
-fn selection_event_for_key(context: &Context, key: &Key) -> Event {
-    if context.selection_behavior == selection::Behavior::Replace {
-        Event::Select(key.clone())
-    } else {
-        Event::ToggleSelect(key.clone())
-    }
-}
-
 fn part_attrs(part: &Part) -> AttrMap {
     let mut attrs = AttrMap::new();
     let [(scope_attr, scope_value), (part_attr, part_value)] = part.data_attrs();
@@ -1394,11 +1474,15 @@ fn sync_props_plan(context: &Context, props: &Props) -> TransitionPlan<Machine> 
         .as_ref()
         .map(|keys| filter_selection(keys, &props.items, &disabled_keys, selection_mode));
 
-    let focused_key = context
-        .focused_key
-        .as_ref()
-        .filter(|key| props.items.contains_key(key) && !disabled_keys.contains(key))
-        .cloned();
+    let focused_key = if props.disabled {
+        None
+    } else {
+        context
+            .focused_key
+            .as_ref()
+            .filter(|key| props.items.contains_key(key) && !disabled_keys.contains(key))
+            .cloned()
+    };
 
     let next_state = if focused_key.is_some() {
         State::Focused
@@ -1449,11 +1533,14 @@ fn sync_props_plan(context: &Context, props: &Props) -> TransitionPlan<Machine> 
 
 #[cfg(test)]
 mod tests {
-    use alloc::{collections::BTreeSet, string::String, vec::Vec};
+    use alloc::{collections::BTreeSet, string::String, sync::Arc, vec::Vec};
     use core::{cell::RefCell, num::NonZero};
+    use std::sync::Mutex;
 
     use ars_collections::{Key, StaticCollection, selection};
-    use ars_core::{AriaAttr, AttrMap, ConnectApi, Env, HtmlAttr, SafeUrl, Service};
+    use ars_core::{
+        AriaAttr, AttrMap, Callback, ConnectApi, Env, HtmlAttr, SafeUrl, Service, StrongSend,
+    };
     use ars_interactions::{KeyboardEventData, KeyboardKey};
     use insta::assert_snapshot;
 
@@ -1870,7 +1957,7 @@ mod tests {
             drop(grid.send(event));
         }
 
-        assert_eq!(grid.context().focused_key, Some(key("alpha")));
+        assert_eq!(grid.context().focused_key, None);
         assert_eq!(grid.context().selected_keys.get(), &selected(&["alpha"]));
 
         drop(grid.send(Event::Blur));
@@ -1949,8 +2036,42 @@ mod tests {
 
         assert_eq!(
             captured.into_inner(),
-            vec![Event::ItemAction(key("alpha")), Event::Select(key("alpha"))]
+            vec![
+                Event::ItemAction(key("alpha")),
+                Event::ToggleSelect(key("alpha"))
+            ]
         );
+    }
+
+    #[test]
+    fn item_action_sets_requested_key_and_invokes_callback() {
+        let actions = Arc::new(Mutex::new(Vec::new()));
+        let callback = Callback::new({
+            let actions = Arc::clone(&actions);
+
+            move |key: Key| actions.lock().expect("actions lock").push(key)
+        });
+        let mut grid = service(Props::new().id("grid").items(items()).on_action(callback));
+
+        let result = grid.send(Event::ItemAction(key("alpha")));
+
+        assert_eq!(
+            grid.connect(&|_| {}).requested_action_key(),
+            Some(&key("alpha"))
+        );
+        assert_eq!(result.pending_effects.len(), 1);
+        assert_eq!(result.pending_effects[0].name, Effect::Action);
+
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        let effect = result
+            .pending_effects
+            .into_iter()
+            .next()
+            .expect("action effect");
+
+        drop(effect.run(grid.context(), grid.props(), send));
+
+        assert_eq!(*actions.lock().expect("actions lock"), vec![key("alpha")]);
     }
 
     #[test]
@@ -2091,7 +2212,7 @@ mod tests {
 
         assert_eq!(
             idle_api.cell_attrs(&key("alpha")).get(&HtmlAttr::TabIndex),
-            Some("0")
+            Some("-1")
         );
         assert_eq!(
             idle_api.cell_attrs(&key("gamma")).get(&HtmlAttr::TabIndex),
@@ -2173,6 +2294,90 @@ mod tests {
                 Event::FocusLast,
                 Event::SelectAll,
             ]
+        );
+    }
+
+    #[test]
+    fn keyboard_helper_extends_selection_with_shift_arrow_and_reverses_rtl() {
+        let captured = RefCell::new(Vec::new());
+        let send = |event| captured.borrow_mut().push(event);
+        let mut env = Env::default();
+
+        env.locale = ars_i18n::locales::ar();
+
+        let grid = Service::<Machine>::new(
+            Props::new()
+                .id("grid")
+                .items(items())
+                .columns(NonZero::new(2).expect("non-zero columns"))
+                .selection_mode(selection::Mode::Multiple),
+            &env,
+            &Messages::default(),
+        );
+        let api = grid.connect(&send);
+        let mut shift_left = keyboard(KeyboardKey::ArrowLeft, None);
+
+        shift_left.shift_key = true;
+        api.on_cell_keydown_at(&key("gamma"), &shift_left, Duration::from_millis(9));
+
+        assert_eq!(
+            captured.into_inner(),
+            vec![
+                Event::FocusRight,
+                Event::SelectRange {
+                    from: key("gamma"),
+                    to: key("delta"),
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn select_range_preserves_non_empty_selection_when_range_has_no_enabled_items() {
+        let disabled_items = StaticCollection::new([
+            (key("alpha"), "Alpha".into(), item("alpha", "Alpha", false)),
+            (key("beta"), "Beta".into(), item("beta", "Beta", true)),
+        ]);
+        let mut grid = service(
+            Props::new()
+                .id("grid")
+                .items(disabled_items)
+                .selection_mode(selection::Mode::Multiple)
+                .default_selected_keys(selected(&["alpha"]))
+                .disallow_empty_selection(true),
+        );
+
+        drop(grid.send(Event::SelectRange {
+            from: key("beta"),
+            to: key("beta"),
+        }));
+
+        assert_eq!(grid.context().selected_keys.get(), &selected(&["alpha"]));
+    }
+
+    #[test]
+    fn convenience_keydown_uses_timeout_advancing_typeahead_timestamp() {
+        let captured = RefCell::new(Vec::new());
+        let send = |event| captured.borrow_mut().push(event);
+        let mut grid = service(Props::new().id("grid").items(items()));
+
+        drop(grid.send(Event::TypeaheadSearch {
+            ch: 'g',
+            now: Duration::from_millis(100),
+        }));
+
+        let api = grid.connect(&send);
+        api.on_cell_keydown(
+            &key("gamma"),
+            &keyboard(KeyboardKey::Unidentified, Some('d')),
+        );
+
+        assert_eq!(
+            captured.into_inner(),
+            vec![Event::TypeaheadSearch {
+                ch: 'd',
+                now: Duration::from_millis(600),
+            }]
         );
     }
 

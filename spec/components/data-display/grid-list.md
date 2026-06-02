@@ -68,6 +68,8 @@ pub struct Context {
     pub selected_keys: Bindable<BTreeSet<Key>>,
     /// Latest user-requested selected keys for adapter change notification.
     pub requested_selected_keys: Option<BTreeSet<Key>>,
+    /// Latest user-requested action key for adapter change notification.
+    pub requested_action_key: Option<Key>,
     /// When true, all items are non-interactive.
     pub disabled: bool,
     /// Keys of individually disabled items.
@@ -169,6 +171,8 @@ pub struct Props {
     /// signalling that the next page of items should be loaded. When `None`,
     /// the `LoadingSentinel` part is not rendered. See `06-collections.md` §5.3.
     pub on_load_more: Option<Callback<dyn Fn() + Send + Sync>>,
+    /// Callback invoked when an enabled item receives a primary action.
+    pub on_action: Option<Callback<dyn Fn(Key) + Send + Sync>>,
     /// Whether a load-more request is currently in flight. When `true`, the
     /// `LoadingSentinel` element receives `data-ars-loading="true"` so the
     /// adapter can display a spinner. Default: `false`.
@@ -194,6 +198,7 @@ impl Default for Props {
             label: None,
             composite: true,
             on_load_more: None,
+            on_action: None,
             loading: false,
             dnd_enabled: false,
         }
@@ -220,6 +225,8 @@ semantics:
 - `selected_keys` is a `Bindable<BTreeSet<Key>>`. Controlled values are filtered to present,
   enabled item keys, while `requested_selected_keys` preserves the latest user-requested
   selection so adapters can notify parents even when controlled props lag.
+- `requested_action_key` preserves the latest enabled item action key so adapters can notify
+  consumers even when no selection changed.
 - Disabled grids reject focus, selection, action, typeahead, and navigation mutations. Disabled
   or stale item keys are rejected for focus, selection, and action events.
 - Arrow, Home, and End navigation operate over the flat collection projected into rows and
@@ -233,11 +240,11 @@ semantics:
 - Printable-character typeahead uses the shared collection typeahead behavior, ignores
   composition and control-modified input, and focuses matching enabled items.
 - `SyncProps` refreshes items, disabled keys, columns, selected-key control state,
-  `loading`, `composite`, `dnd_enabled`, and component IDs, dropping focus only when the
-  focused key is no longer present or enabled.
-- `ItemAction` is notification-only in the agnostic core. Link activation, DOM focus,
-  scroll-into-view, live announcements, pointer hit testing, native drag events, and load-more
-  observation stay in adapters.
+  `loading`, `composite`, `dnd_enabled`, and component IDs, dropping focus when the grid becomes
+  disabled or when the focused key is no longer present or enabled.
+- `ItemAction` records `requested_action_key` and emits the `Action` effect so adapters can invoke
+  `on_action`. Link activation, DOM focus, scroll-into-view, live announcements, pointer hit
+  testing, native drag events, and load-more observation stay in adapters.
 
 ### 1.6 Connect / API
 
@@ -265,6 +272,8 @@ impl Api<'_> {
     pub fn cell_id(&self, key: &Key) -> Option<String>;
     /// Returns the latest user-requested selected keys.
     pub const fn requested_selected_keys(&self) -> Option<&BTreeSet<Key>>;
+    /// Returns the latest user-requested action key.
+    pub const fn requested_action_key(&self) -> Option<&Key>;
     /// Returns the current item collection.
     pub const fn items(&self) -> &StaticCollection<ItemDef>;
     /// Returns root attributes.
@@ -279,7 +288,7 @@ impl Api<'_> {
     pub fn drag_handle_attrs(&self, key: &Key) -> AttrMap;
     /// Returns drop indicator attributes for `target`.
     pub fn drop_indicator_attrs(&self, target: &CollectionDropTarget) -> AttrMap;
-    /// Dispatches a keydown event using `Duration::ZERO`.
+    /// Dispatches a keydown event using a timeout-advancing fallback timestamp.
     pub fn on_cell_keydown(&self, key: &Key, data: &KeyboardEventData);
     /// Dispatches a keydown event with an adapter-provided monotonic timestamp.
     pub fn on_cell_keydown_at(&self, key: &Key, data: &KeyboardEventData, now: Duration);
@@ -304,14 +313,14 @@ GridList
 └── DropIndicator     (optional; drag-and-drop variant)
 ```
 
-| Part              | Element                                                                      | Key Attributes                                                                                                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Root`            | `<div>`                                                                      | `role="grid"`, `aria-label`, `aria-multiselectable`, `data-ars-state`, `data-ars-disabled`                                                                                             |
-| `Row`             | `<div>`                                                                      | `role="row"`, `aria-selected`, `data-ars-key`, `data-ars-selected`                                                                                                                     |
-| `Cell`            | `<div>` or `<a>` (when href)                                                 | `role="gridcell"`, `tabindex` (roving), `aria-disabled`, `aria-roledescription` (when draggable), `data-ars-key`, `data-ars-selected`, `data-ars-focus-visible`, `href` (when present) |
-| `LoadingSentinel` | `<div>` (optional, after last Row; rendered only when `on_load_more` is set) | `aria-hidden="true"`, `tabindex="-1"`, `data-ars-loading` (when loading)                                                                                                               |
-| `DragHandle`      | `<button>`                                                                   | `role="button"`, `aria-label`, `aria-disabled`, `tabindex`                                                                                                                             |
-| `DropIndicator`   | `<div>`                                                                      | `aria-hidden="true"`, `data-ars-drop-position`, `data-ars-drop-target`                                                                                                                 |
+| Part              | Element                                                                      | Key Attributes                                                                                                                                                                                                                                         |
+| ----------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Root`            | `<div>`                                                                      | `role="grid"`, `aria-label`, `aria-multiselectable`, `data-ars-state`, `data-ars-disabled`                                                                                                                                                             |
+| `Row`             | `<div>`                                                                      | `role="row"`, `aria-selected`, `data-ars-key`, `data-ars-selected`                                                                                                                                                                                     |
+| `Cell`            | `<div>` or `<a>` (when href)                                                 | `role="gridcell"`, `tabindex="-1"` in composite mode, independent `tabindex="0"` in non-composite mode, `aria-disabled`, `aria-roledescription` (when draggable), `data-ars-key`, `data-ars-selected`, `data-ars-focus-visible`, `href` (when present) |
+| `LoadingSentinel` | `<div>` (optional, after last Row; rendered only when `on_load_more` is set) | `aria-hidden="true"`, `tabindex="-1"`, `data-ars-loading` (when loading)                                                                                                                                                                               |
+| `DragHandle`      | `<button>`                                                                   | `role="button"`, `aria-label`, `aria-disabled`, `tabindex`                                                                                                                                                                                             |
+| `DropIndicator`   | `<div>`                                                                      | `aria-hidden="true"`, `data-ars-drop-position`, `data-ars-drop-target`                                                                                                                                                                                 |
 
 ## 3. Accessibility
 
@@ -320,16 +329,16 @@ GridList
 - **Grid pattern**: GridList uses `role="grid"` at the root level, with `role="row"` grouping
   cells and `role="gridcell"` on each item. This provides two-dimensional keyboard navigation
   semantics to assistive technologies.
-- **Roving tabindex**: Only the currently focused cell has `tabindex="0"`; all others have
-  `tabindex="-1"`. When no cell is focused, the first non-disabled cell receives `tabindex="0"`.
+- **Composite tab stop**: In `composite: true`, the root is the single tab stop and cells use
+  `tabindex="-1"` while `aria-activedescendant` names the active cell. In `composite: false`,
+  each enabled cell is an independent tab stop.
 - **Selection announcement**: `aria-selected` on rows reflects selection state. When
   `selection_mode` is `Multiple`, the root has `aria-multiselectable="true"`.
 - **Disabled items**: `aria-disabled="true"` on individual cells. Disabled items are skipped
   during 2D navigation when possible, but remain discoverable by AT.
 - **`aria-activedescendant`**: The root element sets `aria-activedescendant` to the ID of the
-  currently focused cell. This provides an alternative focus management strategy to roving
-  tabindex for virtualized grids where not all cells are in the DOM. When `composite: true`,
-  the root element receives focus and `aria-activedescendant` points to the visually focused cell.
+  currently focused cell. When `composite: true`, the root element receives focus and
+  `aria-activedescendant` points to the visually focused cell.
 - **Action vs. selection**: Enter triggers `on_action` (primary action), while Space toggles
   selection. This mirrors the ARIA grid pattern where Enter activates and Space selects.
 - **Home/End wrapping**: `Home` moves focus to the first non-disabled item in the grid. `End`
