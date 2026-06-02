@@ -39,7 +39,7 @@ use ars_core::{
     TransitionPlan,
 };
 use ars_i18n::{
-    CalendarDate, CalendarDateTime, CalendarSystem, DateOrder, HourCycle, Time,
+    CalendarDate, CalendarDateFields, CalendarDateTime, CalendarSystem, DateOrder, HourCycle, Time,
     date_field_separator, date_order,
 };
 use ars_interactions::KeyboardEventData;
@@ -713,16 +713,25 @@ impl Context {
             .all(|segment| segment.value.is_some())
     }
 
-    /// Assembles a [`CalendarDate`] from current date segment values.
+    /// Assembles a [`CalendarDate`] from current date segment values, using the
+    /// configured [`calendar`](Self::calendar) system so non-Gregorian segment
+    /// values commit dates in that calendar (matching `date_field`).
     #[must_use]
     pub fn assemble_date(&self) -> Option<CalendarDate> {
         let year = self.segment_value(DateSegmentKind::Year)?;
-
         let month = u8::try_from(self.segment_value(DateSegmentKind::Month)?).ok()?;
-
         let day = u8::try_from(self.segment_value(DateSegmentKind::Day)?).ok()?;
 
-        CalendarDate::new_gregorian(year, month, day).ok()
+        CalendarDate::new(
+            self.calendar,
+            &CalendarDateFields {
+                year: Some(year),
+                month: Some(month),
+                day: Some(day),
+                ..CalendarDateFields::default()
+            },
+        )
+        .ok()
     }
 
     /// Assembles a [`Time`] from current time segment values.
@@ -1036,6 +1045,24 @@ impl ars_core::Machine for Machine {
 
             Event::CalendarSelectDate(date) => {
                 if ctx.readonly {
+                    return None;
+                }
+
+                // Defense-in-depth: reject a date the picker disallows. The
+                // embedded calendar should never offer an out-of-range date, but
+                // a stale/scripted `CalendarSelectDate` must not store and display
+                // an impossible date before the time segments complete and
+                // `maybe_publish` could clamp. Compare the date against the
+                // date portion of the min/max bounds.
+                let in_range = ctx
+                    .min_value
+                    .as_ref()
+                    .is_none_or(|min| date.compare(min.date()) != Ordering::Less)
+                    && ctx
+                        .max_value
+                        .as_ref()
+                        .is_none_or(|max| date.compare(max.date()) != Ordering::Greater);
+                if !in_range {
                     return None;
                 }
 
@@ -1647,9 +1674,15 @@ impl<'a> Api<'a> {
                 HtmlAttr::Aria(AriaAttr::Controls),
                 self.ctx.ids.part("content"),
             )
+            // Explicit `type="button"` so activating the trigger never submits a
+            // surrounding form (the HTML default button type is `submit`).
+            .set(HtmlAttr::Type, "button")
             .set(HtmlAttr::TabIndex, "0");
 
-        if self.ctx.disabled {
+        // `readonly` blocks opening the popover (see `Machine::open_plan`), so the
+        // trigger is disabled in both states — an operable-looking no-op button
+        // would mislead pointer and AT users.
+        if self.ctx.disabled || self.ctx.readonly {
             attrs
                 .set_bool(HtmlAttr::Disabled, true)
                 .set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
@@ -1672,6 +1705,8 @@ impl<'a> Api<'a> {
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.clear_label)(&self.ctx.locale),
             )
+            // Explicit `type="button"` so clearing never submits a surrounding form.
+            .set(HtmlAttr::Type, "button")
             .set(HtmlAttr::TabIndex, "-1");
 
         if self.ctx.disabled || self.ctx.readonly {
@@ -2343,15 +2378,16 @@ fn clamp_datetime(
 }
 
 /// Formats the combined value as `YYYY-MM-DDTHH:MM:SS` for the hidden input.
+///
+/// The date is serialized from the canonical ISO calendar slots
+/// ([`CalendarDate::to_iso8601`]), not the display fields, so a non-Gregorian
+/// selected value still submits the spec-promised ISO 8601 datetime.
 fn format_iso8601(datetime: &CalendarDateTime) -> String {
-    let date = datetime.date();
     let time = datetime.time();
 
     format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
-        date.year(),
-        date.month(),
-        date.day(),
+        "{}T{:02}:{:02}:{:02}",
+        datetime.date().to_iso8601(),
         time.hour(),
         time.minute(),
         time.second(),

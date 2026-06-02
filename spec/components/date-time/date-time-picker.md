@@ -253,12 +253,16 @@ impl Context {
         self.all_segments().filter(|s| s.is_editable).all(|s| s.value.is_some())
     }
 
-    /// Assemble a Gregorian `CalendarDate` from current date segment values.
+    /// Assemble a `CalendarDate` from current date segment values, using the
+    /// configured `calendar` system (matching `date_field`) so non-Gregorian
+    /// values commit dates in that calendar rather than a Gregorian look-alike.
     pub fn assemble_date(&self) -> Option<CalendarDate> {
         let year = self.segment_value(DateSegmentKind::Year)?;
         let month = u8::try_from(self.segment_value(DateSegmentKind::Month)?).ok()?;
         let day = u8::try_from(self.segment_value(DateSegmentKind::Day)?).ok()?;
-        CalendarDate::new_gregorian(year, month, day).ok()
+        CalendarDate::new(self.calendar, &CalendarDateFields {
+            year: Some(year), month: Some(month), day: Some(day), ..CalendarDateFields::default()
+        }).ok()
     }
 
     /// Assemble a `Time` from current time segment values, honouring granularity
@@ -510,6 +514,15 @@ impl ars_core::Machine for Machine {
             // ── Calendar date selection ───────────────────────────────────
             Event::CalendarSelectDate(date) => {
                 if ctx.readonly { return None; }
+                // Defense-in-depth: reject a stale/scripted selection outside the
+                // min/max date bounds before it is stored and displayed (the
+                // embedded calendar should never offer one). Compares the date
+                // against the date portion of the min/max `CalendarDateTime`.
+                let in_range = ctx.min_value.as_ref()
+                        .is_none_or(|min| date.compare(min.date()) != Ordering::Less)
+                    && ctx.max_value.as_ref()
+                        .is_none_or(|max| date.compare(max.date()) != Ordering::Greater);
+                if !in_range { return None; }
                 let date = date.clone();
                 Some(TransitionPlan::to(State::Focused)
                     .apply(move |ctx| {
@@ -819,8 +832,13 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Expanded),
             if self.is_open() { "true" } else { "false" });
         attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.part("content"));
+        // Explicit `type="button"` so activating the trigger never submits a
+        // surrounding form (the HTML default button type is `submit`).
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::TabIndex, "0");
-        if self.ctx.disabled {
+        // `readonly` blocks opening the popover, so the trigger is disabled in
+        // both states (an operable-looking no-op button would mislead users).
+        if self.ctx.disabled || self.ctx.readonly {
             attrs.set_bool(HtmlAttr::Disabled, true);
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
@@ -836,6 +854,8 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("clear-trigger"));
         attrs.set(HtmlAttr::Aria(AriaAttr::Label),
             (self.ctx.messages.clear_label)(&self.ctx.locale));
+        // Explicit `type="button"` so clearing never submits a surrounding form.
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::TabIndex, "-1");
         if self.ctx.disabled || self.ctx.readonly {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -906,7 +926,9 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Name, name);
         }
         // ISO 8601 datetime: YYYY-MM-DDTHH:MM:SS (always 24-hour, regardless of
-        // the visible hour cycle), built from `CalendarDate`/`Time` accessors.
+        // the visible hour cycle). `format_iso8601` serializes the date from the
+        // canonical ISO calendar slots (`CalendarDate::to_iso8601`), so a
+        // non-Gregorian selected value still submits the ISO datetime.
         if let Some(dt) = self.ctx.value.get() {
             attrs.set(HtmlAttr::Value, format_iso8601(dt));
         }

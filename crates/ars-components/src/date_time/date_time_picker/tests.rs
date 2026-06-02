@@ -9,7 +9,8 @@ use core::cell::RefCell;
 
 use ars_core::{AriaAttr, AttrMap, ComponentPart, Direction, Env, HtmlAttr, SendResult, Service};
 use ars_i18n::{
-    CalendarDate, CalendarDateTime, HourCycle, Locale, StubIntlBackend, Time,
+    CalendarDate, CalendarDateFields, CalendarDateTime, CalendarSystem, HourCycle, Locale,
+    StubIntlBackend, Time,
     locales::{de_de, en_us},
 };
 use ars_interactions::{KeyboardEventData, KeyboardKey};
@@ -1290,6 +1291,116 @@ fn on_segment_keydown_backspace_clears_segment() {
             segment: DateSegmentKind::Minute,
         }]
     );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Codex review #708: calendar fidelity, form button types, range guard
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn assemble_uses_configured_calendar_system() {
+    let mut svc = service_with(props().calendar(CalendarSystem::Buddhist), en_us());
+
+    // Buddhist year 2567 == Gregorian 2024.
+    drop(svc.send(Event::SegmentChange {
+        segment: DateSegmentKind::Year,
+        value: 2567,
+    }));
+    drop(svc.send(Event::SegmentChange {
+        segment: DateSegmentKind::Month,
+        value: 3,
+    }));
+    drop(svc.send(Event::SegmentChange {
+        segment: DateSegmentKind::Day,
+        value: 15,
+    }));
+
+    let assembled = svc.context().date_value.as_ref().expect("date assembled");
+    assert_eq!(assembled.calendar(), CalendarSystem::Buddhist);
+}
+
+#[test]
+fn hidden_input_serializes_iso_for_non_gregorian_value() {
+    // A Buddhist date equivalent to ISO 2024-03-15.
+    let buddhist_date = CalendarDate::new(
+        CalendarSystem::Buddhist,
+        &CalendarDateFields {
+            year: Some(2567),
+            month: Some(3),
+            day: Some(15),
+            ..CalendarDateFields::default()
+        },
+    )
+    .expect("valid Buddhist date");
+    let value = CalendarDateTime::new(buddhist_date, time(14, 30, 0));
+
+    let svc = service_with(
+        Props {
+            default_value: Some(value),
+            ..props()
+        },
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+
+    // The hidden input carries the canonical ISO datetime, not the Buddhist year.
+    assert_eq!(
+        attr(&api.hidden_input_attrs(), HtmlAttr::Value).as_deref(),
+        Some("2024-03-15T14:30:00")
+    );
+}
+
+#[test]
+fn trigger_disabled_when_readonly() {
+    let svc = service_with(props().readonly(true), en_us());
+    let api = svc.connect(&|_| {});
+    let attrs = api.trigger_attrs();
+    assert_eq!(
+        attr(&attrs, HtmlAttr::Aria(AriaAttr::Disabled)).as_deref(),
+        Some("true")
+    );
+}
+
+#[test]
+fn trigger_and_clear_have_button_type() {
+    let svc = filled_service();
+    let api = svc.connect(&|_| {});
+    assert_eq!(
+        attr(&api.trigger_attrs(), HtmlAttr::Type).as_deref(),
+        Some("button")
+    );
+    assert_eq!(
+        attr(&api.clear_trigger_attrs(), HtmlAttr::Type).as_deref(),
+        Some("button")
+    );
+}
+
+#[test]
+fn calendar_select_rejects_out_of_range_date() {
+    let mut svc = service_with(
+        Props {
+            min_value: Some(datetime(2024, 1, 1, 0, 0, 0)),
+            max_value: Some(datetime(2024, 12, 31, 23, 59, 59)),
+            ..props()
+        },
+        en_us(),
+    );
+    drop(svc.send(Event::Open));
+
+    // A selection before the minimum date is rejected outright.
+    let result = svc.send(Event::CalendarSelectDate(date(2023, 6, 1)));
+
+    assert!(!result.context_changed);
+    assert_eq!(svc.context().date_value, None);
+    assert_eq!(*svc.state(), State::Open);
+
+    // A selection after the maximum date is likewise rejected.
+    drop(svc.send(Event::CalendarSelectDate(date(2025, 6, 1))));
+    assert_eq!(svc.context().date_value, None);
+
+    // An in-range selection is accepted.
+    drop(svc.send(Event::CalendarSelectDate(date(2024, 6, 1))));
+    assert_eq!(svc.context().date_value, Some(date(2024, 6, 1)));
 }
 
 // ────────────────────────────────────────────────────────────────────
