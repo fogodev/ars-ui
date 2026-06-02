@@ -1319,6 +1319,106 @@ fn fallback_date_order(locale: &Locale) -> DateOrder {
     }
 }
 
+/// Returns the literal separator a locale renders **between** the numeric fields
+/// of a short, all-numeric date (e.g. `/` for `en-US`, `.` for `de-DE`, `. ` for
+/// `ko-KR`).
+///
+/// This is the canonical source for the literal that segmented date inputs
+/// (`DateField`, `DatePicker`, `DateTimePicker`) insert between their
+/// year/month/day segments. Like [`date_order`], it resolves from real locale
+/// data — CLDR via ICU4X or the browser `Intl` API where a backend is compiled
+/// in — and falls back to a small `(language, region)` heuristic otherwise. The
+/// value is the inter-field separator only; any leading/trailing literals a
+/// locale's pattern may carry (such as the trailing `.` in `ko-KR`) are not
+/// included.
+#[must_use]
+pub fn date_field_separator(locale: &Locale) -> String {
+    #[cfg(feature = "icu4x")]
+    if let Some(separator) = icu_date_field_separator(locale) {
+        return separator;
+    }
+
+    #[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
+    if let Some(separator) = js_date_field_separator(locale) {
+        return separator;
+    }
+
+    fallback_date_field_separator(locale)
+}
+
+#[cfg(feature = "icu4x")]
+fn icu_date_field_separator(locale: &Locale) -> Option<String> {
+    let probe = CalendarDate::new_gregorian(2006, 11, 22).ok()?;
+
+    let locale = locale.with_gregorian_calendar();
+
+    let formatter = build_icu_date_formatter(&locale, FormatLength::Short);
+    let formatted = format_icu_date(&locale, FormatLength::Short, &formatter, &probe);
+
+    separator_from_formatted(&formatted)
+}
+
+#[cfg(all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x")))]
+fn js_date_field_separator(locale: &Locale) -> Option<String> {
+    let probe = CalendarDate::new_gregorian(2006, 11, 22).ok()?;
+
+    let locale = locale.with_gregorian_calendar();
+
+    let formatter = build_js_date_formatter(&locale, FormatLength::Short);
+    let formatted = format_js_date(&locale, FormatLength::Short, &formatter, &probe);
+
+    separator_from_formatted(&formatted)
+}
+
+fn fallback_date_field_separator(locale: &Locale) -> String {
+    match (locale.language(), locale.region()) {
+        ("de", Some("DE")) => ".",
+        ("ko", Some("KR")) => ". ",
+        _ => "/",
+    }
+    .to_string()
+}
+
+/// Extracts the literal between the first two numeric runs of a formatted probe
+/// date. Digits are normalized to ASCII first (so native numbering systems are
+/// detected), leaving the inter-field separator — itself non-numeric — intact.
+/// Returns `None` when the formatted string does not contain two numeric fields.
+#[cfg(any(
+    feature = "icu4x",
+    all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x"))
+))]
+fn separator_from_formatted(formatted: &str) -> Option<String> {
+    let normalized = crate::number::normalize_digits(formatted);
+
+    let chars = normalized.chars().collect::<alloc::vec::Vec<_>>();
+
+    let len = chars.len();
+
+    let mut index = 0;
+
+    while index < len && !chars[index].is_ascii_digit() {
+        index += 1;
+    }
+
+    while index < len && chars[index].is_ascii_digit() {
+        index += 1;
+    }
+
+    let separator_start = index;
+
+    while index < len && !chars[index].is_ascii_digit() {
+        index += 1;
+    }
+
+    // Require a second numeric field after the separator; otherwise there is no
+    // inter-field separator to report.
+    if index >= len || separator_start == index {
+        return None;
+    }
+
+    Some(chars[separator_start..index].iter().collect())
+}
+
 #[cfg(any(
     feature = "icu4x",
     all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x"))
@@ -2732,6 +2832,59 @@ mod tests {
         // Everything else is day-first (the most common order worldwide).
         assert_eq!(order("en-GB"), DateOrder::DayMonthYear);
         assert_eq!(order("de-DE"), DateOrder::DayMonthYear);
+    }
+
+    #[test]
+    fn fallback_date_field_separator_covers_branches() {
+        use super::fallback_date_field_separator;
+
+        let separator =
+            |tag: &str| fallback_date_field_separator(&Locale::parse(tag).expect("locale parses"));
+
+        assert_eq!(separator("de-DE"), ".");
+        assert_eq!(separator("ko-KR"), ". ");
+        assert_eq!(separator("en-US"), "/");
+        assert_eq!(separator("en-GB"), "/");
+        assert_eq!(separator("ja-JP"), "/");
+    }
+
+    #[cfg(all(feature = "std", feature = "icu4x"))]
+    #[test]
+    fn date_field_separator_uses_icu_literal() {
+        use super::date_field_separator;
+
+        // With ICU4X data the separator comes from CLDR, not the heuristic:
+        // `en-US` → `/`, `de-DE` → `.`. `fa-IR` (Extended Arabic-Indic digits,
+        // Solar Hijri default) must still resolve via the Gregorian probe and
+        // digit transliteration rather than failing into the fallback.
+        assert_eq!(
+            date_field_separator(&Locale::parse("en-US").expect("locale parses")),
+            "/",
+        );
+        assert_eq!(
+            date_field_separator(&Locale::parse("de-DE").expect("locale parses")),
+            ".",
+        );
+        assert!(!date_field_separator(&Locale::parse("fa-IR").expect("locale parses")).is_empty(),);
+    }
+
+    #[cfg(any(
+        feature = "icu4x",
+        all(feature = "web-intl", target_arch = "wasm32", not(feature = "icu4x"))
+    ))]
+    #[test]
+    fn separator_from_formatted_extracts_inter_field_literal() {
+        use super::separator_from_formatted;
+
+        assert_eq!(separator_from_formatted("11/22/2006").as_deref(), Some("/"));
+        assert_eq!(separator_from_formatted("22.11.2006").as_deref(), Some("."));
+        assert_eq!(
+            separator_from_formatted("2006. 11. 22.").as_deref(),
+            Some(". ")
+        );
+        // Fewer than two numeric fields yields no separator.
+        assert_eq!(separator_from_formatted("2006").as_deref(), None);
+        assert_eq!(separator_from_formatted("").as_deref(), None);
     }
 
     #[cfg(any(

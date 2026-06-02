@@ -18,19 +18,19 @@ This spec maps the core [`DateTimePicker`](../../components/date-time/date-time-
 #[component]
 pub fn DateTimePicker(
     #[prop(optional)] id: Option<String>,
-    #[prop(optional, into)] value: Signal<Option<DateTime>>,
-    #[prop(optional)] default_value: Option<DateTime>,
+    #[prop(optional, into)] value: Signal<Option<CalendarDateTime>>,
+    #[prop(optional)] default_value: Option<CalendarDateTime>,
     #[prop(optional)] locale: Option<Locale>,
     #[prop(optional)] format: Option<String>,
     #[prop(optional)] visible_months: usize,
-    #[prop(optional)] min_value: Option<DateTime>,
-    #[prop(optional)] max_value: Option<DateTime>,
+    #[prop(optional)] min_value: Option<CalendarDateTime>,
+    #[prop(optional)] max_value: Option<CalendarDateTime>,
     #[prop(optional)] disabled: bool,
     #[prop(optional)] readonly: bool,
     #[prop(optional)] required: bool,
     #[prop(optional)] invalid: bool,
     #[prop(optional)] name: Option<String>,
-    #[prop(optional)] on_value_change: Option<Callback<Option<DateTime>>>,
+    #[prop(optional)] on_value_change: Option<Callback<Option<CalendarDateTime>>>,
     #[prop(optional)] on_open_change: Option<Callback<bool>>,
 ) -> impl IntoView
 ```
@@ -104,11 +104,11 @@ The adapter keeps the unified machine from the agnostic spec, renders both date 
 
 ## 11. Callback Payload Contract
 
-| Callback                                  | Payload source             | Payload shape      | Timing                          | Cancelable? | Notes                                                          |
-| ----------------------------------------- | -------------------------- | ------------------ | ------------------------------- | ----------- | -------------------------------------------------------------- |
-| `on_value_change`                         | machine-derived snapshot   | `Option<DateTime>` | after committed datetime update | no          | Date-only calendar changes combine with current time snapshot. |
-| `on_open_change`                          | normalized adapter payload | `bool`             | after open state commit         | no          | Trigger, dismiss, and Escape share this path.                  |
-| dismissal analytics callback when exposed | raw framework event        | framework event    | before close dispatch           | yes         | Optional wrapper-only surface.                                 |
+| Callback                                  | Payload source             | Payload shape              | Timing                          | Cancelable? | Notes                                                          |
+| ----------------------------------------- | -------------------------- | -------------------------- | ------------------------------- | ----------- | -------------------------------------------------------------- |
+| `on_value_change`                         | machine-derived snapshot   | `Option<CalendarDateTime>` | after committed datetime update | no          | Date-only calendar changes combine with current time snapshot. |
+| `on_open_change`                          | normalized adapter payload | `bool`                     | after open state commit         | no          | Trigger, dismiss, and Escape share this path.                  |
+| dismissal analytics callback when exposed | raw framework event        | framework event            | before close dispatch           | yes         | Optional wrapper-only surface.                                 |
 
 ## 12. Failure and Degradation Rules
 

@@ -6,12 +6,40 @@ foundation_deps: [architecture, accessibility, i18n, interactions, forms]
 shared_deps: [date-time-types]
 related: [date-picker, time-field, calendar]
 references:
-  ark-ui: DatePicker
+    ark-ui: DatePicker
 ---
 
 # DateTimePicker
 
 `DateTimePicker` is a composite component that combines a `DatePicker` (segmented date input with calendar popover) and a `TimeField` (segmented time input) into a single control for selecting both date and time. The date segments and time segments render in a unified control area, separated by a visual separator. The calendar popover handles date selection; time segments are edited inline via the spinbutton pattern.
+
+> **Spec-vs-implementation reconciliation.** The code blocks below describe the
+> agnostic implementation at `crates/ars-components/src/date_time/date_time_picker/`,
+> which is the authoritative contract. Key conventions, shared with the sibling
+> `date_picker`/`time_field` machines:
+>
+> - **Combined value is `ars_i18n::CalendarDateTime`** (`CalendarDateTime::new(date, time)`,
+>   accessors `.date()`/`.time()`). It has no `Ord`, so range checks compare the
+>   date via `CalendarDate::compare` and then the `Time` via `Ord`.
+> - **Focus is adapter-driven via named effects.** The machine declares a typed
+>   `Effect` enum and emits [`PendingEffect::named`] intents (`FocusCalendar`,
+>   `RestoreFocusToTrigger`, `FocusFirstTimeSegment`, `TypeBufferCommit`); the
+>   adapter performs the live, element-handle-based focus / timer. The core never
+>   calls `use_platform_effects()`/`focus_element_by_id` (matches the element/ref
+>   handling note in issue #292).
+> - **Controlled-prop sync.** `on_props_changed` emits `Event::SyncProps(Box<Props>)`,
+>   which reconciles the controlled `value` and cached scalar fields and flows
+>   through even when `disabled` so a parent can lift the disabled state.
+> - **Segment helpers are shared.** Hour-cycle math (`display_hour`,
+>   `display_hour_to_24`, `display_hour_range`, `has_day_period`, `is_pm`) and the
+>   `digits_needed` type-ahead helper live in `date_time::hour_cycle`, shared with
+>   `time_field`. Date segment order comes from `ars_i18n::date_order` and the
+>   inter-segment literal from `ars_i18n::date_field_separator` (both CLDR-backed,
+>   shared with `date_field`/`date_picker`). Segment ARIA labels resolve from the
+>   per-segment fields on this component's `Messages`.
+> - **Real `CalendarDate`/`Time` APIs.** `CalendarDate::new_gregorian(year: i32,
+month: u8, day: u8)` and `Time::new(h, m, s, millis)` are fallible; segment
+>   values pass through `.ok()`. Segment kinds expose `data_name()` (not `as_str()`).
 
 ## 1. State Machine
 
@@ -49,8 +77,8 @@ pub enum Event {
         /// The new value.
         value: i32,
     },
-    /// The full date-time value was committed (Enter, blur, or calendar cell click).
-    ValueCommit(Option<DateTime>),
+    /// Commit (or clear) the full combined date-time value (Enter, blur, programmatic).
+    ValueCommit(Option<CalendarDateTime>),
     /// Focus moved to a specific segment.
     FocusSegment(DateSegmentKind),
     /// Focus moved to the next segment.
@@ -65,33 +93,40 @@ pub enum Event {
     TypeIntoSegment { segment: DateSegmentKind, ch: char },
     /// The type-ahead buffer timer fired; commit buffered digits.
     TypeBufferCommit { segment: DateSegmentKind },
+    /// A segment value changed programmatically.
+    SegmentChange { segment: DateSegmentKind, value: i32 },
     /// Clear the value of a segment.
     ClearSegment { segment: DateSegmentKind },
     /// Clear the entire date-time value.
     ClearAll,
     /// A date was selected from the calendar popover.
     CalendarSelectDate(CalendarDate),
-    /// Navigate to the next month in the calendar.
-    CalendarNext,
-    /// Navigate to the previous month in the calendar.
-    CalendarPrev,
     /// Focus entered the component (any segment or trigger).
     FocusIn,
     /// Focus left the component entirely.
     FocusOut,
-    /// Keyboard event on a segment or trigger.
+    /// Keyboard event on a segment, trigger, or popover.
     KeyDown { key: KeyboardKey },
+    /// Synchronize context from a new props snapshot.
+    SyncProps(Box<Props>),
 }
 ```
+
+> Calendar month navigation (next/previous) is delegated entirely to the embedded
+> `Calendar` machine; the adapter wires those `Calendar` events directly, so the
+> `DateTimePicker` machine has no `CalendarNext`/`CalendarPrev` events.
 
 ### 1.3 Context
 
 ```rust
 /// Context for the DateTimePicker component.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// `Debug` and `PartialEq` are hand-written to skip the `intl_backend` trait
+/// object (every other field participates), mirroring `time_field::Context`.
+#[derive(Clone)]
 pub struct Context {
     /// The combined date-time value (controlled/uncontrolled).
-    pub value: Bindable<Option<DateTime>>,
+    pub value: Bindable<Option<CalendarDateTime>>,
     /// The date portion of the value (synced from value or calendar selection).
     pub date_value: Option<CalendarDate>,
     /// The time portion of the value (synced from value or time segment edits).
@@ -100,9 +135,9 @@ pub struct Context {
     pub focused_segment: Option<DateSegmentKind>,
     /// Whether the calendar popover is open.
     pub open: bool,
-    /// Date segments (Year, Month, Day) in locale order.
+    /// Date segments (Year, Month, Day) in locale order, with literals.
     pub date_segments: Vec<DateSegment>,
-    /// Time segments (Hour, Minute, optional Second, optional DayPeriod).
+    /// Time segments (Hour, Minute, optional Second, optional DayPeriod), with literals.
     pub time_segments: Vec<DateSegment>,
     /// The type-ahead buffer for numeric segment editing.
     pub type_buffer: String,
@@ -110,14 +145,18 @@ pub struct Context {
     pub locale: Locale,
     /// Resolved translatable messages.
     pub messages: Messages,
+    /// Backend used for locale-dependent hour-cycle resolution.
+    pub intl_backend: Arc<dyn IntlBackend>,
     /// The time granularity (Hour, Minute, Second).
     pub granularity: TimeGranularity,
     /// The resolved hour cycle.
     pub hour_cycle: HourCycle,
+    /// The calendar system used by the embedded calendar.
+    pub calendar: CalendarSystem,
     /// Minimum allowed date-time.
-    pub min_value: Option<DateTime>,
+    pub min_value: Option<CalendarDateTime>,
     /// Maximum allowed date-time.
-    pub max_value: Option<DateTime>,
+    pub max_value: Option<CalendarDateTime>,
     /// Whether the component is disabled.
     pub disabled: bool,
     /// Whether the component is read-only.
@@ -126,10 +165,16 @@ pub struct Context {
     pub is_touched: bool,
     /// Whether the field is required.
     pub required: bool,
+    /// Whether the field is invalid.
+    pub invalid: bool,
     /// Form field name.
     pub name: Option<String>,
     /// Right-to-left layout.
     pub is_rtl: bool,
+    /// The adapter-injected current date forwarded to the calendar.
+    pub today: CalendarDate,
+    /// Number of months shown in the calendar popover.
+    pub visible_months: usize,
     /// Component IDs.
     pub ids: ComponentIds,
 }
@@ -138,6 +183,16 @@ impl Context {
     /// All segments in display order: date segments, then time segments.
     pub fn all_segments(&self) -> impl Iterator<Item = &DateSegment> {
         self.date_segments.iter().chain(self.time_segments.iter())
+    }
+
+    /// Returns the segment with the given kind, if present in either group.
+    pub fn segment(&self, kind: DateSegmentKind) -> Option<&DateSegment> {
+        self.all_segments().find(|s| s.kind == kind)
+    }
+
+    /// Returns the current numeric value for a segment.
+    pub fn segment_value(&self, kind: DateSegmentKind) -> Option<i32> {
+        self.segment(kind)?.value
     }
 
     /// Find the first editable segment across date and time.
@@ -171,108 +226,59 @@ impl Context {
         self.time_segments.iter().any(|s| s.kind == kind)
     }
 
-    /// Set a segment's value, looking in both date and time segment lists.
+    /// Set a segment's value (clamped to its range), formatting the display text
+    /// via `format_segment_text` (year is 4-wide, day-period is AM/PM, the rest
+    /// are zero-padded to two digits).
     pub fn set_segment_value(&mut self, kind: DateSegmentKind, raw: i32) {
         let seg = self.date_segments.iter_mut()
             .chain(self.time_segments.iter_mut())
-            .find(|s| s.kind == kind);
+            .find(|s| s.kind == kind && s.is_editable);
         if let Some(seg) = seg {
             let v = raw.clamp(seg.min, seg.max);
             seg.value = Some(v);
-            seg.text = format!("{:02}", v);
+            seg.text = format_segment_text(kind, v);
         }
     }
 
     /// Clear a segment's value.
-    pub fn clear_segment_value(&mut self, kind: DateSegmentKind) {
-        let seg = self.date_segments.iter_mut()
-            .chain(self.time_segments.iter_mut())
-            .find(|s| s.kind == kind);
-        if let Some(seg) = seg {
-            seg.value = None;
-            seg.text = String::new();
-        }
-    }
+    pub fn clear_segment_value(&mut self, kind: DateSegmentKind) { /* clears value + text */ }
 
-    /// Increment a segment's value, wrapping around.
-    pub fn increment_segment(&mut self, kind: DateSegmentKind) {
-        let seg = self.date_segments.iter()
-            .chain(self.time_segments.iter())
-            .find(|s| s.kind == kind)
-            .cloned();
-        if let Some(seg) = seg {
-            let cur  = seg.value.unwrap_or(seg.min);
-            let next = if cur >= seg.max { seg.min } else { cur + 1 };
-            self.set_segment_value(kind, next);
-        }
-    }
-
-    /// Decrement a segment's value, wrapping around.
-    pub fn decrement_segment(&mut self, kind: DateSegmentKind) {
-        let seg = self.date_segments.iter()
-            .chain(self.time_segments.iter())
-            .find(|s| s.kind == kind)
-            .cloned();
-        if let Some(seg) = seg {
-            let cur  = seg.value.unwrap_or(seg.max);
-            let next = if cur <= seg.min { seg.max } else { cur - 1 };
-            self.set_segment_value(kind, next);
-        }
-    }
+    /// Increment / decrement a segment value, wrapping within its range
+    /// (`rem_euclid`-based, identical to `time_field`).
+    pub fn increment_segment(&mut self, kind: DateSegmentKind) { /* step_segment_value(+1) */ }
+    pub fn decrement_segment(&mut self, kind: DateSegmentKind) { /* step_segment_value(-1) */ }
 
     /// Check if all editable segments across both date and time have values.
     pub fn is_complete(&self) -> bool {
-        self.all_segments()
-            .filter(|s| s.is_editable)
-            .all(|s| s.value.is_some())
+        self.all_segments().filter(|s| s.is_editable).all(|s| s.value.is_some())
     }
 
-    /// Assemble a CalendarDate from current date segment values.
+    /// Assemble a Gregorian `CalendarDate` from current date segment values.
     pub fn assemble_date(&self) -> Option<CalendarDate> {
-        let year  = self.date_segments.iter().find(|s| s.kind == DateSegmentKind::Year)?.value?;
-        let month = self.date_segments.iter().find(|s| s.kind == DateSegmentKind::Month)?.value? as u8;
-        let day   = self.date_segments.iter().find(|s| s.kind == DateSegmentKind::Day)?.value? as u8;
-        Some(CalendarDate::new_gregorian(
-            year,
-            NonZero::new(month).expect("month is 1-based from segment constraints"),
-            NonZero::new(day).expect("day is 1-based from segment constraints"),
-        ))
+        let year = self.segment_value(DateSegmentKind::Year)?;
+        let month = u8::try_from(self.segment_value(DateSegmentKind::Month)?).ok()?;
+        let day = u8::try_from(self.segment_value(DateSegmentKind::Day)?).ok()?;
+        CalendarDate::new_gregorian(year, month, day).ok()
     }
 
-    /// Assemble a Time from current time segment values.
+    /// Assemble a `Time` from current time segment values, honouring granularity
+    /// and converting the displayed hour back to 24-hour via `display_hour_to_24`.
     pub fn assemble_time(&self) -> Option<Time> {
-        let raw_hour = self.time_segments.iter().find(|s| s.kind == DateSegmentKind::Hour)?.value? as u8;
-        let minute   = self.time_segments.iter().find(|s| s.kind == DateSegmentKind::Minute)?.value? as u8;
-        let second   = self.time_segments.iter()
-            .find(|s| s.kind == DateSegmentKind::Second)
-            .and_then(|s| s.value)
-            .unwrap_or(0) as u8;
-
-        let hour = if self.hour_cycle.has_day_period() {
-            let is_pm = self.time_segments.iter()
-                .find(|s| s.kind == DateSegmentKind::DayPeriod)
-                .and_then(|s| s.value)
-                .unwrap_or(0) == 1;
-            match self.hour_cycle {
-                HourCycle::H12 => {
-                    if is_pm { if raw_hour == 12 { 12 } else { raw_hour + 12 } }
-                    else     { if raw_hour == 12 { 0  } else { raw_hour       } }
-                }
-                HourCycle::H11 => if is_pm { raw_hour + 12 } else { raw_hour },
-                _ => raw_hour,
-            }
-        } else {
-            raw_hour
-        };
-
-        Some(Time::new(hour, minute, second))
+        let raw_hour = u8::try_from(self.segment_value(DateSegmentKind::Hour)?).ok()?;
+        let minute = if self.granularity >= TimeGranularity::Minute {
+            u8::try_from(self.segment_value(DateSegmentKind::Minute)?).ok()?
+        } else { 0 };
+        let second = if self.granularity >= TimeGranularity::Second {
+            u8::try_from(self.segment_value(DateSegmentKind::Second)?).ok()?
+        } else { 0 };
+        let day_period = self.segment_value(DateSegmentKind::DayPeriod);
+        let hour = display_hour_to_24(raw_hour, day_period, self.hour_cycle)?;
+        Time::new(hour, minute, second, 0).ok()
     }
 
-    /// Assemble a DateTime from the current date and time segment values.
-    pub fn assemble_datetime(&self) -> Option<DateTime> {
-        let date = self.assemble_date()?;
-        let time = self.assemble_time()?;
-        Some(DateTime { date, time })
+    /// Assemble a `CalendarDateTime` from the current date and time segment values.
+    pub fn assemble_datetime(&self) -> Option<CalendarDateTime> {
+        Some(CalendarDateTime::new(self.assemble_date()?, self.assemble_time()?))
     }
 }
 ```
@@ -281,18 +287,21 @@ impl Context {
 
 ```rust
 /// Props for the DateTimePicker component.
+///
+/// Mirrored by chainable builder methods (`Props::new().id(..).granularity(..)`),
+/// matching the `time_field`/`date_picker` builder convention.
 #[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
     /// The ID of the date-time picker.
     pub id: String,
     /// Controlled date-time value. `Some(v)` = controlled, `None` = uncontrolled.
-    pub value: Option<Option<DateTime>>,
+    pub value: Option<Option<CalendarDateTime>>,
     /// Default date-time for uncontrolled mode.
-    pub default_value: Option<DateTime>,
+    pub default_value: Option<CalendarDateTime>,
     /// Minimum allowed date-time.
-    pub min_value: Option<DateTime>,
+    pub min_value: Option<CalendarDateTime>,
     /// Maximum allowed date-time.
-    pub max_value: Option<DateTime>,
+    pub max_value: Option<CalendarDateTime>,
     /// Finest time segment to display.
     pub granularity: TimeGranularity,
     /// Whether the component is non-interactive.
@@ -319,6 +328,10 @@ pub struct Props {
     pub is_rtl: bool,
     /// Number of months to display in the calendar popover. Default: `1`.
     pub visible_months: usize,
+    /// The "today" date, injected by the adapter for testability and SSR. It is
+    /// forwarded to the embedded calendar so the popover opens on the current
+    /// month and marks the correct day.
+    pub today: CalendarDate,
 }
 
 impl Default for Props {
@@ -342,6 +355,8 @@ impl Default for Props {
             invalid: false,
             is_rtl: false,
             visible_months: 1,
+            today: CalendarDate::new_gregorian(2025, 1, 1)
+                .expect("2025-01-01 is a valid Gregorian date"),
         }
     }
 }
@@ -349,10 +364,13 @@ impl Default for Props {
 
 ### 1.5 Guards
 
-```rust
-fn is_disabled(ctx: &Context) -> bool { ctx.disabled }
-fn is_readonly(ctx: &Context) -> bool { ctx.readonly }
-```
+Guards are inline field checks inside `transition`, not separate functions:
+
+- `ctx.disabled` blocks every event except `SyncProps` (which flows through so a
+  parent can lift the disabled state).
+- `ctx.readonly` blocks the editing/open paths (`Open`, `CalendarSelectDate`,
+  `Increment/DecrementSegment`, `TypeIntoSegment`, `SegmentChange`, `ValueCommit`,
+  `ClearSegment`, `ClearAll`) while still allowing focus navigation.
 
 ### 1.6 Composition Strategy
 
@@ -369,185 +387,87 @@ The DateTimePicker does not embed separate `DatePicker` and `TimeField` machine 
 ### 1.7 Full Machine Implementation
 
 ```rust
+/// Typed identifier for every named effect intent the machine emits. The
+/// adapter dispatches the real focus / timer operation on each name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Move focus into the embedded calendar grid.
+    FocusCalendar,
+    /// Restore focus to the trigger button.
+    RestoreFocusToTrigger,
+    /// Move focus to the first editable time segment (after calendar selection).
+    FocusFirstTimeSegment,
+    /// Adapter starts the type-buffer commit timer.
+    TypeBufferCommit,
+}
+
 pub struct Machine;
 
 impl Machine {
-    /// If all segments are complete, assemble and commit the DateTime value.
+    /// If all segments are complete, assemble, clamp, and commit the value.
     fn maybe_publish(ctx: &mut Context) {
         if !ctx.is_complete() { return; }
-        let Some(dt) = ctx.assemble_datetime() else { return };
-        let clamped = match (&ctx.min_value, &ctx.max_value) {
-            (Some(min), _) if dt < *min => min.clone(),
-            (_, Some(max)) if dt > *max => max.clone(),
-            _ => dt,
-        };
+        let Some(datetime) = ctx.assemble_datetime() else { return };
+        let clamped = clamp_datetime(datetime, ctx.min_value.as_ref(), ctx.max_value.as_ref());
+        ctx.date_value = Some(clamped.date().clone());
+        ctx.time_value = Some(*clamped.time());
+        ctx.date_segments = build_date_segments(&ctx.locale, ctx.date_value.as_ref());
+        ctx.time_segments = build_time_segments(ctx.hour_cycle, ctx.granularity, ctx.time_value.as_ref());
         ctx.value.set(Some(clamped));
-    }
-
-    /// Build date segments for the given locale and current date value.
-    fn build_date_segments(locale: &Locale, date: &Option<CalendarDate>) -> Vec<DateSegment> {
-        let mut segs = Vec::new();
-
-        let mut year_seg = DateSegment::new_numeric(DateSegmentKind::Year, 1, 9999, "yyyy");
-        let mut month_seg = DateSegment::new_numeric(DateSegmentKind::Month, 1, 12, "mm");
-        let mut day_seg = DateSegment::new_numeric(DateSegmentKind::Day, 1, 31, "dd");
-
-        if let Some(d) = date {
-            year_seg.value  = Some(d.year);
-            year_seg.text   = format!("{:04}", d.year);
-            month_seg.value = Some(d.month.get() as i32);
-            month_seg.text  = format!("{:02}", d.month.get());
-            day_seg.value   = Some(d.day.get() as i32);
-            day_seg.text    = format!("{:02}", d.day.get());
-        }
-
-        // Locale-dependent segment order.
-        let locale_tag = locale.to_bcp47();
-        match locale_tag.as_str() {
-            "ja-JP" | "zh-CN" | "zh-TW" | "ko-KR" => {
-                segs.push(year_seg);
-                segs.push(DateSegment::new_literal("/"));
-                segs.push(month_seg);
-                segs.push(DateSegment::new_literal("/"));
-                segs.push(day_seg);
-            }
-            "en-GB" | "de-DE" | "fr-FR" | "es-ES" | "it-IT" | "ru-RU" => {
-                segs.push(day_seg);
-                segs.push(DateSegment::new_literal("/"));
-                segs.push(month_seg);
-                segs.push(DateSegment::new_literal("/"));
-                segs.push(year_seg);
-            }
-            _ => {
-                // en-US and fallback: MM/DD/YYYY
-                segs.push(month_seg);
-                segs.push(DateSegment::new_literal("/"));
-                segs.push(day_seg);
-                segs.push(DateSegment::new_literal("/"));
-                segs.push(year_seg);
-            }
-        }
-        segs
-    }
-
-    /// Build time segments for the given hour cycle, granularity, and current time value.
-    fn build_time_segments(
-        hour_cycle: HourCycle,
-        granularity: TimeGranularity,
-        time: &Option<Time>,
-    ) -> Vec<DateSegment> {
-        let mut segs = Vec::new();
-
-        let (h_min, h_max) = hour_cycle.display_hour_range();
-        let mut hour_seg = DateSegment::new_numeric(
-            DateSegmentKind::Hour, h_min as i32, h_max as i32, "hh",
-        );
-        if let Some(t) = time {
-            let display = match hour_cycle {
-                HourCycle::H12 => t.hour_12() as i32,
-                HourCycle::H11 => (t.hour % 12) as i32,
-                _              => t.hour as i32,
-            };
-            hour_seg.value = Some(display);
-            hour_seg.text  = format!("{:02}", display);
-        }
-        segs.push(hour_seg);
-
-        segs.push(DateSegment::new_literal(":"));
-
-        let mut min_seg = DateSegment::new_numeric(DateSegmentKind::Minute, 0, 59, "mm");
-        if let Some(t) = time {
-            min_seg.value = Some(t.minute as i32);
-            min_seg.text  = format!("{:02}", t.minute);
-        }
-        segs.push(min_seg);
-
-        if granularity >= TimeGranularity::Second {
-            segs.push(DateSegment::new_literal(":"));
-            let mut sec_seg = DateSegment::new_numeric(DateSegmentKind::Second, 0, 59, "ss");
-            if let Some(t) = time {
-                sec_seg.value = Some(t.second as i32);
-                sec_seg.text  = format!("{:02}", t.second);
-            }
-            segs.push(sec_seg);
-        }
-
-        if hour_cycle.has_day_period() {
-            segs.push(DateSegment::new_literal("\u{00A0}")); // non-breaking space
-            let mut period_seg = DateSegment {
-                kind: DateSegmentKind::DayPeriod,
-                value: None,
-                min: 0,
-                max: 1,
-                text: String::new(),
-                placeholder: "AM".to_string(),
-                literal: None,
-                is_editable: true,
-            };
-            if let Some(t) = time {
-                let is_pm = t.is_pm();
-                period_seg.value = Some(if is_pm { 1 } else { 0 });
-                period_seg.text  = if is_pm { "PM".to_string() } else { "AM".to_string() };
-            }
-            segs.push(period_seg);
-        }
-
-        segs
     }
 }
 
 impl ars_core::Machine for Machine {
-    type State   = State;
-    type Event   = Event;
-    type Context = Context;
-    type Props   = Props;
+    type State    = State;
+    type Event    = Event;
+    type Context  = Context;
+    type Props    = Props;
     type Messages = Messages;
-    type Api<'a> = Api<'a>;
+    type Effect   = Effect;
+    type Api<'a>  = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let value = match props.value {
-            Some(v) => Bindable::controlled(v),
-            None    => Bindable::uncontrolled(props.default_value.clone()),
+        let value = if let Some(controlled) = &props.value {
+            Bindable::controlled(controlled.clone())
+        } else {
+            Bindable::uncontrolled(props.default_value.clone())
         };
 
         let locale = env.locale.clone();
-        let messages = messages.clone();
+        let date_value = value.get().as_ref().map(|dt| dt.date().clone());
+        let time_value = value.get().as_ref().map(|dt| *dt.time());
+        let hour_cycle = props.hour_cycle
+            .unwrap_or_else(|| locale.hour_cycle(env.intl_backend.as_ref()));
 
-        let date_value = value.get().as_ref().map(|dt| dt.date.clone());
-        let time_value = value.get().as_ref().map(|dt| dt.time);
-
-        let resolved_cycle = props.hour_cycle.unwrap_or_else(|| locale.hour_cycle(&*env.intl_backend));
-
-        let date_segments = Machine::build_date_segments(&locale, &date_value);
-        let time_segments = Machine::build_time_segments(
-            resolved_cycle, props.granularity, &time_value,
-        );
+        let date_segments = build_date_segments(&locale, date_value.as_ref());
+        let time_segments = build_time_segments(hour_cycle, props.granularity, time_value.as_ref());
 
         let ctx = Context {
-            value,
-            date_value,
-            time_value,
-            focused_segment: None,
-            open: false,
-            date_segments,
-            time_segments,
+            value, date_value, time_value,
+            focused_segment: None, open: false,
+            date_segments, time_segments,
             type_buffer: String::new(),
             locale,
-            messages,
+            messages: messages.clone(),
+            intl_backend: Arc::clone(&env.intl_backend),
             granularity: props.granularity,
-            hour_cycle: resolved_cycle,
+            hour_cycle,
+            calendar: props.calendar,
             min_value: props.min_value.clone(),
             max_value: props.max_value.clone(),
-            disabled: props.disabled,
-            readonly: props.readonly,
-            is_touched: false,
-            required: props.required,
-            name: props.name.clone(),
-            is_rtl: props.is_rtl,
+            disabled: props.disabled, readonly: props.readonly,
+            is_touched: false, required: props.required, invalid: props.invalid,
+            name: props.name.clone(), is_rtl: props.is_rtl,
+            today: props.today.clone(), visible_months: props.visible_months,
             ids: ComponentIds::from_id(&props.id),
         };
 
         (State::Idle, ctx)
+    }
+
+    /// Emits `SyncProps` when props change so controlled value / scalar fields reconcile.
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        if old == new { Vec::new() } else { vec![Event::SyncProps(Box::new(new.clone()))] }
     }
 
     fn transition(
@@ -556,338 +476,112 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if is_disabled(ctx) { return None; }
+        // `SyncProps` flows through even when disabled.
+        if let Event::SyncProps(new_props) = event {
+            let new_props = new_props.as_ref().clone();
+            let mut probe = ctx.clone();
+            sync_props(&mut probe, &new_props);
+            let next_state = reconcile_state_after_sync(state, &probe);
+            let clear_focus = next_state != *state && next_state == State::Idle;
+            return Some(TransitionPlan::to(next_state).apply(move |ctx| {
+                sync_props(ctx, &new_props);
+                if clear_focus { ctx.focused_segment = None; ctx.type_buffer.clear(); }
+            }));
+        }
+
+        if ctx.disabled { return None; }
 
         match event {
             // ── Popover open / close ──────────────────────────────────────
-            Event::Open => {
-                if *state == State::Open || is_readonly(ctx) { return None; }
-                Some(TransitionPlan::to(State::Open)
-                    .apply(|ctx| {
-                        ctx.open = true;
-                    })
-                    .with_effect(PendingEffect::new("focus-calendar", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let grid_id = ctx.ids.part("calendar-grid");
-                        platform.focus_element_by_id(&grid_id);
-                        no_cleanup()
-                    })))
-            }
+            // `open_plan`/`close_plan` are small `impl Machine` helpers:
+            //   open_plan  → None if already open or read-only, else
+            //                to(Open),    set ctx.open=true,  effect FocusCalendar.
+            //   close_plan → None if not open, else
+            //                to(Focused), set ctx.open=false, effect RestoreFocusToTrigger.
+            Event::Open => Self::open_plan(state, ctx),
 
-            Event::Close => {
-                if *state != State::Open { return None; }
-                Some(TransitionPlan::to(State::Focused)
-                    .apply(|ctx| {
-                        ctx.open = false;
-                    })
-                    .with_effect(PendingEffect::new("restore-focus", |ctx, _props, _send| {
-                        let platform = use_platform_effects();
-                        let trigger_id = ctx.ids.part("trigger");
-                        platform.focus_element_by_id(&trigger_id);
-                        no_cleanup()
-                    })))
-            }
+            Event::Close => Self::close_plan(state),
 
-            Event::Toggle => {
-                match state {
-                    State::Open => Self::transition(state, &Event::Close, ctx, props),
-                    _           => Self::transition(state, &Event::Open, ctx, props),
-                }
-            }
+            Event::Toggle => match state {
+                State::Open => Self::close_plan(state),
+                _           => Self::open_plan(state, ctx),
+            },
 
             // ── Calendar date selection ───────────────────────────────────
             Event::CalendarSelectDate(date) => {
-                if is_readonly(ctx) { return None; }
+                if ctx.readonly { return None; }
                 let date = date.clone();
                 Some(TransitionPlan::to(State::Focused)
                     .apply(move |ctx| {
                         ctx.date_value = Some(date.clone());
                         ctx.open = false;
                         ctx.is_touched = true;
-                        // Update date segments to reflect the selected date.
-                        ctx.date_segments = Machine::build_date_segments(
-                            &ctx.locale, &Some(date),
-                        );
+                        ctx.date_segments = build_date_segments(&ctx.locale, Some(&date));
                         Machine::maybe_publish(ctx);
                     })
-                    .with_effect(PendingEffect::new("focus-first-time-segment", |ctx, _props, _send| {
-                        // After calendar selection, focus the first editable time segment
-                        // so the user can confirm or adjust the time.
-                        if let Some(seg) = ctx.time_segments.iter().find(|s| s.is_editable) {
-                            let platform = use_platform_effects();
-                            let seg_id = ctx.ids.item("segment", &seg.kind.as_str());
-                            platform.focus_element_by_id(&seg_id);
-                        }
-                        no_cleanup()
-                    })))
+                    .with_effect(PendingEffect::named(Effect::FocusFirstTimeSegment)))
             }
 
-            Event::CalendarNext | Event::CalendarPrev => {
-                // Delegated to the embedded Calendar machine via the adapter.
-                // No state change in the DateTimePicker itself.
-                None
-            }
+            // ── Segment focus / editing ───────────────────────────────────
+            // `FocusSegment`, `FocusNextSegment`, `FocusPrevSegment` traverse
+            // `all_segments()` (crossing the date↔time boundary), committing the
+            // type buffer on the way. `IncrementSegment`/`DecrementSegment` step
+            // the value (wrapping), `SegmentChange` sets it, and `TypeIntoSegment`
+            // drives the type-ahead buffer (numeric digits auto-advance; the
+            // day-period segment accepts `a`/`p`). Edits call `maybe_publish` and,
+            // for in-progress digits, arm `Effect::TypeBufferCommit`. Each editing
+            // path is guarded by `ctx.readonly`. See the source for full bodies.
 
-            // ── Segment focus management ─────────────────────────────────
-            Event::FocusSegment(kind) => {
-                let k = *kind;
-                Some(TransitionPlan::to(State::Focused)
-                    .apply(move |ctx| {
-                        ctx.focused_segment = Some(k);
-                        ctx.type_buffer.clear();
-                    }))
-            }
+            Event::FocusSegment(kind) => { /* commit buffer; focus = kind */ todo!() }
+            Event::FocusNextSegment | Event::FocusPrevSegment => { todo!() }
+            Event::IncrementSegment { .. } | Event::DecrementSegment { .. } => { todo!() }
+            Event::TypeIntoSegment { .. } => { /* type_into_segment(ctx, segment, ch) */ todo!() }
+            Event::TypeBufferCommit { segment } => { /* commit_buffer_for_kind */ todo!() }
+            Event::SegmentChange { .. } => { todo!() }
 
-            Event::FocusNextSegment => {
-                match ctx.focused_segment {
-                    Some(cur) => {
-                        let has_buffer = !ctx.type_buffer.is_empty();
-                        let next = ctx.next_editable_after(cur);
-                        Some(TransitionPlan::to(State::Focused)
-                            .apply(move |ctx| {
-                                if has_buffer {
-                                    if let Ok(v) = ctx.type_buffer.parse::<i32>() {
-                                        ctx.set_segment_value(cur, v);
-                                        Machine::maybe_publish(ctx);
-                                    }
-                                    ctx.type_buffer.clear();
-                                }
-                                ctx.focused_segment = next;
-                            }))
-                    }
-                    None => {
-                        let first = ctx.first_editable()?;
-                        Some(TransitionPlan::to(State::Focused)
-                            .apply(move |ctx| {
-                                ctx.focused_segment = Some(first);
-                            }))
-                    }
-                }
-            }
-
-            Event::FocusPrevSegment => {
-                let cur = ctx.focused_segment?;
-                if !ctx.type_buffer.is_empty() {
-                    return Some(TransitionPlan::context_only(|ctx| {
-                        ctx.type_buffer.clear();
-                    }));
-                }
-                match ctx.prev_editable_before(cur) {
-                    Some(k) => Some(TransitionPlan::to(State::Focused)
-                        .apply(move |ctx| {
-                            ctx.focused_segment = Some(k);
-                        })),
-                    None => None,
-                }
-            }
-
-            // ── Segment value editing ────────────────────────────────────
-            Event::IncrementSegment { segment } => {
-                if is_readonly(ctx) { return None; }
-                let k = *segment;
+            Event::ValueCommit(datetime) => {
+                if ctx.readonly { return None; }
+                let datetime = datetime.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.type_buffer.clear();
-                    ctx.increment_segment(k);
+                    apply_value(ctx, datetime.clone()); // clamps + rebuilds both groups
                     ctx.is_touched = true;
-                    Machine::maybe_publish(ctx);
-                }))
-            }
-
-            Event::DecrementSegment { segment } => {
-                if is_readonly(ctx) { return None; }
-                let k = *segment;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.type_buffer.clear();
-                    ctx.decrement_segment(k);
-                    ctx.is_touched = true;
-                    Machine::maybe_publish(ctx);
-                }))
-            }
-
-            Event::TypeIntoSegment { segment, ch } => {
-                if is_readonly(ctx) { return None; }
-                let ch = *ch;
-                let k = *segment;
-                match k {
-                    DateSegmentKind::DayPeriod => {
-                        let lower = ch.to_ascii_lowercase();
-                        if lower != 'a' && lower != 'p' { return None; }
-                        Some(TransitionPlan::context_only(move |ctx| {
-                            match lower {
-                                'a' => ctx.set_segment_value(DateSegmentKind::DayPeriod, 0),
-                                'p' => ctx.set_segment_value(DateSegmentKind::DayPeriod, 1),
-                                _ => {}
-                            }
-                            ctx.is_touched = true;
-                            Machine::maybe_publish(ctx);
-                        }))
-                    }
-                    k2 if k2.is_numeric() => {
-                        if !ch.is_ascii_digit() { return None; }
-                        let mut new_buffer = ctx.type_buffer.clone();
-                        new_buffer.push(ch);
-                        let buffered: i32 = new_buffer.parse().unwrap_or(0);
-                        let (seg_min, seg_max) = ctx.all_segments()
-                            .find(|s| s.kind == k2)
-                            .map(|s| (s.min, s.max))
-                            .unwrap_or((0, 59));
-                        let max_digits = digits_needed(seg_max);
-                        let should_advance = new_buffer.len() >= max_digits
-                            || buffered * 10 > seg_max;
-                        let valid = buffered >= seg_min && buffered <= seg_max;
-                        let next_seg = if should_advance { ctx.next_editable_after(k2) } else { None };
-
-                        let mut plan = TransitionPlan::to(State::Focused)
-                            .apply(move |ctx| {
-                                ctx.type_buffer.push(ch);
-                                if valid {
-                                    ctx.set_segment_value(k2, buffered);
-                                    ctx.is_touched = true;
-                                    Machine::maybe_publish(ctx);
-                                }
-                                if should_advance {
-                                    ctx.type_buffer.clear();
-                                    if let Some(nk) = next_seg {
-                                        ctx.focused_segment = Some(nk);
-                                    }
-                                }
-                            });
-
-                        if !should_advance {
-                            plan = plan.with_effect(PendingEffect::new(
-                                "type-buffer-commit",
-                                move |_ctx, _props, send| {
-                                    let send = send.clone();
-                                    Box::new(move || {
-                                        send(Event::TypeBufferCommit { segment: k2 });
-                                    })
-                                },
-                            ));
-                        }
-                        Some(plan)
-                    }
-                    _ => None,
-                }
-            }
-
-            Event::TypeBufferCommit { segment } => {
-                let k = *segment;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    if let Ok(v) = ctx.type_buffer.parse::<i32>() {
-                        ctx.set_segment_value(k, v);
-                        Machine::maybe_publish(ctx);
-                    }
                     ctx.type_buffer.clear();
                 }))
             }
 
-            Event::SegmentChange { segment, value } => {
-                if is_readonly(ctx) { return None; }
-                let k = *segment;
-                let v = *value;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.set_segment_value(k, v);
-                    ctx.is_touched = true;
-                    // Update the date/time sub-values.
-                    if ctx.is_date_segment(k) {
-                        ctx.date_value = ctx.assemble_date();
-                    } else if ctx.is_time_segment(k) {
-                        ctx.time_value = ctx.assemble_time();
-                    }
-                    Machine::maybe_publish(ctx);
-                }))
-            }
-
-            Event::ValueCommit(dt) => {
-                if is_readonly(ctx) { return None; }
-                let dt = dt.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.value.set(dt.clone());
-                    ctx.is_touched = true;
-                    if let Some(ref dt) = dt {
-                        ctx.date_value = Some(dt.date.clone());
-                        ctx.time_value = Some(dt.time);
-                        ctx.date_segments = Machine::build_date_segments(
-                            &ctx.locale, &Some(dt.date.clone()),
-                        );
-                        ctx.time_segments = Machine::build_time_segments(
-                            ctx.hour_cycle, ctx.granularity, &Some(dt.time),
-                        );
-                    }
-                }))
-            }
-
-            Event::ClearSegment { segment } => {
-                if is_readonly(ctx) { return None; }
-                let kind = *segment;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.type_buffer.clear();
-                    ctx.clear_segment_value(kind);
-                    ctx.value.set(None);
-                }))
-            }
+            Event::ClearSegment { .. } => { todo!() }
 
             Event::ClearAll => {
-                if is_readonly(ctx) { return None; }
-                Some(TransitionPlan::to(State::Idle)
-                    .apply(|ctx| {
-                        let date_editable = ctx.date_segments.iter()
-                            .filter(|s| s.is_editable).map(|s| s.kind).collect::<Vec<_>>();
-                        for k in date_editable { ctx.clear_segment_value(k); }
-                        let time_editable = ctx.time_segments.iter()
-                            .filter(|s| s.is_editable).map(|s| s.kind).collect::<Vec<_>>();
-                        for k in time_editable { ctx.clear_segment_value(k); }
-                        ctx.date_value = None;
-                        ctx.time_value = None;
-                        ctx.value.set(None);
-                        ctx.type_buffer.clear();
-                    }))
+                if ctx.readonly { return None; }
+                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                    // clear every editable segment, reset date_value/time_value/value/focus
+                }).cancel_effect(Effect::TypeBufferCommit))
             }
 
-            // ── Focus management ─────────────────────────────────────────
-            Event::FocusIn => {
-                if *state == State::Idle {
-                    Some(TransitionPlan::to(State::Focused)
-                        .apply(|_ctx| {}))
-                } else {
-                    None
-                }
-            }
+            // ── Focus in / out ────────────────────────────────────────────
+            Event::FocusIn => (*state == State::Idle).then(|| TransitionPlan::to(State::Focused)),
 
             Event::FocusOut => {
-                // Commit any pending type buffer, close popover if open.
-                let has_buffer = !ctx.type_buffer.is_empty();
-                let focused = ctx.focused_segment;
                 let was_open = ctx.open;
                 Some(TransitionPlan::to(State::Idle)
                     .apply(move |ctx| {
-                        if has_buffer {
-                            if let (Some(k), Ok(v)) = (focused, ctx.type_buffer.parse::<i32>()) {
-                                ctx.set_segment_value(k, v);
-                                Machine::maybe_publish(ctx);
-                            }
-                        }
+                        commit_type_buffer(ctx);
                         ctx.focused_segment = None;
                         ctx.type_buffer.clear();
-                        if was_open {
-                            ctx.open = false;
-                        }
-                    }))
+                        if was_open { ctx.open = false; }
+                    })
+                    .cancel_effect(Effect::TypeBufferCommit))
             }
 
-            // ── Keyboard shortcuts ───────────────────────────────────────
-            Event::KeyDown { key } => {
-                match key {
-                    KeyboardKey::Escape if *state == State::Open => {
-                        Self::transition(state, &Event::Close, ctx, props)
-                    }
-                    KeyboardKey::ArrowDown if *state != State::Open => {
-                        // Alt+ArrowDown opens the picker (modifier check at adapter level).
-                        Self::transition(state, &Event::Open, ctx, props)
-                    }
-                    _ => None,
-                }
-            }
+            // ── Keyboard shortcuts ────────────────────────────────────────
+            Event::KeyDown { key } => match key {
+                KeyboardKey::Escape if *state == State::Open => Self::close_plan(state),
+                KeyboardKey::ArrowDown if *state != State::Open => Self::open_plan(state, ctx),
+                _ => None,
+            },
+
+            // Handled above the disabled guard.
+            Event::SyncProps(_) => None,
         }
     }
 
@@ -901,6 +595,16 @@ impl ars_core::Machine for Machine {
     }
 }
 ```
+
+> The `todo!()` placeholders above stand in for the verbatim segment-editing
+> bodies in `crates/ars-components/src/date_time/date_time_picker/mod.rs`; they
+> are summarized in the preceding comment rather than duplicated here. The
+> supporting free helpers — `build_date_segments` (locale order via
+> `ars_i18n::date_order`), `build_time_segments` (via `date_time::hour_cycle`),
+> `type_into_segment`, `commit_type_buffer`/`commit_buffer_for_kind`,
+> `apply_value`, `sync_props`, `reconcile_state_after_sync`, `clamp_datetime`
+> (date-then-time `compare`), `format_segment_text`, `format_iso8601`, and
+> `format_announcement` — live alongside the machine in that module.
 
 ### 1.8 Connect / API
 
@@ -961,10 +665,11 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Dir, "rtl");
         }
         // Announce the selected datetime when both date and time are complete.
-        if let (Some(date), Some(time)) = (&self.ctx.parsed_date, self.ctx.parsed_time.as_ref()) {
-            let formatted = format!("{} {}", format_date(date, &self.ctx.format, &self.ctx.locale), format_time(time, &self.ctx.locale));
+        // `format_announcement` builds a locale-ordered date plus an
+        // hour-cycle-aware time string from `date_value`/`time_value`.
+        if let Some(announcement) = format_announcement(self.ctx) {
             attrs.set(HtmlAttr::Aria(AriaAttr::Description),
-                (self.ctx.messages.selected_datetime_label)(&formatted, &self.ctx.locale));
+                (self.ctx.messages.selected_datetime_label)(&announcement, &self.ctx.locale));
         }
         attrs
     }
@@ -989,6 +694,18 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("control"));
         attrs.set(HtmlAttr::Role, "group");
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
+        // Chain Description + ErrorMessage so AT announces help/validation when
+        // focus enters the segment group (the hidden input cannot be described).
+        let mut described_by = Vec::new();
+        if self.props.description.is_some() {
+            described_by.push(self.ctx.ids.part("description"));
+        }
+        if self.ctx.invalid && self.props.error_message.is_some() {
+            described_by.push(self.ctx.ids.part("error-message"));
+        }
+        if !described_by.is_empty() {
+            attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), described_by.join(" "));
+        }
         attrs
     }
 
@@ -1031,28 +748,33 @@ impl<'a> Api<'a> {
             Part::Segment { kind: *kind }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.item("segment", kind.as_str()));
-        attrs.set(HtmlAttr::Role, "spinbutton");
-        attrs.set(HtmlAttr::TabIndex, "0");
-        attrs.set(HtmlAttr::InputMode, "numeric");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), kind.aria_label());
-
         // Find the segment in either date or time segments.
-        let seg = self.ctx.date_segments.iter()
-            .chain(self.ctx.time_segments.iter())
-            .find(|s| s.kind == *kind);
+        let Some(seg) = self.ctx.segment(*kind) else { return AttrMap::new() };
 
-        if let Some(seg) = seg {
-            attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), seg.min.to_string());
-            attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), seg.max.to_string());
-            if let Some(v) = &seg.value {
-                attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), v.to_string());
-                attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), &seg.text);
-            }
+        attrs.set(HtmlAttr::Id, self.ctx.ids.item("segment", &seg.kind.data_name()));
+        attrs.set(HtmlAttr::Role, "spinbutton");
+        attrs.set(HtmlAttr::TabIndex, if self.ctx.disabled { "-1" } else { "0" });
+        attrs.set(HtmlAttr::Data("ars-segment"), seg.kind.data_name());
+        // Segment ARIA labels resolve from this component's per-segment Messages
+        // fields (see §4.1), not from a borrowed `date_field::Messages`.
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label),
+            segment_aria_label(seg.kind, &self.ctx.messages, &self.ctx.locale));
+        attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), seg.min.to_string());
+        attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), seg.max.to_string());
+
+        // `inputmode="numeric"` only on numeric segments (not the day-period).
+        if seg.kind.is_numeric() {
+            attrs.set(HtmlAttr::InputMode, "numeric");
         }
 
-        let is_focused = self.ctx.focused_segment.as_ref() == Some(kind);
-        if is_focused {
+        if let Some(v) = seg.value {
+            attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), v.to_string());
+            attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), &seg.text);
+        } else {
+            attrs.set(HtmlAttr::Aria(AriaAttr::ValueText), &seg.placeholder);
+        }
+
+        if self.ctx.focused_segment == Some(seg.kind) {
             attrs.set_bool(HtmlAttr::Data("ars-focused"), true);
         }
         if self.ctx.disabled {
@@ -1183,14 +905,10 @@ impl<'a> Api<'a> {
         if let Some(name) = &self.ctx.name {
             attrs.set(HtmlAttr::Name, name);
         }
-        // ISO 8601 datetime: YYYY-MM-DDTHH:MM:SS
-        if let Some(dt) = &self.ctx.value.get() {
-            let iso = format!(
-                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
-                dt.date.year, dt.date.month.get(), dt.date.day.get(),
-                dt.time.hour, dt.time.minute, dt.time.second,
-            );
-            attrs.set(HtmlAttr::Value, iso);
+        // ISO 8601 datetime: YYYY-MM-DDTHH:MM:SS (always 24-hour, regardless of
+        // the visible hour cycle), built from `CalendarDate`/`Time` accessors.
+        if let Some(dt) = self.ctx.value.get() {
+            attrs.set(HtmlAttr::Value, format_iso8601(dt));
         }
         attrs
     }
@@ -1217,19 +935,30 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown on a segment (date or time).
-    pub fn on_segment_keydown(&self, kind: DateSegmentKind, key: KeyboardKey) {
-        match key {
-            KeyboardKey::ArrowUp   => (self.send)(Event::IncrementSegment { segment: kind }),
+    ///
+    /// Typed characters arrive via `KeyboardEventData::character` (there is no
+    /// `KeyboardKey::Char` variant). `dir` flips Arrow Left/Right for RTL, and
+    /// `Alt+ArrowDown` opens the popover.
+    pub fn on_segment_keydown(&self, kind: DateSegmentKind, data: &KeyboardEventData, dir: Direction) {
+        let is_rtl = dir.is_rtl();
+        match data.key {
+            KeyboardKey::ArrowUp => (self.send)(Event::IncrementSegment { segment: kind }),
+            KeyboardKey::ArrowDown if data.alt_key => (self.send)(Event::Open),
             KeyboardKey::ArrowDown => (self.send)(Event::DecrementSegment { segment: kind }),
+            KeyboardKey::ArrowRight if is_rtl => (self.send)(Event::FocusPrevSegment),
+            KeyboardKey::ArrowLeft if is_rtl => (self.send)(Event::FocusNextSegment),
             KeyboardKey::ArrowLeft => (self.send)(Event::FocusPrevSegment),
-            KeyboardKey::ArrowRight => (self.send)(Event::FocusNextSegment),
+            KeyboardKey::Tab if data.shift_key => (self.send)(Event::FocusPrevSegment),
+            KeyboardKey::ArrowRight | KeyboardKey::Tab => (self.send)(Event::FocusNextSegment),
             KeyboardKey::Backspace | KeyboardKey::Delete => {
                 (self.send)(Event::ClearSegment { segment: kind })
             }
-            KeyboardKey::Char(ch) => {
-                (self.send)(Event::TypeIntoSegment { segment: kind, ch })
+            KeyboardKey::Escape => (self.send)(Event::KeyDown { key: data.key }),
+            _ if data.character.is_some() => {
+                if let Some(ch) = data.character {
+                    (self.send)(Event::TypeIntoSegment { segment: kind, ch });
+                }
             }
-            KeyboardKey::Escape => (self.send)(Event::KeyDown { key }),
             _ => {}
         }
     }
@@ -1265,15 +994,15 @@ impl<'a> Api<'a> {
     /// Content part and wires its SelectDate event back to this machine.
     pub fn calendar_props(&self) -> calendar::Props {
         calendar::Props {
-            id: format!("{}-calendar", self.ctx.ids.base_id),
+            id: format!("{}-calendar", self.ctx.ids.id()),
             value: Some(self.ctx.date_value.clone()),
-            default_value: None,
-            min: self.ctx.min_value.as_ref().map(|dt| dt.date.clone()),
-            max: self.ctx.max_value.as_ref().map(|dt| dt.date.clone()),
+            min: self.ctx.min_value.as_ref().map(|dt| dt.date().clone()),
+            max: self.ctx.max_value.as_ref().map(|dt| dt.date().clone()),
             disabled: self.ctx.disabled,
             readonly: self.ctx.readonly,
             is_rtl: self.ctx.is_rtl,
-            visible_months: self.props.visible_months,
+            visible_months: self.ctx.visible_months,
+            today: self.ctx.today.clone(),
             ..calendar::Props::default()
         }
     }
@@ -1392,19 +1121,19 @@ DateTimePicker (en-US, closed, Minute granularity, H12)
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Element            | Role/Attribute          | Details                                                                                |
-| ------------------ | ----------------------- | -------------------------------------------------------------------------------------- |
-| `Control`          | `role="group"`          | Groups all segments; `aria-labelledby` points to Label                                 |
-| `DateSegmentGroup` | `role="group"`          | `aria-label="Date"`; groups date segments                                              |
-| `TimeSegmentGroup` | `role="group"`          | `aria-label="Time"`; groups time segments                                              |
-| `Segment`          | `role="spinbutton"`     | `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, `aria-valuetext`, `aria-label`      |
-| `Trigger`          | `<button>`              | `aria-label="Open date and time picker"`, `aria-expanded`, `aria-controls`             |
-| `ClearTrigger`     | `<button>`              | `aria-label="Clear date and time"`                                                     |
-| `Content`          | `role="dialog"`         | Contains the Calendar; announced when opened                                           |
-| `ErrorMessage`     | `role="alert"`          | `aria-live="polite"`; announced immediately on render                                  |
-| `Literal`          | `<span>`                | `aria-hidden="true"`; decorative separators                                            |
-| `Separator`        | `<span>`                | `aria-hidden="true"`; decorative separator between date and time                       |
-| `HiddenInput`      | `<input type="hidden">` | Carries the ISO 8601 value; `aria-describedby` chains Description and ErrorMessage IDs |
+| Element            | Role/Attribute          | Details                                                                           |
+| ------------------ | ----------------------- | --------------------------------------------------------------------------------- |
+| `Control`          | `role="group"`          | `aria-labelledby` → Label; `aria-describedby` → Description + ErrorMessage IDs    |
+| `DateSegmentGroup` | `role="group"`          | `aria-label="Date"`; groups date segments                                         |
+| `TimeSegmentGroup` | `role="group"`          | `aria-label="Time"`; groups time segments                                         |
+| `Segment`          | `role="spinbutton"`     | `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, `aria-valuetext`, `aria-label` |
+| `Trigger`          | `<button>`              | `aria-label="Open date and time picker"`, `aria-expanded`, `aria-controls`        |
+| `ClearTrigger`     | `<button>`              | `aria-label="Clear date and time"`                                                |
+| `Content`          | `role="dialog"`         | Contains the Calendar; announced when opened                                      |
+| `ErrorMessage`     | `role="alert"`          | `aria-live="polite"`; announced immediately on render                             |
+| `Literal`          | `<span>`                | `aria-hidden="true"`; decorative separators                                       |
+| `Separator`        | `<span>`                | `aria-hidden="true"`; decorative separator between date and time                  |
+| `HiddenInput`      | `<input type="hidden">` | Carries the ISO 8601 value for form submission                                    |
 
 When `disabled=true`: all segments receive `aria-disabled="true"`, trigger and clear buttons are disabled.
 When `readonly=true`: all segments receive `aria-readonly="true"`, trigger and clear buttons are disabled.
@@ -1448,7 +1177,13 @@ When `invalid=true`: the DateSegmentGroup receives `aria-invalid="true"`, and th
 
 ```rust
 /// Messages for the DateTimePicker component.
-#[derive(Clone, Debug)]
+///
+/// Carries the five composite labels (trigger, clear, the two segment groups,
+/// and the selected-value announcement) plus its own per-segment spinbutton
+/// labels. The segment labels live here — rather than being borrowed from
+/// `date_field::Messages` — so a `DateTimePicker` owns a complete, independently
+/// localizable label set.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Trigger button label (default: "Open date and time picker").
     pub trigger_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
@@ -1458,8 +1193,22 @@ pub struct Messages {
     pub date_group_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Time segment group label (default: "Time").
     pub time_group_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    /// Announces the selected date-time (e.g., "Selected: March 15, 2025 2:30 PM").
+    /// Announces the selected date-time (default: "Selected: {value}").
     pub selected_datetime_label: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    /// Label for the year segment (default: "Year").
+    pub year_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Label for the month segment (default: "Month").
+    pub month_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Label for the day segment (default: "Day").
+    pub day_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Label for the hour segment (default: "Hour").
+    pub hour_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Label for the minute segment (default: "Minute").
+    pub minute_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Label for the second segment (default: "Second").
+    pub second_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+    /// Label for the day-period segment (default: "AM/PM").
+    pub day_period_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
@@ -1469,9 +1218,16 @@ impl Default for Messages {
             clear_label: MessageFn::static_str("Clear date and time"),
             date_group_label: MessageFn::static_str("Date"),
             time_group_label: MessageFn::static_str("Time"),
-            selected_datetime_label: MessageFn::new(|value, _locale| {
-                format!("Selected: {}", value)
+            selected_datetime_label: MessageFn::new(|value: &str, _locale: &Locale| {
+                format!("Selected: {value}")
             }),
+            year_label: MessageFn::static_str("Year"),
+            month_label: MessageFn::static_str("Month"),
+            day_label: MessageFn::static_str("Day"),
+            hour_label: MessageFn::static_str("Hour"),
+            minute_label: MessageFn::static_str("Minute"),
+            second_label: MessageFn::static_str("Second"),
+            day_period_label: MessageFn::static_str("AM/PM"),
         }
     }
 }
@@ -1479,7 +1235,11 @@ impl Default for Messages {
 impl ComponentMessages for Messages {}
 ```
 
-All user-visible text is provided via the `Messages` struct. Individual segment labels (e.g., "Year", "Hour", "AM/PM") are inherited from the `DateSegmentKind::aria_label()` method defined in date-field's segment types. Date segment order and separators are locale-dependent (see `Machine::build_date_segments()`). Time segment display uses the locale's preferred hour cycle when `hour_cycle` is `None`.
+All user-visible text is provided via the `Messages` struct, including the
+per-segment spinbutton labels resolved by `segment_aria_label`. Date segment
+order and separators are locale-dependent (via `ars_i18n::date_order`; see
+`build_date_segments`). Time segment display uses the locale's preferred hour
+cycle when `hour_cycle` is `None`.
 
 ## 5. Form Integration
 

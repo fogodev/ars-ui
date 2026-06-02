@@ -3,7 +3,8 @@
 //! Asserts each date-time component's `Part` enum matches the spec anatomy.
 
 use ars_components::date_time::{
-    calendar, date_field::DateSegmentKind, date_picker, range_calendar, time_field,
+    calendar, date_field::DateSegmentKind, date_picker, date_time_picker, range_calendar,
+    time_field,
 };
 use ars_i18n::{CalendarDate, Weekday};
 
@@ -134,6 +135,41 @@ fn time_field_anatomy_matches_spec() {
             (time_field::Part::Description, "description"),
             (time_field::Part::ErrorMessage, "error-message"),
             (time_field::Part::HiddenInput, "hidden-input"),
+        ],
+    );
+}
+
+#[test]
+fn date_time_picker_anatomy_matches_spec() {
+    assert_anatomy(
+        "date-time-picker",
+        &[
+            (date_time_picker::Part::Root, "root"),
+            (date_time_picker::Part::Label, "label"),
+            (date_time_picker::Part::Control, "control"),
+            (
+                date_time_picker::Part::DateSegmentGroup,
+                "date-segment-group",
+            ),
+            (
+                date_time_picker::Part::TimeSegmentGroup,
+                "time-segment-group",
+            ),
+            (
+                date_time_picker::Part::Segment {
+                    kind: DateSegmentKind::Year,
+                },
+                "segment",
+            ),
+            (date_time_picker::Part::Literal { index: 0 }, "literal"),
+            (date_time_picker::Part::Separator, "separator"),
+            (date_time_picker::Part::Trigger, "trigger"),
+            (date_time_picker::Part::ClearTrigger, "clear-trigger"),
+            (date_time_picker::Part::Positioner, "positioner"),
+            (date_time_picker::Part::Content, "content"),
+            (date_time_picker::Part::Description, "description"),
+            (date_time_picker::Part::ErrorMessage, "error-message"),
+            (date_time_picker::Part::HiddenInput, "hidden-input"),
         ],
     );
 }

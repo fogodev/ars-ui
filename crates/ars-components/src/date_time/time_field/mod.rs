@@ -26,7 +26,12 @@ use ars_core::{
 use ars_i18n::{HourCycle, Time};
 use ars_interactions::KeyboardEventData;
 
-use super::date_field::segment::{DateSegment, DateSegmentKind};
+use super::{
+    date_field::segment::{DateSegment, DateSegmentKind},
+    hour_cycle::{
+        digits_needed, display_hour, display_hour_range, display_hour_to_24, has_day_period, is_pm,
+    },
+};
 
 /// States for the `TimeField` component.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1825,64 +1830,6 @@ fn build_segments(ctx: &Context) -> Vec<DateSegment> {
     segments
 }
 
-const fn display_hour_range(hour_cycle: HourCycle) -> (i32, i32) {
-    match hour_cycle {
-        HourCycle::H11 => (0, 11),
-        HourCycle::H12 => (1, 12),
-        HourCycle::H23 => (0, 23),
-        HourCycle::H24 => (1, 24),
-    }
-}
-
-const fn has_day_period(hour_cycle: HourCycle) -> bool {
-    matches!(hour_cycle, HourCycle::H11 | HourCycle::H12)
-}
-
-fn display_hour(time: Time, hour_cycle: HourCycle) -> i32 {
-    let hour = time.hour();
-
-    match hour_cycle {
-        HourCycle::H11 => i32::from(hour % 12),
-
-        HourCycle::H12 => i32::from(if hour.is_multiple_of(12) {
-            12
-        } else {
-            hour % 12
-        }),
-
-        HourCycle::H23 => i32::from(hour),
-
-        HourCycle::H24 => i32::from(if hour == 0 { 24 } else { hour }),
-    }
-}
-
-fn display_hour_to_24(raw_hour: u8, day_period: Option<i32>, hour_cycle: HourCycle) -> Option<u8> {
-    match hour_cycle {
-        HourCycle::H11 => {
-            let is_pm = day_period.unwrap_or(0) == 1;
-            Some(if is_pm { raw_hour + 12 } else { raw_hour })
-        }
-
-        HourCycle::H12 => {
-            let is_pm = day_period.unwrap_or(0) == 1;
-            Some(match (raw_hour, is_pm) {
-                (12, false) => 0,
-                (12, true) => 12,
-                (_, true) => raw_hour + 12,
-                (_, false) => raw_hour,
-            })
-        }
-
-        HourCycle::H23 => Some(raw_hour),
-
-        HourCycle::H24 => Some(if raw_hour == 24 { 0 } else { raw_hour }),
-    }
-}
-
-const fn is_pm(time: Time) -> bool {
-    time.hour() >= 12
-}
-
 #[derive(Clone, Copy)]
 struct CjkDayPeriodEntry {
     am_label: &'static str,
@@ -2009,15 +1956,6 @@ fn clamp_time(time: Time, min_value: Option<&Time>, max_value: Option<&Time>) ->
     }
 
     time
-}
-
-const fn digits_needed(max: u32) -> usize {
-    match max {
-        0..=9 => 1,
-        10..=99 => 2,
-        100..=999 => 3,
-        _ => 4,
-    }
 }
 
 fn time_segment_aria_label(kind: DateSegmentKind, messages: &Messages, locale: &Locale) -> String {

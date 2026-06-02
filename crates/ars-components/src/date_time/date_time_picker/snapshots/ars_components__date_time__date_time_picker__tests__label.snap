@@ -1,0 +1,37 @@
+---
+source: crates/ars-components/src/date_time/date_time_picker/tests.rs
+expression: snapshot_attrs(&api.label_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "label",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "date-time-picker",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "date-time-picker-label",
+            ),
+        ),
+        (
+            For,
+            String(
+                "date-time-picker-control",
+            ),
+        ),
+    ],
+    styles: [],
+}
