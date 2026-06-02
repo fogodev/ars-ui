@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>ba382sjvy</task-id>
+<tool-use-id>toolu_01GodkYkCyZZQbvJ4QrZcQLZ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-284/fb08ddb6-3398-445c-880d-6a9528edc184/tasks/ba382sjvy.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex review state until verdict" completed (exit code 0)</summary>
+</task-notification>

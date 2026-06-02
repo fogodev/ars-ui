@@ -1,0 +1,99 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "17fafe3af204",
+  "session_id": "fb08ddb6-3398-445c-880d-6a9528edc184",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-02T17:59:55.913805Z",
+  "branch": "impl-284",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_range_field/mod.rs",
+    "crates/ars-components/src/date_time/date_range_field/tests.rs",
+    "spec/components/date-time/date-range-field.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "ccecb5628fa1",
+  "checkpoint_transcript_start": 638,
+  "transcript_lines_at_start": 638,
+  "token_usage": {
+    "input_tokens": 6296,
+    "cache_creation_tokens": 461053,
+    "cache_read_tokens": 22940927,
+    "output_tokens": 44134,
+    "api_call_count": 61
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Address 6 distinct findings from a Codex automated code review of the DateRangeField component, covering prop sync, stale value clearing, cross-field bounds, hidden input handling, and invalidity computation.",
+    "outcome": "All 6 findings fixed, 8+ new tests added, 100% line/function coverage restored, clippy clean, spec updated, and xci-fast (10 gates) passed before committing and pushing.",
+    "learnings": {
+      "repo": [
+        "DateField's `clamp_date` (line 1870) clamps completed dates to min/max, so passing cross-field values as min/max to child DateFields would defeat the parent's swap logic — child fields must receive only global bounds.",
+        "`compare_within_calendar` returns `None` for dates in different calendar systems, which is the trigger condition for clearing a stale range value in `recompute_range`.",
+        "The `SyncProps` event must be explicitly excluded from the disabled guard in `transition` so prop-sync still fires when the component is disabled.",
+        "The project uses `cargo xci-fast` as a pre-push CI profile with 10 gates (~10–15 min runtime).",
+        "Spec files live at `spec/components/date-time/date-range-field.md` and must be kept in sync with implementation changes.",
+        "`Bindable`'s controlled-sync API is used via `sync_controlled` for implementing `sync_props`."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/date_range_field/mod.rs",
+          "line": 402,
+          "end_line": 402,
+          "finding": "Two Codex P1 threads both pointed to line 402 — they were the same prop-sync finding reported twice."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_range_field/mod.rs",
+          "line": 1870,
+          "end_line": 1870,
+          "finding": "`clamp_date` clamps completed dates to min/max; passing sibling-field values as bounds causes incorrect clamping — fix is to pass only global (component-level) bounds to child fields."
+        }
+      ],
+      "workflow": [
+        "Codex review threads are fetched via a poll loop that exits on verdict, then all threads are read in bulk before starting fixes.",
+        "TDD rigor was applied: build first to confirm clean baseline, implement fixes, then add/update tests before re-checking coverage.",
+        "Coverage was tracked at line/function level; a single missed branch (`old == new` no-op in `on_props_changed`) required an explicit targeted test to restore 100%.",
+        "The workflow sequence was: verify findings → implement → build → test → coverage → clippy → spec sync → validate spec → CI → commit/push → reply to review threads."
+      ]
+    },
+    "friction": [
+      "Two Codex P1 threads at line 402 were duplicate findings for the same issue, requiring deduplication before triaging.",
+      "Coverage dropped to 99.81% after fixes due to the `old == new` no-op branch in the new `on_props_changed` method, requiring an extra targeted test pass."
+    ],
+    "open_items": [
+      "Re-trigger `@codex review` after push to confirm all 8 threads are resolved.",
+      "Two branch-closure coverage regions remain uncovered (noted as acceptable)."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-02T17:59:34.005822Z",
+    "agent_lines": 454,
+    "agent_removed": 77,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 454,
+    "total_lines_changed": 531,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 454,
+      "agent_lines_removed": 77
+    }
+  ]
+}
