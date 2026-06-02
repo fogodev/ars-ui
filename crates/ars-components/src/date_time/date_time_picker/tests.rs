@@ -1552,6 +1552,123 @@ fn day_range_clamps_when_month_shortens() {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Codex review #708 (pass 3): reprojection, era, leap months, disabled input
+// ────────────────────────────────────────────────────────────────────
+
+#[test]
+fn maybe_publish_reprojects_clamped_date_into_calendar() {
+    // Buddhist picker whose value is clamped to a Gregorian min bound on edit.
+    let buddhist = date(2024, 6, 15)
+        .to_calendar(CalendarSystem::Buddhist)
+        .expect("buddhist date");
+    let mut svc = service_with(
+        Props {
+            calendar: CalendarSystem::Buddhist,
+            default_value: Some(CalendarDateTime::new(buddhist, time(12, 0, 0))),
+            min_value: Some(datetime(2024, 6, 15, 13, 0, 0)),
+            ..props()
+        },
+        en_us(),
+    );
+
+    // Re-publish below the min so `clamp_datetime` returns the Gregorian bound;
+    // the cached display date must still be Buddhist.
+    drop(svc.send(Event::SegmentChange {
+        segment: DateSegmentKind::Minute,
+        value: 0,
+    }));
+
+    assert_eq!(
+        svc.context()
+            .date_value
+            .as_ref()
+            .map(CalendarDate::calendar),
+        Some(CalendarSystem::Buddhist)
+    );
+}
+
+#[test]
+fn value_commit_reprojects_into_configured_calendar() {
+    let mut svc = service_with(props().calendar(CalendarSystem::Buddhist), en_us());
+
+    // A canonical (Gregorian-shaped) commit is reprojected into Buddhist.
+    drop(svc.send(Event::ValueCommit(Some(datetime(2024, 3, 15, 14, 30, 0)))));
+
+    let date_value = svc.context().date_value.as_ref().expect("date present");
+    assert_eq!(date_value.calendar(), CalendarSystem::Buddhist);
+    assert_eq!(date_value.year(), 2567);
+}
+
+#[test]
+fn editing_preserves_japanese_era() {
+    // Reiwa 6 == Gregorian 2024.
+    let japanese = date(2024, 3, 15)
+        .to_calendar(CalendarSystem::Japanese)
+        .expect("japanese date");
+    let mut svc = service_with(
+        Props {
+            calendar: CalendarSystem::Japanese,
+            default_value: Some(CalendarDateTime::new(japanese, time(14, 30, 0))),
+            ..props()
+        },
+        en_us(),
+    );
+
+    // Editing the day keeps the Reiwa era, so the ISO year stays 2024 rather
+    // than reinterpreting the era-year `6` as ISO year 0006.
+    drop(svc.send(Event::SegmentChange {
+        segment: DateSegmentKind::Day,
+        value: 16,
+    }));
+
+    let api = svc.connect(&|_| {});
+    assert_eq!(
+        attr(&api.hidden_input_attrs(), HtmlAttr::Value).as_deref(),
+        Some("2024-03-16T14:30:00")
+    );
+}
+
+#[test]
+fn month_range_follows_calendar_leap_year() {
+    // Hebrew year 5784 (≈ 2024) is a leap year with 13 months.
+    let hebrew = date(2024, 3, 15)
+        .to_calendar(CalendarSystem::Hebrew)
+        .expect("hebrew date");
+    let svc = service_with(
+        Props {
+            calendar: CalendarSystem::Hebrew,
+            default_value: Some(CalendarDateTime::new(hebrew, time(12, 0, 0))),
+            ..props()
+        },
+        en_us(),
+    );
+
+    let month_max = svc
+        .context()
+        .segment(DateSegmentKind::Month)
+        .map(|segment| segment.max);
+    assert_eq!(month_max, Some(13));
+}
+
+#[test]
+fn hidden_input_disabled_when_picker_disabled() {
+    let svc = service_with(
+        Props {
+            disabled: true,
+            name: Some(String::from("appointment")),
+            default_value: Some(datetime(2024, 3, 15, 14, 30, 0)),
+            ..props()
+        },
+        en_us(),
+    );
+    let api = svc.connect(&|_| {});
+    assert_eq!(
+        attr(&api.hidden_input_attrs(), HtmlAttr::Disabled).as_deref(),
+        Some("true")
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Additional branch coverage: keydown guards, type-ahead edges, sync, format
 // ────────────────────────────────────────────────────────────────────
 

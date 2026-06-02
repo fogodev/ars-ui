@@ -254,14 +254,18 @@ impl Context {
     }
 
     /// Assemble a `CalendarDate` from current date segment values, using the
-    /// configured `calendar` system (matching `date_field`) so non-Gregorian
-    /// values commit dates in that calendar rather than a Gregorian look-alike.
+    /// configured `calendar` system and carrying the current era (matching
+    /// `date_field`) so non-Gregorian values commit dates in that calendar. The
+    /// era is `current_era()` — the value's era, else the calendar's default —
+    /// because `DateTimePicker` has no Era segment (so e.g. Japanese Reiwa 6
+    /// stays Reiwa rather than ISO year 0006).
     pub fn assemble_date(&self) -> Option<CalendarDate> {
         let year = self.segment_value(DateSegmentKind::Year)?;
         let month = u8::try_from(self.segment_value(DateSegmentKind::Month)?).ok()?;
         let day = u8::try_from(self.segment_value(DateSegmentKind::Day)?).ok()?;
         CalendarDate::new(self.calendar, &CalendarDateFields {
-            year: Some(year), month: Some(month), day: Some(day), ..CalendarDateFields::default()
+            era: self.current_era(), year: Some(year), month: Some(month), day: Some(day),
+            ..CalendarDateFields::default()
         }).ok()
     }
 
@@ -709,7 +713,11 @@ impl ars_core::Machine for Machine {
 > `commit_type_buffer`/`commit_buffer_for_kind`, `sync_sub_value`, `apply_value`,
 > `sync_props`, `reconcile_state_after_sync`, `clamp_datetime` (date-then-time
 > `compare`), `format_segment_text`, `format_iso8601`, and `format_announcement` —
-> live alongside the machine in that module.
+> live alongside the machine in that module. `Context::refresh_date_ranges`
+> keeps the month/day segment maxima in sync with the year/month/era/calendar
+> (via the intl backend's `max_months_in_year`/`days_in_month`), and
+> `project_date` reprojects clamped/committed dates back into `ctx.calendar` so
+> the displayed segments and a subsequent edit always agree on the ISO date.
 
 ### 1.8 Connect / API
 

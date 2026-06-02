@@ -39,8 +39,8 @@ use ars_core::{
     TransitionPlan,
 };
 use ars_i18n::{
-    CalendarDate, CalendarDateFields, CalendarDateTime, CalendarSystem, DateOrder, HourCycle, Time,
-    date_field_separator, date_order,
+    CalendarDate, CalendarDateFields, CalendarDateTime, CalendarSystem, DateOrder, Era, HourCycle,
+    Time, date_field_separator, date_order,
 };
 use ars_interactions::KeyboardEventData;
 
@@ -653,44 +653,58 @@ impl Context {
             segment.text = format_segment_text(kind, value);
         }
 
-        // The number of days depends on the year/month/calendar, so refresh the
-        // day segment's range whenever either changes (clamping a now-invalid
-        // day, e.g. Feb 30 → 29) so the visible day can never diverge from a
-        // committable date.
+        // Month/day ranges are calendar- and year-dependent (leap months in
+        // e.g. Hebrew years, varying month lengths), so refresh them whenever
+        // the year or month changes, clamping now-invalid values down so the
+        // visible fields can never diverge from a committable date.
         if matches!(kind, DateSegmentKind::Year | DateSegmentKind::Month) {
-            self.refresh_day_range();
+            self.refresh_date_ranges();
         }
     }
 
-    /// Refreshes the day segment's maximum from the current year/month/calendar
-    /// (via the intl backend), clamping a now-out-of-range day value down.
-    fn refresh_day_range(&mut self) {
+    /// Refreshes the month and day segment maxima from the current
+    /// year/month/era/calendar (via the intl backend), clamping now-out-of-range
+    /// values down. Month is refreshed first so the day refresh sees a valid
+    /// month.
+    fn refresh_date_ranges(&mut self) {
+        let era = self.current_era();
+        let era_code = era.as_ref().map(|era| era.code.as_str());
         let year = self.segment_value(DateSegmentKind::Year);
+
+        // Month range (calendars with 13-month leap years expose month 13).
+        let month_max = year.map_or(12, |year| {
+            i32::from(
+                self.intl_backend
+                    .max_months_in_year(&self.calendar, year, era_code),
+            )
+        });
+        Self::clamp_segment_max(&mut self.date_segments, DateSegmentKind::Month, month_max);
+
+        // Day range depends on year + (clamped) month.
         let month = self
             .segment_value(DateSegmentKind::Month)
             .and_then(|month| u8::try_from(month).ok());
-
-        let max = match (year, month) {
+        let day_max = match (year, month) {
             (Some(year), Some(month)) => {
                 i32::from(
                     self.intl_backend
-                        .days_in_month(&self.calendar, year, month, None),
+                        .days_in_month(&self.calendar, year, month, era_code),
                 )
             }
             _ => 31,
         };
+        Self::clamp_segment_max(&mut self.date_segments, DateSegmentKind::Day, day_max);
+    }
 
-        if let Some(segment) = self
-            .date_segments
-            .iter_mut()
-            .find(|segment| segment.kind == DateSegmentKind::Day)
-        {
+    /// Sets a date segment's `max`, clamping a now-out-of-range value down.
+    fn clamp_segment_max(segments: &mut [DateSegment], kind: DateSegmentKind, max: i32) {
+        if let Some(segment) = segments.iter_mut().find(|segment| segment.kind == kind) {
             segment.max = max;
             if let Some(value) = segment.value
                 && value > max
             {
                 segment.value = Some(max);
-                segment.text = format_segment_text(DateSegmentKind::Day, max);
+                segment.text = format_segment_text(kind, max);
             }
         }
     }
@@ -754,9 +768,28 @@ impl Context {
             .all(|segment| segment.value.is_some())
     }
 
+    /// The era to assemble dates under: the current value's era (so editing a
+    /// Japanese Reiwa 6 value keeps Reiwa rather than reinterpreting `6` as a
+    /// raw year), else the calendar's default era. `DateTimePicker` has no Era
+    /// segment, so the era is carried from context rather than user-editable.
+    #[must_use]
+    fn current_era(&self) -> Option<Era> {
+        self.date_value
+            .as_ref()
+            .and_then(|date| date.era().cloned())
+            .or_else(|| {
+                self.value
+                    .get()
+                    .as_ref()
+                    .and_then(|dt| dt.date().era().cloned())
+            })
+            .or_else(|| self.intl_backend.default_era(&self.calendar))
+    }
+
     /// Assembles a [`CalendarDate`] from current date segment values, using the
-    /// configured [`calendar`](Self::calendar) system so non-Gregorian segment
-    /// values commit dates in that calendar (matching `date_field`).
+    /// configured [`calendar`](Self::calendar) system and carrying the current
+    /// era so non-Gregorian segment values commit dates in that calendar
+    /// (matching `date_field`).
     #[must_use]
     pub fn assemble_date(&self) -> Option<CalendarDate> {
         let year = self.segment_value(DateSegmentKind::Year)?;
@@ -766,6 +799,7 @@ impl Context {
         CalendarDate::new(
             self.calendar,
             &CalendarDateFields {
+                era: self.current_era(),
                 year: Some(year),
                 month: Some(month),
                 day: Some(day),
@@ -811,7 +845,7 @@ impl Context {
     /// then refreshes the day range for the rebuilt year/month.
     fn rebuild_date_segments(&mut self) {
         self.date_segments = build_date_segments(&self.locale, self.date_value.as_ref());
-        self.refresh_day_range();
+        self.refresh_date_ranges();
     }
 
     /// Recomputes the time segments from the current `time_value` and hour cycle.
@@ -963,7 +997,11 @@ impl Machine {
 
         let clamped = clamp_datetime(datetime, ctx.min_value.as_ref(), ctx.max_value.as_ref());
 
-        ctx.date_value = Some(clamped.date().clone());
+        // Clamping may substitute a (Gregorian) min/max bound from props, so
+        // reproject into the active calendar before caching the display date —
+        // otherwise a later edit reassembles Gregorian fields under
+        // `ctx.calendar` and commits a different ISO date.
+        ctx.date_value = Some(project_date(clamped.date(), ctx.calendar));
         ctx.time_value = Some(*clamped.time());
 
         ctx.rebuild_date_segments();
@@ -1046,7 +1084,7 @@ impl ars_core::Machine for Machine {
         };
 
         let mut ctx = ctx;
-        ctx.refresh_day_range();
+        ctx.refresh_date_ranges();
 
         (State::Idle, ctx)
     }
@@ -1872,6 +1910,12 @@ impl<'a> Api<'a> {
             attrs.set(HtmlAttr::Value, format_iso8601(datetime));
         }
 
+        // A disabled field is excluded from form submission, so disable the
+        // hidden input too (otherwise its value still reaches form handlers).
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
+
         attrs
     }
 
@@ -2191,7 +2235,11 @@ fn commit_buffer_for_kind(ctx: &mut Context, kind: DateSegmentKind) {
 fn apply_value(ctx: &mut Context, value: Option<CalendarDateTime>) {
     let value = value.map(|dt| clamp_datetime(dt, ctx.min_value.as_ref(), ctx.max_value.as_ref()));
 
-    ctx.date_value = value.as_ref().map(|dt| dt.date().clone());
+    // Reproject the (clamped, possibly Gregorian) date into the active calendar
+    // so the displayed segments and a subsequent edit agree on the ISO date.
+    ctx.date_value = value
+        .as_ref()
+        .map(|dt| project_date(dt.date(), ctx.calendar));
     ctx.time_value = value.as_ref().map(|dt| *dt.time());
 
     if ctx.value.is_controlled() {
@@ -2451,6 +2499,12 @@ fn cmp_datetime(a: &CalendarDateTime, b: &CalendarDateTime) -> Ordering {
         Ordering::Equal => a.time().cmp(b.time()),
         other => other,
     }
+}
+
+/// Projects a date into the given calendar system for display, falling back to
+/// the original date if the conversion is unsupported.
+fn project_date(date: &CalendarDate, calendar: CalendarSystem) -> CalendarDate {
+    date.to_calendar(calendar).unwrap_or_else(|_| date.clone())
 }
 
 /// Clamps a date-time into the inclusive `[min, max]` range.
