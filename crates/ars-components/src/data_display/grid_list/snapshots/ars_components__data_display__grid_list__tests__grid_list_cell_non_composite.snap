@@ -37,14 +37,6 @@ AttrMap {
             ),
         ),
         (
-            Aria(
-                Selected,
-            ),
-            String(
-                "false",
-            ),
-        ),
-        (
             Id,
             String(
                 "cards-cell-gamma",

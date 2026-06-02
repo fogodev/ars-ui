@@ -228,12 +228,14 @@ semantics:
 - `requested_action_key` preserves the latest enabled item action key so adapters can notify
   consumers even when no selection changed.
 - Disabled grids reject focus, selection, action, typeahead, and navigation mutations. Disabled
-  or stale item keys are rejected for focus, selection, and action events.
+  composite roots are removed from the tab order with `tabindex="-1"`. Disabled or stale item keys
+  are rejected for focus, selection, and action events.
 - Arrow, Home, and End navigation operate over the flat collection projected into rows and
   columns. Horizontal navigation never wraps between rows. Navigation skips disabled candidates
   when another enabled candidate exists in the requested direction.
-- `Enter` maps to `ItemAction`, `Space` maps to selection toggling, Ctrl/Cmd+A selects all
-  enabled items in multiple-selection mode, and `Escape` follows `escape_key_behavior`.
+- `Enter` maps to `ItemAction`, `Space` maps to selection using `selection_behavior`, Ctrl/Cmd+A
+  selects all enabled items in multiple-selection mode, and `Escape` follows
+  `escape_key_behavior`.
 - Selection obeys `selection::Mode`, `selection::Behavior`, and
   `disallow_empty_selection`. Range and select-all selection include only enabled, present item
   keys.
@@ -288,7 +290,7 @@ impl Api<'_> {
     pub fn drag_handle_attrs(&self, key: &Key) -> AttrMap;
     /// Returns drop indicator attributes for `target`.
     pub fn drop_indicator_attrs(&self, target: &CollectionDropTarget) -> AttrMap;
-    /// Dispatches a keydown event using a timeout-advancing fallback timestamp.
+    /// Dispatches a keydown event using an accumulating fallback timestamp.
     pub fn on_cell_keydown(&self, key: &Key, data: &KeyboardEventData);
     /// Dispatches a keydown event with an adapter-provided monotonic timestamp.
     pub fn on_cell_keydown_at(&self, key: &Key, data: &KeyboardEventData, now: Duration);
@@ -313,14 +315,14 @@ GridList
 └── DropIndicator     (optional; drag-and-drop variant)
 ```
 
-| Part              | Element                                                                      | Key Attributes                                                                                                                                                                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Root`            | `<div>`                                                                      | `role="grid"`, `aria-label`, `aria-multiselectable`, `data-ars-state`, `data-ars-disabled`                                                                                                                                                             |
-| `Row`             | `<div>`                                                                      | `role="row"`, `aria-selected`, `data-ars-key`, `data-ars-selected`                                                                                                                                                                                     |
-| `Cell`            | `<div>` or `<a>` (when href)                                                 | `role="gridcell"`, `tabindex="-1"` in composite mode, independent `tabindex="0"` in non-composite mode, `aria-disabled`, `aria-roledescription` (when draggable), `data-ars-key`, `data-ars-selected`, `data-ars-focus-visible`, `href` (when present) |
-| `LoadingSentinel` | `<div>` (optional, after last Row; rendered only when `on_load_more` is set) | `aria-hidden="true"`, `tabindex="-1"`, `data-ars-loading` (when loading)                                                                                                                                                                               |
-| `DragHandle`      | `<button>`                                                                   | `role="button"`, `aria-label`, `aria-disabled`, `tabindex`                                                                                                                                                                                             |
-| `DropIndicator`   | `<div>`                                                                      | `aria-hidden="true"`, `data-ars-drop-position`, `data-ars-drop-target`                                                                                                                                                                                 |
+| Part              | Element                                                                      | Key Attributes                                                                                                                                                                                                                                                                                           |
+| ----------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Root`            | `<div>`                                                                      | `role="grid"`, `tabindex="0"` in enabled composite mode, `tabindex="-1"` in disabled composite mode, `aria-label`, `aria-multiselectable`, `data-ars-state`, `data-ars-disabled`                                                                                                                         |
+| `Row`             | `<div>`                                                                      | `role="row"`, `aria-selected`, `data-ars-key`, `data-ars-selected`                                                                                                                                                                                                                                       |
+| `Cell`            | `<div>` or `<a>` (when enabled href)                                         | `role="gridcell"` and `aria-selected` in composite mode, `tabindex="-1"` in composite mode, independent `tabindex="0"` in non-composite mode, `aria-disabled`, `aria-roledescription` (when draggable), `data-ars-key`, `data-ars-selected`, `data-ars-focus-visible`, `href` (when enabled and present) |
+| `LoadingSentinel` | `<div>` (optional, after last Row; rendered only when `on_load_more` is set) | `aria-hidden="true"`, `tabindex="-1"`, `data-ars-loading` (when loading)                                                                                                                                                                                                                                 |
+| `DragHandle`      | `<button>`                                                                   | `role="button"`, `aria-label`, `aria-disabled`, `tabindex`                                                                                                                                                                                                                                               |
+| `DropIndicator`   | `<div>`                                                                      | `aria-hidden="true"`, `data-ars-drop-position`, `data-ars-drop-target`                                                                                                                                                                                                                                   |
 
 ## 3. Accessibility
 
@@ -329,18 +331,21 @@ GridList
 - **Grid pattern**: GridList uses `role="grid"` at the root level, with `role="row"` grouping
   cells and `role="gridcell"` on each item. This provides two-dimensional keyboard navigation
   semantics to assistive technologies.
-- **Composite tab stop**: In `composite: true`, the root is the single tab stop and cells use
-  `tabindex="-1"` while `aria-activedescendant` names the active cell. In `composite: false`,
-  each enabled cell is an independent tab stop.
-- **Selection announcement**: `aria-selected` on rows reflects selection state. When
-  `selection_mode` is `Multiple`, the root has `aria-multiselectable="true"`.
+- **Composite tab stop**: In `composite: true`, the enabled root is the single tab stop and cells
+  use `tabindex="-1"` while `aria-activedescendant` names the active cell. Disabled composite
+  roots use `tabindex="-1"`. In `composite: false`, each enabled cell is an independent tab stop.
+- **Selection announcement**: `aria-selected` on rows reflects selection state. Composite cells
+  also expose `aria-selected` because they have `role="gridcell"`. Non-composite cell hosts omit
+  cell-level `aria-selected`; the row/listitem carries the selection state. When `selection_mode`
+  is `Multiple`, the root has `aria-multiselectable="true"`.
 - **Disabled items**: `aria-disabled="true"` on individual cells. Disabled items are skipped
   during 2D navigation when possible, but remain discoverable by AT.
 - **`aria-activedescendant`**: The root element sets `aria-activedescendant` to the ID of the
   currently focused cell. When `composite: true`, the root element receives focus and
   `aria-activedescendant` points to the visually focused cell.
-- **Action vs. selection**: Enter triggers `on_action` (primary action), while Space toggles
-  selection. This mirrors the ARIA grid pattern where Enter activates and Space selects.
+- **Action vs. selection**: Enter triggers `on_action` (primary action), while Space selects or
+  toggles according to `selection_behavior`. This mirrors the ARIA grid pattern where Enter
+  activates and Space selects.
 - **Home/End wrapping**: `Home` moves focus to the first non-disabled item in the grid. `End`
   moves focus to the last non-disabled item. When combined with `Ctrl`, `Ctrl+Home` moves to
   the first item in the first row, and `Ctrl+End` moves to the last item in the last row.
@@ -358,7 +363,9 @@ GridList
   `Cell` as an `<a>` element. The `role="gridcell"` on the cell and `role="row"` on the parent
   row are preserved -- the `<a>` carries the grid role, not `role="link"`. This allows native
   link semantics (middle-click to open in new tab, Ctrl+click, etc.) while maintaining the
-  ARIA grid pattern. Enter activates the link navigation; Space continues to toggle selection.
+  ARIA grid pattern. Enter activates the link navigation; Space continues to select according to
+  `selection_behavior`. Disabled link cells omit `href` so native navigation is unavailable while
+  the disabled state is exposed.
 - **Loading sentinel**: The `LoadingSentinel` element is `aria-hidden="true"` and excluded from
   the tab order (`tabindex="-1"`). It serves purely as an `IntersectionObserver` target for
   infinite scroll. Loading state changes (loading started/completed, new items available) are
@@ -376,7 +383,7 @@ GridList
 | `ArrowRight`  | Move focus one cell to the right.                                                                                                                |
 | `Home`        | Move focus to the first item in the grid.                                                                                                        |
 | `End`         | Move focus to the last item in the grid.                                                                                                         |
-| `Space`       | Toggle selection of the focused item.                                                                                                            |
+| `Space`       | Select or toggle the focused item according to `selection_behavior`.                                                                             |
 | `Enter`       | Activate the focused item (primary action).                                                                                                      |
 | `Ctrl+A`      | Select all non-disabled items (multiple selection mode only).                                                                                    |
 | `Escape`      | Clear selection.                                                                                                                                 |

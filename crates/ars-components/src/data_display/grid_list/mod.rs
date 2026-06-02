@@ -888,7 +888,10 @@ impl Api<'_> {
         }
 
         if self.context.composite {
-            attrs.set(HtmlAttr::TabIndex, "0");
+            attrs.set(
+                HtmlAttr::TabIndex,
+                if self.context.disabled { "-1" } else { "0" },
+            );
 
             if let Some(key) = &self.context.focused_key
                 && let Some(id) = self.cell_id(key)
@@ -978,7 +981,7 @@ impl Api<'_> {
             );
         }
 
-        if self.context.selection_mode != selection::Mode::None {
+        if self.context.composite && self.context.selection_mode != selection::Mode::None {
             attrs.set(
                 HtmlAttr::Aria(AriaAttr::Selected),
                 if selected { "true" } else { "false" },
@@ -989,12 +992,13 @@ impl Api<'_> {
             attrs.set_bool(HtmlAttr::Data("ars-selected"), true);
         }
 
-        if let Some(href) = self
-            .context
-            .items
-            .get(key)
-            .and_then(|node| node.value.as_ref())
-            .and_then(|item| item.href.as_ref())
+        if !disabled
+            && let Some(href) = self
+                .context
+                .items
+                .get(key)
+                .and_then(|node| node.value.as_ref())
+                .and_then(|item| item.href.as_ref())
         {
             attrs.set(HtmlAttr::Href, sanitize_url(href.as_str()));
         }
@@ -1074,7 +1078,7 @@ impl Api<'_> {
         attrs
     }
 
-    /// Dispatches a keydown event using a timeout-advancing fallback timestamp.
+    /// Dispatches a keydown event using an accumulating fallback timestamp.
     pub fn on_cell_keydown(&self, key: &Key, data: &KeyboardEventData) {
         self.on_cell_keydown_at(key, data, fallback_typeahead_timestamp(self.context));
     }
@@ -1084,7 +1088,7 @@ impl Api<'_> {
         if !self.context.composite {
             match data.key {
                 KeyboardKey::Enter => (self.send)(Event::ItemAction(key.clone())),
-                KeyboardKey::Space => (self.send)(Event::ToggleSelect(key.clone())),
+                KeyboardKey::Space => (self.send)(self.select_key_event(key)),
                 _ => {}
             }
 
@@ -1120,7 +1124,7 @@ impl Api<'_> {
 
             KeyboardKey::Enter => (self.send)(Event::ItemAction(key.clone())),
 
-            KeyboardKey::Space => (self.send)(Event::ToggleSelect(key.clone())),
+            KeyboardKey::Space => (self.send)(self.select_key_event(key)),
 
             KeyboardKey::Escape
                 if self.context.escape_key_behavior == EscapeKeyBehavior::ClearSelection =>
@@ -1154,6 +1158,13 @@ impl Api<'_> {
 
     fn is_rtl(&self) -> bool {
         Direction::from(self.context.locale.direction()) == Direction::Rtl
+    }
+
+    fn select_key_event(&self, key: &Key) -> Event {
+        match self.context.selection_behavior {
+            selection::Behavior::Toggle => Event::ToggleSelect(key.clone()),
+            selection::Behavior::Replace => Event::Select(key.clone()),
+        }
     }
 
     fn dispatch_arrow(
@@ -1341,7 +1352,7 @@ const fn fallback_typeahead_timestamp(context: &Context) -> Duration {
     context
         .typeahead
         .last_key_time
-        .saturating_add(typeahead::TYPEAHEAD_TIMEOUT)
+        .saturating_add(Duration::from_millis(1))
 }
 
 fn range_keys(context: &Context, from: &Key, to: &Key) -> Option<BTreeSet<Key>> {
@@ -1686,6 +1697,11 @@ mod tests {
                 .get(&HtmlAttr::Aria(AriaAttr::ActiveDescendant))
                 .is_none()
         );
+        assert!(
+            api.cell_attrs(&key("gamma"))
+                .get(&HtmlAttr::Aria(AriaAttr::Selected))
+                .is_none()
+        );
     }
 
     #[test]
@@ -1858,6 +1874,27 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn keyboard_helper_honors_replace_selection_behavior_for_space() {
+        let captured = RefCell::new(Vec::new());
+        let send = |event| captured.borrow_mut().push(event);
+        let grid = service(
+            Props::new()
+                .id("grid")
+                .items(items())
+                .selection_mode(selection::Mode::Multiple)
+                .selection_behavior(selection::Behavior::Replace),
+        );
+
+        grid.connect(&send).on_cell_keydown_at(
+            &key("alpha"),
+            &keyboard(KeyboardKey::Space, Some(' ')),
+            Duration::ZERO,
+        );
+
+        assert_eq!(captured.into_inner(), vec![Event::Select(key("alpha"))]);
     }
 
     #[test]
@@ -2036,10 +2073,7 @@ mod tests {
 
         assert_eq!(
             captured.into_inner(),
-            vec![
-                Event::ItemAction(key("alpha")),
-                Event::ToggleSelect(key("alpha"))
-            ]
+            vec![Event::ItemAction(key("alpha")), Event::Select(key("alpha"))]
         );
     }
 
@@ -2195,18 +2229,46 @@ mod tests {
             Some("true")
         );
         assert_eq!(
+            disabled_api.root_attrs().get(&HtmlAttr::TabIndex),
+            Some("-1")
+        );
+        assert_eq!(
             disabled_api
                 .cell_attrs(&key("alpha"))
                 .get(&HtmlAttr::TabIndex),
             Some("-1")
         );
 
-        let idle = service(
+        let disabled_link = service(
+            Props::new()
+                .id("disabled-link")
+                .items(StaticCollection::new([(
+                    key("alpha"),
+                    "Alpha".into(),
+                    link_item("alpha", "Alpha", SafeUrl::from_static("/disabled")),
+                )]))
+                .disabled_keys(selected(&["alpha"])),
+        );
+
+        assert!(
+            disabled_link
+                .connect(&|_| {})
+                .cell_attrs(&key("alpha"))
+                .get(&HtmlAttr::Href)
+                .is_none()
+        );
+
+        let mut idle = service(
             Props::new()
                 .id("idle")
                 .items(items())
                 .selection_mode(selection::Mode::Single),
         );
+
+        drop(idle.send(Event::Focus {
+            key: Some(key("alpha")),
+            is_keyboard: false,
+        }));
 
         let idle_api = idle.connect(&|_| {});
 
@@ -2214,9 +2276,21 @@ mod tests {
             idle_api.cell_attrs(&key("alpha")).get(&HtmlAttr::TabIndex),
             Some("-1")
         );
+        assert!(
+            idle_api
+                .cell_attrs(&key("alpha"))
+                .get(&HtmlAttr::Data("ars-focus-visible"))
+                .is_none()
+        );
         assert_eq!(
             idle_api.cell_attrs(&key("gamma")).get(&HtmlAttr::TabIndex),
             Some("-1")
+        );
+        assert!(
+            idle_api
+                .cell_attrs(&key("missing"))
+                .get(&HtmlAttr::Id)
+                .is_none()
         );
         assert_eq!(
             idle_api
@@ -2232,6 +2306,21 @@ mod tests {
                 })
                 .get(&HtmlAttr::Data("ars-drop-target")),
             Some(key("missing").to_string().as_str())
+        );
+
+        let selection_none = service(
+            Props::new()
+                .id("selection-none")
+                .items(items())
+                .selection_mode(selection::Mode::None),
+        );
+
+        assert!(
+            selection_none
+                .connect(&|_| {})
+                .row_attrs(&key("alpha"))
+                .get(&HtmlAttr::Aria(AriaAttr::Selected))
+                .is_none()
         );
     }
 
@@ -2295,6 +2384,24 @@ mod tests {
                 Event::SelectAll,
             ]
         );
+
+        let clear_events = RefCell::new(Vec::new());
+        let clear_send = |event| clear_events.borrow_mut().push(event);
+        let clear_grid = service(
+            Props::new()
+                .id("clear-grid")
+                .items(items())
+                .selection_mode(selection::Mode::Multiple)
+                .default_selected_keys(selected(&["alpha"])),
+        );
+
+        clear_grid.connect(&clear_send).on_cell_keydown_at(
+            &key("alpha"),
+            &keyboard(KeyboardKey::Escape, None),
+            Duration::from_millis(9),
+        );
+
+        assert_eq!(clear_events.into_inner(), vec![Event::ClearSelection]);
     }
 
     #[test]
@@ -2321,6 +2428,11 @@ mod tests {
         shift_left.shift_key = true;
         api.on_cell_keydown_at(&key("gamma"), &shift_left, Duration::from_millis(9));
 
+        let mut shift_right = keyboard(KeyboardKey::ArrowRight, None);
+
+        shift_right.shift_key = true;
+        api.on_cell_keydown_at(&key("delta"), &shift_right, Duration::from_millis(10));
+
         assert_eq!(
             captured.into_inner(),
             vec![
@@ -2328,7 +2440,12 @@ mod tests {
                 Event::SelectRange {
                     from: key("gamma"),
                     to: key("delta"),
-                }
+                },
+                Event::FocusLeft,
+                Event::SelectRange {
+                    from: key("delta"),
+                    to: key("gamma"),
+                },
             ]
         );
     }
@@ -2357,7 +2474,7 @@ mod tests {
     }
 
     #[test]
-    fn convenience_keydown_uses_timeout_advancing_typeahead_timestamp() {
+    fn convenience_keydown_uses_accumulating_typeahead_timestamp() {
         let captured = RefCell::new(Vec::new());
         let send = |event| captured.borrow_mut().push(event);
         let mut grid = service(Props::new().id("grid").items(items()));
@@ -2377,7 +2494,7 @@ mod tests {
             captured.into_inner(),
             vec![Event::TypeaheadSearch {
                 ch: 'd',
-                now: Duration::from_millis(600),
+                now: Duration::from_millis(101),
             }]
         );
     }
@@ -2435,6 +2552,11 @@ mod tests {
         assert_snapshot!(
             "grid_list_cell_dnd_enabled",
             snapshot_attrs(&api.cell_attrs(&key("alpha")))
+        );
+        assert!(
+            api.cell_attrs(&key("beta"))
+                .get(&HtmlAttr::Aria(AriaAttr::RoleDescription))
+                .is_none()
         );
         assert_snapshot!(
             "grid_list_drag_handle_enabled",
