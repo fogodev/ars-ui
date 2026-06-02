@@ -29,6 +29,7 @@ pub fn GridList(
     #[prop(optional)] disabled_keys: Option<BTreeSet<Key>>,
     #[prop(optional)] composite: bool,
     #[prop(optional)] loading: bool,
+    #[prop(optional)] dnd_enabled: bool,
     #[prop(optional)] on_load_more: Option<Callback<()>>,
     #[prop(optional)] on_action: Option<Callback<Key>>,
     render_item: GridListRenderItem,
@@ -41,23 +42,29 @@ The adapter owns row/cell scaffolding, roving focus, optional empty state, and o
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with explicit adapter slots for item rendering and empty-state rendering.
-- Part parity: full parity for `Root`, repeated `Row`, repeated `Cell`, and structural `LoadingSentinel`; `EmptyState` remains adapter-owned.
+- Part parity: full parity for `Root`, repeated `Row`, repeated `Cell`, structural
+  `LoadingSentinel`, optional `DragHandle`, and optional `DropIndicator`; `EmptyState` remains
+  adapter-owned.
 - Traceability note: this spec promotes empty-state rendering, link-cell semantics, live announcements, load-more sentinel behavior, and RTL key handling from the agnostic spec.
 
 ## 4. Part Mapping
 
-| Core part / structure | Required? | Adapter rendering target | Ownership     | Attr source                    | Notes                                                     |
-| --------------------- | --------- | ------------------------ | ------------- | ------------------------------ | --------------------------------------------------------- |
-| `Root`                | required  | `<div>`                  | adapter-owned | `api.root_attrs()`             | `role="grid"` in composite mode; list fallback otherwise. |
-| `Row`                 | repeated  | `<div>`                  | adapter-owned | `api.row_attrs(row_index)`     | Groups cells into logical rows.                           |
-| `Cell`                | repeated  | `<div>` or `<a>`         | adapter-owned | `api.cell_attrs(key)`          | Link items preserve grid semantics on the anchor host.    |
-| `LoadingSentinel`     | optional  | `<div>`                  | adapter-owned | `api.loading_sentinel_attrs()` | Render only when `on_load_more` is configured.            |
-| `EmptyState`          | optional  | adapter-chosen wrapper   | adapter-owned | adapter-local attrs            | Render when `items` is empty.                             |
+| Core part / structure | Required? | Adapter rendering target | Ownership     | Attr source                        | Notes                                                     |
+| --------------------- | --------- | ------------------------ | ------------- | ---------------------------------- | --------------------------------------------------------- |
+| `Root`                | required  | `<div>`                  | adapter-owned | `api.root_attrs()`                 | `role="grid"` in composite mode; list fallback otherwise. |
+| `Row`                 | repeated  | `<div>`                  | adapter-owned | `api.row_attrs(key)`               | Groups cells into logical rows.                           |
+| `Cell`                | repeated  | `<div>` or `<a>`         | adapter-owned | `api.cell_attrs(key)`              | Link items preserve grid semantics on the anchor host.    |
+| `LoadingSentinel`     | optional  | `<div>`                  | adapter-owned | `api.loading_sentinel_attrs()`     | Render only when `on_load_more` is configured.            |
+| `DragHandle`          | optional  | `<button>`               | adapter-owned | `api.drag_handle_attrs(key)`       | Render only for drag-and-drop variants.                   |
+| `DropIndicator`       | optional  | `<div>`                  | adapter-owned | `api.drop_indicator_attrs(target)` | Render only while resolving a collection drop target.     |
+| `EmptyState`          | optional  | adapter-chosen wrapper   | adapter-owned | adapter-local attrs                | Render when `items` is empty.                             |
 
 ## 5. Attr Merge and Ownership Rules
 
-- Core attrs include `role`, selection state, disabled state, `tabindex`, key data attrs, and optional `href`.
-- The adapter owns row grouping, roving tabindex, `aria-selected`, and any anchor-vs-div host choice for link items.
+- Core attrs include `role`, selection state, disabled state, `tabindex`, key data attrs, optional
+  `href`, and drag-and-drop affordance attrs.
+- The adapter owns row grouping, applying core attrs to hosts, and any anchor-vs-div host choice
+  for link items.
 - Consumers may decorate rendered item content, but they must not replace row/cell hosts or sentinel structure.
 
 ## 6. Composition / Context Contract
@@ -66,14 +73,15 @@ The adapter owns row/cell scaffolding, roving focus, optional empty state, and o
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop / event            | Mode           | Sync trigger              | Machine event / update path                | Notes                                                    |
-| ------------------------------- | -------------- | ------------------------- | ------------------------------------------ | -------------------------------------------------------- |
-| `selected_keys`                 | controlled     | signal change after mount | selection-related events                   | Bindable observation remains machine-driven.             |
-| focus entry/exit                | adapter event  | root or cell focus        | `Focus` / `Blur`                           | Focus target may default to the first non-disabled cell. |
-| arrow/home/end keys             | adapter event  | keyboard interaction      | navigation events                          | RTL reverses horizontal direction at the adapter layer.  |
-| click/space selection           | adapter event  | pointer or keyboard       | `Select`, `ToggleSelection`, or equivalent | Behavior depends on selection mode.                      |
-| enter/action                    | adapter event  | keyboard or activation    | `ItemAction`                               | Selection and action remain distinct.                    |
-| load-more sentinel intersection | adapter effect | observer callback         | adapter callback only                      | Fires `on_load_more`; no machine mutation required.      |
+| Adapter prop / event                | Mode                 | Sync trigger                    | Machine event / update path             | Notes                                                    |
+| ----------------------------------- | -------------------- | ------------------------------- | --------------------------------------- | -------------------------------------------------------- |
+| `selected_keys`                     | controlled           | signal change after mount       | selection-related events                | Bindable observation remains machine-driven.             |
+| focus entry/exit                    | adapter event        | root or cell focus              | `Focus` / `Blur`                        | Focus target may default to the first non-disabled cell. |
+| arrow/home/end keys                 | adapter event        | keyboard interaction            | navigation events                       | RTL reverses horizontal direction at the adapter layer.  |
+| click/space selection               | adapter event        | pointer or keyboard             | `Select`, `ToggleSelect`, or equivalent | Behavior depends on selection mode.                      |
+| enter/action                        | adapter event        | keyboard or activation          | `ItemAction`                            | Selection and action remain distinct.                    |
+| load-more sentinel intersection     | adapter effect       | observer callback               | adapter callback only                   | Fires `on_load_more`; no machine mutation required.      |
+| drag/drop pointer and keyboard flow | adapter event/effect | pointer or keyboard interaction | adapter drag/drop helpers               | Core only supplies affordance and drop-indicator attrs.  |
 
 ## 8. Registration and Cleanup Contract
 
@@ -87,8 +95,10 @@ The root node requires a live ref for focus entry and optional load-more observa
 
 ## 10. State Machine Boundary Rules
 
-- Machine-owned state: focused key, selected set, disabled knowledge, and composite-mode navigation state.
-- Adapter-owned derived values: row grouping, cell coordinates, sentinel visibility, and empty-state rendering.
+- Machine-owned state: focused key, selected set, disabled knowledge, composite-mode navigation
+  state, typeahead state, loading flag, and drag-and-drop affordance flag.
+- Adapter-owned derived values: row grouping, visible DOM refs, sentinel observation, scroll
+  behavior, live announcements, native drag events, and empty-state rendering.
 - Forbidden mirror: do not maintain a second selected-key set or focused-key index outside the machine.
 
 ## 11. Callback Payload Contract
@@ -176,28 +186,31 @@ Leptos 0.8.x can render rows with keyed iteration and preserve item identity eve
 
 ## 24. Canonical Implementation Sketch
 
-```rust
+```rust,no_check
 #[component]
 pub fn GridList(items: StaticCollection<grid_list::ItemDef>, columns: usize, render_item: GridListRenderItem) -> impl IntoView {
-    let machine = use_machine::<grid_list::Machine>(grid_list::Props {
-        items: items.clone(),
-        columns,
-        ..Default::default()
-    });
+    let machine = use_machine::<grid_list::Machine>(
+        grid_list::Props::new()
+            .items(items.clone())
+            .columns(NonZeroUsize::new(columns).expect("columns must be non-zero")),
+    );
 
     view! {
         <div {..attr_map_to_leptos(machine.derive(|api| api.root_attrs()).get(), &use_style_strategy(), None).attrs}>
             <For
                 each=move || chunk_items(items.clone(), columns)
                 key=|row| row.first().map(|item| item.key.clone()).unwrap_or_default()
-                children=move |row| view! {
-                    <div {..attr_map_to_leptos(machine.derive(|api| api.row_attrs(/* row index */ 0)).get(), &use_style_strategy(), None).attrs}>
+                children=move |row| {
+                    let row_key = row.first().map(|item| item.key.clone()).unwrap_or_default();
+                    view! {
+                    <div {..attr_map_to_leptos(machine.derive(move |api| api.row_attrs(&row_key)).get(), &use_style_strategy(), None).attrs}>
                         {row.into_iter().map(|item| view! {
                             <div {..attr_map_to_leptos(machine.derive(move |api| api.cell_attrs(&item.key)).get(), &use_style_strategy(), None).attrs}>
                                 {(render_item.0)(item)}
                             </div>
                         }).collect_view()}
                     </div>
+                    }
                 }
             />
         </div>

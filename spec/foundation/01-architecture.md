@@ -1565,8 +1565,8 @@ pub trait PlatformEffects {
     fn focus_body(&self);
 
     // ── Timers ──────────────────────────────────────────────────────
-    /// Schedule a callback after `delay_ms` milliseconds. Returns a handle for cancellation.
-    fn set_timeout(&self, delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle;
+    /// Schedule a callback after `delay`. Returns a handle for cancellation.
+    fn set_timeout(&self, delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle;
     /// Cancel a previously scheduled timeout.
     fn clear_timeout(&self, handle: TimerHandle);
 
@@ -1641,9 +1641,8 @@ pub trait PlatformEffects {
     fn on_reduced_motion_change(&self, callback: Box<dyn Fn(bool)>) -> Box<dyn FnOnce()>;
     /// Returns `true` if the platform is macOS (for modifier key mapping).
     fn is_mac_platform(&self) -> bool;
-    /// Returns the current monotonic time in milliseconds (e.g., `performance.now()`
-    /// on web, `Instant::now()` on native). Used for skip-delay window tracking.
-    fn now_ms(&self) -> u64;
+    /// Returns the current monotonic time for skip-delay and debounce calculations.
+    fn now(&self) -> Duration;
     /// Get the bounding rectangle of an element by ID.
     fn get_bounding_rect(&self, id: &str) -> Option<Rect>;
 
@@ -1711,7 +1710,7 @@ impl PlatformEffects for NullPlatformEffects {
     fn focus_element_by_id(&self, _id: &str) {}
 
     #[inline]
-    fn set_timeout(&self, _delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
+    fn set_timeout(&self, _delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
         callback(); // fire immediately in tests
         TimerHandle::new(0)
     }
@@ -1759,7 +1758,7 @@ impl PlatformEffects for MissingProviderEffects {
     }
 
     #[inline]
-    fn set_timeout(&self, _delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
+    fn set_timeout(&self, _delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
         Self::warn("set_timeout");
         callback();
         TimerHandle::new(0)
@@ -1810,10 +1809,11 @@ impl PlatformEffects for WebPlatformEffects {
         // Delegates to existing ars_dom::focus_element_by_id() implementation
         crate::focus::focus_element_by_id(id);
     }
-    fn set_timeout(&self, delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
+    fn set_timeout(&self, delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
+        let delay_ms = delay.as_millis().min(i32::MAX as u128) as i32;
         let id = web_sys::window().unwrap()
             .set_timeout_with_callback_and_timeout_and_arguments_0(
-                &Closure::once_into_js(callback).into(), delay_ms as i32,
+                &Closure::once_into_js(callback).into(), delay_ms,
             ).unwrap();
         TimerHandle::new(id as u64)
     }

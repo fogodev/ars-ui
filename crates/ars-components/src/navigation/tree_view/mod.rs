@@ -25,7 +25,10 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::fmt::{self, Debug};
+use core::{
+    fmt::{self, Debug},
+    time::Duration,
+};
 
 use ars_collections::{
     Collection, Key, Node, TreeCollection, TreeItemConfig,
@@ -145,9 +148,9 @@ pub enum Event {
     Blur,
 
     /// Append a character to the typeahead buffer and jump to the next matching
-    /// node. Carries the current time in milliseconds (adapter-provided) so the
-    /// shared [`typeahead::State`] can reset the buffer after its timeout.
-    TypeaheadSearch(char, u64),
+    /// node. Carries the adapter-provided monotonic timestamp so the shared
+    /// [`typeahead::State`] can reset the buffer after its timeout.
+    TypeaheadSearch(char, Duration),
 
     /// Reset the typeahead buffer (e.g. on blur or an explicit timeout tick).
     ClearTypeahead,
@@ -942,9 +945,9 @@ impl ars_core::Machine for Machine {
                 .and_then(|node| node.parent_key.clone())
                 .map(|key| focus_plan(key, true)),
 
-            Event::TypeaheadSearch(ch, now_ms) => {
+            Event::TypeaheadSearch(ch, now) => {
                 // Delegate to the shared locale-aware, multi-character matcher.
-                let (typeahead, found) = process_typeahead(ctx, *ch, *now_ms);
+                let (typeahead, found) = process_typeahead(ctx, *ch, *now);
                 Some(if let Some(key) = found {
                     TransitionPlan::to(State::Focused)
                         .apply(move |ctx: &mut Context| {
@@ -1515,11 +1518,11 @@ fn focus_relative(ctx: &Context, direction: Direction) -> Option<TransitionPlan<
 /// first reconciled to the component's live `ctx.expanded` — otherwise typeahead
 /// would search the construction-time expansion and skip newly-visible children
 /// (or jump to nodes the user has since collapsed).
-fn process_typeahead(ctx: &Context, ch: char, now_ms: u64) -> (typeahead::State, Option<Key>) {
+fn process_typeahead(ctx: &Context, ch: char, now: Duration) -> (typeahead::State, Option<Key>) {
     let items = reconciled_items(ctx);
     ctx.typeahead.process_char_with_locale(
         ch,
-        now_ms,
+        now,
         ctx.focused_node.as_ref(),
         &items,
         &ctx.locale,
@@ -1552,24 +1555,24 @@ fn reconciled_items(ctx: &Context) -> TreeCollection<TreeItem> {
 }
 
 /// Resolve the timestamp for a typeahead keypress. Adapters that surface a real
-/// clock pass `Some(now_ms)`; otherwise fall back to the host clock (std) or a
+/// clock pass `Some(now)`; otherwise fall back to the host clock (std) or a
 /// monotonic bump of the last keypress so the buffer never spuriously resets.
-fn typeahead_time(now_ms: Option<u64>, state: &typeahead::State) -> u64 {
-    now_ms.unwrap_or_else(|| current_time_ms().unwrap_or(state.last_key_time_ms.saturating_add(1)))
+fn typeahead_time(now: Option<Duration>, state: &typeahead::State) -> Duration {
+    now.unwrap_or_else(|| {
+        current_time()
+            .unwrap_or_else(|| state.last_key_time.saturating_add(Duration::from_millis(1)))
+    })
 }
 
 #[cfg(feature = "std")]
-fn current_time_ms() -> Option<u64> {
-    let millis = std::time::SystemTime::now()
+fn current_time() -> Option<Duration> {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_millis();
-
-    Some(u64::try_from(millis).unwrap_or(u64::MAX))
+        .ok()
 }
 
 #[cfg(not(feature = "std"))]
-const fn current_time_ms() -> Option<u64> {
+const fn current_time() -> Option<Duration> {
     None
 }
 
@@ -2795,12 +2798,12 @@ impl Api<'_> {
     }
 
     /// [`on_node_keydown`](Self::on_node_keydown) with an explicit
-    /// `now_ms` timestamp for the typeahead timeout (adapter-provided clock).
-    pub fn on_node_keydown_at(&self, node_id: &Key, data: &KeyboardEventData, now_ms: u64) {
-        self.on_node_keydown_impl(node_id, data, Some(now_ms));
+    /// `now` timestamp for the typeahead timeout (adapter-provided clock).
+    pub fn on_node_keydown_at(&self, node_id: &Key, data: &KeyboardEventData, now: Duration) {
+        self.on_node_keydown_impl(node_id, data, Some(now));
     }
 
-    fn on_node_keydown_impl(&self, node_id: &Key, data: &KeyboardEventData, now_ms: Option<u64>) {
+    fn on_node_keydown_impl(&self, node_id: &Key, data: &KeyboardEventData, now: Option<Duration>) {
         match data.key {
             KeyboardKey::ArrowDown => (self.send)(Event::FocusNext),
 
@@ -2864,7 +2867,7 @@ impl Api<'_> {
                     } else if !ch.is_control() {
                         (self.send)(Event::TypeaheadSearch(
                             ch,
-                            typeahead_time(now_ms, &self.ctx.typeahead),
+                            typeahead_time(now, &self.ctx.typeahead),
                         ));
                     }
                 }

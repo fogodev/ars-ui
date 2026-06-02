@@ -314,10 +314,10 @@ fn data_state_values_are_stable() {
 import { test, expect } from "@playwright/test";
 
 test("dialog open state", async ({ page }) => {
-  await page.goto("/storybook/dialog");
-  await page.click('[data-ars-part="trigger"]');
-  await expect(page.locator('[data-ars-part="content"]')).toBeVisible();
-  await expect(page).toHaveScreenshot("dialog-open.png");
+    await page.goto("/storybook/dialog");
+    await page.click('[data-ars-part="trigger"]');
+    await expect(page.locator('[data-ars-part="content"]')).toBeVisible();
+    await expect(page).toHaveScreenshot("dialog-open.png");
 });
 ```
 
@@ -561,7 +561,7 @@ fn dialog_cleanup_on_unmount() {
 /// arrives before N's effect setup completes.
 #[wasm_bindgen_test]
 async fn interleaved_effect_setup_and_cancel() {
-    let props = tooltip::Props { open_delay_ms: 500, ..Default::default() };
+    let props = tooltip::Props { open_delay: Duration::from_millis(500), ..Default::default() };
     let mut svc = Service::new(props, Env::default(), Default::default());
     let send_fn: Arc<dyn Fn(tooltip::Event) + Send + Sync> = Arc::new(|_| {});
 

@@ -1812,7 +1812,7 @@ SSR effect gating is defined in §3.4 — effects are not executed during server
 
 #### 7.4.1 Clipboard "Copied" State and SSR Hydration
 
-The Clipboard component's `feedback_duration_ms` timeout resets the "copied" state back to idle after a delay. During SSR hydration, if a `useEffect` runs before the first paint, the visual "copied" text may flash briefly and disappear (or get stuck if the browser defers cleanup).
+The Clipboard component's `feedback_duration` timeout resets the "copied" state back to idle after a delay. During SSR hydration, if a `useEffect` runs before the first paint, the visual "copied" text may flash briefly and disappear (or get stuck if the browser defers cleanup).
 
 **Rules for SSR-safe Clipboard rendering:**
 

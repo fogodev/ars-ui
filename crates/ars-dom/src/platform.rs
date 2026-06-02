@@ -1,6 +1,6 @@
 //! Browser-backed [`ars_core::PlatformEffects`] implementation.
 
-use std::{string::String, vec::Vec};
+use std::{string::String, time::Duration, vec::Vec};
 
 use ars_core::{PlatformEffects, Rect, TimerHandle};
 use ars_i18n::ResolvedDirection;
@@ -42,8 +42,8 @@ impl PlatformEffects for WebPlatformEffects {
         focus::focus_body();
     }
 
-    fn set_timeout(&self, delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
-        set_timeout_impl(delay_ms, callback)
+    fn set_timeout(&self, delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
+        set_timeout_impl(delay, callback)
     }
 
     fn clear_timeout(&self, handle: TimerHandle) {
@@ -126,8 +126,8 @@ impl PlatformEffects for WebPlatformEffects {
         is_mac_platform_impl()
     }
 
-    fn now_ms(&self) -> u64 {
-        now_ms_impl()
+    fn now(&self) -> Duration {
+        now_impl()
     }
 
     fn get_bounding_rect(&self, id: &str) -> Option<Rect> {
@@ -278,7 +278,7 @@ fn focus_container(container: &Element) {
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn set_timeout_impl(delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
+fn set_timeout_impl(delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
     let Some(window) = window() else {
         callback();
 
@@ -289,10 +289,12 @@ fn set_timeout_impl(delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
         callback();
     });
 
+    let delay_ms = delay.as_millis().min(i32::MAX as u128) as i32;
+
     let id = window
         .set_timeout_with_callback_and_timeout_and_arguments_0(
             callback.unchecked_ref::<Function>(),
-            delay_ms as i32,
+            delay_ms,
         )
         .unwrap_or_default();
 
@@ -300,7 +302,7 @@ fn set_timeout_impl(delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
 }
 
 #[cfg(all(feature = "web", not(target_arch = "wasm32")))]
-fn set_timeout_impl(_delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
+fn set_timeout_impl(_delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
     callback();
 
     TimerHandle::new(0)
@@ -695,13 +697,13 @@ fn is_mac_platform_impl() -> bool {
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn now_ms_impl() -> u64 {
-    performance_now_ms().round() as u64
+fn now_impl() -> Duration {
+    Duration::from_secs_f64((performance_now_ms() / 1_000.0).max(0.0))
 }
 
 #[cfg(all(feature = "web", not(target_arch = "wasm32")))]
-fn now_ms_impl() -> u64 {
-    0
+fn now_impl() -> Duration {
+    Duration::ZERO
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -1590,7 +1592,10 @@ mod tests {
         let fired = Rc::new(Cell::new(false));
         let fired_clone = Rc::clone(&fired);
 
-        let handle = platform.set_timeout(10, Box::new(move || fired_clone.set(true)));
+        let handle = platform.set_timeout(
+            Duration::from_millis(10),
+            Box::new(move || fired_clone.set(true)),
+        );
 
         assert_eq!(handle, TimerHandle::new(0));
         assert!(fired.get());
@@ -2171,13 +2176,13 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
-    fn now_ms_is_monotonic() {
+    fn now_is_monotonic() {
         let platform = WebPlatformEffects;
 
-        let first = platform.now_ms();
-        let second = platform.now_ms();
+        let first = platform.now();
+        let second = platform.now();
 
-        assert!(first > 0);
+        assert!(first > Duration::ZERO);
         assert!(second >= first);
     }
 
@@ -2189,7 +2194,7 @@ mod wasm_tests {
 
         let fire_count = Rc::clone(&fired);
         let handle = platform.set_timeout(
-            10,
+            Duration::from_millis(10),
             Box::new(move || {
                 fire_count.set(fire_count.get() + 1);
             }),
@@ -2200,7 +2205,7 @@ mod wasm_tests {
 
         let cleared_count = Rc::clone(&fired);
         let cleared_handle = platform.set_timeout(
-            25,
+            Duration::from_millis(25),
             Box::new(move || {
                 cleared_count.set(cleared_count.get() + 1);
             }),

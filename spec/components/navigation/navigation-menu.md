@@ -43,12 +43,12 @@ pub enum State {
 pub enum Event {
     /// Open a specific item's content panel (immediate, used by keyboard).
     Open(Key),
-    /// Close the currently open content panel. `now_ms` is the adapter-provided
-    /// timestamp (milliseconds since page load) used for skip-delay window tracking.
-    Close(u64),
+    /// Close the currently open content panel. `now` is the adapter-provided
+    /// timestamp used for skip-delay window tracking.
+    Close(Duration),
     /// Pointer entered a trigger — starts open delay (or skips it).
-    /// `now_ms` is the adapter-provided timestamp for skip-delay window checks.
-    PointerEnter(Key, u64),
+    /// `now` is the adapter-provided timestamp for skip-delay window checks.
+    PointerEnter(Key, Duration),
     /// Pointer left a trigger or content area — starts close sequence.
     PointerLeave,
     /// A trigger received focus via keyboard or programmatic focus.
@@ -67,15 +67,15 @@ pub enum Event {
     /// Move keyboard focus to the last trigger.
     FocusLast,
     /// A link inside the content was activated (clicked or Enter pressed).
-    /// `now_ms` is the adapter-provided timestamp for skip-delay window tracking.
-    SelectLink(u64),
+    /// `now` is the adapter-provided timestamp for skip-delay window tracking.
+    SelectLink(Duration),
     /// Escape key pressed — close the open submenu and return focus to its trigger.
-    /// `now_ms` is the adapter-provided timestamp for skip-delay window tracking.
-    EscapeKey(u64),
+    /// `now` is the adapter-provided timestamp for skip-delay window tracking.
+    EscapeKey(Duration),
     /// The open delay timer has fired.
     OpenTimerFired(Key),
-    /// The close delay timer has fired. `now_ms` is the adapter-provided timestamp.
-    CloseTimerFired(u64),
+    /// The close delay timer has fired. `now` is the adapter-provided timestamp.
+    CloseTimerFired(Duration),
     /// Pointer entered the content area — cancels pending close.
     ContentPointerEnter,
     /// Pointer left the content area — starts close delay.
@@ -92,8 +92,8 @@ pub enum Event {
     /// motion direction, and the open-item registration gate. Until the first
     /// `SetItems`, the registry is unsynced and open is permitted optimistically.
     SetItems(Vec<Key>),
-    /// Synchronize props-backed context fields (`orientation`, `delay_ms`,
-    /// `skip_delay_ms`, and the controlled `value`) after a props change while
+    /// Synchronize props-backed context fields (`orientation`, `delay`,
+    /// `skip_delay`, and the controlled `value`) after a props change while
     /// the instance is uncontrolled or its scalar config changed.
     SyncProps,
     /// Synchronize the externally controlled open item. Emitted by
@@ -129,14 +129,14 @@ pub struct Context {
     pub orientation: Orientation,
     /// Text direction — affects arrow key semantics.
     pub dir: Direction,
-    /// Delay in milliseconds before a hovered trigger opens its content.
-    pub delay_ms: u32,
-    /// Window in milliseconds after closing during which re-hovering
+    /// Delay before a hovered trigger opens its content.
+    pub delay: Duration,
+    /// Window after closing during which re-hovering
     /// another trigger skips the open delay entirely.
-    pub skip_delay_ms: u32,
-    /// Timestamp (milliseconds since epoch) of the last close event.
+    pub skip_delay: Duration,
+    /// Timestamp of the last close event.
     /// Used to determine whether the skip-delay window is active.
-    pub last_close_time: Option<u64>,
+    pub last_close_time: Option<Duration>,
     /// Whether the pointer is currently inside the content area.
     pub pointer_in_content: bool,
     /// Registered trigger keys in DOM order.
@@ -181,11 +181,11 @@ pub struct Props {
     pub value: Option<Option<Key>>,
     /// Initial open item when uncontrolled. `None` means all closed initially.
     pub default_value: Option<Key>,
-    /// Delay in milliseconds before a hovered trigger opens. Default: 200.
-    pub delay_ms: u32,
-    /// Window in milliseconds after closing during which hovering a new trigger
+    /// Delay before a hovered trigger opens. Default: 200 ms.
+    pub delay: Duration,
+    /// Window after closing during which hovering a new trigger
     /// skips the delay entirely. Default: 300.
-    pub skip_delay_ms: u32,
+    pub skip_delay: Duration,
     /// Layout orientation of the trigger list. Default: Horizontal.
     pub orientation: Orientation,
     /// Text direction. Default: Ltr.
@@ -203,8 +203,8 @@ impl Default for Props {
             id: String::new(),
             value: None,
             default_value: None,
-            delay_ms: 200,
-            skip_delay_ms: 300,
+            delay: Duration::from_millis(200),
+            skip_delay: Duration::from_millis(300),
             orientation: Orientation::Horizontal,
             dir: Direction::Ltr,
             loop_focus: true,
@@ -220,9 +220,9 @@ impl Default for Props {
 /// Returns true when the skip-delay window is active.
 /// The skip-delay window is the period after closing a submenu during which
 /// hovering another trigger opens it immediately (no delay).
-fn in_skip_delay_window(ctx: &Context, now_ms: u64) -> bool {
+fn in_skip_delay_window(ctx: &Context, now: Duration) -> bool {
     match ctx.last_close_time {
-        Some(t) => now_ms.saturating_sub(t) < ctx.skip_delay_ms as u64,
+        Some(t) => now.saturating_sub(t) < ctx.skip_delay,
         None => false,
     }
 }
@@ -248,7 +248,7 @@ pub enum Effect {
     /// adapter sends `Event::OpenTimerFired(Context::pending_open_item)`.
     OpenDelay,
     /// Adapter starts or refreshes the close-delay timer. When it fires, the
-    /// adapter sends `Event::CloseTimerFired(now_ms)`.
+    /// adapter sends `Event::CloseTimerFired(now)`.
     CloseDelay,
     /// Adapter moves DOM focus to `Context::requested_focus_id`.
     FocusTrigger,
@@ -297,8 +297,8 @@ impl ars_core::Machine for Machine {
             focus_visible: false,
             orientation: props.orientation,
             dir: props.dir,
-            delay_ms: props.delay_ms,
-            skip_delay_ms: props.skip_delay_ms,
+            delay: props.delay,
+            skip_delay: props.skip_delay,
             last_close_time: None,
             pointer_in_content: false,
             items: Vec::new(),
@@ -330,10 +330,10 @@ impl ars_core::Machine for Machine {
             // ── Close / SelectLink ───────────────────────────────────────────
             // `close_plan` cancels the open/close timers, records the close
             // timestamp, and emits `Effect::ValueChange`.
-            (_, Event::Close(now_ms) | Event::SelectLink(now_ms))
+            (_, Event::Close(now) | Event::SelectLink(now))
                 if effective_open_item(state, ctx).is_some() =>
             {
-                Some(close_plan(*now_ms))
+                Some(close_plan(*now))
             }
 
             // ── PointerEnter ─────────────────────────────────────────────────
@@ -341,7 +341,7 @@ impl ars_core::Machine for Machine {
             // close. When another item is open or the skip-delay window is
             // active, open immediately; otherwise stage `pending_open_item` and
             // start the open-delay timer.
-            (_, Event::PointerEnter(item, now_ms)) => {
+            (_, Event::PointerEnter(item, now)) => {
                 let rendered_open = effective_open_item(state, ctx);
 
                 if rendered_open == Some(item) {
@@ -354,7 +354,7 @@ impl ars_core::Machine for Machine {
                     );
                 }
 
-                if rendered_open.is_some() || in_skip_delay_window(ctx, *now_ms) {
+                if rendered_open.is_some() || in_skip_delay_window(ctx, *now) {
                     open_item_plan(state, ctx, item.clone())
                         .map(|plan| plan.cancel_effect(Effect::CloseDelay))
                 } else {
@@ -416,11 +416,11 @@ impl ars_core::Machine for Machine {
 
             // ── CloseTimerFired ──────────────────────────────────────────────
             // Only close if the pointer is not currently inside the content.
-            (_, Event::CloseTimerFired(now_ms)) if effective_open_item(state, ctx).is_some() => {
+            (_, Event::CloseTimerFired(now)) if effective_open_item(state, ctx).is_some() => {
                 if ctx.pointer_in_content {
                     return None;
                 }
-                Some(close_plan(*now_ms).cancel_effect(Effect::CloseDelay))
+                Some(close_plan(*now).cancel_effect(Effect::CloseDelay))
             }
 
             // ── FocusTrigger ─────────────────────────────────────────────────
@@ -450,10 +450,10 @@ impl ars_core::Machine for Machine {
 
             // ── EscapeKey ────────────────────────────────────────────────────
             // Close the open panel and return focus to its trigger.
-            (_, Event::EscapeKey(now_ms)) => {
+            (_, Event::EscapeKey(now)) => {
                 let item = effective_open_item(state, ctx)?.clone();
                 Some(
-                    close_plan(*now_ms)
+                    close_plan(*now)
                         .apply(move |ctx: &mut Context| {
                             ctx.focused_trigger = Some(item);
                             ctx.focus_visible = true;
@@ -525,13 +525,13 @@ impl ars_core::Machine for Machine {
             // ── SyncProps ────────────────────────────────────────────────────
             (_, Event::SyncProps) => {
                 let orientation = props.orientation;
-                let delay_ms = props.delay_ms;
-                let skip_delay_ms = props.skip_delay_ms;
+                let delay = props.delay;
+                let skip_delay = props.skip_delay;
                 let value = props.value.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.orientation = orientation;
-                    ctx.delay_ms = delay_ms;
-                    ctx.skip_delay_ms = skip_delay_ms;
+                    ctx.delay = delay;
+                    ctx.skip_delay = skip_delay;
                     ctx.value.sync_controlled(value);
                 }))
             }
@@ -626,14 +626,14 @@ fn open_to_plan(previous: Option<Key>, item: Key) -> TransitionPlan<Machine> {
 }
 
 /// Transition to `Idle`, cancelling timers and emitting `ValueChange(None)`.
-fn close_plan(now_ms: u64) -> TransitionPlan<Machine> {
+fn close_plan(now: Duration) -> TransitionPlan<Machine> {
     TransitionPlan::to(State::Idle)
         .apply(move |ctx: &mut Context| {
             ctx.previous_item = ctx.value.get().clone();
             ctx.value.set(None);
             ctx.pointer_in_content = false;
             ctx.pending_open_item = None;
-            ctx.last_close_time = Some(now_ms);
+            ctx.last_close_time = Some(now);
         })
         .cancel_effect(Effect::OpenDelay)
         .cancel_effect(Effect::CloseDelay)
@@ -699,7 +699,7 @@ fn focus_absolute_plan(ctx: &Context, index: usize) -> Option<TransitionPlan<Mac
 
 `on_props_changed` translates a controlled/config props change into the sync
 events above: a changed controlled `value` emits `SyncControlledValue`, an
-uncontrolled value change or a changed `orientation`/`delay_ms`/`skip_delay_ms`
+uncontrolled value change or a changed `orientation`/`delay`/`skip_delay`
 emits `SyncProps`, and a changed `dir` emits `SetDirection`. The adapter emits
 `SetItems` when triggers mount or reorder, and `SyncMessages` when the provider
 locale or messages change.
@@ -1048,9 +1048,9 @@ impl<'a> Api<'a> {
     // ── Event handlers ───────────────────────────────────────────────────────
 
     /// Handle pointer enter on a trigger.
-    /// `now_ms` — adapter-provided timestamp from the pointer event.
-    pub fn on_trigger_pointer_enter(&self, item_key: &Key, now_ms: u64) {
-        (self.send)(Event::PointerEnter(item_key.clone(), now_ms));
+    /// `now` — adapter-provided timestamp from the pointer event.
+    pub fn on_trigger_pointer_enter(&self, item_key: &Key, now: Duration) {
+        (self.send)(Event::PointerEnter(item_key.clone(), now));
     }
 
     /// Handle pointer leave on a trigger.
@@ -1064,9 +1064,9 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown on a trigger.
-    /// `now_ms` — adapter-provided timestamp from the keyboard event, forwarded
+    /// `now` — adapter-provided timestamp from the keyboard event, forwarded
     /// to `EscapeKey` so the machine never reaches into the platform itself.
-    pub fn on_trigger_keydown(&self, item_key: &Key, data: &KeyboardEventData, now_ms: u64) {
+    pub fn on_trigger_keydown(&self, item_key: &Key, data: &KeyboardEventData, now: Duration) {
         let (prev_key, next_key) = match (&self.ctx.orientation, &self.ctx.dir) {
             (Orientation::Horizontal, Direction::Rtl)  => (KeyboardKey::ArrowRight, KeyboardKey::ArrowLeft),
             (Orientation::Horizontal, _)               => (KeyboardKey::ArrowLeft, KeyboardKey::ArrowRight),
@@ -1083,7 +1083,7 @@ impl<'a> Api<'a> {
         } else if data.key == KeyboardKey::Enter || data.key == KeyboardKey::Space {
             (self.send)(Event::Open(item_key.clone()));
         } else if data.key == KeyboardKey::Escape {
-            (self.send)(Event::EscapeKey(now_ms));
+            (self.send)(Event::EscapeKey(now));
         } else if self.ctx.orientation == Orientation::Horizontal
             && (data.key == KeyboardKey::ArrowDown || data.key == KeyboardKey::ArrowUp)
         {
@@ -1103,17 +1103,17 @@ impl<'a> Api<'a> {
     }
 
     /// Handle keydown inside the content area.
-    /// `now_ms` — adapter-provided timestamp from the keyboard event.
-    pub fn on_content_keydown(&self, data: &KeyboardEventData, now_ms: u64) {
+    /// `now` — adapter-provided timestamp from the keyboard event.
+    pub fn on_content_keydown(&self, data: &KeyboardEventData, now: Duration) {
         if data.key == KeyboardKey::Escape {
-            (self.send)(Event::EscapeKey(now_ms));
+            (self.send)(Event::EscapeKey(now));
         }
     }
 
     /// Handle click on a link inside the content.
-    /// `now_ms` — adapter-provided timestamp from the click event.
-    pub fn on_link_select(&self, now_ms: u64) {
-        (self.send)(Event::SelectLink(now_ms));
+    /// `now` — adapter-provided timestamp from the click event.
+    pub fn on_link_select(&self, now: Duration) {
+        (self.send)(Event::SelectLink(now));
     }
 }
 
@@ -1341,7 +1341,7 @@ list of triggers and content panels.
 
 ```rust
 /// Props for a Sub navigation menu embedded inside a content panel.
-/// Inherits `delay_ms`, `skip_delay_ms`, `orientation`, and `dir` from the parent.
+/// Inherits `delay`, `skip_delay`, `orientation`, and `dir` from the parent.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SubProps {
     /// Controlled open item within this sub-menu.
@@ -1386,7 +1386,7 @@ panel remains open while the sub-menu is interacted with.
 - `Escape` inside a `SubContent` closes the sub-menu first. A second `Escape` closes the
   parent content panel.
 - Arrow keys within the sub-menu's list navigate between sub-triggers.
-- The `Sub` part inherits `orientation`, `dir`, `delay_ms`, and `skip_delay_ms` from the
+- The `Sub` part inherits `orientation`, `dir`, `delay`, and `skip_delay` from the
   parent `Props` unless the consumer explicitly overrides them.
 
 ### 5.4 Accessibility
@@ -1411,8 +1411,8 @@ Keyboard interaction within the sub-menu mirrors the root menu's keyboard patter
 | ------------------- | -------------------- | ------------------- | ---------------------------------- |
 | Controlled value    | `value`              | `value`             | Full match                         |
 | Default value       | `default_value`      | `defaultValue`      | Full match                         |
-| Delay duration      | `delay_ms`           | `delayDuration`     | Full match (ars-ui: 200ms default) |
-| Skip delay duration | `skip_delay_ms`      | `skipDelayDuration` | Full match (ars-ui: 300ms default) |
+| Delay duration      | `delay`              | `delayDuration`     | Full match (ars-ui: 200ms default) |
+| Skip delay duration | `skip_delay`         | `skipDelayDuration` | Full match (ars-ui: 300ms default) |
 | Dir                 | `dir`                | `dir`               | Full match                         |
 | Orientation         | `orientation`        | `orientation`       | Full match                         |
 | Loop focus          | `loop_focus`         | --                  | ars-ui addition                    |

@@ -1,6 +1,7 @@
 //! Screen-reader announcement queue and live-region attribute helpers.
 
 use alloc::{format, string::String, vec::Vec};
+use core::time::Duration;
 
 use ars_core::{AriaAttr, AttrMap, HtmlAttr};
 
@@ -35,8 +36,8 @@ pub struct LiveAnnouncer {
     voiceover_toggle: bool,
     /// Tracks the last announced message text.
     last_message: Option<String>,
-    /// Delay before clearing the live region content (ms).
-    clear_delay_ms: u32,
+    /// Delay before clearing the live region content.
+    clear_delay: Duration,
 }
 
 impl LiveAnnouncer {
@@ -49,7 +50,7 @@ impl LiveAnnouncer {
             active_priority: None,
             voiceover_toggle: false,
             last_message: None,
-            clear_delay_ms: 7000,
+            clear_delay: Duration::from_secs(7),
         }
     }
 
@@ -117,7 +118,7 @@ impl LiveAnnouncer {
 
         self.last_message = Some(next.message.clone());
 
-        let _unused = (content, next.priority, self.clear_delay_ms);
+        let _unused = (content, next.priority, self.clear_delay);
     }
 
     /// Called by the ars-dom adapter after the live region update completes.
@@ -388,7 +389,7 @@ mod tests {
     fn clear_delay_defaults_to_seven_seconds() {
         let announcer = LiveAnnouncer::new();
 
-        assert_eq!(announcer.clear_delay_ms, 7000);
+        assert_eq!(announcer.clear_delay, Duration::from_secs(7));
     }
 
     #[test]
@@ -399,10 +400,10 @@ mod tests {
             active_priority: None,
             voiceover_toggle: false,
             last_message: None,
-            clear_delay_ms: 1200,
+            clear_delay: Duration::from_millis(1200),
         };
 
-        assert_eq!(announcer.clear_delay_ms, 1200);
+        assert_eq!(announcer.clear_delay, Duration::from_millis(1200));
     }
 
     #[test]
@@ -414,6 +415,6 @@ mod tests {
         assert_eq!(announcer.active_priority, None);
         assert!(!announcer.voiceover_toggle);
         assert_eq!(announcer.last_message, None);
-        assert_eq!(announcer.clear_delay_ms, 7000);
+        assert_eq!(announcer.clear_delay, Duration::from_secs(7));
     }
 }

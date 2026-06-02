@@ -83,7 +83,7 @@ pub enum Event {
     /// The listbox deselected all items.
     DeselectAll,
     /// The listbox performed a typeahead search.
-    TypeaheadSearch(char, u64),
+    TypeaheadSearch(char, Duration),
     /// Clear the typeahead search buffer.
     ClearTypeahead,
     /// IME composition started.
@@ -463,9 +463,9 @@ impl ars_core::Machine for Machine {
             }
 
             // ── Typeahead ───────────────────────────────────────────
-            (State::Focused, Event::TypeaheadSearch(ch, now_ms)) => {
+            (State::Focused, Event::TypeaheadSearch(ch, now)) => {
                 let (new_ta, found) = ctx.typeahead.process_char(
-                    *ch, *now_ms,
+                    *ch, *now,
                     ctx.highlighted_key.as_ref(),
                     &ctx.items,
                 );

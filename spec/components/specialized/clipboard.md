@@ -82,7 +82,7 @@ pub struct Context {
     /// The text to copy. Supports controlled/uncontrolled binding via `Bindable`.
     pub value: Bindable<String>,
     /// How long to show the "copied" feedback (in ms).
-    pub feedback_duration_ms: u32,
+    pub feedback_duration: Duration,
     /// Whether the component is disabled.
     pub disabled: bool,
     /// The reason the last copy failed (`None` when not in error state).
@@ -107,8 +107,8 @@ pub struct Props {
     pub value: Option<String>,
     /// Default value for uncontrolled mode.
     pub default_value: String,
-    /// Duration to show "copied" feedback in ms.
-    pub feedback_duration_ms: u32,
+    /// Duration to show "copied" feedback.
+    pub feedback_duration: Duration,
     /// Disabled state.
     pub disabled: bool,
     /// Callback invoked by the write-text effect with the current text and send handle.
@@ -121,7 +121,7 @@ impl Default for Props {
             id: String::new(),
             value: None,
             default_value: String::new(),
-            feedback_duration_ms: 2000,
+            feedback_duration: Duration::from_secs(2),
             disabled: false,
             on_copy: None,
         }
@@ -177,7 +177,7 @@ impl ars_core::Machine for Machine {
                 Some(v) => Bindable::controlled(v.clone()),
                 None    => Bindable::uncontrolled(props.default_value.clone()),
             },
-            feedback_duration_ms: props.feedback_duration_ms,
+            feedback_duration: props.feedback_duration,
             disabled: props.disabled,
             error: None,
             locale,
@@ -240,10 +240,10 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::SetProps) => {
-                let feedback_duration_ms = props.feedback_duration_ms;
+                let feedback_duration = props.feedback_duration;
                 let disabled = props.disabled;
                 Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.feedback_duration_ms = feedback_duration_ms;
+                    ctx.feedback_duration = feedback_duration;
                     ctx.disabled = disabled;
                 }))
             }
@@ -261,7 +261,7 @@ impl ars_core::Machine for Machine {
             events.push(Event::SetValue(new.value.clone()));
         }
 
-        if old.feedback_duration_ms != new.feedback_duration_ms || old.disabled != new.disabled {
+        if old.feedback_duration != new.feedback_duration || old.disabled != new.disabled {
             events.push(Event::SetProps);
         }
 
@@ -442,24 +442,24 @@ Clipboard
 └── ValueText   (optional — display of the text being copied)
 ```
 
-| Part      | Element    | Key Attributes                                       |
-| --------- | ---------- | ---------------------------------------------------- |
-| Root      | `<div>`    | `data-ars-state`, `data-ars-disabled`                |
-| Label     | `<label>`  | `id`, `for` trigger association                      |
+| Part      | Element    | Key Attributes                                              |
+| --------- | ---------- | ----------------------------------------------------------- |
+| Root      | `<div>`    | `data-ars-state`, `data-ars-disabled`                       |
+| Label     | `<label>`  | `id`, `for` trigger association                             |
 | Trigger   | `<button>` | `aria-label` (state-dependent), `disabled`, `aria-disabled` |
-| Indicator | `<span>`   | `aria-hidden="true"`, `data-ars-state`               |
-| Status    | `<div>`    | `role="status"`, `aria-live="polite"`, `aria-atomic` |
-| ValueText | `<span>`   | displays the text being copied                       |
+| Indicator | `<span>`   | `aria-hidden="true"`, `data-ars-state`                      |
+| Status    | `<div>`    | `role="status"`, `aria-live="polite"`, `aria-atomic`        |
+| ValueText | `<span>`   | displays the text being copied                              |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Part      | Role     | Properties                                        |
-| --------- | -------- | ------------------------------------------------- |
+| Part      | Role     | Properties                                                    |
+| --------- | -------- | ------------------------------------------------------------- |
 | Trigger   | `button` | `aria-label` (changes per state), `disabled`, `aria-disabled` |
-| Indicator | —        | `aria-hidden="true"` (decorative)                 |
-| Status    | `status` | `aria-live="polite"`, `aria-atomic="true"`        |
+| Indicator | —        | `aria-hidden="true"` (decorative)                             |
+| Status    | `status` | `aria-live="polite"`, `aria-atomic="true"`                    |
 
 ### 3.2 Keyboard Interaction
 
@@ -528,7 +528,7 @@ impl ComponentMessages for Messages {}
 | Feature                  | ars-ui                    | Ark UI                   | Notes                                       |
 | ------------------------ | ------------------------- | ------------------------ | ------------------------------------------- |
 | `value` / `defaultValue` | `value` / `default_value` | `value` / `defaultValue` | Equivalent                                  |
-| `timeout`                | `feedback_duration_ms`    | `timeout`                | Equivalent (different naming, same purpose) |
+| `timeout`                | `feedback_duration`       | `timeout`                | Equivalent (different naming, same purpose) |
 | `disabled`               | `disabled`                | --                       | ars-ui adds disabled support                |
 
 **Gaps:** None.

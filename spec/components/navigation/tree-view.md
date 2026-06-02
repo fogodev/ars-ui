@@ -45,7 +45,7 @@ matching every other component and the `TreeCollection` data model.
 | `FocusParent`                         | —               | Move focus to the parent of the focused node.                            |
 | `Focus { is_keyboard }`               | `bool`          | The tree container received focus.                                       |
 | `Blur`                                | —               | The tree container lost focus.                                           |
-| `TypeaheadSearch(char, u64)`          | char + now_ms   | Append a char to the typeahead buffer and jump to the next match.        |
+| `TypeaheadSearch(char, Duration)`     | char + now      | Append a char to the typeahead buffer and jump to the next match.        |
 | `ClearTypeahead`                      | —               | Reset the typeahead buffer.                                              |
 | `ExpandAll`                           | —               | Expand every expandable node in the tree.                                |
 | `CollapseAll`                         | —               | Collapse every node in the tree.                                         |
@@ -293,8 +293,8 @@ pub enum Event {
     /// Blur the tree view.
     Blur,
     /// Append a char to the typeahead buffer and jump to the next match.
-    /// `u64` is the adapter-provided current time (ms) for timeout reset.
-    TypeaheadSearch(char, u64),
+    /// `Duration` is the adapter-provided monotonic timestamp for timeout reset.
+    TypeaheadSearch(char, Duration),
     /// Reset the typeahead buffer.
     ClearTypeahead,
     /// Expand all expandable nodes in the tree.
@@ -543,8 +543,8 @@ impl ars_core::Machine for Machine {
                 .and_then(|node| node.parent_key.clone())
                 .map(|k| focus_plan(k, true)),
 
-            Event::TypeaheadSearch(ch, now_ms) => {
-                let (typeahead, found) = process_typeahead(ctx, *ch, *now_ms);
+            Event::TypeaheadSearch(ch, now) => {
+                let (typeahead, found) = process_typeahead(ctx, *ch, *now);
                 Some(match found {
                     Some(key) => TransitionPlan::to(State::Focused)
                         .apply(move |ctx| {
@@ -898,11 +898,11 @@ fn focus_relative(ctx: &Context, direction: Direction) -> Option<TransitionPlan<
 /// first reconciled to the component's live `ctx.expanded` — otherwise typeahead
 /// would search the construction-time expansion and skip newly-visible children
 /// (or jump to nodes the user has since collapsed).
-fn process_typeahead(ctx: &Context, ch: char, now_ms: u64) -> (typeahead::State, Option<Key>) {
+fn process_typeahead(ctx: &Context, ch: char, now: Duration) -> (typeahead::State, Option<Key>) {
     let items = reconciled_items(ctx);
     ctx.typeahead.process_char_with_locale(
         ch,
-        now_ms,
+        now,
         ctx.focused_node.as_ref(),
         &items,
         &ctx.locale,
@@ -932,8 +932,8 @@ fn reconciled_items(ctx: &Context) -> TreeCollection<TreeItem> {
 /// Resolve the timestamp for a typeahead keypress: the adapter-provided value
 /// when present, else the host clock (std), else a monotonic bump of the last
 /// keypress so the buffer never spuriously resets.
-fn typeahead_time(now_ms: Option<u64>, state: &typeahead::State) -> u64 {
-    now_ms.unwrap_or_else(|| current_time_ms().unwrap_or(state.last_key_time_ms.saturating_add(1)))
+fn typeahead_time(now: Option<Duration>, state: &typeahead::State) -> Duration {
+    now.unwrap_or_else(|| current_time().unwrap_or(state.last_key_time.saturating_add(Duration::from_millis(1))))
 }
 
 /// Ordered valid keyboard drop slots for the dragged node: for every visible
@@ -1342,12 +1342,12 @@ impl Api<'_> {
         self.on_node_keydown_impl(node_id, data, None);
     }
 
-    /// `on_node_keydown` with an explicit `now_ms` for typeahead timing.
-    pub fn on_node_keydown_at(&self, node_id: &Key, data: &KeyboardEventData, now_ms: u64) {
-        self.on_node_keydown_impl(node_id, data, Some(now_ms));
+    /// `on_node_keydown` with an explicit `now` for typeahead timing.
+    pub fn on_node_keydown_at(&self, node_id: &Key, data: &KeyboardEventData, now: Duration) {
+        self.on_node_keydown_impl(node_id, data, Some(now));
     }
 
-    fn on_node_keydown_impl(&self, node_id: &Key, data: &KeyboardEventData, now_ms: Option<u64>) {
+    fn on_node_keydown_impl(&self, node_id: &Key, data: &KeyboardEventData, now: Option<Duration>) {
         match data.key {
             KeyboardKey::ArrowDown => (self.send)(Event::FocusNext),
             KeyboardKey::ArrowUp => (self.send)(Event::FocusPrev),
@@ -1387,7 +1387,7 @@ impl Api<'_> {
             _ => if let Some(ch) = data.character {
                 if ch == '*' { self.expand_siblings(node_id); }
                 else if !ch.is_control() {
-                    (self.send)(Event::TypeaheadSearch(ch, typeahead_time(now_ms, &self.ctx.typeahead)));
+                    (self.send)(Event::TypeaheadSearch(ch, typeahead_time(now, &self.ctx.typeahead)));
                 }
             },
         }

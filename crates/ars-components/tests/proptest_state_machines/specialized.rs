@@ -744,15 +744,15 @@ mod timer_proptests {
     prop_compose! {
         fn arb_props()(
             mode in arb_mode(),
-            target_ms in 1_000u64..=600_000,
-            interval_ms in 1u64..=60_000,
+            target_millis in 1_000u64..=600_000,
+            interval_millis in 1u64..=60_000,
             auto_start in any::<bool>(),
         ) -> Props {
             Props::new()
                 .id("timer")
                 .mode(mode)
-                .target(Duration::from_millis(target_ms))
-                .interval(Duration::from_millis(interval_ms))
+                .target(Duration::from_millis(target_millis))
+                .interval(Duration::from_millis(interval_millis))
                 .auto_start(auto_start)
         }
     }
@@ -761,7 +761,7 @@ mod timer_proptests {
     /// range; this keeps the "countdown never exceeds target" invariant true
     /// while still exercising the `SetTime` branch.
     fn arb_event(target: Duration) -> impl Strategy<Value = Event> {
-        let target_ms = u64::try_from(target.as_millis()).unwrap_or(u64::MAX);
+        let target_millis = u64::try_from(target.as_millis()).unwrap_or(u64::MAX);
         prop_oneof![
             Just(Event::Start),
             Just(Event::Pause),
@@ -769,7 +769,7 @@ mod timer_proptests {
             Just(Event::Reset),
             Just(Event::Restart),
             Just(Event::Tick),
-            (0u64..=target_ms).prop_map(|ms| Event::SetTime(Duration::from_millis(ms))),
+            (0u64..=target_millis).prop_map(|millis| Event::SetTime(Duration::from_millis(millis))),
         ]
     }
 

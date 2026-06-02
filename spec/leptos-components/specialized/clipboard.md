@@ -20,7 +20,7 @@ pub fn Clipboard(
     #[prop(optional)] value: Option<RwSignal<String>>,
     #[prop(optional, into)] default_value: String,
     #[prop(optional, into)] label: Option<String>,
-    #[prop(optional)] feedback_duration_ms: u32,
+    #[prop(optional)] feedback_duration: Duration,
     #[prop(optional)] disabled: bool,
     #[prop(optional)] show_value_text: bool,
 ) -> impl IntoView
@@ -59,11 +59,11 @@ The adapter renders the optional `Label` and `ValueText` parts from props rather
 
 ## 7. Prop Sync and Event Mapping
 
-| Adapter prop                       | Mode         | Sync trigger            | Machine event / update path | Visible effect                              | Notes                                              |
-| ---------------------------------- | ------------ | ----------------------- | --------------------------- | ------------------------------------------- | -------------------------------------------------- |
-| `value`                            | controlled   | upstream signal changes | bindable sync               | changes copied text and `ValueText`         | writable only when a controlled signal is provided |
-| `default_value`                    | uncontrolled | init only               | initial context             | initial copied text                         | ignored after mount in controlled mode             |
-| `disabled`, `feedback_duration_ms` | controlled   | rerender                | prop rebuild                | changes trigger enablement and reset timing | timer behavior follows latest props                |
+| Adapter prop                    | Mode         | Sync trigger            | Machine event / update path | Visible effect                              | Notes                                              |
+| ------------------------------- | ------------ | ----------------------- | --------------------------- | ------------------------------------------- | -------------------------------------------------- |
+| `value`                         | controlled   | upstream signal changes | bindable sync               | changes copied text and `ValueText`         | writable only when a controlled signal is provided |
+| `default_value`                 | uncontrolled | init only               | initial context             | initial copied text                         | ignored after mount in controlled mode             |
+| `disabled`, `feedback_duration` | controlled   | rerender                | prop rebuild                | changes trigger enablement and reset timing | timer behavior follows latest props                |
 
 | UI event                             | Preconditions          | Machine event / callback path                                               | Ordering notes                                               | Notes                                        |
 | ------------------------------------ | ---------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------- |

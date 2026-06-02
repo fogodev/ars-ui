@@ -3424,12 +3424,12 @@ pub struct State {
     /// The accumulated search string, e.g. `"ban"` after typing B, A, N.
     pub search: String,
 
-    /// Timestamp (in milliseconds since epoch) of the last keypress that
-    /// contributed to `search`. Used to detect timeout and reset.
+    /// Monotonic timestamp of the last keypress that contributed to `search`.
+    /// Used to detect timeout and reset.
     ///
     /// The component's state machine obtains this timestamp from an abstract
     /// `Clock` trait (see `01-architecture.md §1.4` on no_std Timer/Clock).
-    pub last_key_time_ms: u64,
+    pub last_key_time: Duration,
 
     /// The key that was focused when the current search started. Used as the
     /// starting point for wrap-around: if we reach the end of the list without
@@ -3441,14 +3441,14 @@ pub struct State {
 impl State {
     /// Process a new character from a keydown event.
     ///
-    /// - If `now_ms - last_key_time_ms >= TYPEAHEAD_TIMEOUT`, the search
+    /// - If `now.saturating_sub(last_key_time) >= TYPEAHEAD_TIMEOUT`, the search
     ///   string is reset before appending the new character.
     /// - Returns `Some(key)` if a match was found, `None` otherwise.
     #[cfg(feature = "i18n")]
     pub fn process_char<T, C: Collection<T>>(
         &self,
         ch: char,
-        now_ms: u64,
+        now: Duration,
         current_focus: Option<&Key>,
         collection: &C,
         locale: &Locale,
@@ -3456,7 +3456,7 @@ impl State {
         disabled_behavior: DisabledBehavior,
     ) -> (Self, Option<Key>) {
         // Determine whether to reset the accumulated search.
-        let timed_out = Duration::from_millis(now_ms.saturating_sub(self.last_key_time_ms)) >= TYPEAHEAD_TIMEOUT;
+        let timed_out = now.saturating_sub(self.last_key_time) >= TYPEAHEAD_TIMEOUT;
         let mut search = if timed_out {
             String::new()
         } else {
@@ -3474,7 +3474,7 @@ impl State {
 
         let new_state = Self {
             search,
-            last_key_time_ms: now_ms,
+            last_key_time: now,
             search_start_key: search_start,
         };
 
@@ -3486,13 +3486,13 @@ impl State {
     pub fn process_char<T, C: Collection<T>>(
         &self,
         ch: char,
-        now_ms: u64,
+        now: Duration,
         current_focus: Option<&Key>,
         collection: &C,
         disabled_keys: &BTreeSet<Key>,
         disabled_behavior: DisabledBehavior,
     ) -> (Self, Option<Key>) {
-        let timed_out = Duration::from_millis(now_ms.saturating_sub(self.last_key_time_ms)) >= TYPEAHEAD_TIMEOUT;
+        let timed_out = now.saturating_sub(self.last_key_time) >= TYPEAHEAD_TIMEOUT;
         let mut search = if timed_out {
             String::new()
         } else {
@@ -3510,7 +3510,7 @@ impl State {
 
         let new_state = Self {
             search,
-            last_key_time_ms: now_ms,
+            last_key_time: now,
             search_start_key: search_start,
         };
 
@@ -3636,9 +3636,9 @@ Inside the component's `transition` function (see `01-architecture.md §2.7`):
 
 Event::KeyDown(key_event) => {
     let ch = key_event.key_as_char()?; // returns None for non-printable keys
-    let now_ms = ctx.clock.now_ms();
+    let now = ctx.clock.now();
     let (new_typeahead, found_key) = ctx.typeahead.process_char(
-        ch, now_ms, ctx.focused_key.as_ref(), &ctx.collection, &ctx.locale,
+        ch, now, ctx.focused_key.as_ref(), &ctx.collection, &ctx.locale,
         &ctx.selection_state.disabled_keys,
         ctx.selection_state.disabled_behavior,
     );
@@ -5670,7 +5670,7 @@ crates/ars-collections/
     announcements.rs        # CollectionChangeAnnouncement, CollectionMessages
     selection.rs            # selection::Mode, selection::Behavior, selection::Set,
                             #   selection::State, selection::DisabledBehavior, selection::OnAction
-    typeahead.rs            # typeahead::State, TYPEAHEAD_TIMEOUT_MS
+    typeahead.rs            # typeahead::State, TYPEAHEAD_TIMEOUT
     navigation.rs           # next_enabled_key, prev_enabled_key, first_enabled_key, last_enabled_key
     async_collection.rs     # AsyncLoadingState, AsyncCollection<T>
     async_loader.rs         # AsyncLoader trait, LoadResult, CollectionError
@@ -5812,7 +5812,10 @@ assert!(collapsed.nodes().all(|n| n.key != Key::str("apple"))); // not in visibl
 ### 9.4 Type-Ahead Navigation
 
 ```rust,no_check
-use ars_collections::{typeahead, StaticCollection, Key};
+use std::{collections::BTreeSet, time::Duration};
+
+use ars_collections::{DisabledBehavior, Key, StaticCollection, typeahead};
+use ars_core::Locale;
 
 let collection = StaticCollection::new([
     (Key::int(0), "Apple".into(),      ()),
@@ -5824,14 +5827,31 @@ let collection = StaticCollection::new([
 
 let state = typeahead::State::default();
 let focus = Some(Key::int(0));
+let disabled_keys = BTreeSet::new();
 
 // Type "b" — should jump to Banana (the first item starting with "b" after Apple).
 let locale = Locale::parse("en-US").expect("valid locale");
-let (state, found) = state.process_char('b', 1000, focus.as_ref(), &collection, &locale);
+let (state, found) = state.process_char_with_locale(
+    'b',
+    Duration::from_millis(1000),
+    focus.as_ref(),
+    &collection,
+    &locale,
+    &disabled_keys,
+    DisabledBehavior::Skip,
+);
 assert_eq!(found, Some(Key::int(2))); // Banana
 
 // Type "l" quickly (within 500 ms) — accumulated query is "bl" → Blueberry.
-let (_, found) = state.process_char('l', 1200, Some(Key::int(2)).as_ref(), &collection, &locale);
+let (_, found) = state.process_char_with_locale(
+    'l',
+    Duration::from_millis(1200),
+    Some(Key::int(2)).as_ref(),
+    &collection,
+    &locale,
+    &disabled_keys,
+    DisabledBehavior::Skip,
+);
 assert_eq!(found, Some(Key::int(3))); // Blueberry
 ```
 

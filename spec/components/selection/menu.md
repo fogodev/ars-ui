@@ -126,7 +126,7 @@ pub enum Event {
     /// Click outside the menu.
     ClickOutside,
     /// Typeahead search.
-    TypeaheadSearch(char, u64),
+    TypeaheadSearch(char, Duration),
     /// Update the item collection.
     /// Replace the item collection dynamically.
     UpdateItems(StaticCollection<Item>),
@@ -444,8 +444,8 @@ impl ars_core::Machine for Machine {
             }
 
             // TypeaheadSearch: use typeahead::State for accumulated search
-            (State::Open, Event::TypeaheadSearch(ch, now_ms)) => {
-                let (new_ta, found) = ctx.typeahead.process_char(*ch, *now_ms,
+            (State::Open, Event::TypeaheadSearch(ch, now)) => {
+                let (new_ta, found) = ctx.typeahead.process_char(*ch, *now,
                     ctx.highlighted_key.as_ref(), &ctx.items);
 
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -810,7 +810,7 @@ impl<'a> Api<'a> {
             }
             _ => {
                 if let Some(ch) = data.key.as_printable_char() {
-                    (self.send)(Event::TypeaheadSearch(ch, data.timestamp_ms));
+                    (self.send)(Event::TypeaheadSearch(ch, data.timestamp));
                 }
             }
         }

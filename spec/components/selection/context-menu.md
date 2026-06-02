@@ -79,8 +79,8 @@ pub enum Event {
     CloseSubmenu,
     /// Click outside the menu.
     ClickOutside,
-    /// Typeahead search with character and timestamp (ms).
-    TypeaheadSearch(char, u64),
+    /// Typeahead search with character and monotonic timestamp.
+    TypeaheadSearch(char, Duration),
     /// Update the item collection dynamically.
     UpdateItems(StaticCollection<menu::Item>),
     /// Synchronize context values derived from updated props.

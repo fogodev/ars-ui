@@ -467,8 +467,8 @@ impl PlatformEffects for RtlDirectionPlatform {
         NullPlatformEffects.focus_body();
     }
 
-    fn set_timeout(&self, delay_ms: u32, callback: Box<dyn FnOnce()>) -> TimerHandle {
-        NullPlatformEffects.set_timeout(delay_ms, callback)
+    fn set_timeout(&self, delay: Duration, callback: Box<dyn FnOnce()>) -> TimerHandle {
+        NullPlatformEffects.set_timeout(delay, callback)
     }
 
     fn clear_timeout(&self, handle: TimerHandle) {
@@ -551,8 +551,8 @@ impl PlatformEffects for RtlDirectionPlatform {
         NullPlatformEffects.is_mac_platform()
     }
 
-    fn now_ms(&self) -> u64 {
-        NullPlatformEffects.now_ms()
+    fn now(&self) -> Duration {
+        NullPlatformEffects.now()
     }
 
     fn get_bounding_rect(&self, id: &str) -> Option<Rect> {

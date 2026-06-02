@@ -1,0 +1,59 @@
+---
+source: crates/ars-components/src/data_display/grid_list/mod.rs
+expression: "snapshot_attrs(&api.cell_attrs(&key(\"alpha\")))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-key",
+            ),
+            String(
+                "alpha",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "cell",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "grid-list",
+            ),
+        ),
+        (
+            Aria(
+                RoleDescription,
+            ),
+            String(
+                "draggable",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "grid-cell-alpha",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "gridcell",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+    ],
+    styles: [],
+}

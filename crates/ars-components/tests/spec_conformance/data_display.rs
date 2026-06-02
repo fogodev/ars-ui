@@ -4,7 +4,7 @@
 
 use ars_collections::Key;
 use ars_components::data_display::{
-    marquee, meter, progress, rating_group, stat, table, tag_group,
+    grid_list, marquee, meter, progress, rating_group, stat, table, tag_group,
 };
 
 use super::helper::assert_anatomy;
@@ -173,6 +173,36 @@ fn tag_group_anatomy_matches_spec() {
                 },
                 "tag-remove",
             ),
+        ],
+    );
+}
+
+#[test]
+fn grid_list_anatomy_matches_spec() {
+    assert_anatomy(
+        "grid-list",
+        &[
+            (grid_list::Part::Root, "root"),
+            (
+                grid_list::Part::Row {
+                    key: Key::default(),
+                },
+                "row",
+            ),
+            (
+                grid_list::Part::Cell {
+                    key: Key::default(),
+                },
+                "cell",
+            ),
+            (grid_list::Part::LoadingSentinel, "loading-sentinel"),
+            (
+                grid_list::Part::DragHandle {
+                    key: Key::default(),
+                },
+                "drag-handle",
+            ),
+            (grid_list::Part::DropIndicator, "drop-indicator"),
         ],
     );
 }

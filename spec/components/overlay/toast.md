@@ -383,7 +383,7 @@ const fn announce_intent(kind: Kind) -> Effect {
 
 > **Adapter obligation:** The adapter consumes `Service::take_initial_effects()` exactly once after first mount and dispatches each [`Effect`] variant. There is no `Event::Init` ping — initial effects are scheduled by `Machine::initial_effects` instead.
 >
-> **SSR timer safety.** Timer effects (auto-dismiss countdown, open/close delays for Tooltip and HoverCard) MUST only start after hydration completes. During SSR, `platform.set_timeout()` and `platform.now_ms()` are unavailable. Adapters MUST guard timer setup with an `on_mount` lifecycle hook so the initial-effects buffer is drained only on the client after the component has mounted.
+> **SSR timer safety.** Timer effects (auto-dismiss countdown, open/close delays for Tooltip and HoverCard) MUST only start after hydration completes. During SSR, `platform.set_timeout()` and `platform.now()` are unavailable. Adapters MUST guard timer setup with an `on_mount` lifecycle hook so the initial-effects buffer is drained only on the client after the component has mounted.
 >
 > **`on_close_complete` callback:** Adapters should expose an `on_close_complete: Callback<String>` that fires when the Presence machine transitions to Unmounted after exit animation. This callback receives the toast ID and enables consumers to perform cleanup.
 
@@ -582,10 +582,10 @@ pub struct ManagerContext {
     /// Pending announcements (toast id + priority). Drained by
     /// `Event::DrainAnnouncement` in priority + FIFO order.
     pub announcement_queue: VecDeque<(String, AnnouncePriority)>,
-    /// Adapter clock timestamp (ms) of the most recent announcement drain.
+    /// Adapter clock timestamp of the most recent announcement drain.
     /// Updated through `Event::DrainAnnouncement` so the next drain can
     /// enforce the §4.2 500 ms gap.
-    pub last_announcement_at: Option<u64>,
+    pub last_announcement_at: Option<Duration>,
     /// Maximum number of simultaneously visible toasts. Default: 5.
     pub max_visible: usize,
     /// Where toasts appear on screen.
@@ -771,9 +771,9 @@ pub mod manager {
         DismissAll,
         /// Adapter heartbeat — drains the next announcement entry if at
         /// least 500 ms have elapsed since the previous drain. Carries
-        /// the current adapter-clock timestamp (ms) so the gate is
-        /// enforced atomically; the agnostic core holds no clock.
-        DrainAnnouncement { now_ms: u64 },
+        /// the current adapter-clock timestamp so the gate is enforced
+        /// atomically; the agnostic core holds no clock.
+        DrainAnnouncement { now: Duration },
         /// Per-toast machine reported `State::Dismissed` (or its
         /// `remove_delay` elapsed). The manager removes the entry and
         /// promotes the next queued config if any.
@@ -1008,8 +1008,8 @@ impl Api<'_> {
     pub fn dismiss_all(&self) { /* … */ }
     pub fn pause_all(&self) { /* … */ }
     pub fn resume_all(&self) { /* … */ }
-    /// Emits `DrainAnnouncement { now_ms }` with the adapter's clock.
-    pub fn drain_announcement(&self, now_ms: u64) { /* … */ }
+    /// Emits `DrainAnnouncement { now }` with the adapter's clock.
+    pub fn drain_announcement(&self, now: Duration) { /* … */ }
 }
 
 /// Region-part selector for the canonical `region_attrs` helper.

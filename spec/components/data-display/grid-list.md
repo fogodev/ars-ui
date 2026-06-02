@@ -27,22 +27,24 @@ an opaque item. Maps to React Aria's `GridList`.
 
 ### 1.2 Events
 
-| Event            | Payload                               | Description                                           |
-| ---------------- | ------------------------------------- | ----------------------------------------------------- |
-| `Focus`          | `key: Option<Key>, is_keyboard: bool` | Focus entered the grid or moved to a specific item.   |
-| `Blur`           | —                                     | Focus left the grid entirely.                         |
-| `Select`         | `Key`                                 | Select a single item (replace current selection).     |
-| `ToggleSelect`   | `Key`                                 | Toggle the selected state of a single item.           |
-| `SelectRange`    | `from: Key, to: Key`                  | Select all items between `from` and `to` (inclusive). |
-| `FocusUp`        | —                                     | Move focus one row up.                                |
-| `FocusDown`      | —                                     | Move focus one row down.                              |
-| `FocusLeft`      | —                                     | Move focus one cell left.                             |
-| `FocusRight`     | —                                     | Move focus one cell right.                            |
-| `FocusFirst`     | —                                     | Move focus to the first item (Home).                  |
-| `FocusLast`      | —                                     | Move focus to the last item (End).                    |
-| `SelectAll`      | —                                     | Select all non-disabled items (Ctrl+A).               |
-| `ClearSelection` | —                                     | Deselect all items.                                   |
-| `ItemAction`     | `Key`                                 | Primary action triggered on an item (Enter key).      |
+| Event             | Payload                               | Description                                           |
+| ----------------- | ------------------------------------- | ----------------------------------------------------- |
+| `Focus`           | `key: Option<Key>, is_keyboard: bool` | Focus entered the grid or moved to a specific item.   |
+| `Blur`            | —                                     | Focus left the grid entirely.                         |
+| `Select`          | `Key`                                 | Select a single item (replace current selection).     |
+| `ToggleSelect`    | `Key`                                 | Toggle the selected state of a single item.           |
+| `SelectRange`     | `from: Key, to: Key`                  | Select all items between `from` and `to` (inclusive). |
+| `FocusUp`         | —                                     | Move focus one row up.                                |
+| `FocusDown`       | —                                     | Move focus one row down.                              |
+| `FocusLeft`       | —                                     | Move focus one cell left.                             |
+| `FocusRight`      | —                                     | Move focus one cell right.                            |
+| `FocusFirst`      | —                                     | Move focus to the first item (Home).                  |
+| `FocusLast`       | —                                     | Move focus to the last item (End).                    |
+| `SelectAll`       | —                                     | Select all non-disabled items (Ctrl+A).               |
+| `ClearSelection`  | —                                     | Deselect all items.                                   |
+| `ItemAction`      | `Key`                                 | Primary action triggered on an item (Enter key).      |
+| `TypeaheadSearch` | `ch: char, now: Duration`             | Focus the next enabled item matching typed text.      |
+| `SyncProps`       | —                                     | Refresh context from changed props.                   |
 
 ### 1.3 Context
 
@@ -53,24 +55,40 @@ pub struct Context {
     /// Flat list of grid items, laid out left-to-right, top-to-bottom.
     pub items: StaticCollection<ItemDef>,
     /// Number of columns in the grid layout.
-    pub columns: NonZero<usize>,
+    pub columns: NonZeroUsize,
     /// Key of the currently focused item, if any.
     pub focused_key: Option<Key>,
     /// True when focus was keyboard-initiated (drives visible focus ring).
     pub focus_visible: bool,
     /// Selection mode for grid items.
     pub selection_mode: selection::Mode,
+    /// Selection behavior for selectable grid items.
+    pub selection_behavior: selection::Behavior,
     /// Currently selected item keys.
     pub selected_keys: Bindable<BTreeSet<Key>>,
+    /// Latest user-requested selected keys for adapter change notification.
+    pub requested_selected_keys: Option<BTreeSet<Key>>,
+    /// Latest user-requested action key for adapter change notification.
+    pub requested_action_key: Option<Key>,
     /// When true, all items are non-interactive.
     pub disabled: bool,
     /// Keys of individually disabled items.
     pub disabled_keys: BTreeSet<Key>,
+    /// Whether deselecting the final selected item is blocked.
+    pub disallow_empty_selection: bool,
+    /// Escape key behavior.
+    pub escape_key_behavior: EscapeKeyBehavior,
+    /// Whether composite grid focus semantics are active.
+    pub composite: bool,
     /// Whether a load-more request is currently in flight. Copied from props;
     /// drives `data-ars-loading` on the `LoadingSentinel` part.
     pub loading: bool,
-    /// Unique component instance identifier.
-    pub id: ComponentId,
+    /// Whether drag-and-drop attrs are enabled.
+    pub dnd_enabled: bool,
+    /// Component IDs used for hydration-stable relationships.
+    pub ids: ComponentIds,
+    /// Typeahead search state.
+    pub typeahead: typeahead::State,
     /// Resolved locale for message formatting.
     pub locale: Locale,
     /// Resolved messages for position announcements.
@@ -82,13 +100,16 @@ pub struct Context {
 pub struct ItemDef {
     /// Unique identifier for this grid item.
     pub key: Key,
+    /// Localized text label used for typeahead and adapter-rendered content.
+    pub label: String,
     /// Whether this individual item is disabled.
     pub disabled: bool,
     /// Optional navigation URL. When `Some`, the cell renders as an `<a>` element
     /// instead of the default element, enabling native link behavior (middle-click
     /// to open in new tab, etc.). The `role="gridcell"` / `role="row"` is preserved
-    /// on the `<a>`.
-    pub href: Option<String>,
+    /// on the `<a>`. Stored as `SafeUrl` so URL-valued output attributes are
+    /// validated before they reach `cell_attrs`.
+    pub href: Option<SafeUrl>,
 }
 ```
 
@@ -112,7 +133,7 @@ pub struct Props {
     /// Grid items to display.
     pub items: StaticCollection<ItemDef>,
     /// Number of columns. Defaults to the number of items (single row).
-    pub columns: Option<NonZero<usize>>,
+    pub columns: Option<NonZeroUsize>,
     /// Controlled selected keys.
     pub selected_keys: Option<BTreeSet<Key>>,
     /// Default selected keys for uncontrolled mode.
@@ -149,19 +170,22 @@ pub struct Props {
     /// Callback invoked when the loading sentinel enters the viewport,
     /// signalling that the next page of items should be loaded. When `None`,
     /// the `LoadingSentinel` part is not rendered. See `06-collections.md` §5.3.
-    pub on_load_more: Option<Callback<()>>,
+    pub on_load_more: Option<Callback<dyn Fn() + Send + Sync>>,
+    /// Callback invoked when an enabled item receives a primary action.
+    pub on_action: Option<Callback<dyn Fn(Key) + Send + Sync>>,
     /// Whether a load-more request is currently in flight. When `true`, the
     /// `LoadingSentinel` element receives `data-ars-loading="true"` so the
     /// adapter can display a spinner. Default: `false`.
     pub loading: bool,
-    // Change callbacks provided by the adapter layer
+    /// Enable the agnostic drag-and-drop affordance attrs. Default: `false`.
+    pub dnd_enabled: bool,
 }
 
 impl Default for Props {
     fn default() -> Self {
         Self {
             id: String::new(),
-            items: Vec::new(),
+            items: StaticCollection::default(),
             columns: None,
             selected_keys: None,
             default_selected_keys: BTreeSet::new(),
@@ -174,309 +198,59 @@ impl Default for Props {
             label: None,
             composite: true,
             on_load_more: None,
+            on_action: None,
             loading: false,
+            dnd_enabled: false,
         }
     }
 }
 ```
 
-### 1.5 Full Machine Implementation
+### 1.5 Transition Semantics
 
-```rust
-use ars_core::{TransitionPlan, ComponentIds, AttrMap, Bindable};
+GridList uses the standard state-machine boundary from `foundation/00-architecture.md`:
+`Props` configure the instance, `Context` owns durable machine state, `Event` drives
+transitions, and `Api` exposes adapter-safe attributes and keyboard dispatch helpers.
 
-/// States for the GridList component.
-#[derive(Clone, Debug, PartialEq)]
-pub enum State {
-    /// No item is focused.
-    Idle,
-    /// An item within the grid has keyboard or pointer focus.
-    Focused,
-}
+The machine has two states:
 
-/// Events for the GridList component.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Event {
-    /// Focus entered the grid or moved to a specific item.
-    Focus { key: Option<Key>, is_keyboard: bool },
-    /// Focus left the grid entirely.
-    Blur,
-    /// Select a single item (replace current selection).
-    Select(Key),
-    /// Toggle the selected state of a single item.
-    ToggleSelect(Key),
-    /// Select all items between `from` and `to` (inclusive).
-    SelectRange { from: Key, to: Key },
-    /// Move focus one row up.
-    FocusUp,
-    /// Move focus one row down.
-    FocusDown,
-    /// Move focus one cell left.
-    FocusLeft,
-    /// Move focus one cell right.
-    FocusRight,
-    /// Move focus to the first item (Home).
-    FocusFirst,
-    /// Move focus to the last item (End).
-    FocusLast,
-    /// Select all non-disabled items (Ctrl+A).
-    SelectAll,
-    /// Deselect all items.
-    ClearSelection,
-    /// Primary action triggered on an item (Enter key).
-    ItemAction(Key),
-}
+- `Idle`: no cell is focused inside the grid list.
+- `Focused`: a present, enabled cell is focused or represented by `aria-activedescendant`.
 
-/// Machine for the GridList component.
-pub struct Machine;
+The machine accepts the public events listed in §1.2. Implementations must preserve these
+semantics:
 
-impl Machine {
-    /// Compute the (column, row) position from a flat index.
-    fn index_to_pos(index: usize, columns: NonZero<usize>) -> (usize, usize) {
-        let cols = columns.get();
-        (index % cols, index / cols)
-    }
-
-    /// Compute the flat index from (column, row) position.
-    fn pos_to_index(col: usize, row: usize, columns: NonZero<usize>) -> usize {
-        row * columns.get() + col
-    }
-
-    /// Find the index of the item with the given key.
-    fn key_index(items: &StaticCollection<ItemDef>, key: &Key) -> Option<usize> {
-        items.iter().position(|item| &item.key == key)
-    }
-
-    /// Check if an item key is disabled.
-    fn is_disabled(ctx: &Context, key: &Key) -> bool {
-        ctx.disabled || ctx.disabled_keys.contains(key)
-            || ctx.items.iter().find(|i| &i.key == key).map_or(false, |i| i.disabled)
-    }
-}
-
-impl ars_core::Machine for Machine {
-    type State   = State;
-    type Event   = Event;
-    type Context = Context;
-    type Props   = Props;
-    type Messages = Messages;
-    type Api<'a> = Api<'a>;
-
-    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let locale = env.locale.clone();
-        let messages = messages.clone();
-        let columns = props.columns.unwrap_or(props.items.len().max(1));
-        (State::Idle, Context {
-            items: props.items.clone(),
-            columns,
-            focused_key: None,
-            focus_visible: false,
-            selection_mode: props.selection_mode.clone(),
-            selected_keys: match &props.selected_keys {
-                Some(keys) => Bindable::controlled(keys.clone()),
-                None       => Bindable::uncontrolled(props.default_selected_keys.clone()),
-            },
-            disabled: props.disabled,
-            disabled_keys: props.disabled_keys.clone(),
-            loading: props.loading,
-            id: ComponentId::new(),
-            locale,
-            messages,
-        })
-    }
-
-    fn transition(
-        state: &Self::State,
-        event: &Self::Event,
-        ctx:   &Self::Context,
-        props: &Self::Props,
-    ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled {
-            return match event {
-                Event::Focus { .. } | Event::Blur => {
-                    Some(TransitionPlan::to(State::Idle))
-                }
-                _ => None,
-            };
-        }
-
-        match event {
-            // ── Focus ────────────────────────────────────────────────────
-            Event::Focus { key, is_keyboard } => {
-                let target_key = key.clone().or_else(|| {
-                    ctx.items.iter()
-                        .find(|i| !Self::is_disabled(ctx, &i.key))
-                        .map(|i| i.key.clone())
-                });
-                let kb = *is_keyboard;
-                Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                    ctx.focused_key = target_key;
-                    ctx.focus_visible = kb;
-                }))
-            }
-
-            Event::Blur => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    ctx.focused_key = None;
-                    ctx.focus_visible = false;
-                }))
-            }
-
-            // ── Selection ────────────────────────────────────────────────
-            Event::Select(key) => {
-                if ctx.selection_mode == selection::Mode::None { return None; }
-                if Self::is_disabled(ctx, key) { return None; }
-                let key = key.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.selected_keys.set(BTreeSet::from([key]));
-                }))
-                // Selection change notification is handled by the adapter layer.
-            }
-
-            Event::ToggleSelect(key) => {
-                if ctx.selection_mode == selection::Mode::None { return None; }
-                if Self::is_disabled(ctx, &key) { return None; }
-                let is_selected = ctx.selected_keys.get().contains(&key);
-                Some(TransitionPlan::context_only(move |ctx| {
-                    if is_selected {
-                        ctx.selected_keys.get_mut_owned().retain(|k| *k != key);
-                    } else {
-                        if ctx.selection_mode == selection::Mode::Single {
-                            ctx.selected_keys.set(BTreeSet::from([key]));
-                        } else {
-                            ctx.selected_keys.get_mut_owned().insert(key);
-                        }
-                    }
-                }))
-                // Selection change notification is handled by the adapter layer.
-            }
-
-            Event::SelectRange { from, to } => {
-                if ctx.selection_mode != selection::Mode::Multiple { return None; }
-                let from_idx = Self::key_index(&ctx.items, from)?;
-                let to_idx   = Self::key_index(&ctx.items, to)?;
-                let (lo, hi) = if from_idx <= to_idx { (from_idx, to_idx) } else { (to_idx, from_idx) };
-                let range_keys = ctx.items[lo..=hi].iter()
-                    .filter(|i| !Self::is_disabled(ctx, &i.key))
-                    .map(|i| i.key.clone())
-                    .collect::<BTreeSet<_>>();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.selected_keys.set(range_keys);
-                }))
-                // Selection change notification is handled by the adapter layer.
-            }
-
-            Event::SelectAll => {
-                if ctx.selection_mode != selection::Mode::Multiple { return None; }
-                let all_keys = ctx.items.iter()
-                    .filter(|i| !Self::is_disabled(ctx, &i.key))
-                    .map(|i| i.key.clone())
-                    .collect::<BTreeSet<_>>();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.selected_keys.set(all_keys);
-                }))
-                // Selection change notification is handled by the adapter layer.
-            }
-
-            Event::ClearSelection => {
-                if ctx.selection_mode == selection::Mode::None { return None; }
-                Some(TransitionPlan::context_only(|ctx| {
-                    ctx.selected_keys.set(BTreeSet::new());
-                }))
-                // Selection change notification is handled by the adapter layer.
-            }
-
-            // ── Item Action ─────────────────────────────────────────────
-            Event::ItemAction(key) => {
-                if Self::is_disabled(ctx, key) { return None; }
-                // ItemAction is a notification event — the adapter fires the
-                // on_action callback. No context mutation needed.
-                Some(TransitionPlan::context_only(|_ctx| {}))
-            }
-
-            // ── 2D Navigation ────────────────────────────────────────────
-            Event::FocusUp => {
-                let current = ctx.focused_key.as_ref()?;
-                let idx = Self::key_index(&ctx.items, current)?;
-                let (col, row) = Self::index_to_pos(idx, ctx.columns);
-                if row == 0 { return None; }
-                let target_idx = Self::pos_to_index(col, row - 1, ctx.columns);
-                let target_key = ctx.items.get(target_idx)?.key.clone();
-                Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                    ctx.focused_key = Some(target_key);
-                    ctx.focus_visible = true;
-                }))
-            }
-
-            Event::FocusDown => {
-                let current = ctx.focused_key.as_ref()?;
-                let idx = Self::key_index(&ctx.items, current)?;
-                let (col, row) = Self::index_to_pos(idx, ctx.columns);
-                let target_idx = Self::pos_to_index(col, row + 1, ctx.columns);
-                let target_key = ctx.items.get(target_idx)?.key.clone();
-                Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                    ctx.focused_key = Some(target_key);
-                    ctx.focus_visible = true;
-                }))
-            }
-
-            Event::FocusLeft => {
-                let current = ctx.focused_key.as_ref()?;
-                let idx = Self::key_index(&ctx.items, current)?;
-                if idx == 0 { return None; }
-                let target_key = ctx.items.get(idx - 1)?.key.clone();
-                Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                    ctx.focused_key = Some(target_key);
-                    ctx.focus_visible = true;
-                }))
-            }
-
-            Event::FocusRight => {
-                let current = ctx.focused_key.as_ref()?;
-                let idx = Self::key_index(&ctx.items, current)?;
-                let target_key = ctx.items.get(idx + 1)?.key.clone();
-                Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                    ctx.focused_key = Some(target_key);
-                    ctx.focus_visible = true;
-                }))
-            }
-
-            Event::FocusFirst => {
-                let first = ctx.items.iter()
-                    .find(|i| !Self::is_disabled(ctx, &i.key))
-                    .map(|i| i.key.clone())?;
-                Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                    ctx.focused_key = Some(first);
-                    ctx.focus_visible = true;
-                }))
-            }
-
-            Event::FocusLast => {
-                let last = ctx.items.iter().rev()
-                    .find(|i| !Self::is_disabled(ctx, &i.key))
-                    .map(|i| i.key.clone())?;
-                Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                    ctx.focused_key = Some(last);
-                    ctx.focus_visible = true;
-                }))
-            }
-        }
-    }
-
-    fn connect<'a>(
-        state: &'a Self::State,
-        ctx:   &'a Self::Context,
-        props: &'a Self::Props,
-        send:  &'a dyn Fn(Self::Event),
-    ) -> Self::Api<'a> {
-        Api { state, ctx, props, send }
-    }
-}
-```
+- Columns initialize from `Props::columns` when present; otherwise they use the item count,
+  clamped to at least one column.
+- `selected_keys` is a `Bindable<BTreeSet<Key>>`. Controlled values are filtered to present,
+  enabled item keys, while `requested_selected_keys` preserves the latest user-requested
+  selection so adapters can notify parents even when controlled props lag.
+- `requested_action_key` preserves the latest enabled item action key so adapters can notify
+  consumers even when no selection changed.
+- Disabled grids reject focus, selection, action, typeahead, and navigation mutations. Disabled
+  composite roots are removed from the tab order with `tabindex="-1"`. Disabled or stale item keys
+  are rejected for focus, selection, and action events.
+- Arrow, Home, and End navigation operate over the flat collection projected into rows and
+  columns. Horizontal navigation never wraps between rows. Navigation skips disabled candidates
+  when another enabled candidate exists in the requested direction.
+- `Enter` maps to `ItemAction`, `Space` maps to selection using `selection_behavior`, Ctrl/Cmd+A
+  selects all enabled items in multiple-selection mode, and `Escape` follows
+  `escape_key_behavior`.
+- Selection obeys `selection::Mode`, `selection::Behavior`, and
+  `disallow_empty_selection`. Range and select-all selection include only enabled, present item
+  keys.
+- Printable-character typeahead uses the shared collection typeahead behavior, ignores
+  composition and control-modified input, and focuses matching enabled items.
+- `SyncProps` refreshes items, disabled keys, columns, selected-key control state,
+  `loading`, `composite`, `dnd_enabled`, and component IDs, dropping focus when the grid becomes
+  disabled or when the focused key is no longer present or enabled.
+- `ItemAction` records `requested_action_key` and emits the `Action` effect so adapters can invoke
+  `on_action`. Link activation, DOM focus, scroll-into-view, live announcements, pointer hit
+  testing, native drag events, and load-more observation stay in adapters.
 
 ### 1.6 Connect / API
 
-```rust
+```rust,no_check
 #[derive(ComponentPart)]
 #[scope = "grid-list"]
 pub enum Part {
@@ -484,156 +258,46 @@ pub enum Part {
     Row { key: Key },
     Cell { key: Key },
     LoadingSentinel,
+    DragHandle { key: Key },
+    DropIndicator,
 }
 
-/// API for the GridList component.
-pub struct Api<'a> {
-    /// Current state of the grid list.
-    state: &'a State,
-    /// Current context of the grid list.
-    ctx:   &'a Context,
-    /// Current props of the grid list.
-    props: &'a Props,
-    /// Send event to the grid list.
-    send:  &'a dyn Fn(Event),
-}
+/// Adapter-facing API for the GridList component.
+pub struct Api<'a> { /* private fields */ }
 
-impl<'a> Api<'a> {
-    /// Returns the grid dimensions description (e.g. "4 rows, 3 columns").
-    pub fn grid_dimensions(&self) -> String {
-        let cols = self.ctx.columns.get();
-        let rows = (self.ctx.items.len() + cols - 1) / cols;
-        (self.ctx.messages.grid_dimensions)(rows, cols, &self.ctx.locale)
-    }
-
-    /// Returns the cell position description (e.g. "Row 2, Column 3").
-    pub fn cell_position(&self, key: &Key) -> Option<String> {
-        let idx = Machine::key_index(&self.ctx.items, key)?;
-        let (col, row) = Machine::index_to_pos(idx, self.ctx.columns);
-        Some((self.ctx.messages.cell_position)(row + 1, col + 1, &self.ctx.locale))
-    }
-
-    /// Root attributes for the grid list.
-    pub fn root_attrs(&self) -> AttrMap {
-        let mut p = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-        p.set(scope_attr, scope_val);
-        p.set(part_attr, part_val);
-        p.set(HtmlAttr::Role, "grid");
-        if let Some(label) = &self.props.label {
-            p.set(HtmlAttr::Aria(AriaAttr::Label), label);
-        }
-        if self.ctx.selection_mode == selection::Mode::Multiple {
-            p.set(HtmlAttr::Aria(AriaAttr::MultiSelectable), "true");
-        }
-        if self.ctx.disabled {
-            p.set_bool(HtmlAttr::Data("ars-disabled"), true);
-            p.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
-        }
-        if let Some(col_count) = self.props.column_count {
-            p.set(HtmlAttr::Aria(AriaAttr::ColCount), col_count.to_string());
-        }
-        if let Some(row_count) = self.props.row_count {
-            p.set(HtmlAttr::Aria(AriaAttr::RowCount), row_count.to_string());
-        }
-        p.set(HtmlAttr::Data("ars-state"), match self.state {
-            State::Idle    => "idle",
-            State::Focused => "focused",
-        });
-        p
-    }
-
-    /// Row attributes for the grid list.
-    pub fn row_attrs(&self, key: &Key) -> AttrMap {
-        let mut p = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] =
-            Part::Row { key: Key::default() }.data_attrs();
-        p.set(scope_attr, scope_val);
-        p.set(part_attr, part_val);
-        p.set(HtmlAttr::Data("ars-key"), key.to_string());
-        p.set(HtmlAttr::Role, "row");
-
-        let is_selected = self.ctx.selected_keys.get().contains(key);
-        if is_selected {
-            p.set(HtmlAttr::Aria(AriaAttr::Selected), "true");
-            p.set_bool(HtmlAttr::Data("ars-selected"), true);
-        }
-        p
-    }
-
-    /// Cell attributes for the grid list.
-    pub fn cell_attrs(&self, key: &Key) -> AttrMap {
-        let mut p = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] =
-            Part::Cell { key: Key::default() }.data_attrs();
-        p.set(scope_attr, scope_val);
-        p.set(part_attr, part_val);
-        p.set(HtmlAttr::Data("ars-key"), key.to_string());
-        p.set(HtmlAttr::Role, "gridcell");
-
-        let is_focused = self.ctx.focused_key.as_ref() == Some(key);
-        let is_disabled = Machine::is_disabled(self.ctx, key);
-        let is_selected = self.ctx.selected_keys.get().contains(key);
-
-        // Roving tabindex
-        p.set(HtmlAttr::TabIndex, if is_focused { "0" } else { "-1" });
-        if is_focused && self.ctx.focus_visible {
-            p.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
-        }
-        if is_disabled {
-            p.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
-            p.set_bool(HtmlAttr::Data("ars-disabled"), true);
-        }
-        if self.ctx.selection_mode != selection::Mode::None {
-            p.set(HtmlAttr::Aria(AriaAttr::Selected), if is_selected { "true" } else { "false" });
-        }
-        if is_selected {
-            p.set_bool(HtmlAttr::Data("ars-selected"), true);
-        }
-
-        // When the item has an href, set it so the adapter renders an `<a>` element.
-        // The `role="gridcell"` is preserved on the `<a>`.
-        let item = self.ctx.items.iter().find(|i| &i.key == key);
-        if let Some(href) = item.and_then(|i| i.href.as_deref()) {
-            p.set(HtmlAttr::Href, href);
-        }
-
-        // Event handlers (focus, blur, click, keydown for 2D grid navigation) are typed methods on the Api struct.
-        p
-    }
-
-    /// Attributes for the loading sentinel element, rendered after the last item
-    /// when `on_load_more` is configured. The framework adapter attaches an
-    /// `IntersectionObserver` to this element; when it enters the viewport, the
-    /// adapter invokes `on_load_more`. See `06-collections.md` §5.3.
-    ///
-    /// Returns `None` when `on_load_more` is `None` (no sentinel needed).
-    pub fn loading_sentinel_attrs(&self) -> Option<AttrMap> {
-        if self.props.on_load_more.is_none() { return None; }
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::LoadingSentinel.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
-        attrs.set(HtmlAttr::TabIndex, "-1");
-        if self.ctx.loading {
-            attrs.set_bool(HtmlAttr::Data("ars-loading"), true);
-        }
-        Some(attrs)
-    }
+impl Api<'_> {
+    /// Returns the current localized grid-dimensions description.
+    pub fn grid_dimensions(&self) -> String;
+    /// Returns the localized row/column description for `key`.
+    pub fn cell_position(&self, key: &Key) -> Option<String>;
+    /// Returns the hydration-stable cell ID for `key`.
+    pub fn cell_id(&self, key: &Key) -> Option<String>;
+    /// Returns the latest user-requested selected keys.
+    pub const fn requested_selected_keys(&self) -> Option<&BTreeSet<Key>>;
+    /// Returns the latest user-requested action key.
+    pub const fn requested_action_key(&self) -> Option<&Key>;
+    /// Returns the current item collection.
+    pub const fn items(&self) -> &StaticCollection<ItemDef>;
+    /// Returns root attributes.
+    pub fn root_attrs(&self) -> AttrMap;
+    /// Returns row attributes for `key`.
+    pub fn row_attrs(&self, key: &Key) -> AttrMap;
+    /// Returns cell attributes for `key`.
+    pub fn cell_attrs(&self, key: &Key) -> AttrMap;
+    /// Returns loading sentinel attributes when `on_load_more` is configured.
+    pub fn loading_sentinel_attrs(&self) -> Option<AttrMap>;
+    /// Returns drag handle attributes for `key`.
+    pub fn drag_handle_attrs(&self, key: &Key) -> AttrMap;
+    /// Returns drop indicator attributes for `target`.
+    pub fn drop_indicator_attrs(&self, target: &CollectionDropTarget) -> AttrMap;
+    /// Dispatches a keydown event using an accumulating fallback timestamp.
+    pub fn on_cell_keydown(&self, key: &Key, data: &KeyboardEventData);
+    /// Dispatches a keydown event with an adapter-provided monotonic timestamp.
+    pub fn on_cell_keydown_at(&self, key: &Key, data: &KeyboardEventData, now: Duration);
 }
 
 impl ConnectApi for Api<'_> {
     type Part = Part;
-
-    fn part_attrs(&self, part: Part) -> AttrMap {
-        match &part {
-            Part::Root => self.root_attrs(),
-            Part::Row { key } => self.row_attrs(key),
-            Part::Cell { key } => self.cell_attrs(key),
-            Part::LoadingSentinel => self.loading_sentinel_attrs().unwrap_or_default(),
-        }
-    }
 }
 ```
 
@@ -646,15 +310,19 @@ GridList
 │   ├── Cell          (individual item; role="gridcell"; <a> when href present; data-ars-part="cell")
 │   └── ...
 ├── ...
-└── LoadingSentinel   (optional; after last Row; rendered only when on_load_more is set)
+├── LoadingSentinel   (optional; after last Row; rendered only when on_load_more is set)
+├── DragHandle        (optional; drag-and-drop variant)
+└── DropIndicator     (optional; drag-and-drop variant)
 ```
 
-| Part              | Element                                                                      | Key Attributes                                                                                                                                |
-| ----------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Root`            | `<div>`                                                                      | `role="grid"`, `aria-label`, `aria-multiselectable`, `data-ars-state`, `data-ars-disabled`                                                    |
-| `Row`             | `<div>`                                                                      | `role="row"`, `aria-selected`, `data-ars-key`, `data-ars-selected`                                                                            |
-| `Cell`            | `<div>` or `<a>` (when href)                                                 | `role="gridcell"`, `tabindex` (roving), `aria-disabled`, `data-ars-key`, `data-ars-selected`, `data-ars-focus-visible`, `href` (when present) |
-| `LoadingSentinel` | `<div>` (optional, after last Row; rendered only when `on_load_more` is set) | `aria-hidden="true"`, `tabindex="-1"`, `data-ars-loading` (when loading)                                                                      |
+| Part              | Element                                                                      | Key Attributes                                                                                                                                                                                                                                                                                           |
+| ----------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Root`            | `<div>`                                                                      | `role="grid"`, `tabindex="0"` in enabled composite mode, `tabindex="-1"` in disabled composite mode, `aria-label`, `aria-multiselectable`, `data-ars-state`, `data-ars-disabled`                                                                                                                         |
+| `Row`             | `<div>`                                                                      | `role="row"` and `aria-selected` in composite mode, `role="listitem"` without `aria-selected` in non-composite mode, `data-ars-key`, `data-ars-selected`                                                                                                                                                 |
+| `Cell`            | `<div>` or `<a>` (when enabled href)                                         | `role="gridcell"` and `aria-selected` in composite mode, `tabindex="-1"` in composite mode, independent `tabindex="0"` in non-composite mode, `aria-disabled`, `aria-roledescription` (when draggable), `data-ars-key`, `data-ars-selected`, `data-ars-focus-visible`, `href` (when enabled and present) |
+| `LoadingSentinel` | `<div>` (optional, after last Row; rendered only when `on_load_more` is set) | `aria-hidden="true"`, `tabindex="-1"`, `data-ars-loading` (when loading)                                                                                                                                                                                                                                 |
+| `DragHandle`      | `<button>`                                                                   | `role="button"`, `aria-label`, `aria-disabled`, `tabindex`                                                                                                                                                                                                                                               |
+| `DropIndicator`   | `<div>`                                                                      | `aria-hidden="true"`, `data-ars-drop-position`, `data-ars-drop-target`                                                                                                                                                                                                                                   |
 
 ## 3. Accessibility
 
@@ -663,18 +331,22 @@ GridList
 - **Grid pattern**: GridList uses `role="grid"` at the root level, with `role="row"` grouping
   cells and `role="gridcell"` on each item. This provides two-dimensional keyboard navigation
   semantics to assistive technologies.
-- **Roving tabindex**: Only the currently focused cell has `tabindex="0"`; all others have
-  `tabindex="-1"`. When no cell is focused, the first non-disabled cell receives `tabindex="0"`.
-- **Selection announcement**: `aria-selected` on rows reflects selection state. When
-  `selection_mode` is `Multiple`, the root has `aria-multiselectable="true"`.
+- **Composite tab stop**: In `composite: true`, the enabled root is the single tab stop and cells
+  use `tabindex="-1"` while `aria-activedescendant` names the active cell. Disabled composite
+  roots use `tabindex="-1"`. In `composite: false`, each enabled cell is an independent tab stop.
+- **Selection announcement**: In composite mode, `aria-selected` on rows reflects selection state.
+  Composite cells also expose `aria-selected` because they have `role="gridcell"`. Non-composite
+  listitems and cell hosts omit `aria-selected`; adapters style selected non-composite items from
+  `data-ars-selected` or use a selectable adapter-level pattern when AT selection announcement is
+  required. When `selection_mode` is `Multiple`, the root has `aria-multiselectable="true"`.
 - **Disabled items**: `aria-disabled="true"` on individual cells. Disabled items are skipped
   during 2D navigation when possible, but remain discoverable by AT.
 - **`aria-activedescendant`**: The root element sets `aria-activedescendant` to the ID of the
-  currently focused cell. This provides an alternative focus management strategy to roving
-  tabindex for virtualized grids where not all cells are in the DOM. When `composite: true`,
-  the root element receives focus and `aria-activedescendant` points to the visually focused cell.
-- **Action vs. selection**: Enter triggers `on_action` (primary action), while Space toggles
-  selection. This mirrors the ARIA grid pattern where Enter activates and Space selects.
+  currently focused cell. When `composite: true`, the root element receives focus and
+  `aria-activedescendant` points to the visually focused cell.
+- **Action vs. selection**: Enter triggers `on_action` (primary action), while Space selects or
+  toggles according to `selection_behavior`. This mirrors the ARIA grid pattern where Enter
+  activates and Space selects.
 - **Home/End wrapping**: `Home` moves focus to the first non-disabled item in the grid. `End`
   moves focus to the last non-disabled item. When combined with `Ctrl`, `Ctrl+Home` moves to
   the first item in the first row, and `Ctrl+End` moves to the last item in the last row.
@@ -692,7 +364,9 @@ GridList
   `Cell` as an `<a>` element. The `role="gridcell"` on the cell and `role="row"` on the parent
   row are preserved -- the `<a>` carries the grid role, not `role="link"`. This allows native
   link semantics (middle-click to open in new tab, Ctrl+click, etc.) while maintaining the
-  ARIA grid pattern. Enter activates the link navigation; Space continues to toggle selection.
+  ARIA grid pattern. Enter activates the link navigation; Space continues to select according to
+  `selection_behavior`. Disabled link cells omit `href` so native navigation is unavailable while
+  the disabled state is exposed.
 - **Loading sentinel**: The `LoadingSentinel` element is `aria-hidden="true"` and excluded from
   the tab order (`tabindex="-1"`). It serves purely as an `IntersectionObserver` target for
   infinite scroll. Loading state changes (loading started/completed, new items available) are
@@ -710,7 +384,7 @@ GridList
 | `ArrowRight`  | Move focus one cell to the right.                                                                                                                |
 | `Home`        | Move focus to the first item in the grid.                                                                                                        |
 | `End`         | Move focus to the last item in the grid.                                                                                                         |
-| `Space`       | Toggle selection of the focused item.                                                                                                            |
+| `Space`       | Select or toggle the focused item according to `selection_behavior`.                                                                             |
 | `Enter`       | Activate the focused item (primary action).                                                                                                      |
 | `Ctrl+A`      | Select all non-disabled items (multiple selection mode only).                                                                                    |
 | `Escape`      | Clear selection.                                                                                                                                 |
@@ -735,19 +409,25 @@ pub struct Messages {
     pub cell_position: MessageFn<dyn Fn(usize, usize, &Locale) -> String + Send + Sync>,
     /// Describes total grid dimensions, e.g. "4 rows, 3 columns".
     pub grid_dimensions: MessageFn<dyn Fn(usize, usize, &Locale) -> String + Send + Sync>,
+    /// Accessible label template for an item's drag handle.
+    pub drag_handle_label: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    /// Role description for draggable items.
+    pub draggable: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 }
 impl Default for Messages {
     fn default() -> Self {
         Self {
             cell_position: MessageFn::new(|row, col, _locale| format!("Row {row}, Column {col}")),
             grid_dimensions: MessageFn::new(|rows, cols, _locale| format!("{rows} rows, {cols} columns")),
+            drag_handle_label: MessageFn::new(|label, _locale| format!("Drag {label}")),
+            draggable: MessageFn::static_str("draggable"),
         }
     }
 }
 impl ComponentMessages for Messages {}
 ```
 
-> **Drag and Drop Reorder**: When `dnd_enabled: true` is set, GridList integrates with `DraggableCollection<T>` and `DroppableCollection<T>` from `06-collections.md` §7. This adds optional `DragHandle` and `DropIndicator` anatomy parts, and fires `CollectionDndEvent::Reorder` when items are drag-reordered.
+> **Drag and Drop Reorder**: When `dnd_enabled: true` is set, GridList surfaces the agnostic drag-and-drop affordance attrs described in `06-collections.md` §10: cells receive draggable role-description attrs, `DragHandle` exposes the keyboard-accessible drag affordance, and `DropIndicator` encodes a resolved `CollectionDropTarget`. Adapters wire `DraggableCollection<T>` / `DroppableCollection<T>`, pointer hit-testing, keyboard drag protocol, live announcements, and `CollectionDndEvent::Reorder` completion callbacks.
 
 ## 5. Library Parity
 
@@ -764,7 +444,7 @@ impl ComponentMessages for Messages {}
 | `disabled_keys`                           | `BTreeSet<Key>`             | `Iterable<Key>`                | Equivalent                                                                      |
 | `disallow_empty_selection`                | `bool`                      | --                             | Added for consistency with Table                                                |
 | `escape_key_behavior`                     | `EscapeKeyBehavior`         | --                             | Added for consistency with Table                                                |
-| `drag_and_drop_hooks`                     | Via `06-collections.md`     | `DragAndDropHooks`             | Both support DnD                                                                |
+| `drag_and_drop_hooks`                     | Via `06-collections.md` §10 | `DragAndDropHooks`             | Both support DnD                                                                |
 | `render_empty_state`                      | --                          | `() => ReactNode`              | Adapter-layer concern; the adapter decides what to render when `items` is empty |
 | `selection_behavior`                      | `selection::Behavior`       | `SelectionBehavior` (implicit) | Equivalent                                                                      |
 
@@ -772,15 +452,17 @@ impl ComponentMessages for Messages {}
 
 ### 5.2 Anatomy
 
-| Part     | ars-ui            | React Aria             | Notes                                                 |
-| -------- | ----------------- | ---------------------- | ----------------------------------------------------- |
-| Root     | `Root`            | `GridList`             | --                                                    |
-| Row      | `Row`             | --                     | ars-ui adds explicit row grouping                     |
-| Cell     | `Cell`            | `GridListItem`         | --                                                    |
-| Section  | --                | `GridListSection`      | ars-ui handles grouping at the adapter level          |
-| Header   | --                | `GridListHeader`       | Section headers are adapter-level                     |
-| LoadMore | `LoadingSentinel` | `GridListLoadMoreItem` | Same concept                                          |
-| Checkbox | --                | `Checkbox`             | ars-ui manages selection via `aria-selected` on cells |
+| Part          | ars-ui            | React Aria             | Notes                                                 |
+| ------------- | ----------------- | ---------------------- | ----------------------------------------------------- |
+| Root          | `Root`            | `GridList`             | --                                                    |
+| Row           | `Row`             | --                     | ars-ui adds explicit row grouping                     |
+| Cell          | `Cell`            | `GridListItem`         | --                                                    |
+| Section       | --                | `GridListSection`      | ars-ui handles grouping at the adapter level          |
+| Header        | --                | `GridListHeader`       | Section headers are adapter-level                     |
+| LoadMore      | `LoadingSentinel` | `GridListLoadMoreItem` | Same concept                                          |
+| DragHandle    | `DragHandle`      | `DragAndDropHooks`     | ars-ui exposes a named handle part for DnD affordance |
+| DropIndicator | `DropIndicator`   | `DragAndDropHooks`     | ars-ui exposes a named visual drop-target part        |
+| Checkbox      | --                | `Checkbox`             | ars-ui manages selection via `aria-selected` on cells |
 
 **Gaps:** None. Section grouping is an adapter-level concern in ars-ui.
 

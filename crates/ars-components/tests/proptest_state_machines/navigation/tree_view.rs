@@ -1,6 +1,6 @@
 //! Property-based tests for the `navigation/tree_view` state machine.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, time::Duration};
 
 use ars_collections::{
     Collection, Key, TreeCollection, TreeItemConfig,
@@ -130,7 +130,9 @@ fn arb_tree_view_event() -> impl Strategy<Value = tree_view::Event> {
             prop_oneof![Just('a'), Just('b'), Just('d'), Just('z')],
             0u64..4000
         )
-            .prop_map(|(ch, now_ms)| tree_view::Event::TypeaheadSearch(ch, now_ms)),
+            .prop_map(|(ch, now)| {
+                tree_view::Event::TypeaheadSearch(ch, Duration::from_millis(now))
+            }),
         Just(tree_view::Event::ClearTypeahead),
         Just(tree_view::Event::ExpandAll),
         Just(tree_view::Event::CollapseAll),
