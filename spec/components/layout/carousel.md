@@ -48,8 +48,15 @@ pub enum Event {
     AutoPlayStop,
     /// Auto-play timer fired; advance one slide.
     AutoPlayTick,
-    /// Temporarily pause auto-play (hover/focus).
+    /// Manually pause auto-play (e.g. the auto-play trigger button). Pauses
+    /// regardless of the `pause_on_*` options, which gate the automatic
+    /// hover/focus pauses (`HoverStart` / `FocusSlide`).
     AutoPlayPause,
+    /// Pointer entered the carousel. Pauses auto-play only when
+    /// `AutoPlayOptions::pause_on_hover` is set; otherwise a no-op.
+    HoverStart,
+    /// Pointer left the carousel. Resumes a hover/focus auto-play pause.
+    HoverEnd,
     /// Resume auto-play after pause.
     AutoPlayResume,
     /// The CSS transition animation completed.
@@ -191,8 +198,14 @@ impl Context {
         }
     }
 
-    pub fn can_go_prev(&self) -> bool { self.loop_nav || self.current_index() > 0 }
-    pub fn can_go_next(&self) -> bool { self.loop_nav || self.current_index() < self.last_index() }
+    // Always `false` when `last_index() == 0` (one slide, or `slides_per_view`
+    // already shows them all): no distinct target exists, even when looping.
+    pub fn can_go_prev(&self) -> bool {
+        self.current_index() > 0 || (self.loop_nav && self.last_index() > 0)
+    }
+    pub fn can_go_next(&self) -> bool {
+        self.current_index() < self.last_index() || (self.loop_nav && self.last_index() > 0)
+    }
 
     /// Whether `index` is within the visible window of `visible_count` slides
     /// starting at `current_index` (wrapping when `loop_nav` is set). Slides
@@ -253,6 +266,13 @@ pub struct Props {
     pub swipe_threshold: Option<f64>,
     /// Whether the carousel is right-to-left.
     pub is_rtl: bool,
+    /// Callback fired with the newly requested slide index whenever the machine
+    /// changes the index. **Required for controlled usage** (`index` is
+    /// `Some`): in controlled mode `Bindable::set` only updates the pending
+    /// internal value, so the parent must update its controlled signal from
+    /// this callback and push it back through `index`, otherwise the visible
+    /// slide never moves.
+    pub on_index_change: Option<Callback<dyn Fn(usize) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -272,6 +292,7 @@ impl Default for Props {
             transition_duration: None,
             swipe_threshold: None,
             is_rtl: false,
+            on_index_change: None,
         }
     }
 }
@@ -300,6 +321,13 @@ pub enum Effect {
     /// on `Blur` when resuming a focus/hover pause. Cancelled on
     /// `AutoPlayStop`, `AutoPlayPause`, and `PointerDown`.
     AutoPlayTimer,
+    /// Adapter invokes `Props::on_index_change` with the newly requested slide
+    /// index. Emitted whenever the machine changes the index (manual nav,
+    /// swipe, auto-play tick, focus scroll). This is the round-trip path for
+    /// **controlled** carousels: in controlled mode `Bindable::set` only updates
+    /// the pending internal value, so the parent must observe this callback and
+    /// push the new value back through `Props::index`.
+    IndexChange,
 }
 
 pub struct Machine;
@@ -317,12 +345,25 @@ pub struct Machine;
 fn navigate_to(ctx: &Context, idx: usize) -> Option<TransitionPlan<Machine>> {
     if idx == ctx.current_index() { return None; }
     let stop = ctx.auto_play.as_ref().is_some_and(|o| o.stop_on_interaction);
-    let mut plan = TransitionPlan::to(State::Transitioning).apply(move |ctx| {
-        ctx.index.set(idx);
-        if stop { ctx.auto_play_stopped = true; }
-    });
+    let mut plan = TransitionPlan::to(State::Transitioning)
+        .apply(move |ctx| {
+            ctx.index.set(idx);
+            if stop { ctx.auto_play_stopped = true; }
+        })
+        .with_effect(index_change_effect(idx));
     if stop { plan = plan.cancel_effect(Effect::AutoPlayTimer); }
     Some(plan)
+}
+
+/// Build the `Effect::IndexChange` notification carrying the newly requested
+/// slide `index`; the adapter resolves it by invoking `Props::on_index_change`.
+fn index_change_effect(index: usize) -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::IndexChange, move |_ctx, props: &Props, _send| {
+        if let Some(callback) = &props.on_index_change {
+            callback(index);
+        }
+        no_cleanup()
+    })
 }
 
 impl ars_core::Machine for Machine {
@@ -480,9 +521,9 @@ impl ars_core::Machine for Machine {
                 // `Transitioning` with no transform change risks a missing
                 // `transitionend` that strands the machine.
                 if next == ctx.current_index() { return None; }
-                Some(TransitionPlan::to(State::Transitioning).apply(move |ctx| {
-                    ctx.index.set(next);
-                }))
+                Some(TransitionPlan::to(State::Transitioning)
+                    .apply(move |ctx| { ctx.index.set(next); })
+                    .with_effect(index_change_effect(next)))
             }
 
             Event::AutoPlayPause => {
@@ -497,6 +538,28 @@ impl ars_core::Machine for Machine {
                     TransitionPlan::new()
                 };
                 Some(plan.apply(|ctx| { ctx.auto_play_paused = true; }).cancel_effect(Effect::AutoPlayTimer))
+            }
+
+            Event::HoverStart => {
+                // Hover-pause is opt-in via `pause_on_hover`; otherwise hovering
+                // does nothing. When enabled it pauses like `AutoPlayPause`.
+                if !ctx.auto_play.as_ref().is_some_and(|o| o.pause_on_hover) { return None; }
+                let plan = if *state == State::AutoPlaying {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+                Some(plan.apply(|ctx| { ctx.auto_play_paused = true; }).cancel_effect(Effect::AutoPlayTimer))
+            }
+
+            Event::HoverEnd => {
+                // Resume a hover/focus pause when the pointer leaves, mirroring `Blur`.
+                if ctx.auto_play_paused && !ctx.auto_play_stopped && ctx.auto_play.is_some() {
+                    return Some(TransitionPlan::to(State::AutoPlaying).apply(|ctx| {
+                        ctx.auto_play_paused = false;
+                    }).with_effect(PendingEffect::named(Effect::AutoPlayTimer)));
+                }
+                None
             }
 
             Event::AutoPlayResume => {
@@ -542,6 +605,11 @@ impl ars_core::Machine for Machine {
             }
 
             Event::PointerUp => {
+                // No-op without an active drag: a stray pointer-up must not run
+                // the resume logic (which would re-arm a timer that was never
+                // cancelled, creating duplicate intervals).
+                ctx.drag_start_pos?;
+
                 let delta = ctx.drag_delta;
                 let velocity = ctx.swipe_velocity;
                 let threshold = ctx.swipe_threshold;
@@ -549,10 +617,12 @@ impl ars_core::Machine for Machine {
                 let effective = if velocity.abs() > 0.5 { threshold * 0.3 } else { threshold };
 
                 let cur = ctx.current_index() as isize;
+                // A swipe advances by `slides_per_move`, matching button/keyboard nav.
+                let step = ctx.slides_per_move as isize;
                 let next_idx = if delta < -effective && ctx.can_go_next() {
-                    Some(ctx.clamp_index(cur + 1))
+                    Some(ctx.clamp_index(cur + step))
                 } else if delta > effective && ctx.can_go_prev() {
-                    Some(ctx.clamp_index(cur - 1))
+                    Some(ctx.clamp_index(cur - step))
                 } else {
                     None
                 };
@@ -571,6 +641,7 @@ impl ars_core::Machine for Machine {
                     && !ctx.auto_play_stopped
                     && !ctx.auto_play_paused;
                 let target = if resume { State::AutoPlaying } else { State::Idle };
+                let index_changed = next_idx.is_some_and(|idx| idx != ctx.current_index());
 
                 let mut plan = TransitionPlan::to(target).apply(move |ctx| {
                     ctx.drag_start_pos = None;
@@ -582,6 +653,9 @@ impl ars_core::Machine for Machine {
                     }
                     if mark_stopped { ctx.auto_play_stopped = true; }
                 });
+                if index_changed && let Some(idx) = next_idx {
+                    plan = plan.with_effect(index_change_effect(idx));
+                }
                 if resume { plan = plan.with_effect(PendingEffect::named(Effect::AutoPlayTimer)); }
                 Some(plan)
             }
@@ -610,11 +684,13 @@ impl ars_core::Machine for Machine {
             }
 
             Event::FocusSlide { index } => {
-                // Clamp to the last valid starting index: focusing a slide
-                // already inside the visible window must not push
-                // `current_index` past the boundary.
+                // Only scroll when the focused slide is not already on-screen.
+                // With `slides_per_view > 1`, tabbing into a visible non-leading
+                // slide must NOT shift the track under the user.
+                let scroll = !ctx.is_slide_visible(*index);
+                // Clamp to the last valid starting index so a slide near the end
+                // maps to the last full page rather than overscrolling.
                 let idx = (*index).min(ctx.last_index());
-                let current = ctx.current_index();
                 let should_pause = ctx.auto_play.as_ref().is_some_and(|o| o.pause_on_focus);
                 if should_pause {
                     // Pausing on focus mirrors `AutoPlayPause`: leave
@@ -625,14 +701,17 @@ impl ars_core::Machine for Machine {
                     } else {
                         TransitionPlan::new()
                     };
-                    return Some(plan.apply(move |ctx| {
-                        if idx != current { ctx.index.set(idx); }
+                    let mut plan = plan.apply(move |ctx| {
+                        if scroll { ctx.index.set(idx); }
                         ctx.auto_play_paused = true;
-                    }).cancel_effect(Effect::AutoPlayTimer));
+                    }).cancel_effect(Effect::AutoPlayTimer);
+                    if scroll { plan = plan.with_effect(index_change_effect(idx)); }
+                    return Some(plan);
                 }
+                if !scroll { return None; }
                 Some(TransitionPlan::context_only(move |ctx| {
-                    if idx != current { ctx.index.set(idx); }
-                }))
+                    ctx.index.set(idx);
+                }).with_effect(index_change_effect(idx)))
             }
 
             Event::Blur => {
@@ -945,6 +1024,10 @@ impl<'a> Api<'a> {
             (self.send)(Event::AutoPlayPause);
         }
     }
+    /// Pointer entered the carousel; auto-play pauses only when `pause_on_hover`.
+    pub fn on_root_pointer_enter(&self) { (self.send)(Event::HoverStart); }
+    /// Pointer left the carousel; resumes a hover pause.
+    pub fn on_root_pointer_leave(&self) { (self.send)(Event::HoverEnd); }
     pub fn on_viewport_pointerdown(&self, pos: f64, timestamp: f64) {
         (self.send)(Event::PointerDown { pos, timestamp });
     }
@@ -1042,7 +1125,7 @@ RTL: Arrow keys reverse per `03-accessibility.md` §4.1.
 ### 3.3 Screen Reader Announcements
 
 - `aria-live` on `ItemGroup` is `"off"` during auto-play to prevent disruptive announcements, and `"polite"` when paused or stopped.
-- Auto-play MUST pause on hover (`mouseenter`) and on focus within the carousel (`focusin`). Resumes on `mouseleave` / `focusout` unless `stop_on_interaction` triggered.
+- Auto-play pauses on hover (`mouseenter` → `HoverStart`) when `AutoPlayOptions::pause_on_hover` is set, and on focus within the carousel (`focusin` → `FocusSlide`) when `pause_on_focus` is set. Each gate is enforced in the core, not the adapter. Rotation resumes on `mouseleave` / `focusout` (`HoverEnd` / `Blur`) unless permanently stopped. The auto-play trigger button's manual pause (`AutoPlayPause`) is unconditional and independent of these options.
 - Slides **outside the visible window** (`current_index` through `current_index + ceil(slides_per_view)`, wrapping when `loop_nav` is set) receive both `aria-hidden="true"` and `inert`, ensuring off-screen slides are invisible to assistive technology. With `slides_per_view > 1` every on-screen slide stays accessible — only the leading slide carries `data-ars-active`.
 
 ## 4. Internationalization
