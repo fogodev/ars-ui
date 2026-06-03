@@ -263,6 +263,27 @@ fn select_range_complete_blocked_when_readonly() {
     assert!(svc.context().value.get().is_none());
 }
 
+#[test]
+fn select_range_complete_commits_even_after_close() {
+    // Browser ordering: clicking a calendar cell can fire FocusOut (closing the
+    // popover) before the calendar reports the completed range. The selection
+    // must still commit; only the close side-effect is gated on being open.
+    let mut svc = service();
+    drop(svc.send(Event::Open));
+    drop(svc.send(Event::FocusOut));
+    assert_eq!(*svc.state(), State::Closed);
+
+    let selected = range(date(2025, 3, 1), date(2025, 3, 15));
+    drop(svc.send(Event::SelectRangeComplete {
+        range: selected.clone(),
+    }));
+
+    assert_eq!(*svc.state(), State::Closed);
+    assert_eq!(*svc.context().value.get(), Some(selected));
+    assert_eq!(svc.context().start_date, Some(date(2025, 3, 1)));
+    assert_eq!(svc.context().end_date, Some(date(2025, 3, 15)));
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Field value coordination
 // ────────────────────────────────────────────────────────────────────
@@ -648,6 +669,23 @@ fn disabled_component_still_processes_sync_props() {
     assert_eq!(*svc.state(), State::Open);
 }
 
+#[test]
+fn disabling_via_props_while_open_closes_popover() {
+    // Disabling an open picker must dismiss it: otherwise the disabled guard
+    // blocks Escape/FocusOut/Close and the dialog is stuck open.
+    let mut svc = service();
+    drop(svc.send(Event::Open));
+    assert_eq!(*svc.state(), State::Open);
+
+    drop(svc.set_props(Props {
+        disabled: true,
+        ..props()
+    }));
+
+    assert_eq!(*svc.state(), State::Closed);
+    assert!(!*svc.context().open.get());
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Connect API: ARIA / attributes
 // ────────────────────────────────────────────────────────────────────
@@ -756,6 +794,27 @@ fn clear_trigger_enabled_with_value() {
     let api = svc.connect(&|_| {});
 
     assert_eq!(attr(&api.clear_trigger_attrs(), HtmlAttr::Disabled), None);
+}
+
+#[test]
+fn clear_trigger_disabled_when_readonly() {
+    // `Event::Clear` is rejected when readonly, so the rendered control must be
+    // disabled rather than expose an actionable button that does nothing.
+    let svc = service_with(
+        Props {
+            default_value: Some(range(date(2025, 6, 1), date(2025, 6, 15))),
+            readonly: true,
+            ..props()
+        },
+        en_us(),
+    );
+
+    let api = svc.connect(&|_| {});
+
+    assert_eq!(
+        attr(&api.clear_trigger_attrs(), HtmlAttr::Disabled).as_deref(),
+        Some("true")
+    );
 }
 
 #[test]
@@ -1001,6 +1060,27 @@ fn preset_helpers_expose_labels_and_attrs() {
     // Out-of-range preset trigger is disabled.
     assert_eq!(
         attr(&api.preset_trigger_attrs(9), HtmlAttr::Disabled).as_deref(),
+        Some("true")
+    );
+}
+
+#[test]
+fn preset_trigger_disabled_when_readonly() {
+    // `Event::SelectPreset` is rejected when readonly, so a valid preset's
+    // button must render disabled rather than do nothing when clicked.
+    let svc = service_with(
+        Props {
+            presets: sample_presets(),
+            readonly: true,
+            ..props()
+        },
+        en_us(),
+    );
+
+    let api = svc.connect(&|_| {});
+
+    assert_eq!(
+        attr(&api.preset_trigger_attrs(0), HtmlAttr::Disabled).as_deref(),
         Some("true")
     );
 }

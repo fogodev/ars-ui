@@ -378,6 +378,14 @@ impl ars_core::Machine for Machine {
         match (state, event) {
             (_, Event::SyncProps(next)) => {
                 let next = next.as_ref().clone();
+                // Disabling an open picker dismisses it: while disabled the guard
+                // above blocks Close/Escape/FocusOut, so it could never reopen.
+                if next.disabled && *state == State::Open {
+                    return Some(TransitionPlan::to(State::Closed).apply(move |ctx| {
+                        sync_props(ctx, &next);
+                        ctx.open.set(false);
+                    }));
+                }
                 Some(TransitionPlan::context_only(move |ctx| sync_props(ctx, &next)))
             }
 
@@ -389,11 +397,14 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::to(State::Closed).apply(|ctx| ctx.open.set(false)))
             }
 
-            (State::Open, Event::SelectRangeComplete { range }) => {
+            // Accept the completed range in any state: a browser may fire
+            // `FocusOut` (closing the popover) before the calendar reports the
+            // cell click. The close side-effect only applies when it was open.
+            (_, Event::SelectRangeComplete { range }) => {
                 if ctx.readonly { return None; }
                 let range = range.clone();
-                let should_close = props.close_on_select;
-                let next_state = if should_close { State::Closed } else { State::Open };
+                let should_close = props.close_on_select && *state == State::Open;
+                let next_state = if should_close { State::Closed } else { state.clone() };
                 Some(TransitionPlan::to(next_state)
                     .apply(move |ctx| apply_complete_range(ctx, range, should_close)))
             }
@@ -617,11 +628,13 @@ impl<'a> Api<'a> {
     pub fn trigger_attrs(&self) -> AttrMap { /* ... */ }
 
     /// Clear trigger: `aria-label` from `messages.clear_label`; `disabled` when
-    /// disabled or no range is selected.
+    /// the component is disabled or read-only, or no range is selected (matching
+    /// the machine, which rejects `Event::Clear` in those states).
     pub fn clear_trigger_attrs(&self) -> AttrMap { /* ... */ }
 
     /// Preset trigger at `index`: `data-ars-index={index}`, `type="button"`;
-    /// `disabled` when the component is disabled or the index is out of range.
+    /// `disabled` when the component is disabled or read-only, or the index is
+    /// out of range (matching the machine, which rejects `Event::SelectPreset`).
     pub fn preset_trigger_attrs(&self, index: usize) -> AttrMap { /* ... */ }
 
     /// Positioner: scope/part only (positioning is performed by the adapter).
@@ -746,8 +759,8 @@ DateRangePicker
 | `Separator`     | `<span>`              | `aria-hidden="true"`                                                                    |
 | `EndInput`      | `<div>` _(DateField)_ | End date field wrapper (child configured via `end_field_props`)                         |
 | `Trigger`       | `<button>`            | `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`                              |
-| `ClearTrigger`  | `<button>`            | `aria-label="Clear date range"`, disabled when empty                                    |
-| `PresetTrigger` | `<button>`            | `data-ars-index`, one per `Props::presets` entry; disabled when out of range            |
+| `ClearTrigger`  | `<button>`            | `aria-label="Clear date range"`, disabled when empty, disabled, or read-only            |
+| `PresetTrigger` | `<button>`            | `data-ars-index`, one per `Props::presets` entry; disabled when out of range/read-only  |
 | `Positioner`    | `<div>`               | Floating positioner (positioned by the adapter)                                         |
 | `Content`       | `<div>`               | `role="dialog"`, `aria-modal="false"`, `aria-labelledby`                                |
 | `Description`   | `<div>`               | Help text, wired via the control's `aria-describedby`                                   |

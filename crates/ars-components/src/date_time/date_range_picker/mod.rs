@@ -666,6 +666,19 @@ impl ars_core::Machine for Machine {
         match (state, event) {
             (_, Event::SyncProps(next)) => {
                 let next = next.as_ref().clone();
+
+                // Disabling an open picker must dismiss it: while disabled the
+                // guard above blocks Close/Escape/FocusOut, so a popover left
+                // open here could never be closed again.
+                if next.disabled && *state == State::Open {
+                    return Some(TransitionPlan::to(State::Closed).apply(
+                        move |ctx: &mut Context| {
+                            sync_props(ctx, &next);
+                            ctx.open.set(false);
+                        },
+                    ));
+                }
+
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     sync_props(ctx, &next);
                 }))
@@ -683,19 +696,23 @@ impl ars_core::Machine for Machine {
                 }),
             ),
 
-            (State::Open, Event::SelectRangeComplete { range }) => {
+            (_, Event::SelectRangeComplete { range }) => {
                 if ctx.readonly {
                     return None;
                 }
 
+                // Accept the completed range regardless of open state: a browser
+                // can fire `FocusOut` (closing the popover) before the calendar
+                // reports the cell click, and the selection must not be dropped.
+                // The close side-effect only applies when the picker was open.
                 let range = range.clone();
 
-                let should_close = props.close_on_select;
+                let should_close = props.close_on_select && *state == State::Open;
 
                 let next_state = if should_close {
                     State::Closed
                 } else {
-                    State::Open
+                    state.clone()
                 };
 
                 Some(
@@ -1196,8 +1213,9 @@ impl<'a> Api<'a> {
 
     /// Returns attributes for the clear trigger element.
     ///
-    /// The button is disabled when the component is disabled or no range is
-    /// selected.
+    /// The button is disabled when the component is disabled or read-only, or
+    /// when no range is selected — matching the machine, which rejects
+    /// [`Event::Clear`] in those states.
     #[must_use]
     pub fn clear_trigger_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -1212,7 +1230,7 @@ impl<'a> Api<'a> {
                 (self.ctx.messages.clear_label)(&self.ctx.locale),
             );
 
-        if self.ctx.disabled || self.ctx.value.get().is_none() {
+        if self.ctx.disabled || self.ctx.readonly || self.ctx.value.get().is_none() {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
@@ -1221,8 +1239,9 @@ impl<'a> Api<'a> {
 
     /// Returns attributes for the preset trigger at `index`.
     ///
-    /// The trigger is disabled when the component is disabled or the index is out
-    /// of range.
+    /// The trigger is disabled when the component is disabled or read-only, or
+    /// when the index is out of range — matching the machine, which rejects
+    /// [`Event::SelectPreset`] in those states.
     #[must_use]
     pub fn preset_trigger_attrs(&self, index: usize) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -1235,7 +1254,7 @@ impl<'a> Api<'a> {
             .set(HtmlAttr::Type, "button")
             .set(HtmlAttr::Data("ars-index"), index.to_string());
 
-        if self.ctx.disabled || index >= self.ctx.presets.len() {
+        if self.ctx.disabled || self.ctx.readonly || index >= self.ctx.presets.len() {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
