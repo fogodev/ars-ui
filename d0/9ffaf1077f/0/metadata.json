@@ -1,0 +1,141 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d09ffaf1077f",
+  "session_id": "11232391-c5e3-4f6c-9dfc-75ed12f9e103",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T17:05:15.233545Z",
+  "branch": "impl-278",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/layout/carousel/mod.rs",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__auto_play_trigger_paused.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__auto_play_trigger_playing.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__autoplay_indicator_paused.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__autoplay_indicator_playing.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__indicator_group.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__indicator_selected.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__indicator_unselected.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__item_current.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__item_group_off.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__item_group_polite.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__item_hidden.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__next_trigger_disabled.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__next_trigger_enabled.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__prev_trigger_disabled.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__prev_trigger_enabled.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__progress_text_attrs.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__root_autoplaying.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__root_idle_horizontal.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__root_transitioning.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__root_vertical.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__viewport_horizontal.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__viewport_vertical.snap",
+    "crates/ars-components/src/layout/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/layout.rs",
+    "crates/ars-components/tests/spec_conformance/layout.rs",
+    "spec/components/layout/carousel.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "3880b47c3e06",
+  "token_usage": {
+    "input_tokens": 37717,
+    "cache_creation_tokens": 859043,
+    "cache_read_tokens": 30990895,
+    "output_tokens": 146262,
+    "api_call_count": 143
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "summary": {
+    "intent": "Implement the framework-agnostic Carousel state machine (issue #278) for the ars-ui component library, following the existing spec and codebase conventions.",
+    "outcome": "Fully implemented, audited, and verified the Carousel agnostic core with 82 inline tests, 22 snapshot fixtures, proptest coverage, and 97.88% line coverage. All CI gates passed; changes committed and pushed as a PR targeting main.",
+    "learnings": {
+      "repo": [
+        "Agnostic core has no set_interval/clear_interval — timer effects must be modeled as typed Effect enum variants emitted via PendingEffect::named/cancel_effect, following the toast::single::Effect precedent",
+        "When a machine boots into a state that requires an active effect (e.g., AutoPlaying), an initial_effects override is required so adapters can drain via take_initial_effects() on mount — without it the timer never arms",
+        "MessageFn implements PartialEq, so any Messages struct stored in Context must also derive PartialEq or the Machine trait bound fails",
+        "ComponentPart derive uses kebab-case: multi-word variants like AutoPlayTrigger map to 'auto-play-trigger'",
+        "#[must_use] on all *_attrs methods is enforced workspace-wide (splitter, collapsible precedent)",
+        "Closures passed to .apply() require an explicit &mut Context type annotation — Rust inference doesn't resolve it without the annotation",
+        "Multi-arg closure fields that trigger clippy type_complexity should be factored into named type aliases (e.g., SlideLabelFn), matching the splitter convention",
+        "cargo xci-fast is the mandatory pre-push gate (10 steps, includes coverage threshold checks at 98.4% line / 90.1% branch for ars-components)",
+        "cargo insta test --features i18n --unreferenced=reject is the snapshot orphan check; i18n feature must be enabled or highlight utility fixtures appear as false-positive orphans",
+        "Splitter component is the canonical implementation pattern to mirror for new layout components (imports, builder structure, Api Debug derive, test helper shape)"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "GoToSlide and FocusSlide must clamp index to [0, slide_count-1] — spec originally left it unclamped, which would silently break every connect method for out-of-range inputs"
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "autoplay_indicator_attrs was named inconsistently with its sibling auto_play_trigger_attrs and the AutoPlayIndicator Part variant — renamed to auto_play_indicator_attrs"
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/layout.rs",
+          "finding": "Carousel has no on_props_changed, so props are init-time config only — the proptest must thread slide_count into the event strategy rather than using set_props mid-sequence"
+        },
+        {
+          "path": "spec/components/layout/carousel.md",
+          "finding": "map_or(false, |x| x.cond()) is non-idiomatic in this workspace (clippy -D warnings enforced) — spec must use is_some_and to stay compilable as doc snippets"
+        }
+      ],
+      "workflow": [
+        "GitHub Projects board should be updated to 'In Progress' before starting implementation, not after",
+        "Post-implementation audit runs in 3 phases: spec/impl drift check, iterative 'anything missing?' rounds (terminate after 2 consecutive clean rounds), then llvm-cov gap analysis",
+        "llvm-cov text output is too noisy to grep reliably for per-file uncovered lines — reasoning from branch structure to identify gaps is more practical than fighting the tool's output format",
+        "cargo xci-fast output is buffered until completion when piped through tail; use an until-loop monitor or background task notification rather than polling a read",
+        "Spec markdown must be kept in sync with impl changes throughout the session, not deferred to end — spec validates as part of the CI gate"
+      ]
+    },
+    "friction": [
+      "KeyboardEventData was assumed to derive Default (like some other components) but does not — required field-literal construction, discovered only at compile time",
+      "Event capture closures in tests needed explicit block-scoping for borrow lifetimes; the error message (E0499) was not immediately obvious",
+      "llvm-cov per-file filtering via regex lookahead is unsupported, making carousel-specific uncovered line extraction awkward and requiring a reasoning-based fallback",
+      "cargo xci-fast piped output buffers until process exit, making progress monitoring during the wait require an until-loop workaround",
+      "Spec had three accumulated drift points (timer API, initial_effects, PartialEq + imports) that required multiple targeted edits before the impl could compile against it"
+    ],
+    "open_items": [
+      "Adapter specs for leptos and dioxus carousel (spec/leptos-components/layout/carousel.md, spec/dioxus-components/layout/carousel.md) exist but are not yet implemented",
+      "Codex review loop was mentioned as a planned follow-up step after the PR push but is not shown as completed in the transcript",
+      "Issue #278 was moved to In Progress but not yet closed — depends on PR review and merge"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T17:04:16.564239Z",
+    "agent_lines": 2776,
+    "agent_removed": 0,
+    "human_added": 646,
+    "human_modified": 194,
+    "human_removed": 0,
+    "total_committed": 3519,
+    "total_lines_changed": 3616,
+    "agent_percentage": 76.76991150442478,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 420,
+      "user_lines_removed": 97,
+      "agent_lines_added": 3293,
+      "agent_lines_removed": 39,
+      "user_added_per_file": {
+        "crates/ars-components/src/layout/carousel/mod.rs": 418,
+        "crates/ars-components/tests/proptest_state_machines/layout.rs": 2
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/layout/carousel/mod.rs": 97
+      }
+    }
+  ]
+}

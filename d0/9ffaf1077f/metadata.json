@@ -1,0 +1,51 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d09ffaf1077f",
+  "strategy": "manual-commit",
+  "branch": "impl-278",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/layout/carousel/mod.rs",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__auto_play_trigger_paused.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__auto_play_trigger_playing.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__autoplay_indicator_paused.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__autoplay_indicator_playing.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__indicator_group.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__indicator_selected.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__indicator_unselected.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__item_current.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__item_group_off.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__item_group_polite.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__item_hidden.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__next_trigger_disabled.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__next_trigger_enabled.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__prev_trigger_disabled.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__prev_trigger_enabled.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__progress_text_attrs.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__root_autoplaying.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__root_idle_horizontal.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__root_transitioning.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__root_vertical.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__viewport_horizontal.snap",
+    "crates/ars-components/src/layout/carousel/snapshots/ars_components__layout__carousel__tests__viewport_vertical.snap",
+    "crates/ars-components/src/layout/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/layout.rs",
+    "crates/ars-components/tests/spec_conformance/layout.rs",
+    "spec/components/layout/carousel.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d0/9ffaf1077f/0/metadata.json",
+      "transcript": "/d0/9ffaf1077f/0/full.jsonl",
+      "content_hash": "/d0/9ffaf1077f/0/content_hash.txt",
+      "prompt": "/d0/9ffaf1077f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 37717,
+    "cache_creation_tokens": 859043,
+    "cache_read_tokens": 30990895,
+    "output_tokens": 146262,
+    "api_call_count": 143
+  }
+}
