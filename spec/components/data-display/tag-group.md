@@ -206,9 +206,32 @@ impl ars_core::Machine for Machine {
     ) -> Option<TransitionPlan<Self>> {
         if ctx.disabled {
             return match event {
-                Event::Focus { .. } | Event::Blur => {
-                    // Allow focus/blur for AT even when disabled
-                    Some(TransitionPlan::to(State::Idle))
+                Event::Focus { item, is_keyboard } => {
+                    // Allow focus for AT even when disabled so focused context remains observable.
+                    let key = match item {
+                        Some(key) if ctx.items.get(key).is_some() => Some(key.clone()),
+                        Some(_) => None,
+                        None => {
+                            ctx.items
+                                .iter()
+                                .find(|t| !t.disabled)
+                                .map(|t| t.key.clone())
+                        }
+                    };
+                    let focus_visible = *is_keyboard;
+                    let target = if key.is_some() { State::Focused } else { State::Idle };
+
+                    Some(TransitionPlan::to(target).apply(move |ctx| {
+                        ctx.focused_key = key;
+                        ctx.focus_visible = ctx.focused_key.is_some() && focus_visible;
+                    }))
+                }
+                Event::Blur => {
+                    // Allow blur for AT even when disabled.
+                    Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                        ctx.focused_key = None;
+                        ctx.focus_visible = false;
+                    }))
                 }
                 _ => None,
             };
