@@ -47,17 +47,20 @@ pub struct SignatureData {
 impl SignatureData {
     /// Check if the signature data is empty.
     pub fn is_empty(&self) -> bool {
-        self.strokes.is_empty()
+        // Point-based, not stroke-count-based: data containing only empty
+        // strokes (no points) is blank, matching `to_svg_path`/`point_count`,
+        // so externally supplied empty data never looks like a real signature.
+        self.strokes.iter().all(|stroke| stroke.points.is_empty())
     }
 
     /// Convert to SVG path data string.
     pub fn to_svg_path(&self) -> String {
         let mut path = String::new();
         for stroke in &self.strokes {
-            if stroke.points.is_empty() { continue; }
-            path.push_str(format!("M{:.1},{:.1}", stroke.points[0].x, stroke.points[0].y));
+            let Some(first) = stroke.points.first() else { continue };
+            path.push_str(&format!("M{:.1},{:.1}", first.x, first.y));
             for point in &stroke.points[1..] {
-                path.push_str(format!(" L{:.1},{:.1}", point.x, point.y));
+                path.push_str(&format!(" L{:.1},{:.1}", point.x, point.y));
             }
         }
         path
@@ -69,45 +72,40 @@ impl SignatureData {
     }
 }
 
-/// Export format for the signature.
+/// Resolution-independent export formats the agnostic core can produce.
+///
+/// Raster formats (PNG/JPEG/base64-PNG) need a live canvas and live in the
+/// adapter layer's own export format enum, not here — keeping this type free of
+/// variants the core cannot fulfil (make-invalid-states-unrepresentable).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SignatureFormat {
-    /// PNG format.
-    Png,
-    /// SVG format.
+    /// SVG path markup.
     Svg,
-    /// JPEG format.
-    Jpeg,
-    /// Base64-encoded PNG format.
-    Base64Png,
     /// Raw point data.
     Points,
 }
 
-/// Exported signature data in the requested format.
+/// Exported signature data in one of the `SignatureFormat` variants.
+///
+/// Mirrors `SignatureFormat`: every variant is something the core can actually
+/// return, so `export` is total. Adapters define their own export type for
+/// raster output.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SignatureExport {
-    /// PNG image bytes.
-    Png(Vec<u8>),
     /// SVG markup string.
     Svg(String),
-    /// JPEG image bytes.
-    Jpeg(Vec<u8>),
-    /// Base64-encoded PNG string (suitable for `data:` URIs).
-    Base64(String),
     /// Raw point data for vector reconstruction.
     /// Each inner `Vec` is one continuous stroke.
     Points(Vec<Vec<SignaturePoint>>),
 }
 
 impl SignatureData {
-    /// Export the signature in the requested format.
+    /// Export the signature in one of the resolution-independent formats the
+    /// agnostic core can produce.
     ///
-    /// For `Png`, `Jpeg`, and `Base64Png`, the adapter renders strokes onto
-    /// an off-screen canvas and encodes the result. For `Svg`, the core
-    /// library generates the markup from stroke data. For `Points`, the raw
-    /// `SignaturePoint` vectors are returned directly, enabling server-side
-    /// vector reconstruction regardless of display resolution.
+    /// For `Svg` the core generates the markup from stroke data. For `Points`
+    /// the raw `SignaturePoint` vectors are returned directly, enabling
+    /// server-side vector reconstruction regardless of display resolution.
     pub fn export(&self, format: SignatureFormat) -> SignatureExport {
         match format {
             SignatureFormat::Svg => SignatureExport::Svg(self.to_svg_path()),
@@ -116,9 +114,50 @@ impl SignatureData {
                     self.strokes.iter().map(|s| s.points.clone()).collect()
                 )
             }
-            // Png, Jpeg, Base64Png require adapter-side canvas rendering.
-            _ => unimplemented!("Raster export is handled by the adapter layer"),
         }
+    }
+}
+```
+
+**Raster export (PNG/JPEG/WebP).** Raster output needs a pixel surface, which the agnostic core does not have. It
+is therefore an **injected platform capability**, modeled exactly like
+[`PlatformEffects`](../../foundation/01-architecture.md): `ars-core` defines the
+`SignatureRasterizer` trait plus the neutral `RasterPoint` / `RasterSpec` /
+`RasterImage` / `RasterFormat` / `RasterError` types (see
+`foundation/01-architecture.md` §2.2.8 and `foundation/11-dom-utilities.md` §7),
+and the caller supplies an implementation. `ars-dom` provides
+`WebSignatureRasterizer` (browser `<canvas>`); `NullSignatureRasterizer` is the
+SSR/test no-op.
+
+`SignatureData::export_raster` forwards the strokes — with per-point
+**pressure** preserved, so firmer presses render thicker — to the injected
+rasterizer. Requiring the rasterizer as an argument means raster export is
+impossible to call without a backend (make-invalid-states-unrepresentable), so
+there is no panicking or `unimplemented!` arm. `RasterFormat` covers `Png`,
+`Jpeg`, and `Webp`; because a browser may not encode WebP (Safari falls back to
+PNG), the returned `RasterImage::format` reports the format actually produced,
+not the one requested:
+
+```rust
+impl SignatureData {
+    /// Rasterize into an encoded image (PNG/JPEG) via an injected rasterizer.
+    pub fn export_raster(
+        &self,
+        rasterizer: &dyn SignatureRasterizer,
+        spec: &RasterSpec,
+    ) -> Result<RasterImage, RasterError> {
+        let strokes: Vec<Vec<RasterPoint>> = self
+            .strokes
+            .iter()
+            .map(|stroke| {
+                stroke
+                    .points
+                    .iter()
+                    .map(|p| RasterPoint { x: p.x, y: p.y, pressure: p.pressure })
+                    .collect()
+            })
+            .collect();
+        rasterizer.rasterize(&strokes, spec)
     }
 }
 ```
@@ -176,6 +215,14 @@ pub enum Event {
     Focus,
     /// Focus left the canvas.
     Blur,
+    /// The controlled `data` prop changed; re-sync the bound signature data.
+    /// Dispatched by `on_props_changed`, processed regardless of disabled/read-only.
+    SyncData,
+    /// A configuration prop (disabled, read-only, pen color/width, min distance)
+    /// changed; mirror the new values into the context. Dispatched by
+    /// `on_props_changed`, processed regardless of disabled/read-only so the pad
+    /// can be re-enabled.
+    SyncProps,
 }
 ```
 
@@ -234,6 +281,12 @@ pub struct Props {
     pub min_distance: f64,
     /// Name for form submission.
     pub name: Option<String>,
+    /// Fired when the signature data changes through user interaction (a
+    /// committed stroke, undo, or clear), carrying the new data. Required for
+    /// controlled `data`: the parent updates its controlled value from this
+    /// callback, then feeds it back via props (triggering `Event::SyncData`).
+    /// Not fired for parent-driven syncs.
+    pub on_data_change: Option<Callback<dyn Fn(SignatureData) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -248,6 +301,7 @@ impl Default for Props {
             pen_width: 2.0,
             min_distance: 3.0,
             name: None,
+            on_data_change: None,
         }
     }
 }
@@ -255,7 +309,31 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
+The agnostic core never touches the live canvas or the screen reader. It emits
+typed [`Effect`] markers and the framework adapter performs the real work:
+`DrawingListeners` tells the adapter to attach global pointer-drag listeners
+(e.g. `PlatformEffects::track_pointer_drag`) that dispatch `DrawMove`/`DrawEnd`
+even when the pointer leaves the canvas, and `AnnounceProvided`/`AnnounceCleared`
+tell it to announce the corresponding message into a polite `aria-live` region.
+
 ```rust
+/// Typed effect intents emitted by the signature-pad machine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter attaches global pointer-drag listeners that dispatch
+    /// `Event::DrawMove`/`Event::DrawEnd`. Emitted on entry to `Drawing`.
+    DrawingListeners,
+    /// Adapter announces `messages.signature_provided`. Emitted on entry to
+    /// `Completed`.
+    AnnounceProvided,
+    /// Adapter announces `messages.signature_cleared`. Emitted on `Clear`.
+    AnnounceCleared,
+    /// Signature data changed through user interaction (committed stroke, undo,
+    /// or clear); fires `Props::on_data_change` with the new data. Lets a parent
+    /// holding controlled `data` observe the change. Not emitted for `SyncData`.
+    DataChange,
+}
+
 /// The machine for the `SignaturePad` component.
 pub struct Machine;
 
@@ -265,6 +343,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -298,19 +377,88 @@ impl ars_core::Machine for Machine {
         })
     }
 
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(old.id, new.id, "signature_pad::Props.id must remain stable after init");
+
+        let mut events = Vec::new();
+        if old.data != new.data {
+            events.push(Event::SyncData);
+        }
+        if old.disabled != new.disabled
+            || old.readonly != new.readonly
+            || old.pen_color != new.pen_color
+            || old.pen_width != new.pen_width
+            || old.min_distance != new.min_distance
+        {
+            events.push(Event::SyncProps);
+        }
+        events
+    }
+
     fn transition(
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        // Focus/Blur always pass through regardless of disabled/readonly.
+        // Focus/Blur and the prop-sync events always pass through, regardless of
+        // disabled/read-only (prop sync must be able to re-enable the pad).
         match event {
             Event::Focus => {
                 return Some(TransitionPlan::context_only(|ctx| ctx.focused = true));
             }
             Event::Blur => {
                 return Some(TransitionPlan::context_only(|ctx| ctx.focused = false));
+            }
+            Event::SyncProps => {
+                let disabled = props.disabled;
+                let readonly = props.readonly;
+                let pen_color = props.pen_color.clone();
+                let pen_width = props.pen_width;
+                let min_distance = props.min_distance;
+                // Becoming non-interactive mid-stroke must not strand the machine
+                // in `Drawing` (the gate below would reject the trailing
+                // `DrawEnd`/`Clear`); cancel the in-flight stroke and leave it.
+                let cancel_drawing = (disabled || readonly) && matches!(state, State::Drawing);
+                let target = if cancel_drawing {
+                    if ctx.data.pending().is_empty() { State::Idle } else { State::Completed }
+                } else {
+                    *state
+                };
+                return Some(TransitionPlan::to(target).apply(move |ctx| {
+                    ctx.disabled = disabled;
+                    ctx.readonly = readonly;
+                    ctx.pen_color = pen_color;
+                    ctx.pen_width = pen_width;
+                    ctx.min_distance = min_distance;
+                    if cancel_drawing {
+                        ctx.current_stroke = None;
+                    }
+                }));
+            }
+            Event::SyncData => {
+                let new_data = props.data.clone();
+                // Emptiness after the sync: the new controlled value, or — when
+                // dropping to uncontrolled — the retained local value.
+                let empty_after = match &new_data {
+                    Some(data) => data.is_empty(),
+                    None => ctx.data.pending().is_empty(),
+                };
+                // Reconcile the displayed state with the synced data, but never
+                // reorder an in-flight stroke.
+                let plan = if matches!(state, State::Drawing) {
+                    TransitionPlan::new()
+                } else {
+                    TransitionPlan::to(if empty_after { State::Idle } else { State::Completed })
+                };
+                return Some(plan.apply(move |ctx| {
+                    if let Some(data) = new_data {
+                        ctx.data.set(data.clone());
+                        ctx.data.sync_controlled(Some(data));
+                    } else {
+                        ctx.data.sync_controlled(None);
+                    }
+                }));
             }
             _ => {}
         }
@@ -331,15 +479,7 @@ impl ars_core::Machine for Machine {
                             x, y, pressure, timestamp: 0.0,
                         }],
                     });
-                }).with_named_effect("drawing-listeners", |_ctx, _props, send| {
-                    let platform = use_platform_effects();
-                    let send_move = send.clone();
-                    let send_up = send.clone();
-                    platform.track_pointer_drag(
-                        Box::new(move |x, y| { send_move.call_if_alive(Event::DrawMove { x, y, pressure: 0.5 }); }),
-                        Box::new(move || { send_up.call_if_alive(Event::DrawEnd); }),
-                    )
-                }))
+                }).with_effect(PendingEffect::named(Effect::DrawingListeners)))
             }
 
             // Continue drawing
@@ -363,49 +503,69 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            // End drawing
+            // End drawing. A stroke too short to commit (a stray tap) leaves the
+            // signature unchanged, so the pad returns to `Idle` when the canvas
+            // is still blank and only announces when a stroke is actually added.
             (State::Drawing, Event::DrawEnd) => {
-                Some(TransitionPlan::to(State::Completed).apply(|ctx| {
+                let commits = ctx
+                    .current_stroke
+                    .as_ref()
+                    .is_some_and(|stroke| stroke.points.len() >= 2);
+                // Build on the pending (internal) working copy, not `get()`: in
+                // controlled mode `get()` returns the stale parent value until it
+                // round-trips, so reading it would drop earlier un-synced strokes.
+                let target = if commits || !ctx.data.pending().is_empty() {
+                    State::Completed
+                } else {
+                    State::Idle
+                };
+                let mut plan = TransitionPlan::to(target).apply(|ctx| {
                     if let Some(stroke) = ctx.current_stroke.take() {
                         if stroke.points.len() >= 2 {
-                            let mut data = ctx.data.get().clone();
+                            let mut data = ctx.data.pending().clone();
                             data.strokes.push(stroke);
                             ctx.data.set(data);
                         }
                     }
-                }).with_named_effect("announce-provided", |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    platform.announce(&(ctx.messages.signature_provided)(&ctx.locale));
-                    no_cleanup()
-                }))
+                });
+                if commits {
+                    plan = plan
+                        .with_effect(PendingEffect::named(Effect::AnnounceProvided))
+                        .with_effect(data_change_effect());
+                }
+                Some(plan)
             }
 
-            // Undo last stroke
+            // Undo last stroke. The target is computed from post-pop point
+            // emptiness (not stroke count, which empty-stroke entries break), and
+            // built on the pending working copy to preserve un-synced edits.
             (State::Completed, Event::Undo) => {
-                Some(TransitionPlan::context_only(|ctx| {
-                    let mut data = ctx.data.get().clone();
-                    data.strokes.pop();
+                let mut data = ctx.data.pending().clone();
+                data.strokes.pop();
+                let target = if data.is_empty() { State::Idle } else { State::Completed };
+                Some(TransitionPlan::to(target).apply(move |ctx| {
                     ctx.data.set(data);
-                }))
+                }).with_effect(data_change_effect()))
             }
 
-            // Clear all strokes
+            // Clear all strokes. Notify the parent only when there was data.
             (_, Event::Clear) => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                let had_data = !ctx.data.pending().is_empty();
+                let mut plan = TransitionPlan::to(State::Idle).apply(|ctx| {
                     ctx.data.set(SignatureData::default());
                     ctx.current_stroke = None;
-                }).with_named_effect("announce-cleared", |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    platform.announce(&(ctx.messages.signature_cleared)(&ctx.locale));
-                    no_cleanup()
-                }))
+                }).with_effect(PendingEffect::named(Effect::AnnounceCleared));
+                if had_data {
+                    plan = plan.with_effect(data_change_effect());
+                }
+                Some(plan)
             }
 
             _ => None,
         }
     }
 
-    fn connect(
+    fn connect<'a>(
         state: &'a Self::State,
         ctx: &'a Self::Context,
         props: &'a Self::Props,
@@ -413,6 +573,18 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+/// Builds the `Effect::DataChange` effect, notifying `Props::on_data_change`
+/// with the value just committed (`pending()`, which in controlled mode is the
+/// new data even though `get()` still returns the stale parent-owned value).
+fn data_change_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::DataChange, |ctx, props, _send| {
+        if let Some(callback) = &props.on_data_change {
+            callback(ctx.data.pending().clone());
+        }
+        no_cleanup()
+    })
 }
 ```
 
@@ -503,7 +675,7 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Label),
             (self.ctx.messages.clear_label)(&self.ctx.locale));
         if self.is_empty() || self.ctx.disabled || self.ctx.readonly {
-            attrs.set(HtmlAttr::Disabled, "true");
+            attrs.set_bool(HtmlAttr::Disabled, true);
         }
         attrs
     }
@@ -518,7 +690,7 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Label),
             (self.ctx.messages.undo_label)(&self.ctx.locale));
         if self.is_empty() || self.ctx.disabled || self.ctx.readonly {
-            attrs.set(HtmlAttr::Disabled, "true");
+            attrs.set_bool(HtmlAttr::Disabled, true);
         }
         attrs
     }
@@ -561,6 +733,11 @@ impl<'a> Api<'a> {
         }
         // Value is SVG path data for form submission
         attrs.set(HtmlAttr::Value, self.ctx.data.get().to_svg_path());
+        // A disabled control is excluded from submission; mirror that so a
+        // disabled pad cannot submit stale signature data.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         attrs
     }
 
@@ -653,7 +830,7 @@ The `SignaturePad` includes a visually-hidden live region (`aria-live="polite"`)
 
 ```rust
 /// The messages for the `SignaturePad` component.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Accessible label for the canvas.
     pub canvas_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,

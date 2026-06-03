@@ -1,0 +1,73 @@
+---
+source: crates/ars-components/src/specialized/signature_pad/mod.rs
+expression: snapshot_attrs(&api.canvas_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "canvas",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "signature-pad",
+            ),
+        ),
+        (
+            Aria(
+                Disabled,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Signature pad",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "sig-label",
+            ),
+        ),
+        (
+            Class,
+            String(
+                "ars-touch-none",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "sig-canvas",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "img",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

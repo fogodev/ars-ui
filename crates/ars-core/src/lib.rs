@@ -42,6 +42,7 @@ mod message_fn;
 pub mod modality;
 pub mod platform;
 pub mod provider;
+pub mod raster;
 mod shared_flag;
 mod shared_state;
 mod url;
@@ -92,6 +93,11 @@ pub use platform::{
 };
 // ── Provider ────────────────────────────────────────────────────────
 pub use provider::{ArsContext, ColorMode};
+// ── Raster ──────────────────────────────────────────────────────────
+pub use raster::{
+    NullSignatureRasterizer, RasterError, RasterFormat, RasterImage, RasterPoint, RasterSpec,
+    SignatureRasterizer,
+};
 pub use shared_flag::SharedFlag;
 pub use shared_state::SharedState;
 pub use url::{SafeUrl, UnsafeUrlError, is_safe_url, sanitize_url};

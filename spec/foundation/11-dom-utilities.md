@@ -3094,3 +3094,50 @@ keystroke as defense in depth on top of the topmost gate.
 | --------------------------------------- | ---------------------------------------------------------------------------- |
 | `target_is_inside_boundary`             | `dismissable`, `focus-scope`, every overlay (`Dialog`, `Popover`, `Menu`, …) |
 | `install_outside_interaction_listeners` | `dismissable`, `download-trigger`, `drop-zone`, `action-group`               |
+
+## 13. Signature Rasterization
+
+`WebSignatureRasterizer` is the browser implementation of the
+`ars_core::SignatureRasterizer` capability (see `01-architecture.md` §2.2.9). It
+turns vector strokes into encoded PNG/JPEG bytes using an **offscreen
+`<canvas>`** — no on-screen element required.
+
+### 13.1 Behavior
+
+Given `strokes: &[Vec<RasterPoint>]` and a `RasterSpec`, `rasterize`:
+
+0. Rejects a zero-sized spec (`width == 0 || height == 0`) with
+   `RasterError::Backend` — such a canvas makes `toDataURL` return the `data:,`
+   sentinel, which would otherwise decode to empty bytes mistakable for a valid
+   image.
+1. Creates a detached `<canvas>` via `document.createElement("canvas")` sized to
+   `spec.width` × `spec.height`, and acquires its `2d` context.
+2. Fills `spec.background` (a CSS color) when set; otherwise leaves the surface
+   transparent (PNG) — JPEG has no alpha, so an unset background renders as the
+   platform default.
+3. Strokes each polyline **segment by segment**, setting `lineWidth` per segment
+   to `spec.pen_width × pressure_scale`, where `pressure_scale` maps the average
+   endpoint pressure to `0.5..=1.0` so a segment is always visible and firmer
+   presses render thicker. `lineCap`/`lineJoin` are `round`.
+4. Encodes via `canvas.toDataURL` using `spec.format.mime()` (PNG, or JPEG/WebP
+   honoring `spec.quality`), then parses and decodes the base64 data URL to raw
+   bytes with `window.atob`. The parser rejects the `data:,` sentinel / any empty
+   payload as `RasterError::Backend` — a canvas that is zero-sized _or larger
+   than the browser maximum_ yields that sentinel, which must not decode into
+   empty "valid" image bytes.
+
+Returns `RasterImage { format, bytes }`, or `RasterError::Backend(_)` if any
+browser step fails. On non-wasm targets the implementation returns
+`RasterError::Unsupported`.
+
+**Honest format reporting.** A browser that cannot encode the requested type
+silently substitutes PNG (notably Safari for WebP). The implementation derives
+`RasterImage::format` from the returned data URL's own MIME via
+`RasterFormat::from_mime`, not from the request — so a WebP request that fell
+back to PNG reports `Png` with PNG bytes, never a mislabeled `Webp`.
+
+### 13.2 Reusers
+
+| Helper                   | Spec callers                                                             |
+| ------------------------ | ------------------------------------------------------------------------ |
+| `WebSignatureRasterizer` | `SignaturePad` raster export (`components/specialized/signature-pad.md`) |

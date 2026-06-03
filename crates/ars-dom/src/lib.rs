@@ -44,6 +44,8 @@ pub mod portal;
 pub mod positioning;
 mod scroll;
 pub mod scroll_lock;
+#[cfg(feature = "web")]
+pub mod signature_raster;
 pub mod z_index;
 
 #[cfg(feature = "web")]
@@ -95,6 +97,8 @@ pub use scroll_lock::{
 };
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub use scroll_lock::{needs_ios_workaround, scrollbar_width};
+#[cfg(feature = "web")]
+pub use signature_raster::WebSignatureRasterizer;
 pub use z_index::{
     Z_INDEX_BASE, Z_INDEX_CEILING, ZIndexAllocator, ZIndexClaim, next_z_index, reset_z_index,
     supports_top_layer,

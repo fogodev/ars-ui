@@ -829,3 +829,91 @@ mod timer_proptests {
         }
     }
 }
+
+// ────────────────────────────────────────────────────────────────────
+// SignaturePad
+// ────────────────────────────────────────────────────────────────────
+
+mod signature_pad_proptests {
+    use ars_components::specialized::signature_pad::{Event, Machine, Props, State};
+    use ars_core::{Env, Service};
+    use proptest::prelude::*;
+
+    fn arb_event() -> impl Strategy<Value = Event> {
+        prop_oneof![
+            (0.0f64..1000.0, 0.0f64..1000.0, 0.0f64..=1.0)
+                .prop_map(|(x, y, pressure)| Event::DrawStart { x, y, pressure }),
+            (0.0f64..1000.0, 0.0f64..1000.0, 0.0f64..=1.0)
+                .prop_map(|(x, y, pressure)| Event::DrawMove { x, y, pressure }),
+            Just(Event::DrawEnd),
+            Just(Event::Undo),
+            Just(Event::Clear),
+            Just(Event::Focus),
+            Just(Event::Blur),
+            Just(Event::SyncData),
+            Just(Event::SyncProps),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(super::super::common::proptest_config())]
+
+        #[test]
+        #[ignore = "proptest — nightly extended-proptest job"]
+        fn signature_event_sequences_keep_invariants(
+            events in prop::collection::vec(arb_event(), 0..96),
+        ) {
+            let mut svc = Service::<Machine>::new(
+                // `min_distance` 0 keeps every move point so committed strokes can
+                // grow; the invariants below must still hold for any sequence.
+                Props::new().id("sig").min_distance(0.0),
+                &Env::default(),
+                &Default::default(),
+            );
+
+            for ev in events {
+                drop(svc.send(ev));
+            }
+
+            let state = *svc.state();
+            let ctx = svc.context();
+
+            // `current_stroke` is in flight iff we are drawing.
+            prop_assert_eq!(ctx.current_stroke.is_some(), state == State::Drawing);
+
+            // Idle implies no committed strokes, and `Completed` always holds at
+            // least one stroke (undoing or clearing the last stroke returns to
+            // `Idle`), so blank-canvas state is unambiguous.
+            if state == State::Idle {
+                prop_assert!(ctx.data.get().is_empty());
+            }
+
+            if state == State::Completed {
+                prop_assert!(!ctx.data.get().is_empty());
+            }
+
+            // Every committed stroke has at least two points (single-point
+            // strokes are discarded on `DrawEnd`).
+            for stroke in &ctx.data.get().strokes {
+                prop_assert!(stroke.points.len() >= 2);
+            }
+
+            // The data helpers and `connect()` output never panic and stay
+            // mutually consistent.
+            let data = ctx.data.get();
+
+            prop_assert_eq!(data.is_empty(), data.point_count() == 0);
+
+            drop(data.to_svg_path());
+
+            let api = svc.connect(&|_| {});
+
+            drop(api.root_attrs());
+            drop(api.canvas_attrs());
+            drop(api.clear_trigger_attrs());
+            drop(api.undo_trigger_attrs());
+            drop(api.guide_attrs());
+            drop(api.hidden_input_attrs());
+        }
+    }
+}

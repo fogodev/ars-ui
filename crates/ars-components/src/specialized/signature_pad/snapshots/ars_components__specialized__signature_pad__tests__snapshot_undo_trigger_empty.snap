@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/specialized/signature_pad/mod.rs
+expression: "snapshot_attrs(&empty_api(State::Idle).undo_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "undo-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "signature-pad",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Undo last stroke",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "sig-undo",
+            ),
+        ),
+        (
+            Disabled,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

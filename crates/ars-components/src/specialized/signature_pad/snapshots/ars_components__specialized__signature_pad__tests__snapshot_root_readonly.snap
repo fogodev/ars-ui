@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/specialized/signature_pad/mod.rs
+expression: snapshot_attrs(&api.root_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-readonly",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "signature-pad",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "completed",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "sig",
+            ),
+        ),
+    ],
+    styles: [],
+}

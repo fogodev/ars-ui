@@ -1,0 +1,25 @@
+---
+source: crates/ars-components/src/specialized/signature_pad/mod.rs
+expression: "snapshot_attrs(&empty_api(State::Idle).guide_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "guide",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "signature-pad",
+            ),
+        ),
+    ],
+    styles: [],
+}

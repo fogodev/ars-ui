@@ -85,6 +85,8 @@ No dedicated callback is required beyond the bindable signature data and hidden 
 
 If canvas APIs are unavailable, degrade gracefully by rendering the labeled static surface and disabling interactive drawing. Export remains optional and client-only.
 
+Raster export (PNG/JPEG/WebP) uses the injected `ars_core::SignatureRasterizer` capability: pass `ars_dom::WebSignatureRasterizer` and a `RasterSpec` to `SignatureData::export_raster` (or `Api::export_raster`). Per-point pressure is forwarded so firmer presses render thicker. The resolution-independent `Svg`/`Points` formats come from the core `SignatureData::export`.
+
 ## 13. Identity and Key Policy
 
 Stroke identity stays machine-owned. Clear and undo actions always target the current instance’s stroke list only.
