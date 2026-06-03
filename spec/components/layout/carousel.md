@@ -65,6 +65,10 @@ pub enum Event {
     FocusSlide { index: usize },
     /// Focus left the carousel.
     Blur,
+    /// The parent pushed a new controlled `index` value through `set_props`.
+    /// Emitted by `on_props_changed` so the stored `Bindable` tracks the
+    /// controlled signal without animating or stopping auto-play.
+    SyncControlledIndex { index: usize },
 }
 ```
 
@@ -329,9 +333,16 @@ impl ars_core::Machine for Machine {
         } else {
             State::Idle
         };
+        // Normalize `slides_per_view`: a non-finite or non-positive value would
+        // make `track_offset_percent` divide by zero/NaN, so fall back to one.
+        let slides_per_view = props.slides_per_view
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or(1.0);
+        // `slides_per_move` of zero makes every navigation a no-op, so clamp to one.
+        let slides_per_move = props.slides_per_move.unwrap_or(1).max(1);
         // Clamp the uncontrolled default to the last valid starting index so
         // `current_index < slide_count` holds from the first render.
-        let visible_count = (props.slides_per_view.unwrap_or(1.0).ceil() as usize).max(1);
+        let visible_count = (slides_per_view.ceil() as usize).max(1);
         let max_index = props.slide_count.get().saturating_sub(visible_count);
         let initial_index = props.default_index.unwrap_or(0).min(max_index);
         let locale = env.locale.clone();
@@ -345,8 +356,8 @@ impl ars_core::Machine for Machine {
             auto_play_stopped: false,
             auto_play_paused: false,
             spacing: props.spacing.unwrap_or(0.0),
-            slides_per_view: props.slides_per_view.unwrap_or(1.0),
-            slides_per_move: props.slides_per_move.unwrap_or(1),
+            slides_per_view,
+            slides_per_move,
             align: props.align.unwrap_or_default(),
             orientation: props.orientation.unwrap_or_default(),
             is_rtl: props.is_rtl,
@@ -378,6 +389,20 @@ impl ars_core::Machine for Machine {
         } else {
             Vec::new()
         }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(old.id, new.id, "carousel::Props.id must remain stable after initialization");
+        // In controlled mode the parent owns the index and pushes new values
+        // through `set_props`. Forward a changed controlled value so the stored
+        // `Bindable` tracks it (otherwise the active slide, progress text, and
+        // indicators stay stuck on the initial controlled value).
+        let old_index = old.index.as_ref().map(|bindable| *bindable.get());
+        let new_index = new.index.as_ref().map(|bindable| *bindable.get());
+        if old_index != new_index && let Some(index) = new_index {
+            return vec![Event::SyncControlledIndex { index }];
+        }
+        Vec::new()
     }
 
     fn transition(
@@ -432,7 +457,10 @@ impl ars_core::Machine for Machine {
             }
 
             Event::AutoPlayTick => {
-                if *state != State::AutoPlaying { return None; }
+                // Ignore ticks that cannot advance: at the final non-looping
+                // page entering `Transitioning` risks a missing `transitionend`
+                // (the transform never changes) leaving the machine stuck.
+                if *state != State::AutoPlaying || !ctx.can_go_next() { return None; }
                 let step = ctx.slides_per_move as isize;
                 let next = ctx.clamp_index(ctx.current_index() as isize + step);
                 Some(TransitionPlan::to(State::Transitioning).apply(move |ctx| {
@@ -537,12 +565,26 @@ impl ars_core::Machine for Machine {
             }
 
             Event::PointerCancel => {
-                Some(TransitionPlan::context_only(|ctx| {
+                // The drag is aborted (touch scroll / pointer-capture loss).
+                // `PointerDown` cancelled the timer, so re-arm it if the gesture
+                // interrupted an active auto-play carousel — otherwise rotation
+                // silently dies while the state still reads `AutoPlaying`.
+                let resume = ctx.drag_start_pos.is_some()
+                    && ctx.auto_play.is_some()
+                    && !ctx.auto_play_stopped
+                    && !ctx.auto_play_paused;
+                let mut plan = if resume {
+                    TransitionPlan::to(State::AutoPlaying)
+                } else {
+                    TransitionPlan::new()
+                }.apply(|ctx| {
                     ctx.drag_start_pos = None;
                     ctx.drag_delta = 0.0;
                     ctx.swipe_velocity = 0.0;
                     ctx.drag_last_timestamp = None;
-                }))
+                });
+                if resume { plan = plan.with_effect(PendingEffect::named(Effect::AutoPlayTimer)); }
+                Some(plan)
             }
 
             Event::FocusSlide { index } => {
@@ -578,6 +620,15 @@ impl ars_core::Machine for Machine {
                     }).with_effect(PendingEffect::named(Effect::AutoPlayTimer)));
                 }
                 None
+            }
+
+            Event::SyncControlledIndex { index } => {
+                // Push the parent's controlled value into the stored bindable
+                // without animating or stopping auto-play. Clamp defensively.
+                let idx = (*index).min(ctx.last_index());
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.index.sync_controlled(Some(idx));
+                }))
             }
         }
     }
@@ -748,7 +799,9 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::AutoPlayTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        let is_playing = !self.ctx.auto_play_stopped && !self.ctx.auto_play_paused;
+        let is_playing = self.ctx.auto_play.is_some()
+            && !self.ctx.auto_play_stopped
+            && !self.ctx.auto_play_paused;
         let label = if is_playing {
             (self.ctx.messages.pause_auto_play_label)(&self.ctx.locale)
         } else {
@@ -764,7 +817,9 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::AutoPlayIndicator.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        let is_playing = !self.ctx.auto_play_stopped && !self.ctx.auto_play_paused;
+        let is_playing = self.ctx.auto_play.is_some()
+            && !self.ctx.auto_play_stopped
+            && !self.ctx.auto_play_paused;
         attrs.set(HtmlAttr::Data("ars-state"), if is_playing { "playing" } else { "paused" });
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs

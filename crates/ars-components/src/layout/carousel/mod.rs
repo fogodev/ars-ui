@@ -150,6 +150,15 @@ pub enum Event {
 
     /// Focus left the carousel.
     Blur,
+
+    /// The parent pushed a new controlled `index` value through `set_props`.
+    /// Emitted by [`Machine::on_props_changed`](ars_core::Machine::on_props_changed)
+    /// so the stored [`Bindable`] tracks the controlled signal without going
+    /// through a `Transitioning` animation or stopping auto-play.
+    SyncControlledIndex {
+        /// The new controlled slide index.
+        index: usize,
+    },
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -554,11 +563,23 @@ impl ars_core::Machine for Machine {
             State::Idle
         };
 
+        // Normalize `slides_per_view`: a non-finite or non-positive value
+        // would make `track_offset_percent` divide by zero/NaN and corrupt the
+        // visible-window math, so fall back to one full slide.
+        let slides_per_view = props
+            .slides_per_view
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or(1.0);
+
+        // `slides_per_move` of zero would make every navigation a no-op (while
+        // still able to stop auto-play), so clamp it to at least one.
+        let slides_per_move = props.slides_per_move.unwrap_or(1).max(1);
+
         // Clamp the uncontrolled default to the last valid starting index so
         // `current_index < slide_count` holds from the very first render (a
         // bad `default_index` would otherwise yield "Slide 100 of 3" with no
         // item marked current). Accounts for `slides_per_view`.
-        let visible_count = (props.slides_per_view.unwrap_or(1.0).ceil() as usize).max(1);
+        let visible_count = (slides_per_view.ceil() as usize).max(1);
         let max_index = props.slide_count.get().saturating_sub(visible_count);
         let initial_index = props.default_index.unwrap_or(0).min(max_index);
 
@@ -573,8 +594,8 @@ impl ars_core::Machine for Machine {
             auto_play_stopped: false,
             auto_play_paused: false,
             spacing: props.spacing.unwrap_or(0.0),
-            slides_per_view: props.slides_per_view.unwrap_or(1.0),
-            slides_per_move: props.slides_per_move.unwrap_or(1),
+            slides_per_view,
+            slides_per_move,
             align: props.align.unwrap_or_default(),
             orientation: props.orientation.unwrap_or_default(),
             is_rtl: props.is_rtl,
@@ -608,6 +629,28 @@ impl ars_core::Machine for Machine {
         } else {
             Vec::new()
         }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        assert_eq!(
+            old.id, new.id,
+            "carousel::Props.id must remain stable after initialization"
+        );
+
+        // In controlled mode the parent owns the slide index and pushes new
+        // values through `set_props`. Detect a changed controlled value and
+        // forward it so the stored `Bindable` tracks it (otherwise the active
+        // slide, progress text, and indicators stay stuck on the initial
+        // controlled value).
+        let old_index = old.index.as_ref().map(|bindable| *bindable.get());
+        let new_index = new.index.as_ref().map(|bindable| *bindable.get());
+        if old_index != new_index
+            && let Some(index) = new_index
+        {
+            return vec![Event::SyncControlledIndex { index }];
+        }
+
+        Vec::new()
     }
 
     fn transition(
@@ -679,7 +722,11 @@ impl ars_core::Machine for Machine {
             ),
 
             Event::AutoPlayTick => {
-                if *state != State::AutoPlaying {
+                // Ignore ticks that cannot advance: at the final non-looping
+                // page `clamp_index` would return the same index, so entering
+                // `Transitioning` risks a missing `transitionend` (the
+                // transform never changes) leaving the machine stuck.
+                if *state != State::AutoPlaying || !ctx.can_go_next() {
                     return None;
                 }
 
@@ -832,12 +879,35 @@ impl ars_core::Machine for Machine {
                 Some(plan)
             }
 
-            Event::PointerCancel => Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                ctx.drag_start_pos = None;
-                ctx.drag_delta = 0.0;
-                ctx.swipe_velocity = 0.0;
-                ctx.drag_last_timestamp = None;
-            })),
+            Event::PointerCancel => {
+                // The drag is aborted (e.g. touch scrolling or pointer-capture
+                // interruption). `PointerDown` cancelled the timer, so if the
+                // gesture was interrupting an active auto-play carousel, re-arm
+                // the timer — otherwise rotation silently dies even though the
+                // state still reads `AutoPlaying`.
+                let resume = ctx.drag_start_pos.is_some()
+                    && ctx.auto_play.is_some()
+                    && !ctx.auto_play_stopped
+                    && !ctx.auto_play_paused;
+
+                let mut plan = if resume {
+                    TransitionPlan::to(State::AutoPlaying)
+                } else {
+                    TransitionPlan::new()
+                }
+                .apply(|ctx: &mut Context| {
+                    ctx.drag_start_pos = None;
+                    ctx.drag_delta = 0.0;
+                    ctx.swipe_velocity = 0.0;
+                    ctx.drag_last_timestamp = None;
+                });
+
+                if resume {
+                    plan = plan.with_effect(PendingEffect::named(Effect::AutoPlayTimer));
+                }
+
+                Some(plan)
+            }
 
             Event::FocusSlide { index } => {
                 // Clamp to the last valid starting index: a focused slide is a
@@ -871,6 +941,16 @@ impl ars_core::Machine for Machine {
                     if idx != current {
                         ctx.index.set(idx);
                     }
+                }))
+            }
+
+            Event::SyncControlledIndex { index } => {
+                // Push the parent's controlled value into the stored bindable
+                // without animating or stopping auto-play. Clamp defensively so
+                // a bad controlled value can't break the index invariant.
+                let idx = (*index).min(ctx.last_index());
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.index.sync_controlled(Some(idx));
                 }))
             }
 
@@ -1188,7 +1268,9 @@ impl Api<'_> {
 
         attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
-        let is_playing = !self.ctx.auto_play_stopped && !self.ctx.auto_play_paused;
+        let is_playing = self.ctx.auto_play.is_some()
+            && !self.ctx.auto_play_stopped
+            && !self.ctx.auto_play_paused;
 
         let label = if is_playing {
             (self.ctx.messages.pause_auto_play_label)(&self.ctx.locale)
@@ -1212,7 +1294,9 @@ impl Api<'_> {
 
         attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
-        let is_playing = !self.ctx.auto_play_stopped && !self.ctx.auto_play_paused;
+        let is_playing = self.ctx.auto_play.is_some()
+            && !self.ctx.auto_play_stopped
+            && !self.ctx.auto_play_paused;
 
         attrs
             .set(
@@ -2750,5 +2834,111 @@ mod tests {
             captured_keydown(&service, KeyboardKey::End),
             vec![Event::GoToSlide { index: 1 }]
         );
+    }
+
+    // ── Codex review #716 (second pass) ──────────────────────────────
+
+    #[test]
+    fn controlled_index_syncs_from_props() {
+        let mut service = service(Props {
+            index: Some(Bindable::controlled(0)),
+            ..props(4)
+        });
+        assert_eq!(service.context().current_index(), 0);
+
+        // Parent pushes a new controlled value via set_props.
+        drop(service.set_props(Props {
+            index: Some(Bindable::controlled(2)),
+            ..props(4)
+        }));
+        assert_eq!(service.context().current_index(), 2);
+    }
+
+    #[test]
+    fn slides_per_move_zero_is_clamped_to_one() {
+        let mut service = service(Props {
+            slides_per_move: Some(0),
+            ..props(4)
+        });
+        assert_eq!(service.context().slides_per_move, 1);
+        drop(service.send(Event::GoToNext));
+        assert_eq!(service.context().current_index(), 1);
+    }
+
+    #[test]
+    fn slides_per_view_zero_is_normalized() {
+        let ctx = service(Props {
+            slides_per_view: Some(0.0),
+            ..props(3)
+        })
+        .context()
+        .clone();
+        assert_eq!(ctx.slides_per_view, 1.0);
+        assert!(ctx.track_offset_percent(200.0).is_finite());
+    }
+
+    #[test]
+    fn slides_per_view_non_finite_is_normalized() {
+        let ctx = service(Props {
+            slides_per_view: Some(f64::NAN),
+            ..props(3)
+        })
+        .context()
+        .clone();
+        assert_eq!(ctx.slides_per_view, 1.0);
+    }
+
+    #[test]
+    fn pointer_cancel_resumes_autoplay() {
+        let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
+        drop(service.send(Event::PointerDown {
+            pos: 100.0,
+            timestamp: 0.0,
+        }));
+        let result = service.send(Event::PointerCancel);
+        assert_eq!(service.state(), &State::AutoPlaying);
+        assert!(service.context().drag_start_pos.is_none());
+        assert_eq!(pending_effect_names(&result), vec![Effect::AutoPlayTimer]);
+    }
+
+    #[test]
+    fn pointer_cancel_without_autoplay_only_clears_drag() {
+        let mut service = service(props(3));
+        drop(service.send(Event::PointerDown {
+            pos: 100.0,
+            timestamp: 0.0,
+        }));
+        let result = service.send(Event::PointerCancel);
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().drag_start_pos.is_none());
+        assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn auto_play_trigger_not_playing_without_config() {
+        let service = service(props(3));
+        let trigger = service.connect(&|_| {}).auto_play_trigger_attrs();
+        assert_eq!(
+            trigger.get(&HtmlAttr::Aria(AriaAttr::Pressed)),
+            Some("false")
+        );
+        let indicator = service.connect(&|_| {}).auto_play_indicator_attrs();
+        assert_eq!(indicator.get(&HtmlAttr::Data("ars-state")), Some("paused"));
+    }
+
+    #[test]
+    fn autoplay_tick_ignored_at_last_page_non_looping() {
+        let mut service = service(Props {
+            default_index: Some(2),
+            ..autoplay_props(3)
+        });
+        drop(service.take_initial_effects());
+        // At the last slide of a non-looping carousel, a tick cannot advance,
+        // so it must not enter Transitioning (which could stall).
+        let result = service.send(Event::AutoPlayTick);
+        assert!(!result.state_changed);
+        assert_eq!(service.state(), &State::AutoPlaying);
+        assert_eq!(service.context().current_index(), 2);
     }
 }
