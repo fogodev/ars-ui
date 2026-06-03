@@ -164,6 +164,12 @@ pub enum Event {
     /// Pointer cancelled (drag abort).
     PointerCancel,
 
+    /// Keyboard focus entered the carousel on a part other than a slide (a
+    /// control such as Prev/Next, an indicator, or the auto-play trigger).
+    /// Pauses auto-play when [`AutoPlayOptions::pause_on_focus`] is set, without
+    /// changing the slide index. Slide focus uses [`Event::FocusSlide`].
+    FocusEnter,
+
     /// A slide received focus.
     FocusSlide {
         /// Zero-based index of the slide that received focus.
@@ -811,7 +817,14 @@ impl ars_core::Machine for Machine {
 
             Event::TransitionEnd => {
                 if ctx.auto_play.is_some() && !ctx.auto_play_stopped && !ctx.is_auto_play_paused() {
-                    Some(TransitionPlan::to(State::AutoPlaying))
+                    // Always (re-)arm the timer on entering AutoPlaying: a swipe
+                    // cancelled it on PointerDown and kept it cancelled through
+                    // the snap, so settling here must restart it — otherwise the
+                    // controls report "playing" with no interval running.
+                    Some(
+                        TransitionPlan::to(State::AutoPlaying)
+                            .with_effect(PendingEffect::named(Effect::AutoPlayTimer)),
+                    )
                 } else {
                     Some(TransitionPlan::to(State::Idle))
                 }
@@ -972,6 +985,13 @@ impl ars_core::Machine for Machine {
             }
 
             Event::PointerDown { pos, timestamp } => {
+                // Don't start a drag mid-snap: a slide animation is in progress
+                // and accepting a new gesture would let rapid pointer input skip
+                // slides, the same way button/keyboard nav is blocked during
+                // `Transitioning`.
+                if *state == State::Transitioning {
+                    return None;
+                }
                 let pos = *pos;
                 let timestamp = *timestamp;
                 Some(
@@ -1008,6 +1028,19 @@ impl ars_core::Machine for Machine {
                 // was never cancelled, creating duplicate intervals). Mirrors
                 // the `PointerMove`/`PointerCancel` guards.
                 ctx.drag_start_pos?;
+
+                // Never navigate mid-snap: if a slide animation is still running
+                // a release must not set a new index (button/keyboard nav is
+                // blocked the same way). Just clear the drag and let the current
+                // transition settle.
+                if *state == State::Transitioning {
+                    return Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                        ctx.drag_start_pos = None;
+                        ctx.drag_delta = 0.0;
+                        ctx.swipe_velocity = 0.0;
+                        ctx.drag_last_timestamp = None;
+                    }));
+                }
 
                 let delta = ctx.drag_delta;
                 let velocity = ctx.swipe_velocity;
@@ -1112,6 +1145,30 @@ impl ars_core::Machine for Machine {
                 }
 
                 Some(plan)
+            }
+
+            Event::FocusEnter => {
+                // Focus entered a control (not a slide). Pause auto-play when
+                // `pause_on_focus` is set, mirroring `FocusSlide`'s pause but
+                // without moving the index. `Blur` resumes on focus-out.
+                if !ctx
+                    .auto_play
+                    .as_ref()
+                    .is_some_and(|options| options.pause_on_focus)
+                {
+                    return None;
+                }
+                let plan = if *state == State::AutoPlaying {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+                Some(
+                    plan.apply(|ctx: &mut Context| {
+                        ctx.auto_play_paused_focus = true;
+                    })
+                    .cancel_effect(Effect::AutoPlayTimer),
+                )
             }
 
             Event::FocusSlide { index } => {
@@ -1674,7 +1731,7 @@ impl Api<'_> {
             KeyboardKey::Home => (self.send)(Event::GoToSlide { index: 0 }),
 
             KeyboardKey::End => (self.send)(Event::GoToSlide {
-                index: self.ctx.last_index(),
+                index: self.ctx.max_start_index(),
             }),
 
             _ => {}
@@ -1721,6 +1778,21 @@ impl Api<'_> {
     /// Dispatch a hover-end (pointer left the carousel), resuming a hover pause.
     pub fn on_root_pointer_leave(&self) {
         (self.send)(Event::HoverEnd);
+    }
+
+    /// Dispatch focus entering the carousel on a control (not a slide; slides
+    /// use [`on_root_keydown`](Self::on_root_keydown)'s sibling
+    /// [`Event::FocusSlide`] via the slide focus handler). Auto-play pauses only
+    /// when [`AutoPlayOptions::pause_on_focus`] is set. Adapters fire this from
+    /// `focusin` on a carousel control.
+    pub fn on_root_focus_in(&self) {
+        (self.send)(Event::FocusEnter);
+    }
+
+    /// Dispatch focus leaving the carousel, resuming a focus pause. Adapters
+    /// fire this from `focusout` when focus exits the whole carousel.
+    pub fn on_root_focus_out(&self) {
+        (self.send)(Event::Blur);
     }
 
     /// Dispatch a pointer-down (drag start) with adapter-normalized position
@@ -3812,5 +3884,129 @@ mod tests {
         // Subsequent navigation is not blocked.
         drop(service.send(Event::GoToNext));
         assert_eq!(service.context().current_index(), 2);
+    }
+
+    // ── Codex review #716 (eighth pass) ──────────────────────────────
+
+    #[test]
+    fn swipe_settle_rearms_autoplay_timer() {
+        // T1: a swipe cancels the timer on PointerDown and keeps it cancelled
+        // through the snap, so TransitionEnd must re-arm it (not just flip state).
+        let mut service = service(Props {
+            auto_play: Some(AutoPlayOptions {
+                stop_on_interaction: false,
+                ..AutoPlayOptions::default()
+            }),
+            ..props(4)
+        });
+        drop(service.take_initial_effects());
+        drop(service.send(Event::PointerDown {
+            pos: 100.0,
+            timestamp: 0.0,
+        }));
+        drop(service.send(Event::PointerMove {
+            pos: 40.0,
+            timestamp: 1000.0,
+        }));
+        drop(service.send(Event::PointerUp));
+        assert_eq!(service.state(), &State::Transitioning);
+        // Settling re-arms the interval.
+        let settled = service.send(Event::TransitionEnd);
+        assert_eq!(service.state(), &State::AutoPlaying);
+        assert!(
+            settled
+                .pending_effects
+                .iter()
+                .any(|effect| effect.name == Effect::AutoPlayTimer)
+        );
+    }
+
+    #[test]
+    fn pointer_down_ignored_during_transition() {
+        // T2: a slide animation is in progress → don't start a new drag.
+        let mut service = service(props(4));
+        drop(service.send(Event::GoToSlide { index: 1 }));
+        assert_eq!(service.state(), &State::Transitioning);
+        let result = service.send(Event::PointerDown {
+            pos: 100.0,
+            timestamp: 0.0,
+        });
+        assert!(!result.context_changed);
+        assert_eq!(service.context().drag_start_pos, None);
+    }
+
+    #[test]
+    fn pointer_up_during_transition_does_not_navigate() {
+        // T2: a release mid-snap must not set a new index. Set up an active drag
+        // (PointerDown leaves state unchanged), then enter Transitioning via a
+        // programmatic jump before release.
+        let mut service = service(props(4));
+        drop(service.send(Event::PointerDown {
+            pos: 100.0,
+            timestamp: 0.0,
+        }));
+        drop(service.send(Event::PointerMove {
+            pos: 30.0,
+            timestamp: 1000.0,
+        }));
+        drop(service.send(Event::GoToSlide { index: 1 }));
+        assert_eq!(service.state(), &State::Transitioning);
+        assert_eq!(service.context().current_index(), 1);
+
+        // Release mid-snap: clears the drag, does NOT navigate again.
+        drop(service.send(Event::PointerUp));
+        assert_eq!(service.state(), &State::Transitioning);
+        assert_eq!(service.context().current_index(), 1);
+        assert_eq!(service.context().drag_start_pos, None);
+    }
+
+    #[test]
+    fn end_key_targets_final_slide_when_looping() {
+        // T3: looped multi-view → End reaches the final slide, not last_index.
+        let service = service(Props {
+            loop_nav: true,
+            slides_per_view: Some(2.0),
+            ..props(5)
+        });
+        assert_eq!(
+            captured_keydown(&service, KeyboardKey::End),
+            vec![Event::GoToSlide { index: 4 }]
+        );
+    }
+
+    #[test]
+    fn focus_enter_pauses_and_blur_resumes() {
+        // T4: focusing a control (not a slide) pauses; focus-out resumes.
+        let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
+        let paused = service.send(Event::FocusEnter);
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().auto_play_paused_focus);
+        assert_eq!(paused.cancel_effects, vec![Effect::AutoPlayTimer]);
+
+        let resumed = service.send(Event::Blur);
+        assert_eq!(service.state(), &State::AutoPlaying);
+        assert!(!service.context().is_auto_play_paused());
+        assert!(
+            resumed
+                .pending_effects
+                .iter()
+                .any(|effect| effect.name == Effect::AutoPlayTimer)
+        );
+    }
+
+    #[test]
+    fn focus_enter_without_pause_on_focus_is_noop() {
+        let mut service = service(Props {
+            auto_play: Some(AutoPlayOptions {
+                pause_on_focus: false,
+                ..AutoPlayOptions::default()
+            }),
+            ..props(3)
+        });
+        drop(service.take_initial_effects());
+        let result = service.send(Event::FocusEnter);
+        assert!(!result.state_changed);
+        assert!(!service.context().auto_play_paused_focus);
     }
 }

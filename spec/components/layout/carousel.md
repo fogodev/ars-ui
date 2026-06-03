@@ -69,6 +69,10 @@ pub enum Event {
     PointerUp,
     /// Pointer cancelled (drag abort).
     PointerCancel,
+    /// Keyboard focus entered the carousel on a control (Prev/Next, indicator,
+    /// auto-play trigger) rather than a slide. Pauses auto-play when
+    /// `pause_on_focus` is set, without changing the index.
+    FocusEnter,
     /// A slide received focus.
     FocusSlide { index: usize },
     /// Focus left the carousel.
@@ -522,7 +526,12 @@ impl ars_core::Machine for Machine {
 
             Event::TransitionEnd => {
                 if ctx.auto_play.is_some() && !ctx.auto_play_stopped && !ctx.is_auto_play_paused() {
-                    Some(TransitionPlan::to(State::AutoPlaying))
+                    // Always re-arm the timer on entering AutoPlaying: a swipe
+                    // cancelled it on PointerDown and kept it cancelled through
+                    // the snap, so settling here must restart it (otherwise the
+                    // controls report "playing" with no interval running).
+                    Some(TransitionPlan::to(State::AutoPlaying)
+                        .with_effect(PendingEffect::named(Effect::AutoPlayTimer)))
                 } else {
                     Some(TransitionPlan::to(State::Idle))
                 }
@@ -626,6 +635,10 @@ impl ars_core::Machine for Machine {
             }
 
             Event::PointerDown { pos, timestamp } => {
+                // Don't start a drag mid-snap (a slide animation is running);
+                // accepting one would let rapid pointer input skip slides, the
+                // same way button/keyboard nav is blocked during `Transitioning`.
+                if *state == State::Transitioning { return None; }
                 let p = *pos;
                 let ts = *timestamp;
                 Some(TransitionPlan::context_only(move |ctx| {
@@ -657,6 +670,18 @@ impl ars_core::Machine for Machine {
                 // the resume logic (which would re-arm a timer that was never
                 // cancelled, creating duplicate intervals).
                 ctx.drag_start_pos?;
+
+                // Never navigate mid-snap: a release while a slide animation is
+                // running just clears the drag (button/keyboard nav is blocked
+                // the same way); the in-flight transition settles on its own.
+                if *state == State::Transitioning {
+                    return Some(TransitionPlan::context_only(|ctx| {
+                        ctx.drag_start_pos = None;
+                        ctx.drag_delta = 0.0;
+                        ctx.swipe_velocity = 0.0;
+                        ctx.drag_last_timestamp = None;
+                    }));
+                }
 
                 let delta = ctx.drag_delta;
                 let velocity = ctx.swipe_velocity;
@@ -736,6 +761,19 @@ impl ars_core::Machine for Machine {
                 });
                 if resume { plan = plan.with_effect(PendingEffect::named(Effect::AutoPlayTimer)); }
                 Some(plan)
+            }
+
+            Event::FocusEnter => {
+                // Focus entered a control (not a slide). Pause when
+                // `pause_on_focus` is set, without moving the index; `Blur`
+                // resumes on focus-out.
+                if !ctx.auto_play.as_ref().is_some_and(|o| o.pause_on_focus) { return None; }
+                let plan = if *state == State::AutoPlaying {
+                    TransitionPlan::to(State::Idle)
+                } else {
+                    TransitionPlan::new()
+                };
+                Some(plan.apply(|ctx| { ctx.auto_play_paused_focus = true; }).cancel_effect(Effect::AutoPlayTimer))
             }
 
             Event::FocusSlide { index } => {
@@ -1082,7 +1120,7 @@ impl<'a> Api<'a> {
             k if k == next_key => (self.send)(Event::GoToNext),
             KeyboardKey::Home => (self.send)(Event::GoToSlide { index: 0 }),
             KeyboardKey::End => (self.send)(Event::GoToSlide {
-                index: self.ctx.last_index(),
+                index: self.ctx.max_start_index(),
             }),
             _ => {}
         }
@@ -1105,6 +1143,10 @@ impl<'a> Api<'a> {
     pub fn on_root_pointer_enter(&self) { (self.send)(Event::HoverStart); }
     /// Pointer left the carousel; resumes a hover pause.
     pub fn on_root_pointer_leave(&self) { (self.send)(Event::HoverEnd); }
+    /// Focus entered the carousel on a control; pauses when `pause_on_focus`.
+    pub fn on_root_focus_in(&self) { (self.send)(Event::FocusEnter); }
+    /// Focus left the carousel; resumes a focus pause.
+    pub fn on_root_focus_out(&self) { (self.send)(Event::Blur); }
     pub fn on_viewport_pointerdown(&self, pos: f64, timestamp: f64) {
         (self.send)(Event::PointerDown { pos, timestamp });
     }
@@ -1206,7 +1248,7 @@ Arrow-key navigation applies only to keydowns the carousel owns. Because the agn
 ### 3.3 Screen Reader Announcements
 
 - `aria-live` on `ItemGroup` is `"off"` during auto-play to prevent disruptive announcements, and `"polite"` when paused or stopped.
-- Auto-play pauses on hover (`mouseenter` → `HoverStart`) when `AutoPlayOptions::pause_on_hover` is set, and on focus within the carousel (`focusin` → `FocusSlide`) when `pause_on_focus` is set. Each gate is enforced in the core, not the adapter. Rotation resumes on `mouseleave` / `focusout` (`HoverEnd` / `Blur`) unless permanently stopped. The auto-play trigger button's manual pause (`AutoPlayPause`) is unconditional and independent of these options.
+- Auto-play pauses on hover (`mouseenter` → `HoverStart`) when `AutoPlayOptions::pause_on_hover` is set, and on focus within the carousel when `pause_on_focus` is set — `focusin` on a slide → `FocusSlide`, on a control (Prev/Next, indicators, auto-play trigger) → `FocusEnter`. Each gate is enforced in the core, not the adapter. Rotation resumes on `mouseleave` / `focusout` (`HoverEnd` / `Blur`) unless permanently stopped. The auto-play trigger button's manual pause (`AutoPlayPause`) is unconditional and independent of these options.
 - Slides **outside the visible window** (`current_index` through `current_index + ceil(slides_per_view)`, wrapping when `loop_nav` is set) receive both `aria-hidden="true"` and `inert`, ensuring off-screen slides are invisible to assistive technology. With `slides_per_view > 1` every on-screen slide stays accessible — only the leading slide carries `data-ars-active`.
 
 ## 4. Internationalization
