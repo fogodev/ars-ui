@@ -70,7 +70,10 @@ pub enum Event {
     /// Add a new tag from the given text.
     AddTag(String),
 
-    /// Remove a tag by value (removes all occurrences when duplicates exist).
+    /// Remove a tag by value. Removes the **first** matching occurrence only, so
+    /// with duplicates allowed the other identical chips are preserved (matching
+    /// index-based removal). Use [`RemoveTagAtIndex`](Self::RemoveTagAtIndex) to
+    /// target a specific chip.
     RemoveTag(String),
 
     /// Remove a tag by index.
@@ -879,14 +882,23 @@ impl ars_core::Machine for Machine {
 
             Event::Paste(text) => paste_plan(ctx, text),
 
-            Event::ClearAll => Some(
-                TransitionPlan::context_only(|ctx: &mut Context| {
+            Event::ClearAll => {
+                // Clearing an already-empty list does not change the value, so skip
+                // the `ValueChange` effect (matches the add/paste paths).
+                let had_tags = !ctx.value.pending().is_empty();
+
+                let mut plan = TransitionPlan::context_only(|ctx: &mut Context| {
                     ctx.value.set(Vec::new());
                     ctx.input_value.clear();
                     ctx.focused_tag = None;
-                })
-                .with_effect(value_change_effect()),
-            ),
+                });
+
+                if had_tags {
+                    plan = plan.with_effect(value_change_effect());
+                }
+
+                Some(plan)
+            }
 
             Event::FocusPrevTag => {
                 let len = ctx.value.get().len();
@@ -952,14 +964,10 @@ impl ars_core::Machine for Machine {
             Event::SetValue(value) => {
                 let value = value.clone();
 
-                // Post-sync length, used to clamp stale focus/edit indices and to
-                // exit an inline edit whose tag the new value no longer contains.
-                let new_len = match &value {
-                    Some(new_value) => new_value.len(),
-                    None => ctx.value.pending().len(),
-                };
-                let exit_editing =
-                    matches!(state, State::EditingTag { index } if *index >= new_len);
+                // A controlled value push is authoritative: if it lands while a tag
+                // is mid-edit, exit edit mode so a later commit cannot clobber the
+                // parent's replacement with a stale draft (even at the same index).
+                let exit_editing = matches!(state, State::EditingTag { .. });
 
                 let plan = if exit_editing {
                     TransitionPlan::to(State::Focused)
@@ -973,6 +981,11 @@ impl ars_core::Machine for Machine {
                         ctx.value.sync_controlled(Some(value));
                     } else {
                         ctx.value.sync_controlled(None);
+                    }
+
+                    if exit_editing {
+                        ctx.editing_tag = None;
+                        ctx.editing_draft.clear();
                     }
 
                     // A controlled parent may replace the list with a shorter one;
@@ -1717,6 +1730,17 @@ impl Api<'_> {
             // forward arrow (ArrowLeft) moves to the next tag, and vice versa.
             KeyboardKey::ArrowLeft | KeyboardKey::ArrowRight => {
                 if self.is_toward_prev(data.key) {
+                    (self.send)(Event::FocusPrevTag);
+                } else {
+                    (self.send)(Event::FocusNextTag);
+                }
+            }
+
+            // Tab moves through the chips (only the focused tag is tabbable, so the
+            // machine must drive focus): forward to the next tag/input, Shift+Tab
+            // back to the previous tag.
+            KeyboardKey::Tab => {
+                if data.shift_key {
                     (self.send)(Event::FocusPrevTag);
                 } else {
                     (self.send)(Event::FocusNextTag);
@@ -4126,5 +4150,99 @@ mod tests {
             api.on_input_keydown(&key(KeyboardKey::ArrowRight), true);
         });
         assert_eq!(service.context().focused_tag, Some(2));
+    }
+
+    // — Codex review pass 4 —
+
+    #[test]
+    fn tab_on_tag_moves_through_chips() {
+        let mut service = with_tags(&["a", "b"]);
+        drop(service.send(Event::FocusPrevTag)); // -> Some(1)
+        drop(service.send(Event::FocusPrevTag)); // -> Some(0)
+
+        dispatch(&mut service, |api| {
+            api.on_tag_keydown(0, &key(KeyboardKey::Tab));
+        });
+        assert_eq!(service.context().focused_tag, Some(1));
+
+        // Shift+Tab steps back.
+        let shift_tab = KeyboardEventData {
+            shift_key: true,
+            ..key(KeyboardKey::Tab)
+        };
+        dispatch(&mut service, |api| {
+            api.on_tag_keydown(1, &shift_tab);
+        });
+        assert_eq!(service.context().focused_tag, Some(0));
+    }
+
+    #[test]
+    fn set_value_exits_edit_on_same_index_replacement() {
+        let mut service = service(props().editable(true).value(vec!["a".to_string()]));
+        drop(service.send(Event::EditTag { index: 0 }));
+        assert_eq!(service.state(), &State::EditingTag { index: 0 });
+
+        // Parent replaces the edited tag at the same index (same length).
+        drop(service.set_props(props().editable(true).value(vec!["x".to_string()])));
+
+        assert_eq!(service.state(), &State::Focused);
+        assert_eq!(service.context().editing_tag, None);
+        assert_eq!(service.context().editing_draft, "");
+
+        // A late commit cannot clobber the parent's replacement.
+        drop(service.send(Event::CommitEdit {
+            index: 0,
+            value: "a".to_string(),
+        }));
+        assert_eq!(tags_of(&service), vec!["x"]);
+    }
+
+    #[test]
+    fn clear_all_on_empty_does_not_fire_value_change() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut service = service(props().on_value_change({
+            let log = Arc::clone(&log);
+            callback(move |value: Vec<String>| log.lock().expect("lock").push(value))
+        }));
+
+        let result = service.send(Event::ClearAll); // already empty
+        run_effects(&service, result);
+
+        assert!(log.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn clear_all_with_tags_fires_value_change_once() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut service = service(
+            props()
+                .default_value(vec!["a".to_string()])
+                .on_value_change({
+                    let log = Arc::clone(&log);
+                    callback(move |value: Vec<String>| log.lock().expect("lock").push(value))
+                }),
+        );
+
+        let result = service.send(Event::ClearAll);
+        run_effects(&service, result);
+
+        assert_eq!(
+            log.lock().expect("lock").as_slice(),
+            &[Vec::<String>::new()]
+        );
+    }
+
+    #[test]
+    fn remove_tag_by_value_removes_only_first_duplicate() {
+        let mut service = service(props().allow_duplicates(true).default_value(vec![
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+        ]));
+
+        drop(service.send(Event::RemoveTag("a".to_string())));
+
+        // Only the first "a" is removed, matching the documented contract.
+        assert_eq!(tags_of(&service), vec!["a", "b"]);
     }
 }

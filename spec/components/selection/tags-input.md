@@ -43,7 +43,8 @@ pub enum State {
 pub enum Event {
     /// Add a new tag.
     AddTag(String),
-    /// Remove a tag by value.
+    /// Remove the first matching tag by value (with duplicates allowed, the other
+    /// identical chips are preserved). Use `RemoveTagAtIndex` to target a chip.
     RemoveTag(String),
     /// Remove a tag by index.
     RemoveTagAtIndex(usize),
@@ -253,12 +254,12 @@ pub editing_draft: String,
 
 **Editing Events**: The following events (already defined in the Event enum) drive the editing flow:
 
-| Event                         | Trigger                                                         | Behavior                                                                                                                                                                                     |
-| ----------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EditTag { index }`           | Enter key on focused tag, or double-click when `editable: true` | Transition to `EditingTag { index }`. Set `editing_tag = Some(index)`, `editing_draft` = current tag value. Focus the inline input.                                                          |
+| Event                         | Trigger                                                         | Behavior                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EditTag { index }`           | Enter key on focused tag, or double-click when `editable: true` | Transition to `EditingTag { index }`. Set `editing_tag = Some(index)`, `editing_draft` = current tag value. Focus the inline input.                                                                                                                                                                                                                                               |
 | `CommitEdit { index, value }` | Enter/Tab during edit                                           | Replace the tag at `index` only when `value` is non-empty, within `max_length`, and passes duplicate validation (when `allow_duplicates: false`); otherwise the edit is rejected and the original tag is kept (a **blank value is not a delete**). Transition back to `Focused`. Clear `editing_tag`/`editing_draft`. `on_value_change` fires only when the tag actually changed. |
-| `CancelEdit`                  | Escape key during edit                                          | Discard `editing_draft`. Transition back to `Focused`. Return focus to the tag at the editing index.                                                                                         |
-| `InputChange(text)`           | Typing in the inline edit input                                 | Update `editing_draft` with the new text. No state transition.                                                                                                                               |
+| `CancelEdit`                  | Escape key during edit                                          | Discard `editing_draft`. Transition back to `Focused`. Return focus to the tag at the editing index.                                                                                                                                                                                                                                                                              |
+| `InputChange(text)`           | Typing in the inline edit input                                 | Update `editing_draft` with the new text. No state transition.                                                                                                                                                                                                                                                                                                                    |
 
 **Keyboard Bindings During Editing**:
 
@@ -308,8 +309,6 @@ pub enum Effect {
     ValueChange,
 }
 
-/// The machine for the `TagsInput` component.
-#[derive(Debug)]
 pub struct Machine;
 
 impl ars_core::Machine for Machine {
@@ -591,14 +590,23 @@ impl ars_core::Machine for Machine {
 
             Event::Paste(text) => paste_plan(ctx, text),
 
-            Event::ClearAll => Some(
-                TransitionPlan::context_only(|ctx: &mut Context| {
+            Event::ClearAll => {
+                // Clearing an already-empty list does not change the value, so skip
+                // the `ValueChange` effect (matches the add/paste paths).
+                let had_tags = !ctx.value.pending().is_empty();
+
+                let mut plan = TransitionPlan::context_only(|ctx: &mut Context| {
                     ctx.value.set(Vec::new());
                     ctx.input_value.clear();
                     ctx.focused_tag = None;
-                })
-                .with_effect(value_change_effect()),
-            ),
+                });
+
+                if had_tags {
+                    plan = plan.with_effect(value_change_effect());
+                }
+
+                Some(plan)
+            }
 
             Event::FocusPrevTag => {
                 let len = ctx.value.get().len();
@@ -664,14 +672,10 @@ impl ars_core::Machine for Machine {
             Event::SetValue(value) => {
                 let value = value.clone();
 
-                // Post-sync length, used to clamp stale focus/edit indices and to
-                // exit an inline edit whose tag the new value no longer contains.
-                let new_len = match &value {
-                    Some(new_value) => new_value.len(),
-                    None => ctx.value.pending().len(),
-                };
-                let exit_editing =
-                    matches!(state, State::EditingTag { index } if *index >= new_len);
+                // A controlled value push is authoritative: if it lands while a tag
+                // is mid-edit, exit edit mode so a later commit cannot clobber the
+                // parent's replacement with a stale draft (even at the same index).
+                let exit_editing = matches!(state, State::EditingTag { .. });
 
                 let plan = if exit_editing {
                     TransitionPlan::to(State::Focused)
@@ -685,6 +689,11 @@ impl ars_core::Machine for Machine {
                         ctx.value.sync_controlled(Some(value));
                     } else {
                         ctx.value.sync_controlled(None);
+                    }
+
+                    if exit_editing {
+                        ctx.editing_tag = None;
+                        ctx.editing_draft.clear();
                     }
 
                     // A controlled parent may replace the list with a shorter one;
@@ -1027,6 +1036,8 @@ pub enum Part {
     /// The visually-hidden live region for screen-reader announcements.
     LiveRegion,
 }
+
+/// The machine for the `TagsInput` component.
 
 /// The connect API for the `TagsInput` component.
 ///
@@ -1503,6 +1514,17 @@ impl Api<'_> {
                 }
             }
 
+            // Tab moves through the chips (only the focused tag is tabbable, so the
+            // machine must drive focus): forward to the next tag/input, Shift+Tab
+            // back to the previous tag.
+            KeyboardKey::Tab => {
+                if data.shift_key {
+                    (self.send)(Event::FocusPrevTag);
+                } else {
+                    (self.send)(Event::FocusNextTag);
+                }
+            }
+
             // Escape deselects the tag list and returns focus to the input,
             // regardless of which tag is focused.
             KeyboardKey::Escape => (self.send)(Event::DeselectTags),
@@ -1816,23 +1838,23 @@ Note: Ark UI's `TagsInput` and React Aria's `TagGroup` differ significantly in s
 
 ### 6.2 Anatomy
 
-| Part         | ars-ui             | Ark UI              | React Aria               | Notes                                     |
-| ------------ | ------------------ | ------------------- | ------------------------ | ----------------------------------------- |
-| Root         | `Root`             | `Root`              | `TagGroup`               | --                                        |
-| Label        | `Label`            | `Label`             | `Label`                  | --                                        |
-| Control      | `Control`          | `Control`           | `TagList`                | Wraps tags + input                        |
-| Input        | `Input`            | `Input`             | --                       | React Aria has no input                   |
-| Tag          | `Tag`              | `Item`              | `Tag`                    | A grid `row`                              |
-| Tag preview  | --                 | `ItemPreview`       | --                       | ars-ui folds the chip wrapper into `Tag`  |
-| Tag text     | `TagText`          | `ItemText`          | --                       | --                                        |
-| Tag delete cell | `TagDeleteCell` | --                  | --                       | `gridcell` wrapper preserving button semantics |
-| Tag delete   | `TagDeleteTrigger` | `ItemDeleteTrigger` | --                       | React Aria handles remove via render prop |
-| Tag edit     | `TagEdit`          | `ItemInput`         | --                       | Inline edit input                         |
-| ClearTrigger | `ClearTrigger`     | `ClearTrigger`      | --                       | --                                        |
-| HiddenInput  | `HiddenInput`      | `HiddenInput`       | --                       | Form submission                           |
-| Description  | `Description`      | --                  | `Text[slot=description]` | --                                        |
-| ErrorMessage | `ErrorMessage`     | --                  | `FieldError`             | --                                        |
-| LiveRegion   | `LiveRegion`       | --                  | --                       | Polite removal/limit announcements        |
+| Part            | ars-ui             | Ark UI              | React Aria               | Notes                                          |
+| --------------- | ------------------ | ------------------- | ------------------------ | ---------------------------------------------- |
+| Root            | `Root`             | `Root`              | `TagGroup`               | --                                             |
+| Label           | `Label`            | `Label`             | `Label`                  | --                                             |
+| Control         | `Control`          | `Control`           | `TagList`                | Wraps tags + input                             |
+| Input           | `Input`            | `Input`             | --                       | React Aria has no input                        |
+| Tag             | `Tag`              | `Item`              | `Tag`                    | A grid `row`                                   |
+| Tag preview     | --                 | `ItemPreview`       | --                       | ars-ui folds the chip wrapper into `Tag`       |
+| Tag text        | `TagText`          | `ItemText`          | --                       | --                                             |
+| Tag delete cell | `TagDeleteCell`    | --                  | --                       | `gridcell` wrapper preserving button semantics |
+| Tag delete      | `TagDeleteTrigger` | `ItemDeleteTrigger` | --                       | React Aria handles remove via render prop      |
+| Tag edit        | `TagEdit`          | `ItemInput`         | --                       | Inline edit input                              |
+| ClearTrigger    | `ClearTrigger`     | `ClearTrigger`      | --                       | --                                             |
+| HiddenInput     | `HiddenInput`      | `HiddenInput`       | --                       | Form submission                                |
+| Description     | `Description`      | --                  | `Text[slot=description]` | --                                             |
+| ErrorMessage    | `ErrorMessage`     | --                  | `FieldError`             | --                                             |
+| LiveRegion      | `LiveRegion`       | --                  | --                       | Polite removal/limit announcements             |
 
 **Gaps:** None. ars-ui has no separate `ItemPreview` part — the chip wrapper role is covered by `Tag` itself — and adds a dedicated `LiveRegion` part for screen-reader announcements.
 
