@@ -29,9 +29,29 @@ AttrMap {
             ),
         ),
         (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Hidden,
+            Bool(
+                true,
+            ),
+        ),
+        (
             Id,
             String(
                 "tags-tag-edit-input-0",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
             ),
         ),
         (

@@ -429,6 +429,10 @@ fn tags_input_anatomy_matches_spec() {
             (tags_input::Part::Tag { index: 0 }, "tag"),
             (tags_input::Part::TagText { index: 0 }, "tag-text"),
             (
+                tags_input::Part::TagDeleteCell { index: 0 },
+                "tag-delete-cell",
+            ),
+            (
                 tags_input::Part::TagDeleteTrigger { index: 0 },
                 "tag-delete-trigger",
             ),

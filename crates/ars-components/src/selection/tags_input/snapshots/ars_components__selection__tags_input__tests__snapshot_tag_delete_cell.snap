@@ -1,6 +1,6 @@
 ---
 source: crates/ars-components/src/selection/tags_input/mod.rs
-expression: "snapshot_attrs(&service.connect(&|_| {}).input_attrs())"
+expression: "snapshot_attrs(&service.connect(&|_| {}).tag_delete_cell_attrs(0))"
 ---
 AttrMap {
     attrs: [
@@ -9,7 +9,7 @@ AttrMap {
                 "ars-part",
             ),
             String(
-                "input",
+                "tag-delete-cell",
             ),
         ),
         (
@@ -21,23 +21,9 @@ AttrMap {
             ),
         ),
         (
-            Aria(
-                DescribedBy,
-            ),
+            Role,
             String(
-                "tags-description",
-            ),
-        ),
-        (
-            Id,
-            String(
-                "tags-input",
-            ),
-        ),
-        (
-            Value,
-            String(
-                "",
+                "gridcell",
             ),
         ),
     ],

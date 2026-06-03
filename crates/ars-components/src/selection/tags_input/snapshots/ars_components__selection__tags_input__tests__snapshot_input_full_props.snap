@@ -54,6 +54,12 @@ AttrMap {
                 "Add a tag",
             ),
         ),
+        (
+            Value,
+            String(
+                "",
+            ),
+        ),
     ],
     styles: [],
 }

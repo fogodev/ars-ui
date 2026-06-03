@@ -42,6 +42,12 @@ AttrMap {
                 "tags-input",
             ),
         ),
+        (
+            Value,
+            String(
+                "",
+            ),
+        ),
     ],
     styles: [],
 }

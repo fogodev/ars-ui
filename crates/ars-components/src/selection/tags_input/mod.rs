@@ -21,8 +21,8 @@ use core::fmt::{self, Debug, Display};
 
 use ars_core::{
     AriaAttr, AttrMap, Bindable, Callback, ComponentIds, ComponentMessages, ComponentPart,
-    ConnectApi, Env, HtmlAttr, KeyboardKey, Locale, MessageFn, PendingEffect, TransitionPlan,
-    no_cleanup,
+    ConnectApi, Direction, Env, HtmlAttr, KeyboardKey, Locale, MessageFn, PendingEffect,
+    TransitionPlan, no_cleanup,
 };
 use ars_interactions::KeyboardEventData;
 
@@ -205,6 +205,9 @@ pub struct Context {
     /// What happens to pending input text on blur.
     pub blur_behavior: BlurBehavior,
 
+    /// Text direction. In RTL, horizontal tag-navigation arrows are reversed.
+    pub dir: Direction,
+
     /// True while an IME composition session is active (between
     /// [`Event::CompositionStart`] and [`Event::CompositionEnd`]).
     pub is_composing: bool,
@@ -274,6 +277,9 @@ pub struct Props {
     /// What happens to pending input text when the component loses focus.
     pub blur_behavior: BlurBehavior,
 
+    /// Text direction. In RTL, horizontal tag-navigation arrows are reversed.
+    pub dir: Direction,
+
     /// Callback fired with the new tag list whenever it changes. Controlled
     /// consumers use this to round-trip the value back through [`value`](Self::value).
     pub on_value_change: Option<Callback<dyn Fn(Vec<String>) + Send + Sync>>,
@@ -298,6 +304,7 @@ impl Default for Props {
             placeholder: None,
             editable: false,
             blur_behavior: BlurBehavior::Add,
+            dir: Direction::Ltr,
             on_value_change: None,
         }
     }
@@ -429,6 +436,13 @@ impl Props {
         self
     }
 
+    /// Sets [`dir`](Self::dir).
+    #[must_use]
+    pub const fn dir(mut self, value: Direction) -> Self {
+        self.dir = value;
+        self
+    }
+
     /// Sets [`on_value_change`](Self::on_value_change).
     #[must_use]
     pub fn on_value_change(
@@ -543,7 +557,15 @@ pub enum Part {
         index: usize,
     },
 
-    /// The delete trigger for a tag (a `gridcell` containing the remove button).
+    /// The `gridcell` wrapper that contains a tag's delete trigger. Holding the
+    /// `gridcell` role here keeps the [`TagDeleteTrigger`](Self::TagDeleteTrigger)
+    /// button's native button semantics intact.
+    TagDeleteCell {
+        /// The index of the tag.
+        index: usize,
+    },
+
+    /// The remove button for a tag (a `<button>` inside the delete cell).
     TagDeleteTrigger {
         /// The index of the tag.
         index: usize,
@@ -610,6 +632,7 @@ impl ars_core::Machine for Machine {
             add_on_paste: props.add_on_paste,
             allow_duplicates: props.allow_duplicates,
             blur_behavior: props.blur_behavior,
+            dir: props.dir,
             is_composing: false,
             name: props.name.clone(),
             locale: env.locale.clone(),
@@ -733,37 +756,57 @@ impl ars_core::Machine for Machine {
                 let trimmed = value.trim().to_string();
                 let allow_duplicates = ctx.allow_duplicates;
                 let max_length = ctx.max_length;
-                Some(
-                    TransitionPlan::to(State::Focused)
-                        .apply(move |ctx: &mut Context| {
-                            let mut tags = ctx.value.get().clone();
 
-                            if index < tags.len() {
-                                if trimmed.is_empty() {
-                                    tags.remove(index);
-                                } else {
-                                    let is_duplicate = !allow_duplicates
-                                        && tags
-                                            .iter()
-                                            .enumerate()
-                                            .any(|(other, tag)| other != index && tag == &trimmed);
+                // Decide up front whether the commit actually mutates the list, so
+                // `on_value_change` only fires when the value really changes.
+                let tags = ctx.value.get();
+                let changes = index < tags.len()
+                    && (trimmed.is_empty() || {
+                        let is_duplicate = !allow_duplicates
+                            && tags
+                                .iter()
+                                .enumerate()
+                                .any(|(other, tag)| other != index && tag == &trimmed);
+                        let replaces_with_new = tags[index] != trimmed;
+                        !is_duplicate
+                            && !exceeds_max_length(max_length, &trimmed)
+                            && replaces_with_new
+                    });
 
-                                    // Reject duplicates and over-length edits: keep the
-                                    // original tag rather than committing an invalid value.
-                                    if !is_duplicate && !exceeds_max_length(max_length, &trimmed) {
-                                        tags[index] = trimmed;
-                                    }
+                let mut plan = TransitionPlan::to(State::Focused)
+                    .apply(move |ctx: &mut Context| {
+                        let mut tags = ctx.value.get().clone();
+
+                        if index < tags.len() {
+                            if trimmed.is_empty() {
+                                tags.remove(index);
+                            } else {
+                                let is_duplicate = !allow_duplicates
+                                    && tags
+                                        .iter()
+                                        .enumerate()
+                                        .any(|(other, tag)| other != index && tag == &trimmed);
+
+                                // Reject duplicates and over-length edits: keep the
+                                // original tag rather than committing an invalid value.
+                                if !is_duplicate && !exceeds_max_length(max_length, &trimmed) {
+                                    tags[index] = trimmed;
                                 }
-
-                                ctx.value.set(tags);
                             }
 
-                            ctx.editing_tag = None;
-                            ctx.editing_draft.clear();
-                        })
-                        .with_effect(PendingEffect::named(Effect::FocusInput))
-                        .with_effect(value_change_effect()),
-                )
+                            ctx.value.set(tags);
+                        }
+
+                        ctx.editing_tag = None;
+                        ctx.editing_draft.clear();
+                    })
+                    .with_effect(PendingEffect::named(Effect::FocusInput));
+
+                if changes {
+                    plan = plan.with_effect(value_change_effect());
+                }
+
+                Some(plan)
             }
 
             Event::CancelEdit => {
@@ -810,6 +853,7 @@ impl ars_core::Machine for Machine {
                     && !ctx.disabled
                     && !ctx.readonly
                     && !input_trimmed.is_empty()
+                    && !exceeds_max_length(ctx.max_length, &input_trimmed)
                     && ctx.max.is_none_or(|max| ctx.value.get().len() < max)
                     && (ctx.allow_duplicates || !ctx.value.get().contains(&input_trimmed));
 
@@ -914,12 +958,39 @@ impl ars_core::Machine for Machine {
 
             Event::SetValue(value) => {
                 let value = value.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+
+                // Post-sync length, used to clamp stale focus/edit indices and to
+                // exit an inline edit whose tag the new value no longer contains.
+                let new_len = match &value {
+                    Some(new_value) => new_value.len(),
+                    None => ctx.value.pending().len(),
+                };
+                let exit_editing =
+                    matches!(state, State::EditingTag { index } if *index >= new_len);
+
+                let plan = if exit_editing {
+                    TransitionPlan::to(State::Focused)
+                } else {
+                    TransitionPlan::new()
+                };
+
+                Some(plan.apply(move |ctx: &mut Context| {
                     if let Some(value) = value {
                         ctx.value.set(value.clone());
                         ctx.value.sync_controlled(Some(value));
                     } else {
                         ctx.value.sync_controlled(None);
+                    }
+
+                    // A controlled parent may replace the list with a shorter one;
+                    // never let focus/edit indices point past the end.
+                    let len = ctx.value.get().len();
+                    if ctx.focused_tag.is_some_and(|index| index >= len) {
+                        ctx.focused_tag = None;
+                    }
+                    if ctx.editing_tag.is_some_and(|index| index >= len) {
+                        ctx.editing_tag = None;
+                        ctx.editing_draft.clear();
                     }
                 }))
             }
@@ -936,6 +1007,7 @@ impl ars_core::Machine for Machine {
                     ctx.add_on_paste = props.add_on_paste;
                     ctx.allow_duplicates = props.allow_duplicates;
                     ctx.blur_behavior = props.blur_behavior;
+                    ctx.dir = props.dir;
                     ctx.name = props.name;
                 }))
             }
@@ -1168,6 +1240,7 @@ fn props_output_changed(old: &Props, new: &Props) -> bool {
         || old.add_on_paste != new.add_on_paste
         || old.allow_duplicates != new.allow_duplicates
         || old.blur_behavior != new.blur_behavior
+        || old.dir != new.dir
         || old.name != new.name
 }
 
@@ -1342,12 +1415,27 @@ impl Api<'_> {
         attrs
     }
 
-    /// Attributes for the delete trigger of the tag at `index` (a `gridcell`).
+    /// Attributes for the `gridcell` wrapping a tag's delete trigger.
+    #[must_use]
+    pub fn tag_delete_cell_attrs(&self, index: usize) -> AttrMap {
+        let mut attrs = base_attrs(&Part::TagDeleteCell { index });
+
+        attrs.set(HtmlAttr::Role, "gridcell");
+
+        attrs
+    }
+
+    /// Attributes for the remove `<button>` of the tag at `index`.
+    ///
+    /// No `role` is set, so the native button role is preserved; the surrounding
+    /// [`TagDeleteCell`](Part::TagDeleteCell) carries the grid `gridcell` role.
     #[must_use]
     pub fn tag_delete_trigger_attrs(&self, index: usize) -> AttrMap {
         let mut attrs = base_attrs(&Part::TagDeleteTrigger { index });
 
-        attrs.set(HtmlAttr::Role, "gridcell");
+        // Explicit `type="button"` so clicking the remove control never submits a
+        // surrounding form (a typeless `<button>` defaults to submit).
+        attrs.set(HtmlAttr::Type, "button");
 
         if let Some(value) = self.ctx.value.get().get(index) {
             attrs.set(
@@ -1378,12 +1466,24 @@ impl Api<'_> {
             attrs.set(HtmlAttr::MaxLength, max_length.to_string());
         }
 
-        let is_editing = self.ctx.editing_tag == Some(index);
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
 
-        if is_editing {
+        if self.ctx.readonly {
+            attrs.set_bool(HtmlAttr::ReadOnly, true);
+        }
+
+        if self.ctx.editing_tag == Some(index) {
             attrs.set(HtmlAttr::Value, self.ctx.editing_draft.clone());
         } else {
-            attrs.set_bool(HtmlAttr::Data("ars-hidden"), true);
+            // Inactive edit inputs must be fully inert — not just visually hidden —
+            // so keyboard and screen-reader users cannot reach a stray text input.
+            attrs
+                .set_bool(HtmlAttr::Data("ars-hidden"), true)
+                .set_bool(HtmlAttr::Hidden, true)
+                .set(HtmlAttr::Aria(AriaAttr::Hidden), "true")
+                .set(HtmlAttr::TabIndex, "-1");
         }
 
         attrs
@@ -1394,7 +1494,11 @@ impl Api<'_> {
     pub fn input_attrs(&self) -> AttrMap {
         let mut attrs = base_attrs(&Part::Input);
 
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("input"));
+        attrs
+            .set(HtmlAttr::Id, self.ctx.ids.part("input"))
+            // The agnostic core owns the new-tag input value; expose it so adapters
+            // drive the DOM input (notably back to "" after a tag is committed).
+            .set(HtmlAttr::Value, self.ctx.input_value.clone());
 
         if let Some(placeholder) = &self.props.placeholder {
             attrs.set(HtmlAttr::Placeholder, placeholder);
@@ -1446,6 +1550,7 @@ impl Api<'_> {
         let mut attrs = base_attrs(&Part::ClearTrigger);
 
         attrs
+            .set(HtmlAttr::Type, "button")
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.clear_all_label)(&self.ctx.locale),
@@ -1578,9 +1683,10 @@ impl Api<'_> {
                 }
             }
 
-            // ArrowLeft navigates into the tag list when the caret is at the start.
-            KeyboardKey::ArrowLeft => {
-                if caret_at_start {
+            // The "toward previous tag" arrow (ArrowLeft in LTR, ArrowRight in RTL)
+            // navigates into the tag list when the caret is at the start.
+            KeyboardKey::ArrowLeft | KeyboardKey::ArrowRight => {
+                if caret_at_start && self.is_toward_prev(data.key) {
                     (self.send)(Event::FocusPrevTag);
                 }
             }
@@ -1600,9 +1706,15 @@ impl Api<'_> {
                 (self.send)(Event::RemoveTagAtIndex(index));
             }
 
-            KeyboardKey::ArrowLeft => (self.send)(Event::FocusPrevTag),
-
-            KeyboardKey::ArrowRight => (self.send)(Event::FocusNextTag),
+            // Horizontal arrows resolve against text direction: in RTL the visually
+            // forward arrow (ArrowLeft) moves to the next tag, and vice versa.
+            KeyboardKey::ArrowLeft | KeyboardKey::ArrowRight => {
+                if self.is_toward_prev(data.key) {
+                    (self.send)(Event::FocusPrevTag);
+                } else {
+                    (self.send)(Event::FocusNextTag);
+                }
+            }
 
             // Escape deselects the tag list and returns focus to the input,
             // regardless of which tag is focused.
@@ -1613,6 +1725,17 @@ impl Api<'_> {
             }
 
             _ => {}
+        }
+    }
+
+    /// Resolves whether a horizontal arrow key points toward the previous tag,
+    /// accounting for RTL text direction (where `ArrowRight` moves backward).
+    fn is_toward_prev(&self, key: KeyboardKey) -> bool {
+        if self.ctx.dir == Direction::Rtl {
+            key == KeyboardKey::ArrowRight
+        } else {
+            // LTR and Auto (resolved to LTR in the agnostic layer).
+            key == KeyboardKey::ArrowLeft
         }
     }
 
@@ -1679,6 +1802,7 @@ impl ConnectApi for Api<'_> {
             Part::Control => self.control_attrs(),
             Part::Tag { index } => self.tag_attrs(index),
             Part::TagText { index } => self.tag_text_attrs(index),
+            Part::TagDeleteCell { index } => self.tag_delete_cell_attrs(index),
             Part::TagDeleteTrigger { index } => self.tag_delete_trigger_attrs(index),
             Part::TagEdit { index } => self.tag_edit_attrs(index),
             Part::Input => self.input_attrs(),
@@ -2424,9 +2548,19 @@ mod tests {
         assert_eq!(api.control_attrs().get(&HtmlAttr::Role), Some("grid"));
         assert_eq!(api.tag_attrs(0).get(&HtmlAttr::Role), Some("row"));
         assert_eq!(api.tag_text_attrs(0).get(&HtmlAttr::Role), Some("gridcell"));
+        // The gridcell role lives on the wrapper cell; the trigger stays a button.
         assert_eq!(
-            api.tag_delete_trigger_attrs(0).get(&HtmlAttr::Role),
+            api.tag_delete_cell_attrs(0).get(&HtmlAttr::Role),
             Some("gridcell")
+        );
+        assert!(
+            api.tag_delete_trigger_attrs(0)
+                .get(&HtmlAttr::Role)
+                .is_none()
+        );
+        assert_eq!(
+            api.tag_delete_trigger_attrs(0).get(&HtmlAttr::Type),
+            Some("button")
         );
     }
 
@@ -2556,6 +2690,15 @@ mod tests {
         let service = with_tags(&["apple"]);
 
         assert_snapshot!(snapshot_attrs(&service.connect(&|_| {}).tag_text_attrs(0)));
+    }
+
+    #[test]
+    fn snapshot_tag_delete_cell() {
+        let service = with_tags(&["apple"]);
+
+        assert_snapshot!(snapshot_attrs(
+            &service.connect(&|_| {}).tag_delete_cell_attrs(0)
+        ));
     }
 
     #[test]
@@ -3044,6 +3187,7 @@ mod tests {
             Part::Control,
             Part::Tag { index: 0 },
             Part::TagText { index: 0 },
+            Part::TagDeleteCell { index: 0 },
             Part::TagDeleteTrigger { index: 0 },
             Part::TagEdit { index: 0 },
             Part::Input,
@@ -3635,5 +3779,224 @@ mod tests {
         drop(service.send(Event::Blur));
 
         assert!(tags_of(&service).is_empty());
+    }
+
+    // — Codex review pass 2 —
+
+    #[test]
+    fn input_attrs_expose_pending_value() {
+        let mut service = service(props());
+        drop(service.send(Event::InputChange("typing".to_string())));
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.input_attrs().get(&HtmlAttr::Value), Some("typing"));
+
+        // After committing a tag the input value is cleared and reflected.
+        drop(service.send(Event::AddTag("typing".to_string())));
+        let api = service.connect(&|_| {});
+        assert_eq!(api.input_attrs().get(&HtmlAttr::Value), Some(""));
+    }
+
+    #[test]
+    fn blur_does_not_add_overlong_pending_input() {
+        let mut service = service(props().max_length(3));
+        drop(service.send(Event::Focus { is_keyboard: false }));
+        drop(service.send(Event::InputChange("abcd".to_string())));
+
+        drop(service.send(Event::Blur));
+
+        assert!(tags_of(&service).is_empty());
+    }
+
+    #[test]
+    fn set_value_clears_stale_focused_tag() {
+        let mut service = with_tags(&["a", "b", "c"]);
+        drop(service.send(Event::FocusPrevTag)); // focuses index 2
+
+        drop(service.send(Event::SetValue(Some(vec!["a".to_string()]))));
+
+        assert_eq!(tags_of(&service), vec!["a"]);
+        assert_eq!(service.context().focused_tag, None);
+    }
+
+    #[test]
+    fn set_value_exits_edit_when_tag_removed() {
+        let mut service = service(
+            props()
+                .editable(true)
+                .value(vec!["a".to_string(), "b".to_string()]),
+        );
+        drop(service.send(Event::EditTag { index: 1 }));
+        assert_eq!(service.state(), &State::EditingTag { index: 1 });
+
+        drop(service.send(Event::SetValue(Some(vec!["a".to_string()]))));
+
+        assert_eq!(service.state(), &State::Focused);
+        assert_eq!(service.context().editing_tag, None);
+        assert_eq!(service.context().editing_draft, "");
+    }
+
+    #[test]
+    fn delete_cell_holds_gridcell_and_button_keeps_role() {
+        let service = with_tags(&["a"]);
+        let api = service.connect(&|_| {});
+
+        assert_eq!(
+            api.tag_delete_cell_attrs(0).get(&HtmlAttr::Role),
+            Some("gridcell")
+        );
+        assert!(
+            api.tag_delete_trigger_attrs(0)
+                .get(&HtmlAttr::Role)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn triggers_are_type_button() {
+        let service = with_tags(&["a"]);
+        let api = service.connect(&|_| {});
+
+        assert_eq!(
+            api.tag_delete_trigger_attrs(0).get(&HtmlAttr::Type),
+            Some("button")
+        );
+        assert_eq!(
+            api.clear_trigger_attrs().get(&HtmlAttr::Type),
+            Some("button")
+        );
+    }
+
+    #[test]
+    fn inline_edit_input_disabled_and_readonly_mirror_state() {
+        let disabled = service(
+            props()
+                .editable(true)
+                .disabled(true)
+                .default_value(vec!["a".to_string()]),
+        );
+        assert_eq!(
+            disabled
+                .connect(&|_| {})
+                .tag_edit_attrs(0)
+                .get(&HtmlAttr::Disabled),
+            Some("true")
+        );
+
+        let readonly = service(
+            props()
+                .editable(true)
+                .readonly(true)
+                .default_value(vec!["a".to_string()]),
+        );
+        assert_eq!(
+            readonly
+                .connect(&|_| {})
+                .tag_edit_attrs(0)
+                .get(&HtmlAttr::ReadOnly),
+            Some("true")
+        );
+    }
+
+    #[test]
+    fn inactive_inline_edit_input_is_inert() {
+        let service = service(props().editable(true).default_value(vec!["a".to_string()]));
+        let attrs = service.connect(&|_| {}).tag_edit_attrs(0); // not editing
+
+        assert_eq!(attrs.get(&HtmlAttr::Hidden), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Hidden)), Some("true"));
+        assert_eq!(attrs.get(&HtmlAttr::TabIndex), Some("-1"));
+    }
+
+    #[test]
+    fn rtl_reverses_tag_arrow_navigation() {
+        let mut service = service(props().dir(Direction::Rtl).default_value(vec![
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+        ]));
+        // Enter the list from the input: in RTL the "toward previous" arrow is ArrowRight.
+        dispatch(&mut service, |api| {
+            api.on_input_keydown(&key(KeyboardKey::ArrowRight), true);
+        });
+        assert_eq!(service.context().focused_tag, Some(2));
+
+        // ArrowLeft now moves toward the next tag (back toward the input).
+        dispatch(&mut service, |api| {
+            api.on_tag_keydown(2, &key(KeyboardKey::ArrowLeft));
+        });
+        assert_eq!(service.context().focused_tag, None);
+
+        // ArrowRight on a tag moves toward the previous tag.
+        drop(service.send(Event::FocusPrevTag));
+        let before = service.context().focused_tag;
+        dispatch(&mut service, |api| {
+            api.on_tag_keydown(before.unwrap(), &key(KeyboardKey::ArrowRight));
+        });
+        assert!(service.context().focused_tag < before);
+    }
+
+    #[test]
+    fn ltr_input_arrow_right_does_not_enter_tags() {
+        let mut service = with_tags(&["a", "b"]);
+
+        // In LTR, ArrowRight is not the "toward previous" arrow, so it never enters tags.
+        dispatch(&mut service, |api| {
+            api.on_input_keydown(&key(KeyboardKey::ArrowRight), true);
+        });
+
+        assert_eq!(service.context().focused_tag, None);
+    }
+
+    #[test]
+    fn rejected_inline_edit_does_not_fire_value_change() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut service = service(
+            props()
+                .editable(true)
+                .max_length(3)
+                .default_value(vec!["ab".to_string(), "cd".to_string()])
+                .on_value_change({
+                    let log = Arc::clone(&log);
+                    callback(move |value: Vec<String>| log.lock().expect("lock").push(value))
+                }),
+        );
+        drop(service.send(Event::EditTag { index: 0 }));
+
+        // Over-length edit is rejected → list unchanged → no value-change callback.
+        let result = service.send(Event::CommitEdit {
+            index: 0,
+            value: "abcdef".to_string(),
+        });
+        run_effects(&service, result);
+
+        assert!(log.lock().expect("lock").is_empty());
+        assert_eq!(tags_of(&service), vec!["ab", "cd"]);
+    }
+
+    #[test]
+    fn committed_inline_edit_fires_value_change() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut service = service(
+            props()
+                .editable(true)
+                .default_value(vec!["a".to_string()])
+                .on_value_change({
+                    let log = Arc::clone(&log);
+                    callback(move |value: Vec<String>| log.lock().expect("lock").push(value))
+                }),
+        );
+        drop(service.send(Event::EditTag { index: 0 }));
+
+        let result = service.send(Event::CommitEdit {
+            index: 0,
+            value: "b".to_string(),
+        });
+        run_effects(&service, result);
+
+        assert_eq!(
+            log.lock().expect("lock").as_slice(),
+            &[vec!["b".to_string()]]
+        );
     }
 }

@@ -46,6 +46,12 @@ AttrMap {
                 true,
             ),
         ),
+        (
+            Value,
+            String(
+                "",
+            ),
+        ),
     ],
     styles: [],
 }

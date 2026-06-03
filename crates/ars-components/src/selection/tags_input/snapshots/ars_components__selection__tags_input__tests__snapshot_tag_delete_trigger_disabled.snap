@@ -29,12 +29,6 @@ AttrMap {
             ),
         ),
         (
-            Role,
-            String(
-                "gridcell",
-            ),
-        ),
-        (
             TabIndex,
             String(
                 "-1",
@@ -44,6 +38,12 @@ AttrMap {
             Disabled,
             Bool(
                 true,
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
             ),
         ),
     ],

@@ -138,6 +138,8 @@ pub struct Context {
     pub allow_duplicates: bool,
     /// What happens to pending input on blur.
     pub blur_behavior: BlurBehavior,
+    /// Text direction. In RTL, horizontal tag-navigation arrows are reversed.
+    pub dir: Direction,
     /// True while an IME composition session is active (between CompositionStart and CompositionEnd).
     pub is_composing: bool,
     /// The name of the component.
@@ -194,6 +196,9 @@ pub struct Props {
     /// `Add` creates a tag from the current input (if non-empty and valid).
     /// `Clear` discards the pending input. Default: `BlurBehavior::Add`.
     pub blur_behavior: BlurBehavior,
+    /// Text direction. In RTL, horizontal tag-navigation arrows are reversed.
+    /// Default: `Direction::Ltr`.
+    pub dir: Direction,
     /// Callback fired with the new tag list whenever it changes. Controlled
     /// consumers use this to round-trip the value back through `value`.
     pub on_value_change: Option<Callback<dyn Fn(Vec<String>) + Send + Sync>>,
@@ -220,6 +225,7 @@ impl Default for Props {
             name: None, placeholder: None,
             editable: false,
             blur_behavior: BlurBehavior::Add,
+            dir: Direction::Ltr,
             on_value_change: None,
         }
     }
@@ -336,6 +342,7 @@ impl ars_core::Machine for Machine {
             add_on_paste: props.add_on_paste,
             allow_duplicates: props.allow_duplicates,
             blur_behavior: props.blur_behavior,
+            dir: props.dir,
             is_composing: false,
             name: props.name.clone(),
             locale: env.locale.clone(),
@@ -459,37 +466,57 @@ impl ars_core::Machine for Machine {
                 let trimmed = value.trim().to_string();
                 let allow_duplicates = ctx.allow_duplicates;
                 let max_length = ctx.max_length;
-                Some(
-                    TransitionPlan::to(State::Focused)
-                        .apply(move |ctx: &mut Context| {
-                            let mut tags = ctx.value.get().clone();
 
-                            if index < tags.len() {
-                                if trimmed.is_empty() {
-                                    tags.remove(index);
-                                } else {
-                                    let is_duplicate = !allow_duplicates
-                                        && tags
-                                            .iter()
-                                            .enumerate()
-                                            .any(|(other, tag)| other != index && tag == &trimmed);
+                // Decide up front whether the commit actually mutates the list, so
+                // `on_value_change` only fires when the value really changes.
+                let tags = ctx.value.get();
+                let changes = index < tags.len()
+                    && (trimmed.is_empty() || {
+                        let is_duplicate = !allow_duplicates
+                            && tags
+                                .iter()
+                                .enumerate()
+                                .any(|(other, tag)| other != index && tag == &trimmed);
+                        let replaces_with_new = tags[index] != trimmed;
+                        !is_duplicate
+                            && !exceeds_max_length(max_length, &trimmed)
+                            && replaces_with_new
+                    });
 
-                                    // Reject duplicates and over-length edits: keep the
-                                    // original tag rather than committing an invalid value.
-                                    if !is_duplicate && !exceeds_max_length(max_length, &trimmed) {
-                                        tags[index] = trimmed;
-                                    }
+                let mut plan = TransitionPlan::to(State::Focused)
+                    .apply(move |ctx: &mut Context| {
+                        let mut tags = ctx.value.get().clone();
+
+                        if index < tags.len() {
+                            if trimmed.is_empty() {
+                                tags.remove(index);
+                            } else {
+                                let is_duplicate = !allow_duplicates
+                                    && tags
+                                        .iter()
+                                        .enumerate()
+                                        .any(|(other, tag)| other != index && tag == &trimmed);
+
+                                // Reject duplicates and over-length edits: keep the
+                                // original tag rather than committing an invalid value.
+                                if !is_duplicate && !exceeds_max_length(max_length, &trimmed) {
+                                    tags[index] = trimmed;
                                 }
-
-                                ctx.value.set(tags);
                             }
 
-                            ctx.editing_tag = None;
-                            ctx.editing_draft.clear();
-                        })
-                        .with_effect(PendingEffect::named(Effect::FocusInput))
-                        .with_effect(value_change_effect()),
-                )
+                            ctx.value.set(tags);
+                        }
+
+                        ctx.editing_tag = None;
+                        ctx.editing_draft.clear();
+                    })
+                    .with_effect(PendingEffect::named(Effect::FocusInput));
+
+                if changes {
+                    plan = plan.with_effect(value_change_effect());
+                }
+
+                Some(plan)
             }
 
             Event::CancelEdit => {
@@ -536,6 +563,7 @@ impl ars_core::Machine for Machine {
                     && !ctx.disabled
                     && !ctx.readonly
                     && !input_trimmed.is_empty()
+                    && !exceeds_max_length(ctx.max_length, &input_trimmed)
                     && ctx.max.is_none_or(|max| ctx.value.get().len() < max)
                     && (ctx.allow_duplicates || !ctx.value.get().contains(&input_trimmed));
 
@@ -640,12 +668,39 @@ impl ars_core::Machine for Machine {
 
             Event::SetValue(value) => {
                 let value = value.clone();
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+
+                // Post-sync length, used to clamp stale focus/edit indices and to
+                // exit an inline edit whose tag the new value no longer contains.
+                let new_len = match &value {
+                    Some(new_value) => new_value.len(),
+                    None => ctx.value.pending().len(),
+                };
+                let exit_editing =
+                    matches!(state, State::EditingTag { index } if *index >= new_len);
+
+                let plan = if exit_editing {
+                    TransitionPlan::to(State::Focused)
+                } else {
+                    TransitionPlan::new()
+                };
+
+                Some(plan.apply(move |ctx: &mut Context| {
                     if let Some(value) = value {
                         ctx.value.set(value.clone());
                         ctx.value.sync_controlled(Some(value));
                     } else {
                         ctx.value.sync_controlled(None);
+                    }
+
+                    // A controlled parent may replace the list with a shorter one;
+                    // never let focus/edit indices point past the end.
+                    let len = ctx.value.get().len();
+                    if ctx.focused_tag.is_some_and(|index| index >= len) {
+                        ctx.focused_tag = None;
+                    }
+                    if ctx.editing_tag.is_some_and(|index| index >= len) {
+                        ctx.editing_tag = None;
+                        ctx.editing_draft.clear();
                     }
                 }))
             }
@@ -662,6 +717,7 @@ impl ars_core::Machine for Machine {
                     ctx.add_on_paste = props.add_on_paste;
                     ctx.allow_duplicates = props.allow_duplicates;
                     ctx.blur_behavior = props.blur_behavior;
+                    ctx.dir = props.dir;
                     ctx.name = props.name;
                 }))
             }
@@ -894,6 +950,7 @@ fn props_output_changed(old: &Props, new: &Props) -> bool {
         || old.add_on_paste != new.add_on_paste
         || old.allow_duplicates != new.allow_duplicates
         || old.blur_behavior != new.blur_behavior
+        || old.dir != new.dir
         || old.name != new.name
 }
 ```
@@ -926,7 +983,15 @@ pub enum Part {
         index: usize,
     },
 
-    /// The delete trigger for a tag (a `gridcell` containing the remove button).
+    /// The `gridcell` wrapper that contains a tag's delete trigger. Holding the
+    /// `gridcell` role here keeps the [`TagDeleteTrigger`](Self::TagDeleteTrigger)
+    /// button's native button semantics intact.
+    TagDeleteCell {
+        /// The index of the tag.
+        index: usize,
+    },
+
+    /// The remove button for a tag (a `<button>` inside the delete cell).
     TagDeleteTrigger {
         /// The index of the tag.
         index: usize,
@@ -1128,12 +1193,27 @@ impl Api<'_> {
         attrs
     }
 
-    /// Attributes for the delete trigger of the tag at `index` (a `gridcell`).
+    /// Attributes for the `gridcell` wrapping a tag's delete trigger.
+    #[must_use]
+    pub fn tag_delete_cell_attrs(&self, index: usize) -> AttrMap {
+        let mut attrs = base_attrs(&Part::TagDeleteCell { index });
+
+        attrs.set(HtmlAttr::Role, "gridcell");
+
+        attrs
+    }
+
+    /// Attributes for the remove `<button>` of the tag at `index`.
+    ///
+    /// No `role` is set, so the native button role is preserved; the surrounding
+    /// [`TagDeleteCell`](Part::TagDeleteCell) carries the grid `gridcell` role.
     #[must_use]
     pub fn tag_delete_trigger_attrs(&self, index: usize) -> AttrMap {
         let mut attrs = base_attrs(&Part::TagDeleteTrigger { index });
 
-        attrs.set(HtmlAttr::Role, "gridcell");
+        // Explicit `type="button"` so clicking the remove control never submits a
+        // surrounding form (a typeless `<button>` defaults to submit).
+        attrs.set(HtmlAttr::Type, "button");
 
         if let Some(value) = self.ctx.value.get().get(index) {
             attrs.set(
@@ -1164,12 +1244,24 @@ impl Api<'_> {
             attrs.set(HtmlAttr::MaxLength, max_length.to_string());
         }
 
-        let is_editing = self.ctx.editing_tag == Some(index);
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
 
-        if is_editing {
+        if self.ctx.readonly {
+            attrs.set_bool(HtmlAttr::ReadOnly, true);
+        }
+
+        if self.ctx.editing_tag == Some(index) {
             attrs.set(HtmlAttr::Value, self.ctx.editing_draft.clone());
         } else {
-            attrs.set_bool(HtmlAttr::Data("ars-hidden"), true);
+            // Inactive edit inputs must be fully inert — not just visually hidden —
+            // so keyboard and screen-reader users cannot reach a stray text input.
+            attrs
+                .set_bool(HtmlAttr::Data("ars-hidden"), true)
+                .set_bool(HtmlAttr::Hidden, true)
+                .set(HtmlAttr::Aria(AriaAttr::Hidden), "true")
+                .set(HtmlAttr::TabIndex, "-1");
         }
 
         attrs
@@ -1180,7 +1272,11 @@ impl Api<'_> {
     pub fn input_attrs(&self) -> AttrMap {
         let mut attrs = base_attrs(&Part::Input);
 
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("input"));
+        attrs
+            .set(HtmlAttr::Id, self.ctx.ids.part("input"))
+            // The agnostic core owns the new-tag input value; expose it so adapters
+            // drive the DOM input (notably back to "" after a tag is committed).
+            .set(HtmlAttr::Value, self.ctx.input_value.clone());
 
         if let Some(placeholder) = &self.props.placeholder {
             attrs.set(HtmlAttr::Placeholder, placeholder);
@@ -1232,6 +1328,7 @@ impl Api<'_> {
         let mut attrs = base_attrs(&Part::ClearTrigger);
 
         attrs
+            .set(HtmlAttr::Type, "button")
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.clear_all_label)(&self.ctx.locale),
@@ -1364,9 +1461,10 @@ impl Api<'_> {
                 }
             }
 
-            // ArrowLeft navigates into the tag list when the caret is at the start.
-            KeyboardKey::ArrowLeft => {
-                if caret_at_start {
+            // The "toward previous tag" arrow (ArrowLeft in LTR, ArrowRight in RTL)
+            // navigates into the tag list when the caret is at the start.
+            KeyboardKey::ArrowLeft | KeyboardKey::ArrowRight => {
+                if caret_at_start && self.is_toward_prev(data.key) {
                     (self.send)(Event::FocusPrevTag);
                 }
             }
@@ -1386,9 +1484,15 @@ impl Api<'_> {
                 (self.send)(Event::RemoveTagAtIndex(index));
             }
 
-            KeyboardKey::ArrowLeft => (self.send)(Event::FocusPrevTag),
-
-            KeyboardKey::ArrowRight => (self.send)(Event::FocusNextTag),
+            // Horizontal arrows resolve against text direction: in RTL the visually
+            // forward arrow (ArrowLeft) moves to the next tag, and vice versa.
+            KeyboardKey::ArrowLeft | KeyboardKey::ArrowRight => {
+                if self.is_toward_prev(data.key) {
+                    (self.send)(Event::FocusPrevTag);
+                } else {
+                    (self.send)(Event::FocusNextTag);
+                }
+            }
 
             // Escape deselects the tag list and returns focus to the input,
             // regardless of which tag is focused.
@@ -1399,6 +1503,17 @@ impl Api<'_> {
             }
 
             _ => {}
+        }
+    }
+
+    /// Resolves whether a horizontal arrow key points toward the previous tag,
+    /// accounting for RTL text direction (where `ArrowRight` moves backward).
+    fn is_toward_prev(&self, key: KeyboardKey) -> bool {
+        if self.ctx.dir == Direction::Rtl {
+            key == KeyboardKey::ArrowRight
+        } else {
+            // LTR and Auto (resolved to LTR in the agnostic layer).
+            key == KeyboardKey::ArrowLeft
         }
     }
 
@@ -1465,6 +1580,7 @@ impl ConnectApi for Api<'_> {
             Part::Control => self.control_attrs(),
             Part::Tag { index } => self.tag_attrs(index),
             Part::TagText { index } => self.tag_text_attrs(index),
+            Part::TagDeleteCell { index } => self.tag_delete_cell_attrs(index),
             Part::TagDeleteTrigger { index } => self.tag_delete_trigger_attrs(index),
             Part::TagEdit { index } => self.tag_edit_attrs(index),
             Part::Input => self.input_attrs(),
@@ -1497,6 +1613,7 @@ fn base_attrs(part: &Part) -> AttrMap {
 | `Control`          | `[data-ars-scope="tags-input"][data-ars-part="control"]`            | `<div>`    | Wraps tags + input   |
 | `Tag`              | `[data-ars-scope="tags-input"][data-ars-part="tag"]`                | `<span>`   | `data-ars-index`     |
 | `TagText`          | `[data-ars-scope="tags-input"][data-ars-part="tag-text"]`           | `<span>`   |                      |
+| `TagDeleteCell`    | `[data-ars-scope="tags-input"][data-ars-part="tag-delete-cell"]`    | `<span>`   | `gridcell` wrapper   |
 | `TagDeleteTrigger` | `[data-ars-scope="tags-input"][data-ars-part="tag-delete-trigger"]` | `<button>` | ×/close icon         |
 | `TagEdit`          | `[data-ars-scope="tags-input"][data-ars-part="tag-edit"]`           | `<input>`  | Visible in edit mode |
 | `Input`            | `[data-ars-scope="tags-input"][data-ars-part="input"]`              | `<input>`  | New tag entry        |
@@ -1516,7 +1633,9 @@ fn base_attrs(part: &Part) -> AttrMap {
 | `aria-labelledby`  | `Control`          | Label id                                                                                        |
 | `role`             | `Tag`              | `row`                                                                                           |
 | `role`             | `TagText`          | `gridcell`                                                                                      |
-| `role`             | `TagDeleteTrigger` | `gridcell` (contains the remove button)                                                         |
+| `role`             | `TagDeleteCell`    | `gridcell` (wraps the remove button)                                                            |
+| `type`             | `TagDeleteTrigger` | `button` (native button role preserved; non-submit)                                             |
+| `type`             | `ClearTrigger`     | `button` (non-submit)                                                                           |
 | `aria-describedby` | `Input`            | ErrorMessage id (when invalid) then Description id                                              |
 | `aria-label`       | `Tag`              | `"{value}"`                                                                                     |
 | `aria-disabled`    | `Tag`              | When tag or group is disabled                                                                   |
@@ -1687,6 +1806,7 @@ Note: Ark UI's `TagsInput` and React Aria's `TagGroup` differ significantly in s
 | Tag          | `Tag`              | `Item`              | `Tag`                    | A grid `row`                              |
 | Tag preview  | --                 | `ItemPreview`       | --                       | ars-ui folds the chip wrapper into `Tag`  |
 | Tag text     | `TagText`          | `ItemText`          | --                       | --                                        |
+| Tag delete cell | `TagDeleteCell` | --                  | --                       | `gridcell` wrapper preserving button semantics |
 | Tag delete   | `TagDeleteTrigger` | `ItemDeleteTrigger` | --                       | React Aria handles remove via render prop |
 | Tag edit     | `TagEdit`          | `ItemInput`         | --                       | Inline edit input                         |
 | ClearTrigger | `ClearTrigger`     | `ClearTrigger`      | --                       | --                                        |

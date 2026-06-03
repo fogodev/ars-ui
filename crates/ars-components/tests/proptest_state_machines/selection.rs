@@ -1139,9 +1139,11 @@ proptest! {
     fn tags_input_preserves_invariants(
         max in prop::option::of(1usize..5),
         editable in any::<bool>(),
+        rtl in any::<bool>(),
         events in prop::collection::vec(arb_tags_input_event(), 0..48),
     ) {
-        let mut props = tags_input::Props::new().id("tags").editable(editable);
+        let dir = if rtl { ars_core::Direction::Rtl } else { ars_core::Direction::Ltr };
+        let mut props = tags_input::Props::new().id("tags").editable(editable).dir(dir);
 
         if let Some(max) = max {
             props = props.max(max);

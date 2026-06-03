@@ -29,15 +29,15 @@ AttrMap {
             ),
         ),
         (
-            Role,
-            String(
-                "gridcell",
-            ),
-        ),
-        (
             TabIndex,
             String(
                 "-1",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
             ),
         ),
     ],
