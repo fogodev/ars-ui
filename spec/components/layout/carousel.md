@@ -486,6 +486,11 @@ impl ars_core::Machine for Machine {
             }
 
             Event::AutoPlayPause => {
+                // Nothing to pause without auto-play configured. Guarding here
+                // (not just in the trigger handler) keeps a stray `paused` flag
+                // from being set while `auto_play` is `None`, which would
+                // suppress the timer if the parent later enables autoplay.
+                ctx.auto_play.as_ref()?;
                 let plan = if *state == State::AutoPlaying {
                     TransitionPlan::to(State::Idle)
                 } else {
@@ -495,18 +500,18 @@ impl ars_core::Machine for Machine {
             }
 
             Event::AutoPlayResume => {
+                // Nothing to resume without auto-play configured (the paused and
+                // stopped flags are only ever set while it is configured).
+                ctx.auto_play.as_ref()?;
                 // Resume is also the "restart" path the auto-play trigger
                 // dispatches when rotation was stopped (the trigger shows the
                 // "Start" label and sends `AutoPlayResume`), so it clears BOTH
                 // the paused and the stopped flags — otherwise a stopped
                 // carousel's start control would be inert.
-                if ctx.auto_play.is_some() {
-                    return Some(TransitionPlan::to(State::AutoPlaying).apply(|ctx| {
-                        ctx.auto_play_paused = false;
-                        ctx.auto_play_stopped = false;
-                    }).with_effect(PendingEffect::named(Effect::AutoPlayTimer)));
-                }
-                Some(TransitionPlan::context_only(|ctx| { ctx.auto_play_paused = false; }))
+                Some(TransitionPlan::to(State::AutoPlaying).apply(|ctx| {
+                    ctx.auto_play_paused = false;
+                    ctx.auto_play_stopped = false;
+                }).with_effect(PendingEffect::named(Effect::AutoPlayTimer)))
             }
 
             Event::PointerDown { pos, timestamp } => {
@@ -931,6 +936,9 @@ impl<'a> Api<'a> {
     pub fn on_next_trigger_click(&self) { (self.send)(Event::GoToNext); }
     pub fn on_indicator_click(&self, index: usize) { (self.send)(Event::GoToSlide { index }); }
     pub fn on_auto_play_trigger_click(&self) {
+        // No-op without auto-play configured: there is nothing to toggle, and
+        // dispatching `AutoPlayPause` would set a stale `paused` flag.
+        if self.ctx.auto_play.is_none() { return; }
         if self.ctx.auto_play_stopped || self.ctx.auto_play_paused {
             (self.send)(Event::AutoPlayResume);
         } else {

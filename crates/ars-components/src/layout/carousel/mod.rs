@@ -763,6 +763,12 @@ impl ars_core::Machine for Machine {
             }
 
             Event::AutoPlayPause => {
+                // Nothing to pause without auto-play configured. Guarding here
+                // (not just in the trigger handler) keeps a stray `paused` flag
+                // from being set while `auto_play` is `None` — a stale flag
+                // would suppress the timer if the parent later enables autoplay.
+                ctx.auto_play.as_ref()?;
+
                 let plan = if *state == State::AutoPlaying {
                     TransitionPlan::to(State::Idle)
                 } else {
@@ -778,26 +784,24 @@ impl ars_core::Machine for Machine {
             }
 
             Event::AutoPlayResume => {
-                // Resume is also the "restart" path the auto-play trigger
-                // dispatches when rotation was permanently stopped (the
-                // trigger shows the "Start" label and sends `AutoPlayResume`),
-                // so it clears BOTH the paused and the stopped flags. Without
-                // clearing `auto_play_stopped`, a stopped carousel's start
-                // control would be inert with no way to resume rotation.
-                if ctx.auto_play.is_some() {
-                    return Some(
-                        TransitionPlan::to(State::AutoPlaying)
-                            .apply(|ctx: &mut Context| {
-                                ctx.auto_play_paused = false;
-                                ctx.auto_play_stopped = false;
-                            })
-                            .with_effect(PendingEffect::named(Effect::AutoPlayTimer)),
-                    );
-                }
+                // Nothing to resume without auto-play configured (the paused and
+                // stopped flags are only ever set while it is configured).
+                ctx.auto_play.as_ref()?;
 
-                Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                    ctx.auto_play_paused = false;
-                }))
+                // Resume is also the "restart" path the auto-play trigger
+                // dispatches when rotation was permanently stopped (the trigger
+                // shows the "Start" label and sends `AutoPlayResume`), so it
+                // clears BOTH the paused and the stopped flags. Without clearing
+                // `auto_play_stopped`, a stopped carousel's start control would
+                // be inert with no way to resume rotation.
+                Some(
+                    TransitionPlan::to(State::AutoPlaying)
+                        .apply(|ctx: &mut Context| {
+                            ctx.auto_play_paused = false;
+                            ctx.auto_play_stopped = false;
+                        })
+                        .with_effect(PendingEffect::named(Effect::AutoPlayTimer)),
+                )
             }
 
             Event::PointerDown { pos, timestamp } => {
@@ -1471,7 +1475,14 @@ impl Api<'_> {
     }
 
     /// Toggle auto-play: resume when stopped/paused, otherwise pause.
+    ///
+    /// No-op when auto-play is not configured — there is nothing to toggle, and
+    /// dispatching `AutoPlayPause` would set a stale `paused` flag that suppresses
+    /// the timer if the parent later enables auto-play.
     pub fn on_auto_play_trigger_click(&self) {
+        if self.ctx.auto_play.is_none() {
+            return;
+        }
         if self.ctx.auto_play_stopped || self.ctx.auto_play_paused {
             (self.send)(Event::AutoPlayResume);
         } else {
@@ -2687,30 +2698,30 @@ mod tests {
     }
 
     #[test]
-    fn autoplay_pause_when_idle_sets_flag_without_state_change() {
-        // No auto-play config → resting in `Idle`; pause keeps the state but
-        // still records the paused flag and cancels the (absent) timer.
-        let mut service = service(props(3));
+    fn autoplay_pause_when_not_playing_sets_flag_without_state_change() {
+        // An auto-play carousel mid-transition (not in `AutoPlaying`): pause
+        // keeps the state but records the paused flag and cancels the timer.
+        let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
+        drop(service.send(Event::AutoPlayTick));
+        assert_eq!(service.state(), &State::Transitioning);
 
         let result = service.send(Event::AutoPlayPause);
 
-        assert_eq!(service.state(), &State::Idle);
+        assert_eq!(service.state(), &State::Transitioning);
         assert!(service.context().auto_play_paused);
         assert_eq!(result.cancel_effects, vec![Effect::AutoPlayTimer]);
     }
 
     #[test]
-    fn autoplay_resume_without_config_clears_paused_flag() {
+    fn autoplay_resume_without_config_is_noop() {
+        // The paused/stopped flags are never set while auto-play is absent, so
+        // a stray `AutoPlayResume` has nothing to do.
         let mut service = service(props(3));
-
-        drop(service.send(Event::AutoPlayPause));
-
-        assert!(service.context().auto_play_paused);
-
         let result = service.send(Event::AutoPlayResume);
-
-        assert!(!service.context().auto_play_paused);
+        assert!(!result.state_changed);
         assert!(result.pending_effects.is_empty());
+        assert!(!service.context().auto_play_paused);
     }
 
     // ── Codex review #716: autoplay timer lifecycle ──────────────────
@@ -3116,6 +3127,49 @@ mod tests {
         assert!(!result.state_changed);
         assert!(!service.context().auto_play_stopped);
         assert_eq!(service.state(), &State::AutoPlaying);
+    }
+
+    // ── Codex review #716 (fourth pass) ──────────────────────────────
+
+    #[test]
+    fn autoplay_pause_without_config_is_noop() {
+        let mut service = service(props(3));
+        let result = service.send(Event::AutoPlayPause);
+        assert!(!result.state_changed);
+        assert!(!service.context().auto_play_paused);
+    }
+
+    #[test]
+    fn auto_play_trigger_click_without_config_dispatches_nothing() {
+        let service = service(props(3));
+        let recorder: RefCell<Vec<Event>> = RefCell::new(Vec::new());
+        {
+            let record = |event| recorder.borrow_mut().push(event);
+            let api = service.connect(&record);
+            api.on_auto_play_trigger_click();
+        }
+        assert!(recorder.into_inner().is_empty());
+    }
+
+    #[test]
+    fn enabling_autoplay_after_trigger_click_starts_timer() {
+        // Regression: clicking the trigger while auto-play is off must not set a
+        // stale paused flag that suppresses the timer once autoplay is enabled.
+        let mut service = service(props(3));
+        {
+            let api = service.connect(&|_| {});
+            api.on_auto_play_trigger_click();
+        }
+        assert!(!service.context().auto_play_paused);
+
+        let result = service.set_props(autoplay_props(3));
+        assert_eq!(service.state(), &State::AutoPlaying);
+        assert!(
+            result
+                .pending_effects
+                .iter()
+                .any(|effect| effect.name == Effect::AutoPlayTimer)
+        );
     }
 
     #[test]
