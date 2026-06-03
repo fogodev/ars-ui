@@ -1,0 +1,37 @@
+---
+source: crates/ars-components/src/date_time/date_range_picker/tests.rs
+expression: snapshot_attrs(&api.label_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "label",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "date-range-picker",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "trip-label",
+            ),
+        ),
+        (
+            For,
+            String(
+                "trip-start-input",
+            ),
+        ),
+    ],
+    styles: [],
+}

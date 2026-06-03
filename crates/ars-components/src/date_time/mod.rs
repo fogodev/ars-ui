@@ -12,6 +12,9 @@ pub mod date_picker;
 /// DateRangeField machine.
 pub mod date_range_field;
 
+/// DateRangePicker machine.
+pub mod date_range_picker;
+
 /// DateTimePicker machine.
 pub mod date_time_picker;
 

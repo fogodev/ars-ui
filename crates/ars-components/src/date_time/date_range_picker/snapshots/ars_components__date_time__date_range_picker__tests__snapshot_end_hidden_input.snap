@@ -1,0 +1,27 @@
+---
+source: crates/ars-components/src/date_time/date_range_picker/tests.rs
+expression: snapshot_attrs(&api.end_hidden_input_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Name,
+            String(
+                "to",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "hidden",
+            ),
+        ),
+        (
+            Value,
+            String(
+                "2024-01-20",
+            ),
+        ),
+    ],
+    styles: [],
+}

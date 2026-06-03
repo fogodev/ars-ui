@@ -243,7 +243,7 @@ struct OverlayProps {
 
 #[component]
 fn Overlay(props: OverlayProps) -> Element {
-    let calendar_props = props.machine.with_api_snapshot(|api| api.calendar_props());
+    let calendar_props = props.machine.with_api_snapshot(|api| api.range_calendar_props());
     rsx! { RangeCalendar { ..calendar_props } }
 }
 ```
