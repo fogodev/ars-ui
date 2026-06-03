@@ -1,0 +1,169 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8f960c77e679",
+  "session_id": "09cc549d-4ad5-4de7-9321-dca94bacfc94",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T05:36:36.785687Z",
+  "branch": "impl-290",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_range_field/mod.rs",
+    "crates/ars-components/src/date_time/date_range_picker/mod.rs",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_clear_trigger_empty.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_clear_trigger_with_value.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_content.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_control.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_control_with_description_and_error.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_description.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_end_field_props.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_end_hidden_input.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_end_input_marker.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_error_message.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_hidden_input_empty.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_hidden_input_with_range.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_label.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_positioner.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_preset_trigger.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_root_closed.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_root_disabled.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_root_invalid.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_root_open.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_root_readonly.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_root_required.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_separator.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_start_field_props.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_start_hidden_input.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_start_input_marker.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_trigger_closed.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_trigger_disabled.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_trigger_open.snap",
+    "crates/ars-components/src/date_time/date_range_picker/tests.rs",
+    "crates/ars-components/src/date_time/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "spec/components/date-time/date-range-picker.md",
+    "spec/dioxus-components/date-time/date-range-picker.md",
+    "spec/leptos-components/date-time/date-range-picker.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "6620a6d46d5e",
+  "token_usage": {
+    "input_tokens": 61354,
+    "cache_creation_tokens": 1040049,
+    "cache_read_tokens": 56314899,
+    "output_tokens": 196108,
+    "api_call_count": 193
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Implement task #290: the DateRangePicker agnostic core state machine component in a Rust UI component library, including spec, tests, and conformance/proptest entries.",
+    "outcome": "The DateRangePicker module was fully implemented (82 unit + 28 snapshot + conformance + proptest), the component spec was rewritten to match real dependency APIs, a controlled→uncontrolled consistency bug was discovered and fixed via proptest, and a PR was opened after all xci-fast gates passed.",
+    "learnings": {
+      "repo": [
+        "The date-range-picker spec was written before date_field and range_calendar were finalized, causing pervasive API drift: text-input model with DateFormat/parse_date, calendar{is_range: true} composition, to_iso_string(), and DateRange::normalized() returning a non-Option — all wrong.",
+        "date_field is a segmented field emitting Option<CalendarDate>, not a text input. DateFormat does not exist (only DateFormatter). Range selection lives in the dedicated range_calendar component, not calendar{is_range: true}.",
+        "CalendarDate::to_iso_string() does not exist; the correct method is to_iso8601(). DateRange::normalized() returns Option, making spec line 340's set(Some(normalized(...))) a type error.",
+        "range_calendar::Props impls Default with visible_months: 2, enabling spread-based overrides.",
+        "format_date_label differs between range_calendar (appends weekday) and date_range_field — do not merge these into a shared helper.",
+        "NoEffect is the correct Effect type for agnostic-core pickers where focus and positioning are adapter concerns.",
+        "The snapshot-count gate is a soft per-component budget review cap (not an exact manifest); the workspace-wide total warning is pre-existing and not a per-component failure.",
+        "spec-compile-snippets gate performs syntactic Rust parse (syn/rustc token-tree) on all markdown code blocks — placeholder bodies like { /* ... */ } are syntactically valid and pass.",
+        "usize fields in ComponentPart-derived Part enums require no #[part(default)] attribute; the derive uses 0.",
+        "Adapter specs (Leptos, Dioxus) referenced api.calendar_props() which needed renaming to range_calendar_props() to match the core implementation."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/date_range_picker/mod.rs",
+          "finding": "sync_props controlled branch must also update the internal value so that a controlled→uncontrolled switch (parent drops value prop) reveals a value consistent with the fields, not a stale None."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_range_picker/mod.rs",
+          "line": 872,
+          "end_line": 872,
+          "finding": "Non-comparable mixed-calendar defensive branch — intentionally left uncovered, consistent with date_range_field sibling; only reachable via deliberately mixed CalendarSystem inputs."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_range_field/mod.rs",
+          "finding": "date_out_of_bounds and format_date_label helpers promoted to pub(crate) for sibling reuse by date_range_picker, avoiding a third copy."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+          "finding": "The field-mirror invariant (value.get() matches start_date/end_date) must be gated on !is_controlled(); in controlled mode get() correctly returns the parent override while fields track edits independently."
+        }
+      ],
+      "workflow": [
+        "cargo xci-fast is the pre-push gate (~10-15 min): covers fmt, clippy, unit/integration/adapter tests, spec-compile-snippets, error-variant-coverage, mutual-exclusion, snapshot-count, and native coverage.",
+        "Run cargo insta review (or cargo insta accept) to generate and accept pending snapshot fixtures after first test run.",
+        "Run cargo insta --unreferenced=reject with --all-features to avoid false positives from feature-gated snapshot tests.",
+        "Proptest blocks are #[ignore]d (nightly-only) but should be run manually at least once to validate invariants; they can catch real implementation bugs that unit tests miss.",
+        "Post-implementation audit phases: (1) spec/impl derive/type drift, (2) adapter spec and surface reference sweep (two clean consecutive rounds), (3) coverage gap-fill. Document uncovered defensive branches explicitly.",
+        "SendResult uses state_changed and context_changed fields — there is no transitioned field.",
+        "date_field::Props has no From<AttrMap> / Into<AttrMap> impl; return marker attrs for wrapper parts instead of converting Props directly."
+      ]
+    },
+    "friction": [
+      "Substantial spec drift required extensive research across 5+ files before any implementation could begin — the spec was authoritative in theory but factually wrong in many API details.",
+      "SendResult API mismatch (expected .transitioned, actual .state_changed/.context_changed) caused a cascade of test file edits.",
+      "date_field::Props having no Into<AttrMap> impl was only discoverable at compile time, requiring a design pivot to marker attrs.",
+      "ToString needed an explicit import in the no_std + alloc context even though it's normally in the prelude.",
+      "cargo insta --unreferenced=reject produces false positives without --all-features due to feature-gated snapshot tests in other components.",
+      "Proptest discovered a real controlled→uncontrolled consistency bug in the initial implementation that required a fix and regression test.",
+      "MD060 markdownlint warnings appeared repeatedly during spec editing but are cosmetic (not a CI gate), creating noise.",
+      "The two format_date_label implementations look similar but differ in one detail (weekday suffix), making the merge tempting but incorrect."
+    ],
+    "open_items": [
+      "Adapter implementations (Leptos, Dioxus) for DateRangePicker are not yet written — adapter specs were updated but no adapter code exists.",
+      "Proptest is #[ignore]d and only runs manually or on nightly CI; the invariants it guards are not covered by the always-on suite beyond the named regression test.",
+      "E2E tests are deferred — they are an adapter-layer concern and not applicable to the agnostic core.",
+      "The non-comparable mixed-calendar defensive branch (mod.rs:872) is intentionally uncovered; a future test could exercise it by constructing deliberately mixed CalendarSystem inputs."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T05:35:39.585239Z",
+    "agent_lines": 4817,
+    "agent_removed": 461,
+    "human_added": 93,
+    "human_modified": 21,
+    "human_removed": 0,
+    "total_committed": 4931,
+    "total_lines_changed": 5392,
+    "agent_percentage": 97.88575667655786,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 114,
+      "user_lines_removed": 21,
+      "agent_lines_added": 4857,
+      "agent_lines_removed": 480,
+      "user_added_per_file": {
+        "crates/ars-components/src/date_time/date_range_picker/mod.rs": 17,
+        "crates/ars-components/src/date_time/date_range_picker/tests.rs": 90,
+        "spec/components/date-time/date-range-picker.md": 7
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/date_time/date_range_picker/mod.rs": 10,
+        "crates/ars-components/src/date_time/date_range_picker/tests.rs": 4,
+        "spec/components/date-time/date-range-picker.md": 7
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4952,
+      "agent_lines_removed": 482
+    }
+  ]
+}

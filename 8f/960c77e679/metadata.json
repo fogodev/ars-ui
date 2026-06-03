@@ -1,0 +1,61 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8f960c77e679",
+  "strategy": "manual-commit",
+  "branch": "impl-290",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_range_field/mod.rs",
+    "crates/ars-components/src/date_time/date_range_picker/mod.rs",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_clear_trigger_empty.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_clear_trigger_with_value.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_content.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_control.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_control_with_description_and_error.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_description.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_end_field_props.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_end_hidden_input.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_end_input_marker.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_error_message.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_hidden_input_empty.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_hidden_input_with_range.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_label.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_positioner.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_preset_trigger.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_root_closed.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_root_disabled.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_root_invalid.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_root_open.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_root_readonly.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_root_required.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_separator.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_start_field_props.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_start_hidden_input.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_start_input_marker.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_trigger_closed.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_trigger_disabled.snap",
+    "crates/ars-components/src/date_time/date_range_picker/snapshots/ars_components__date_time__date_range_picker__tests__snapshot_trigger_open.snap",
+    "crates/ars-components/src/date_time/date_range_picker/tests.rs",
+    "crates/ars-components/src/date_time/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "spec/components/date-time/date-range-picker.md",
+    "spec/dioxus-components/date-time/date-range-picker.md",
+    "spec/leptos-components/date-time/date-range-picker.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/8f/960c77e679/0/metadata.json",
+      "transcript": "/8f/960c77e679/0/full.jsonl",
+      "content_hash": "/8f/960c77e679/0/content_hash.txt",
+      "prompt": "/8f/960c77e679/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 61354,
+    "cache_creation_tokens": 1040049,
+    "cache_read_tokens": 56314899,
+    "output_tokens": 196108,
+    "api_call_count": 193
+  }
+}
