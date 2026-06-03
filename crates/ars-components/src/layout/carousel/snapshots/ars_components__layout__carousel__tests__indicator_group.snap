@@ -1,0 +1,31 @@
+---
+source: crates/ars-components/src/layout/carousel/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).indicator_group_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "indicator-group",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "carousel",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "tablist",
+            ),
+        ),
+    ],
+    styles: [],
+}

@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/layout/carousel/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).auto_play_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "auto-play-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "carousel",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Pause automatic slide show",
+            ),
+        ),
+        (
+            Aria(
+                Pressed,
+            ),
+            String(
+                "true",
+            ),
+        ),
+    ],
+    styles: [],
+}

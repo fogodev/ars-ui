@@ -1,0 +1,33 @@
+---
+source: crates/ars-components/src/layout/carousel/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).prev_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "prev-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "carousel",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Previous slide",
+            ),
+        ),
+    ],
+    styles: [],
+}

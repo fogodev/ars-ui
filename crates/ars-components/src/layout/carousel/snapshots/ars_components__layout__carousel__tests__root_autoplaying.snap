@@ -1,0 +1,63 @@
+---
+source: crates/ars-components/src/layout/carousel/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-orientation",
+            ),
+            String(
+                "horizontal",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "carousel",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "auto-playing",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Carousel",
+            ),
+        ),
+        (
+            Aria(
+                RoleDescription,
+            ),
+            String(
+                "carousel",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "region",
+            ),
+        ),
+    ],
+    styles: [],
+}

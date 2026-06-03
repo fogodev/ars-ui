@@ -71,8 +71,10 @@ pub enum Event {
 ### 1.3 Context
 
 ```rust
-use crate::{Bindable, Duration};
+use ars_core::Bindable;
 use ars_i18n::Orientation;
+use core::num::NonZero;
+use core::time::Duration;
 
 /// Slide alignment within the viewport.
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Default)]
@@ -245,7 +247,29 @@ impl Default for Props {
 
 ### 1.5 Full Machine Implementation
 
+Auto-play timing is an adapter concern, not an agnostic one: the core never calls
+`set_interval`/`set_timeout` directly. Instead it emits a typed [`Effect`] marker that adapters
+dispatch on (`match effect.name { Effect::AutoPlayTimer => … }`) — the same convention used by
+`toast::single::Effect`, `dialog::Effect`, `popover::Effect`, and `tooltip::Effect`. The adapter
+resolving `Effect::AutoPlayTimer` runs a recurring interval of `ctx.auto_play.interval` that
+dispatches `Event::AutoPlayTick`, and tears it down when the effect is cancelled.
+
 ```rust
+/// Typed identifier for every named effect intent the carousel machine emits.
+///
+/// Adapters dispatch on `effect.name` exhaustively so unhandled variants and
+/// name typos surface at compile time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter starts (or restarts) a recurring auto-play interval of
+    /// `Context::auto_play.interval` that dispatches `Event::AutoPlayTick`.
+    /// Emitted on mount when the carousel boots into `State::AutoPlaying`
+    /// (see `initial_effects`), on `AutoPlayStart`, on `AutoPlayResume`, and
+    /// on `Blur` when resuming a focus/hover pause. Cancelled on
+    /// `AutoPlayStop`, `AutoPlayPause`, and `PointerDown`.
+    AutoPlayTimer,
+}
+
 pub struct Machine;
 
 impl ars_core::Machine for Machine {
@@ -254,6 +278,7 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
@@ -293,6 +318,22 @@ impl ars_core::Machine for Machine {
         (initial_state, ctx)
     }
 
+    fn initial_effects(
+        state: &Self::State,
+        _ctx: &Self::Context,
+        _props: &Self::Props,
+    ) -> Vec<PendingEffect<Self>> {
+        // `init` boots into `AutoPlaying` when `auto_play.is_some()`, but no
+        // `AutoPlayStart` event fires on mount — so the recurring auto-play
+        // interval must be armed here. Adapters drain this via
+        // `Service::take_initial_effects()` on first mount.
+        if *state == State::AutoPlaying {
+            vec![PendingEffect::named(Effect::AutoPlayTimer)]
+        } else {
+            Vec::new()
+        }
+    }
+
     fn transition(
         state: &Self::State,
         event: &Self::Event,
@@ -302,7 +343,10 @@ impl ars_core::Machine for Machine {
         match event {
             Event::GoToSlide { index } => {
                 if *state == State::Transitioning { return None; }
-                let idx = *index;
+                // A direct jump never wraps; clamp out-of-range targets to the
+                // last slide so `current_index` can never exceed the slide
+                // count (every connect method relies on that invariant).
+                let idx = (*index).min(ctx.slide_count.get() - 1);
                 Some(TransitionPlan::to(State::Transitioning).apply(move |ctx| {
                     ctx.index.set(idx);
                 }))
@@ -312,7 +356,7 @@ impl ars_core::Machine for Machine {
                 if *state == State::Transitioning || !ctx.can_go_next() { return None; }
                 let step = ctx.slides_per_move as isize;
                 let next = ctx.clamp_index(ctx.current_index() as isize + step);
-                let stop = ctx.auto_play.as_ref().map_or(false, |o| o.stop_on_interaction);
+                let stop = ctx.auto_play.as_ref().is_some_and(|o| o.stop_on_interaction);
                 Some(TransitionPlan::to(State::Transitioning).apply(move |ctx| {
                     ctx.index.set(next);
                     if stop { ctx.auto_play_stopped = true; }
@@ -323,7 +367,7 @@ impl ars_core::Machine for Machine {
                 if *state == State::Transitioning || !ctx.can_go_prev() { return None; }
                 let step = ctx.slides_per_move as isize;
                 let prev = ctx.clamp_index(ctx.current_index() as isize - step);
-                let stop = ctx.auto_play.as_ref().map_or(false, |o| o.stop_on_interaction);
+                let stop = ctx.auto_play.as_ref().is_some_and(|o| o.stop_on_interaction);
                 Some(TransitionPlan::to(State::Transitioning).apply(move |ctx| {
                     ctx.index.set(prev);
                     if stop { ctx.auto_play_stopped = true; }
@@ -340,20 +384,14 @@ impl ars_core::Machine for Machine {
 
             Event::AutoPlayStart => {
                 if ctx.auto_play_stopped || ctx.auto_play.is_none() { return None; }
-                let interval = ctx.auto_play.as_ref()?.interval;
-                Some(TransitionPlan::to(State::AutoPlaying).with_named_effect(
-                    "auto-play",
-                    move |_ctx, _props, send| {
-                        let handle = set_interval(move || send(Event::AutoPlayTick), interval);
-                        Box::new(move || clear_interval(handle))
-                    },
-                ))
+                Some(TransitionPlan::to(State::AutoPlaying)
+                    .with_effect(PendingEffect::named(Effect::AutoPlayTimer)))
             }
 
             Event::AutoPlayStop => {
                 Some(TransitionPlan::to(State::Idle).apply(|ctx| {
                     ctx.auto_play_stopped = true;
-                }).cancel_effect("auto-play"))
+                }).cancel_effect(Effect::AutoPlayTimer))
             }
 
             Event::AutoPlayTick => {
@@ -371,19 +409,15 @@ impl ars_core::Machine for Machine {
                 } else {
                     TransitionPlan::new()
                 };
-                Some(plan.apply(|ctx| { ctx.auto_play_paused = true; }).cancel_effect("auto-play"))
+                Some(plan.apply(|ctx| { ctx.auto_play_paused = true; }).cancel_effect(Effect::AutoPlayTimer))
             }
 
             Event::AutoPlayResume => {
                 if ctx.auto_play_stopped { return None; }
-                if let Some(ref opts) = ctx.auto_play {
-                    let interval = opts.interval;
+                if ctx.auto_play.is_some() {
                     return Some(TransitionPlan::to(State::AutoPlaying).apply(|ctx| {
                         ctx.auto_play_paused = false;
-                    }).with_named_effect("auto-play", move |_ctx, _props, send| {
-                        let handle = set_interval(move || send(Event::AutoPlayTick), interval);
-                        Box::new(move || clear_interval(handle))
-                    }));
+                    }).with_effect(PendingEffect::named(Effect::AutoPlayTimer)));
                 }
                 Some(TransitionPlan::context_only(|ctx| { ctx.auto_play_paused = false; }))
             }
@@ -396,7 +430,7 @@ impl ars_core::Machine for Machine {
                     ctx.drag_delta = 0.0;
                     ctx.swipe_velocity = 0.0;
                     ctx.drag_last_timestamp = Some(ts);
-                }).cancel_effect("auto-play"))
+                }).cancel_effect(Effect::AutoPlayTimer))
             }
 
             Event::PointerMove { pos, timestamp } => {
@@ -452,9 +486,12 @@ impl ars_core::Machine for Machine {
             }
 
             Event::FocusSlide { index } => {
-                let idx = *index;
+                // Defensive: focus is always reported for a real slide, but
+                // clamp anyway so an out-of-range index can never desync
+                // `current_index` past the slide count.
+                let idx = (*index).min(ctx.slide_count.get() - 1);
                 let current = ctx.current_index();
-                let should_pause = ctx.auto_play.as_ref().map_or(false, |o| o.pause_on_focus);
+                let should_pause = ctx.auto_play.as_ref().is_some_and(|o| o.pause_on_focus);
                 Some(TransitionPlan::context_only(move |ctx| {
                     if idx != current { ctx.index.set(idx); }
                     if should_pause { ctx.auto_play_paused = true; }
@@ -462,16 +499,10 @@ impl ars_core::Machine for Machine {
             }
 
             Event::Blur => {
-                if ctx.auto_play_paused && !ctx.auto_play_stopped {
-                    if let Some(ref opts) = ctx.auto_play {
-                        let interval = opts.interval;
-                        return Some(TransitionPlan::to(State::AutoPlaying).apply(|ctx| {
-                            ctx.auto_play_paused = false;
-                        }).with_named_effect("auto-play", move |_ctx, _props, send| {
-                            let handle = set_interval(move || send(Event::AutoPlayTick), interval);
-                            Box::new(move || clear_interval(handle))
-                        }));
-                    }
+                if ctx.auto_play_paused && !ctx.auto_play_stopped && ctx.auto_play.is_some() {
+                    return Some(TransitionPlan::to(State::AutoPlaying).apply(|ctx| {
+                        ctx.auto_play_paused = false;
+                    }).with_effect(PendingEffect::named(Effect::AutoPlayTimer)));
                 }
                 None
             }
@@ -647,7 +678,7 @@ impl<'a> Api<'a> {
         attrs
     }
 
-    pub fn autoplay_indicator_attrs(&self) -> AttrMap {
+    pub fn auto_play_indicator_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::AutoPlayIndicator.data_attrs();
         attrs.set(scope_attr, scope_val);
@@ -733,7 +764,7 @@ impl ConnectApi for Api<'_> {
             Part::IndicatorGroup => self.indicator_group_attrs(),
             Part::Indicator { index } => self.indicator_attrs(index),
             Part::AutoPlayTrigger => self.auto_play_trigger_attrs(),
-            Part::AutoPlayIndicator => self.autoplay_indicator_attrs(),
+            Part::AutoPlayIndicator => self.auto_play_indicator_attrs(),
             Part::ProgressText => self.progress_text_attrs(),
         }
     }
@@ -815,12 +846,16 @@ RTL: Arrow keys reverse per `03-accessibility.md` §4.1.
 ### 4.1 Messages
 
 ```rust
-#[derive(Clone, Debug)]
+/// Closure type for the slide label message (factored into a type alias to
+/// satisfy the workspace `clippy::type_complexity` lint).
+pub type SlideLabelFn = dyn Fn(usize, usize, &Locale) -> String + Send + Sync;
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     pub carousel_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub role_description: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub slide_role_description: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    pub slide_label: MessageFn<dyn Fn(usize, usize, &Locale) -> String + Send + Sync>,
+    pub slide_label: MessageFn<SlideLabelFn>,
     pub prev_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub next_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub pause_auto_play_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,

@@ -1,0 +1,63 @@
+---
+source: crates/ars-components/src/layout/carousel/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).item_attrs(0))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-active",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-index",
+            ),
+            String(
+                "0",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "item",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "carousel",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Slide 1 of 3",
+            ),
+        ),
+        (
+            Aria(
+                RoleDescription,
+            ),
+            String(
+                "slide",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "group",
+            ),
+        ),
+    ],
+    styles: [],
+}
