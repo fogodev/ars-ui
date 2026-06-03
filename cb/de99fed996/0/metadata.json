@@ -1,0 +1,102 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "cbde99fed996",
+  "session_id": "11232391-c5e3-4f6c-9dfc-75ed12f9e103",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T21:27:19.796278Z",
+  "branch": "impl-278",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/layout/carousel/mod.rs",
+    "spec/components/layout/carousel.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "6f414e0d2125",
+  "checkpoint_transcript_start": 1322,
+  "transcript_lines_at_start": 1322,
+  "token_usage": {
+    "input_tokens": 5778,
+    "cache_creation_tokens": 705330,
+    "cache_read_tokens": 54105351,
+    "output_tokens": 57026,
+    "api_call_count": 89
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "summary": {
+    "intent": "Implement 6 fixes identified in a 'pass 5' code review of the carousel component, covering swipe gesture guards, slides_per_move step size, focus-scroll visibility checks, controlled-mode index round-tripping, hover pause gating, and loop control disabling.",
+    "outcome": "All 6 fixes were implemented and verified: 126 tests pass, clippy clean, spec synced, xci-fast gate green, committed and pushed.",
+    "learnings": {
+      "repo": [
+        "Controlled value round-trip convention follows Slider's pattern: a `Bindable` field pairs with `on_value_change: Option<Callback<...>>` + `Effect::ValueChange` fired on change; adapter resolves it by calling the callback and the parent pushes the new value back via `set_props`.",
+        "The `cargo xci-fast` command is the pre-push CI gate for this repo.",
+        "Spec and implementation are kept in strict sync — spec lives at `spec/components/layout/carousel.md` and must be updated for every behavioral change.",
+        "Test helpers that fire `pending_effects` use `Arc<Mutex<Vec>>` + a no-op `StrongSend`; pattern established by slider tests.",
+        "Pass-N review cycles are tracked as numbered Codex threads; each pass produces a verdict, replies are posted per-thread, and the next pass is re-triggered after commit."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "PointerUp was missing a no-drag guard (Q1) and was not honoring `slides_per_move` for step size (Q2); both were fixed in the same rewrite of that arm."
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "FocusSlide was unconditionally scrolling even when the target slide was already visible (Q3); fix adds a visibility check before navigating."
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "Added `Effect::IndexChange` variant, `on_index_change: Option<Callback<usize>>` Props field, and `index_change_effect` helper; wired into AutoPlayTick, PointerUp, and FocusSlide (Q4 controlled round-trip)."
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "Added `HoverStart`/`HoverEnd` event variants with transition arms gated by `pause_on_hover`, plus `on_root_pointer_enter`/`on_root_pointer_leave` Api handlers (Q5)."
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "`can_go_prev`/`can_go_next` were not returning `false` when `last_index() == 0`; fixed so loop controls are disabled on single-slide carousels (Q6)."
+        },
+        {
+          "path": "spec/components/layout/carousel.md",
+          "finding": "Spec had internal contradiction: `AutoPlayPause` was documented as the hover/focus pause mechanism while `FocusSlide` separately gated `pause_on_focus`; resolved by reframing `AutoPlayPause` as the manual pause and making hover/focus symmetric core events."
+        }
+      ],
+      "workflow": [
+        "When a spec is internally contradictory on an architectural decision, block on user input via `AskUserQuestion` rather than picking arbitrarily — the user resolved the Q5 ambiguity in one round.",
+        "After adding a new effect variant, existing tests that assert exact `pending_effects` contents will fail and need assertion updates — treat this as expected churn, not regressions.",
+        "Clippy nits (collapsible `if`, let-return in test helpers) caught post-implementation; worth a clippy pass before the final test run."
+      ]
+    },
+    "friction": [
+      "Two previously-passing swipe tests had exact `pending_effects` assertions that broke when `IndexChange` was added to navigation paths — required manual assertion updates.",
+      "Two clippy warnings (collapsible `if` in PointerUp arm, let-return in test helper) required separate fix edits after the main implementation.",
+      "Spec ambiguity in Q5 (`AutoPlayPause` dual-documented as both hover-pause and manual-pause) required a user decision before implementation could proceed."
+    ],
+    "open_items": [
+      "Q5 `pause_on_hover`/`pause_on_focus` architectural decision was resolved by user choice of 'core hover events (symmetric)' — downstream adapters will need to wire `on_root_pointer_enter`/`leave` to actual DOM pointer events.",
+      "Pass-6 Codex review not yet triggered at transcript end — pending after commit/push and thread replies."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T21:26:40.631166Z",
+    "agent_lines": 0,
+    "agent_removed": 4358,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 0,
+    "total_lines_changed": 4358,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
