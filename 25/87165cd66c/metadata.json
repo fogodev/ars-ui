@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "2587165cd66c",
+  "strategy": "manual-commit",
+  "branch": "impl-295",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/specialized/signature_pad/mod.rs",
+    "crates/ars-dom/src/signature_raster.rs",
+    "spec/components/specialized/signature-pad.md",
+    "spec/foundation/11-dom-utilities.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/25/87165cd66c/0/metadata.json",
+      "transcript": "/25/87165cd66c/0/full.jsonl",
+      "content_hash": "/25/87165cd66c/0/content_hash.txt",
+      "prompt": "/25/87165cd66c/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 7027,
+    "cache_creation_tokens": 693156,
+    "cache_read_tokens": 45839497,
+    "output_tokens": 48057,
+    "api_call_count": 76
+  }
+}

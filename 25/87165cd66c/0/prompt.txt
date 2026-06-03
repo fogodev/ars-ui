@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bh66avdeo</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-295/5dc90dba-b6c5-414c-a88d-4524396ab2be/tasks/bh66avdeo.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex review until verdict" completed (exit code 0)</summary>
+</task-notification>
