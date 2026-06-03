@@ -36,6 +36,15 @@ fn rasterize_impl(
     strokes: &[Vec<RasterPoint>],
     spec: &RasterSpec,
 ) -> Result<RasterImage, RasterError> {
+    // A zero-sized canvas makes `toDataURL` return the `data:,` sentinel rather
+    // than an encoded image, which would otherwise decode to an empty byte
+    // buffer that callers could mistake for a valid export. Reject it up front.
+    if spec.width == 0 || spec.height == 0 {
+        return Err(RasterError::Backend(
+            "raster spec has zero width or height".into(),
+        ));
+    }
+
     let window = web_sys::window().ok_or_else(|| RasterError::Backend("no window".into()))?;
 
     let document = window
@@ -265,6 +274,17 @@ mod wasm_tests {
 
             RasterFormat::Jpeg => panic!("webp request must never report jpeg"),
         }
+    }
+
+    #[wasm_bindgen_test]
+    fn zero_sized_spec_is_rejected_not_empty_bytes() {
+        // A 0-dimension canvas would make toDataURL return the `data:,` sentinel,
+        // which must surface as an error rather than empty "valid" image bytes.
+        let result = WebSignatureRasterizer.rasterize(&sample_strokes(), &RasterSpec::new(0, 100));
+        assert!(matches!(result, Err(RasterError::Backend(_))));
+
+        let result = WebSignatureRasterizer.rasterize(&sample_strokes(), &RasterSpec::new(100, 0));
+        assert!(matches!(result, Err(RasterError::Backend(_))));
     }
 
     #[wasm_bindgen_test]

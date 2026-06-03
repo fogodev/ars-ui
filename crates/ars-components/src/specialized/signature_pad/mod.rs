@@ -23,9 +23,9 @@ use alloc::{string::String, vec, vec::Vec};
 use core::fmt::{self, Debug, Write as _};
 
 use ars_core::{
-    AriaAttr, AttrMap, Bindable, ComponentIds, ComponentMessages, ComponentPart, ConnectApi, Env,
-    HasId, HtmlAttr, Locale, MessageFn, PendingEffect, RasterError, RasterImage, RasterPoint,
-    RasterSpec, SignatureRasterizer, TransitionPlan,
+    AriaAttr, AttrMap, Bindable, Callback, ComponentIds, ComponentMessages, ComponentPart,
+    ConnectApi, Env, HasId, HtmlAttr, Locale, MessageFn, PendingEffect, RasterError, RasterImage,
+    RasterPoint, RasterSpec, SignatureRasterizer, TransitionPlan, no_cleanup,
 };
 
 /// A single point in a signature stroke.
@@ -59,10 +59,17 @@ pub struct SignatureData {
 }
 
 impl SignatureData {
-    /// Check if the signature data is empty.
+    /// Check if the signature data is empty, i.e. it has no recorded points.
+    ///
+    /// Emptiness is point-based, not stroke-count-based: externally supplied or
+    /// deserialized data containing only empty strokes (no points) is treated as
+    /// blank, matching [`to_svg_path`](Self::to_svg_path) and
+    /// [`point_count`](Self::point_count), so it never looks like a real
+    /// signature (guide stays visible, clear/undo stay disabled, init stays
+    /// [`Idle`](State::Idle)).
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.strokes.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.strokes.iter().all(|stroke| stroke.points.is_empty())
     }
 
     /// Convert to SVG path data string.
@@ -318,6 +325,13 @@ pub struct Props {
 
     /// Name for form submission.
     pub name: Option<String>,
+
+    /// Fired when the signature data changes through user interaction (a
+    /// committed stroke, undo, or clear), carrying the new data. Required for
+    /// controlled [`data`](Self::data): the parent updates its controlled value
+    /// from this callback, then feeds it back via props (triggering
+    /// [`Event::SyncData`]). Not fired for parent-driven syncs.
+    pub on_data_change: Option<Callback<dyn Fn(SignatureData) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -332,6 +346,7 @@ impl Default for Props {
             pen_width: 2.0,
             min_distance: 3.0,
             name: None,
+            on_data_change: None,
         }
     }
 }
@@ -405,6 +420,16 @@ impl Props {
         self.name = Some(name.into());
         self
     }
+
+    /// Sets [`on_data_change`](Self::on_data_change).
+    #[must_use]
+    pub fn on_data_change(
+        mut self,
+        callback: Callback<dyn Fn(SignatureData) + Send + Sync>,
+    ) -> Self {
+        self.on_data_change = Some(callback);
+        self
+    }
 }
 
 /// The messages for the `SignaturePad` component.
@@ -465,6 +490,13 @@ pub enum Effect {
     /// Adapter announces [`Messages::signature_cleared`] into a polite
     /// `aria-live` region. Emitted on the [`Event::Clear`] transition.
     AnnounceCleared,
+
+    /// The signature data changed through user interaction (a committed stroke,
+    /// undo, or clear). Fires [`Props::on_data_change`] with the new data so a
+    /// parent holding controlled [`Props::data`] can update it — without this,
+    /// controlled mode would never observe the change. Not emitted for
+    /// [`Event::SyncData`] (that change originates from the parent).
+    DataChange,
 }
 
 /// The machine for the `SignaturePad` component.
@@ -588,12 +620,32 @@ impl ars_core::Machine for Machine {
                 let pen_color = props.pen_color.clone();
                 let pen_width = props.pen_width;
                 let min_distance = props.min_distance;
-                return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+
+                // Becoming non-interactive mid-stroke must not strand the machine
+                // in `Drawing` — the disabled/read-only gate below would then
+                // reject the trailing `DrawEnd`/`Clear`, leaving an in-flight
+                // stroke that could later commit stale. Cancel it and leave
+                // `Drawing` (blank canvas -> `Idle`, otherwise `Completed`).
+                let cancel_drawing = (disabled || readonly) && matches!(state, State::Drawing);
+                let target = if cancel_drawing {
+                    if ctx.data.get().is_empty() {
+                        State::Idle
+                    } else {
+                        State::Completed
+                    }
+                } else {
+                    *state
+                };
+
+                return Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
                     ctx.disabled = disabled;
                     ctx.readonly = readonly;
                     ctx.pen_color = pen_color;
                     ctx.pen_width = pen_width;
                     ctx.min_distance = min_distance;
+                    if cancel_drawing {
+                        ctx.current_stroke = None;
+                    }
                 }));
             }
 
@@ -714,7 +766,9 @@ impl ars_core::Machine for Machine {
                 });
 
                 if commits {
-                    plan = plan.with_effect(PendingEffect::named(Effect::AnnounceProvided));
+                    plan = plan
+                        .with_effect(PendingEffect::named(Effect::AnnounceProvided))
+                        .with_effect(data_change_effect());
                 }
 
                 Some(plan)
@@ -729,24 +783,38 @@ impl ars_core::Machine for Machine {
                     State::Completed
                 };
 
-                Some(TransitionPlan::to(target).apply(|ctx: &mut Context| {
-                    let mut data = ctx.data.get().clone();
+                Some(
+                    TransitionPlan::to(target)
+                        .apply(|ctx: &mut Context| {
+                            let mut data = ctx.data.get().clone();
 
-                    data.strokes.pop();
+                            data.strokes.pop();
 
-                    ctx.data.set(data);
-                }))
+                            ctx.data.set(data);
+                        })
+                        .with_effect(data_change_effect()),
+                )
             }
 
             // Clear all strokes from any state.
-            (_, Event::Clear) => Some(
-                TransitionPlan::to(State::Idle)
+            (_, Event::Clear) => {
+                // Notify the parent only when there was something to clear, so a
+                // clear on an already-blank pad does not emit a spurious change.
+                let had_data = !ctx.data.get().is_empty();
+
+                let mut plan = TransitionPlan::to(State::Idle)
                     .apply(|ctx: &mut Context| {
                         ctx.data.set(SignatureData::default());
                         ctx.current_stroke = None;
                     })
-                    .with_effect(PendingEffect::named(Effect::AnnounceCleared)),
-            ),
+                    .with_effect(PendingEffect::named(Effect::AnnounceCleared));
+
+                if had_data {
+                    plan = plan.with_effect(data_change_effect());
+                }
+
+                Some(plan)
+            }
 
             _ => None,
         }
@@ -765,6 +833,22 @@ impl ars_core::Machine for Machine {
             send,
         }
     }
+}
+
+/// Builds the [`Effect::DataChange`] effect that notifies
+/// [`Props::on_data_change`] with the new signature data.
+///
+/// Reads the bound value's *pending* (internal) data, which is the value just
+/// committed by the transition — in controlled mode `get()` would still return
+/// the stale parent-owned value until it round-trips back through props.
+fn data_change_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::DataChange, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_data_change {
+            callback(ctx.data.pending().clone());
+        }
+
+        no_cleanup()
+    })
 }
 
 /// DOM parts of the `SignaturePad` component.
@@ -1025,6 +1109,12 @@ impl Api<'_> {
 
         attrs.set(HtmlAttr::Value, self.ctx.data.get().to_svg_path());
 
+        // A disabled control is excluded from form submission; mirror that on
+        // the hidden input so a disabled pad cannot submit stale signature data.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
+
         attrs
     }
 
@@ -1181,6 +1271,32 @@ mod tests {
         assert!(data.is_empty());
         assert_eq!(data.point_count(), 0);
         assert_eq!(data.to_svg_path(), "");
+    }
+
+    #[test]
+    fn signature_data_with_only_empty_strokes_is_empty() {
+        // Strokes that carry no points are blank even though the stroke vec is
+        // non-empty — emptiness is point-based, consistent with to_svg_path.
+        let data = SignatureData {
+            strokes: vec![
+                SignatureStroke { points: Vec::new() },
+                SignatureStroke { points: Vec::new() },
+            ],
+        };
+
+        assert!(data.is_empty());
+        assert_eq!(data.point_count(), 0);
+        assert_eq!(data.to_svg_path(), "");
+    }
+
+    #[test]
+    fn init_with_only_empty_strokes_starts_idle() {
+        let service = fresh_service(test_props().default_data(SignatureData {
+            strokes: vec![SignatureStroke { points: Vec::new() }],
+        }));
+
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().data.get().is_empty());
     }
 
     #[test]
@@ -1517,7 +1633,10 @@ mod tests {
         assert_eq!(service.state(), &State::Completed);
         assert_eq!(service.context().data.get().strokes.len(), 1);
         assert!(service.context().current_stroke.is_none());
-        assert_eq!(effect_names(&result), vec![Effect::AnnounceProvided]);
+        assert_eq!(
+            effect_names(&result),
+            vec![Effect::AnnounceProvided, Effect::DataChange]
+        );
     }
 
     #[test]
@@ -1615,7 +1734,10 @@ mod tests {
         assert_eq!(service.state(), &State::Idle);
         assert!(service.context().data.get().is_empty());
         assert!(service.context().current_stroke.is_none());
-        assert_eq!(effect_names(&result), vec![Effect::AnnounceCleared]);
+        assert_eq!(
+            effect_names(&result),
+            vec![Effect::AnnounceCleared, Effect::DataChange]
+        );
     }
 
     #[test]
@@ -1783,6 +1905,150 @@ mod tests {
         assert_eq!(service.state(), &State::Drawing);
     }
 
+    #[test]
+    fn set_props_disabling_mid_stroke_cancels_drawing() {
+        let mut service = fresh_service(test_props());
+        drop(service.send(Event::DrawStart {
+            x: 0.0,
+            y: 0.0,
+            pressure: 0.5,
+        }));
+        assert_eq!(service.state(), &State::Drawing);
+
+        // Disabling while drawing must cancel the in-flight stroke and leave
+        // Drawing, not strand the machine where the disabled gate rejects DrawEnd.
+        drop(service.set_props(test_props().disabled(true)));
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().current_stroke.is_none());
+
+        // The (now disabled) trailing DrawEnd is a no-op and cannot commit a
+        // stale stroke.
+        drop(service.send(Event::DrawEnd));
+        assert!(service.context().data.get().is_empty());
+    }
+
+    #[test]
+    fn set_props_readonly_mid_stroke_with_prior_data_returns_to_completed() {
+        let mut service = fresh_service(test_props().default_data(data_with(1)));
+        drop(service.send(Event::DrawStart {
+            x: 9.0,
+            y: 9.0,
+            pressure: 0.5,
+        }));
+        assert_eq!(service.state(), &State::Drawing);
+
+        drop(service.set_props(test_props().default_data(data_with(1)).readonly(true)));
+        assert_eq!(service.state(), &State::Completed);
+        assert!(service.context().current_stroke.is_none());
+    }
+
+    // ───────────────────────── on_data_change ─────────────────────────
+
+    fn recording_pad() -> (
+        Service<Machine>,
+        std::sync::Arc<std::sync::Mutex<Vec<SignatureData>>>,
+    ) {
+        use std::sync::{Arc, Mutex};
+
+        let log: Arc<Mutex<Vec<SignatureData>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&log);
+        let service = Service::<Machine>::new(
+            test_props()
+                .min_distance(0.0)
+                .on_data_change(ars_core::callback(move |data: SignatureData| {
+                    sink.lock().unwrap().push(data);
+                })),
+            &Env::default(),
+            &Messages::default(),
+        );
+        (service, log)
+    }
+
+    /// Sends an event and runs the resulting pending effects, so effect-backed
+    /// callbacks (like `on_data_change`) actually fire — `Service::send` only
+    /// returns the effects for the adapter to run.
+    fn send_run(service: &mut Service<Machine>, event: Event) {
+        use std::sync::Arc;
+
+        let mut result = service.send(event);
+        let send: ars_core::StrongSend<Event> = Arc::new(|_| {});
+        for effect in result.pending_effects.drain(..) {
+            drop(effect.run(service.context(), service.props(), Arc::clone(&send)));
+        }
+    }
+
+    fn draw_one_stroke(service: &mut Service<Machine>) {
+        send_run(
+            service,
+            Event::DrawStart {
+                x: 0.0,
+                y: 0.0,
+                pressure: 0.5,
+            },
+        );
+        send_run(
+            service,
+            Event::DrawMove {
+                x: 5.0,
+                y: 5.0,
+                pressure: 0.5,
+            },
+        );
+        send_run(service, Event::DrawEnd);
+    }
+
+    #[test]
+    fn on_data_change_fires_with_new_data_on_commit_undo_and_clear() {
+        let (mut service, log) = recording_pad();
+
+        draw_one_stroke(&mut service);
+        assert_eq!(log.lock().unwrap().len(), 1);
+        assert_eq!(log.lock().unwrap()[0].strokes.len(), 1);
+
+        send_run(&mut service, Event::Undo);
+        assert_eq!(log.lock().unwrap().len(), 2);
+        assert!(log.lock().unwrap()[1].is_empty());
+
+        // Drawing again then clearing fires once more with the emptied data.
+        draw_one_stroke(&mut service);
+        send_run(&mut service, Event::Clear);
+        let calls = log.lock().unwrap();
+        assert_eq!(calls.len(), 4);
+        assert!(calls[3].is_empty());
+    }
+
+    #[test]
+    fn clear_on_blank_pad_does_not_fire_data_change() {
+        let (mut service, log) = recording_pad();
+        send_run(&mut service, Event::Clear);
+        assert!(log.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn controlled_data_change_round_trips_through_callback_and_sync() {
+        // In controlled mode the parent owns `data`: the component proposes the
+        // new value via `on_data_change`, the parent feeds it back through props,
+        // and only then does `api.data()` reflect it.
+        let mut service = Service::<Machine>::new(
+            test_props()
+                .min_distance(0.0)
+                .data(SignatureData::default()),
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        draw_one_stroke(&mut service);
+        // The committed stroke is staged but the controlled value still reads empty.
+        assert!(service.context().data.get().is_empty());
+        let pending = service.context().data.pending().clone();
+        assert_eq!(pending.strokes.len(), 1);
+
+        // Parent applies the proposed data back through props.
+        drop(service.set_props(test_props().min_distance(0.0).data(pending)));
+        assert_eq!(service.context().data.get().strokes.len(), 1);
+        assert_eq!(service.state(), &State::Completed);
+    }
+
     // ───────────────────────── Api accessors ─────────────────────────
 
     #[test]
@@ -1925,6 +2191,15 @@ mod tests {
             attrs.get(&HtmlAttr::Value).map(str::to_string),
             Some(data_with(1).to_svg_path())
         );
+        // Enabled pad: the input participates in submission.
+        assert!(!attrs.contains(&HtmlAttr::Disabled));
+    }
+
+    #[test]
+    fn hidden_input_disabled_when_pad_disabled() {
+        let api = api_for(State::Completed, data_with(1), true, false, false);
+        // A disabled pad must not submit its (stale) signature value.
+        assert!(api.hidden_input_attrs().contains(&HtmlAttr::Disabled));
     }
 
     #[test]

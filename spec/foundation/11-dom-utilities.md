@@ -3106,6 +3106,10 @@ turns vector strokes into encoded PNG/JPEG bytes using an **offscreen
 
 Given `strokes: &[Vec<RasterPoint>]` and a `RasterSpec`, `rasterize`:
 
+0. Rejects a zero-sized spec (`width == 0 || height == 0`) with
+   `RasterError::Backend` — such a canvas makes `toDataURL` return the `data:,`
+   sentinel, which would otherwise decode to empty bytes mistakable for a valid
+   image.
 1. Creates a detached `<canvas>` via `document.createElement("canvas")` sized to
    `spec.width` × `spec.height`, and acquires its `2d` context.
 2. Fills `spec.background` (a CSS color) when set; otherwise leaves the surface

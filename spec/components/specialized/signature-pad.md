@@ -46,8 +46,11 @@ pub struct SignatureData {
 
 impl SignatureData {
     /// Check if the signature data is empty.
-    pub const fn is_empty(&self) -> bool {
-        self.strokes.is_empty()
+    pub fn is_empty(&self) -> bool {
+        // Point-based, not stroke-count-based: data containing only empty
+        // strokes (no points) is blank, matching `to_svg_path`/`point_count`,
+        // so externally supplied empty data never looks like a real signature.
+        self.strokes.iter().all(|stroke| stroke.points.is_empty())
     }
 
     /// Convert to SVG path data string.
@@ -278,6 +281,12 @@ pub struct Props {
     pub min_distance: f64,
     /// Name for form submission.
     pub name: Option<String>,
+    /// Fired when the signature data changes through user interaction (a
+    /// committed stroke, undo, or clear), carrying the new data. Required for
+    /// controlled `data`: the parent updates its controlled value from this
+    /// callback, then feeds it back via props (triggering `Event::SyncData`).
+    /// Not fired for parent-driven syncs.
+    pub on_data_change: Option<Callback<dyn Fn(SignatureData) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -292,6 +301,7 @@ impl Default for Props {
             pen_width: 2.0,
             min_distance: 3.0,
             name: None,
+            on_data_change: None,
         }
     }
 }
@@ -318,6 +328,10 @@ pub enum Effect {
     AnnounceProvided,
     /// Adapter announces `messages.signature_cleared`. Emitted on `Clear`.
     AnnounceCleared,
+    /// Signature data changed through user interaction (committed stroke, undo,
+    /// or clear); fires `Props::on_data_change` with the new data. Lets a parent
+    /// holding controlled `data` observe the change. Not emitted for `SyncData`.
+    DataChange,
 }
 
 /// The machine for the `SignaturePad` component.
@@ -402,12 +416,24 @@ impl ars_core::Machine for Machine {
                 let pen_color = props.pen_color.clone();
                 let pen_width = props.pen_width;
                 let min_distance = props.min_distance;
-                return Some(TransitionPlan::context_only(move |ctx| {
+                // Becoming non-interactive mid-stroke must not strand the machine
+                // in `Drawing` (the gate below would reject the trailing
+                // `DrawEnd`/`Clear`); cancel the in-flight stroke and leave it.
+                let cancel_drawing = (disabled || readonly) && matches!(state, State::Drawing);
+                let target = if cancel_drawing {
+                    if ctx.data.get().is_empty() { State::Idle } else { State::Completed }
+                } else {
+                    *state
+                };
+                return Some(TransitionPlan::to(target).apply(move |ctx| {
                     ctx.disabled = disabled;
                     ctx.readonly = readonly;
                     ctx.pen_color = pen_color;
                     ctx.pen_width = pen_width;
                     ctx.min_distance = min_distance;
+                    if cancel_drawing {
+                        ctx.current_stroke = None;
+                    }
                 }));
             }
             Event::SyncData => {
@@ -500,7 +526,9 @@ impl ars_core::Machine for Machine {
                     }
                 });
                 if commits {
-                    plan = plan.with_effect(PendingEffect::named(Effect::AnnounceProvided));
+                    plan = plan
+                        .with_effect(PendingEffect::named(Effect::AnnounceProvided))
+                        .with_effect(data_change_effect());
                 }
                 Some(plan)
             }
@@ -517,15 +545,20 @@ impl ars_core::Machine for Machine {
                     let mut data = ctx.data.get().clone();
                     data.strokes.pop();
                     ctx.data.set(data);
-                }))
+                }).with_effect(data_change_effect()))
             }
 
-            // Clear all strokes
+            // Clear all strokes. Notify the parent only when there was data.
             (_, Event::Clear) => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
+                let had_data = !ctx.data.get().is_empty();
+                let mut plan = TransitionPlan::to(State::Idle).apply(|ctx| {
                     ctx.data.set(SignatureData::default());
                     ctx.current_stroke = None;
-                }).with_effect(PendingEffect::named(Effect::AnnounceCleared)))
+                }).with_effect(PendingEffect::named(Effect::AnnounceCleared));
+                if had_data {
+                    plan = plan.with_effect(data_change_effect());
+                }
+                Some(plan)
             }
 
             _ => None,
@@ -540,6 +573,18 @@ impl ars_core::Machine for Machine {
     ) -> Self::Api<'a> {
         Api { state, ctx, props, send }
     }
+}
+
+/// Builds the `Effect::DataChange` effect, notifying `Props::on_data_change`
+/// with the value just committed (`pending()`, which in controlled mode is the
+/// new data even though `get()` still returns the stale parent-owned value).
+fn data_change_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::DataChange, |ctx, props, _send| {
+        if let Some(callback) = &props.on_data_change {
+            callback(ctx.data.pending().clone());
+        }
+        no_cleanup()
+    })
 }
 ```
 
@@ -688,6 +733,11 @@ impl<'a> Api<'a> {
         }
         // Value is SVG path data for form submission
         attrs.set(HtmlAttr::Value, self.ctx.data.get().to_svg_path());
+        // A disabled control is excluded from submission; mirror that so a
+        // disabled pad cannot submit stale signature data.
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
         attrs
     }
 
