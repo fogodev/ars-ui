@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/selection/tags_input/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).live_region_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "live-region",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tags-input",
+            ),
+        ),
+        (
+            Aria(
+                Atomic,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "tags-live-region",
+            ),
+        ),
+    ],
+    styles: [],
+}

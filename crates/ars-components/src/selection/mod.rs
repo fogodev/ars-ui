@@ -28,3 +28,6 @@ pub mod select;
 
 /// Segment group component machine.
 pub mod segment_group;
+
+/// Tags input component machine.
+pub mod tags_input;

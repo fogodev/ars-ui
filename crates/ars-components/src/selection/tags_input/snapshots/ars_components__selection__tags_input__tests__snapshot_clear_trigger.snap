@@ -1,0 +1,45 @@
+---
+source: crates/ars-components/src/selection/tags_input/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).clear_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "clear-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tags-input",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Remove all tags",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "-1",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
