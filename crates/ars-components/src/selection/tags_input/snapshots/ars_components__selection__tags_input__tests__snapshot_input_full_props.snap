@@ -1,0 +1,59 @@
+---
+source: crates/ars-components/src/selection/tags_input/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).input_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "input",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tags-input",
+            ),
+        ),
+        (
+            Aria(
+                Required,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                DescribedBy,
+            ),
+            String(
+                "tags-error-message tags-description",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "tags-input",
+            ),
+        ),
+        (
+            MaxLength,
+            String(
+                "20",
+            ),
+        ),
+        (
+            Placeholder,
+            String(
+                "Add a tag",
+            ),
+        ),
+    ],
+    styles: [],
+}

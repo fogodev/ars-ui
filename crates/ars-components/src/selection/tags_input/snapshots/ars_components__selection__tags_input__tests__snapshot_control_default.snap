@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/selection/tags_input/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).control_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "control",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tags-input",
+            ),
+        ),
+        (
+            Aria(
+                LabelledBy,
+            ),
+            String(
+                "tags-label",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "grid",
+            ),
+        ),
+    ],
+    styles: [],
+}

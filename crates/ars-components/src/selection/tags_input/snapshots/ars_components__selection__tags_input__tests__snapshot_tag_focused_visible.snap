@@ -1,0 +1,75 @@
+---
+source: crates/ars-components/src/selection/tags_input/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).tag_attrs(0))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-focus-visible",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-index",
+            ),
+            String(
+                "0",
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "tag",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "tags-input",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "apple",
+            ),
+        ),
+        (
+            Aria(
+                Description,
+            ),
+            String(
+                "Press Delete to remove",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "tags-tag-0",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "row",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

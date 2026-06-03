@@ -106,6 +106,12 @@ pub struct Context {
     pub focused_tag: Option<usize>,
     /// The index of the tag being edited.
     pub editing_tag: Option<usize>,
+    /// Draft text for the tag currently being edited. Initialized from the tag's
+    /// current value when editing starts and updated on each keystroke during edit.
+    pub editing_draft: String,
+    /// The most recent screen-reader live-region announcement text, surfaced by
+    /// adapters in the `LiveRegion` part via the `Announce` effect.
+    pub live_message: String,
     /// Whether the component is disabled.
     pub disabled: bool,
     /// Whether the component is readonly.
@@ -217,11 +223,10 @@ pre-filled with the tag's current value.
 
 **Editing Context Fields**:
 
-```rust,no_check
-// Already present in Context:
-pub editing_tag: Option<usize>,     // Index of the tag currently being edited
+Both fields live in `Context` (§1.3):
 
-// Additional editing context (added to Context):
+```rust,no_check
+pub editing_tag: Option<usize>,     // Index of the tag currently being edited
 /// Draft text for the tag currently being edited. Initialized from the tag's
 /// current value when editing starts; updated on each keystroke during edit.
 pub editing_draft: String,
@@ -245,7 +250,11 @@ pub editing_draft: String,
 | Tab    | Move focus to next tag or input                      | Commit edit, then move focus |
 
 **Guard**: `EditTag`, `CommitEdit`, and `CancelEdit` events are rejected when `editable: false`,
-`disabled: true`, or `readonly: true`.
+`disabled: true`, or `readonly: true`. `CommitEdit` and `CancelEdit` are additionally rejected
+outside the `EditingTag` state. While in `EditingTag`, the list-mutating and tag-navigation events
+(`AddTag`, `RemoveTag`, `RemoveTagAtIndex`, `EditTag`, `Paste`, `ClearAll`, `FocusPrevTag`,
+`FocusNextTag`) are ignored so the edit stays atomic — the user must commit, cancel, or blur first.
+A `Focus` event exits the edit (clearing `editing_tag` and `editing_draft`).
 
 ### 1.6 Full Machine Implementation
 
@@ -253,21 +262,43 @@ pub editing_draft: String,
 /// The machine for the TagsInput component.
 pub struct Machine;
 
+// Adapters resolve live DOM focus and announcements from these typed effects;
+// the agnostic core never calls into the adapter platform directly.
+/// Typed identifier for every named effect intent the `tags_input` machine emits.
+///
+/// Each variant is resolved by the adapter, which reads the relevant [`Context`]
+/// field to perform the live DOM operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter moves DOM focus to the tag at [`Context::focused_tag`].
+    FocusTag,
+
+    /// Adapter moves DOM focus to the new-tag input element.
+    FocusInput,
+
+    /// Adapter moves DOM focus to the inline-edit input at [`Context::editing_tag`].
+    FocusEditInput,
+
+    /// Adapter surfaces [`Context::live_message`] in the live region so assistive
+    /// technology announces it.
+    Announce,
+}
+
+pub struct Machine;
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
     type Context = Context;
     type Props = Props;
-    type Api<'a> = Api<'a>;
     type Messages = Messages;
+    type Effect = Effect;
+    type Api<'a> = Api<'a>;
 
-    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let state = State::Idle;
-        let locale = env.locale.clone();
-        let messages = messages.clone();
-        let ctx = Context {
+    fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (State, Context) {
+        let context = Context {
             value: match &props.value {
-                Some(v) => Bindable::controlled(v.clone()),
+                Some(value) => Bindable::controlled(value.clone()),
                 None => Bindable::uncontrolled(props.default_value.clone()),
             },
             input_value: String::new(),
@@ -275,6 +306,8 @@ impl ars_core::Machine for Machine {
             focus_visible: false,
             focused_tag: None,
             editing_tag: None,
+            editing_draft: String::new(),
+            live_message: String::new(),
             disabled: props.disabled,
             readonly: props.readonly,
             invalid: props.invalid,
@@ -285,12 +318,12 @@ impl ars_core::Machine for Machine {
             blur_behavior: props.blur_behavior,
             is_composing: false,
             name: props.name.clone(),
-            locale,
+            locale: env.locale.clone(),
             ids: ComponentIds::from_id(&props.id),
-            messages,
+            messages: messages.clone(),
         };
 
-        (state, ctx)
+        (State::Idle, context)
     }
 
     fn transition(
@@ -299,6 +332,7 @@ impl ars_core::Machine for Machine {
         ctx: &Self::Context,
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
+        // Mutating events are rejected while disabled or read-only.
         if ctx.disabled || ctx.readonly {
             match event {
                 Event::AddTag(_)
@@ -312,147 +346,129 @@ impl ars_core::Machine for Machine {
             }
         }
 
+        if matches!(state, State::EditingTag { .. }) {
+            // While editing a tag inline, list-mutating and tag-navigation events
+            // are unreachable from the editing UI. Ignoring them keeps the edit
+            // atomic (the user must commit, cancel, or blur first) so `editing_tag`
+            // and the `EditingTag` state never dangle past a structural change.
+            match event {
+                Event::AddTag(_)
+                | Event::RemoveTag(_)
+                | Event::RemoveTagAtIndex(_)
+                | Event::EditTag { .. }
+                | Event::Paste(_)
+                | Event::ClearAll
+                | Event::FocusPrevTag
+                | Event::FocusNextTag => return None,
+                _ => {}
+            }
+        } else {
+            // `CommitEdit` / `CancelEdit` only make sense while editing; a stray
+            // one in another state would otherwise mutate the list and dangle focus.
+            match event {
+                Event::CommitEdit { .. } | Event::CancelEdit => return None,
+                _ => {}
+            }
+        }
+
         match event {
-            Event::AddTag(tag) => {
-                let tag = tag.trim().to_string();
-                if tag.is_empty() { return None; }
+            Event::AddTag(tag) => add_tag_plan(ctx, tag),
 
-                // Check max
-                if let Some(max) = ctx.max {
-                    if ctx.value.get().len() >= max { return None; }
-                }
+            Event::RemoveTag(value) => {
+                let removed_index = ctx.value.get().iter().position(|tag| tag == value);
+                remove_plan(ctx, removed_index, value)
+            }
 
-                // Check duplicates
-                if !ctx.allow_duplicates && ctx.value.get().contains(&tag) {
+            Event::RemoveTagAtIndex(index) => {
+                let tags = ctx.value.get();
+                if *index >= tags.len() {
                     return None;
                 }
-
-                let allow_dupes = ctx.allow_duplicates;
-                Some(TransitionPlan::context_only(move |ctx| {
-                    let mut tags = ctx.value.get().clone();
-                    if allow_dupes || !tags.contains(&tag) {
-                        tags.push(tag);
-                    }
-                    ctx.value.set(tags);
-                    ctx.input_value.clear();
-                }))
-            }
-
-            Event::RemoveTag(val) => {
-                let val = val.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    let mut tags = ctx.value.get().clone();
-                    let removed_idx = tags.iter().position(|t| t == &val);
-                    tags.retain(|t| t != &val);
-                    ctx.value.set(tags.clone());
-                    if tags.is_empty() {
-                        ctx.focused_tag = None;
-                    } else if let Some(idx) = removed_idx {
-                        ctx.focused_tag = Some(idx.min(tags.len() - 1));
-                    }
-                }).with_effect(PendingEffect::new("focus_tag", |ctx, _props, _send| {
-                    if let Some(idx) = ctx.focused_tag {
-                        let platform = use_platform_effects();
-                        let tag_id = ctx.ids.item("tag", &idx);
-                        platform.focus_element_by_id(&tag_id);
-                    }
-                    no_cleanup()
-                })))
-            }
-
-            Event::RemoveTagAtIndex(idx) => {
-                let idx = *idx;
-                if idx >= ctx.value.get().len() { return None; }
-                Some(TransitionPlan::context_only(move |ctx| {
-                    let mut tags = ctx.value.get().clone();
-                    if idx < tags.len() {
-                        tags.remove(idx);
-                        ctx.value.set(tags.clone());
-                        if tags.is_empty() {
-                            ctx.focused_tag = None;
-                        } else {
-                            ctx.focused_tag = Some(idx.min(tags.len() - 1));
-                        }
-                    }
-                }).with_effect(PendingEffect::new("focus_tag", |ctx, _props, _send| {
-                    if let Some(idx) = ctx.focused_tag {
-                        let platform = use_platform_effects();
-                        let tag_id = ctx.ids.item("tag", &idx);
-                        platform.focus_element_by_id(&tag_id);
-                    }
-                    no_cleanup()
-                })))
+                let value = tags[*index].clone();
+                remove_plan(ctx, Some(*index), &value)
             }
 
             Event::EditTag { index } => {
-                if *index >= ctx.value.get().len() { return None; }
-                let idx = *index;
-                Some(TransitionPlan::to(State::EditingTag { index: idx }).apply(move |ctx| {
-                    ctx.editing_tag = Some(idx);
-                }).with_effect(PendingEffect::new("focus_edit_input", |ctx, _props, _send| {
-                    if let Some(idx) = ctx.editing_tag {
-                        let platform = use_platform_effects();
-                        let edit_id = ctx.ids.item("tag-edit-input", &idx);
-                        platform.focus_element_by_id(&edit_id);
-                    }
-                    no_cleanup()
-                })))
+                if !props.editable {
+                    return None;
+                }
+                let index = *index;
+                let value = ctx.value.get().get(index).cloned()?;
+                Some(
+                    TransitionPlan::to(State::EditingTag { index })
+                        .apply(move |ctx: &mut Context| {
+                            ctx.editing_tag = Some(index);
+                            ctx.editing_draft = value;
+                            ctx.focused_tag = None;
+                        })
+                        .with_effect(PendingEffect::named(Effect::FocusEditInput)),
+                )
             }
 
             Event::CommitEdit { index, value } => {
-                let idx = *index;
-                let val = value.trim().to_string();
-                Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                    if val.is_empty() {
-                        let mut tags = ctx.value.get().clone();
-                        if idx < tags.len() {
-                            tags.remove(idx);
-                            ctx.value.set(tags);
-                        }
-                    } else {
-                        let mut tags = ctx.value.get().clone();
-                        if idx < tags.len() {
-                            tags[idx] = val;
-                            ctx.value.set(tags);
-                        }
-                    }
-                    ctx.editing_tag = None;
-                }).with_effect(PendingEffect::new("focus_input", |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    let input_id = ctx.ids.part("input");
-                    platform.focus_element_by_id(&input_id);
-                    no_cleanup()
-                })))
+                if !props.editable {
+                    return None;
+                }
+                let index = *index;
+                let trimmed = value.trim().to_string();
+                let allow_duplicates = ctx.allow_duplicates;
+                Some(
+                    TransitionPlan::to(State::Focused)
+                        .apply(move |ctx: &mut Context| {
+                            let mut tags = ctx.value.get().clone();
+                            if index < tags.len() {
+                                if trimmed.is_empty() {
+                                    tags.remove(index);
+                                } else {
+                                    let is_duplicate = !allow_duplicates
+                                        && tags
+                                            .iter()
+                                            .enumerate()
+                                            .any(|(other, tag)| other != index && tag == &trimmed);
+                                    if !is_duplicate {
+                                        tags[index] = trimmed;
+                                    }
+                                }
+                                ctx.value.set(tags);
+                            }
+                            ctx.editing_tag = None;
+                            ctx.editing_draft.clear();
+                        })
+                        .with_effect(PendingEffect::named(Effect::FocusInput)),
+                )
             }
 
             Event::CancelEdit => {
-                Some(TransitionPlan::to(State::Focused).apply(|ctx| {
-                    ctx.editing_tag = None;
-                }).with_effect(PendingEffect::new("focus_input", |ctx, _props, _send| {
-                    let platform = use_platform_effects();
-                    let input_id = ctx.ids.part("input");
-                    platform.focus_element_by_id(&input_id);
-                    no_cleanup()
-                })))
+                let restored = ctx.editing_tag;
+                Some(
+                    TransitionPlan::to(State::Focused)
+                        .apply(move |ctx: &mut Context| {
+                            ctx.editing_tag = None;
+                            ctx.editing_draft.clear();
+                            ctx.focused_tag = restored;
+                        })
+                        .with_effect(PendingEffect::named(Effect::FocusTag)),
+                )
             }
 
             Event::Focus { is_keyboard } => {
-                let is_kb = *is_keyboard;
-                Some(TransitionPlan::to(State::Focused).apply(move |ctx| {
-                    ctx.focused = true;
-                    ctx.focus_visible = is_kb;
-                    ctx.focused_tag = None;
-                }))
+                let is_keyboard = *is_keyboard;
+                Some(
+                    TransitionPlan::to(State::Focused).apply(move |ctx: &mut Context| {
+                        ctx.focused = true;
+                        ctx.focus_visible = is_keyboard;
+                        ctx.focused_tag = None;
+                        ctx.editing_tag = None;
+                        ctx.editing_draft.clear();
+                    }),
+                )
             }
 
             Event::Blur if matches!(state, State::EditingTag { .. }) => {
-                let idx = match state {
-                    State::EditingTag { index } => *index,
-                    _ => 0,
-                };
-                Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
-                    // Commit the in-progress edit before transitioning
+                // Blurring out of an inline edit discards the draft and returns to idle.
+                Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
                     ctx.editing_tag = None;
+                    ctx.editing_draft.clear();
                     ctx.focused = false;
                     ctx.focus_visible = false;
                     ctx.focused_tag = None;
@@ -460,135 +476,85 @@ impl ars_core::Machine for Machine {
             }
 
             Event::Blur => {
-                // Respect blur_behavior: Add creates a tag, Clear discards input.
                 let input_trimmed = ctx.input_value.trim().to_string();
-                let should_attempt_add = ctx.blur_behavior == BlurBehavior::Add;
-                let can_add = should_attempt_add
+                let can_add = ctx.blur_behavior == BlurBehavior::Add
                     && !input_trimmed.is_empty()
-                    && ctx.max.map_or(true, |m| ctx.value.get().len() < m)
+                    && ctx.max.is_none_or(|max| ctx.value.get().len() < max)
                     && (ctx.allow_duplicates || !ctx.value.get().contains(&input_trimmed));
-                let tag_to_add = if can_add { Some(input_trimmed) } else { None };
+                let tag_to_add = can_add.then_some(input_trimmed);
 
-                Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
-                    if let Some(tag) = tag_to_add {
-                        let mut tags = ctx.value.get().clone();
-                        tags.push(tag);
-                        ctx.value.set(tags);
-                    }
-                    ctx.input_value.clear();
-                    ctx.focused = false;
-                    ctx.focus_visible = false;
-                    ctx.focused_tag = None;
-                }))
-            }
-
-            Event::InputChange(val) => {
-                let val = val.clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.input_value = val;
-                    ctx.focused_tag = None;
-                }))
-            }
-
-            Event::Paste(text) => {
-                if !ctx.add_on_paste {
-                    let text = text.clone();
-                    return Some(TransitionPlan::context_only(move |ctx| {
-                        ctx.input_value = text;
-                    }));
-                }
-                let delimiter = ctx.delimiter.clone();
-                let max = ctx.max;
-                let allow_duplicates = ctx.allow_duplicates;
-                let parts: Vec<String> = text.split(&delimiter)
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                let current_tags = ctx.value.get().clone();
-                Some(TransitionPlan::context_only(move |ctx| {
-                    let mut tags = current_tags;
-                    for part in parts {
-                        if max.map_or(true, |m| tags.len() < m)
-                            && (allow_duplicates || !tags.contains(&part))
-                        {
-                            tags.push(part);
+                Some(
+                    TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
+                        if let Some(tag) = tag_to_add {
+                            let mut tags = ctx.value.get().clone();
+                            tags.push(tag);
+                            ctx.value.set(tags);
                         }
-                    }
-                    ctx.value.set(tags);
-                    ctx.input_value.clear();
-                }))
+                        ctx.input_value.clear();
+                        ctx.focused = false;
+                        ctx.focus_visible = false;
+                        ctx.focused_tag = None;
+                    }),
+                )
             }
 
-            Event::ClearAll => {
-                Some(TransitionPlan::context_only(|ctx| {
-                    ctx.value.set(Vec::new());
-                    ctx.input_value.clear();
-                }))
-            }
+            Event::InputChange(value) => input_change_plan(state, ctx, value),
+
+            Event::Paste(text) => paste_plan(ctx, text),
+
+            Event::ClearAll => Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                ctx.value.set(Vec::new());
+                ctx.input_value.clear();
+                ctx.focused_tag = None;
+            })),
 
             Event::FocusPrevTag => {
                 let len = ctx.value.get().len();
-                if len == 0 { return None; }
-                let current_tag = ctx.focused_tag;
-                let new_idx = match current_tag {
-                    Some(idx) if idx > 0 => idx - 1,
-                    Some(0) => 0,
+                if len == 0 {
+                    return None;
+                }
+                let new_index = match ctx.focused_tag {
+                    Some(index) if index > 0 => index - 1,
+                    Some(_) => 0,
                     None => len - 1,
-                    _ => 0,
                 };
-                Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.focused_tag = Some(new_idx);
-                }).with_effect(PendingEffect::new("focus_tag", |ctx, _props, _send| {
-
-                    if let Some(idx) = ctx.focused_tag {
-                        let platform = use_platform_effects();
-                        let tag_id = ctx.ids.item("tag", &idx);
-                        platform.focus_element_by_id(&tag_id);
-                    }
-                    no_cleanup()
-                })))
+                Some(
+                    TransitionPlan::context_only(move |ctx: &mut Context| {
+                        ctx.focused_tag = Some(new_index);
+                    })
+                    .with_effect(PendingEffect::named(Effect::FocusTag)),
+                )
             }
 
             Event::FocusNextTag => {
                 let len = ctx.value.get().len();
-                let current_tag = ctx.focused_tag;
-                match current_tag {
-                    Some(idx) if idx + 1 < len => {
-                        let next = idx + 1;
-                        Some(TransitionPlan::context_only(move |ctx| {
-                            ctx.focused_tag = Some(next);
-                        }).with_effect(PendingEffect::new("focus_tag", |ctx, _props, _send| {
-                            if let Some(idx) = ctx.focused_tag {
-                                let platform = use_platform_effects();
-                                let tag_id = ctx.ids.item("tag", &idx);
-                                platform.focus_element_by_id(&tag_id);
-                            }
-                            no_cleanup()
-                        })))
+                match ctx.focused_tag {
+                    Some(index) if index + 1 < len => {
+                        let next = index + 1;
+                        Some(
+                            TransitionPlan::context_only(move |ctx: &mut Context| {
+                                ctx.focused_tag = Some(next);
+                            })
+                            .with_effect(PendingEffect::named(Effect::FocusTag)),
+                        )
                     }
-                    Some(_) => {
-                        // Past last tag → focus input
-                        Some(TransitionPlan::context_only(|ctx| {
+                    Some(_) => Some(
+                        TransitionPlan::context_only(|ctx: &mut Context| {
                             ctx.focused_tag = None;
-                        }).with_effect(PendingEffect::new("focus_input", |ctx, _props, _send| {
-                            let platform = use_platform_effects();
-                            let input_id = ctx.ids.part("input");
-                            platform.focus_element_by_id(&input_id);
-                            no_cleanup()
-                        })))
-                    }
+                        })
+                        .with_effect(PendingEffect::named(Effect::FocusInput)),
+                    ),
                     None => None,
                 }
             }
 
-            Event::CompositionStart => {
-                Some(TransitionPlan::context_only(|ctx| { ctx.is_composing = true; }))
-            }
-            Event::CompositionEnd => {
-                Some(TransitionPlan::context_only(|ctx| { ctx.is_composing = false; }))
-            }
+            Event::CompositionStart => Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                ctx.is_composing = true;
+            })),
 
-            _ => None,
+            Event::CompositionEnd => Some(TransitionPlan::context_only(|ctx: &mut Context| {
+                ctx.is_composing = false;
+            })),
         }
     }
 
@@ -598,7 +564,157 @@ impl ars_core::Machine for Machine {
         props: &'a Self::Props,
         send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
-        Api { state, ctx, props, send }
+        Api {
+            state,
+            ctx,
+            props,
+            send,
+        }
+    }
+}
+
+/// Builds the plan for an [`Event::AddTag`], including the max-reached announcement.
+fn add_tag_plan(ctx: &Context, tag: &str) -> Option<TransitionPlan<Machine>> {
+    let trimmed = tag.trim().to_string();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(max) = ctx.max.filter(|&max| ctx.value.get().len() >= max) {
+        let announcement = (ctx.messages.max_reached_announcement)(max, &ctx.locale);
+        return Some(
+            TransitionPlan::context_only(move |ctx: &mut Context| {
+                ctx.live_message = announcement;
+            })
+            .with_effect(PendingEffect::named(Effect::Announce)),
+        );
+    }
+
+    if !ctx.allow_duplicates && ctx.value.get().contains(&trimmed) {
+        return None;
+    }
+
+    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+        let mut tags = ctx.value.get().clone();
+        tags.push(trimmed);
+        ctx.value.set(tags);
+        ctx.input_value.clear();
+        ctx.focused_tag = None;
+    }))
+}
+
+/// Builds the plan for removing the tag `value` (first found at `removed_index`),
+/// updating focus and emitting the removal announcement.
+fn remove_plan(
+    ctx: &Context,
+    removed_index: Option<usize>,
+    value: &str,
+) -> Option<TransitionPlan<Machine>> {
+    let removed_index = removed_index?;
+    let new_tags: Vec<String> = ctx
+        .value
+        .get()
+        .iter()
+        .filter(|tag| tag.as_str() != value)
+        .cloned()
+        .collect();
+    let will_be_empty = new_tags.is_empty();
+    let announcement = (ctx.messages.removed_announcement)(value, &ctx.locale);
+    let focus_effect = if will_be_empty {
+        Effect::FocusInput
+    } else {
+        Effect::FocusTag
+    };
+
+    Some(
+        TransitionPlan::context_only(move |ctx: &mut Context| {
+            let focused_tag = if new_tags.is_empty() {
+                None
+            } else {
+                Some(removed_index.min(new_tags.len() - 1))
+            };
+            ctx.value.set(new_tags);
+            ctx.focused_tag = focused_tag;
+            ctx.live_message = announcement;
+        })
+        .with_effect(PendingEffect::named(focus_effect))
+        .with_effect(PendingEffect::named(Effect::Announce)),
+    )
+}
+
+/// Builds the plan for an [`Event::InputChange`], handling inline-edit drafts and
+/// delimiter-on-type tag splitting.
+fn input_change_plan(state: &State, ctx: &Context, value: &str) -> Option<TransitionPlan<Machine>> {
+    if matches!(state, State::EditingTag { .. }) {
+        let draft = value.to_string();
+        return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+            ctx.editing_draft = draft;
+        }));
+    }
+
+    let delimiter = ctx.delimiter.clone();
+    let should_split =
+        !ctx.is_composing && !delimiter.is_empty() && value.contains(delimiter.as_str());
+
+    if !should_split {
+        let value = value.to_string();
+        return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+            ctx.input_value = value;
+            ctx.focused_tag = None;
+        }));
+    }
+
+    let value = value.to_string();
+    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+        let mut segments: Vec<&str> = value.split(delimiter.as_str()).collect();
+        // The final segment is the trailing remainder still being typed.
+        let remainder = segments.pop().unwrap_or("").to_string();
+        let mut tags = ctx.value.get().clone();
+        for segment in segments {
+            push_if_allowed(ctx, &mut tags, segment);
+        }
+        ctx.value.set(tags);
+        ctx.input_value = remainder;
+        ctx.focused_tag = None;
+    }))
+}
+
+/// Builds the plan for an [`Event::Paste`].
+fn paste_plan(ctx: &Context, text: &str) -> Option<TransitionPlan<Machine>> {
+    if !ctx.add_on_paste {
+        let text = text.to_string();
+        return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+            ctx.input_value = text;
+        }));
+    }
+
+    let delimiter = ctx.delimiter.clone();
+    let text = text.to_string();
+    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+        let mut tags = ctx.value.get().clone();
+        if delimiter.is_empty() {
+            push_if_allowed(ctx, &mut tags, &text);
+        } else {
+            for segment in text.split(delimiter.as_str()) {
+                push_if_allowed(ctx, &mut tags, segment);
+            }
+        }
+        ctx.value.set(tags);
+        ctx.input_value.clear();
+    }))
+}
+
+/// Pushes the trimmed `segment` onto `tags` when it is non-empty and respects the
+/// max-tags and duplicate constraints in `ctx`.
+fn push_if_allowed(ctx: &Context, tags: &mut Vec<String>, segment: &str) {
+    let candidate = segment.trim();
+    if candidate.is_empty() {
+        return;
+    }
+    let under_max = ctx.max.is_none_or(|max| tags.len() < max);
+    let unique = ctx.allow_duplicates || !tags.iter().any(|tag| tag == candidate);
+    if under_max && unique {
+        tags.push(candidate.to_string());
     }
 }
 ```
@@ -606,27 +722,69 @@ impl ars_core::Machine for Machine {
 ### 1.7 Connect / API
 
 ```rust
+/// The anatomy parts exposed by the `TagsInput` connect API.
 #[derive(ComponentPart)]
 #[scope = "tags-input"]
 pub enum Part {
+    /// Root container.
     Root,
+
+    /// Label element.
     Label,
+
+    /// Control wrapper around the tags and the input (the `grid`).
     Control,
-    Tag { index: usize },
-    TagText { index: usize },
-    TagDeleteTrigger { index: usize },
-    TagEdit { index: usize },
+
+    /// A tag chip (a grid `row`).
+    Tag {
+        /// The index of the tag.
+        index: usize,
+    },
+
+    /// The text portion of a tag (a `gridcell`).
+    TagText {
+        /// The index of the tag.
+        index: usize,
+    },
+
+    /// The delete trigger for a tag (a `gridcell` containing the remove button).
+    TagDeleteTrigger {
+        /// The index of the tag.
+        index: usize,
+    },
+
+    /// The inline-edit input for a tag (visible only in edit mode).
+    TagEdit {
+        /// The index of the tag.
+        index: usize,
+    },
+
+    /// The new-tag input element.
     Input,
+
+    /// The clear-all trigger.
     ClearTrigger,
+
+    /// The hidden form input carrying the joined tag value.
     HiddenInput,
+
+    /// The description element.
     Description,
+
+    /// The error-message element.
     ErrorMessage,
+
+    /// The visually-hidden live region for screen-reader announcements.
+    LiveRegion,
 }
 
-/// API for the TagsInput component.
+/// The machine for the `TagsInput` component.
+#[derive(Debug)]
+
+/// The connect API for the `TagsInput` component.
 ///
-/// The `Api` struct is created by `Machine::connect()` (defined in §1.6) and provides
-/// per-part attribute methods and event handlers for adapter rendering.
+/// Created by [`Machine::connect`]; provides per-part attribute methods and event
+/// handlers for adapter rendering.
 pub struct Api<'a> {
     state: &'a State,
     ctx: &'a Context,
@@ -634,67 +792,45 @@ pub struct Api<'a> {
     send: &'a dyn Fn(Event),
 }
 
-impl<'a> Api<'a> {
+impl Debug for Api<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Api")
+            .field("state", &self.state)
+            .field("ctx", &self.ctx)
+            .field("props", &self.props)
+            .field("send", &"<callback>")
+            .finish()
+    }
+}
 
-    /// The on input focus handler.
-    pub fn on_input_focus(&self, is_keyboard: bool) { (self.send)(Event::Focus { is_keyboard }); }
-
-    /// The on input blur handler.
-    pub fn on_input_blur(&self) { (self.send)(Event::Blur); }
-
-    /// The on input change handler.
-    pub fn on_input_change(&self, val: String) { (self.send)(Event::InputChange(val)); }
-
-    /// The on tag delete handler.
-    pub fn on_tag_delete(&self, val: String) { (self.send)(Event::RemoveTag(val)); }
-
-    /// The on clear click handler.
-    pub fn on_clear_click(&self) { (self.send)(Event::ClearAll); }
-
-    /// Attributes for the root container.
-    pub fn root_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        if self.ctx.disabled { attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
-        if self.ctx.readonly { attrs.set_bool(HtmlAttr::Data("ars-readonly"), true); }
-        if self.ctx.invalid { attrs.set_bool(HtmlAttr::Data("ars-invalid"), true); }
-        if self.ctx.focused { attrs.set_bool(HtmlAttr::Data("ars-focused"), true); }
-        attrs
+impl Api<'_> {
+    /// Returns the current state.
+    #[must_use]
+    pub const fn state(&self) -> &State {
+        self.state
     }
 
-    /// Attributes for the label element.
-    pub fn label_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Label.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("label"));
-        attrs.set(HtmlAttr::For, self.ctx.ids.part("input"));
-        attrs
+    /// Returns the current tag list.
+    #[must_use]
+    pub fn tags(&self) -> &[String] {
+        self.ctx.value.get()
     }
 
-    /// Attributes for the control wrapper.
-    pub fn control_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Control.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Role, "grid");
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
-        if self.ctx.disabled { attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
-        if self.ctx.readonly { attrs.set_bool(HtmlAttr::Data("ars-readonly"), true); }
-        if let Some(max) = self.ctx.max {
-            let current = self.ctx.value.get().len();
-            attrs.set(HtmlAttr::Aria(AriaAttr::Description),
-                (self.ctx.messages.count_label)(current, max, &self.ctx.locale));
-        }
-        attrs
+    /// Returns the current inline-edit draft text.
+    #[must_use]
+    pub fn editing_draft(&self) -> &str {
+        &self.ctx.editing_draft
     }
 
-    /// Returns the count text for the current tag count vs maximum.
-    /// Returns `None` when no `max` is configured.
+    /// Returns the current live-region announcement text.
+    #[must_use]
+    pub fn live_message(&self) -> &str {
+        &self.ctx.live_message
+    }
+
+    /// Returns the count text for the current tag count versus the maximum, or
+    /// `None` when no `max` is configured.
+    #[must_use]
     pub fn count_text(&self) -> Option<String> {
         self.ctx.max.map(|max| {
             let current = self.ctx.value.get().len();
@@ -702,15 +838,62 @@ impl<'a> Api<'a> {
         })
     }
 
-    /// Attributes for a tag element.
+    /// Attributes for the root container.
+    #[must_use]
+    pub fn root_attrs(&self) -> AttrMap {
+        let mut attrs = base_attrs(&Part::Root);
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
+        }
+        if self.ctx.readonly {
+            attrs.set_bool(HtmlAttr::Data("ars-readonly"), true);
+        }
+        if self.ctx.invalid {
+            attrs.set_bool(HtmlAttr::Data("ars-invalid"), true);
+            attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
+        }
+        if self.ctx.focused {
+            attrs.set_bool(HtmlAttr::Data("ars-focused"), true);
+        }
+        attrs
+    }
+
+    /// Attributes for the label element.
+    #[must_use]
+    pub fn label_attrs(&self) -> AttrMap {
+        let mut attrs = base_attrs(&Part::Label);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("label"));
+        attrs.set(HtmlAttr::For, self.ctx.ids.part("input"));
+        attrs
+    }
+
+    /// Attributes for the control wrapper (the `grid`).
+    #[must_use]
+    pub fn control_attrs(&self) -> AttrMap {
+        let mut attrs = base_attrs(&Part::Control);
+        attrs.set(HtmlAttr::Role, "grid");
+        attrs.set(
+            HtmlAttr::Aria(AriaAttr::LabelledBy),
+            self.ctx.ids.part("label"),
+        );
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
+        }
+        if self.ctx.readonly {
+            attrs.set_bool(HtmlAttr::Data("ars-readonly"), true);
+        }
+        if let Some(text) = self.count_text() {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Description), text);
+        }
+        attrs
+    }
+
+    /// Attributes for the tag at `index` (a grid `row`).
+    #[must_use]
     pub fn tag_attrs(&self, index: usize) -> AttrMap {
-        let tag_id = self.ctx.ids.item("tag", index);
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Tag { index }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
+        let mut attrs = base_attrs(&Part::Tag { index });
         attrs.set(HtmlAttr::Data("ars-index"), index.to_string());
-        attrs.set(HtmlAttr::Id, tag_id);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.item("tag", &index));
         attrs.set(HtmlAttr::Role, "row");
         if let Some(value) = self.ctx.value.get().get(index) {
             attrs.set(HtmlAttr::Aria(AriaAttr::Label), value);
@@ -727,32 +910,32 @@ impl<'a> Api<'a> {
             attrs.set_bool(HtmlAttr::Data("ars-editing"), true);
         }
         if !self.ctx.disabled && !self.ctx.readonly {
-            attrs.set(HtmlAttr::Aria(AriaAttr::Description),
-                (self.ctx.messages.delete_hint)(&self.ctx.locale));
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::Description),
+                (self.ctx.messages.delete_hint)(&self.ctx.locale),
+            );
         }
         attrs
     }
 
-    /// Attributes for the tag text element.
+    /// Attributes for the text portion of the tag at `index` (a `gridcell`).
+    #[must_use]
     pub fn tag_text_attrs(&self, index: usize) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::TagText { index }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
+        let mut attrs = base_attrs(&Part::TagText { index });
         attrs.set(HtmlAttr::Role, "gridcell");
         attrs
     }
 
-    /// Attributes for the tag delete trigger.
+    /// Attributes for the delete trigger of the tag at `index` (a `gridcell`).
+    #[must_use]
     pub fn tag_delete_trigger_attrs(&self, index: usize) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::TagDeleteTrigger { index }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
+        let mut attrs = base_attrs(&Part::TagDeleteTrigger { index });
         attrs.set(HtmlAttr::Role, "gridcell");
         if let Some(value) = self.ctx.value.get().get(index) {
-            let label = (self.ctx.messages.remove_tag_label)(value, &self.ctx.locale);
-            attrs.set(HtmlAttr::Aria(AriaAttr::Label), label);
+            attrs.set(
+                HtmlAttr::Aria(AriaAttr::Label),
+                (self.ctx.messages.remove_tag_label)(value, &self.ctx.locale),
+            );
         }
         attrs.set(HtmlAttr::TabIndex, "-1");
         if self.ctx.disabled || self.ctx.readonly {
@@ -761,62 +944,68 @@ impl<'a> Api<'a> {
         attrs
     }
 
-    /// Attributes for the inline tag edit input.
+    /// Attributes for the inline-edit input of the tag at `index`.
+    #[must_use]
     pub fn tag_edit_attrs(&self, index: usize) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::TagEdit { index }.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        let edit_id = self.ctx.ids.item("tag-edit-input", index);
-        attrs.set(HtmlAttr::Id, edit_id);
+        let mut attrs = base_attrs(&Part::TagEdit { index });
+        attrs.set(HtmlAttr::Id, self.ctx.ids.item("tag-edit-input", &index));
         attrs.set(HtmlAttr::Type, "text");
         let is_editing = self.ctx.editing_tag == Some(index);
-        if !is_editing {
+        if is_editing {
+            attrs.set(HtmlAttr::Value, self.ctx.editing_draft.clone());
+        } else {
             attrs.set_bool(HtmlAttr::Data("ars-hidden"), true);
         }
         attrs
     }
 
     /// Attributes for the new-tag input element.
+    #[must_use]
     pub fn input_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Input.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
+        let mut attrs = base_attrs(&Part::Input);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("input"));
-        if let Some(ref placeholder) = self.props.placeholder {
+        if let Some(placeholder) = &self.props.placeholder {
             attrs.set(HtmlAttr::Placeholder, placeholder);
         }
-        if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
-        if self.ctx.readonly { attrs.set_bool(HtmlAttr::ReadOnly, true); }
-        if self.props.required { attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true"); }
-        if let Some(max_len) = self.props.max_length {
-            attrs.set(HtmlAttr::MaxLength, max_len.to_string());
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
         }
-        // Wire aria-describedby to error-message (first) and description parts.
-        let mut describedby_parts: Vec<String> = Vec::new();
+        if self.ctx.readonly {
+            attrs.set_bool(HtmlAttr::ReadOnly, true);
+        }
+        if self.props.required {
+            attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
+        }
+        if let Some(max_length) = self.props.max_length {
+            attrs.set(HtmlAttr::MaxLength, max_length.to_string());
+        }
+        let mut described_by: Vec<String> = Vec::new();
         if self.ctx.invalid {
-            describedby_parts.push(self.ctx.ids.part("error-message"));
+            described_by.push(self.ctx.ids.part("error-message"));
         }
-        describedby_parts.push(self.ctx.ids.part("description"));
-        if !describedby_parts.is_empty() {
-            attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), describedby_parts.join(" "));
-        }
-        // Disable input when max tags reached
-        if self.ctx.max.map_or(false, |m| self.ctx.value.get().len() >= m) {
+        described_by.push(self.ctx.ids.part("description"));
+        attrs.set(
+            HtmlAttr::Aria(AriaAttr::DescribedBy),
+            described_by.join(" "),
+        );
+        if self
+            .ctx
+            .max
+            .is_some_and(|max| self.ctx.value.get().len() >= max)
+        {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
         attrs
     }
 
     /// Attributes for the clear-all trigger.
+    #[must_use]
     pub fn clear_trigger_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ClearTrigger.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label),
-            (self.ctx.messages.clear_all_label)(&self.ctx.locale));
+        let mut attrs = base_attrs(&Part::ClearTrigger);
+        attrs.set(
+            HtmlAttr::Aria(AriaAttr::Label),
+            (self.ctx.messages.clear_all_label)(&self.ctx.locale),
+        );
         attrs.set(HtmlAttr::TabIndex, "-1");
         if self.ctx.disabled || self.ctx.readonly {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -825,38 +1014,38 @@ impl<'a> Api<'a> {
     }
 
     /// Attributes for the hidden form input.
+    #[must_use]
     pub fn hidden_input_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::HiddenInput.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
+        let mut attrs = base_attrs(&Part::HiddenInput);
         attrs.set(HtmlAttr::Type, "hidden");
         attrs.set(HtmlAttr::Name, self.ctx.name.as_deref().unwrap_or(""));
-        let value_str = self.ctx.value.get().join(&self.ctx.delimiter);
-        attrs.set(HtmlAttr::Value, value_str);
-        if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
-        if self.props.required { attrs.set_bool(HtmlAttr::Required, true); }
+        attrs.set(
+            HtmlAttr::Value,
+            self.ctx.value.get().join(self.ctx.delimiter.as_str()),
+        );
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Disabled, true);
+        }
+        if self.props.required {
+            attrs.set_bool(HtmlAttr::Required, true);
+        }
         attrs.set(HtmlAttr::TabIndex, "-1");
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs
     }
 
     /// Attributes for the description element.
+    #[must_use]
     pub fn description_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Description.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
+        let mut attrs = base_attrs(&Part::Description);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("description"));
         attrs
     }
 
-    /// Attributes for the error message element.
+    /// Attributes for the error-message element.
+    #[must_use]
     pub fn error_message_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ErrorMessage.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
+        let mut attrs = base_attrs(&Part::ErrorMessage);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("error-message"));
         attrs.set(HtmlAttr::Aria(AriaAttr::Live), "polite");
         if !self.ctx.invalid {
@@ -865,35 +1054,50 @@ impl<'a> Api<'a> {
         attrs
     }
 
+    /// Attributes for the visually-hidden live region.
+    #[must_use]
+    pub fn live_region_attrs(&self) -> AttrMap {
+        let mut attrs = base_attrs(&Part::LiveRegion);
+        attrs.set(HtmlAttr::Id, self.ctx.ids.part("live-region"));
+        attrs.set(HtmlAttr::Aria(AriaAttr::Live), "polite");
+        attrs.set(HtmlAttr::Aria(AriaAttr::Atomic), "true");
+        attrs
+    }
+
     // — Event handlers —
 
     /// Handle focus on the input element.
-    pub fn on_input_focus(&self, is_keyboard: bool) { (self.send)(Event::Focus { is_keyboard }); }
+    pub fn on_input_focus(&self, is_keyboard: bool) {
+        (self.send)(Event::Focus { is_keyboard });
+    }
 
     /// Handle blur on the input element.
-    pub fn on_input_blur(&self) { (self.send)(Event::Blur); }
+    pub fn on_input_blur(&self) {
+        (self.send)(Event::Blur);
+    }
 
-    /// Handle input value change.
-    pub fn on_input_change(&self, val: String) { (self.send)(Event::InputChange(val)); }
+    /// Handle a value change on the input element.
+    pub fn on_input_change(&self, value: String) {
+        (self.send)(Event::InputChange(value));
+    }
 
-    /// Handle paste into the input.
-    pub fn on_input_paste(&self, text: String) { (self.send)(Event::Paste(text)); }
+    /// Handle a paste into the input element.
+    pub fn on_input_paste(&self, text: String) {
+        (self.send)(Event::Paste(text));
+    }
 
-    /// Handle keydown on the input element.
+    /// Handle a keydown on the input element.
     pub fn on_input_keydown(&self, data: &KeyboardEventData) {
-        if self.ctx.is_composing { return; }
+        if self.ctx.is_composing {
+            return;
+        }
         match data.key {
             KeyboardKey::Enter => {
                 if !self.ctx.input_value.trim().is_empty() {
                     (self.send)(Event::AddTag(self.ctx.input_value.clone()));
                 }
             }
-            KeyboardKey::Backspace => {
-                if self.ctx.input_value.is_empty() {
-                    (self.send)(Event::FocusPrevTag);
-                }
-            }
-            KeyboardKey::ArrowLeft => {
+            KeyboardKey::Backspace | KeyboardKey::ArrowLeft => {
                 if self.ctx.input_value.is_empty() {
                     (self.send)(Event::FocusPrevTag);
                 }
@@ -905,44 +1109,66 @@ impl<'a> Api<'a> {
         }
     }
 
-    /// Handle keydown on a focused tag.
+    /// Handle a keydown on a focused tag at `index`.
     pub fn on_tag_keydown(&self, index: usize, data: &KeyboardEventData) {
         match data.key {
             KeyboardKey::Backspace | KeyboardKey::Delete => {
                 (self.send)(Event::RemoveTagAtIndex(index));
             }
             KeyboardKey::ArrowLeft => (self.send)(Event::FocusPrevTag),
-            KeyboardKey::ArrowRight => (self.send)(Event::FocusNextTag),
-            KeyboardKey::Escape => {
-                (self.send)(Event::FocusNextTag); // deselect → focus input
-            }
-            KeyboardKey::Enter => {
-                if self.props.editable {
-                    (self.send)(Event::EditTag { index });
-                }
+            // ArrowRight moves to the next tag/input; Escape deselects to the input
+            // (both reduce to `FocusNextTag`, which returns to the input past the last tag).
+            KeyboardKey::ArrowRight | KeyboardKey::Escape => (self.send)(Event::FocusNextTag),
+            KeyboardKey::Enter if self.props.editable => {
+                (self.send)(Event::EditTag { index });
             }
             _ => {}
         }
     }
 
-    /// Handle click on a tag's delete trigger.
-    pub fn on_tag_delete(&self, val: String) { (self.send)(Event::RemoveTag(val)); }
+    /// Handle a click on a tag's delete trigger.
+    pub fn on_tag_delete(&self, value: String) {
+        (self.send)(Event::RemoveTag(value));
+    }
 
-    /// Handle double-click on a tag (enter edit mode).
+    /// Handle a double-click on a tag (enter edit mode when editable).
     pub fn on_tag_dblclick(&self, index: usize) {
         if self.props.editable {
             (self.send)(Event::EditTag { index });
         }
     }
 
-    /// Handle click on the clear-all trigger.
-    pub fn on_clear_click(&self) { (self.send)(Event::ClearAll); }
+    /// Handle a value change on an inline-edit input.
+    pub fn on_tag_edit_change(&self, value: String) {
+        (self.send)(Event::InputChange(value));
+    }
+
+    /// Handle a keydown on an inline-edit input at `index`.
+    pub fn on_tag_edit_keydown(&self, index: usize, data: &KeyboardEventData) {
+        match data.key {
+            KeyboardKey::Enter => (self.send)(Event::CommitEdit {
+                index,
+                value: self.ctx.editing_draft.clone(),
+            }),
+            KeyboardKey::Escape => (self.send)(Event::CancelEdit),
+            _ => {}
+        }
+    }
+
+    /// Handle a click on the clear-all trigger.
+    pub fn on_clear_click(&self) {
+        (self.send)(Event::ClearAll);
+    }
 
     /// Handle IME composition start.
-    pub fn on_composition_start(&self) { (self.send)(Event::CompositionStart); }
+    pub fn on_composition_start(&self) {
+        (self.send)(Event::CompositionStart);
+    }
 
     /// Handle IME composition end.
-    pub fn on_composition_end(&self) { (self.send)(Event::CompositionEnd); }
+    pub fn on_composition_end(&self) {
+        (self.send)(Event::CompositionEnd);
+    }
 }
 
 impl ConnectApi for Api<'_> {
@@ -962,8 +1188,18 @@ impl ConnectApi for Api<'_> {
             Part::HiddenInput => self.hidden_input_attrs(),
             Part::Description => self.description_attrs(),
             Part::ErrorMessage => self.error_message_attrs(),
+            Part::LiveRegion => self.live_region_attrs(),
         }
     }
+}
+
+/// Returns an [`AttrMap`] pre-populated with the scope and part `data-ars-*` attrs.
+fn base_attrs(part: &Part) -> AttrMap {
+    let mut attrs = AttrMap::new();
+    let [(scope_attr, scope_val), (part_attr, part_val)] = part.data_attrs();
+    attrs.set(scope_attr, scope_val);
+    attrs.set(part_attr, part_val);
+    attrs
 }
 ```
 
@@ -983,24 +1219,25 @@ impl ConnectApi for Api<'_> {
 | `HiddenInput`      | `[data-ars-scope="tags-input"][data-ars-part="hidden-input"]`       | `<input>`  | Form value           |
 | `Description`      | `[data-ars-scope="tags-input"][data-ars-part="description"]`        | `<div>`    |                      |
 | `ErrorMessage`     | `[data-ars-scope="tags-input"][data-ars-part="error-message"]`      | `<div>`    |                      |
+| `LiveRegion`       | `[data-ars-scope="tags-input"][data-ars-part="live-region"]`        | `<div>`    | Polite announcements |
 
 ## 3. Accessibility
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Property           | Element            | Value                                                                            |
-| ------------------ | ------------------ | -------------------------------------------------------------------------------- |
-| `role`             | `Control`          | `grid` (enables proper AT navigation between tags and their delete actions)      |
-| `aria-labelledby`  | `Control`          | Label id                                                                         |
-| `role`             | `Tag`              | `row`                                                                            |
-| `role`             | `TagText`          | `gridcell`                                                                       |
-| `role`             | `TagDeleteTrigger` | `gridcell` (contains the remove button)                                          |
-| `aria-describedby` | `Input`            | Description + ErrorMessage ids                                                   |
-| `aria-label`       | `Tag`              | `"{value}"`                                                                      |
-| `aria-disabled`    | `Tag`              | When tag or group is disabled                                                    |
-| `aria-label`       | `TagDeleteTrigger` | `"Remove {value}"`                                                               |
-| `aria-label`       | `ClearTrigger`     | `"Remove all tags"`                                                              |
-| `aria-describedby` | `Tag`              | ID of shared visually hidden text: "Press Delete to remove" (localized via i18n) |
+| Property           | Element            | Value                                                                                           |
+| ------------------ | ------------------ | ----------------------------------------------------------------------------------------------- |
+| `role`             | `Control`          | `grid` (enables proper AT navigation between tags and their delete actions)                     |
+| `aria-labelledby`  | `Control`          | Label id                                                                                        |
+| `role`             | `Tag`              | `row`                                                                                           |
+| `role`             | `TagText`          | `gridcell`                                                                                      |
+| `role`             | `TagDeleteTrigger` | `gridcell` (contains the remove button)                                                         |
+| `aria-describedby` | `Input`            | ErrorMessage id (when invalid) then Description id                                              |
+| `aria-label`       | `Tag`              | `"{value}"`                                                                                     |
+| `aria-disabled`    | `Tag`              | When tag or group is disabled                                                                   |
+| `aria-label`       | `TagDeleteTrigger` | `"Remove {value}"`                                                                              |
+| `aria-label`       | `ClearTrigger`     | `"Remove all tags"`                                                                             |
+| `aria-description` | `Tag`              | "Press Delete to remove" (localized via `Messages.delete_hint`); omitted when disabled/readonly |
 
 ### 3.2 Keyboard Interaction
 
@@ -1019,25 +1256,27 @@ impl ConnectApi for Api<'_> {
 When a tag is removed, screen reader users must be informed of the removal and the
 resulting focus location:
 
-- **Live region announcement**: On tag deletion, emit an `aria-live="polite"` announcement:
-  `"Removed {tag_label}"` (localized via `Messages`).
-- **Tag `aria-label`**: Each Tag part MUST have `aria-label="{tag_label}, press Delete to remove"`
-  (localized via `Messages.delete_hint`), combining the tag value with the
-  removal instruction.
-- **Max count reached**: When `ctx.value.get().len() >= ctx.max.unwrap_or(usize::MAX)`,
-  announce `"Maximum of {max} tags reached"` via the live region. The input SHOULD also
-  set `aria-disabled="true"` to indicate no more tags can be added.
-- **Focus management after removal**: Focus follows the existing `focus_tag` effect —
-  moves to the adjacent tag (same index, clamped to `len - 1`), or to the input if no
-  tags remain. This behavior is already implemented in the `RemoveTag` and
-  `RemoveTagAtIndex` transitions above.
+- **Live region announcement**: On tag deletion, the `RemoveTag` / `RemoveTagAtIndex`
+  transitions write `"Removed {value}"` (localized via `Messages.removed_announcement`) to
+  `ctx.live_message` and emit `Effect::Announce`. The adapter surfaces `ctx.live_message`
+  in the `LiveRegion` part (`aria-live="polite"`).
+- **Tag semantics**: Each Tag part has `aria-label="{value}"` plus
+  `aria-description` set to the removal instruction (localized via `Messages.delete_hint`,
+  default "Press Delete to remove").
+- **Max count reached**: When an `AddTag` is blocked because `ctx.value.get().len() >= max`,
+  the transition writes `"Maximum of {max} tags reached"` (localized via
+  `Messages.max_reached_announcement`) to `ctx.live_message` and emits `Effect::Announce`.
+  The input also sets `aria-disabled="true"` once the maximum is reached.
+- **Focus management after removal**: The `RemoveTag` / `RemoveTagAtIndex` transitions move
+  focus to the adjacent tag (same index, clamped to `len - 1`) via `Effect::FocusTag`, or to
+  the input via `Effect::FocusInput` when no tags remain.
 
 ## 4. Internationalization
 
 ### 4.1 Messages
 
 ```rust
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Template for tag delete trigger label (default: "Remove {value}")
     pub remove_tag_label: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
@@ -1045,17 +1284,26 @@ pub struct Messages {
     pub clear_all_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     /// Visually hidden instruction (default: "Press Delete to remove")
     pub delete_hint: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
-    /// Count label when `max_tags` is set (default: "{current} of {max} tags").
+    /// Count label when `max` is set (default: "{current} of {max} tags").
     pub count_label: MessageFn<dyn Fn(usize, usize, &Locale) -> String + Send + Sync>,
+    /// Live-region announcement when a tag is removed (default: "Removed {value}").
+    pub removed_announcement: MessageFn<dyn Fn(&str, &Locale) -> String + Send + Sync>,
+    /// Live-region announcement when an add is blocked because the maximum is
+    /// reached (default: "Maximum of {max} tags reached").
+    pub max_reached_announcement: MessageFn<dyn Fn(usize, &Locale) -> String + Send + Sync>,
 }
 
 impl Default for Messages {
     fn default() -> Self {
         Self {
-            remove_tag_label: MessageFn::new(|value, _locale| format!("Remove {}", value)),
+            remove_tag_label: MessageFn::new(|value, _locale| format!("Remove {value}")),
             clear_all_label: MessageFn::static_str("Remove all tags"),
             delete_hint: MessageFn::static_str("Press Delete to remove"),
-            count_label: MessageFn::new(|current, max, _locale| format!("{} of {} tags", current, max)),
+            count_label: MessageFn::new(|current, max, _locale| format!("{current} of {max} tags")),
+            removed_announcement: MessageFn::new(|value, _locale| format!("Removed {value}")),
+            max_reached_announcement: MessageFn::new(|max, _locale| {
+                format!("Maximum of {max} tags reached")
+            }),
         }
     }
 }
@@ -1145,23 +1393,24 @@ Note: Ark UI's `TagsInput` and React Aria's `TagGroup` differ significantly in s
 
 ### 6.2 Anatomy
 
-| Part              | ars-ui              | Ark UI              | React Aria               | Notes                                     |
-| ----------------- | ------------------- | ------------------- | ------------------------ | ----------------------------------------- |
-| Root              | `Root`              | `Root`              | `TagGroup`               | --                                        |
-| Label             | `Label`             | `Label`             | `Label`                  | --                                        |
-| Control           | `Control`           | `Control`           | `TagList`                | Wraps tags + input                        |
-| Input             | `Input`             | `Input`             | --                       | React Aria has no input                   |
-| Item (tag)        | `Item`              | `Item`              | `Tag`                    | --                                        |
-| ItemPreview       | `ItemPreview`       | `ItemPreview`       | --                       | Tag visual container                      |
-| ItemText          | `ItemText`          | `ItemText`          | --                       | --                                        |
-| ItemDeleteTrigger | `ItemDeleteTrigger` | `ItemDeleteTrigger` | --                       | React Aria handles remove via render prop |
-| ItemInput         | `ItemInput`         | `ItemInput`         | --                       | Inline edit input                         |
-| ClearTrigger      | `ClearTrigger`      | `ClearTrigger`      | --                       | --                                        |
-| HiddenInput       | `HiddenInput`       | `HiddenInput`       | --                       | Form submission                           |
-| Description       | `Description`       | --                  | `Text[slot=description]` | --                                        |
-| ErrorMessage      | `ErrorMessage`      | --                  | `FieldError`             | --                                        |
+| Part         | ars-ui             | Ark UI              | React Aria               | Notes                                     |
+| ------------ | ------------------ | ------------------- | ------------------------ | ----------------------------------------- |
+| Root         | `Root`             | `Root`              | `TagGroup`               | --                                        |
+| Label        | `Label`            | `Label`             | `Label`                  | --                                        |
+| Control      | `Control`          | `Control`           | `TagList`                | Wraps tags + input                        |
+| Input        | `Input`            | `Input`             | --                       | React Aria has no input                   |
+| Tag          | `Tag`              | `Item`              | `Tag`                    | A grid `row`                              |
+| Tag preview  | --                 | `ItemPreview`       | --                       | ars-ui folds the chip wrapper into `Tag`  |
+| Tag text     | `TagText`          | `ItemText`          | --                       | --                                        |
+| Tag delete   | `TagDeleteTrigger` | `ItemDeleteTrigger` | --                       | React Aria handles remove via render prop |
+| Tag edit     | `TagEdit`          | `ItemInput`         | --                       | Inline edit input                         |
+| ClearTrigger | `ClearTrigger`     | `ClearTrigger`      | --                       | --                                        |
+| HiddenInput  | `HiddenInput`      | `HiddenInput`       | --                       | Form submission                           |
+| Description  | `Description`      | --                  | `Text[slot=description]` | --                                        |
+| ErrorMessage | `ErrorMessage`     | --                  | `FieldError`             | --                                        |
+| LiveRegion   | `LiveRegion`       | --                  | --                       | Polite removal/limit announcements        |
 
-**Gaps:** None.
+**Gaps:** None. ars-ui has no separate `ItemPreview` part — the chip wrapper role is covered by `Tag` itself — and adds a dedicated `LiveRegion` part for screen-reader announcements.
 
 ### 6.3 Events
 
