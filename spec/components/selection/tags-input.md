@@ -256,7 +256,7 @@ pub editing_draft: String,
 | Event                         | Trigger                                                         | Behavior                                                                                                                                                                                     |
 | ----------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `EditTag { index }`           | Enter key on focused tag, or double-click when `editable: true` | Transition to `EditingTag { index }`. Set `editing_tag = Some(index)`, `editing_draft` = current tag value. Focus the inline input.                                                          |
-| `CommitEdit { index, value }` | Enter key during edit                                           | If `value` is non-empty and passes duplicate validation (when `allow_duplicates: false`), replace the tag at `index`. Transition back to `Focused`. Clear `editing_tag` and `editing_draft`. |
+| `CommitEdit { index, value }` | Enter/Tab during edit                                           | Replace the tag at `index` only when `value` is non-empty, within `max_length`, and passes duplicate validation (when `allow_duplicates: false`); otherwise the edit is rejected and the original tag is kept (a **blank value is not a delete**). Transition back to `Focused`. Clear `editing_tag`/`editing_draft`. `on_value_change` fires only when the tag actually changed. |
 | `CancelEdit`                  | Escape key during edit                                          | Discard `editing_draft`. Transition back to `Focused`. Return focus to the tag at the editing index.                                                                                         |
 | `InputChange(text)`           | Typing in the inline edit input                                 | Update `editing_draft` with the new text. No state transition.                                                                                                                               |
 
@@ -270,10 +270,12 @@ pub editing_draft: String,
 
 **Guard**: `EditTag`, `CommitEdit`, and `CancelEdit` events are rejected when `editable: false`,
 `disabled: true`, or `readonly: true`. `CommitEdit` and `CancelEdit` are additionally rejected
-outside the `EditingTag` state. While in `EditingTag`, the list-mutating and tag-navigation events
-(`AddTag`, `RemoveTag`, `RemoveTagAtIndex`, `EditTag`, `Paste`, `ClearAll`, `FocusPrevTag`,
-`FocusNextTag`) are ignored so the edit stays atomic — the user must commit, cancel, or blur first.
-A `Focus` event exits the edit (clearing `editing_tag` and `editing_draft`).
+outside the `EditingTag` state. Because `editable` is read live (not cached via `SetProps`), if a
+parent turns it off while a tag is mid-edit, `CommitEdit` exits edit mode **without** mutating the
+list. While in `EditingTag`, the list-mutating and tag-navigation events (`AddTag`, `RemoveTag`,
+`RemoveTagAtIndex`, `EditTag`, `Paste`, `ClearAll`, `FocusPrevTag`, `FocusNextTag`) are ignored so
+the edit stays atomic — the user must commit, cancel, or blur first. A `Focus` event exits the edit
+(clearing `editing_tag` and `editing_draft`).
 
 ### 1.6 Full Machine Implementation
 
@@ -459,51 +461,44 @@ impl ars_core::Machine for Machine {
             }
 
             Event::CommitEdit { index, value } => {
-                // Reachable only in `EditingTag`, which `EditTag` enters only when
-                // `editable` is set; props are fixed for the machine's lifetime, so no
-                // separate `editable` guard is needed here.
+                // A parent can toggle `editable` off mid-edit (it is read live, not
+                // synced via `SetProps`); when that happens, exit edit without
+                // mutating the list, matching the spec's `editable: false` guard.
+                if !props.editable {
+                    return Some(
+                        TransitionPlan::to(State::Focused)
+                            .apply(|ctx: &mut Context| {
+                                ctx.editing_tag = None;
+                                ctx.editing_draft.clear();
+                            })
+                            .with_effect(PendingEffect::named(Effect::FocusInput)),
+                    );
+                }
+
                 let index = *index;
                 let trimmed = value.trim().to_string();
                 let allow_duplicates = ctx.allow_duplicates;
                 let max_length = ctx.max_length;
 
-                // Decide up front whether the commit actually mutates the list, so
-                // `on_value_change` only fires when the value really changes.
-                let tags = ctx.value.get();
-                let changes = index < tags.len()
-                    && (trimmed.is_empty() || {
-                        let is_duplicate = !allow_duplicates
-                            && tags
-                                .iter()
-                                .enumerate()
-                                .any(|(other, tag)| other != index && tag == &trimmed);
-                        let replaces_with_new = tags[index] != trimmed;
-                        !is_duplicate
-                            && !exceeds_max_length(max_length, &trimmed)
-                            && replaces_with_new
-                    });
+                // A non-empty, non-duplicate, within-length value that differs from
+                // the current tag is the only thing that commits. An empty value is
+                // rejected (a blank edit is not a delete — removal has its own paths).
+                let tags = ctx.value.pending();
+                let commits = index < tags.len()
+                    && !trimmed.is_empty()
+                    && tags[index] != trimmed
+                    && (allow_duplicates
+                        || !tags
+                            .iter()
+                            .enumerate()
+                            .any(|(other, tag)| other != index && tag == &trimmed))
+                    && !exceeds_max_length(max_length, &trimmed);
 
                 let mut plan = TransitionPlan::to(State::Focused)
                     .apply(move |ctx: &mut Context| {
-                        let mut tags = ctx.value.get().clone();
-
-                        if index < tags.len() {
-                            if trimmed.is_empty() {
-                                tags.remove(index);
-                            } else {
-                                let is_duplicate = !allow_duplicates
-                                    && tags
-                                        .iter()
-                                        .enumerate()
-                                        .any(|(other, tag)| other != index && tag == &trimmed);
-
-                                // Reject duplicates and over-length edits: keep the
-                                // original tag rather than committing an invalid value.
-                                if !is_duplicate && !exceeds_max_length(max_length, &trimmed) {
-                                    tags[index] = trimmed;
-                                }
-                            }
-
+                        if commits {
+                            let mut tags = ctx.value.pending().clone();
+                            tags[index] = trimmed;
                             ctx.value.set(tags);
                         }
 
@@ -512,7 +507,7 @@ impl ars_core::Machine for Machine {
                     })
                     .with_effect(PendingEffect::named(Effect::FocusInput));
 
-                if changes {
+                if commits {
                     plan = plan.with_effect(value_change_effect());
                 }
 
@@ -564,15 +559,15 @@ impl ars_core::Machine for Machine {
                     && !ctx.readonly
                     && !input_trimmed.is_empty()
                     && !exceeds_max_length(ctx.max_length, &input_trimmed)
-                    && ctx.max.is_none_or(|max| ctx.value.get().len() < max)
-                    && (ctx.allow_duplicates || !ctx.value.get().contains(&input_trimmed));
+                    && ctx.max.is_none_or(|max| ctx.value.pending().len() < max)
+                    && (ctx.allow_duplicates || !ctx.value.pending().contains(&input_trimmed));
 
                 let tag_to_add = can_add.then_some(input_trimmed);
                 let adds_tag = tag_to_add.is_some();
 
                 let mut plan = TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
                     if let Some(tag) = tag_to_add {
-                        let mut tags = ctx.value.get().clone();
+                        let mut tags = ctx.value.pending().clone();
 
                         tags.push(tag);
 
@@ -740,6 +735,10 @@ impl ars_core::Machine for Machine {
 }
 
 /// Builds the plan for an [`Event::AddTag`], including the max-reached announcement.
+///
+/// Mutations build from [`Bindable::pending`] (the staged internal value) rather
+/// than [`Bindable::get`] so that, in controlled mode, successive edits accumulate
+/// instead of each starting from the parent's not-yet-round-tripped value.
 fn add_tag_plan(ctx: &Context, tag: &str) -> Option<TransitionPlan<Machine>> {
     let trimmed = tag.trim().to_string();
 
@@ -747,7 +746,7 @@ fn add_tag_plan(ctx: &Context, tag: &str) -> Option<TransitionPlan<Machine>> {
         return None;
     }
 
-    if let Some(max) = ctx.max.filter(|&max| ctx.value.get().len() >= max) {
+    if let Some(max) = ctx.max.filter(|&max| ctx.value.pending().len() >= max) {
         let announcement = (ctx.messages.max_reached_announcement)(max, &ctx.locale);
 
         return Some(
@@ -758,7 +757,7 @@ fn add_tag_plan(ctx: &Context, tag: &str) -> Option<TransitionPlan<Machine>> {
         );
     }
 
-    if !ctx.allow_duplicates && ctx.value.get().contains(&trimmed) {
+    if !ctx.allow_duplicates && ctx.value.pending().contains(&trimmed) {
         return None;
     }
 
@@ -768,7 +767,7 @@ fn add_tag_plan(ctx: &Context, tag: &str) -> Option<TransitionPlan<Machine>> {
 
     Some(
         TransitionPlan::context_only(move |ctx: &mut Context| {
-            let mut tags = ctx.value.get().clone();
+            let mut tags = ctx.value.pending().clone();
 
             tags.push(trimmed);
 
@@ -791,7 +790,7 @@ fn exceeds_max_length(max_length: Option<usize>, value: &str) -> bool {
 /// emitting the removal announcement. Removing by index (rather than filtering by
 /// value) ensures that with duplicates allowed only the targeted chip is removed.
 fn remove_plan(ctx: &Context, index: usize) -> Option<TransitionPlan<Machine>> {
-    let current = ctx.value.get();
+    let current = ctx.value.pending();
 
     let value = current.get(index)?.clone();
 
@@ -847,27 +846,31 @@ fn input_change_plan(state: &State, ctx: &Context, value: &str) -> Option<Transi
         }));
     }
 
-    let value = value.to_string();
+    let mut segments = value.split(delimiter.as_str()).collect::<Vec<_>>();
 
-    Some(
-        TransitionPlan::context_only(move |ctx: &mut Context| {
-            let mut segments = value.split(delimiter.as_str()).collect::<Vec<_>>();
+    // The final segment is the trailing remainder still being typed.
+    let remainder = segments.pop().unwrap_or("").to_string();
 
-            // The final segment is the trailing remainder still being typed.
-            let remainder = segments.pop().unwrap_or("").to_string();
+    // Compute the resulting list eagerly so `ValueChange` only fires when a
+    // segment is actually appended (not when every segment is a duplicate/over-max).
+    let current = ctx.value.pending().clone();
+    let mut new_tags = current.clone();
+    for segment in &segments {
+        push_if_allowed(ctx, &mut new_tags, segment);
+    }
+    let changed = new_tags.len() != current.len();
 
-            let mut tags = ctx.value.get().clone();
+    let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
+        ctx.value.set(new_tags);
+        ctx.input_value = remainder;
+        ctx.focused_tag = None;
+    });
 
-            for segment in segments {
-                push_if_allowed(ctx, &mut tags, segment);
-            }
+    if changed {
+        plan = plan.with_effect(value_change_effect());
+    }
 
-            ctx.value.set(tags);
-            ctx.input_value = remainder;
-            ctx.focused_tag = None;
-        })
-        .with_effect(value_change_effect()),
-    )
+    Some(plan)
 }
 
 /// Builds the plan for an [`Event::Paste`].
@@ -881,25 +884,28 @@ fn paste_plan(ctx: &Context, text: &str) -> Option<TransitionPlan<Machine>> {
     }
 
     let delimiter = ctx.delimiter.clone();
-    let text = text.to_string();
 
-    Some(
-        TransitionPlan::context_only(move |ctx: &mut Context| {
-            let mut tags = ctx.value.get().clone();
+    let current = ctx.value.pending().clone();
+    let mut new_tags = current.clone();
+    if delimiter.is_empty() {
+        push_if_allowed(ctx, &mut new_tags, text);
+    } else {
+        for segment in text.split(delimiter.as_str()) {
+            push_if_allowed(ctx, &mut new_tags, segment);
+        }
+    }
+    let changed = new_tags.len() != current.len();
 
-            if delimiter.is_empty() {
-                push_if_allowed(ctx, &mut tags, &text);
-            } else {
-                for segment in text.split(delimiter.as_str()) {
-                    push_if_allowed(ctx, &mut tags, segment);
-                }
-            }
+    let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
+        ctx.value.set(new_tags);
+        ctx.input_value.clear();
+    });
 
-            ctx.value.set(tags);
-            ctx.input_value.clear();
-        })
-        .with_effect(value_change_effect()),
-    )
+    if changed {
+        plan = plan.with_effect(value_change_effect());
+    }
+
+    Some(plan)
 }
 
 /// Pushes the trimmed `segment` onto `tags` when it is non-empty and respects the
@@ -1347,13 +1353,16 @@ impl Api<'_> {
     pub fn hidden_input_attrs(&self) -> AttrMap {
         let mut attrs = base_attrs(&Part::HiddenInput);
 
-        attrs
-            .set(HtmlAttr::Type, "hidden")
-            .set(HtmlAttr::Name, self.ctx.name.as_deref().unwrap_or(""))
-            .set(
-                HtmlAttr::Value,
-                self.ctx.value.get().join(self.ctx.delimiter.as_str()),
-            );
+        attrs.set(HtmlAttr::Type, "hidden").set(
+            HtmlAttr::Value,
+            self.ctx.value.get().join(self.ctx.delimiter.as_str()),
+        );
+
+        // Only emit `name` when one is configured — an empty name is invalid,
+        // useless form markup (matches the other form-backed components).
+        if let Some(name) = &self.ctx.name {
+            attrs.set(HtmlAttr::Name, name);
+        }
 
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -1509,11 +1518,20 @@ impl Api<'_> {
     /// Resolves whether a horizontal arrow key points toward the previous tag,
     /// accounting for RTL text direction (where `ArrowRight` moves backward).
     fn is_toward_prev(&self, key: KeyboardKey) -> bool {
-        if self.ctx.dir == Direction::Rtl {
+        if self.is_rtl() {
             key == KeyboardKey::ArrowRight
         } else {
-            // LTR and Auto (resolved to LTR in the agnostic layer).
             key == KeyboardKey::ArrowLeft
+        }
+    }
+
+    /// Resolves the effective right-to-left state, falling back to the locale's
+    /// direction when [`Direction::Auto`] is configured.
+    fn is_rtl(&self) -> bool {
+        match self.ctx.dir {
+            Direction::Rtl => true,
+            Direction::Ltr => false,
+            Direction::Auto => self.ctx.locale.is_rtl(),
         }
     }
 
@@ -1719,7 +1737,8 @@ All hardcoded `aria-label` values in `TagDeleteTrigger` and `ClearTrigger` MUST 
 
 - **Delimiter**: Default `,` — may be configured per locale (some locales use `;`).
 - **Tag labels**: `"Remove {value}"` — localized via `Messages.remove_tag_label`.
-- **RTL**: Tag order renders right-to-left; ArrowLeft/Right reversed visually.
+- **RTL**: Tag order renders right-to-left; ArrowLeft/Right reversed visually. `Props.dir`
+  selects the direction; `Direction::Auto` resolves from `Context.locale` (`Locale::is_rtl`).
 - **Max count message**: `"{current} of {max} tags"` — localized with plural rules via `Messages.count_label`.
 
 ## 5. Form Integration

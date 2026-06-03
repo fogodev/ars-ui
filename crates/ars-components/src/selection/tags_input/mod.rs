@@ -749,51 +749,44 @@ impl ars_core::Machine for Machine {
             }
 
             Event::CommitEdit { index, value } => {
-                // Reachable only in `EditingTag`, which `EditTag` enters only when
-                // `editable` is set; props are fixed for the machine's lifetime, so no
-                // separate `editable` guard is needed here.
+                // A parent can toggle `editable` off mid-edit (it is read live, not
+                // synced via `SetProps`); when that happens, exit edit without
+                // mutating the list, matching the spec's `editable: false` guard.
+                if !props.editable {
+                    return Some(
+                        TransitionPlan::to(State::Focused)
+                            .apply(|ctx: &mut Context| {
+                                ctx.editing_tag = None;
+                                ctx.editing_draft.clear();
+                            })
+                            .with_effect(PendingEffect::named(Effect::FocusInput)),
+                    );
+                }
+
                 let index = *index;
                 let trimmed = value.trim().to_string();
                 let allow_duplicates = ctx.allow_duplicates;
                 let max_length = ctx.max_length;
 
-                // Decide up front whether the commit actually mutates the list, so
-                // `on_value_change` only fires when the value really changes.
-                let tags = ctx.value.get();
-                let changes = index < tags.len()
-                    && (trimmed.is_empty() || {
-                        let is_duplicate = !allow_duplicates
-                            && tags
-                                .iter()
-                                .enumerate()
-                                .any(|(other, tag)| other != index && tag == &trimmed);
-                        let replaces_with_new = tags[index] != trimmed;
-                        !is_duplicate
-                            && !exceeds_max_length(max_length, &trimmed)
-                            && replaces_with_new
-                    });
+                // A non-empty, non-duplicate, within-length value that differs from
+                // the current tag is the only thing that commits. An empty value is
+                // rejected (a blank edit is not a delete — removal has its own paths).
+                let tags = ctx.value.pending();
+                let commits = index < tags.len()
+                    && !trimmed.is_empty()
+                    && tags[index] != trimmed
+                    && (allow_duplicates
+                        || !tags
+                            .iter()
+                            .enumerate()
+                            .any(|(other, tag)| other != index && tag == &trimmed))
+                    && !exceeds_max_length(max_length, &trimmed);
 
                 let mut plan = TransitionPlan::to(State::Focused)
                     .apply(move |ctx: &mut Context| {
-                        let mut tags = ctx.value.get().clone();
-
-                        if index < tags.len() {
-                            if trimmed.is_empty() {
-                                tags.remove(index);
-                            } else {
-                                let is_duplicate = !allow_duplicates
-                                    && tags
-                                        .iter()
-                                        .enumerate()
-                                        .any(|(other, tag)| other != index && tag == &trimmed);
-
-                                // Reject duplicates and over-length edits: keep the
-                                // original tag rather than committing an invalid value.
-                                if !is_duplicate && !exceeds_max_length(max_length, &trimmed) {
-                                    tags[index] = trimmed;
-                                }
-                            }
-
+                        if commits {
+                            let mut tags = ctx.value.pending().clone();
+                            tags[index] = trimmed;
                             ctx.value.set(tags);
                         }
 
@@ -802,7 +795,7 @@ impl ars_core::Machine for Machine {
                     })
                     .with_effect(PendingEffect::named(Effect::FocusInput));
 
-                if changes {
+                if commits {
                     plan = plan.with_effect(value_change_effect());
                 }
 
@@ -854,15 +847,15 @@ impl ars_core::Machine for Machine {
                     && !ctx.readonly
                     && !input_trimmed.is_empty()
                     && !exceeds_max_length(ctx.max_length, &input_trimmed)
-                    && ctx.max.is_none_or(|max| ctx.value.get().len() < max)
-                    && (ctx.allow_duplicates || !ctx.value.get().contains(&input_trimmed));
+                    && ctx.max.is_none_or(|max| ctx.value.pending().len() < max)
+                    && (ctx.allow_duplicates || !ctx.value.pending().contains(&input_trimmed));
 
                 let tag_to_add = can_add.then_some(input_trimmed);
                 let adds_tag = tag_to_add.is_some();
 
                 let mut plan = TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
                     if let Some(tag) = tag_to_add {
-                        let mut tags = ctx.value.get().clone();
+                        let mut tags = ctx.value.pending().clone();
 
                         tags.push(tag);
 
@@ -1030,6 +1023,10 @@ impl ars_core::Machine for Machine {
 }
 
 /// Builds the plan for an [`Event::AddTag`], including the max-reached announcement.
+///
+/// Mutations build from [`Bindable::pending`] (the staged internal value) rather
+/// than [`Bindable::get`] so that, in controlled mode, successive edits accumulate
+/// instead of each starting from the parent's not-yet-round-tripped value.
 fn add_tag_plan(ctx: &Context, tag: &str) -> Option<TransitionPlan<Machine>> {
     let trimmed = tag.trim().to_string();
 
@@ -1037,7 +1034,7 @@ fn add_tag_plan(ctx: &Context, tag: &str) -> Option<TransitionPlan<Machine>> {
         return None;
     }
 
-    if let Some(max) = ctx.max.filter(|&max| ctx.value.get().len() >= max) {
+    if let Some(max) = ctx.max.filter(|&max| ctx.value.pending().len() >= max) {
         let announcement = (ctx.messages.max_reached_announcement)(max, &ctx.locale);
 
         return Some(
@@ -1048,7 +1045,7 @@ fn add_tag_plan(ctx: &Context, tag: &str) -> Option<TransitionPlan<Machine>> {
         );
     }
 
-    if !ctx.allow_duplicates && ctx.value.get().contains(&trimmed) {
+    if !ctx.allow_duplicates && ctx.value.pending().contains(&trimmed) {
         return None;
     }
 
@@ -1058,7 +1055,7 @@ fn add_tag_plan(ctx: &Context, tag: &str) -> Option<TransitionPlan<Machine>> {
 
     Some(
         TransitionPlan::context_only(move |ctx: &mut Context| {
-            let mut tags = ctx.value.get().clone();
+            let mut tags = ctx.value.pending().clone();
 
             tags.push(trimmed);
 
@@ -1081,7 +1078,7 @@ fn exceeds_max_length(max_length: Option<usize>, value: &str) -> bool {
 /// emitting the removal announcement. Removing by index (rather than filtering by
 /// value) ensures that with duplicates allowed only the targeted chip is removed.
 fn remove_plan(ctx: &Context, index: usize) -> Option<TransitionPlan<Machine>> {
-    let current = ctx.value.get();
+    let current = ctx.value.pending();
 
     let value = current.get(index)?.clone();
 
@@ -1137,27 +1134,31 @@ fn input_change_plan(state: &State, ctx: &Context, value: &str) -> Option<Transi
         }));
     }
 
-    let value = value.to_string();
+    let mut segments = value.split(delimiter.as_str()).collect::<Vec<_>>();
 
-    Some(
-        TransitionPlan::context_only(move |ctx: &mut Context| {
-            let mut segments = value.split(delimiter.as_str()).collect::<Vec<_>>();
+    // The final segment is the trailing remainder still being typed.
+    let remainder = segments.pop().unwrap_or("").to_string();
 
-            // The final segment is the trailing remainder still being typed.
-            let remainder = segments.pop().unwrap_or("").to_string();
+    // Compute the resulting list eagerly so `ValueChange` only fires when a
+    // segment is actually appended (not when every segment is a duplicate/over-max).
+    let current = ctx.value.pending().clone();
+    let mut new_tags = current.clone();
+    for segment in &segments {
+        push_if_allowed(ctx, &mut new_tags, segment);
+    }
+    let changed = new_tags.len() != current.len();
 
-            let mut tags = ctx.value.get().clone();
+    let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
+        ctx.value.set(new_tags);
+        ctx.input_value = remainder;
+        ctx.focused_tag = None;
+    });
 
-            for segment in segments {
-                push_if_allowed(ctx, &mut tags, segment);
-            }
+    if changed {
+        plan = plan.with_effect(value_change_effect());
+    }
 
-            ctx.value.set(tags);
-            ctx.input_value = remainder;
-            ctx.focused_tag = None;
-        })
-        .with_effect(value_change_effect()),
-    )
+    Some(plan)
 }
 
 /// Builds the plan for an [`Event::Paste`].
@@ -1171,25 +1172,28 @@ fn paste_plan(ctx: &Context, text: &str) -> Option<TransitionPlan<Machine>> {
     }
 
     let delimiter = ctx.delimiter.clone();
-    let text = text.to_string();
 
-    Some(
-        TransitionPlan::context_only(move |ctx: &mut Context| {
-            let mut tags = ctx.value.get().clone();
+    let current = ctx.value.pending().clone();
+    let mut new_tags = current.clone();
+    if delimiter.is_empty() {
+        push_if_allowed(ctx, &mut new_tags, text);
+    } else {
+        for segment in text.split(delimiter.as_str()) {
+            push_if_allowed(ctx, &mut new_tags, segment);
+        }
+    }
+    let changed = new_tags.len() != current.len();
 
-            if delimiter.is_empty() {
-                push_if_allowed(ctx, &mut tags, &text);
-            } else {
-                for segment in text.split(delimiter.as_str()) {
-                    push_if_allowed(ctx, &mut tags, segment);
-                }
-            }
+    let mut plan = TransitionPlan::context_only(move |ctx: &mut Context| {
+        ctx.value.set(new_tags);
+        ctx.input_value.clear();
+    });
 
-            ctx.value.set(tags);
-            ctx.input_value.clear();
-        })
-        .with_effect(value_change_effect()),
-    )
+    if changed {
+        plan = plan.with_effect(value_change_effect());
+    }
+
+    Some(plan)
 }
 
 /// Pushes the trimmed `segment` onto `tags` when it is non-empty and respects the
@@ -1569,13 +1573,16 @@ impl Api<'_> {
     pub fn hidden_input_attrs(&self) -> AttrMap {
         let mut attrs = base_attrs(&Part::HiddenInput);
 
-        attrs
-            .set(HtmlAttr::Type, "hidden")
-            .set(HtmlAttr::Name, self.ctx.name.as_deref().unwrap_or(""))
-            .set(
-                HtmlAttr::Value,
-                self.ctx.value.get().join(self.ctx.delimiter.as_str()),
-            );
+        attrs.set(HtmlAttr::Type, "hidden").set(
+            HtmlAttr::Value,
+            self.ctx.value.get().join(self.ctx.delimiter.as_str()),
+        );
+
+        // Only emit `name` when one is configured — an empty name is invalid,
+        // useless form markup (matches the other form-backed components).
+        if let Some(name) = &self.ctx.name {
+            attrs.set(HtmlAttr::Name, name);
+        }
 
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Disabled, true);
@@ -1731,11 +1738,20 @@ impl Api<'_> {
     /// Resolves whether a horizontal arrow key points toward the previous tag,
     /// accounting for RTL text direction (where `ArrowRight` moves backward).
     fn is_toward_prev(&self, key: KeyboardKey) -> bool {
-        if self.ctx.dir == Direction::Rtl {
+        if self.is_rtl() {
             key == KeyboardKey::ArrowRight
         } else {
-            // LTR and Auto (resolved to LTR in the agnostic layer).
             key == KeyboardKey::ArrowLeft
+        }
+    }
+
+    /// Resolves the effective right-to-left state, falling back to the locale's
+    /// direction when [`Direction::Auto`] is configured.
+    fn is_rtl(&self) -> bool {
+        match self.ctx.dir {
+            Direction::Rtl => true,
+            Direction::Ltr => false,
+            Direction::Auto => self.ctx.locale.is_rtl(),
         }
     }
 
@@ -1830,7 +1846,7 @@ mod tests {
     use alloc::{string::ToString, vec};
     use core::cell::RefCell;
 
-    use ars_core::{Env, HtmlAttr, Service};
+    use ars_core::{Env, HtmlAttr, Locale, Service};
     use ars_interactions::KeyboardEventData;
     use insta::assert_snapshot;
 
@@ -2291,7 +2307,7 @@ mod tests {
     }
 
     #[test]
-    fn commit_empty_edit_removes_tag() {
+    fn commit_blank_edit_is_rejected_and_keeps_tag() {
         let mut service = service(
             props()
                 .editable(true)
@@ -2304,7 +2320,10 @@ mod tests {
             value: "   ".to_string(),
         }));
 
-        assert_eq!(tags_of(&service), vec!["b"]);
+        // A blank commit is not a delete — the original tag is preserved.
+        assert_eq!(tags_of(&service), vec!["a", "b"]);
+        assert_eq!(service.state(), &State::Focused);
+        assert_eq!(service.context().editing_tag, None);
     }
 
     #[test]
@@ -3158,12 +3177,12 @@ mod tests {
     }
 
     #[test]
-    fn hidden_input_uses_empty_name_when_unset() {
+    fn hidden_input_omits_name_when_unset() {
         let service = with_tags(&["a"]);
 
         let attrs = service.connect(&|_| {}).hidden_input_attrs();
 
-        assert_eq!(attrs.get(&HtmlAttr::Name), Some(""));
+        assert!(attrs.get(&HtmlAttr::Name).is_none());
     }
 
     #[test]
@@ -3998,5 +4017,114 @@ mod tests {
             log.lock().expect("lock").as_slice(),
             &[vec!["b".to_string()]]
         );
+    }
+
+    // — Codex review pass 3 —
+
+    #[test]
+    fn commit_edit_ignored_when_editable_toggled_off_mid_edit() {
+        let mut service = service(props().editable(true).default_value(vec!["a".to_string()]));
+        drop(service.send(Event::EditTag { index: 0 }));
+        assert_eq!(service.state(), &State::EditingTag { index: 0 });
+
+        // Parent turns editing off while a tag is in edit mode (editable is read live).
+        drop(service.set_props(props().editable(false).default_value(vec!["a".to_string()])));
+
+        drop(service.send(Event::CommitEdit {
+            index: 0,
+            value: "hacked".to_string(),
+        }));
+
+        // The edit is not applied; we simply leave edit mode.
+        assert_eq!(tags_of(&service), vec!["a"]);
+        assert_eq!(service.state(), &State::Focused);
+        assert_eq!(service.context().editing_tag, None);
+    }
+
+    #[test]
+    fn delimiter_split_without_new_tag_does_not_fire_value_change() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut service = service(
+            props()
+                .default_value(vec!["a".to_string()])
+                .on_value_change({
+                    let log = Arc::clone(&log);
+                    callback(move |value: Vec<String>| log.lock().expect("lock").push(value))
+                }),
+        );
+
+        // "a," splits to an existing duplicate → nothing added → no callback.
+        let result = service.send(Event::InputChange("a,".to_string()));
+        run_effects(&service, result);
+
+        assert_eq!(tags_of(&service), vec!["a"]);
+        assert!(log.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn paste_without_new_tag_does_not_fire_value_change() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut service = service(
+            props()
+                .default_value(vec!["a".to_string()])
+                .on_value_change({
+                    let log = Arc::clone(&log);
+                    callback(move |value: Vec<String>| log.lock().expect("lock").push(value))
+                }),
+        );
+
+        let result = service.send(Event::Paste("a,a".to_string())); // all duplicates
+        run_effects(&service, result);
+
+        assert_eq!(tags_of(&service), vec!["a"]);
+        assert!(log.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn controlled_adds_accumulate_across_rapid_changes() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut service = service(props().value(vec!["a".to_string()]).on_value_change({
+            let log = Arc::clone(&log);
+            callback(move |value: Vec<String>| log.lock().expect("lock").push(value))
+        }));
+
+        // Two adds before the parent round-trips the value: each should build on the
+        // previous pending value, not the stale controlled one.
+        let first = service.send(Event::AddTag("b".to_string()));
+        run_effects(&service, first);
+        let second = service.send(Event::AddTag("c".to_string()));
+        run_effects(&service, second);
+
+        assert_eq!(
+            log.lock().expect("lock").as_slice(),
+            &[
+                vec!["a".to_string(), "b".to_string()],
+                vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            ]
+        );
+    }
+
+    #[test]
+    fn auto_direction_resolves_rtl_from_locale() {
+        let env = Env {
+            locale: Locale::parse("ar").expect("`ar` is a valid BCP-47 tag"),
+            ..Env::default()
+        };
+        let mut service = Service::<Machine>::new(
+            props().dir(Direction::Auto).default_value(vec![
+                "a".to_string(),
+                "b".to_string(),
+                "c".to_string(),
+            ]),
+            &env,
+            &Messages::default(),
+        );
+
+        // Under an RTL locale with Direction::Auto, ArrowRight enters the tags from
+        // the input (the "toward previous" arrow), like an explicit RTL direction.
+        dispatch(&mut service, |api| {
+            api.on_input_keydown(&key(KeyboardKey::ArrowRight), true);
+        });
+        assert_eq!(service.context().focused_tag, Some(2));
     }
 }

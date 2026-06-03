@@ -41,12 +41,6 @@ AttrMap {
             ),
         ),
         (
-            Name,
-            String(
-                "",
-            ),
-        ),
-        (
             Type,
             String(
                 "hidden",
