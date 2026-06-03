@@ -401,21 +401,10 @@ impl ars_core::Machine for Machine {
                     ctx.focus_visible = false;
                 })),
 
-                Event::Focus { item, is_keyboard } => {
-                    let key = item
-                        .as_ref()
-                        .filter(|key| context.items.contains_key(key))
-                        .cloned();
-                    let is_keyboard = *is_keyboard;
-                    let target = if key.is_some() {
-                        State::Focused
-                    } else {
-                        State::Idle
-                    };
-
-                    Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
-                        ctx.focused_key = key;
-                        ctx.focus_visible = is_keyboard && ctx.focused_key.is_some();
+                Event::Focus { .. } => {
+                    Some(TransitionPlan::to(State::Idle).apply(|ctx: &mut Context| {
+                        ctx.focused_key = None;
+                        ctx.focus_visible = false;
                     }))
                 }
 
@@ -1705,14 +1694,14 @@ mod tests {
             is_keyboard: true,
         }));
 
-        assert_eq!(disabled.context().focused_key, Some(key("alpha")));
-        assert!(disabled.context().focus_visible);
+        assert_eq!(disabled.context().focused_key, None);
+        assert!(!disabled.context().focus_visible);
         assert_eq!(
             disabled
                 .connect(&|_| {})
                 .tag_attrs(&key("alpha"))
                 .get(&HtmlAttr::Data("ars-focus-visible")),
-            Some("true")
+            None
         );
 
         drop(disabled.send(Event::Blur));
