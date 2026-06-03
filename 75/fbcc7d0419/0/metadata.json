@@ -1,0 +1,91 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "75fbcc7d0419",
+  "session_id": "11232391-c5e3-4f6c-9dfc-75ed12f9e103",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T18:26:39.273991Z",
+  "branch": "impl-278",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/layout/carousel/mod.rs",
+    "spec/components/layout/carousel.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "08ca51e961ce",
+  "checkpoint_transcript_start": 1031,
+  "transcript_lines_at_start": 1031,
+  "token_usage": {
+    "input_tokens": 3976,
+    "cache_creation_tokens": 512315,
+    "cache_read_tokens": 27815598,
+    "output_tokens": 39737,
+    "api_call_count": 55
+  },
+  "session_metrics": {
+    "turn_count": 4
+  },
+  "summary": {
+    "intent": "Fix 6 bugs found in a pass-3 Codex review of the carousel component, covering dynamic-props reconfiguration, no-op-transition stalls, and AutoPlay behavioral issues.",
+    "outcome": "All 6 findings addressed: SyncControlledIndex replaced with a comprehensive SyncProps pattern (following splitter precedent), navigate_to refactored to return Option to skip no-ops, AutoPlayTick and AutoPlayStart guards added, controlled index clamped at init. 113 tests pass, xci-fast green, committed and pushed.",
+    "learnings": {
+      "repo": [
+        "The workspace convention for dynamic-props reconciliation is a SyncProps { props } event that re-derives all config in the arm, as established by the splitter component.",
+        "sync_controlled is the workspace utility for handling Some↔None controlled/uncontrolled prop transitions.",
+        "The carousel spec (spec/components/layout/carousel.md) must be kept in sync with implementation — it is a first-class artifact updated in the same commit.",
+        "The xci-fast gate is the final CI check before pushing; the pipeline is build → clippy → unit tests → xci-fast."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "SyncControlledIndex event replaced with SyncProps { props }; Event no longer derives Copy (mirrors splitter)."
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "navigate_to now returns Option, returning None for no-op transitions (same index), eliminating stalled transition state."
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "AutoPlayStart now clears the paused flag; AutoPlayTick guards on next == current instead of can_go_next to avoid no-op stalls."
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "Controlled index is now clamped at init time to prevent out-of-bounds starting state."
+        }
+      ],
+      "workflow": [
+        "Multi-pass Codex reviews surface findings incrementally; pass-3 added 6 more threads after pass-2 fixes introduced new issues.",
+        "TDD practice: new tests for all 6 findings were added alongside the fixes, growing the suite from 82 to 113 tests.",
+        "Em-dashes and special characters in Rust doc comments break exact-string Edit tool matching; editing on unique signature/return lines avoids this."
+      ]
+    },
+    "friction": [
+      "Em-dashes in a doc comment caused the Edit tool to fail matching navigate_to; required a second attempt targeting only the function signature and return type lines.",
+      "Three separate call-site edits were needed after changing navigate_to's return type from a value to Option, as the old callers wrapped the result in Some(...)."
+    ],
+    "open_items": [
+      "The pass-2 on_props_changed was a partial implementation that this pass-3 work supersedes — any downstream components that relied on the old SyncControlledIndex event should be audited."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T18:26:11.236199Z",
+    "agent_lines": 330,
+    "agent_removed": 76,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 330,
+    "total_lines_changed": 406,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
