@@ -1,0 +1,53 @@
+Implement task #295
+
+---
+
+<ide_selection>The user selected the lines 121 to 123 from /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-295/crates/ars-components/src/specialized/signature_pad/mod.rs:
+SignatureFormat::Png | SignatureFormat::Jpeg | SignatureFormat::Base64Png => {
+                unimplemented!("Raster export is handled by the adapter layer")
+            }
+
+This may or may not be related to the current task.</ide_selection>
+If the agnostic signature pad can't handle PNG, JPEG or base64PNG exports, let's remove them from the enum, and have a similar SignatureFormat enum with those variants in the adapter layer, this way we won't need this `unimplemented` call to begin with, following the MISU principle
+
+---
+
+<ide_opened_file>The user opened the file /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-295/crates/ars-components/src/specialized/signature_pad/mod.rs in the IDE. This may or may not be related to the current task.</ide_opened_file>
+Or would it make sense to proper support raster images at the agnostic layer, behind a feature flag or something like that? Actual question, don't change any code yet
+
+---
+
+We need to intruduce this SignatureRasterizer into the agnostic SignaturePad and for web we can implement it in ars-dom which is our web related crate?
+
+---
+
+<ide_opened_file>The user opened the file /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-295/spec/foundation/01-architecture.md in the IDE. This may or may not be related to the current task.</ide_opened_file>
+It would make sense to have a `Backend(Box<dyn Error>)` instead of `Backend(String)` for the RasterError?
+
+---
+
+It's fine then, let's keep the String one
+
+---
+
+<ide_opened_file>The user opened the file /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-295/crates/ars-dom/src/signature_raster.rs in the IDE. This may or may not be related to the current task.</ide_opened_file>
+Do we have other formats available in the browser like webp?
+
+---
+
+<ide_opened_file>The user opened the file /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-295/crates/ars-dom/src/signature_raster.rs in the IDE. This may or may not be related to the current task.</ide_opened_file>
+Let's rebase our work here with the latest main branch
+
+---
+
+<ide_opened_file>The user opened the file /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-295/crates/ars-core/src/raster.rs in the IDE. This may or may not be related to the current task.</ide_opened_file>
+Should this new raster code use our existing color facilities instead of using plaing String? Actual question, don't change any code yet
+
+---
+
+Should we have a new CssColor type that can represent all the ways color can appear in CSS in a typed manner?
+
+---
+
+<ide_opened_file>The user opened the file /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-295/crates/ars-components/src/specialized/signature_pad/mod.rs in the IDE. This may or may not be related to the current task.</ide_opened_file>
+I reviewed here, let's commit and push a PR to github
