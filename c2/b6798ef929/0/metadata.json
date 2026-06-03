@@ -1,0 +1,150 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c2b6798ef929",
+  "session_id": "019e8b3e-5b1f-7c23-82f5-c27c08733024",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T02:47:23.122053Z",
+  "branch": "codex/data-display-agnostic-audit",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/data_display/tag_group/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/avatar.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/grid_list.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/marquee.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/progress.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/rating_group.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/table.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/tag_group.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/data_display.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/avatar.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/badge.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/grid_list.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/marquee.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/meter.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/mod.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/progress.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/rating_group.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/skeleton.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/stat.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/table.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/tag_group.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "e8abc1f01918",
+  "token_usage": {
+    "input_tokens": 419926,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 9488896,
+    "output_tokens": 30344,
+    "api_call_count": 77
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Audit all agnostic data-display components against the spec to close Epic #225, including splitting bloated per-category test files into per-component modules and verifying spec conformance, proptests, and coverage.",
+    "outcome": "All 11 data-display agnostic components audited; one real spec drift found and fixed (TagGroup disabled-group focus behavior); test files split into per-component modules; all gates passed (8,019 unit tests, 12 conformance checks, 7 ignored proptests, 95.90% line coverage); committed and PR opened closing Epic #225.",
+    "learnings": {
+      "repo": [
+        "The `data-display` category has 11 agnostic components: Avatar, AvatarGroup, Badge, GridList, Marquee, Meter, Progress, RatingGroup, Skeleton, Stat, Table, TagGroup.",
+        "Existing per-category test files (`data_display.rs`) were monolithic blobs; the established pattern for split tests is a directory-backed module (`data_display/mod.rs`) with one sibling file per component, matching the `input/` and `navigation/` test layout.",
+        "Badge, Skeleton, Avatar, and AvatarGroup were missing spec-conformance anatomy checks entirely before this audit.",
+        "The `cargo xtask spec compile-snippets` command does not support a `--category` filter flag; it must be run across all categories.",
+        "`cargo llvm-cov` with `--lcov` mode does not emit branch records (`BRF`/`BRH`) for this workspace configuration, so only line coverage is reportable from lcov output.",
+        "The fast CI profile (`cargo xci --profile fast`) runs 10 sequential gates including fmt, clippy, unit (8,019 tests via nextest), integration, adapter, spec snippets, error-variant coverage, mutual exclusion, snapshot count, and native coverage instrumented rebuild."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/tag_group/mod.rs",
+          "line": 397,
+          "end_line": 430,
+          "finding": "Disabled TagGroup was accepting `Event::Focus { item: Some(...) }` and recording `focused_key`, violating spec prose that disabled tags must be skipped and disabled groups prevent interaction. Fix: disabled-group Focus events now clear focus state and stay Idle rather than storing focused_key."
+        },
+        {
+          "path": "crates/ars-components/tests/spec_conformance/data_display/mod.rs",
+          "line": 1,
+          "end_line": 80,
+          "finding": "New directory-backed spec conformance module replacing the single data_display.rs file; now contains 12 anatomy checks across all data-display components."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/data_display/mod.rs",
+          "line": 1,
+          "end_line": 80,
+          "finding": "New directory-backed proptest module; only stateful/complex components (Avatar, GridList, Marquee, Progress, RatingGroup, Table, TagGroup) have proptests since stateless components have no machine invariants."
+        },
+        {
+          "path": "spec/components/data-display/tag-group.md",
+          "line": 207,
+          "end_line": 235,
+          "finding": "Spec reference code is slightly ambiguous: says 'Allow focus/blur for AT even when disabled' but transitions to Idle without setting focused_key — correct behavior is accept focus/blur events but never store focused_key while group is disabled."
+        }
+      ],
+      "workflow": [
+        "When converting a single test file to a directory-backed module, naming the inner test module the same as the component import causes Rust namespace conflicts; move component imports into each individual test file to avoid this.",
+        "Running `PROPTEST_CASES=32` when executing ignored proptests is an effective way to validate the split compiled and executes without waiting for full case generation.",
+        "The TDD cycle for spec-drift fixes: update the unit test to encode correct spec behavior first, confirm it fails on the current implementation, then apply the minimal machine fix.",
+        "Using `awk` to parse lcov files by path prefix (`src/data_display/`) gives per-component coverage breakdowns without relying on `--summary-only` which aggregates the whole crate.",
+        "The worktree was in detached HEAD state throughout the audit; a `git switch -c` branch was required before committing and pushing.",
+        "Parallel cargo invocations compete for the Cargo build lock and serialize in practice; issuing them together still reduces wall-clock time once the first build populates the cache."
+      ]
+    },
+    "friction": [
+      "`cargo xtask spec info` triggered a fresh xtask compile in the worktree because it had not been built yet, blocking early audit discovery.",
+      "The `cargo xtask spec compile-snippets --category data-display` flag is not supported, requiring a full-category run instead of a scoped one.",
+      "`cargo llvm-cov --text` output was too large to use directly; required a second run with `--lcov` plus manual awk parsing to get per-component numbers.",
+      "Coverage run with `--lcov` mode did not emit branch records (`BRF`/`BRH`), making branch coverage unverifiable without a different instrumentation approach.",
+      "Multiple Cargo commands serialized behind the build lock when run in parallel, requiring repeated polling with `write_stdin` to collect output.",
+      "The `coverage-native` gate in `cargo xci --profile fast` requires a full instrumented rebuild, making it the dominant time cost of the pre-push gate."
+    ],
+    "open_items": [
+      "Branch coverage for `src/data_display` is not captured by the current lcov invocation mode; a follow-up could configure branch instrumentation or use a different coverage report format.",
+      "Marquee has the lowest line coverage at 92.97%; specific uncovered branches were not identified in this audit and could be worth a targeted follow-up.",
+      "The TagGroup spec at line 207 is slightly ambiguous about AT focus behavior on disabled groups; the spec prose could be tightened to explicitly state that `focused_key` must remain `None` even when focus/blur events are accepted for AT.",
+      "Badge, Skeleton, Avatar, and AvatarGroup now have anatomy-only spec conformance tests; they have no proptests (correct for stateless components) but also no behavior-specific conformance tests beyond anatomy structure."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T02:46:45.578351Z",
+    "agent_lines": 1045,
+    "agent_removed": 1007,
+    "human_added": 3,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1048,
+    "total_lines_changed": 2055,
+    "agent_percentage": 99.85401459854015,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 3,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1045,
+      "agent_lines_removed": 1007,
+      "user_added_per_file": {
+        "crates/ars-components/tests/proptest_state_machines/data_display/rating_group.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/data_display/tag_group.rs": 2
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1048,
+      "agent_lines_removed": 1007
+    }
+  ]
+}

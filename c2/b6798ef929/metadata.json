@@ -1,0 +1,49 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c2b6798ef929",
+  "strategy": "manual-commit",
+  "branch": "codex/data-display-agnostic-audit",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "crates/ars-components/src/data_display/tag_group/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/avatar.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/grid_list.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/marquee.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/progress.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/rating_group.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/table.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/tag_group.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/data_display.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/avatar.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/badge.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/grid_list.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/marquee.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/meter.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/mod.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/progress.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/rating_group.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/skeleton.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/stat.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/table.rs",
+    "crates/ars-components/tests/spec_conformance/data_display/tag_group.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/c2/b6798ef929/0/metadata.json",
+      "transcript": "/c2/b6798ef929/0/full.jsonl",
+      "content_hash": "/c2/b6798ef929/0/content_hash.txt",
+      "prompt": "/c2/b6798ef929/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 419926,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 9488896,
+    "output_tokens": 30344,
+    "api_call_count": 77
+  }
+}
