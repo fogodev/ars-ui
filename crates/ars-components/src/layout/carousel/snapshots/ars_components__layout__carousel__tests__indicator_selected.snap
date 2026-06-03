@@ -34,6 +34,12 @@ AttrMap {
                 "tab",
             ),
         ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
     ],
     styles: [],
 }

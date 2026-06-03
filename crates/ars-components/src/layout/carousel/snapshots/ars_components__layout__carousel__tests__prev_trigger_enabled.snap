@@ -28,6 +28,12 @@ AttrMap {
                 "Previous slide",
             ),
         ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
     ],
     styles: [],
 }

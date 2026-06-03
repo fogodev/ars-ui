@@ -36,6 +36,12 @@ AttrMap {
                 "false",
             ),
         ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
     ],
     styles: [],
 }

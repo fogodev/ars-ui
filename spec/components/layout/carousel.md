@@ -135,8 +135,14 @@ pub struct Context {
     pub auto_play: Option<AutoPlayOptions>,
     /// Whether auto-play has been permanently stopped by user interaction.
     pub auto_play_stopped: bool,
-    /// Whether auto-play is temporarily paused (hover/focus).
-    pub auto_play_paused: bool,
+    /// Whether the auto-play trigger button manually paused rotation. Tracked
+    /// separately from hover/focus so a hover/focus exit never resumes a manual
+    /// pause. See `is_auto_play_paused`.
+    pub auto_play_paused_manual: bool,
+    /// Whether pointer hover currently pauses auto-play (`HoverStart`).
+    pub auto_play_paused_hover: bool,
+    /// Whether keyboard focus within the carousel pauses auto-play (`FocusSlide`).
+    pub auto_play_paused_focus: bool,
     /// Gap between slides in pixels.
     pub spacing: f64,
     /// Number of slides visible at once (fractional supported).
@@ -173,6 +179,12 @@ pub struct Context {
 
 impl Context {
     pub fn current_index(&self) -> usize { *self.index.get() }
+
+    /// Whether auto-play is temporarily paused by any source — the manual
+    /// trigger pause, a pointer hover, or keyboard focus.
+    pub const fn is_auto_play_paused(&self) -> bool {
+        self.auto_play_paused_manual || self.auto_play_paused_hover || self.auto_play_paused_focus
+    }
 
     /// Number of slide slots occupied at once, rounding a fractional
     /// `slides_per_view` up so a partially visible trailing slide still counts
@@ -407,7 +419,9 @@ impl ars_core::Machine for Machine {
             loop_nav: props.loop_nav,
             auto_play: props.auto_play.clone(),
             auto_play_stopped: false,
-            auto_play_paused: false,
+            auto_play_paused_manual: false,
+            auto_play_paused_hover: false,
+            auto_play_paused_focus: false,
             spacing: props.spacing.unwrap_or(0.0),
             slides_per_view,
             slides_per_move,
@@ -465,11 +479,11 @@ impl ars_core::Machine for Machine {
         match event {
             Event::GoToSlide { index } => {
                 if *state == State::Transitioning { return None; }
-                // A direct jump never wraps; clamp out-of-range targets to the
-                // last valid starting index. A direct jump is a manual
-                // interaction, so it honours `stop_on_interaction` like
-                // Next/Prev (see `navigate_to`).
-                let idx = (*index).min(ctx.last_index());
+                // Clamp via `clamp_index`: wraps under `loop_nav` (any slide
+                // selectable, including past `last_index`), saturates at
+                // `last_index` otherwise. A direct jump is a manual interaction,
+                // so it honours `stop_on_interaction` like Next/Prev.
+                let idx = ctx.clamp_index(*index as isize);
                 navigate_to(ctx, idx)
             }
 
@@ -488,7 +502,7 @@ impl ars_core::Machine for Machine {
             }
 
             Event::TransitionEnd => {
-                if ctx.auto_play.is_some() && !ctx.auto_play_stopped && !ctx.auto_play_paused {
+                if ctx.auto_play.is_some() && !ctx.auto_play_stopped && !ctx.is_auto_play_paused() {
                     Some(TransitionPlan::to(State::AutoPlaying))
                 } else {
                     Some(TransitionPlan::to(State::Idle))
@@ -501,7 +515,11 @@ impl ars_core::Machine for Machine {
                 // actively rotating, so the paused live-region mode and
                 // `aria-pressed="false"` must not linger.
                 Some(TransitionPlan::to(State::AutoPlaying)
-                    .apply(|ctx| { ctx.auto_play_paused = false; })
+                    .apply(|ctx| {
+                        ctx.auto_play_paused_manual = false;
+                        ctx.auto_play_paused_hover = false;
+                        ctx.auto_play_paused_focus = false;
+                    })
                     .with_effect(PendingEffect::named(Effect::AutoPlayTimer)))
             }
 
@@ -512,7 +530,10 @@ impl ars_core::Machine for Machine {
             }
 
             Event::AutoPlayTick => {
-                if *state != State::AutoPlaying { return None; }
+                // Drop ticks during a drag: `PointerDown` cancels the timer, but
+                // a callback queued just before could still fire and advance the
+                // slide under the pointer.
+                if *state != State::AutoPlaying || ctx.drag_start_pos.is_some() { return None; }
                 let step = ctx.slides_per_move as isize;
                 let next = ctx.clamp_index(ctx.current_index() as isize + step);
                 // Ignore ticks that would not move the track: the non-looping
@@ -537,7 +558,7 @@ impl ars_core::Machine for Machine {
                 } else {
                     TransitionPlan::new()
                 };
-                Some(plan.apply(|ctx| { ctx.auto_play_paused = true; }).cancel_effect(Effect::AutoPlayTimer))
+                Some(plan.apply(|ctx| { ctx.auto_play_paused_manual = true; }).cancel_effect(Effect::AutoPlayTimer))
             }
 
             Event::HoverStart => {
@@ -549,30 +570,38 @@ impl ars_core::Machine for Machine {
                 } else {
                     TransitionPlan::new()
                 };
-                Some(plan.apply(|ctx| { ctx.auto_play_paused = true; }).cancel_effect(Effect::AutoPlayTimer))
+                Some(plan.apply(|ctx| { ctx.auto_play_paused_hover = true; }).cancel_effect(Effect::AutoPlayTimer))
             }
 
             Event::HoverEnd => {
-                // Resume a hover/focus pause when the pointer leaves, mirroring `Blur`.
-                if ctx.auto_play_paused && !ctx.auto_play_stopped && ctx.auto_play.is_some() {
-                    return Some(TransitionPlan::to(State::AutoPlaying).apply(|ctx| {
-                        ctx.auto_play_paused = false;
-                    }).with_effect(PendingEffect::named(Effect::AutoPlayTimer)));
-                }
-                None
+                // Clear only the hover pause; resume only if no other source
+                // (manual trigger or focus) still holds it.
+                if !ctx.auto_play_paused_hover { return None; }
+                let resume = !ctx.auto_play_paused_manual
+                    && !ctx.auto_play_paused_focus
+                    && !ctx.auto_play_stopped
+                    && ctx.auto_play.is_some();
+                let mut plan = if resume {
+                    TransitionPlan::to(State::AutoPlaying)
+                } else {
+                    TransitionPlan::new()
+                }.apply(|ctx| { ctx.auto_play_paused_hover = false; });
+                if resume { plan = plan.with_effect(PendingEffect::named(Effect::AutoPlayTimer)); }
+                Some(plan)
             }
 
             Event::AutoPlayResume => {
-                // Nothing to resume without auto-play configured (the paused and
+                // Nothing to resume without auto-play configured (the pause and
                 // stopped flags are only ever set while it is configured).
                 ctx.auto_play.as_ref()?;
                 // Resume is also the "restart" path the auto-play trigger
-                // dispatches when rotation was stopped (the trigger shows the
-                // "Start" label and sends `AutoPlayResume`), so it clears BOTH
-                // the paused and the stopped flags — otherwise a stopped
-                // carousel's start control would be inert.
+                // dispatches when rotation was stopped; it clears every pause
+                // source AND the stopped flag — an explicit play request
+                // overrides hover/focus/manual pauses.
                 Some(TransitionPlan::to(State::AutoPlaying).apply(|ctx| {
-                    ctx.auto_play_paused = false;
+                    ctx.auto_play_paused_manual = false;
+                    ctx.auto_play_paused_hover = false;
+                    ctx.auto_play_paused_focus = false;
                     ctx.auto_play_stopped = false;
                 }).with_effect(PendingEffect::named(Effect::AutoPlayTimer)))
             }
@@ -639,7 +668,7 @@ impl ars_core::Machine for Machine {
                 let resume = ctx.auto_play.is_some()
                     && !mark_stopped
                     && !ctx.auto_play_stopped
-                    && !ctx.auto_play_paused;
+                    && !ctx.is_auto_play_paused();
                 let target = if resume { State::AutoPlaying } else { State::Idle };
                 let index_changed = next_idx.is_some_and(|idx| idx != ctx.current_index());
 
@@ -668,7 +697,7 @@ impl ars_core::Machine for Machine {
                 let resume = ctx.drag_start_pos.is_some()
                     && ctx.auto_play.is_some()
                     && !ctx.auto_play_stopped
-                    && !ctx.auto_play_paused;
+                    && !ctx.is_auto_play_paused();
                 let mut plan = if resume {
                     TransitionPlan::to(State::AutoPlaying)
                 } else {
@@ -688,9 +717,9 @@ impl ars_core::Machine for Machine {
                 // With `slides_per_view > 1`, tabbing into a visible non-leading
                 // slide must NOT shift the track under the user.
                 let scroll = !ctx.is_slide_visible(*index);
-                // Clamp to the last valid starting index so a slide near the end
-                // maps to the last full page rather than overscrolling.
-                let idx = (*index).min(ctx.last_index());
+                // Clamp via `clamp_index` (wraps under `loop_nav`, saturates at
+                // `last_index` otherwise), matching `GoToSlide`.
+                let idx = ctx.clamp_index(*index as isize);
                 let should_pause = ctx.auto_play.as_ref().is_some_and(|o| o.pause_on_focus);
                 if should_pause {
                     // Pausing on focus mirrors `AutoPlayPause`: leave
@@ -703,7 +732,7 @@ impl ars_core::Machine for Machine {
                     };
                     let mut plan = plan.apply(move |ctx| {
                         if scroll { ctx.index.set(idx); }
-                        ctx.auto_play_paused = true;
+                        ctx.auto_play_paused_focus = true;
                     }).cancel_effect(Effect::AutoPlayTimer);
                     if scroll { plan = plan.with_effect(index_change_effect(idx)); }
                     return Some(plan);
@@ -715,12 +744,20 @@ impl ars_core::Machine for Machine {
             }
 
             Event::Blur => {
-                if ctx.auto_play_paused && !ctx.auto_play_stopped && ctx.auto_play.is_some() {
-                    return Some(TransitionPlan::to(State::AutoPlaying).apply(|ctx| {
-                        ctx.auto_play_paused = false;
-                    }).with_effect(PendingEffect::named(Effect::AutoPlayTimer)));
-                }
-                None
+                // Clear only the focus pause; resume only if no other source
+                // (manual trigger or hover) still holds it.
+                if !ctx.auto_play_paused_focus { return None; }
+                let resume = !ctx.auto_play_paused_manual
+                    && !ctx.auto_play_paused_hover
+                    && !ctx.auto_play_stopped
+                    && ctx.auto_play.is_some();
+                let mut plan = if resume {
+                    TransitionPlan::to(State::AutoPlaying)
+                } else {
+                    TransitionPlan::new()
+                }.apply(|ctx| { ctx.auto_play_paused_focus = false; });
+                if resume { plan = plan.with_effect(PendingEffect::named(Effect::AutoPlayTimer)); }
+                Some(plan)
             }
 
             Event::SyncProps { props } => {
@@ -729,7 +766,7 @@ impl ars_core::Machine for Machine {
                 // and reconcile the auto-play timer — all without animating.
                 let new_auto = props.auto_play.clone();
                 let auto_changed = ctx.auto_play != new_auto;
-                let want_timer = new_auto.is_some() && !ctx.auto_play_stopped && !ctx.auto_play_paused;
+                let want_timer = new_auto.is_some() && !ctx.auto_play_stopped && !ctx.is_auto_play_paused();
                 // Only the auto-play transition moves the resting state.
                 let target = if auto_changed {
                     if want_timer { State::AutoPlaying }
@@ -764,7 +801,9 @@ impl ars_core::Machine for Machine {
                         ctx.index.set(clamped);
                     }
                     if ctx.auto_play.is_none() {
-                        ctx.auto_play_paused = false;
+                        ctx.auto_play_paused_manual = false;
+                        ctx.auto_play_paused_hover = false;
+                        ctx.auto_play_paused_focus = false;
                         ctx.auto_play_stopped = false;
                     }
                 });
@@ -859,7 +898,7 @@ impl<'a> Api<'a> {
         // paused (hover/focus) carousels announce manual changes politely.
         let live = if self.ctx.auto_play.is_none()
             || self.ctx.auto_play_stopped
-            || self.ctx.auto_play_paused
+            || self.ctx.is_auto_play_paused()
         {
             "polite"
         } else {
@@ -897,6 +936,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::PrevTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.prev_label)(&self.ctx.locale));
         if !self.ctx.can_go_prev() {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
@@ -909,6 +949,7 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::NextTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.next_label)(&self.ctx.locale));
         if !self.ctx.can_go_next() {
             attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
@@ -931,6 +972,7 @@ impl<'a> Api<'a> {
             Part::Indicator { index }.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         attrs.set(HtmlAttr::Role, "tab");
         attrs.set(HtmlAttr::Aria(AriaAttr::Selected),
             if index == self.ctx.current_index() { "true" } else { "false" },
@@ -943,9 +985,10 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::AutoPlayTrigger.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
+        attrs.set(HtmlAttr::Type, "button");
         let is_playing = self.ctx.auto_play.is_some()
             && !self.ctx.auto_play_stopped
-            && !self.ctx.auto_play_paused;
+            && !self.ctx.is_auto_play_paused();
         let label = if is_playing {
             (self.ctx.messages.pause_auto_play_label)(&self.ctx.locale)
         } else {
@@ -963,7 +1006,7 @@ impl<'a> Api<'a> {
         attrs.set(part_attr, part_val);
         let is_playing = self.ctx.auto_play.is_some()
             && !self.ctx.auto_play_stopped
-            && !self.ctx.auto_play_paused;
+            && !self.ctx.is_auto_play_paused();
         attrs.set(HtmlAttr::Data("ars-state"), if is_playing { "playing" } else { "paused" });
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs
@@ -1018,7 +1061,7 @@ impl<'a> Api<'a> {
         // No-op without auto-play configured: there is nothing to toggle, and
         // dispatching `AutoPlayPause` would set a stale `paused` flag.
         if self.ctx.auto_play.is_none() { return; }
-        if self.ctx.auto_play_stopped || self.ctx.auto_play_paused {
+        if self.ctx.auto_play_stopped || self.ctx.is_auto_play_paused() {
             (self.send)(Event::AutoPlayResume);
         } else {
             (self.send)(Event::AutoPlayPause);
@@ -1034,6 +1077,8 @@ impl<'a> Api<'a> {
     pub fn on_viewport_pointermove(&self, pos: f64, timestamp: f64) {
         (self.send)(Event::PointerMove { pos, timestamp });
     }
+    /// Gesture aborted by the browser (pointer-capture loss / touch-scroll).
+    pub fn on_viewport_pointercancel(&self) { (self.send)(Event::PointerCancel); }
     pub fn on_viewport_pointerup(&self) { (self.send)(Event::PointerUp); }
 }
 
@@ -1081,11 +1126,11 @@ Carousel
 | Viewport          | `<div>`     | `overflow:hidden`, `touch-action`                       |
 | ItemGroup         | `<div>`     | `aria-live="off\|polite"`                               |
 | Item              | `<div>`     | `role="group"`, `aria-roledescription="slide"`, `inert` |
-| PrevTrigger       | `<button>`  | `aria-disabled` when at boundary                        |
-| NextTrigger       | `<button>`  | `aria-disabled` when at boundary                        |
+| PrevTrigger       | `<button>`  | `type="button"`, `aria-disabled` when at boundary       |
+| NextTrigger       | `<button>`  | `type="button"`, `aria-disabled` when at boundary       |
 | IndicatorGroup    | `<div>`     | `role="tablist"`                                        |
-| Indicator         | `<button>`  | `role="tab"`, `aria-selected`                           |
-| AutoPlayTrigger   | `<button>`  | `aria-pressed`                                          |
+| Indicator         | `<button>`  | `type="button"`, `role="tab"`, `aria-selected`          |
+| AutoPlayTrigger   | `<button>`  | `type="button"`, `aria-pressed`                         |
 | AutoPlayIndicator | `<div>`     | `aria-hidden="true"`, `data-ars-state`                  |
 | ProgressText      | `<div>`     | `aria-live="polite"`, `aria-atomic="true"`              |
 
