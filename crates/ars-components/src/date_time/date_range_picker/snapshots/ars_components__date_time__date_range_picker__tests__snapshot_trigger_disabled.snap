@@ -1,0 +1,75 @@
+---
+source: crates/ars-components/src/date_time/date_range_picker/tests.rs
+expression: snapshot_attrs(&api.trigger_attrs())
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "date-range-picker",
+            ),
+        ),
+        (
+            Aria(
+                Expanded,
+            ),
+            String(
+                "false",
+            ),
+        ),
+        (
+            Aria(
+                HasPopup,
+            ),
+            String(
+                "dialog",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Open date range picker",
+            ),
+        ),
+        (
+            Aria(
+                Controls,
+            ),
+            String(
+                "trip-content",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "trip-trigger",
+            ),
+        ),
+        (
+            Disabled,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

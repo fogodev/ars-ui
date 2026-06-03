@@ -220,7 +220,7 @@ view! {
 
 ```rust
 fn overlay(machine: UseMachineReturn<date_range_picker::Machine>) -> impl IntoView {
-    let calendar_props = machine.with_api_snapshot(|api| api.calendar_props());
+    let calendar_props = machine.with_api_snapshot(|api| api.range_calendar_props());
     view! {
         <Positioner>
             <FocusScope>

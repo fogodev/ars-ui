@@ -6,13 +6,15 @@ foundation_deps: [architecture, accessibility, i18n, interactions, forms]
 shared_deps: [date-time-types]
 related: [calendar, range-calendar, date-field, date-range-field]
 references:
-  ark-ui: DatePicker
-  react-aria: DateRangePicker
+    ark-ui: DatePicker
+    react-aria: DateRangePicker
 ---
 
 # DateRangePicker
 
-Composes **two DateField instances** + **Calendar with `is_range: true`** in a popover. Follows DatePicker's composition pattern (event bridging via `calendar_props()`).
+Composes **two segmented DateField inputs** (start and end) + a **[RangeCalendar](range-calendar.md)** shown in a popover, with optional preset shortcuts. Follows DatePicker's composition pattern: the picker owns the canonical range and popover state and exposes child-props builders (`start_field_props()`, `end_field_props()`, `range_calendar_props()`) that the adapter feeds to the child machines, bridging their events back.
+
+> **Composition note.** A `DateField` is a _segmented_ input that emits an `Option<CalendarDate>` (it has no format string); range selection lives in the dedicated `RangeCalendar` component (`Calendar` has no range mode). The two-field value coordination mirrors [DateRangeField](date-range-field.md) (value-based events + `DateRange::normalized`), and the popover lifecycle mirrors [DatePicker](date-picker.md). Live focus, popover positioning, and return-focus are adapter concerns driven from element handles; the agnostic core emits no effects (`type Effect = NoEffect`).
 
 ## 1. State Machine
 
@@ -20,7 +22,7 @@ Composes **two DateField instances** + **Calendar with `is_range: true`** in a p
 
 ```rust
 /// States for the DateRangePicker component.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum State {
     /// The popover is closed.
     Closed,
@@ -35,36 +37,42 @@ pub enum State {
 /// Events for the DateRangePicker component.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    /// Open the popover.
+    /// Open the calendar popover.
     Open,
-    /// Close the popover.
+    /// Close the calendar popover.
     Close,
-    /// Toggle open/closed.
+    /// Toggle the popover open/closed.
     Toggle,
-    /// Calendar has completed range selection.
+    /// The embedded calendar completed a range selection.
     SelectRangeComplete {
         /// The selected range.
-        range: DateRange
+        range: DateRange,
     },
-    /// Start date field text changed.
-    StartInputChange {
-        /// The new value.
-        value: String
+    /// The start field's value changed. A segmented `DateField` emits an
+    /// `Option<CalendarDate>`, not raw text.
+    StartValueChange(Option<CalendarDate>),
+    /// The end field's value changed.
+    EndValueChange(Option<CalendarDate>),
+    /// A preset range was chosen by its index into `Props::presets`.
+    SelectPreset {
+        /// Zero-based index into the configured presets.
+        index: usize,
     },
-    /// End date field text changed.
-    EndInputChange {
-        /// The new value.
-        value: String
-    },
+    /// Clear the selected range (the clear trigger).
+    Clear,
     /// Focus entered the component.
     FocusIn,
     /// Focus left the component entirely.
     FocusOut,
-    /// Key pressed on trigger or within popover.
+    /// A key was pressed on the trigger or within the popover.
     KeyDown {
         /// The key that was pressed.
-        key: KeyboardKey
+        key: KeyboardKey,
     },
+    /// Re-apply context-backed prop fields after a props change. Emitted by
+    /// `Machine::on_props_changed` so a controlled `value` and the cached
+    /// `min`/`max`/`today`/`presets`/flags follow parent-driven prop updates.
+    SyncProps(Box<Props>),
 }
 ```
 
@@ -72,57 +80,66 @@ pub enum Event {
 
 ```rust
 /// Context for the DateRangePicker component.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// `intl_backend` is not `PartialEq`/`Debug`-derivable, so `Context` provides a
+/// hand-written `Debug` and is not `PartialEq` (matching `DateRangeField`).
+#[derive(Clone)]
 pub struct Context {
-    /// The selected range.
+    /// The canonical selected range. `Some` only when both `start_date` and
+    /// `end_date` are set; always normalized so `start <= end`.
     pub value: Bindable<Option<DateRange>>,
-    /// Whether the popover is open.
+    /// Whether the popover is open (always uncontrolled).
     pub open: Bindable<bool>,
-    /// The text in the start input field.
-    pub start_input_text: String,
-    /// The text in the end input field.
-    pub end_input_text: String,
-    /// The parsed start date.
-    pub parsed_start: Option<CalendarDate>,
-    /// The parsed end date.
-    pub parsed_end: Option<CalendarDate>,
-    /// Which DateField is currently active.
+    /// The start field's current value, tracked independently so a range can be
+    /// assembled incrementally as each field changes.
+    pub start_date: Option<CalendarDate>,
+    /// The end field's current value, tracked independently.
+    pub end_date: Option<CalendarDate>,
+    /// Which field most recently received a value change.
     pub active_field: ActiveField,
-    /// The minimum date.
+    /// The minimum selectable date.
     pub min: Option<CalendarDate>,
-    /// The maximum date.
+    /// The maximum selectable date.
     pub max: Option<CalendarDate>,
-    /// The locale.
+    /// The adapter-injected "today" date, forwarded to the embedded calendar.
+    pub today: CalendarDate,
+    /// Named preset ranges offered as one-click shortcuts.
+    pub presets: Vec<Preset>,
+    /// Number of months displayed side-by-side, forwarded to the calendar.
+    pub visible_months: usize,
+    /// Right-to-left layout direction, forwarded to the calendar.
+    pub is_rtl: bool,
+    /// The resolved locale.
     pub locale: Locale,
+    /// Backend used for locale-dependent labels in range descriptions.
+    pub intl_backend: Arc<dyn IntlBackend>,
     /// Resolved translatable messages.
     pub messages: Messages,
-    /// The date format.
-    pub format: DateFormat,
     /// Whether the component is disabled.
     pub disabled: bool,
     /// Whether the component is readonly.
     pub readonly: bool,
     /// Whether the component is required.
     pub required: bool,
-    /// The name of the component.
+    /// When `true`, numeric segments in both child fields display with leading
+    /// zeros.
+    pub force_leading_zeros: bool,
+    /// Whether the `Description` part is rendered.
+    pub has_description: bool,
+    /// Whether the `ErrorMessage` part is rendered.
+    pub has_error_message: bool,
+    /// Form field name for a single hidden input carrying the range value.
     pub name: Option<String>,
-    /// Separate form name for start date.
+    /// Separate form name for the start date.
     pub start_name: Option<String>,
-    /// Separate form name for end date.
+    /// Separate form name for the end date.
     pub end_name: Option<String>,
     /// Component IDs.
     pub ids: ComponentIds,
 }
-
-/// Which DateField is currently active.
-#[derive(Clone, Debug, PartialEq)]
-pub enum ActiveField {
-    /// The start field is active.
-    Start,
-    /// The end field is active.
-    End,
-}
 ```
+
+`ActiveField` (`Start` / `End`) is owned by [DateRangeField](date-range-field.md) as the first range component to need it; `DateRangePicker` re-exports and reuses that enum rather than redefining it.
 
 ### 1.4 Props
 
@@ -130,37 +147,54 @@ pub enum ActiveField {
 /// Props for the DateRangePicker component.
 #[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
-    /// The ID of the component.
+    /// The stable DOM id for the component.
     pub id: String,
-    /// The value of the component.
+    /// Controlled range value. `None` = uncontrolled, `Some(None)` =
+    /// controlled-and-empty, `Some(Some(range))` = controlled with a range.
     pub value: Option<Option<DateRange>>,
-    /// The default value of the component.
+    /// The initial range used when the component is uncontrolled.
     pub default_value: Option<DateRange>,
-    /// The minimum date.
+    /// The minimum selectable date (forwarded to both fields and the calendar).
     pub min: Option<CalendarDate>,
-    /// The maximum date.
+    /// The maximum selectable date (forwarded to both fields and the calendar).
     pub max: Option<CalendarDate>,
-    /// The date format.
-    pub format: DateFormat,
+    /// The "today" date, injected by the adapter for testability and SSR
+    /// determinism. Forwarded to the embedded calendar. Defaults to a fixed
+    /// date; adapters inject the real today.
+    pub today: CalendarDate,
+    /// Named preset ranges offered as one-click shortcuts (rendered as
+    /// `PresetTrigger` items inside the popover).
+    pub presets: Vec<Preset>,
+    /// Number of months displayed side-by-side in the calendar popover.
+    /// Default: `2`. Forwarded to the embedded calendar's `visible_months`.
+    pub visible_months: usize,
+    /// Right-to-left layout direction (forwarded to the embedded calendar).
+    pub is_rtl: bool,
     /// Whether the component is disabled.
     pub disabled: bool,
-    /// Whether the component is readonly.
+    /// Whether the component is readonly (viewing allowed, editing blocked).
     pub readonly: bool,
     /// Whether the component is required.
     pub required: bool,
-    /// The name of the component (for single hidden input submission).
+    /// When `true`, numeric segments in both child fields display with leading
+    /// zeros. Defaults to `false`, which uses locale-aware formatting.
+    pub force_leading_zeros: bool,
+    /// Whether a `Description` element is rendered (wires the control's
+    /// `aria-describedby`).
+    pub has_description: bool,
+    /// Whether an `ErrorMessage` element is rendered (wires the control's
+    /// `aria-describedby`).
+    pub has_error_message: bool,
+    /// Form field name for a single hidden input carrying the range value as the
+    /// ISO 8601 interval `YYYY-MM-DD/YYYY-MM-DD`.
     pub name: Option<String>,
-    /// Form field name for the start date (alternative to `name` for separate
-    /// start/end hidden inputs). When set, the start date is submitted under
-    /// this key in ISO 8601 format.
+    /// Form field name for a separate hidden input carrying the start date
+    /// (alternative to `name`). Submitted in ISO 8601 format.
     pub start_name: Option<String>,
-    /// Form field name for the end date. When set, the end date is submitted
-    /// under this key in ISO 8601 format.
+    /// Form field name for a separate hidden input carrying the end date.
     pub end_name: Option<String>,
-    /// Whether to close the popover after a date is selected. Default: true.
+    /// Whether to close the popover after a range is completed. Default: `true`.
     pub close_on_select: bool,
-    /// The positioning options.
-    pub positioning: PositioningOptions,
 }
 
 impl Default for Props {
@@ -171,16 +205,47 @@ impl Default for Props {
             default_value: None,
             min: None,
             max: None,
-            format: DateFormat::default(),
+            today: CalendarDate::new_gregorian(2025, 1, 1)
+                .expect("2025-01-01 is a valid Gregorian date"),
+            presets: Vec::new(),
+            visible_months: 2,
+            is_rtl: false,
             disabled: false,
             readonly: false,
             required: false,
+            force_leading_zeros: false,
+            has_description: false,
+            has_error_message: false,
             name: None,
             start_name: None,
             end_name: None,
             close_on_select: true,
-            positioning: PositioningOptions::default(),
         }
+    }
+}
+```
+
+### 1.4.1 Preset
+
+```rust
+/// A named preset range offered as a one-click shortcut (e.g. "Last 7 days").
+///
+/// The consumer supplies an already-localized `label` and a concrete `range`.
+/// Relative presets are computed by the consumer against the same `today`
+/// injected into `Props::today`, keeping the agnostic core deterministic and
+/// free of closures.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Preset {
+    /// The pre-localized label shown on the preset trigger.
+    pub label: String,
+    /// The concrete range applied when this preset is selected.
+    pub range: DateRange,
+}
+
+impl Preset {
+    /// Creates a preset from a label and a concrete range.
+    pub fn new(label: impl Into<String>, range: DateRange) -> Self {
+        Self { label: label.into(), range }
     }
 }
 ```
@@ -201,41 +266,47 @@ fn is_readonly(ctx: &Context) -> bool { ctx.readonly }
 
 ### 1.7 Composition Pattern
 
-Event bridging from child components to DateRangePicker:
+The adapter bridges child-component events back to DateRangePicker. The children
+are configured via the picker's `*_props()` builders; the picker runs no child
+machines itself.
 
 ```text
-Calendar.SelectRangeEnd -> DateRangePicker.SelectRangeComplete { range }
-StartDateField.SetValue -> DateRangePicker.StartInputChange { value } (parse, update range.start)
-EndDateField.SetValue   -> DateRangePicker.EndInputChange { value }   (parse, update range.end)
+RangeCalendar value completed -> DateRangePicker.SelectRangeComplete { range }
+StartDateField value change   -> DateRangePicker.StartValueChange(Option<CalendarDate>)
+EndDateField value change     -> DateRangePicker.EndValueChange(Option<CalendarDate>)
+PresetTrigger click           -> DateRangePicker.SelectPreset { index }
 ```
 
 > **Multi-month recommendation**: DateRangePicker uses `visible_months: 2` by default so users see start and end month grids side-by-side.
 
 #### 1.7.1 State Ownership and Synchronization
 
-The **Calendar** component is the single source of truth for the selected date range.
+The DateRangePicker context is the single source of truth for the selected
+range. It tracks the two field values independently (`start_date`/`end_date`)
+and derives the canonical normalized `value` from them.
 
 ```rust
-// DateRangePicker context owns the canonical range
 struct Context {
-    /// Source of truth for the selected range.
-    range: Bindable<Option<DateRange>>,
+    /// Canonical, normalized range derived from the two field values.
+    value: Bindable<Option<DateRange>>,
+    /// Per-field working values.
+    start_date: Option<CalendarDate>,
+    end_date: Option<CalendarDate>,
     // ...
 }
 ```
 
 **Sync Rules:**
 
-1. When the user selects a range via the Calendar, the DateFields update to reflect the new range.
-2. When the user edits a date via a DateField, the Calendar updates to reflect the new value.
-3. In controlled mode (`value` prop set), both Calendar and DateFields reflect the controlled value. User edits trigger `on_change` but do not update internal state.
-4. In uncontrolled mode, internal `range` is the source of truth. Both Calendar and DateFields read from and write to it.
+1. When the user completes a range via the calendar (`SelectRangeComplete`), both field values and the canonical `value` are updated.
+2. When the user edits a date via a field (`StartValueChange`/`EndValueChange`), the changed field is stored and the canonical range is recomputed via `DateRange::normalized`; the adapter feeds the updated `value` back to the calendar through `range_calendar_props()`.
+3. In controlled mode (`value` prop set), `get()` returns the parent's value; field edits update the per-field working values and the internal (pending) value but the override stands until the parent reconciles via the next `SyncProps`. The internal value is kept in lockstep with the override so a later controlled→uncontrolled switch reveals a value consistent with the fields.
+4. In uncontrolled mode, the internal `value` is the source of truth; both the fields and the calendar read from and write to it.
 
-**Conflict Resolution:**
+**Normalization & invalid ranges:**
 
-- If a DateField edit produces an invalid range (start > end), the edit is accepted but the range is marked invalid via `ctx.is_invalid = true`.
-- The Calendar highlights the invalid range with a visual indicator.
-- `on_change` fires with the invalid range; the consumer decides whether to correct it.
+- Field edits are normalized by `DateRange::normalized` so the stored range always satisfies `start <= end` (an out-of-order edit swaps the endpoints rather than being rejected).
+- A range whose endpoints fall outside `[min, max]` is _valid in order but out of bounds_; `Root` then carries `data-ars-invalid` and each child field reports its own `invalid`. Each child field is bounded only by the global `min`/`max` (never by the opposite endpoint), so an out-of-order edit reaches the parent for the normalizing swap instead of being clamped away by the child.
 
 ### 1.8 Full Machine Implementation
 
@@ -249,41 +320,41 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = NoEffect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let locale = env.locale.clone();
-        let messages = messages.clone();
-
-        let (start_text, end_text, parsed_start, parsed_end) = match &props.default_value {
-            Some(range) => (
-                format_date(&range.start, &props.format, &locale),
-                format_date(&range.end, &props.format, &locale),
-                Some(range.start.clone()),
-                Some(range.end.clone()),
-            ),
-            None => (String::new(), String::new(), None, None),
+        let value = if let Some(value) = &props.value {
+            Bindable::controlled(value.clone())
+        } else {
+            Bindable::uncontrolled(props.default_value.clone())
         };
 
+        let initial_range = value.get().clone();
+        let start_date = initial_range.as_ref().map(|range| range.start.clone());
+        let end_date = initial_range.as_ref().map(|range| range.end.clone());
+
         let ctx = Context {
-            value: match &props.value {
-                Some(v) => Bindable::controlled(v.clone()),
-                None => Bindable::uncontrolled(props.default_value.clone()),
-            },
+            value,
             open: Bindable::uncontrolled(false),
-            start_input_text: start_text,
-            end_input_text: end_text,
-            parsed_start,
-            parsed_end,
+            start_date,
+            end_date,
             active_field: ActiveField::Start,
             min: props.min.clone(),
             max: props.max.clone(),
-            locale,
-            messages,
-            format: props.format.clone(),
+            today: props.today.clone(),
+            presets: props.presets.clone(),
+            visible_months: props.visible_months,
+            is_rtl: props.is_rtl,
+            locale: env.locale.clone(),
+            intl_backend: Arc::clone(&env.intl_backend),
+            messages: messages.clone(),
             disabled: props.disabled,
             readonly: props.readonly,
             required: props.required,
+            force_leading_zeros: props.force_leading_zeros,
+            has_description: props.has_description,
+            has_error_message: props.has_error_message,
             name: props.name.clone(),
             start_name: props.start_name.clone(),
             end_name: props.end_name.clone(),
@@ -296,78 +367,102 @@ impl ars_core::Machine for Machine {
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
-        if ctx.disabled { return None; }
+        // `SyncProps` must process even when disabled so adapter-driven prop
+        // updates (including re-enabling) still reach the context.
+        if ctx.disabled && !matches!(event, Event::SyncProps(_)) {
+            return None;
+        }
 
         match (state, event) {
-            (State::Closed, Event::Open) | (State::Closed, Event::Toggle) => {
-                Some(TransitionPlan::to(State::Open).apply(|ctx| {
-                    ctx.open.set(true);
-                }))
-            }
-
-            (State::Open, Event::Close) | (State::Open, Event::Toggle) => {
-                Some(TransitionPlan::to(State::Closed).apply(|ctx| {
-                    ctx.open.set(false);
-                }))
-            }
-
-            (State::Open, Event::SelectRangeComplete { range }) => {
-                let range = range.clone();
-                let should_close = _props.close_on_select;
-                let next_state = if should_close { State::Closed } else { State::Open };
-                Some(TransitionPlan::to(next_state).apply(move |ctx| {
-                    ctx.start_input_text = format_date(&range.start, &ctx.format, &ctx.locale);
-                    ctx.end_input_text = format_date(&range.end, &ctx.format, &ctx.locale);
-                    ctx.parsed_start = Some(range.start.clone());
-                    ctx.parsed_end = Some(range.end.clone());
-                    ctx.value.set(Some(range));
-                    if should_close {
+            (_, Event::SyncProps(next)) => {
+                let next = next.as_ref().clone();
+                // Disabling an open picker dismisses it: while disabled the guard
+                // above blocks Close/Escape/FocusOut, so it could never reopen.
+                if next.disabled && *state == State::Open {
+                    return Some(TransitionPlan::to(State::Closed).apply(move |ctx| {
+                        sync_props(ctx, &next);
                         ctx.open.set(false);
-                    }
-                }))
+                    }));
+                }
+                Some(TransitionPlan::context_only(move |ctx| sync_props(ctx, &next)))
             }
 
-            (_, Event::StartInputChange { value }) => {
-                let text = value.clone();
+            (State::Closed, Event::Open | Event::Toggle) => {
+                Some(TransitionPlan::to(State::Open).apply(|ctx| ctx.open.set(true)))
+            }
+
+            (State::Open, Event::Close | Event::Toggle) => {
+                Some(TransitionPlan::to(State::Closed).apply(|ctx| ctx.open.set(false)))
+            }
+
+            // Accept the completed range in any state: a browser may fire
+            // `FocusOut` (closing the popover) before the calendar reports the
+            // cell click. The close side-effect only applies when it was open.
+            (_, Event::SelectRangeComplete { range }) => {
+                if ctx.readonly { return None; }
+                let range = range.clone();
+                let should_close = props.close_on_select && *state == State::Open;
+                let next_state = if should_close { State::Closed } else { state.clone() };
+                Some(TransitionPlan::to(next_state)
+                    .apply(move |ctx| apply_complete_range(ctx, range, should_close)))
+            }
+
+            (_, Event::SelectPreset { index }) => {
+                if ctx.readonly { return None; }
+                let range = ctx.presets.get(*index)?.range.clone();
+                let should_close = props.close_on_select && *state == State::Open;
+                let next_state = if should_close { State::Closed } else { state.clone() };
+                Some(TransitionPlan::to(next_state)
+                    .apply(move |ctx| apply_complete_range(ctx, range, should_close)))
+            }
+
+            (_, Event::StartValueChange(date)) => {
+                if ctx.readonly { return None; }
+                let date = date.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.parsed_start = parse_date(&text, &ctx.format, &ctx.locale);
-                    ctx.start_input_text = text;
                     ctx.active_field = ActiveField::Start;
-                    // Update range if both dates are valid
-                    if let (Some(start), Some(end)) = (&ctx.parsed_start, &ctx.parsed_end) {
-                        ctx.value.set(Some(DateRange::normalized(start.clone(), end.clone())));
-                    }
+                    ctx.start_date = date;
+                    recompute_range(ctx);
                 }))
             }
 
-            (_, Event::EndInputChange { value }) => {
-                let text = value.clone();
+            (_, Event::EndValueChange(date)) => {
+                if ctx.readonly { return None; }
+                let date = date.clone();
                 Some(TransitionPlan::context_only(move |ctx| {
-                    ctx.parsed_end = parse_date(&text, &ctx.format, &ctx.locale);
-                    ctx.end_input_text = text;
                     ctx.active_field = ActiveField::End;
-                    if let (Some(start), Some(end)) = (&ctx.parsed_start, &ctx.parsed_end) {
-                        ctx.value.set(Some(DateRange::normalized(start.clone(), end.clone())));
-                    }
+                    ctx.end_date = date;
+                    recompute_range(ctx);
+                }))
+            }
+
+            (_, Event::Clear) => {
+                if ctx.readonly { return None; }
+                Some(TransitionPlan::context_only(|ctx| {
+                    ctx.start_date = None;
+                    ctx.end_date = None;
+                    ctx.value.set(None);
                 }))
             }
 
             (State::Open, Event::KeyDown { key }) if *key == KeyboardKey::Escape => {
-                Self::transition(state, &Event::Close, ctx, _props)
+                Self::transition(state, &Event::Close, ctx, props)
             }
 
             (State::Closed, Event::KeyDown { key }) if *key == KeyboardKey::ArrowDown => {
-                Self::transition(state, &Event::Open, ctx, _props)
+                Self::transition(state, &Event::Open, ctx, props)
             }
 
-            (_, Event::FocusOut) if *state == State::Open => {
-                Self::transition(state, &Event::Close, ctx, _props)
-            }
+            (State::Open, Event::FocusOut) => Self::transition(state, &Event::Close, ctx, props),
 
             _ => None,
         }
+    }
+
+    fn on_props_changed(old: &Self::Props, new: &Self::Props) -> Vec<Self::Event> {
+        if old == new { Vec::new() } else { vec![Event::SyncProps(Box::new(new.clone()))] }
     }
 
     fn connect<'a>(
@@ -379,9 +474,70 @@ impl ars_core::Machine for Machine {
         Api { state, ctx, props, send }
     }
 }
+
+/// Re-derives mutable context fields from changed props. `open` is always
+/// uncontrolled and is left untouched.
+fn sync_props(ctx: &mut Context, props: &Props) {
+    ctx.min = props.min.clone();
+    ctx.max = props.max.clone();
+    ctx.today = props.today.clone();
+    ctx.presets = props.presets.clone();
+    ctx.visible_months = props.visible_months;
+    ctx.is_rtl = props.is_rtl;
+    ctx.disabled = props.disabled;
+    ctx.readonly = props.readonly;
+    ctx.required = props.required;
+    ctx.force_leading_zeros = props.force_leading_zeros;
+    ctx.has_description = props.has_description;
+    ctx.has_error_message = props.has_error_message;
+    ctx.name = props.name.clone();
+    ctx.start_name = props.start_name.clone();
+    ctx.end_name = props.end_name.clone();
+
+    if let Some(controlled) = &props.value {
+        ctx.value.sync_controlled(Some(controlled.clone()));
+        // Keep the internal value in lockstep so a later controlled→uncontrolled
+        // switch reveals a value consistent with the per-field values.
+        ctx.value.set(controlled.clone());
+        ctx.start_date = controlled.as_ref().map(|range| range.start.clone());
+        ctx.end_date = controlled.as_ref().map(|range| range.end.clone());
+    } else {
+        // Genuinely uncontrolled: drop any stale override but keep the internal
+        // working state and per-field values so in-progress edits survive.
+        ctx.value.sync_controlled(None);
+    }
+}
+
+/// Applies a completed range to the context (fields, canonical value, and — when
+/// `close` — the open state).
+fn apply_complete_range(ctx: &mut Context, range: DateRange, close: bool) {
+    ctx.start_date = Some(range.start.clone());
+    ctx.end_date = Some(range.end.clone());
+    ctx.value.set(Some(range));
+    if close { ctx.open.set(false); }
+}
+
+/// Recomputes the canonical range from the two field values, normalizing so
+/// `start <= end`. Clears the range when either field is empty or the dates are
+/// not comparable.
+fn recompute_range(ctx: &mut Context) {
+    match (ctx.start_date.clone(), ctx.end_date.clone()) {
+        (Some(start), Some(end)) => match DateRange::normalized(start, end) {
+            Some(range) => {
+                ctx.start_date = Some(range.start.clone());
+                ctx.end_date = Some(range.end.clone());
+                ctx.value.set(Some(range));
+            }
+            None => ctx.value.set(None),
+        },
+        _ => ctx.value.set(None),
+    }
+}
 ```
 
 ### 1.9 Connect / API
+
+`ActiveField` is re-exported from [DateRangeField](date-range-field.md).
 
 ```rust
 #[derive(ComponentPart)]
@@ -395,6 +551,8 @@ pub enum Part {
     EndInput,
     Trigger,
     ClearTrigger,
+    /// A preset shortcut button; the index selects into `Props::presets`.
+    PresetTrigger { index: usize },
     Positioner,
     Content,
     Description,
@@ -404,262 +562,146 @@ pub enum Part {
 
 /// API for the DateRangePicker component.
 pub struct Api<'a> {
-    /// The state of the component.
     state: &'a State,
-    /// The context of the component.
     ctx: &'a Context,
-    /// The props of the component.
     props: &'a Props,
-    /// The send function.
     send: &'a dyn Fn(Event),
 }
 
 impl<'a> Api<'a> {
-    /// Attributes for the root element.
+    /// Root element. Carries scope/part/id/state plus `data-ars-disabled`,
+    /// `data-ars-readonly`, `data-ars-required`, and `data-ars-invalid` flags.
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Root.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.id());
-        attrs.set(HtmlAttr::Data("ars-state"), self.state_name());
+        attrs
+            .set(scope_attr, scope_val)
+            .set(part_attr, part_val)
+            .set(HtmlAttr::Id, self.ctx.ids.id())
+            .set(HtmlAttr::Data("ars-state"), self.state_name());
         if self.ctx.disabled { attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
         if self.ctx.readonly { attrs.set_bool(HtmlAttr::Data("ars-readonly"), true); }
         if self.ctx.required { attrs.set_bool(HtmlAttr::Data("ars-required"), true); }
+        if self.ctx.is_invalid() { attrs.set_bool(HtmlAttr::Data("ars-invalid"), true); }
         attrs
     }
 
-    /// Attributes for the label element.
-    pub fn label_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Label.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("label"));
-        attrs.set(HtmlAttr::For, self.ctx.ids.part("start-input"));
-        attrs
-    }
+    /// Label element: `id={id}-label`, `for={id}-start-input`.
+    pub fn label_attrs(&self) -> AttrMap { /* scope/part + id + For(start-input) */ }
 
-    /// Attributes for the control element.
-    pub fn control_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Control.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Role, "group");
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
-        attrs
-    }
+    /// Control group: `role="group"`, `aria-labelledby={id}-label`, and
+    /// `aria-describedby` chaining the description/error ids when present.
+    pub fn control_attrs(&self) -> AttrMap { /* ... */ }
 
-    /// Attributes for the separator element.
-    pub fn separator_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Separator.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
-        attrs
-    }
+    /// Marker attributes for the start/end input wrappers (scope/part only); the
+    /// child `DateField` is configured through `start_field_props`/`end_field_props`.
+    pub fn start_input_attrs(&self) -> AttrMap { /* scope/part */ }
+    pub fn end_input_attrs(&self) -> AttrMap { /* scope/part */ }
 
-    /// Build DateField Props for the start date input.
+    /// Separator element: `aria-hidden="true"`.
+    pub fn separator_attrs(&self) -> AttrMap { /* ... */ }
+
+    /// Builds the child `DateField` props for the start input. Bounded only by
+    /// the global `min`/`max` (never by the opposite endpoint); `invalid`
+    /// reflects whether this field's own value is out of bounds.
     pub fn start_field_props(&self) -> date_field::Props {
         date_field::Props {
             id: self.ctx.ids.part("start-input"),
-            value: Some(self.ctx.parsed_start.clone()),
-            format: self.ctx.format.clone(),
-            min: self.ctx.min.clone(),
-            max: self.ctx.parsed_end.clone(), // start can't exceed end
+            value: Some(self.ctx.start_date.clone()),
+            min_value: self.ctx.min.clone(),
+            max_value: self.ctx.max.clone(),
             disabled: self.ctx.disabled,
             readonly: self.ctx.readonly,
+            required: self.ctx.required,
+            invalid: date_out_of_bounds(self.ctx.start_date.as_ref(), self.ctx.min.as_ref(), self.ctx.max.as_ref()),
             aria_label: Some((self.ctx.messages.start_label)(&self.ctx.locale)),
-            ..Default::default()
+            force_leading_zeros: self.ctx.force_leading_zeros,
+            ..date_field::Props::default()
         }
     }
 
-    /// Build DateField Props for the end date input.
-    pub fn end_field_props(&self) -> date_field::Props {
-        date_field::Props {
-            id: self.ctx.ids.part("end-input"),
-            value: Some(self.ctx.parsed_end.clone()),
-            format: self.ctx.format.clone(),
-            min: self.ctx.parsed_start.clone(), // end can't precede start
-            max: self.ctx.max.clone(),
-            disabled: self.ctx.disabled,
-            readonly: self.ctx.readonly,
-            aria_label: Some((self.ctx.messages.end_label)(&self.ctx.locale)),
-            ..Default::default()
-        }
-    }
+    /// Builds the child `DateField` props for the end input (mirror of start).
+    pub fn end_field_props(&self) -> date_field::Props { /* id = {id}-end-input, value = end_date, ... */ }
 
-    /// Attributes for the trigger element.
-    pub fn trigger_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Trigger.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("trigger"));
-        attrs.set(HtmlAttr::Type, "button");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.trigger_label)(&self.ctx.locale));
-        attrs.set(HtmlAttr::Aria(AriaAttr::HasPopup), "dialog");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Expanded), if *self.ctx.open.get() { "true" } else { "false" });
-        attrs.set(HtmlAttr::Aria(AriaAttr::Controls), self.ctx.ids.part("content"));
-        if self.ctx.disabled { attrs.set_bool(HtmlAttr::Disabled, true); }
-        attrs
-    }
+    /// Trigger: `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls={id}-content`,
+    /// `aria-label` from `messages.trigger_label`; `disabled` when disabled.
+    pub fn trigger_attrs(&self) -> AttrMap { /* ... */ }
 
-    /// Attributes for the clear trigger element.
-    pub fn clear_trigger_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ClearTrigger.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Type, "button");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.clear_label)(&self.ctx.locale));
-        if self.ctx.disabled || self.ctx.value.get().is_none() {
-            attrs.set_bool(HtmlAttr::Disabled, true);
-        }
-        attrs
-    }
+    /// Clear trigger: `aria-label` from `messages.clear_label`; `disabled` when
+    /// the component is disabled or read-only, or no range is selected (matching
+    /// the machine, which rejects `Event::Clear` in those states).
+    pub fn clear_trigger_attrs(&self) -> AttrMap { /* ... */ }
 
-    /// Attributes for the positioner element.
-    pub fn positioner_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Positioner.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs
-    }
+    /// Preset trigger at `index`: `data-ars-index={index}`, `type="button"`;
+    /// `disabled` when the component is disabled or read-only, or the index is
+    /// out of range (matching the machine, which rejects `Event::SelectPreset`).
+    pub fn preset_trigger_attrs(&self, index: usize) -> AttrMap { /* ... */ }
 
-    /// Attributes for the content element.
-    pub fn content_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Content.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("content"));
-        attrs.set(HtmlAttr::Role, "dialog");
-        attrs.set(HtmlAttr::Aria(AriaAttr::Modal), "false");
-        attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
-        attrs
-    }
+    /// Positioner: scope/part only (positioning is performed by the adapter).
+    pub fn positioner_attrs(&self) -> AttrMap { /* ... */ }
 
-    /// Attributes for the description element.
-    pub fn description_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::Description.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("description"));
-        attrs
-    }
+    /// Content: `role="dialog"`, `aria-modal="false"`, `aria-labelledby={id}-label`,
+    /// `id={id}-content`.
+    pub fn content_attrs(&self) -> AttrMap { /* ... */ }
 
-    /// Attributes for the error message element.
-    pub fn error_message_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ErrorMessage.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Id, self.ctx.ids.part("error-message"));
-        attrs.set(HtmlAttr::Role, "alert");
-        attrs
-    }
+    pub fn description_attrs(&self) -> AttrMap { /* id={id}-description */ }
+    pub fn error_message_attrs(&self) -> AttrMap { /* id={id}-error-message, role="alert" */ }
 
-    /// Attributes for the hidden input element (form submission).
-    /// When `name` is set, submits range as `"YYYY-MM-DD/YYYY-MM-DD"`.
-    /// When `start_name`/`end_name` are set, use `start_hidden_input_attrs()`
-    /// and `end_hidden_input_attrs()` instead for separate form fields.
-    pub fn hidden_input_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        let [(scope_attr, scope_val), (part_attr, part_val)] = Part::HiddenInput.data_attrs();
-        attrs.set(scope_attr, scope_val);
-        attrs.set(part_attr, part_val);
-        attrs.set(HtmlAttr::Type, "hidden");
-        if let Some(name) = &self.ctx.name {
-            attrs.set(HtmlAttr::Name, name);
-        }
-        // Submit range as two ISO 8601 dates separated by "/"
-        if let Some(range) = &self.ctx.value.get() {
-            let iso = format!("{}/{}", range.start.to_iso_string(), range.end.to_iso_string());
-            attrs.set(HtmlAttr::Value, iso);
-        }
-        attrs
-    }
+    /// Combined hidden input: `value = range.to_iso8601()` (the `start/end`
+    /// interval), or empty. `name` from props; `disabled` mirrors the component.
+    pub fn hidden_input_attrs(&self) -> AttrMap { /* ... */ }
 
-    /// Attributes for a separate hidden input carrying the start date.
-    /// Only rendered when `start_name` is set on Props.
-    pub fn start_hidden_input_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        attrs.set(HtmlAttr::Type, "hidden");
-        if let Some(name) = &self.ctx.start_name {
-            attrs.set(HtmlAttr::Name, name);
-        }
-        if let Some(range) = &self.ctx.value.get() {
-            attrs.set(HtmlAttr::Value, range.start.to_iso_string());
-        }
-        attrs
-    }
+    /// Separate hidden inputs carrying each endpoint as `CalendarDate::to_iso8601`.
+    /// Used when `start_name`/`end_name` are set.
+    pub fn start_hidden_input_attrs(&self) -> AttrMap { /* name from start_name, value = start_date.to_iso8601() */ }
+    pub fn end_hidden_input_attrs(&self) -> AttrMap { /* name from end_name, value = end_date.to_iso8601() */ }
 
-    /// Attributes for a separate hidden input carrying the end date.
-    /// Only rendered when `end_name` is set on Props.
-    pub fn end_hidden_input_attrs(&self) -> AttrMap {
-        let mut attrs = AttrMap::new();
-        attrs.set(HtmlAttr::Type, "hidden");
-        if let Some(name) = &self.ctx.end_name {
-            attrs.set(HtmlAttr::Name, name);
-        }
-        if let Some(range) = &self.ctx.value.get() {
-            attrs.set(HtmlAttr::Value, range.end.to_iso_string());
-        }
-        attrs
-    }
-
-    /// Build Calendar Props with range mode enabled.
-    /// Uses `visible_months: 2` by default so users see start and end month
-    /// grids side-by-side.
-    pub fn calendar_props(&self) -> calendar::Props {
-        calendar::Props {
+    /// Builds the embedded `RangeCalendar` props. The calendar reflects the
+    /// picker's canonical range as a controlled value and inherits the picker's
+    /// bounds, today, visible-month count, and layout direction.
+    pub fn range_calendar_props(&self) -> range_calendar::Props {
+        range_calendar::Props {
             id: self.ctx.ids.part("calendar"),
-            is_range: true,
-            visible_months: 2,
-            page_behavior: PageBehavior::Visible,
-            range_start: self.ctx.parsed_start.clone(),
-            range_end: self.ctx.parsed_end.clone(),
+            value: Some(self.ctx.value.get().clone()),
             min: self.ctx.min.clone(),
             max: self.ctx.max.clone(),
-            ..Default::default()
+            today: self.ctx.today.clone(),
+            visible_months: self.ctx.visible_months,
+            is_rtl: self.ctx.is_rtl,
+            disabled: self.ctx.disabled,
+            readonly: self.ctx.readonly,
+            ..range_calendar::Props::default()
         }
     }
 
-    /// Screen reader description of the full date range (e.g., "March 1 to March 15").
-    /// Returns `None` if no complete range is selected.
-    /// The adapter can use this as an `aria-description` on the root or as a live announcement.
-    pub fn range_description(&self) -> Option<String> {
-        let range = self.ctx.value.get().as_ref()?;
-        let start = format_date(&range.start, &self.ctx.format, &self.ctx.locale);
-        let end = format_date(&range.end, &self.ctx.format, &self.ctx.locale);
-        Some((self.ctx.messages.range_description)(&start, &end, &self.ctx.locale))
-    }
+    /// Screen-reader description of the full range (e.g. "March 1, 2025 to
+    /// March 15, 2025"), or `None` if no complete range is selected.
+    pub fn range_description(&self) -> Option<String> { /* via shared format_date_label + messages.range_description */ }
 
-    // -- Imperative methods -----------------------------------------------
-
-    /// Open the popover.
+    // Imperative dispatch + getters
     pub fn open(&self)   { (self.send)(Event::Open); }
-    /// Close the popover.
     pub fn close(&self)  { (self.send)(Event::Close); }
-    /// Toggle the popover.
     pub fn toggle(&self) { (self.send)(Event::Toggle); }
-    /// Check if the popover is open.
-    pub fn is_open(&self) -> bool { *self.ctx.open.get() }
-    /// Get the selected range.
-    pub fn selected_range(&self) -> Option<&DateRange> {
-        self.ctx.value.get().as_ref()
+    pub fn clear(&self)  { (self.send)(Event::Clear); }
+    pub fn select_range(&self, range: DateRange) { (self.send)(Event::SelectRangeComplete { range }); }
+    pub fn select_preset(&self, index: usize)    { (self.send)(Event::SelectPreset { index }); }
+    pub fn set_start_value(&self, date: Option<CalendarDate>) { (self.send)(Event::StartValueChange(date)); }
+    pub fn set_end_value(&self, date: Option<CalendarDate>)   { (self.send)(Event::EndValueChange(date)); }
+    pub fn focus_in(&self)  { (self.send)(Event::FocusIn); }
+    pub fn focus_out(&self) { (self.send)(Event::FocusOut); }
+    pub fn on_key_down(&self, key: KeyboardKey) { (self.send)(Event::KeyDown { key }); }
+
+    pub fn is_open(&self) -> bool { matches!(self.state, State::Open) }
+    pub fn selected_range(&self) -> Option<&DateRange> { self.ctx.value.get().as_ref() }
+    pub fn active_field(&self) -> ActiveField { self.ctx.active_field }
+    pub fn presets(&self) -> &[Preset] { &self.ctx.presets }
+    pub fn preset_label(&self, index: usize) -> Option<&str> {
+        self.ctx.presets.get(index).map(|preset| preset.label.as_str())
     }
+    pub fn is_invalid(&self) -> bool { self.ctx.is_invalid() }
 
     fn state_name(&self) -> &'static str {
-        match self.state {
-            State::Closed => "closed",
-            State::Open   => "open",
-        }
+        match self.state { State::Closed => "closed", State::Open => "open" }
     }
 }
 
@@ -671,11 +713,12 @@ impl ConnectApi for Api<'_> {
             Part::Root => self.root_attrs(),
             Part::Label => self.label_attrs(),
             Part::Control => self.control_attrs(),
-            Part::StartInput => self.start_field_props().into(), // delegates to DateField
+            Part::StartInput => self.start_input_attrs(),
             Part::Separator => self.separator_attrs(),
-            Part::EndInput => self.end_field_props().into(), // delegates to DateField
+            Part::EndInput => self.end_input_attrs(),
             Part::Trigger => self.trigger_attrs(),
             Part::ClearTrigger => self.clear_trigger_attrs(),
+            Part::PresetTrigger { index } => self.preset_trigger_attrs(index),
             Part::Positioner => self.positioner_attrs(),
             Part::Content => self.content_attrs(),
             Part::Description => self.description_attrs(),
@@ -693,34 +736,36 @@ DateRangePicker
 +-- Root                                  data-ars-scope="date-range-picker"
 |   +-- Label                             <label for="{id}-start-input">
 |   +-- Control                           role="group" aria-labelledby="{id}-label"
-|   |   +-- StartInput                    (DateField)
+|   |   +-- StartInput                    (DateField wrapper)
 |   |   +-- Separator                     aria-hidden="true"  "--"
-|   |   +-- EndInput                      (DateField)
+|   |   +-- EndInput                      (DateField wrapper)
 |   |   +-- Trigger                       aria-haspopup="dialog" aria-expanded
 |   |   +-- ClearTrigger                  aria-label="Clear date range"
 |   +-- Positioner
 |   |   +-- Content                       role="dialog" aria-labelledby="{id}-label"
-|   |       +-- (Calendar)                is_range=true  visible_months=2
+|   |       +-- PresetTrigger*            data-ars-index   (one per Props::presets entry)
+|   |       +-- (RangeCalendar)           visible_months=2
 |   +-- Description                       help text
 |   +-- ErrorMessage                      role="alert"
 |   +-- HiddenInput                       type="hidden" value="2024-01-10/2024-01-20"
 ```
 
-| Part           | Element       | Key Attributes                                                      |
-| -------------- | ------------- | ------------------------------------------------------------------- |
-| `Root`         | `<div>`       | `data-ars-scope="date-range-picker"`, `data-ars-part="root"`, state |
-| `Label`        | `<label>`     | `for="{id}-start-input"`                                            |
-| `Control`      | `<div>`       | `role="group"`, `aria-labelledby`                                   |
-| `StartInput`   | _(DateField)_ | Start date field                                                    |
-| `Separator`    | `<span>`      | `aria-hidden="true"`                                                |
-| `EndInput`     | _(DateField)_ | End date field                                                      |
-| `Trigger`      | `<button>`    | `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`          |
-| `ClearTrigger` | `<button>`    | `aria-label="Clear date range"`                                     |
-| `Positioner`   | `<div>`       | Floating positioner (via positioning engine)                        |
-| `Content`      | `<div>`       | `role="dialog"`, `aria-modal="false"`, `aria-labelledby`            |
-| `Description`  | `<div>`       | Help text, wired via `aria-describedby`                             |
-| `ErrorMessage` | `<div>`       | `role="alert"`, validation error                                    |
-| `HiddenInput`  | `<input>`     | `type="hidden"`, ISO 8601 range value                               |
+| Part            | Element               | Key Attributes                                                                          |
+| --------------- | --------------------- | --------------------------------------------------------------------------------------- |
+| `Root`          | `<div>`               | `data-ars-scope="date-range-picker"`, `data-ars-part="root"`, state, `data-ars-invalid` |
+| `Label`         | `<label>`             | `for="{id}-start-input"`                                                                |
+| `Control`       | `<div>`               | `role="group"`, `aria-labelledby`, `aria-describedby`                                   |
+| `StartInput`    | `<div>` _(DateField)_ | Start date field wrapper (child configured via `start_field_props`)                     |
+| `Separator`     | `<span>`              | `aria-hidden="true"`                                                                    |
+| `EndInput`      | `<div>` _(DateField)_ | End date field wrapper (child configured via `end_field_props`)                         |
+| `Trigger`       | `<button>`            | `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls`                              |
+| `ClearTrigger`  | `<button>`            | `aria-label="Clear date range"`, disabled when empty, disabled, or read-only            |
+| `PresetTrigger` | `<button>`            | `data-ars-index`, one per `Props::presets` entry; disabled when out of range/read-only  |
+| `Positioner`    | `<div>`               | Floating positioner (positioned by the adapter)                                         |
+| `Content`       | `<div>`               | `role="dialog"`, `aria-modal="false"`, `aria-labelledby`                                |
+| `Description`   | `<div>`               | Help text, wired via the control's `aria-describedby`                                   |
+| `ErrorMessage`  | `<div>`               | `role="alert"`, validation error                                                        |
+| `HiddenInput`   | `<input>`             | `type="hidden"`, ISO 8601 range value `start/end`                                       |
 
 ## 3. Accessibility
 
@@ -760,7 +805,7 @@ DateRangePicker
 
 ```rust
 /// Messages for the DateRangePicker component.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Messages {
     /// Trigger button label (default: "Open date range picker").
     pub trigger_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
@@ -805,26 +850,27 @@ impl ComponentMessages for Messages {}
 
 ### 6.1 Props
 
-| Feature               | ars-ui            | Ark UI                | React Aria                  | Notes                                               |
-| --------------------- | ----------------- | --------------------- | --------------------------- | --------------------------------------------------- |
-| Controlled range      | `value`           | `value` (DateValue[]) | `value` (RangeValue)        | Equivalent                                          |
-| Default range         | `default_value`   | `defaultValue`        | `defaultValue`              | Equivalent                                          |
-| Min/max               | `min`, `max`      | `min`, `max`          | `minValue`, `maxValue`      | Equivalent                                          |
-| Disabled              | `disabled`        | `disabled`            | `isDisabled`                | Equivalent                                          |
-| Read-only             | `readonly`        | `readOnly`            | `isReadOnly`                | Equivalent                                          |
-| Required              | `required`        | `required`            | `isRequired`                | Equivalent                                          |
-| Close on select       | `close_on_select` | `closeOnSelect`       | `shouldCloseOnSelect`       | Equivalent                                          |
-| Locale                | `locale`          | `locale`              | -- (context)                | Equivalent                                          |
-| Format                | `format`          | `format`              | --                          | Equivalent                                          |
-| Name                  | `name`            | `name`                | `startName`, `endName`      | React Aria has separate form names                  |
-| Positioning           | `positioning`     | `positioning`         | --                          | Equivalent                                          |
-| Allows non-contiguous | --                | --                    | `allowsNonContiguousRanges` | React Aria feature                                  |
-| Max visible months    | --                | `numOfMonths`         | `maxVisibleMonths`          | ars-ui uses `visible_months: 2` default on Calendar |
-| Start/end form names  | --                | --                    | `startName`, `endName`      | React Aria has separate form names for start/end    |
+| Feature               | ars-ui                   | Ark UI                | React Aria                  | Notes                                                   |
+| --------------------- | ------------------------ | --------------------- | --------------------------- | ------------------------------------------------------- |
+| Controlled range      | `value`                  | `value` (DateValue[]) | `value` (RangeValue)        | Equivalent                                              |
+| Default range         | `default_value`          | `defaultValue`        | `defaultValue`              | Equivalent                                              |
+| Min/max               | `min`, `max`             | `min`, `max`          | `minValue`, `maxValue`      | Equivalent                                              |
+| Disabled              | `disabled`               | `disabled`            | `isDisabled`                | Equivalent                                              |
+| Read-only             | `readonly`               | `readOnly`            | `isReadOnly`                | Equivalent                                              |
+| Required              | `required`               | `required`            | `isRequired`                | Equivalent                                              |
+| Close on select       | `close_on_select`        | `closeOnSelect`       | `shouldCloseOnSelect`       | Equivalent                                              |
+| Locale                | (context)                | `locale`              | -- (context)                | Resolved from `Env`, not a prop                         |
+| Today (injected)      | `today`                  | --                    | `todayValue` (context)      | Adapter-injected for determinism; forwarded to calendar |
+| Presets               | `presets`                | `presetTrigger`       | (userland)                  | ars-ui takes pre-localized concrete-range presets       |
+| Name                  | `name`                   | `name`                | `startName`, `endName`      | React Aria has separate form names                      |
+| Allows non-contiguous | --                       | --                    | `allowsNonContiguousRanges` | React Aria feature                                      |
+| Max visible months    | `visible_months`         | `numOfMonths`         | `maxVisibleMonths`          | ars-ui default `2`, forwarded to RangeCalendar          |
+| Start/end form names  | `start_name`, `end_name` | --                    | `startName`, `endName`      | ars-ui matches React Aria's separate form names         |
 
 **Gaps:**
 
 - `allowsNonContiguousRanges`: React Aria allows selecting ranges that span unavailable dates. Currently ars-ui's RangeCalendar blocks selection of unavailable dates. This is a niche feature; not adopting.
+- The date _format_ is owned by each child `DateField` (segment order / leading zeros), not a picker-level `format` prop; popover _positioning_ is an adapter concern (no `positioning` prop on the agnostic core).
 
 ### 6.2 Anatomy
 
@@ -858,128 +904,125 @@ impl ComponentMessages for Messages {}
 
 ### 6.4 Features
 
-| Feature               | ars-ui                      | Ark UI            | React Aria            |
-| --------------------- | --------------------------- | ----------------- | --------------------- |
-| Two-field input       | Yes (StartInput + EndInput) | Yes (Input index) | Yes (start/end slots) |
-| Calendar popover      | Yes                         | Yes               | Yes                   |
-| Range normalization   | Yes                         | Yes               | Yes                   |
-| Close on select       | Yes                         | Yes               | Yes                   |
-| Clear button          | Yes                         | Yes               | No                    |
-| Multi-month calendar  | Yes (default 2)             | Yes               | Yes                   |
-| Non-contiguous ranges | No                          | No                | Yes                   |
-| Separate form names   | No                          | No                | Yes                   |
-| Hidden form input     | Yes                         | No                | No                    |
+| Feature               | ars-ui                        | Ark UI                | React Aria            |
+| --------------------- | ----------------------------- | --------------------- | --------------------- |
+| Two-field input       | Yes (StartInput + EndInput)   | Yes (Input index)     | Yes (start/end slots) |
+| Calendar popover      | Yes                           | Yes                   | Yes                   |
+| Range normalization   | Yes                           | Yes                   | Yes                   |
+| Close on select       | Yes                           | Yes                   | Yes                   |
+| Clear button          | Yes                           | Yes                   | No                    |
+| Multi-month calendar  | Yes (default 2)               | Yes                   | Yes                   |
+| Preset shortcuts      | Yes (`presets`)               | Yes (`presetTrigger`) | Userland              |
+| Non-contiguous ranges | No                            | No                    | Yes                   |
+| Separate form names   | Yes (`start_name`/`end_name`) | No                    | Yes                   |
+| Hidden form input     | Yes                           | No                    | No                    |
 
 **Gaps:** None.
 
 ### 6.5 Summary
 
 - **Overall:** Full parity.
-- **Divergences:** React Aria supports `allowsNonContiguousRanges` which is a niche feature not adopted. ars-ui submits ranges via a single hidden input while React Aria uses separate form names.
+- **Divergences:** React Aria supports `allowsNonContiguousRanges`, a niche feature not adopted. ars-ui submits ranges via a single hidden input (`name`) and additionally supports separate `start_name`/`end_name` inputs (matching React Aria). Presets are taken as pre-localized concrete-range values (mirroring Ark UI's `presetTrigger`) rather than relative tokens, keeping the agnostic core deterministic.
 - **Recommended additions:** None.
 
 ## Appendix: Testing
+
+The full unit, ARIA, snapshot, spec-conformance, and proptest suites live in
+`crates/ars-components/src/date_time/date_range_picker/` (`tests.rs` +
+`snapshots/`), `crates/ars-components/tests/spec_conformance/date_time.rs`, and
+`crates/ars-components/tests/proptest_state_machines/date_time.rs`. The
+illustrative cases below drive the machine through a `Service`.
 
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ars_core::Service;
+    use ars_i18n::{CalendarDate, DateRange, locales::en_us};
+
+    fn date(y: i32, m: u8, d: u8) -> CalendarDate {
+        CalendarDate::new_gregorian(y, m, d).expect("valid date")
+    }
+
+    fn service() -> Service<Machine> {
+        Service::<Machine>::new(
+            Props { id: "range".into(), ..Props::default() },
+            &Env::default(),
+            &Messages::default(),
+        )
+    }
 
     #[test]
     fn initial_state_is_closed() {
-        let (state, ctx) = Machine::init(&Props::default(), &Env::default(), &Default::default());
-        assert_eq!(state, State::Closed);
-        assert_eq!(*ctx.open.get(), false);
-        assert!(ctx.value.get().is_none());
+        let svc = service();
+        assert_eq!(*svc.state(), State::Closed);
+        assert!(svc.context().value.get().is_none());
     }
 
     #[test]
     fn open_and_close() {
-        let props = Props::default();
-        let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
-        let plan = Machine::transition(&state, &Event::Open, &ctx, &props).unwrap();
-        assert_eq!(plan.target, Some(State::Open));
-
-        let (state, ctx) = (State::Open, /* apply plan */);
-        let plan = Machine::transition(&state, &Event::Close, &ctx, &props).unwrap();
-        assert_eq!(plan.target, Some(State::Closed));
+        let mut svc = service();
+        drop(svc.send(Event::Open));
+        assert_eq!(*svc.state(), State::Open);
+        drop(svc.send(Event::Close));
+        assert_eq!(*svc.state(), State::Closed);
     }
 
     #[test]
     fn select_range_complete_closes_and_sets_value() {
-        let props = Props::default();
-        let (_, ctx) = Machine::init(&props, &Env::default(), &Default::default());
-        let range = DateRange::new(
-            CalendarDate::new_gregorian(2025, nzu8(3), nzu8(1)),
-            CalendarDate::new_gregorian(2025, nzu8(3), nzu8(15)),
+        let mut svc = service();
+        drop(svc.send(Event::Open));
+        let selected = DateRange::new(date(2025, 3, 1), date(2025, 3, 15)).unwrap();
+        drop(svc.send(Event::SelectRangeComplete { range: selected.clone() }));
+        assert_eq!(*svc.state(), State::Closed);
+        assert_eq!(*svc.context().value.get(), Some(selected));
+    }
+
+    #[test]
+    fn field_edits_assemble_and_normalize_range() {
+        let mut svc = service();
+        // A segmented DateField emits an Option<CalendarDate>, not text.
+        drop(svc.send(Event::StartValueChange(Some(date(2025, 6, 25)))));
+        drop(svc.send(Event::EndValueChange(Some(date(2025, 6, 1)))));
+        assert_eq!(
+            *svc.context().value.get(),
+            DateRange::new(date(2025, 6, 1), date(2025, 6, 25)).ok(),
         );
-        let plan = Machine::transition(
-            &State::Open,
-            &Event::SelectRangeComplete { range: range.clone() },
-            &ctx,
-            &props,
-        ).unwrap();
-        assert_eq!(plan.target, Some(State::Closed));
     }
 
     #[test]
-    fn start_input_change_parses_date() {
-        let props = Props { ..Props::default() };
-        let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
-        let plan = Machine::transition(
-            &state,
-            &Event::StartInputChange { value: "03/01/2025".to_string() },
-            &ctx,
-            &props,
-        ).unwrap();
-        // Plan should update start_input_text and parsed_start
-        assert!(plan.target.is_none()); // context-only
+    fn select_preset_applies_range() {
+        let preset_range = DateRange::new(date(2025, 5, 26), date(2025, 6, 1)).unwrap();
+        let mut svc = Service::<Machine>::new(
+            Props {
+                id: "range".into(),
+                presets: vec![Preset { label: "Last 7 days".into(), range: preset_range.clone() }],
+                ..Props::default()
+            },
+            &Env::default(),
+            &Messages::default(),
+        );
+        drop(svc.send(Event::SelectPreset { index: 0 }));
+        assert_eq!(*svc.context().value.get(), Some(preset_range));
     }
 
     #[test]
-    fn escape_closes_popover() {
-        let props = Props::default();
-        let (_, ctx) = Machine::init(&props, &Env::default(), &Default::default());
-        let plan = Machine::transition(
-            &State::Open,
-            &Event::KeyDown { key: KeyboardKey::Escape },
-            &ctx,
-            &props,
-        ).unwrap();
-        assert_eq!(plan.target, Some(State::Closed));
+    fn escape_closes_and_arrow_down_opens() {
+        let mut svc = service();
+        drop(svc.send(Event::KeyDown { key: KeyboardKey::ArrowDown }));
+        assert_eq!(*svc.state(), State::Open);
+        drop(svc.send(Event::KeyDown { key: KeyboardKey::Escape }));
+        assert_eq!(*svc.state(), State::Closed);
     }
 
     #[test]
     fn disabled_ignores_events() {
-        let props = Props { disabled: true, ..Props::default() };
-        let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
-        assert!(Machine::transition(&state, &Event::Open, &ctx, &props).is_none());
-    }
-
-    #[test]
-    fn focusout_closes_popover() {
-        let props = Props::default();
-        let (_, ctx) = Machine::init(&props, &Env::default(), &Default::default());
-        let plan = Machine::transition(
-            &State::Open,
-            &Event::FocusOut,
-            &ctx,
-            &props,
-        ).unwrap();
-        assert_eq!(plan.target, Some(State::Closed));
-    }
-
-    #[test]
-    fn arrow_down_opens_from_closed() {
-        let props = Props::default();
-        let (state, ctx) = Machine::init(&props, &Env::default(), &Default::default());
-        let plan = Machine::transition(
-            &state,
-            &Event::KeyDown { key: KeyboardKey::ArrowDown },
-            &ctx,
-            &props,
-        ).unwrap();
-        assert_eq!(plan.target, Some(State::Open));
+        let mut svc = Service::<Machine>::new(
+            Props { id: "range".into(), disabled: true, ..Props::default() },
+            &Env::default(),
+            &Messages::default(),
+        );
+        assert!(!svc.send(Event::Open).state_changed);
     }
 }
 ```

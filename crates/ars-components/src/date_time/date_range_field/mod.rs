@@ -195,7 +195,10 @@ impl Context {
 
 /// Returns `true` when `date` is present and falls outside the inclusive
 /// `[min, max]` bounds (either bound absent means unbounded on that side).
-fn date_out_of_bounds(
+///
+/// Exposed to sibling `date_time` components (e.g. `date_range_picker`) that
+/// share the same range-bounds invalidity rule, so the check is defined once.
+pub(crate) fn date_out_of_bounds(
     date: Option<&CalendarDate>,
     min: Option<&CalendarDate>,
     max: Option<&CalendarDate>,
@@ -1105,7 +1108,16 @@ impl ConnectApi for Api<'_> {
 
 /// Formats a single date as a human-readable label for screen-reader range
 /// descriptions (e.g. "March 1, 2025").
-fn format_date_label(date: &CalendarDate, backend: &dyn IntlBackend, locale: &Locale) -> String {
+///
+/// Exposed to sibling `date_time` components (e.g. `date_range_picker`) so the
+/// month/day/year range-label form is produced identically across them. (The
+/// `range_calendar` variant intentionally appends the weekday and keeps its own
+/// copy.)
+pub(crate) fn format_date_label(
+    date: &CalendarDate,
+    backend: &dyn IntlBackend,
+    locale: &Locale,
+) -> String {
     format!(
         "{} {}, {}",
         backend.month_long_name(date.month(), locale),
