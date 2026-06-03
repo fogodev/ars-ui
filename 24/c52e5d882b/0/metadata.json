@@ -3,131 +3,99 @@
   "checkpoint_id": "24c52e5d882b",
   "session_id": "a871f55b-7ea2-4d36-b632-0ffe300f0fca",
   "strategy": "manual-commit",
-  "created_at": "2026-06-03T14:41:36.177082Z",
+  "created_at": "2026-06-03T15:03:48.468894Z",
   "branch": "impl-242",
   "checkpoints_count": 1,
   "files_touched": [
-    "crates/ars-components/proptest-regressions/state-machines.txt",
-    "crates/ars-components/src/selection/mod.rs",
-    "crates/ars-components/src/selection/tags_input/mod.rs",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_clear_trigger.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_clear_trigger_disabled.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_control_default.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_control_with_max.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_description.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_error_message_hidden.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_error_message_visible.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_hidden_input.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_hidden_input_disabled.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_input_at_max.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_input_default.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_input_disabled_readonly.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_input_full_props.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_label.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_live_region.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_root_default.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_root_disabled_readonly_invalid_focused.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_default.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_delete_trigger.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_delete_trigger_disabled.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_disabled.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_edit_editing.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_edit_hidden.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_editing.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_focused_visible.snap",
-    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_text.snap",
-    "crates/ars-components/tests/proptest_state_machines/selection.rs",
-    "crates/ars-components/tests/spec_conformance/selection.rs",
-    "spec/components/selection/tags-input.md"
+    "crates/ars-components/src/selection/tags_input/mod.rs"
   ],
   "agent": "Claude Code",
   "model": "",
-  "turn_id": "c31aa3ab0c31",
+  "turn_id": "c8317d8228c5",
+  "checkpoint_transcript_start": 730,
+  "transcript_lines_at_start": 730,
   "token_usage": {
-    "input_tokens": 43477,
-    "cache_creation_tokens": 854266,
-    "cache_read_tokens": 48990391,
-    "output_tokens": 178696,
-    "api_call_count": 194
+    "input_tokens": 3644,
+    "cache_creation_tokens": 16802,
+    "cache_read_tokens": 5155131,
+    "output_tokens": 10481,
+    "api_call_count": 13
   },
   "session_metrics": {
-    "turn_count": 1
+    "turn_count": 3
   },
   "summary": {
-    "intent": "Implement task #242: build the framework-agnostic TagsInput state machine component for the ars-ui project, including machine logic, ARIA attributes, tests, and spec amendments.",
-    "outcome": "Delivered a complete TagsInput agnostic core (state machine, 100 unit/snapshot tests, proptest with 3000 cases, spec-conformance test, 97.5% line coverage) with 6 spec drift items resolved and full spec sync; rebased onto main and ready for PR.",
+    "intent": "Add a TagsInput component implementation and get it through the CI pre-push gate with sufficient test coverage.",
+    "outcome": "All 10 CI gates passed with ars-components branch coverage at ≥90%, commit amended with branch-coverage tests, and branch pushed ready for PR.",
     "learnings": {
       "repo": [
-        "Agnostic components in ars-components must never call use_platform_effects() — that is adapter-only. The canonical pattern (per pin_input) is a typed Effect enum resolved by the adapter via ctx.",
-        "Vec<String>: BindableValue and &'static str: EffectName are both blanket impls — string effect names from specs are valid at the type level but the codebase convention uses enums.",
-        "Controlled-mode Bindable: set() does not reflect in get(). Mutation tests must use uncontrolled default_value, not .value(...) controlled bindings.",
-        "KeyboardEventData::named() does not exist — that method is on Hotkey. KeyboardEventData must be constructed manually (matching how checkbox tests do it).",
-        "insta --unreferenced=reject must be run with --features i18n to avoid false positives; highlight component snapshot tests are i18n-gated and appear as orphans without the feature.",
-        "doc-test # Examples blocks are absent from all selection components (combobox, select, listbox, segment_group) — writing none is the correct convention.",
-        "The spec has a cargo xtask spec compile-snippets gate that parses Rust code blocks in markdown; all spec code must be syntactically valid.",
-        "Intra-doc links to enum variants and struct fields (e.g., Effect::FocusTag, Context::editing_draft) do not resolve in module-level //! docs even when they resolve in item-level docs; use type links + code spans instead.",
-        "cargo xci-fast is the pre-push integration gate; it is not run as part of the local implementation workflow.",
-        "The §6.2 parity table in specs tends to use stale part names (Item* naming) that diverge from actual implementation anatomy — always cross-check during spec sync."
+        "The project uses `cargo xci-fast` as a pre-push gate that enforces a 90% branch coverage threshold for ars-components.",
+        "The coverage gate uses lcov data; test-code `assert!` panic arms count as uncovered branches but are considered inherent/acceptable.",
+        "The gate runs 10 discrete checks; coverage is one of them."
       ],
       "code": [
         {
           "path": "crates/ars-components/src/selection/tags_input/mod.rs",
-          "line": 657,
-          "end_line": 657,
-          "finding": "Dead code guard: !props.editable check inside CommitEdit was unreachable because EditingTag state requires editable at entry and props are immutable. Removed."
+          "line": 681,
+          "end_line": 681,
+          "finding": "Short-circuit or conditional branch arm that required explicit test coverage for out-of-range part indices."
         },
         {
           "path": "crates/ars-components/src/selection/tags_input/mod.rs",
-          "line": 1,
-          "end_line": 50,
-          "finding": "Module-level //! intra-doc links to variant/field refs (Effect::FocusTag, Context::editing_draft) emit rustdoc warnings; must use type-only links ([Effect]) plus backtick code spans for variants."
+          "line": 744,
+          "end_line": 745,
+          "finding": "Readonly-not-disabled path and a companion branch; both needed targeted tests to push coverage over 90%."
         },
         {
-          "path": "crates/ars-components/src/input/text_field/mod.rs",
-          "line": 1,
-          "end_line": 50,
-          "finding": "Canonical pattern for Api structs containing fn fields: add a manual Debug impl (same as text_field does) since #[derive(Debug)] cannot be used on function pointer fields."
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "line": 936,
+          "end_line": 936,
+          "finding": "Non-editable Enter-on-tag branch arm required a dedicated test case."
         },
         {
-          "path": "crates/ars-components/tests/proptest_state_machines/selection.rs",
-          "line": 1,
-          "end_line": 50,
-          "finding": "Proptest discovered that list-mutating events (Remove, ClearAll) during EditingTag state left editing_tag index dangling. Fix: guard CommitEdit/CancelEdit to no-op outside EditingTag; ignore list-mutating events while editing."
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "line": 1007,
+          "end_line": 1009,
+          "finding": "allow_duplicates commit/paste and empty-delimiter InputChange branches; line 1009 was the last uncovered production branch after the first coverage pass."
+        },
+        {
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "line": 1145,
+          "end_line": 1201,
+          "finding": "Blur-add edge-case branches in this range needed coverage; lines 1165 and 1192 were specifically identified."
+        },
+        {
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "line": 1291,
+          "end_line": 1427,
+          "finding": "Additional conditional branch arms in this range were uncovered and addressed in the targeted test pass."
         }
       ],
       "workflow": [
-        "Proptest is essential for state machine components — it found a real invariant violation (dangling edit index) that the 50 hand-written unit tests completely missed.",
-        "Running coverage before the post-implementation audit (not after) avoids a two-pass cycle; the audit's Phase 3 specifically checks coverage and adds targeted tests.",
-        "The post-implementation audit runs in three phases: (1) spec/impl drift, (2) two consecutive clean surface rounds (adapters, manifest, catalog, doc-tests), (3) coverage with annotated uncovered lines — each phase gates the next.",
-        "When clippy -D warnings is run workspace-wide, pre-existing warnings in other crates surface and must be distinguished from new ones introduced by the change.",
-        "Spec amendments are in-scope for the same PR as the implementation under the spec-sync rule — they are not deferred to a follow-up."
+        "Running the coverage gate first revealed a 0.1% shortfall (89.9%), requiring a targeted second pass of branch-coverage tests before pushing.",
+        "Parsing lcov branch data directly (BRH lines) is an efficient way to identify exactly which line numbers lack coverage without re-running the full suite.",
+        "Amending the commit after confirming the gate green keeps the branch-coverage tests bundled with the implementation in a single commit."
       ]
     },
     "friction": [
-      "Spec had 6 architectural drift issues that required reconciliation before implementation could begin: duplicate method definitions, missing editing_draft from Context, use_platform_effects() calls in agnostic code, string effect names vs typed enums, missing delimiter-on-type logic, and missing LiveRegion part.",
-      "Closure type inference required explicit &mut Context annotations on helper closures after the initial compile failed with 'type parameter M must be constrained'.",
-      "Cross-worktree paths in lcov --text output made it impossible to grep for the tags_input section by filename; required parsing the lcov format directly.",
-      "Initially constructed test data using controlled .value(...) bindings, causing all mutation tests to silently pass without state changes — took a full test run to identify the Bindable semantics mismatch.",
-      "Multiple rounds of clippy semicolon warnings in test functions required several targeted edit passes.",
-      "insta snapshot acceptance required running with i18n feature to avoid false unreferenced-snapshot failures from an unrelated highlight component."
+      "Initial gate run showed 89.9% branch coverage — just 0.1% under the 90% threshold — requiring an additional round of targeted tests before the push could proceed.",
+      "Test-code `assert!` panic arms inflate the uncovered-branch count in lcov, requiring manual filtering to identify real production gaps."
     ],
     "open_items": [
-      "Adapter components (Leptos/Dioxus) for TagsInput are out of scope for this PR and must be implemented separately.",
-      "Widget examples and E2E tests for TagsInput are deferred to a follow-up task.",
-      "cargo xci-fast pre-push gate was not run during implementation and must be run before merging the PR.",
-      "Pre-existing broken intra-doc links in table/grid components (focused_cell, ColumnResize, sort_descriptor) were identified but not fixed — out of scope for this task."
+      "Branch coverage is exactly at the 90% floor after the fix; any future changes to tags_input that add uncovered branches will immediately trip the gate — consider adding a few more tests as a buffer.",
+      "PR was not yet opened in the transcript; that step was queued but not confirmed complete."
     ]
   },
   "initial_attribution": {
-    "calculated_at": "2026-06-03T14:40:43.978481Z",
-    "agent_lines": 4345,
-    "agent_removed": 332,
-    "human_added": 522,
-    "human_modified": 168,
+    "calculated_at": "2026-06-03T15:03:29.248871Z",
+    "agent_lines": 152,
+    "agent_removed": 0,
+    "human_added": 2108,
+    "human_modified": 0,
     "human_removed": 0,
-    "total_committed": 4951,
-    "total_lines_changed": 5367,
-    "agent_percentage": 87.14365567356064,
+    "total_committed": 2260,
+    "total_lines_changed": 2697,
+    "agent_percentage": 5.635891731553578,
     "metric_version": 2
   },
   "prompt_attributions": [
@@ -140,19 +108,10 @@
     },
     {
       "checkpoint_number": 2,
-      "user_lines_added": 345,
-      "user_lines_removed": 84,
-      "agent_lines_added": 4774,
-      "agent_lines_removed": 416,
-      "user_added_per_file": {
-        "crates/ars-components/src/selection/tags_input/mod.rs": 312,
-        "crates/ars-components/tests/proptest_state_machines/selection.rs": 5,
-        "spec/components/selection/tags-input.md": 28
-      },
-      "user_removed_per_file": {
-        "crates/ars-components/src/selection/tags_input/mod.rs": 56,
-        "spec/components/selection/tags-input.md": 28
-      }
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 152,
+      "agent_lines_removed": 0
     }
   ]
 }
