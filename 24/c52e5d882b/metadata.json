@@ -1,0 +1,56 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "24c52e5d882b",
+  "strategy": "manual-commit",
+  "branch": "impl-242",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/proptest-regressions/state-machines.txt",
+    "crates/ars-components/src/selection/mod.rs",
+    "crates/ars-components/src/selection/tags_input/mod.rs",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_clear_trigger.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_clear_trigger_disabled.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_control_default.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_control_with_max.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_description.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_error_message_hidden.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_error_message_visible.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_hidden_input.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_hidden_input_disabled.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_input_at_max.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_input_default.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_input_disabled_readonly.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_input_full_props.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_label.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_live_region.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_root_default.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_root_disabled_readonly_invalid_focused.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_default.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_delete_trigger.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_delete_trigger_disabled.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_disabled.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_edit_editing.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_edit_hidden.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_editing.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_focused_visible.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_text.snap",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "crates/ars-components/tests/spec_conformance/selection.rs",
+    "spec/components/selection/tags-input.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/24/c52e5d882b/0/metadata.json",
+      "transcript": "/24/c52e5d882b/0/full.jsonl",
+      "content_hash": "/24/c52e5d882b/0/content_hash.txt",
+      "prompt": "/24/c52e5d882b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 43477,
+    "cache_creation_tokens": 854266,
+    "cache_read_tokens": 48990391,
+    "output_tokens": 178696,
+    "api_call_count": 194
+  }
+}
