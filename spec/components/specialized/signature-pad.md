@@ -421,7 +421,7 @@ impl ars_core::Machine for Machine {
                 // `DrawEnd`/`Clear`); cancel the in-flight stroke and leave it.
                 let cancel_drawing = (disabled || readonly) && matches!(state, State::Drawing);
                 let target = if cancel_drawing {
-                    if ctx.data.get().is_empty() { State::Idle } else { State::Completed }
+                    if ctx.data.pending().is_empty() { State::Idle } else { State::Completed }
                 } else {
                     *state
                 };
@@ -511,7 +511,10 @@ impl ars_core::Machine for Machine {
                     .current_stroke
                     .as_ref()
                     .is_some_and(|stroke| stroke.points.len() >= 2);
-                let target = if commits || !ctx.data.get().is_empty() {
+                // Build on the pending (internal) working copy, not `get()`: in
+                // controlled mode `get()` returns the stale parent value until it
+                // round-trips, so reading it would drop earlier un-synced strokes.
+                let target = if commits || !ctx.data.pending().is_empty() {
                     State::Completed
                 } else {
                     State::Idle
@@ -519,7 +522,7 @@ impl ars_core::Machine for Machine {
                 let mut plan = TransitionPlan::to(target).apply(|ctx| {
                     if let Some(stroke) = ctx.current_stroke.take() {
                         if stroke.points.len() >= 2 {
-                            let mut data = ctx.data.get().clone();
+                            let mut data = ctx.data.pending().clone();
                             data.strokes.push(stroke);
                             ctx.data.set(data);
                         }
@@ -533,24 +536,21 @@ impl ars_core::Machine for Machine {
                 Some(plan)
             }
 
-            // Undo last stroke. Removing the final stroke returns to `Idle`
-            // (a blank canvas is `Idle`, never `Completed`).
+            // Undo last stroke. The target is computed from post-pop point
+            // emptiness (not stroke count, which empty-stroke entries break), and
+            // built on the pending working copy to preserve un-synced edits.
             (State::Completed, Event::Undo) => {
-                let target = if ctx.data.get().strokes.len() <= 1 {
-                    State::Idle
-                } else {
-                    State::Completed
-                };
-                Some(TransitionPlan::to(target).apply(|ctx| {
-                    let mut data = ctx.data.get().clone();
-                    data.strokes.pop();
+                let mut data = ctx.data.pending().clone();
+                data.strokes.pop();
+                let target = if data.is_empty() { State::Idle } else { State::Completed };
+                Some(TransitionPlan::to(target).apply(move |ctx| {
                     ctx.data.set(data);
                 }).with_effect(data_change_effect()))
             }
 
             // Clear all strokes. Notify the parent only when there was data.
             (_, Event::Clear) => {
-                let had_data = !ctx.data.get().is_empty();
+                let had_data = !ctx.data.pending().is_empty();
                 let mut plan = TransitionPlan::to(State::Idle).apply(|ctx| {
                     ctx.data.set(SignatureData::default());
                     ctx.current_stroke = None;

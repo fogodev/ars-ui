@@ -3120,8 +3120,11 @@ Given `strokes: &[Vec<RasterPoint>]` and a `RasterSpec`, `rasterize`:
    endpoint pressure to `0.5..=1.0` so a segment is always visible and firmer
    presses render thicker. `lineCap`/`lineJoin` are `round`.
 4. Encodes via `canvas.toDataURL` using `spec.format.mime()` (PNG, or JPEG/WebP
-   honoring `spec.quality`), then decodes the base64 data URL to raw bytes with
-   `window.atob`.
+   honoring `spec.quality`), then parses and decodes the base64 data URL to raw
+   bytes with `window.atob`. The parser rejects the `data:,` sentinel / any empty
+   payload as `RasterError::Backend` — a canvas that is zero-sized _or larger
+   than the browser maximum_ yields that sentinel, which must not decode into
+   empty "valid" image bytes.
 
 Returns `RasterImage { format, bytes }`, or `RasterError::Backend(_)` if any
 browser step fails. On non-wasm targets the implementation returns

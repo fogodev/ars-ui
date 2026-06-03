@@ -628,7 +628,7 @@ impl ars_core::Machine for Machine {
                 // `Drawing` (blank canvas -> `Idle`, otherwise `Completed`).
                 let cancel_drawing = (disabled || readonly) && matches!(state, State::Drawing);
                 let target = if cancel_drawing {
-                    if ctx.data.get().is_empty() {
+                    if ctx.data.pending().is_empty() {
                         State::Idle
                     } else {
                         State::Completed
@@ -747,7 +747,12 @@ impl ars_core::Machine for Machine {
                     .as_ref()
                     .is_some_and(|stroke| stroke.points.len() >= 2);
 
-                let target = if commits || !ctx.data.get().is_empty() {
+                // Build on the *pending* (internal) data, not `get()`: in
+                // controlled mode `get()` returns the stale parent value until it
+                // round-trips through `on_data_change`, so reading it would drop
+                // earlier un-synced strokes when several are drawn in quick
+                // succession.
+                let target = if commits || !ctx.data.pending().is_empty() {
                     State::Completed
                 } else {
                     State::Idle
@@ -757,7 +762,7 @@ impl ars_core::Machine for Machine {
                     if let Some(stroke) = ctx.current_stroke.take()
                         && stroke.points.len() >= 2
                     {
-                        let mut data = ctx.data.get().clone();
+                        let mut data = ctx.data.pending().clone();
 
                         data.strokes.push(stroke);
 
@@ -774,10 +779,16 @@ impl ars_core::Machine for Machine {
                 Some(plan)
             }
 
-            // Undo the last completed stroke. Removing the final stroke returns
-            // to `Idle` (a blank canvas is `Idle`, never `Completed`).
+            // Undo the last completed stroke. The post-pop emptiness — not the
+            // stroke count — decides the target, so data carrying empty-stroke
+            // entries can never strand the pad in `Completed` while it is blank.
+            // Built on the pending working copy to preserve un-synced controlled
+            // edits.
             (State::Completed, Event::Undo) => {
-                let target = if ctx.data.get().strokes.len() <= 1 {
+                let mut data = ctx.data.pending().clone();
+                data.strokes.pop();
+
+                let target = if data.is_empty() {
                     State::Idle
                 } else {
                     State::Completed
@@ -785,11 +796,7 @@ impl ars_core::Machine for Machine {
 
                 Some(
                     TransitionPlan::to(target)
-                        .apply(|ctx: &mut Context| {
-                            let mut data = ctx.data.get().clone();
-
-                            data.strokes.pop();
-
+                        .apply(move |ctx: &mut Context| {
                             ctx.data.set(data);
                         })
                         .with_effect(data_change_effect()),
@@ -800,7 +807,7 @@ impl ars_core::Machine for Machine {
             (_, Event::Clear) => {
                 // Notify the parent only when there was something to clear, so a
                 // clear on an already-blank pad does not emit a spurious change.
-                let had_data = !ctx.data.get().is_empty();
+                let had_data = !ctx.data.pending().is_empty();
 
                 let mut plan = TransitionPlan::to(State::Idle)
                     .apply(|ctx: &mut Context| {
@@ -1716,6 +1723,25 @@ mod tests {
     }
 
     #[test]
+    fn undo_returns_to_idle_when_only_empty_strokes_remain() {
+        // `[empty_stroke, real_stroke]` is non-blank, so init is Completed; undo
+        // pops the real stroke leaving only an empty stroke, which is blank — so
+        // the target is Idle (computed from post-pop emptiness, not stroke count).
+        let mut service = fresh_service(test_props().default_data(SignatureData {
+            strokes: vec![
+                SignatureStroke { points: Vec::new() },
+                stroke(&[(0.0, 0.0), (1.0, 1.0)]),
+            ],
+        }));
+        assert_eq!(service.state(), &State::Completed);
+
+        drop(service.send(Event::Undo));
+
+        assert!(service.context().data.get().is_empty());
+        assert_eq!(service.state(), &State::Idle);
+    }
+
+    #[test]
     fn undo_ignored_when_idle() {
         let mut service = fresh_service(test_props());
 
@@ -2047,6 +2073,40 @@ mod tests {
         drop(service.set_props(test_props().min_distance(0.0).data(pending)));
         assert_eq!(service.context().data.get().strokes.len(), 1);
         assert_eq!(service.state(), &State::Completed);
+    }
+
+    #[test]
+    fn controlled_rapid_strokes_accumulate_in_pending() {
+        use std::sync::{Arc, Mutex};
+
+        // Controlled, with the parent not yet round-tripping: a second stroke
+        // drawn before the sync must build on the pending value, not the stale
+        // controlled one, so the first stroke is not lost.
+        let log: Arc<Mutex<Vec<SignatureData>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&log);
+        let mut service = Service::<Machine>::new(
+            test_props()
+                .min_distance(0.0)
+                .data(SignatureData::default())
+                .on_data_change(ars_core::callback(move |data: SignatureData| {
+                    sink.lock().unwrap().push(data);
+                })),
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        draw_one_stroke(&mut service); // stroke A
+        draw_one_stroke(&mut service); // stroke B, before any parent sync
+
+        let calls = log.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].strokes.len(), 1, "first callback reports [A]");
+        assert_eq!(
+            calls[1].strokes.len(),
+            2,
+            "second callback reports [A, B], not just [B]"
+        );
+        assert_eq!(service.context().data.pending().strokes.len(), 2);
     }
 
     // ───────────────────────── Api accessors ─────────────────────────

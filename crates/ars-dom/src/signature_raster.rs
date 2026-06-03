@@ -5,10 +5,13 @@
 //! bytes. Stroke width is modulated by per-point pressure so firmer presses
 //! draw thicker segments.
 
+// `RasterFormat` is only referenced by the data-URL parser, which compiles on
+// wasm (real path) or under test (native parser tests).
+#[cfg(any(target_arch = "wasm32", test))]
+use ars_core::RasterFormat;
 use ars_core::{RasterError, RasterImage, RasterPoint, RasterSpec, SignatureRasterizer};
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use {
-    ars_core::RasterFormat,
     wasm_bindgen::{JsCast, JsValue},
     web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, Window},
 };
@@ -122,22 +125,29 @@ fn pressure_scale(from: f64, to: f64) -> f64 {
     0.5 + 0.5 * average
 }
 
-/// Decodes a `data:<mime>;base64,<payload>` URL into the MIME-derived format and
-/// raw bytes via `window.atob`.
+/// Parses a `data:<mime>;base64,<payload>` URL into the MIME-derived format and
+/// the base64 payload, rejecting the `data:,` sentinel and any empty payload.
 ///
-/// The returned format comes from the data URL's own MIME (so a browser's silent
-/// substitution is reported truthfully), falling back to `requested` if the
-/// header is unparseable. `atob` yields a binary string whose code points are
-/// byte values `0..=255`; truncating each `char` to `u8` recovers the bytes.
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn decode_data_url(
-    window: &Window,
+/// The format comes from the URL's own MIME — so a browser's silent substitution
+/// (e.g. Safari WebP→PNG) is reported truthfully — falling back to `requested`
+/// when the header carries no recognized MIME. A canvas whose dimensions are
+/// zero *or larger than the browser maximum* instead returns the `data:,`
+/// sentinel (empty payload); that is rejected as a backend error rather than
+/// decoded into empty "valid" image bytes.
+#[cfg(all(feature = "web", any(target_arch = "wasm32", test)))]
+fn parse_data_url_header(
     data_url: &str,
     requested: RasterFormat,
-) -> Result<(RasterFormat, Vec<u8>), RasterError> {
-    let (header, base64) = data_url
+) -> Result<(RasterFormat, &str), RasterError> {
+    let (header, payload) = data_url
         .split_once(',')
         .ok_or_else(|| RasterError::Backend("malformed data URL".into()))?;
+
+    if payload.is_empty() {
+        return Err(RasterError::Backend(
+            "canvas produced no image data (dimensions too large or unsupported)".into(),
+        ));
+    }
 
     // header looks like `data:image/png;base64`
     let format = header
@@ -146,8 +156,24 @@ fn decode_data_url(
         .and_then(RasterFormat::from_mime)
         .unwrap_or(requested);
 
+    Ok((format, payload))
+}
+
+/// Decodes a data URL into the MIME-derived format and raw bytes via
+/// `window.atob`, after [`parse_data_url_header`] validates it.
+///
+/// `atob` yields a binary string whose code points are byte values `0..=255`;
+/// truncating each `char` to `u8` recovers the bytes.
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn decode_data_url(
+    window: &Window,
+    data_url: &str,
+    requested: RasterFormat,
+) -> Result<(RasterFormat, Vec<u8>), RasterError> {
+    let (format, payload) = parse_data_url_header(data_url, requested)?;
+
     let binary = window
-        .atob(base64)
+        .atob(payload)
         .map_err(|_| RasterError::Backend("atob failed".into()))?;
 
     Ok((format, binary.chars().map(|code| code as u8).collect()))
@@ -184,6 +210,35 @@ mod native_tests {
             WebSignatureRasterizer.rasterize(&strokes, &RasterSpec::new(10, 10)),
             Err(RasterError::Unsupported)
         );
+    }
+
+    #[test]
+    fn parse_data_url_rejects_sentinel_and_empty_payload() {
+        // The `data:,` sentinel (zero-sized OR oversized canvas) and any empty
+        // payload must be a backend error, not decoded into empty bytes.
+        assert!(matches!(
+            parse_data_url_header("data:,", RasterFormat::Png),
+            Err(RasterError::Backend(_))
+        ));
+        assert!(matches!(
+            parse_data_url_header("data:image/png;base64,", RasterFormat::Png),
+            Err(RasterError::Backend(_))
+        ));
+    }
+
+    #[test]
+    fn parse_data_url_reads_format_from_mime_with_fallback() {
+        // Honest format detection: the data URL's own MIME wins.
+        let (format, payload) =
+            parse_data_url_header("data:image/webp;base64,QQ==", RasterFormat::Png)
+                .expect("valid webp data URL");
+        assert_eq!(format, RasterFormat::Webp);
+        assert_eq!(payload, "QQ==");
+
+        // A header with no recognized MIME falls back to the requested format.
+        let (format, _) = parse_data_url_header("data:;base64,QQ==", RasterFormat::Jpeg)
+            .expect("non-empty payload");
+        assert_eq!(format, RasterFormat::Jpeg);
     }
 }
 
