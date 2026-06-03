@@ -348,6 +348,19 @@ impl Context {
         self.slide_count.get().saturating_sub(self.visible_count())
     }
 
+    /// Largest reachable starting index. Under `loop_nav` any slide can be the
+    /// leading one (the window wraps), so it is `slide_count - 1`; otherwise it
+    /// is the contain-scroll [`last_index`](Self::last_index). Used to clamp
+    /// caller-supplied (default/controlled) indices.
+    #[must_use]
+    pub fn max_start_index(&self) -> usize {
+        if self.loop_nav {
+            self.slide_count.get().saturating_sub(1)
+        } else {
+            self.last_index()
+        }
+    }
+
     /// Clamp or wrap an index according to `loop_nav`.
     ///
     /// When `loop_nav` is `true`, out-of-range indices wrap around modulo the
@@ -535,6 +548,10 @@ pub struct Messages {
     /// total slide count (e.g. "Slide 2 of 5").
     pub slide_label: MessageFn<SlideLabelFn>,
 
+    /// Accessible name for the indicator `tablist` (`aria-label` on
+    /// `IndicatorGroup`), so screen-reader users know the tabs choose a slide.
+    pub indicators_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
+
     /// Accessible label for the previous-slide trigger.
     pub prev_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
 
@@ -558,6 +575,7 @@ impl Default for Messages {
             slide_label: MessageFn::new(|index, total, _locale: &Locale| {
                 format!("Slide {index} of {total}")
             }),
+            indicators_label: MessageFn::static_str("Choose slide"),
             prev_label: MessageFn::static_str("Previous slide"),
             next_label: MessageFn::static_str("Next slide"),
             pause_auto_play_label: MessageFn::static_str("Pause automatic slide show"),
@@ -606,7 +624,19 @@ fn navigate_to(ctx: &Context, idx: usize) -> Option<TransitionPlan<Machine>> {
     if stop {
         plan = plan.cancel_effect(Effect::AutoPlayTimer);
     }
-    Some(plan)
+    Some(settle_if_instant(ctx, plan))
+}
+
+/// When the configured transition is zero-length (animation disabled or
+/// reduced-motion), a zero-duration CSS transition fires no `transitionend`, so
+/// the adapter never settles `Transitioning`. Self-dispatch `TransitionEnd` so
+/// the machine settles synchronously instead of stranding in `Transitioning`.
+fn settle_if_instant(ctx: &Context, plan: TransitionPlan<Machine>) -> TransitionPlan<Machine> {
+    if ctx.transition_duration.is_zero() {
+        plan.then(Event::TransitionEnd)
+    } else {
+        plan
+    }
 }
 
 /// Build the [`Effect::IndexChange`] notification carrying the newly requested
@@ -657,17 +687,19 @@ impl ars_core::Machine for Machine {
         // still able to stop auto-play), so clamp it to at least one.
         let slides_per_move = props.slides_per_move.unwrap_or(1).max(1);
 
-        // Clamp the uncontrolled default to the last valid starting index so
-        // `current_index < slide_count` holds from the very first render (a
-        // bad `default_index` would otherwise yield "Slide 100 of 3" with no
-        // item marked current). Accounts for `slides_per_view`.
+        // Clamp the default/controlled index to the largest reachable starting
+        // index so `current_index < slide_count` holds from the first render.
+        // Under `loop_nav` that's `slide_count - 1` (the window wraps, so any
+        // slide is a valid start); otherwise it's the contain-scroll last page
+        // (`slide_count - ceil(slides_per_view)`).
         let visible_count = (slides_per_view.ceil() as usize).max(1);
-        let max_index = props.slide_count.get().saturating_sub(visible_count);
+        let max_index = if props.loop_nav {
+            props.slide_count.get().saturating_sub(1)
+        } else {
+            props.slide_count.get().saturating_sub(visible_count)
+        };
         let initial_index = props.default_index.unwrap_or(0).min(max_index);
 
-        // Clamp the controlled value too: a caller-supplied controlled `index`
-        // past `last_index()` would start the machine out of range before any
-        // prop-change sync could run.
         let index = match &props.index {
             Some(controlled) => Bindable::controlled((*controlled.get()).min(max_index)),
             None => Bindable::uncontrolled(initial_index),
@@ -834,13 +866,14 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
-                Some(
+                Some(settle_if_instant(
+                    ctx,
                     TransitionPlan::to(State::Transitioning)
                         .apply(move |ctx: &mut Context| {
                             ctx.index.set(next);
                         })
                         .with_effect(index_change_effect(next)),
-                )
+                ))
             }
 
             Event::AutoPlayPause => {
@@ -1001,55 +1034,53 @@ impl ars_core::Machine for Machine {
                 };
 
                 // `PointerDown` cancelled the auto-play timer for the duration
-                // of the drag. Resolve rotation now the gesture ended:
-                //  - a navigating swipe with `stop_on_interaction` permanently
-                //    stops it (mark stopped; the timer stays cancelled);
-                //  - otherwise, if rotation was still active (not stopped, not
-                //    focus/hover-paused), re-arm the timer so it resumes —
-                //    without this a swipe silently kills rotation, or leaves
-                //    the state reporting "playing" with no timer running.
-                let navigated = next_idx.is_some();
-                let stop_on_interaction = ctx
-                    .auto_play
-                    .as_ref()
-                    .is_some_and(|o| o.stop_on_interaction);
-                let mark_stopped = navigated && stop_on_interaction;
-                let resume = ctx.auto_play.is_some()
-                    && !mark_stopped
-                    && !ctx.auto_play_stopped
-                    && !ctx.is_auto_play_paused();
+                // of the drag.
+                let target_idx = next_idx.filter(|&idx| idx != ctx.current_index());
 
-                let target = if resume {
-                    State::AutoPlaying
+                if let Some(idx) = target_idx {
+                    // A navigating swipe animates through `Transitioning`, like
+                    // button/auto-play navigation, so auto-play ticks and further
+                    // navigation are blocked until `TransitionEnd`. The timer
+                    // stays cancelled across the snap; `TransitionEnd` then
+                    // resumes auto-play (or stays `Idle` if `stop_on_interaction`
+                    // stopped it).
+                    let stop = ctx
+                        .auto_play
+                        .as_ref()
+                        .is_some_and(|o| o.stop_on_interaction);
+                    let plan = TransitionPlan::to(State::Transitioning)
+                        .apply(move |ctx: &mut Context| {
+                            ctx.drag_start_pos = None;
+                            ctx.drag_delta = 0.0;
+                            ctx.swipe_velocity = 0.0;
+                            ctx.drag_last_timestamp = None;
+                            ctx.index.set(idx);
+                            if stop {
+                                ctx.auto_play_stopped = true;
+                            }
+                        })
+                        .with_effect(index_change_effect(idx));
+                    return Some(settle_if_instant(ctx, plan));
+                }
+
+                // No navigation: reset the drag and resume auto-play if it was
+                // active (the timer was cancelled on `PointerDown`).
+                let resume =
+                    ctx.auto_play.is_some() && !ctx.auto_play_stopped && !ctx.is_auto_play_paused();
+                let mut plan = if resume {
+                    TransitionPlan::to(State::AutoPlaying)
                 } else {
-                    State::Idle
-                };
-
-                let index_changed = next_idx.is_some_and(|idx| idx != ctx.current_index());
-
-                let mut plan = TransitionPlan::to(target).apply(move |ctx: &mut Context| {
+                    TransitionPlan::to(State::Idle)
+                }
+                .apply(|ctx: &mut Context| {
                     ctx.drag_start_pos = None;
                     ctx.drag_delta = 0.0;
                     ctx.swipe_velocity = 0.0;
                     ctx.drag_last_timestamp = None;
-
-                    if let Some(idx) = next_idx {
-                        ctx.index.set(idx);
-                    }
-
-                    if mark_stopped {
-                        ctx.auto_play_stopped = true;
-                    }
                 });
-
-                if index_changed && let Some(idx) = next_idx {
-                    plan = plan.with_effect(index_change_effect(idx));
-                }
-
                 if resume {
                     plan = plan.with_effect(PendingEffect::named(Effect::AutoPlayTimer));
                 }
-
                 Some(plan)
             }
 
@@ -1175,18 +1206,19 @@ impl ars_core::Machine for Machine {
                         .unwrap_or_else(|| Duration::from_millis(300));
                     ctx.swipe_threshold = props.swipe_threshold.unwrap_or(50.0);
 
-                    // Track the controlled signal (clamped); `None` returns the
-                    // bindable to uncontrolled mode.
+                    // Track the controlled signal (clamped to the largest
+                    // reachable start, loop-aware); `None` returns the bindable
+                    // to uncontrolled mode.
                     let controlled = props
                         .index
                         .as_ref()
-                        .map(|bindable| (*bindable.get()).min(ctx.last_index()));
+                        .map(|bindable| (*bindable.get()).min(ctx.max_start_index()));
                     ctx.index.sync_controlled(controlled);
 
                     // Keep an uncontrolled index in range if the slide count or
                     // visible window shrank.
                     if !ctx.index.is_controlled() {
-                        let clamped = ctx.current_index().min(ctx.last_index());
+                        let clamped = ctx.current_index().min(ctx.max_start_index());
                         ctx.index.set(clamped);
                     }
 
@@ -1502,7 +1534,11 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
-            .set(HtmlAttr::Role, "tablist");
+            .set(HtmlAttr::Role, "tablist")
+            .set(
+                HtmlAttr::Aria(AriaAttr::Label),
+                (self.ctx.messages.indicators_label)(&self.ctx.locale),
+            );
 
         attrs
     }
@@ -1609,6 +1645,14 @@ impl Api<'_> {
 
     /// Handle a keydown on the root region: arrow keys navigate (reversed for
     /// RTL horizontal carousels), `Home`/`End` jump to the first/last slide.
+    ///
+    /// **Adapter contract:** the agnostic core cannot inspect the DOM event
+    /// target, so the adapter MUST only forward keydowns that the carousel owns
+    /// — those whose target is the carousel root/controls, not events bubbled
+    /// from interactive slide content (text inputs, sliders, nested widgets).
+    /// Otherwise `ArrowLeft`/`ArrowRight` typed into a slide's `<input>` would
+    /// be hijacked into slide navigation. Gate on the event target (e.g. skip
+    /// when `event.target` is an interactive descendant) before calling this.
     pub fn on_root_keydown(&self, data: &KeyboardEventData) {
         let is_horizontal = self.ctx.orientation == Orientation::Horizontal;
 
@@ -2306,9 +2350,13 @@ mod tests {
         }));
         drop(service.send(Event::PointerUp));
 
-        assert_eq!(service.state(), &State::Idle);
+        // A navigating swipe animates through Transitioning; the snap settles to
+        // Idle on TransitionEnd.
+        assert_eq!(service.state(), &State::Transitioning);
         assert_eq!(service.context().current_index(), 1);
         assert_eq!(service.context().drag_delta, 0.0);
+        settle(&mut service);
+        assert_eq!(service.state(), &State::Idle);
     }
 
     #[test]
@@ -3007,12 +3055,14 @@ mod tests {
         }));
         let result = service.send(Event::PointerUp);
         assert_eq!(service.context().current_index(), 1);
-        assert_eq!(service.state(), &State::Idle);
+        // Navigating swipe animates through Transitioning; IndexChange fires now,
+        // the timer stays cancelled, and the stop settles to Idle.
+        assert_eq!(service.state(), &State::Transitioning);
         assert!(service.context().auto_play_stopped);
-        // Index changed → IndexChange notification, but rotation is stopped so
-        // no timer is re-armed.
         assert!(pending_effect_names(&result).contains(&Effect::IndexChange));
         assert!(!pending_effect_names(&result).contains(&Effect::AutoPlayTimer));
+        settle(&mut service);
+        assert_eq!(service.state(), &State::Idle);
     }
 
     #[test]
@@ -3035,11 +3085,14 @@ mod tests {
         }));
         let result = service.send(Event::PointerUp);
         assert_eq!(service.context().current_index(), 1);
-        assert_eq!(service.state(), &State::AutoPlaying);
+        // Navigating swipe animates through Transitioning (blocking ticks during
+        // the snap); auto-play resumes on TransitionEnd, not immediately.
+        assert_eq!(service.state(), &State::Transitioning);
         assert!(!service.context().auto_play_stopped);
-        // Rotation resumes (timer re-armed) and the index change is notified.
-        assert!(pending_effect_names(&result).contains(&Effect::AutoPlayTimer));
         assert!(pending_effect_names(&result).contains(&Effect::IndexChange));
+        assert!(!pending_effect_names(&result).contains(&Effect::AutoPlayTimer));
+        settle(&mut service);
+        assert_eq!(service.state(), &State::AutoPlaying);
     }
 
     #[test]
@@ -3675,5 +3728,89 @@ mod tests {
         ] {
             assert_eq!(attrs.get(&HtmlAttr::Type), Some("button"));
         }
+    }
+
+    // ── Codex review #716 (seventh pass) ─────────────────────────────
+
+    #[test]
+    fn swipe_transition_blocks_autoplay_tick_until_settle() {
+        // S1: a navigating swipe stays in Transitioning until TransitionEnd, so
+        // an AutoPlayTick during the snap is ignored (no double-advance).
+        let mut service = service(Props {
+            auto_play: Some(AutoPlayOptions {
+                stop_on_interaction: false,
+                ..AutoPlayOptions::default()
+            }),
+            ..props(4)
+        });
+        drop(service.take_initial_effects());
+        drop(service.send(Event::PointerDown {
+            pos: 100.0,
+            timestamp: 0.0,
+        }));
+        drop(service.send(Event::PointerMove {
+            pos: 40.0,
+            timestamp: 1000.0,
+        }));
+        drop(service.send(Event::PointerUp));
+        assert_eq!(service.state(), &State::Transitioning);
+        assert_eq!(service.context().current_index(), 1);
+
+        // Tick mid-snap is dropped.
+        let tick = service.send(Event::AutoPlayTick);
+        assert!(!tick.state_changed);
+        assert_eq!(service.context().current_index(), 1);
+
+        settle(&mut service);
+        assert_eq!(service.state(), &State::AutoPlaying);
+    }
+
+    #[test]
+    fn init_clamps_controlled_index_loop_aware() {
+        // S2: looped multi-view must allow wrapped starts past last_index.
+        let default_start = service(Props {
+            loop_nav: true,
+            slides_per_view: Some(2.0),
+            default_index: Some(4),
+            ..props(5)
+        });
+        assert_eq!(default_start.context().current_index(), 4);
+
+        let controlled = service(Props {
+            loop_nav: true,
+            slides_per_view: Some(2.0),
+            index: Some(Bindable::controlled(4)),
+            ..props(5)
+        });
+        assert_eq!(controlled.context().current_index(), 4);
+    }
+
+    #[test]
+    fn indicator_group_is_labeled() {
+        // S3: the indicator tablist carries an accessible name.
+        let service = service(props(3));
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .indicator_group_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::Label)),
+            Some("Choose slide")
+        );
+    }
+
+    #[test]
+    fn zero_transition_duration_settles_immediately() {
+        // S4: zero-duration transitions fire no transitionend, so navigation
+        // must self-settle rather than strand in Transitioning.
+        let mut service = service(Props {
+            transition_duration: Some(Duration::ZERO),
+            ..props(3)
+        });
+        drop(service.send(Event::GoToNext));
+        assert_eq!(service.context().current_index(), 1);
+        assert_eq!(service.state(), &State::Idle);
+        // Subsequent navigation is not blocked.
+        drop(service.send(Event::GoToNext));
+        assert_eq!(service.context().current_index(), 2);
     }
 }

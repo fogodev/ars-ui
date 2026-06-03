@@ -21,6 +21,14 @@ AttrMap {
             ),
         ),
         (
+            Aria(
+                Label,
+            ),
+            String(
+                "Choose slide",
+            ),
+        ),
+        (
             Role,
             String(
                 "tablist",

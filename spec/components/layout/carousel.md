@@ -200,6 +200,13 @@ impl Context {
         self.slide_count.get().saturating_sub(self.visible_count())
     }
 
+    /// Largest reachable starting index. Under `loop_nav` any slide can lead
+    /// (the window wraps), so `slide_count - 1`; otherwise the contain-scroll
+    /// `last_index`. Used to clamp caller-supplied (default/controlled) indices.
+    pub fn max_start_index(&self) -> usize {
+        if self.loop_nav { self.slide_count.get().saturating_sub(1) } else { self.last_index() }
+    }
+
     /// Clamp or wrap an index according to `loop_nav`.
     pub fn clamp_index(&self, i: isize) -> usize {
         let n = self.slide_count.get() as isize;
@@ -364,7 +371,14 @@ fn navigate_to(ctx: &Context, idx: usize) -> Option<TransitionPlan<Machine>> {
         })
         .with_effect(index_change_effect(idx));
     if stop { plan = plan.cancel_effect(Effect::AutoPlayTimer); }
-    Some(plan)
+    Some(settle_if_instant(ctx, plan))
+}
+
+/// A zero-length transition fires no `transitionend`, so the adapter never
+/// settles `Transitioning`. Self-dispatch `TransitionEnd` so the machine
+/// settles synchronously rather than stranding in `Transitioning`.
+fn settle_if_instant(ctx: &Context, plan: TransitionPlan<Machine>) -> TransitionPlan<Machine> {
+    if ctx.transition_duration.is_zero() { plan.then(Event::TransitionEnd) } else { plan }
 }
 
 /// Build the `Effect::IndexChange` notification carrying the newly requested
@@ -400,10 +414,15 @@ impl ars_core::Machine for Machine {
             .unwrap_or(1.0);
         // `slides_per_move` of zero makes every navigation a no-op, so clamp to one.
         let slides_per_move = props.slides_per_move.unwrap_or(1).max(1);
-        // Clamp the uncontrolled default to the last valid starting index so
-        // `current_index < slide_count` holds from the first render.
+        // Clamp the default/controlled index to the largest reachable start so
+        // `current_index < slide_count` holds from the first render — loop-aware
+        // (`slide_count - 1` under loop, else the contain-scroll last page).
         let visible_count = (slides_per_view.ceil() as usize).max(1);
-        let max_index = props.slide_count.get().saturating_sub(visible_count);
+        let max_index = if props.loop_nav {
+            props.slide_count.get().saturating_sub(1)
+        } else {
+            props.slide_count.get().saturating_sub(visible_count)
+        };
         let initial_index = props.default_index.unwrap_or(0).min(max_index);
         let locale = env.locale.clone();
         let messages = messages.clone();
@@ -542,9 +561,9 @@ impl ars_core::Machine for Machine {
                 // `Transitioning` with no transform change risks a missing
                 // `transitionend` that strands the machine.
                 if next == ctx.current_index() { return None; }
-                Some(TransitionPlan::to(State::Transitioning)
+                Some(settle_if_instant(ctx, TransitionPlan::to(State::Transitioning)
                     .apply(move |ctx| { ctx.index.set(next); })
-                    .with_effect(index_change_effect(next)))
+                    .with_effect(index_change_effect(next))))
             }
 
             Event::AutoPlayPause => {
@@ -656,35 +675,42 @@ impl ars_core::Machine for Machine {
                     None
                 };
 
-                // `PointerDown` cancelled the timer for the drag. Resolve
-                // rotation now the gesture ended: a navigating swipe with
-                // `stop_on_interaction` stops it; otherwise, if rotation was
-                // still active, re-arm the timer (resume) — without this a
-                // swipe silently kills rotation, or leaves the state reporting
-                // "playing" with no timer running.
-                let navigated = next_idx.is_some();
-                let stop = ctx.auto_play.as_ref().is_some_and(|o| o.stop_on_interaction);
-                let mark_stopped = navigated && stop;
+                // `PointerDown` cancelled the timer for the drag.
+                let target_idx = next_idx.filter(|&idx| idx != ctx.current_index());
+                if let Some(idx) = target_idx {
+                    // A navigating swipe animates through `Transitioning`, like
+                    // button/auto-play nav, so ticks and further navigation are
+                    // blocked until `TransitionEnd` (which then resumes auto-play
+                    // or stays `Idle` if `stop_on_interaction` stopped it).
+                    let stop = ctx.auto_play.as_ref().is_some_and(|o| o.stop_on_interaction);
+                    let plan = TransitionPlan::to(State::Transitioning)
+                        .apply(move |ctx| {
+                            ctx.drag_start_pos = None;
+                            ctx.drag_delta = 0.0;
+                            ctx.swipe_velocity = 0.0;
+                            ctx.drag_last_timestamp = None;
+                            ctx.index.set(idx);
+                            if stop { ctx.auto_play_stopped = true; }
+                        })
+                        .with_effect(index_change_effect(idx));
+                    return Some(settle_if_instant(ctx, plan));
+                }
+
+                // No navigation: reset the drag and resume auto-play if it was
+                // active (the timer was cancelled on `PointerDown`).
                 let resume = ctx.auto_play.is_some()
-                    && !mark_stopped
                     && !ctx.auto_play_stopped
                     && !ctx.is_auto_play_paused();
-                let target = if resume { State::AutoPlaying } else { State::Idle };
-                let index_changed = next_idx.is_some_and(|idx| idx != ctx.current_index());
-
-                let mut plan = TransitionPlan::to(target).apply(move |ctx| {
+                let mut plan = if resume {
+                    TransitionPlan::to(State::AutoPlaying)
+                } else {
+                    TransitionPlan::to(State::Idle)
+                }.apply(|ctx| {
                     ctx.drag_start_pos = None;
                     ctx.drag_delta = 0.0;
                     ctx.swipe_velocity = 0.0;
                     ctx.drag_last_timestamp = None;
-                    if let Some(idx) = next_idx {
-                        ctx.index.set(idx);
-                    }
-                    if mark_stopped { ctx.auto_play_stopped = true; }
                 });
-                if index_changed && let Some(idx) = next_idx {
-                    plan = plan.with_effect(index_change_effect(idx));
-                }
                 if resume { plan = plan.with_effect(PendingEffect::named(Effect::AutoPlayTimer)); }
                 Some(plan)
             }
@@ -792,12 +818,13 @@ impl ars_core::Machine for Machine {
                     ctx.transition_duration = props.transition_duration
                         .unwrap_or_else(|| Duration::from_millis(300));
                     ctx.swipe_threshold = props.swipe_threshold.unwrap_or(50.0);
-                    // Track the controlled signal (clamped); `None` returns to uncontrolled.
+                    // Track the controlled signal (clamped to the largest
+                    // reachable start, loop-aware); `None` returns to uncontrolled.
                     let controlled = props.index.as_ref()
-                        .map(|bindable| (*bindable.get()).min(ctx.last_index()));
+                        .map(|bindable| (*bindable.get()).min(ctx.max_start_index()));
                     ctx.index.sync_controlled(controlled);
                     if !ctx.index.is_controlled() {
-                        let clamped = ctx.current_index().min(ctx.last_index());
+                        let clamped = ctx.current_index().min(ctx.max_start_index());
                         ctx.index.set(clamped);
                     }
                     if ctx.auto_play.is_none() {
@@ -963,6 +990,7 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "tablist");
+        attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.indicators_label)(&self.ctx.locale));
         attrs
     }
 
@@ -1032,6 +1060,12 @@ impl<'a> Api<'a> {
         )
     }
 
+    /// **Adapter contract:** the agnostic core cannot inspect the DOM event
+    /// target, so the adapter MUST only forward keydowns the carousel owns —
+    /// those targeting the carousel root/controls, not events bubbled from
+    /// interactive slide content (text inputs, sliders, nested widgets).
+    /// Otherwise `ArrowLeft`/`ArrowRight` typed into a slide's `<input>` would
+    /// be hijacked into slide navigation. Gate on the event target first.
     pub fn on_root_keydown(&self, data: &KeyboardEventData) {
         let is_horizontal = self.ctx.orientation == Orientation::Horizontal;
         let (prev_key, next_key) = if is_horizontal {
@@ -1167,6 +1201,8 @@ The carousel follows the [WAI-ARIA Carousel Pattern](https://www.w3.org/WAI/ARIA
 
 RTL: Arrow keys reverse per `03-accessibility.md` §4.1.
 
+Arrow-key navigation applies only to keydowns the carousel owns. Because the agnostic core cannot inspect the DOM event target, the adapter MUST gate `on_root_keydown` on the event target and not forward arrow keys bubbled from interactive slide content (text inputs, sliders, nested widgets), so typing inside a slide operates that control rather than navigating the carousel.
+
 ### 3.3 Screen Reader Announcements
 
 - `aria-live` on `ItemGroup` is `"off"` during auto-play to prevent disruptive announcements, and `"polite"` when paused or stopped.
@@ -1188,6 +1224,8 @@ pub struct Messages {
     pub role_description: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub slide_role_description: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub slide_label: MessageFn<SlideLabelFn>,
+    /// Accessible name for the indicator `tablist` (`aria-label` on `IndicatorGroup`).
+    pub indicators_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub prev_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub next_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
     pub pause_auto_play_label: MessageFn<dyn Fn(&Locale) -> String + Send + Sync>,
@@ -1201,6 +1239,7 @@ impl Default for Messages {
             role_description: MessageFn::static_str("carousel"),
             slide_role_description: MessageFn::static_str("slide"),
             slide_label: MessageFn::new(|index, total, _locale| format!("Slide {index} of {total}")),
+            indicators_label: MessageFn::static_str("Choose slide"),
             prev_label: MessageFn::static_str("Previous slide"),
             next_label: MessageFn::static_str("Next slide"),
             pause_auto_play_label: MessageFn::static_str("Pause automatic slide show"),
