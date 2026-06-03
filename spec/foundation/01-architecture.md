@@ -1891,6 +1891,90 @@ fn send_and_setup<M: Machine>(service: &mut Service<M>, event: M::Event, active_
 
 Adapters SHOULD prefer Strategy 1 unless they have a specific reason to require synchronous setup. Strategy 1 is compatible with framework scheduling (e.g., Leptos effect batching, Dioxus virtual DOM diffing) and avoids blocking the render pipeline.
 
+#### 2.2.9 SignatureRasterizer Trait
+
+Some components need to turn vector data into an encoded raster image (e.g.
+`SignaturePad` exporting a PNG/JPEG). Rasterization needs a pixel surface, which
+the agnostic core does not have, so — like the `PlatformEffects` trait (§2.2.7) —
+it is an **injected platform capability** defined in `ars-core` and implemented
+by the adapter layer. Unlike `PlatformEffects`, it is not triggered by a
+transition; the consumer calls it on demand and receives the encoded bytes
+synchronously.
+
+The contract is deliberately **neutral** — it takes pressure-weighted points and
+a `RasterSpec`, never any component-specific type — so the lower-level `ars-dom`
+crate can implement it without depending on the component crates.
+
+```rust
+/// A sampled stroke point for rasterization: position plus normalized pressure.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RasterPoint {
+    pub x: f64,
+    pub y: f64,
+    /// Normalized pressure in `0.0..=1.0`; scales the rendered stroke width.
+    pub pressure: f64,
+}
+
+/// Encoded image format produced by a `SignatureRasterizer`.
+///
+/// `Webp` is not encodable by every browser canvas (Safari falls back to PNG),
+/// so a rasterizer requesting it MUST report the format it *actually* produced
+/// in `RasterImage::format`. `RasterFormat::mime()` / `from_mime()` convert
+/// to/from the `image/<fmt>` MIME used by canvas encoders and `data:` URLs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RasterFormat {
+    Png,
+    Jpeg,
+    Webp,
+}
+
+/// Rendering parameters for a rasterization request.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RasterSpec {
+    pub width: u32,
+    pub height: u32,
+    pub pen_color: String,
+    pub pen_width: f64,
+    pub background: Option<String>,
+    pub format: RasterFormat,
+    pub quality: f64,
+}
+
+/// An encoded raster image.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RasterImage {
+    pub format: RasterFormat,
+    pub bytes: Vec<u8>,
+}
+
+/// Why a rasterization request failed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RasterError {
+    /// No backend in this environment (SSR/tests/non-browser).
+    Unsupported,
+    /// The platform pipeline failed; carries a human-readable reason.
+    Backend(String),
+}
+
+/// Platform capability that rasterizes vector strokes into an encoded image.
+///
+/// - `ars-dom` provides `WebSignatureRasterizer` (browser `<canvas>`).
+/// - `NullSignatureRasterizer` is the SSR/test no-op (always `Unsupported`).
+pub trait SignatureRasterizer: Send + Sync {
+    fn rasterize(
+        &self,
+        strokes: &[Vec<RasterPoint>],
+        spec: &RasterSpec,
+    ) -> Result<RasterImage, RasterError>;
+}
+```
+
+Consumers requiring raster output take `&dyn SignatureRasterizer` as an argument
+(see `SignatureData::export_raster` in `components/specialized/signature-pad.md`),
+so the call is impossible to make without a backend — there is no panicking
+fallback.
+
 ### 2.3 Service Runtime
 
 ```rust,no_check

@@ -1,0 +1,51 @@
+---
+source: crates/ars-components/src/specialized/signature_pad/mod.rs
+expression: "snapshot_attrs(&empty_api(State::Idle).clear_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "clear-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "signature-pad",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Clear signature",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "sig-clear",
+            ),
+        ),
+        (
+            Disabled,
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}
