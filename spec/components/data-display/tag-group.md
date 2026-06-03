@@ -208,16 +208,16 @@ impl ars_core::Machine for Machine {
             return match event {
                 Event::Focus { item, is_keyboard } => {
                     // Allow focus for AT even when disabled so focused context remains observable.
-                    let key = item
-                        .as_ref()
-                        .filter(|key| ctx.items.get(key).is_some())
-                        .cloned()
-                        .or_else(|| {
+                    let key = match item {
+                        Some(key) if ctx.items.get(key).is_some() => Some(key.clone()),
+                        Some(_) => None,
+                        None => {
                             ctx.items
                                 .iter()
                                 .find(|t| !t.disabled)
                                 .map(|t| t.key.clone())
-                        });
+                        }
+                    };
                     let focus_visible = *is_keyboard;
                     let target = if key.is_some() { State::Focused } else { State::Idle };
 

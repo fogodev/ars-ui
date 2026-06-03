@@ -402,11 +402,11 @@ impl ars_core::Machine for Machine {
                 })),
 
                 Event::Focus { item, is_keyboard } => {
-                    let key = item
-                        .as_ref()
-                        .filter(|key| context.items.get(key).is_some())
-                        .cloned()
-                        .or_else(|| first_enabled_key(&context.items));
+                    let key = match item {
+                        Some(key) if context.items.get(key).is_some() => Some(key.clone()),
+                        Some(_) => None,
+                        None => first_enabled_key(&context.items),
+                    };
                     let focus_visible = *is_keyboard;
                     let target = if key.is_some() {
                         State::Focused
@@ -1717,6 +1717,14 @@ mod tests {
         );
 
         drop(disabled.send(Event::Blur));
+
+        assert_eq!(disabled.context().focused_key, None);
+        assert!(!disabled.context().focus_visible);
+
+        drop(disabled.send(Event::Focus {
+            item: Some(key("stale")),
+            is_keyboard: true,
+        }));
 
         assert_eq!(disabled.context().focused_key, None);
         assert!(!disabled.context().focus_visible);
