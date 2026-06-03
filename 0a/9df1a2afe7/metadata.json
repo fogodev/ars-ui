@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0a9df1a2afe7",
+  "strategy": "manual-commit",
+  "branch": "codex/data-display-agnostic-audit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "spec/components/data-display/tag-group.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0a/9df1a2afe7/0/metadata.json",
+      "transcript": "/0a/9df1a2afe7/0/full.jsonl",
+      "content_hash": "/0a/9df1a2afe7/0/content_hash.txt",
+      "prompt": "/0a/9df1a2afe7/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 37826,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 705280,
+    "output_tokens": 2615,
+    "api_call_count": 10
+  }
+}

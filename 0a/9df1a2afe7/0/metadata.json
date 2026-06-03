@@ -1,0 +1,86 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0a9df1a2afe7",
+  "session_id": "019e8b3e-5b1f-7c23-82f5-c27c08733024",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T05:28:06.924701Z",
+  "branch": "codex/data-display-agnostic-audit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "spec/components/data-display/tag-group.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "4017d45fe89e",
+  "checkpoint_transcript_start": 1345,
+  "transcript_lines_at_start": 1345,
+  "token_usage": {
+    "input_tokens": 37826,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 705280,
+    "output_tokens": 2615,
+    "api_call_count": 10
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Sync a TagGroup component spec file with an implementation change that allows disabled items to emit Focus/Blur events, then push and restart a Codex review loop.",
+    "outcome": "The spec code example was patched to reflect that disabled Focus/Blur transitions are observable, validated via cargo xtask, committed as a follow-up, and pushed to the PR branch.",
+    "learnings": {
+      "repo": [
+        "Spec files live under spec/components/data-display/ and contain embedded code snippets that are independently compiled and validated via `cargo xtask spec compile-snippets` and `cargo xtask spec validate`.",
+        "The project uses a Codex review loop triggered after each push; inline PR review threads must be replied to and resolved manually before retriggering.",
+        "Disabled state in TagGroup previously silently dropped Focus/Blur events; the updated contract makes disabled focus observable (state is recorded) while keeping mutation/navigation events as no-ops."
+      ],
+      "code": [
+        {
+          "path": "spec/components/data-display/tag-group.md",
+          "line": 188,
+          "end_line": 235,
+          "finding": "Disabled branch spec example did not record focused state despite prose saying Focus/Blur are allowed for AT; patched to match implementation."
+        },
+        {
+          "path": "spec/components/data-display/tag-group.md",
+          "line": 40,
+          "end_line": 110,
+          "finding": "Broader disabled section reviewed to ensure the narrow fix didn't conflict with existing no-op behavior for mutation/navigation events."
+        }
+      ],
+      "workflow": [
+        "Spec snippets are part of the contract and validated independently of Rust crate tests — always run `cargo xtask spec validate` after editing spec markdown.",
+        "Separating the review fix commit from the spec sync commit keeps PR history legible and makes each change's purpose clear.",
+        "Inline review thread anchors become outdated after a force-push or rebase, which is expected behavior and not a blocker."
+      ]
+    },
+    "friction": [
+      "The user had to prompt the assistant to check whether the spec had been updated — the spec sync was not part of the original fix scope and was nearly missed.",
+      "Inline comment anchors went stale after the push, requiring re-fetching thread identifiers before replying."
+    ],
+    "open_items": [
+      "Codex review re-pass not yet confirmed complete at transcript end — outcome of the retriggered review is unknown.",
+      "Proptest state machine file (crates/ars-components/tests/proptest_state_machines/data_display/tag_group.rs) was diffed but no changes to it were mentioned — may need updating to cover the new disabled focus behavior."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T05:27:50.432835Z",
+    "agent_lines": 26,
+    "agent_removed": 3,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 26,
+    "total_lines_changed": 29,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
