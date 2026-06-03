@@ -1,0 +1,119 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "6b7d4a0ba820",
+  "session_id": "a871f55b-7ea2-4d36-b632-0ffe300f0fca",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T16:54:42.983588Z",
+  "branch": "impl-242",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/selection/tags_input/mod.rs",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_clear_trigger.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_clear_trigger_disabled.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_input_at_max.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_input_default.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_input_disabled_readonly.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_input_full_props.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_delete_cell.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_delete_trigger.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_delete_trigger_disabled.snap",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_tag_edit_hidden.snap",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "crates/ars-components/tests/spec_conformance/selection.rs",
+    "spec/components/selection/tags-input.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "a97e2507a5da",
+  "checkpoint_transcript_start": 1282,
+  "transcript_lines_at_start": 1282,
+  "token_usage": {
+    "input_tokens": 6703,
+    "cache_creation_tokens": 694974,
+    "cache_read_tokens": 49886261,
+    "output_tokens": 46274,
+    "api_call_count": 83
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "summary": {
+    "intent": "Implement all 9 findings from a Codex pass-2 review of the `tags_input` component in the ars-ui Rust library, including a user-confirmed ARIA anatomy change (TagDeleteCell wrapper part) and RTL keyboard navigation support.",
+    "outcome": "All 9 fixes were applied, tests grew from 135 to 145 passing, snapshots updated and accepted, spec synced, clippy clean, coverage gate passed (90.1% branch / 97.56% line), and changes committed and pushed to the impl-242 worktree.",
+    "learnings": {
+      "repo": [
+        "The component layer enforces a strict three-way sync: source (mod.rs), spec conformance tests (tests/spec_conformance/selection.rs), and the markdown spec (spec/components/selection/tags-input.md) must all be updated together or CI fails.",
+        "Parts are dispatched through a `ConnectApi` match arm; adding a new Part (TagDeleteCell) requires updates to the Part enum, the attr method, the ConnectApi dispatcher, the conformance anatomy list, and the `part_attrs_dispatch_covers_every_part` test.",
+        "Snapshot tests cover rendered attr sets; intentional attr changes require explicit snapshot acceptance (`cargo test -- --update`) and must be reviewed before accepting to confirm they match only the intended diff.",
+        "The `xci-fast` gate runs 10 sub-gates (build, tests, spec conformance, snapshots, clippy, proptest, coverage branch ≥90%, coverage line, spec validator, snippet compiler); all must be green before push.",
+        "Direction::Auto is a valid variant of the Direction enum and must be handled explicitly in RTL logic; treating it as LTR in the component layer is the correct policy.",
+        "Proptest state machine tests live in `tests/proptest_state_machines/selection.rs` and require prop randomization for new behavioral axes (e.g., adding `dir` randomization for RTL fuzz coverage)."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "finding": "tag_delete_trigger_attrs previously carried role=gridcell; it now lives on a new TagDeleteCell wrapper part so the button itself has no grid role, matching ARIA grid anatomy where gridcell wraps the interactive child."
+        },
+        {
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "finding": "SetValue must clamp both focused_index and edit_index to the new tag list length, and must exit editing mode if the currently-edited tag index no longer exists in the new value."
+        },
+        {
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "finding": "CommitEdit should only emit a ValueChange event when the tag list actually changes (i.e., the edited text differs from the original); rejected edits (same text) must not fire the event."
+        },
+        {
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "finding": "Inactive tag-edit inputs require hidden + aria-hidden + tabindex=-1 to be fully excluded from focus order and assistive technology; omitting any one of these leaves a gap."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/selection.rs",
+          "finding": "RTL fuzz coverage requires adding dir (LTR/RTL/Auto) to the proptest arbitrary Props so the state machine exercises arrow-key reversal under randomized direction values."
+        }
+      ],
+      "workflow": [
+        "Codex review runs in numbered passes; pass-2 findings are fetched as threads and triaged before implementation — clear bugs are applied directly, genuine design decisions are escalated to the user first.",
+        "When an ARIA design decision conflicts with the current spec anatomy, stopping to get user confirmation before implementing prevents rework on a structural change that touches enums, dispatch, conformance tests, and the spec simultaneously.",
+        "Clippy warnings should be resolved before running the coverage gate, since the gate includes a clippy step and failures late in the gate waste CI time.",
+        "Snapshot diffs should be reviewed manually before acceptance to verify only the intended attr changes appear; unexpected diffs in the snapshot output indicate a regression in a neighboring attr method."
+      ]
+    },
+    "friction": [
+      "Direction::Auto was not handled in the initial RTL arrow-reversal implementation and required a follow-up edit after the first pass.",
+      "3 clippy warnings surfaced after the main implementation pass and had to be cleaned up before the coverage gate.",
+      "9 snapshots needed manual review and explicit acceptance after intentional attr changes — a necessary but interrupting step mid-implementation."
+    ],
+    "open_items": [
+      "Codex pass-2 thread replies, resolution, and re-trigger were planned after the push but the transcript ends before confirming they were completed.",
+      "The `xci-fast` gate was run while capturing thread reply targets in parallel; if the gate had failed the reply step would have been premature — worth verifying gate-then-reply ordering is enforced in the workflow."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T16:53:54.322576Z",
+    "agent_lines": 671,
+    "agent_removed": 95,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 671,
+    "total_lines_changed": 766,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 671,
+      "agent_lines_removed": 95
+    }
+  ]
+}
