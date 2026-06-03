@@ -221,6 +221,13 @@ impl Context {
         }
     }
 
+    /// Clamp/wrap an absolute `usize` target (direct `GoToSlide`/`FocusSlide`)
+    /// without routing through `as isize`, so a target above `isize::MAX`
+    /// saturates (non-loop) or wraps (loop) instead of overflowing negative.
+    pub fn clamp_index_usize(&self, index: usize) -> usize {
+        if self.loop_nav { index % self.slide_count.get() } else { index.min(self.last_index()) }
+    }
+
     // Always `false` when `last_index() == 0` (one slide, or `slides_per_view`
     // already shows them all): no distinct target exists, even when looping.
     pub fn can_go_prev(&self) -> bool {
@@ -506,7 +513,7 @@ impl ars_core::Machine for Machine {
                 // selectable, including past `last_index`), saturates at
                 // `last_index` otherwise. A direct jump is a manual interaction,
                 // so it honours `stop_on_interaction` like Next/Prev.
-                let idx = ctx.clamp_index(*index as isize);
+                let idx = ctx.clamp_index_usize(*index);
                 navigate_to(ctx, idx)
             }
 
@@ -783,7 +790,7 @@ impl ars_core::Machine for Machine {
                 let scroll = !ctx.is_slide_visible(*index);
                 // Clamp via `clamp_index` (wraps under `loop_nav`, saturates at
                 // `last_index` otherwise), matching `GoToSlide`.
-                let idx = ctx.clamp_index(*index as isize);
+                let idx = ctx.clamp_index_usize(*index);
                 let should_pause = ctx.auto_play.as_ref().is_some_and(|o| o.pause_on_focus);
                 if should_pause {
                     // Pausing on focus mirrors `AutoPlayPause`: leave
@@ -831,16 +838,23 @@ impl ars_core::Machine for Machine {
                 let new_auto = props.auto_play.clone();
                 let auto_changed = ctx.auto_play != new_auto;
                 let want_timer = new_auto.is_some() && !ctx.auto_play_stopped && !ctx.is_auto_play_paused();
-                // Only the auto-play transition moves the resting state.
-                let target = if auto_changed {
-                    if want_timer { State::AutoPlaying }
-                    else if *state == State::AutoPlaying { State::Idle }
-                    else { *state }
+                // Resting target. Never exit an in-flight `Transitioning` snap
+                // (that would accept ticks/nav before the adapter's
+                // `TransitionEnd`); it settles + re-arms on its own.
+                let target = if *state == State::Transitioning {
+                    State::Transitioning
+                } else if want_timer {
+                    State::AutoPlaying
                 } else {
-                    *state
+                    State::Idle
                 };
+                // Only emit a transition when the state changes: a no-op
+                // `to(current)` still flags `state_changed`, and the adapter
+                // drains active effect cleanups on any state change — silently
+                // killing the running interval on an unrelated prop change.
+                let changes_state = target != *state;
                 let props = props.clone();
-                let mut plan = TransitionPlan::to(target).apply(move |ctx| {
+                let apply = move |ctx: &mut Context| {
                     let slides_per_view = props.slides_per_view
                         .filter(|value| value.is_finite() && *value > 0.0)
                         .unwrap_or(1.0);
@@ -856,14 +870,15 @@ impl ars_core::Machine for Machine {
                     ctx.transition_duration = props.transition_duration
                         .unwrap_or_else(|| Duration::from_millis(300));
                     ctx.swipe_threshold = props.swipe_threshold.unwrap_or(50.0);
-                    // Track the controlled signal (clamped to the largest
-                    // reachable start, loop-aware); `None` returns to uncontrolled.
+                    // Capture the displayed index (controlled value while
+                    // controlled) before clearing control, so releasing control
+                    // preserves it instead of revealing a stale internal.
+                    let displayed = ctx.current_index();
                     let controlled = props.index.as_ref()
                         .map(|bindable| (*bindable.get()).min(ctx.max_start_index()));
                     ctx.index.sync_controlled(controlled);
                     if !ctx.index.is_controlled() {
-                        let clamped = ctx.current_index().min(ctx.max_start_index());
-                        ctx.index.set(clamped);
+                        ctx.index.set(displayed.min(ctx.max_start_index()));
                     }
                     if ctx.auto_play.is_none() {
                         ctx.auto_play_paused_manual = false;
@@ -871,10 +886,27 @@ impl ars_core::Machine for Machine {
                         ctx.auto_play_paused_focus = false;
                         ctx.auto_play_stopped = false;
                     }
-                });
-                if auto_changed {
-                    plan = plan.cancel_effect(Effect::AutoPlayTimer);
-                    if want_timer { plan = plan.with_effect(PendingEffect::named(Effect::AutoPlayTimer)); }
+                };
+                let mut plan = if changes_state {
+                    TransitionPlan::to(target).apply(apply)
+                } else {
+                    TransitionPlan::context_only(apply)
+                };
+                // Reconcile the timer to match `target`.
+                match target {
+                    State::AutoPlaying => {
+                        // (Re)arm when the state change drained effects or the
+                        // config changed; otherwise the interval is still running.
+                        if changes_state || auto_changed {
+                            plan = plan.cancel_effect(Effect::AutoPlayTimer)
+                                .with_effect(PendingEffect::named(Effect::AutoPlayTimer));
+                        }
+                    }
+                    State::Idle => { plan = plan.cancel_effect(Effect::AutoPlayTimer); }
+                    State::Transitioning => {
+                        // Stay in the snap; `TransitionEnd` re-arms on settle.
+                        if !want_timer { plan = plan.cancel_effect(Effect::AutoPlayTimer); }
+                    }
                 }
                 Some(plan)
             }
