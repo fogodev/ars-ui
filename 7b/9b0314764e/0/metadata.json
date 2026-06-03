@@ -1,0 +1,91 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "7b9b0314764e",
+  "session_id": "09cc549d-4ad5-4de7-9321-dca94bacfc94",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T05:55:59.225512Z",
+  "branch": "impl-290",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_range_picker/tests.rs",
+    "crates/ars-components/src/date_time/date_range_picker/mod.rs",
+    "spec/components/date-time/date-range-picker.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "ce81ba6f56c6",
+  "checkpoint_transcript_start": 774,
+  "transcript_lines_at_start": 774,
+  "token_usage": {
+    "input_tokens": 3692,
+    "cache_creation_tokens": 25665,
+    "cache_read_tokens": 15239928,
+    "output_tokens": 16035,
+    "api_call_count": 32
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Fix four P2 bugs in the DateRangePicker component identified by a Codex review, using TDD (red-green cycle) and then sync the spec documentation.",
+    "outcome": "All four bugs were fixed and verified: disable-while-open reconciles to Closed (C1), SelectRangeComplete accepts range in any state (C2), and clear/preset triggers are disabled when readonly (C3/C4). 86 tests pass, clippy clean, coverage maintained at ~99.72%, and the spec was updated to match.",
+    "learnings": {
+      "repo": [
+        "DateRangePicker spec lives at spec/components/date-time/date-range-picker.md and must be updated alongside code changes — there are spec gates in CI that validate consistency.",
+        "The project enforces a coverage gate (~99.72% line coverage) and runs proptest + snapshot tests as separate verification steps beyond unit tests.",
+        "SelectPreset already handled the 'accept in any state, close only if Open' pattern — C2 fix mirrored that existing convention rather than inventing a new one.",
+        "The disabled guard in SyncProps was blocking Close/Escape/FocusOut events, so disabling while open would leave the picker stuck — reconciliation to Closed must happen before the disabled guard activates."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/date_time/date_range_picker/mod.rs",
+          "finding": "SyncProps event handler needed to reconcile state to Closed when disabled=true and state=Open, before the disabled guard runs."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_range_picker/mod.rs",
+          "finding": "SelectRangeComplete was gated on Open state; fix makes it accept the range in any state and only close if was Open — matching SelectPreset's pattern."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_range_picker/mod.rs",
+          "finding": "Clear and preset trigger disabled conditions only checked `disabled`; `readonly` needed to be added as a second disabling condition."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_range_picker/tests.rs",
+          "finding": "New tests were placed near thematically related existing tests (disabled tests for C1, readonly-block tests for C2, clear/preset ARIA tests for C3/C4) — file is organized by behavior category."
+        }
+      ],
+      "workflow": [
+        "TDD red-green cycle was enforced: all 4 tests were confirmed failing before any fix was applied, then fixed one-by-one.",
+        "Codex review ran as a background task and produced a structured verdict with unresolved thread IDs that could be fetched separately.",
+        "Spec synchronization is a mandatory step after behavior changes — anatomy rows, transition tables, and trigger doc comments all needed updating.",
+        "Coverage baseline was captured before writing tests to confirm no regression after fixes."
+      ]
+    },
+    "friction": [
+      "Locating the correct insertion points in tests.rs required multiple Read + Bash grep passes before each Edit — the test file is large enough that blind insertion would have misplaced tests.",
+      "The C2 fix required multiple Read/Edit iterations on mod.rs to get the state-conditional close logic correct."
+    ],
+    "open_items": []
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T05:55:37.329795Z",
+    "agent_lines": 128,
+    "agent_removed": 16,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 128,
+    "total_lines_changed": 144,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}

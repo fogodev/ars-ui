@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bgz6kbco1</task-id>
+<tool-use-id>toolu_01BcNiNMoWzZQxswwXCT3NVZ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-290/09cc549d-4ad5-4de7-9321-dca94bacfc94/tasks/bgz6kbco1.output</output-file>
+<status>completed</status>
+<summary>Background command "Background poll for Codex verdict" completed (exit code 0)</summary>
+</task-notification>

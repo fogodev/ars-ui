@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "7b9b0314764e",
+  "strategy": "manual-commit",
+  "branch": "impl-290",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/date_time/date_range_picker/mod.rs",
+    "crates/ars-components/src/date_time/date_range_picker/tests.rs",
+    "spec/components/date-time/date-range-picker.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/7b/9b0314764e/0/metadata.json",
+      "transcript": "/7b/9b0314764e/0/full.jsonl",
+      "content_hash": "/7b/9b0314764e/0/content_hash.txt",
+      "prompt": "/7b/9b0314764e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 3692,
+    "cache_creation_tokens": 25665,
+    "cache_read_tokens": 15239928,
+    "output_tokens": 16035,
+    "api_call_count": 32
+  }
+}
