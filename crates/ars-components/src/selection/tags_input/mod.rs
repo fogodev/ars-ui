@@ -20,8 +20,9 @@ use alloc::{
 use core::fmt::{self, Debug, Display};
 
 use ars_core::{
-    AriaAttr, AttrMap, Bindable, ComponentIds, ComponentMessages, ComponentPart, ConnectApi, Env,
-    HtmlAttr, KeyboardKey, Locale, MessageFn, PendingEffect, TransitionPlan,
+    AriaAttr, AttrMap, Bindable, Callback, ComponentIds, ComponentMessages, ComponentPart,
+    ConnectApi, Env, HtmlAttr, KeyboardKey, Locale, MessageFn, PendingEffect, TransitionPlan,
+    no_cleanup,
 };
 use ars_interactions::KeyboardEventData;
 
@@ -117,11 +118,22 @@ pub enum Event {
     /// Navigate focus to the next tag (or back to the input).
     FocusNextTag,
 
+    /// Deselect any focused tag and return focus to the input.
+    DeselectTags,
+
     /// IME composition started (CJK, etc.).
     CompositionStart,
 
     /// IME composition ended.
     CompositionEnd,
+
+    /// Synchronize the controlled value from a parent prop change. `None`
+    /// switches the binding to uncontrolled mode.
+    SetValue(Option<Vec<String>>),
+
+    /// Re-synchronize output-affecting props (disabled/readonly/invalid/max/…)
+    /// into `Context` after a parent prop change.
+    SetProps,
 }
 
 /// What happens to pending input text when `TagsInput` loses focus.
@@ -176,6 +188,10 @@ pub struct Context {
 
     /// The maximum number of tags, if limited.
     pub max: Option<usize>,
+
+    /// Maximum character length per tag, if limited. Enforced on add and on
+    /// inline-edit commit, and surfaced as `maxlength` on the input elements.
+    pub max_length: Option<usize>,
 
     /// The delimiter used for paste-splitting and delimiter-on-type detection.
     pub delimiter: String,
@@ -257,6 +273,10 @@ pub struct Props {
 
     /// What happens to pending input text when the component loses focus.
     pub blur_behavior: BlurBehavior,
+
+    /// Callback fired with the new tag list whenever it changes. Controlled
+    /// consumers use this to round-trip the value back through [`value`](Self::value).
+    pub on_value_change: Option<Callback<dyn Fn(Vec<String>) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -278,6 +298,7 @@ impl Default for Props {
             placeholder: None,
             editable: false,
             blur_behavior: BlurBehavior::Add,
+            on_value_change: None,
         }
     }
 }
@@ -407,6 +428,23 @@ impl Props {
         self.blur_behavior = value;
         self
     }
+
+    /// Sets [`on_value_change`](Self::on_value_change).
+    #[must_use]
+    pub fn on_value_change(
+        mut self,
+        callback: impl Into<Callback<dyn Fn(Vec<String>) + Send + Sync>>,
+    ) -> Self {
+        self.on_value_change = Some(callback.into());
+        self
+    }
+
+    /// Clears [`on_value_change`](Self::on_value_change).
+    #[must_use]
+    pub fn no_value_change(mut self) -> Self {
+        self.on_value_change = None;
+        self
+    }
 }
 
 /// The localizable messages for the `TagsInput` component.
@@ -475,6 +513,9 @@ pub enum Effect {
     /// Adapter surfaces [`Context::live_message`] in the live region so assistive
     /// technology announces it.
     Announce,
+
+    /// Adapter invokes `Props::on_value_change` with the new tag list.
+    ValueChange,
 }
 
 /// The anatomy parts exposed by the `TagsInput` connect API.
@@ -564,6 +605,7 @@ impl ars_core::Machine for Machine {
             readonly: props.readonly,
             invalid: props.invalid,
             max: props.max,
+            max_length: props.max_length,
             delimiter: props.delimiter.clone(),
             add_on_paste: props.add_on_paste,
             allow_duplicates: props.allow_duplicates,
@@ -576,6 +618,25 @@ impl ars_core::Machine for Machine {
         };
 
         (State::Idle, context)
+    }
+
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(
+            old.id, new.id,
+            "tags_input::Props.id must remain stable after init"
+        );
+
+        let mut events = Vec::new();
+
+        if old.value != new.value {
+            events.push(Event::SetValue(new.value.clone()));
+        }
+
+        if props_output_changed(old, new) {
+            events.push(Event::SetProps);
+        }
+
+        events
     }
 
     fn transition(
@@ -593,7 +654,11 @@ impl ars_core::Machine for Machine {
                 | Event::EditTag { .. }
                 | Event::CommitEdit { .. }
                 | Event::ClearAll
-                | Event::Paste(_) => return None,
+                | Event::Paste(_)
+                // `InputChange` is a mutating path too: delimiter-on-type appends
+                // tags and a non-empty input feeds the blur-add. A disabled or
+                // read-only input accepts no text changes, so reject it outright.
+                | Event::InputChange(_) => return None,
                 _ => {}
             }
         }
@@ -627,21 +692,19 @@ impl ars_core::Machine for Machine {
             Event::AddTag(tag) => add_tag_plan(ctx, tag),
 
             Event::RemoveTag(value) => {
-                let removed_index = ctx.value.get().iter().position(|tag| tag == value);
+                // Remove the first occurrence by index, so that with duplicates
+                // allowed only one chip is removed (matching index-based deletion).
+                let index = ctx.value.get().iter().position(|tag| tag == value)?;
 
-                remove_plan(ctx, removed_index, value)
+                remove_plan(ctx, index)
             }
 
             Event::RemoveTagAtIndex(index) => {
-                let tags = ctx.value.get();
-
-                if *index >= tags.len() {
+                if *index >= ctx.value.get().len() {
                     return None;
                 }
 
-                let value = tags[*index].clone();
-
-                remove_plan(ctx, Some(*index), &value)
+                remove_plan(ctx, *index)
             }
 
             Event::EditTag { index } => {
@@ -669,6 +732,7 @@ impl ars_core::Machine for Machine {
                 let index = *index;
                 let trimmed = value.trim().to_string();
                 let allow_duplicates = ctx.allow_duplicates;
+                let max_length = ctx.max_length;
                 Some(
                     TransitionPlan::to(State::Focused)
                         .apply(move |ctx: &mut Context| {
@@ -684,7 +748,9 @@ impl ars_core::Machine for Machine {
                                             .enumerate()
                                             .any(|(other, tag)| other != index && tag == &trimmed);
 
-                                    if !is_duplicate {
+                                    // Reject duplicates and over-length edits: keep the
+                                    // original tag rather than committing an invalid value.
+                                    if !is_duplicate && !exceeds_max_length(max_length, &trimmed) {
                                         tags[index] = trimmed;
                                     }
                                 }
@@ -695,7 +761,8 @@ impl ars_core::Machine for Machine {
                             ctx.editing_tag = None;
                             ctx.editing_draft.clear();
                         })
-                        .with_effect(PendingEffect::named(Effect::FocusInput)),
+                        .with_effect(PendingEffect::named(Effect::FocusInput))
+                        .with_effect(value_change_effect()),
                 )
             }
 
@@ -740,39 +807,49 @@ impl ars_core::Machine for Machine {
                 let input_trimmed = ctx.input_value.trim().to_string();
 
                 let can_add = ctx.blur_behavior == BlurBehavior::Add
+                    && !ctx.disabled
+                    && !ctx.readonly
                     && !input_trimmed.is_empty()
                     && ctx.max.is_none_or(|max| ctx.value.get().len() < max)
                     && (ctx.allow_duplicates || !ctx.value.get().contains(&input_trimmed));
 
                 let tag_to_add = can_add.then_some(input_trimmed);
+                let adds_tag = tag_to_add.is_some();
 
-                Some(
-                    TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
-                        if let Some(tag) = tag_to_add {
-                            let mut tags = ctx.value.get().clone();
+                let mut plan = TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
+                    if let Some(tag) = tag_to_add {
+                        let mut tags = ctx.value.get().clone();
 
-                            tags.push(tag);
+                        tags.push(tag);
 
-                            ctx.value.set(tags);
-                        }
+                        ctx.value.set(tags);
+                    }
 
-                        ctx.input_value.clear();
-                        ctx.focused = false;
-                        ctx.focus_visible = false;
-                        ctx.focused_tag = None;
-                    }),
-                )
+                    ctx.input_value.clear();
+                    ctx.focused = false;
+                    ctx.focus_visible = false;
+                    ctx.focused_tag = None;
+                });
+
+                if adds_tag {
+                    plan = plan.with_effect(value_change_effect());
+                }
+
+                Some(plan)
             }
 
             Event::InputChange(value) => input_change_plan(state, ctx, value),
 
             Event::Paste(text) => paste_plan(ctx, text),
 
-            Event::ClearAll => Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                ctx.value.set(Vec::new());
-                ctx.input_value.clear();
-                ctx.focused_tag = None;
-            })),
+            Event::ClearAll => Some(
+                TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.value.set(Vec::new());
+                    ctx.input_value.clear();
+                    ctx.focused_tag = None;
+                })
+                .with_effect(value_change_effect()),
+            ),
 
             Event::FocusPrevTag => {
                 let len = ctx.value.get().len();
@@ -827,6 +904,41 @@ impl ars_core::Machine for Machine {
             Event::CompositionEnd => Some(TransitionPlan::context_only(|ctx: &mut Context| {
                 ctx.is_composing = false;
             })),
+
+            Event::DeselectTags => Some(
+                TransitionPlan::context_only(|ctx: &mut Context| {
+                    ctx.focused_tag = None;
+                })
+                .with_effect(PendingEffect::named(Effect::FocusInput)),
+            ),
+
+            Event::SetValue(value) => {
+                let value = value.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    if let Some(value) = value {
+                        ctx.value.set(value.clone());
+                        ctx.value.sync_controlled(Some(value));
+                    } else {
+                        ctx.value.sync_controlled(None);
+                    }
+                }))
+            }
+
+            Event::SetProps => {
+                let props = props.clone();
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.disabled = props.disabled;
+                    ctx.readonly = props.readonly;
+                    ctx.invalid = props.invalid;
+                    ctx.max = props.max;
+                    ctx.max_length = props.max_length;
+                    ctx.delimiter = props.delimiter;
+                    ctx.add_on_paste = props.add_on_paste;
+                    ctx.allow_duplicates = props.allow_duplicates;
+                    ctx.blur_behavior = props.blur_behavior;
+                    ctx.name = props.name;
+                }))
+            }
         }
     }
 
@@ -868,37 +980,45 @@ fn add_tag_plan(ctx: &Context, tag: &str) -> Option<TransitionPlan<Machine>> {
         return None;
     }
 
-    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-        let mut tags = ctx.value.get().clone();
+    if exceeds_max_length(ctx.max_length, &trimmed) {
+        return None;
+    }
 
-        tags.push(trimmed);
+    Some(
+        TransitionPlan::context_only(move |ctx: &mut Context| {
+            let mut tags = ctx.value.get().clone();
 
-        ctx.value.set(tags);
-        ctx.input_value.clear();
-        ctx.focused_tag = None;
-    }))
+            tags.push(trimmed);
+
+            ctx.value.set(tags);
+            ctx.input_value.clear();
+            ctx.focused_tag = None;
+        })
+        .with_effect(value_change_effect()),
+    )
 }
 
-/// Builds the plan for removing the tag `value` (first found at `removed_index`),
-/// updating focus and emitting the removal announcement.
-fn remove_plan(
-    ctx: &Context,
-    removed_index: Option<usize>,
-    value: &str,
-) -> Option<TransitionPlan<Machine>> {
-    let removed_index = removed_index?;
+/// Returns `true` when `max_length` is set and `value` exceeds it (counted in
+/// Unicode scalar values, matching the browser `maxlength` semantics closely
+/// enough for tag entry).
+fn exceeds_max_length(max_length: Option<usize>, value: &str) -> bool {
+    max_length.is_some_and(|limit| value.chars().count() > limit)
+}
 
-    let new_tags = ctx
-        .value
-        .get()
-        .iter()
-        .filter(|tag| tag.as_str() != value)
-        .cloned()
-        .collect::<Vec<_>>();
+/// Builds the plan for removing exactly the tag at `index`, updating focus and
+/// emitting the removal announcement. Removing by index (rather than filtering by
+/// value) ensures that with duplicates allowed only the targeted chip is removed.
+fn remove_plan(ctx: &Context, index: usize) -> Option<TransitionPlan<Machine>> {
+    let current = ctx.value.get();
+
+    let value = current.get(index)?.clone();
+
+    let mut new_tags = current.clone();
+    new_tags.remove(index);
 
     let will_be_empty = new_tags.is_empty();
 
-    let announcement = (ctx.messages.removed_announcement)(value, &ctx.locale);
+    let announcement = (ctx.messages.removed_announcement)(&value, &ctx.locale);
 
     let focus_effect = if will_be_empty {
         Effect::FocusInput
@@ -908,14 +1028,15 @@ fn remove_plan(
 
     Some(
         TransitionPlan::context_only(move |ctx: &mut Context| {
-            let focused_tag = (!new_tags.is_empty()).then(|| removed_index.min(new_tags.len() - 1));
+            let focused_tag = (!new_tags.is_empty()).then(|| index.min(new_tags.len() - 1));
 
             ctx.value.set(new_tags);
             ctx.focused_tag = focused_tag;
             ctx.live_message = announcement;
         })
         .with_effect(PendingEffect::named(focus_effect))
-        .with_effect(PendingEffect::named(Effect::Announce)),
+        .with_effect(PendingEffect::named(Effect::Announce))
+        .with_effect(value_change_effect()),
     )
 }
 
@@ -946,22 +1067,25 @@ fn input_change_plan(state: &State, ctx: &Context, value: &str) -> Option<Transi
 
     let value = value.to_string();
 
-    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-        let mut segments = value.split(delimiter.as_str()).collect::<Vec<_>>();
+    Some(
+        TransitionPlan::context_only(move |ctx: &mut Context| {
+            let mut segments = value.split(delimiter.as_str()).collect::<Vec<_>>();
 
-        // The final segment is the trailing remainder still being typed.
-        let remainder = segments.pop().unwrap_or("").to_string();
+            // The final segment is the trailing remainder still being typed.
+            let remainder = segments.pop().unwrap_or("").to_string();
 
-        let mut tags = ctx.value.get().clone();
+            let mut tags = ctx.value.get().clone();
 
-        for segment in segments {
-            push_if_allowed(ctx, &mut tags, segment);
-        }
+            for segment in segments {
+                push_if_allowed(ctx, &mut tags, segment);
+            }
 
-        ctx.value.set(tags);
-        ctx.input_value = remainder;
-        ctx.focused_tag = None;
-    }))
+            ctx.value.set(tags);
+            ctx.input_value = remainder;
+            ctx.focused_tag = None;
+        })
+        .with_effect(value_change_effect()),
+    )
 }
 
 /// Builds the plan for an [`Event::Paste`].
@@ -977,24 +1101,27 @@ fn paste_plan(ctx: &Context, text: &str) -> Option<TransitionPlan<Machine>> {
     let delimiter = ctx.delimiter.clone();
     let text = text.to_string();
 
-    Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-        let mut tags = ctx.value.get().clone();
+    Some(
+        TransitionPlan::context_only(move |ctx: &mut Context| {
+            let mut tags = ctx.value.get().clone();
 
-        if delimiter.is_empty() {
-            push_if_allowed(ctx, &mut tags, &text);
-        } else {
-            for segment in text.split(delimiter.as_str()) {
-                push_if_allowed(ctx, &mut tags, segment);
+            if delimiter.is_empty() {
+                push_if_allowed(ctx, &mut tags, &text);
+            } else {
+                for segment in text.split(delimiter.as_str()) {
+                    push_if_allowed(ctx, &mut tags, segment);
+                }
             }
-        }
 
-        ctx.value.set(tags);
-        ctx.input_value.clear();
-    }))
+            ctx.value.set(tags);
+            ctx.input_value.clear();
+        })
+        .with_effect(value_change_effect()),
+    )
 }
 
 /// Pushes the trimmed `segment` onto `tags` when it is non-empty and respects the
-/// max-tags and duplicate constraints in `ctx`.
+/// max-tags, duplicate, and per-tag length constraints in `ctx`.
 fn push_if_allowed(ctx: &Context, tags: &mut Vec<String>, segment: &str) {
     let candidate = segment.trim();
 
@@ -1006,9 +1133,42 @@ fn push_if_allowed(ctx: &Context, tags: &mut Vec<String>, segment: &str) {
 
     let unique = ctx.allow_duplicates || !tags.iter().any(|tag| tag == candidate);
 
-    if under_max && unique {
+    if under_max && unique && !exceeds_max_length(ctx.max_length, candidate) {
         tags.push(candidate.to_string());
     }
+}
+
+/// The effect that invokes `Props::on_value_change` with the just-committed tag
+/// list. Reads `Context::value` at effect-run time (post-apply), so it reports
+/// the new value even in controlled mode where `get()` still returns the parent's.
+fn value_change_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(
+        Effect::ValueChange,
+        |ctx: &Context, props: &Props, _send| {
+            if let Some(callback) = &props.on_value_change {
+                callback(ctx.value.pending().clone());
+            }
+
+            no_cleanup()
+        },
+    )
+}
+
+/// Returns `true` when a `Context`-cached prop changed and the context must be
+/// re-synchronized via [`Event::SetProps`]. Props the connect API reads live each
+/// render (`placeholder`, `required`, `editable`) are deliberately excluded — they
+/// never go stale, so they need no resync.
+fn props_output_changed(old: &Props, new: &Props) -> bool {
+    old.disabled != new.disabled
+        || old.readonly != new.readonly
+        || old.invalid != new.invalid
+        || old.max != new.max
+        || old.max_length != new.max_length
+        || old.delimiter != new.delimiter
+        || old.add_on_paste != new.add_on_paste
+        || old.allow_duplicates != new.allow_duplicates
+        || old.blur_behavior != new.blur_behavior
+        || old.name != new.name
 }
 
 /// The connect API for the `TagsInput` component.
@@ -1214,6 +1374,10 @@ impl Api<'_> {
             .set(HtmlAttr::Id, self.ctx.ids.item("tag-edit-input", &index))
             .set(HtmlAttr::Type, "text");
 
+        if let Some(max_length) = self.ctx.max_length {
+            attrs.set(HtmlAttr::MaxLength, max_length.to_string());
+        }
+
         let is_editing = self.ctx.editing_tag == Some(index);
 
         if is_editing {
@@ -1312,9 +1476,10 @@ impl Api<'_> {
             attrs.set_bool(HtmlAttr::Disabled, true);
         }
 
-        if self.props.required {
-            attrs.set_bool(HtmlAttr::Required, true);
-        }
+        // NOTE: `required` is intentionally NOT set here. `<input type="hidden">`
+        // is excluded from browser constraint validation, so `required` on it is a
+        // no-op (per MDN). Required-ness is surfaced as `aria-required` on the
+        // visible input and enforced at the form layer (see spec §5).
 
         attrs
             .set(HtmlAttr::TabIndex, "-1")
@@ -1385,8 +1550,16 @@ impl Api<'_> {
     }
 
     /// Handle a keydown on the input element.
-    pub fn on_input_keydown(&self, data: &KeyboardEventData) {
-        if self.ctx.is_composing {
+    ///
+    /// `caret_at_start` reports whether the text caret sits at position 0 with no
+    /// selection. Caret reads are adapter-resolved (the agnostic core cannot query
+    /// the live DOM selection), so the adapter passes this in; it gates `ArrowLeft`
+    /// navigation back into the tag list per the spec's keyboard table.
+    pub fn on_input_keydown(&self, data: &KeyboardEventData, caret_at_start: bool) {
+        // Suppress character-driven actions while composing — check both the stored
+        // context flag and the event's own flag, since an Enter keydown can arrive
+        // mid-composition before the composition-start event updates the context.
+        if self.ctx.is_composing || data.is_composing {
             return;
         }
 
@@ -1397,8 +1570,17 @@ impl Api<'_> {
                 }
             }
 
-            KeyboardKey::Backspace | KeyboardKey::ArrowLeft => {
+            // Backspace deletes back into the tags only when there is nothing left
+            // to delete in the input.
+            KeyboardKey::Backspace => {
                 if self.ctx.input_value.is_empty() {
+                    (self.send)(Event::FocusPrevTag);
+                }
+            }
+
+            // ArrowLeft navigates into the tag list when the caret is at the start.
+            KeyboardKey::ArrowLeft => {
+                if caret_at_start {
                     (self.send)(Event::FocusPrevTag);
                 }
             }
@@ -1420,9 +1602,11 @@ impl Api<'_> {
 
             KeyboardKey::ArrowLeft => (self.send)(Event::FocusPrevTag),
 
-            // ArrowRight moves to the next tag/input; Escape deselects to the input
-            // (both reduce to `FocusNextTag`, which returns to the input past the last tag).
-            KeyboardKey::ArrowRight | KeyboardKey::Escape => (self.send)(Event::FocusNextTag),
+            KeyboardKey::ArrowRight => (self.send)(Event::FocusNextTag),
+
+            // Escape deselects the tag list and returns focus to the input,
+            // regardless of which tag is focused.
+            KeyboardKey::Escape => (self.send)(Event::DeselectTags),
 
             KeyboardKey::Enter if self.props.editable => {
                 (self.send)(Event::EditTag { index });
@@ -1432,9 +1616,12 @@ impl Api<'_> {
         }
     }
 
-    /// Handle a click on a tag's delete trigger.
-    pub fn on_tag_delete(&self, value: String) {
-        (self.send)(Event::RemoveTag(value));
+    /// Handle a click on a tag's delete trigger at `index`.
+    ///
+    /// Removes by index (not by value) so that, with duplicates allowed, clicking
+    /// one chip removes only that chip — matching keyboard deletion.
+    pub fn on_tag_delete(&self, index: usize) {
+        (self.send)(Event::RemoveTagAtIndex(index));
     }
 
     /// Handle a double-click on a tag (enter edit mode when editable).
@@ -1452,7 +1639,10 @@ impl Api<'_> {
     /// Handle a keydown on an inline-edit input at `index`.
     pub fn on_tag_edit_keydown(&self, index: usize, data: &KeyboardEventData) {
         match data.key {
-            KeyboardKey::Enter => (self.send)(Event::CommitEdit {
+            // Enter and Tab both commit the edit (Tab additionally lets the browser
+            // move focus onward); committing first avoids losing the draft to the
+            // `EditingTag` blur, which discards it.
+            KeyboardKey::Enter | KeyboardKey::Tab => (self.send)(Event::CommitEdit {
                 index,
                 value: self.ctx.editing_draft.clone(),
             }),
@@ -1605,7 +1795,7 @@ mod tests {
         drop(service.send(Event::InputChange("apple".to_string())));
 
         dispatch(&mut service, |api| {
-            api.on_input_keydown(&key(KeyboardKey::Enter));
+            api.on_input_keydown(&key(KeyboardKey::Enter), true);
         });
 
         assert_eq!(tags_of(&service), vec!["apple"]);
@@ -1619,7 +1809,7 @@ mod tests {
         drop(service.send(Event::InputChange("   ".to_string())));
 
         dispatch(&mut service, |api| {
-            api.on_input_keydown(&key(KeyboardKey::Enter));
+            api.on_input_keydown(&key(KeyboardKey::Enter), true);
         });
 
         assert!(tags_of(&service).is_empty());
@@ -1660,7 +1850,7 @@ mod tests {
     fn remove_tag_by_value_via_delete_button() {
         let mut service = with_tags(&["a", "b", "c"]);
 
-        dispatch(&mut service, |api| api.on_tag_delete("b".to_string()));
+        dispatch(&mut service, |api| api.on_tag_delete(1));
 
         assert_eq!(tags_of(&service), vec!["a", "c"]);
     }
@@ -1730,7 +1920,7 @@ mod tests {
         drop(service.send(Event::Focus { is_keyboard: true }));
 
         dispatch(&mut service, |api| {
-            api.on_input_keydown(&key(KeyboardKey::Backspace));
+            api.on_input_keydown(&key(KeyboardKey::Backspace), true);
         });
 
         assert_eq!(service.context().focused_tag, Some(1));
@@ -1743,7 +1933,7 @@ mod tests {
         drop(service.send(Event::InputChange("typing".to_string())));
 
         dispatch(&mut service, |api| {
-            api.on_input_keydown(&key(KeyboardKey::Backspace));
+            api.on_input_keydown(&key(KeyboardKey::Backspace), false);
         });
 
         assert_eq!(service.context().focused_tag, None);
@@ -2100,7 +2290,7 @@ mod tests {
         drop(service.send(Event::CompositionStart));
 
         dispatch(&mut service, |api| {
-            api.on_input_keydown(&key(KeyboardKey::Enter));
+            api.on_input_keydown(&key(KeyboardKey::Enter), true);
         });
 
         assert!(tags_of(&service).is_empty());
@@ -2184,7 +2374,9 @@ mod tests {
         assert_eq!(attrs.get(&HtmlAttr::Type), Some("hidden"));
         assert_eq!(attrs.get(&HtmlAttr::Name), Some("tags-field"));
         assert_eq!(attrs.get(&HtmlAttr::Value), Some("a,b"));
-        assert_eq!(attrs.get(&HtmlAttr::Required), Some("true"));
+        // `required` is never set on the hidden input — it is excluded from browser
+        // constraint validation.
+        assert!(attrs.get(&HtmlAttr::Required).is_none());
     }
 
     #[test]
@@ -2607,7 +2799,7 @@ mod tests {
         let mut service = with_tags(&["a", "b"]);
         // ArrowLeft on empty input focuses the previous tag.
         dispatch(&mut service, |api| {
-            api.on_input_keydown(&key(KeyboardKey::ArrowLeft));
+            api.on_input_keydown(&key(KeyboardKey::ArrowLeft), true);
         });
 
         assert_eq!(service.context().focused_tag, Some(1));
@@ -2617,14 +2809,14 @@ mod tests {
         drop(service.send(Event::InputChange("draft".to_string())));
 
         dispatch(&mut service, |api| {
-            api.on_input_keydown(&key(KeyboardKey::Escape));
+            api.on_input_keydown(&key(KeyboardKey::Escape), true);
         });
 
         assert_eq!(service.context().input_value, "");
 
         // An unhandled key is a no-op.
         dispatch(&mut service, |api| {
-            api.on_input_keydown(&key(KeyboardKey::ArrowUp));
+            api.on_input_keydown(&key(KeyboardKey::ArrowUp), true);
         });
     }
 
@@ -3096,5 +3288,352 @@ mod tests {
         drop(service.send(Event::Paste("a,b,c,d".to_string())));
 
         assert_eq!(tags_of(&service), vec!["a", "b"]);
+    }
+
+    // — Codex review pass: controlled value, prop sync, and keyboard fixes —
+
+    use alloc::sync::Arc;
+
+    use ars_core::{StrongSend, callback};
+
+    fn run_effects(service: &Service<Machine>, result: ars_core::SendResult<Machine>) {
+        let send: StrongSend<Event> = Arc::new(|_| {});
+        for effect in result.pending_effects {
+            drop(effect.run(service.context(), service.props(), Arc::clone(&send)));
+        }
+    }
+
+    #[test]
+    fn on_value_change_fires_with_new_list_including_controlled() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let props = service(props().value(vec!["a".to_string()]).on_value_change({
+            let log = Arc::clone(&log);
+            callback(move |value: Vec<String>| log.lock().expect("lock").push(value))
+        }));
+        let mut service = props;
+
+        let result = service.send(Event::AddTag("b".to_string()));
+        // Controlled `get()` still returns the parent value until round-tripped.
+        assert_eq!(tags_of(&service), vec!["a"]);
+        run_effects(&service, result);
+
+        assert_eq!(
+            log.lock().expect("lock").as_slice(),
+            &[vec!["a".to_string(), "b".to_string()]]
+        );
+    }
+
+    #[test]
+    fn on_value_change_fires_on_remove_and_clear() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut service = service(
+            props()
+                .default_value(vec!["a".to_string(), "b".to_string()])
+                .on_value_change({
+                    let log = Arc::clone(&log);
+                    callback(move |value: Vec<String>| log.lock().expect("lock").push(value))
+                }),
+        );
+
+        let removed = service.send(Event::RemoveTagAtIndex(0));
+        run_effects(&service, removed);
+        let cleared = service.send(Event::ClearAll);
+        run_effects(&service, cleared);
+
+        assert_eq!(
+            log.lock().expect("lock").as_slice(),
+            &[vec!["b".to_string()], Vec::<String>::new()]
+        );
+    }
+
+    #[test]
+    fn on_props_changed_syncs_controlled_value() {
+        let old = props().value(vec!["a".to_string()]);
+        let new = props().value(vec!["a".to_string(), "b".to_string()]);
+
+        let events = <Machine as ars_core::Machine>::on_props_changed(&old, &new);
+
+        assert_eq!(
+            events,
+            vec![Event::SetValue(Some(vec![
+                "a".to_string(),
+                "b".to_string()
+            ]))]
+        );
+    }
+
+    #[test]
+    fn set_value_syncs_controlled_then_uncontrolled() {
+        let mut service = service(props().value(vec!["a".to_string()]));
+
+        drop(service.send(Event::SetValue(Some(vec![
+            "x".to_string(),
+            "y".to_string(),
+        ]))));
+        assert_eq!(tags_of(&service), vec!["x", "y"]);
+
+        drop(service.send(Event::SetValue(None)));
+        // Now uncontrolled: reads the staged internal value.
+        assert_eq!(tags_of(&service), vec!["x", "y"]);
+        assert!(!service.context().value.is_controlled());
+    }
+
+    #[test]
+    fn on_props_changed_emits_set_props_for_output_fields() {
+        let old = props();
+        let new = props().disabled(true).max(3);
+
+        let events = <Machine as ars_core::Machine>::on_props_changed(&old, &new);
+
+        assert!(events.contains(&Event::SetProps));
+    }
+
+    #[test]
+    fn set_props_resyncs_output_fields_after_mount() {
+        let mut service = service(props().default_value(vec!["a".to_string()]));
+        assert!(!service.context().disabled);
+        assert_eq!(service.context().max, None);
+
+        // A parent toggling props after mount drives `on_props_changed` → SetProps,
+        // which re-synchronizes the cached context fields.
+        drop(
+            service.set_props(
+                props()
+                    .default_value(vec!["a".to_string()])
+                    .disabled(true)
+                    .max(3),
+            ),
+        );
+
+        assert!(service.context().disabled);
+        assert_eq!(service.context().max, Some(3));
+    }
+
+    #[test]
+    fn set_props_round_trips_controlled_value() {
+        let mut service = service(props().value(vec!["a".to_string()]));
+
+        drop(service.set_props(props().value(vec!["a".to_string(), "b".to_string()])));
+
+        assert_eq!(tags_of(&service), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn delete_trigger_removes_only_clicked_duplicate() {
+        let mut service = service(props().allow_duplicates(true).default_value(vec![
+            "a".to_string(),
+            "a".to_string(),
+            "b".to_string(),
+        ]));
+
+        dispatch(&mut service, |api| api.on_tag_delete(0));
+
+        // Only the clicked chip is removed, not every "a".
+        assert_eq!(tags_of(&service), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn escape_on_non_last_tag_returns_to_input() {
+        let mut service = with_tags(&["a", "b"]);
+        drop(service.send(Event::FocusPrevTag)); // -> Some(1)
+        drop(service.send(Event::FocusPrevTag)); // -> Some(0)
+        assert_eq!(service.context().focused_tag, Some(0));
+
+        let result = api_send(&mut service, |api| {
+            api.on_tag_keydown(0, &key(KeyboardKey::Escape));
+        });
+
+        assert_eq!(service.context().focused_tag, None);
+        assert!(result.contains(&Effect::FocusInput));
+    }
+
+    #[test]
+    fn tab_commits_inline_edit() {
+        let mut service = service(
+            props()
+                .editable(true)
+                .default_value(vec!["apple".to_string()]),
+        );
+        drop(service.send(Event::EditTag { index: 0 }));
+        drop(service.send(Event::InputChange("apricot".to_string())));
+
+        dispatch(&mut service, |api| {
+            api.on_tag_edit_keydown(0, &key(KeyboardKey::Tab));
+        });
+
+        assert_eq!(tags_of(&service), vec!["apricot"]);
+        assert_eq!(service.state(), &State::Focused);
+    }
+
+    #[test]
+    fn arrow_left_with_caret_at_start_focuses_last_tag_even_with_text() {
+        let mut service = with_tags(&["a", "b"]);
+        drop(service.send(Event::InputChange("typed".to_string())));
+
+        // Caret at start with non-empty text → navigate into the tags.
+        dispatch(&mut service, |api| {
+            api.on_input_keydown(&key(KeyboardKey::ArrowLeft), true);
+        });
+
+        assert_eq!(service.context().focused_tag, Some(1));
+    }
+
+    #[test]
+    fn arrow_left_without_caret_at_start_does_not_navigate() {
+        let mut service = with_tags(&["a", "b"]);
+        drop(service.send(Event::InputChange("typed".to_string())));
+
+        dispatch(&mut service, |api| {
+            api.on_input_keydown(&key(KeyboardKey::ArrowLeft), false);
+        });
+
+        assert_eq!(service.context().focused_tag, None);
+    }
+
+    #[test]
+    fn enter_suppressed_when_event_is_composing() {
+        let mut service = service(props());
+        drop(service.send(Event::InputChange("apple".to_string())));
+
+        let composing = KeyboardEventData {
+            is_composing: true,
+            ..key(KeyboardKey::Enter)
+        };
+        dispatch(&mut service, |api| {
+            api.on_input_keydown(&composing, true);
+        });
+
+        // Event-level composing flag suppresses the add even though context isn't composing.
+        assert!(tags_of(&service).is_empty());
+    }
+
+    #[test]
+    fn max_length_blocks_overlong_add() {
+        let mut service = service(props().max_length(3));
+
+        drop(service.send(Event::AddTag("abcd".to_string())));
+
+        assert!(tags_of(&service).is_empty());
+    }
+
+    #[test]
+    fn max_length_blocks_overlong_inline_edit() {
+        let mut service = service(
+            props()
+                .editable(true)
+                .max_length(3)
+                .default_value(vec!["ab".to_string()]),
+        );
+        drop(service.send(Event::EditTag { index: 0 }));
+
+        drop(service.send(Event::CommitEdit {
+            index: 0,
+            value: "abcdef".to_string(),
+        }));
+
+        // Over-length edit is rejected; the original tag stays.
+        assert_eq!(tags_of(&service), vec!["ab"]);
+    }
+
+    #[test]
+    fn max_length_attr_on_inline_edit_input() {
+        let mut service = service(
+            props()
+                .editable(true)
+                .max_length(5)
+                .default_value(vec!["a".to_string()]),
+        );
+        drop(service.send(Event::EditTag { index: 0 }));
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.tag_edit_attrs(0).get(&HtmlAttr::MaxLength), Some("5"));
+    }
+
+    #[test]
+    fn max_length_blocks_overlong_paste_segment() {
+        let mut service = service(props().max_length(3));
+
+        drop(service.send(Event::Paste("ok,toolong".to_string())));
+
+        assert_eq!(tags_of(&service), vec!["ok"]);
+    }
+
+    /// Captures the effects emitted by an `Api` interaction (without re-applying events).
+    fn api_send(service: &mut Service<Machine>, run: impl FnOnce(&Api<'_>)) -> Vec<Effect> {
+        let captured = RefCell::new(Vec::new());
+        {
+            let send = |event| captured.borrow_mut().push(event);
+            let api = service.connect(&send);
+            run(&api);
+        }
+        let mut effects = Vec::new();
+        for event in captured.into_inner() {
+            effects.extend(service.send(event).pending_effects.iter().map(|e| e.name));
+        }
+        effects
+    }
+
+    #[test]
+    fn props_output_changed_detects_each_cached_field() {
+        let base = props();
+        assert!(!props_output_changed(&base, &base.clone()));
+        assert!(props_output_changed(&base, &base.clone().disabled(true)));
+        assert!(props_output_changed(&base, &base.clone().readonly(true)));
+        assert!(props_output_changed(&base, &base.clone().invalid(true)));
+        assert!(props_output_changed(&base, &base.clone().max(2)));
+        assert!(props_output_changed(&base, &base.clone().max_length(2)));
+        assert!(props_output_changed(&base, &base.clone().delimiter(";")));
+        assert!(props_output_changed(
+            &base,
+            &base.clone().add_on_paste(false)
+        ));
+        assert!(props_output_changed(
+            &base,
+            &base.clone().allow_duplicates(true)
+        ));
+        assert!(props_output_changed(
+            &base,
+            &base.clone().blur_behavior(BlurBehavior::Clear)
+        ));
+        assert!(props_output_changed(&base, &base.clone().name("field")));
+        // Props read live each render do NOT force a resync.
+        assert!(!props_output_changed(
+            &base,
+            &base.clone().placeholder("hint")
+        ));
+        assert!(!props_output_changed(&base, &base.clone().required(true)));
+        assert!(!props_output_changed(&base, &base.clone().editable(true)));
+    }
+
+    #[test]
+    fn value_change_effect_without_callback_is_noop() {
+        let mut service = service(props().default_value(vec!["a".to_string()]));
+
+        let result = service.send(Event::AddTag("b".to_string()));
+        run_effects(&service, result); // on_value_change is None → the effect no-ops.
+
+        assert_eq!(tags_of(&service), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn blur_does_not_add_when_disabled_after_typing() {
+        let mut service = service(props());
+        drop(service.send(Event::InputChange("pending".to_string())));
+
+        drop(service.set_props(props().disabled(true)));
+        drop(service.send(Event::Blur));
+
+        assert!(tags_of(&service).is_empty());
+    }
+
+    #[test]
+    fn blur_does_not_add_when_readonly_after_typing() {
+        let mut service = service(props());
+        drop(service.send(Event::InputChange("pending".to_string())));
+
+        drop(service.set_props(props().readonly(true)));
+        drop(service.send(Event::Blur));
+
+        assert!(tags_of(&service).is_empty());
     }
 }

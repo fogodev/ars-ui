@@ -1081,6 +1081,7 @@ fn arb_tags_input_event() -> impl Strategy<Value = tags_input::Event> {
         Just(tags_input::Event::ClearAll),
         Just(tags_input::Event::FocusPrevTag),
         Just(tags_input::Event::FocusNextTag),
+        Just(tags_input::Event::DeselectTags),
         Just(tags_input::Event::CompositionStart),
         Just(tags_input::Event::CompositionEnd),
     ]
