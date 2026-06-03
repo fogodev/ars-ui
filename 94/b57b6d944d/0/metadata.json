@@ -1,0 +1,80 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "94b57b6d944d",
+  "session_id": "019e8b3e-5b1f-7c23-82f5-c27c08733024",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T06:12:25.579241Z",
+  "branch": "codex/data-display-agnostic-audit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".crap-baseline.json"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "4017d45fe89e",
+  "checkpoint_transcript_start": 1576,
+  "transcript_lines_at_start": 1576,
+  "token_usage": {
+    "input_tokens": 208238,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 6402560,
+    "output_tokens": 9165,
+    "api_call_count": 49
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Complete a PR (#713) adding a TagGroup component by addressing Codex review comments, getting CI green, and obtaining final approval.",
+    "outcome": "All Codex review threads were resolved and approval obtained; Coverage CI job was unblocked by refreshing the stale .crap-baseline.json using the CI's own lcov.info artifact after normalizing runner paths.",
+    "learnings": {
+      "repo": [
+        "The repo uses a CRAP regression gate (cargo xtask ci crap / cargo xcrap --update-baseline) that compares against a committed .crap-baseline.json; when main advances with new code, the baseline drifts and the gate fails on unrelated functions.",
+        "CI uploads a 'coverage-lcov' artifact containing lcov.info with absolute runner paths (/home/runner/work/ars-ui/ars-ui/); these must be rewritten to repo-relative paths (SF:./) before running local baseline tools.",
+        "The Coverage CI job failing while Codecov itself shows green is a signal of a CRAP threshold/baseline failure, not a coverage percentage regression.",
+        "The project uses cargo xtask for CI tasks (e.g., cargo xtask ci crap) and xcrap subcommand for baseline management.",
+        "Spec documentation for components lives in spec/components/data-display/<component>.md alongside the implementation."
+      ],
+      "code": [
+        {
+          "path": ".crap-baseline.json",
+          "finding": "Must be refreshed whenever main advances with new code that adds functions; stale baseline causes broad false CRAP regressions on the PR's merge-ref CI run."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/tag_group/mod.rs",
+          "finding": "TagGroup component implementation; was subject to a Codex stale-focus review thread that was resolved by a targeted fix and push."
+        }
+      ],
+      "workflow": [
+        "When a Coverage CI job fails with broad CRAP regressions spanning unrelated functions, the first diagnostic step is to compare the PR's merge-base against origin/main to detect baseline drift rather than assuming a code regression.",
+        "The CI lcov artifact can be downloaded via GitHub Actions API (gh api repos/.../actions/jobs/.../logs and _download_workflow_artifact), extracted, path-normalized with perl -pi -e, and used to regenerate the baseline locally.",
+        "Polling CI with 'gh pr checks <number>' on sleep intervals (120s–360s) is the fallback when no event-driven notification is available; interval should grow as remaining jobs are the known-slow ones.",
+        "Reply to and resolve Codex/review threads explicitly after each fix push to keep the review state clean; use _reply_to_review_comment + _resolve_review_thread + _add_comment_to_issue to trigger a new Codex pass."
+      ]
+    },
+    "friction": [
+      "Coverage CI job failed with misleading broad CRAP regressions caused by baseline drift from main advancing, not any change in the PR itself — required significant investigation to distinguish from a real regression.",
+      "CI lcov artifact uses absolute runner paths that break local CRAP tooling; required a perl path-rewrite step that is not documented in any visible repo tooling.",
+      "GitHub API log fetch hit a transient network error mid-session, requiring a retry.",
+      "Long CI polling loop with manual sleep intervals (up to 360s) due to lack of event-driven CI notification; several polling cycles returned no new information.",
+      "The 20k-line Coverage job log required targeted rg/sed extraction rather than direct reading."
+    ],
+    "open_items": [
+      "No automated process exists to keep .crap-baseline.json in sync when main advances; teams must manually refresh it when CRAP fails on merge-ref CI — worth adding a bot or CI step to auto-update the baseline on main merges.",
+      "The lcov path-normalization step (runner paths → local paths) is undocumented and manual; could be wrapped in the xcrap tooling or a repo script.",
+      "Release Verification CI job status was not confirmed green in the transcript — final PR merge readiness depends on that job completing successfully."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T06:11:58.505041Z",
+    "agent_lines": 18226,
+    "agent_removed": 10458,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 18226,
+    "total_lines_changed": 28684,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
