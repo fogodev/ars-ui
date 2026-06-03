@@ -97,7 +97,9 @@ proptest! {
 
                 let item = ctx.items.get(focused).expect("focused key is present");
 
-                prop_assert!(!item.value.as_ref().expect("tag value").disabled);
+                if !ctx.disabled {
+                    prop_assert!(!item.value.as_ref().expect("tag value").disabled);
+                }
             }
 
             for key in ctx.selected_keys.get() {
