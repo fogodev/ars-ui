@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>b03gg2i6h</task-id>
+<tool-use-id>toolu_01HTahoFrsXh2VVB4aYZ4Vo7</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-295/5dc90dba-b6c5-414c-a88d-4524396ab2be/tasks/b03gg2i6h.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex for next-pass verdict" completed (exit code 0)</summary>
+</task-notification>
