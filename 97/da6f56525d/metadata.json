@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "97da6f56525d",
+  "strategy": "manual-commit",
+  "branch": "codex/data-display-agnostic-audit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/data_display/tag_group/mod.rs",
+    "spec/components/data-display/tag-group.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/97/da6f56525d/0/metadata.json",
+      "transcript": "/97/da6f56525d/0/full.jsonl",
+      "content_hash": "/97/da6f56525d/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 20831,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1860864,
+    "output_tokens": 3840,
+    "api_call_count": 22
+  }
+}
