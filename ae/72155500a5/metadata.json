@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "ae72155500a5",
+  "strategy": "manual-commit",
+  "branch": "impl-278",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/layout/carousel/mod.rs",
+    "spec/components/layout/carousel.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ae/72155500a5/0/metadata.json",
+      "transcript": "/ae/72155500a5/0/full.jsonl",
+      "content_hash": "/ae/72155500a5/0/content_hash.txt",
+      "prompt": "/ae/72155500a5/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 6944,
+    "cache_creation_tokens": 819975,
+    "cache_read_tokens": 38005126,
+    "output_tokens": 25404,
+    "api_call_count": 47
+  }
+}

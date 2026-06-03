@@ -1,0 +1,94 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "ae72155500a5",
+  "session_id": "11232391-c5e3-4f6c-9dfc-75ed12f9e103",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T23:04:13.657466Z",
+  "branch": "impl-278",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/layout/carousel/mod.rs",
+    "spec/components/layout/carousel.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "7170664f401f",
+  "checkpoint_transcript_start": 2186,
+  "transcript_lines_at_start": 2186,
+  "token_usage": {
+    "input_tokens": 6944,
+    "cache_creation_tokens": 819975,
+    "cache_read_tokens": 38005126,
+    "output_tokens": 25404,
+    "api_call_count": 47
+  },
+  "session_metrics": {
+    "turn_count": 9
+  },
+  "summary": {
+    "intent": "Implement pass-8 review findings for the carousel component, fixing four correctness issues around state machine transitions, drag guards, keyboard navigation, and focus-based pause behavior.",
+    "outcome": "All four findings implemented and tested: auto-play timer re-armed on TransitionEnd, drag blocked during Transitioning state, End key mapped to max_start_index(), and FocusEnter event added to pause on control focus. 143 tests pass, clippy clean, spec synced, committed and pushed.",
+    "learnings": {
+      "repo": [
+        "Carousel lives in crates/ars-components/src/layout/carousel/mod.rs and has a companion spec at spec/components/layout/carousel.md that must be kept in sync with every implementation change.",
+        "The project uses a custom CI shortcut `cargo xci-fast` as the final gate before commit/push.",
+        "The carousel uses an explicit state machine with named states (AutoPlaying, Transitioning, etc.) and named events (FocusSlide, FocusEnter, PointerDown, PointerUp, TransitionEnd, etc.).",
+        "Codex is used as an async code-review oracle; results arrive via task notifications and are fetched in numbered 'passes' (pass-8 here).",
+        "Spec changes mirror implementation: event variants, transition arms, and handler prose all have corresponding spec sections (§1.2 events, transition table, §3.3 focus prose)."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "TransitionEnd must re-arm the auto-play timer; a swipe leaves it cancelled so this was previously a silent bug."
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "PointerDown must be guarded to block drag initiation while in the Transitioning state to prevent overlapping animations."
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "PointerUp needs a defensive guard against triggering navigation when state is Transitioning, not just PointerDown."
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "End key must jump to max_start_index() rather than the last slide index to correctly handle multi-visible-slide carousels."
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "FocusEnter event variant added alongside on_root_focus_in/on_root_focus_out handlers, placed near on_root_pointer_enter for consistency. Pauses auto-play when any control (not just slides) receives focus."
+        }
+      ],
+      "workflow": [
+        "Initial test written for PointerUp-during-transition was bogus and had to be rewritten; the correct approach constructs the scenario via PointerDown (drag recording) followed by GoToSlide to enter Transitioning.",
+        "Spec sync is a non-trivial step: events, transition arms, handler definitions, and prose sections (e.g. §3.3) each need independent updates.",
+        "Six new tests were added for pass-8 findings, bringing the total from 137 to 143."
+      ]
+    },
+    "friction": [
+      "First attempt at the pointer_up_during_transition test was incorrect and required a rewrite to properly construct the Transitioning state scenario.",
+      "Spec sync required multiple targeted reads and edits across different sections (events, transition table, handlers, prose) with no single-pass update path."
+    ],
+    "open_items": []
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T23:03:53.551008Z",
+    "agent_lines": 0,
+    "agent_removed": 5149,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 0,
+    "total_lines_changed": 5149,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
