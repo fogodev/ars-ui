@@ -1,0 +1,92 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "81be93d6609e",
+  "session_id": "11232391-c5e3-4f6c-9dfc-75ed12f9e103",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T22:00:54.122432Z",
+  "branch": "impl-278",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/layout/carousel/mod.rs",
+    "spec/components/layout/carousel.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "76e399cc15b9",
+  "checkpoint_transcript_start": 1632,
+  "transcript_lines_at_start": 1632,
+  "token_usage": {
+    "input_tokens": 8608,
+    "cache_creation_tokens": 708758,
+    "cache_read_tokens": 57177992,
+    "output_tokens": 45576,
+    "api_call_count": 83
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "summary": {
+    "intent": "Implement pass-6 code review findings for the carousel component, primarily refactoring the single `auto_play_paused` boolean into three independent pause-source flags (manual, hover, focus) and applying several smaller fixes.",
+    "outcome": "All five pass-6 findings implemented: pause-source refactor (R3), index clamping via `clamp_index` (R1), drag-tick no-op (R2), `on_viewport_pointercancel` handler (R4), and `type=\"button\"` on all button parts (R5). 133 tests pass, clippy clean, snapshots regenerated, spec synced, xci-fast green, committed and pushed.",
+    "learnings": {
+      "repo": [
+        "The pause state uses `HtmlAttr::Type` with value `\"button\"` — same convention as dialog and toggle_button components.",
+        "Index clamping in GoToSlide and FocusSlide must go through `clamp_index` rather than raw arithmetic to correctly respect loop-wrapping semantics.",
+        "The three pause sources (manual, hover, focus) are independent: a hover-exit must not resume a manual pause or a still-active focus pause; Blur only clears the focus-pause source.",
+        "Snapshot tests needed regeneration after adding `type=\"button\"` attributes to button parts.",
+        "`is_auto_play_paused` helper must be `const fn` to satisfy clippy.",
+        "The spec in `spec/components/layout/carousel.md` must be kept in sync with implementation changes — it covers Context fields, init, all transition/connect sites, and the anatomy table."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "finding": "Replaced single `auto_play_paused: bool` field with three source flags (`auto_play_paused_manual`, `auto_play_paused_hover`, `auto_play_paused_focus`) and added a `const fn is_auto_play_paused()` helper that ORs them."
+        },
+        {
+          "path": "crates/ars-components/src/layout/carousel/mod.rs",
+          "line": 781,
+          "finding": "TransitionEnd site updated to clear only the manual pause source rather than the bare boolean."
+        },
+        {
+          "path": "spec/components/layout/carousel.md",
+          "finding": "Spec anatomy table rows for trigger and indicator parts updated to document `type=\"button\"`; all Context, init, transition, and connect sections updated to match the three-source pause model."
+        }
+      ],
+      "workflow": [
+        "Large mechanical refactors (field rename across many call sites) were done with targeted `sed` substitutions via Bash rather than manual edits, then verified with a grep for any remaining bare references.",
+        "Existing test `blur_resumes_when_paused` was asserting old (buggy) behavior; it had to be rewritten to test the correct focus-source-specific resume semantics rather than just deleted.",
+        "New overlap-coverage tests were added specifically for R3 to guard the multi-source independence invariant (hover-exit must not resume manual or active-focus pauses).",
+        "The workflow of: implement → test → clippy → regenerate snapshots → spec sync → xci-fast → commit/push/re-label was used as the standard pass-completion sequence."
+      ]
+    },
+    "friction": [
+      "Multiple rounds of reading the same file regions were needed because edits shifted line numbers, requiring re-reads before each subsequent edit.",
+      "The `blur_resumes_when_paused` test encoded the old buggy behavior, so it silently passed against wrong logic and had to be identified and corrected as part of the refactor.",
+      "Batch `sed` substitutions for read-sites required careful escaping and verification that no bare `auto_play_paused` references remained afterward."
+    ],
+    "open_items": [
+      "No open items noted — all five pass-6 findings were fully implemented, tested, spec-synced, and landed."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T22:00:30.299993Z",
+    "agent_lines": 0,
+    "agent_removed": 4753,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 0,
+    "total_lines_changed": 5061,
+    "agent_percentage": 93.91424619640387,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
