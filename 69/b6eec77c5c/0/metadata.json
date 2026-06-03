@@ -1,0 +1,112 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "69b6eec77c5c",
+  "session_id": "a871f55b-7ea2-4d36-b632-0ffe300f0fca",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T16:10:10.67274Z",
+  "branch": "impl-242",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/selection/tags_input/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "spec/components/selection/tags-input.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "810133d22938",
+  "checkpoint_transcript_start": 813,
+  "transcript_lines_at_start": 813,
+  "token_usage": {
+    "input_tokens": 9564,
+    "cache_creation_tokens": 660436,
+    "cache_read_tokens": 58269818,
+    "output_tokens": 81837,
+    "api_call_count": 120
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Address 10 Codex code review findings on the `tags_input` component, implementing fixes with TDD, syncing the spec, and passing CI gates before pushing.",
+    "outcome": "All 10 findings resolved with 128 passing tests, 90.1% branch coverage, spec updated and validated, clippy clean, and the full xci-fast gate passed before commit and push.",
+    "learnings": {
+      "repo": [
+        "The established controlled-value convention uses on_props_changed/SetValue/SetProps events plus an on_value_change callback prop — mirroring the text_field implementation exactly.",
+        "Effects run with post-send context, so pending() reads the post-apply state and is safe and testable inside effect handlers.",
+        "Service::set_props(props) is the API for triggering prop resync in end-to-end tests.",
+        "The ars-components coverage gate enforces ≥90% on both line and branch coverage for production code.",
+        "on_props_changed is a trait method and must be fully qualified when called in test code.",
+        "SetValue/SetProps are parent-trusted syncs that legitimately bypass dedup invariants — they belong in explicit unit tests, not the proptest invariant generator.",
+        "Spec code blocks (§1.6/§1.7) are regenerated from source; prose sections (events, props, form behavior) are updated manually."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "line": 810,
+          "end_line": 811,
+          "finding": "Blur's disabled/readonly short-circuit branches were uncovered — needed targeted tests to reach the 90% branch gate."
+        },
+        {
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "line": 1148,
+          "end_line": 1148,
+          "finding": "value_change_effect None arm was an uncovered production branch requiring an explicit test."
+        },
+        {
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "line": 1163,
+          "end_line": 1170,
+          "finding": "props_output_changed per-field operands were uncovered branches — needed targeted prop-sync tests."
+        },
+        {
+          "path": "crates/ars-components/src/input/text_field/mod.rs",
+          "finding": "Canonical reference for the on_props_changed/SetValue/SetProps/on_value_change controlled-value machinery pattern used across input components."
+        }
+      ],
+      "workflow": [
+        "TDD caught two real implementation bugs that were not in the original review: remove_plan removed by value (all duplicates) instead of by index, and the Tab arm was missing from on_tag_edit_keydown.",
+        "Draft per-thread PR reply messages before the CI gate finishes so they can be posted immediately after the push.",
+        "When branch coverage drops below the gate threshold after adding features, identify uncovered branches with a targeted grep before writing tests rather than guessing."
+      ]
+    },
+    "friction": [
+      "Branch coverage fell just under 90% after the initial 10-fix implementation, requiring a second round of targeted branch tests before the gate passed.",
+      "on_props_changed test calls failed to compile because the method requires trait qualification — not obvious from the production call sites.",
+      "Two TDD test failures revealed real bugs (index-based removal and missing Tab arm) that required additional debugging and refactoring passes before tests could pass.",
+      "Three clippy warnings needed cleanup after the main implementation was complete."
+    ],
+    "open_items": [
+      "Codex re-review pending — @codex review was queued to be triggered after the push with inline thread replies.",
+      "Caret-at-start parameter design (#6) was confirmed with the user as an agnostic-layer constraint; the exact API shape may need revisiting if the agnostic layer evolves.",
+      "SetValue/SetProps coverage is handled only via explicit unit tests; proptest generator intentionally excludes these parent-trusted syncs."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T16:09:30.831491Z",
+    "agent_lines": 1071,
+    "agent_removed": 246,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1071,
+    "total_lines_changed": 1323,
+    "agent_percentage": 99.54648526077098,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1071,
+      "agent_lines_removed": 252
+    }
+  ]
+}

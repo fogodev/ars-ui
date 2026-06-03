@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>b7vlgdjeo</task-id>
+<tool-use-id>toolu_01K8WY4QP2QMfsW3x7zt4gb4</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-242/a871f55b-7ea2-4d36-b632-0ffe300f0fca/tasks/b7vlgdjeo.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex review until terminal state" completed (exit code 0)</summary>
+</task-notification>
