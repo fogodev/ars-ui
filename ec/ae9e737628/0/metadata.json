@@ -1,0 +1,113 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "ecae9e737628",
+  "session_id": "a871f55b-7ea2-4d36-b632-0ffe300f0fca",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T17:25:18.660139Z",
+  "branch": "impl-242",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/selection/tags_input/mod.rs",
+    "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_hidden_input_disabled.snap",
+    "spec/components/selection/tags-input.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "f20a63a619df",
+  "checkpoint_transcript_start": 1580,
+  "transcript_lines_at_start": 1580,
+  "token_usage": {
+    "input_tokens": 4980,
+    "cache_creation_tokens": 723560,
+    "cache_read_tokens": 29767377,
+    "output_tokens": 31529,
+    "api_call_count": 45
+  },
+  "session_metrics": {
+    "turn_count": 9
+  },
+  "summary": {
+    "intent": "Apply 6 Codex pass-3 review findings to the tags_input component, fixing bugs around editable re-check, no-op ValueChange events, controlled input accumulation, Auto direction resolution, blank commit behavior, and hidden input name attribute.",
+    "outcome": "All 6 fixes implemented and verified: 150 tests pass, clippy clean, proptest green, 97.56% line coverage, all 10 xci-fast gates pass. Changes committed and pushed; Codex pass-4 re-trigger queued.",
+    "learnings": {
+      "repo": [
+        "set_props can change the `editable` prop on a tag mid-edit (live toggle), so editable must be re-checked at CommitEdit time, not just at edit-start.",
+        "Blank commits should be rejected (no delete) — blank input on CommitEdit is a no-op, not a tag removal.",
+        "Controlled input accumulation must be built from pending() rather than from previous state snapshots.",
+        "Auto direction can be resolved via Locale::is_rtl() from context, which is cleaner than the adapter round-trip used by the tabs component.",
+        "Hidden input name attribute should be omitted entirely when unset, not rendered as an empty attribute.",
+        "Delimiter-split and paste paths should emit ValueChange only when an actual value change occurs (conditional, not unconditional).",
+        "The project uses `Env { locale, ..Env::default() }` with `Locale::parse(\"ar\")` to construct an RTL environment in tests.",
+        "Coverage gate threshold is 90.1%; actual coverage in this component was 97.56% line with 0 uncovered production branches.",
+        "The spec lives at spec/components/selection/tags-input.md and must be kept in sync with source — §1.5, §1.6, §1.7, and §4 RTL sections were all updated.",
+        "The project gate command is `cargo xci-fast` with 10 sub-gates."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "finding": "CommitEdit arm now re-checks editable prop, rejects blank input as a no-op (no remove), and uses pending() for controlled accumulation."
+        },
+        {
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "finding": "is_toward_prev helper updated to resolve Auto direction via Locale::is_rtl() from the ambient Env context."
+        },
+        {
+          "path": "crates/ars-components/src/selection/tags_input/mod.rs",
+          "finding": "input_change_plan and paste_plan now gate ValueChange emission on an actual value difference."
+        },
+        {
+          "path": "crates/ars-components/src/selection/tags_input/snapshots/ars_components__selection__tags_input__tests__snapshot_hidden_input_disabled.snap",
+          "finding": "Snapshot updated to reflect removal of empty Name attribute from hidden input when name prop is unset."
+        },
+        {
+          "path": "spec/components/selection/tags-input.md",
+          "finding": "§1.5 CommitEdit row updated to document blank-rejection and editable-toggle behavior; §4 RTL section updated with Auto-resolution note."
+        }
+      ],
+      "workflow": [
+        "Codex review is run in numbered passes (pass 3, pass 4); each pass produces findings that are addressed, then Codex is re-triggered for the next pass.",
+        "The workflow is: implement fixes → run tests → update snapshots → add TDD tests for new behaviors → check coverage → run full gate → commit/push → reply to review threads → resolve → re-trigger Codex.",
+        "Background tasks (gate runs) are tracked via task-notifications, allowing other preparation work (capturing thread reply targets, reading spec) to proceed concurrently.",
+        "Snapshot tests are used for HTML/DOM output verification; behavior changes require both updating assertion tests and re-accepting snapshots.",
+        "New TDD tests were added for all 6 pass-3 fixes alongside the implementation."
+      ]
+    },
+    "friction": [
+      "Codex pass-3 findings #1 and #5 contradicted earlier implementation assumptions (editable can change live; blank commits should not delete), requiring re-work of the CommitEdit arm.",
+      "Multiple Read calls were needed to locate the exact line ranges for the Blur and CommitEdit arms before editing, suggesting the file is large and navigation is non-trivial.",
+      "The Auto direction resolution required investigating two different APIs (tabs adapter pattern vs Locale::is_rtl()) before choosing the right approach."
+    ],
+    "open_items": [
+      "Codex pass-4 review has been triggered but not yet completed — further findings may require additional fixes.",
+      "Commit, push, thread replies, and resolve actions were queued but not shown as completed in this transcript segment."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T17:24:51.253269Z",
+    "agent_lines": 330,
+    "agent_removed": 189,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 330,
+    "total_lines_changed": 519,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 330,
+      "agent_lines_removed": 189
+    }
+  ]
+}
