@@ -279,11 +279,31 @@ impl Context {
         *self.index.get()
     }
 
+    /// Number of slide slots occupied by the viewport at once, rounding a
+    /// fractional [`slides_per_view`](Self::slides_per_view) up so a partially
+    /// visible trailing slide still counts as on-screen. Always at least `1`.
+    #[must_use]
+    pub fn visible_count(&self) -> usize {
+        (self.slides_per_view.ceil() as usize).max(1)
+    }
+
+    /// Largest valid starting index for non-looping navigation.
+    ///
+    /// With `slides_per_view > 1` the last page is flush to the end
+    /// (contain-scroll): the final starting index is
+    /// `slide_count - visible_count`, so the trailing slide is fully shown
+    /// instead of leaving a partial/blank page past the boundary.
+    #[must_use]
+    pub fn last_index(&self) -> usize {
+        self.slide_count.get().saturating_sub(self.visible_count())
+    }
+
     /// Clamp or wrap an index according to `loop_nav`.
     ///
     /// When `loop_nav` is `true`, out-of-range indices wrap around modulo the
-    /// slide count; otherwise they are clamped to the `[0, slide_count - 1]`
-    /// range.
+    /// slide count; otherwise they are clamped to the `[0, last_index]` range
+    /// (see [`last_index`](Self::last_index), which accounts for
+    /// `slides_per_view`).
     #[must_use]
     pub fn clamp_index(&self, i: isize) -> usize {
         let n = self.slide_count.get() as isize;
@@ -291,7 +311,7 @@ impl Context {
         if self.loop_nav {
             ((i % n) + n) as usize % self.slide_count.get()
         } else {
-            (i.max(0) as usize).min(self.slide_count.get().saturating_sub(1))
+            (i.max(0) as usize).min(self.last_index())
         }
     }
 
@@ -302,9 +322,31 @@ impl Context {
     }
 
     /// Whether the carousel can navigate to a next slide.
+    ///
+    /// For `slides_per_view > 1` the boundary is the last full page
+    /// ([`last_index`](Self::last_index)), so `Next` disables once the final
+    /// slide is already in view rather than allowing a partial page.
     #[must_use]
     pub fn can_go_next(&self) -> bool {
-        self.loop_nav || self.current_index() + 1 < self.slide_count.get()
+        self.loop_nav || self.current_index() < self.last_index()
+    }
+
+    /// Whether `index` is within the currently visible window of
+    /// `visible_count` slides starting at `current_index` (wrapping when
+    /// `loop_nav` is set). Slides outside the window are hidden from
+    /// assistive technology.
+    #[must_use]
+    pub fn is_slide_visible(&self, index: usize) -> bool {
+        let current = self.current_index();
+        let count = self.slide_count.get();
+        (0..self.visible_count()).any(|offset| {
+            let slot = if self.loop_nav {
+                (current + offset) % count
+            } else {
+                current + offset
+            };
+            slot == index
+        })
     }
 
     /// CSS translate percentage for the slide track, given the live viewport
@@ -469,6 +511,29 @@ impl ComponentMessages for Messages {}
 #[derive(Debug)]
 pub struct Machine;
 
+/// Build the transition for a manual navigation to `idx`: enter
+/// [`State::Transitioning`] and set the index, and — when
+/// `stop_on_interaction` is configured — permanently stop auto-play and
+/// cancel its timer. The cancellation is essential: without it the adapter's
+/// recurring interval keeps running after rotation has "stopped", leaking the
+/// timer and dispatching ignored [`Event::AutoPlayTick`]s forever.
+fn navigate_to(ctx: &Context, idx: usize) -> TransitionPlan<Machine> {
+    let stop = ctx
+        .auto_play
+        .as_ref()
+        .is_some_and(|o| o.stop_on_interaction);
+    let mut plan = TransitionPlan::to(State::Transitioning).apply(move |ctx: &mut Context| {
+        ctx.index.set(idx);
+        if stop {
+            ctx.auto_play_stopped = true;
+        }
+    });
+    if stop {
+        plan = plan.cancel_effect(Effect::AutoPlayTimer);
+    }
+    plan
+}
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
@@ -489,7 +554,13 @@ impl ars_core::Machine for Machine {
             State::Idle
         };
 
-        let initial_index = props.default_index.unwrap_or(0);
+        // Clamp the uncontrolled default to the last valid starting index so
+        // `current_index < slide_count` holds from the very first render (a
+        // bad `default_index` would otherwise yield "Slide 100 of 3" with no
+        // item marked current). Accounts for `slides_per_view`.
+        let visible_count = (props.slides_per_view.unwrap_or(1.0).ceil() as usize).max(1);
+        let max_index = props.slide_count.get().saturating_sub(visible_count);
+        let initial_index = props.default_index.unwrap_or(0).min(max_index);
 
         let ctx = Context {
             index: props
@@ -552,14 +623,12 @@ impl ars_core::Machine for Machine {
                 }
 
                 // A direct jump never wraps; clamp out-of-range targets to the
-                // last slide so `current_index` can never exceed the slide
-                // count (every connect method relies on that invariant).
-                let idx = (*index).min(ctx.slide_count.get() - 1);
-                Some(
-                    TransitionPlan::to(State::Transitioning).apply(move |ctx: &mut Context| {
-                        ctx.index.set(idx);
-                    }),
-                )
+                // last valid starting index so `current_index` can never
+                // exceed the boundary (every connect method relies on that
+                // invariant). A direct jump is a manual interaction, so it
+                // honours `stop_on_interaction` like Next/Prev.
+                let idx = (*index).min(ctx.last_index());
+                Some(navigate_to(ctx, idx))
             }
 
             Event::GoToNext => {
@@ -568,23 +637,8 @@ impl ars_core::Machine for Machine {
                 }
 
                 let step = ctx.slides_per_move as isize;
-
                 let next = ctx.clamp_index(ctx.current_index() as isize + step);
-
-                let stop = ctx
-                    .auto_play
-                    .as_ref()
-                    .is_some_and(|o| o.stop_on_interaction);
-
-                Some(
-                    TransitionPlan::to(State::Transitioning).apply(move |ctx: &mut Context| {
-                        ctx.index.set(next);
-
-                        if stop {
-                            ctx.auto_play_stopped = true;
-                        }
-                    }),
-                )
+                Some(navigate_to(ctx, next))
             }
 
             Event::GoToPrev => {
@@ -593,23 +647,8 @@ impl ars_core::Machine for Machine {
                 }
 
                 let step = ctx.slides_per_move as isize;
-
                 let prev = ctx.clamp_index(ctx.current_index() as isize - step);
-
-                let stop = ctx
-                    .auto_play
-                    .as_ref()
-                    .is_some_and(|o| o.stop_on_interaction);
-
-                Some(
-                    TransitionPlan::to(State::Transitioning).apply(move |ctx: &mut Context| {
-                        ctx.index.set(prev);
-
-                        if stop {
-                            ctx.auto_play_stopped = true;
-                        }
-                    }),
-                )
+                Some(navigate_to(ctx, prev))
             }
 
             Event::TransitionEnd => {
@@ -671,15 +710,18 @@ impl ars_core::Machine for Machine {
             }
 
             Event::AutoPlayResume => {
-                if ctx.auto_play_stopped {
-                    return None;
-                }
-
+                // Resume is also the "restart" path the auto-play trigger
+                // dispatches when rotation was permanently stopped (the
+                // trigger shows the "Start" label and sends `AutoPlayResume`),
+                // so it clears BOTH the paused and the stopped flags. Without
+                // clearing `auto_play_stopped`, a stopped carousel's start
+                // control would be inert with no way to resume rotation.
                 if ctx.auto_play.is_some() {
                     return Some(
                         TransitionPlan::to(State::AutoPlaying)
                             .apply(|ctx: &mut Context| {
                                 ctx.auto_play_paused = false;
+                                ctx.auto_play_stopped = false;
                             })
                             .with_effect(PendingEffect::named(Effect::AutoPlayTimer)),
                     );
@@ -743,18 +785,51 @@ impl ars_core::Machine for Machine {
                     None
                 };
 
-                Some(
-                    TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
-                        ctx.drag_start_pos = None;
-                        ctx.drag_delta = 0.0;
-                        ctx.swipe_velocity = 0.0;
-                        ctx.drag_last_timestamp = None;
+                // `PointerDown` cancelled the auto-play timer for the duration
+                // of the drag. Resolve rotation now the gesture ended:
+                //  - a navigating swipe with `stop_on_interaction` permanently
+                //    stops it (mark stopped; the timer stays cancelled);
+                //  - otherwise, if rotation was still active (not stopped, not
+                //    focus/hover-paused), re-arm the timer so it resumes —
+                //    without this a swipe silently kills rotation, or leaves
+                //    the state reporting "playing" with no timer running.
+                let navigated = next_idx.is_some();
+                let stop_on_interaction = ctx
+                    .auto_play
+                    .as_ref()
+                    .is_some_and(|o| o.stop_on_interaction);
+                let mark_stopped = navigated && stop_on_interaction;
+                let resume = ctx.auto_play.is_some()
+                    && !mark_stopped
+                    && !ctx.auto_play_stopped
+                    && !ctx.auto_play_paused;
 
-                        if let Some(idx) = next_idx {
-                            ctx.index.set(idx);
-                        }
-                    }),
-                )
+                let target = if resume {
+                    State::AutoPlaying
+                } else {
+                    State::Idle
+                };
+
+                let mut plan = TransitionPlan::to(target).apply(move |ctx: &mut Context| {
+                    ctx.drag_start_pos = None;
+                    ctx.drag_delta = 0.0;
+                    ctx.swipe_velocity = 0.0;
+                    ctx.drag_last_timestamp = None;
+
+                    if let Some(idx) = next_idx {
+                        ctx.index.set(idx);
+                    }
+
+                    if mark_stopped {
+                        ctx.auto_play_stopped = true;
+                    }
+                });
+
+                if resume {
+                    plan = plan.with_effect(PendingEffect::named(Effect::AutoPlayTimer));
+                }
+
+                Some(plan)
             }
 
             Event::PointerCancel => Some(TransitionPlan::context_only(|ctx: &mut Context| {
@@ -765,20 +840,36 @@ impl ars_core::Machine for Machine {
             })),
 
             Event::FocusSlide { index } => {
-                // Defensive: focus is always reported for a real slide, but
-                // clamp anyway so an out-of-range index can never desync
-                // `current_index` past the slide count.
-                let idx = (*index).min(ctx.slide_count.get() - 1);
+                // Clamp to the last valid starting index: a focused slide is a
+                // real slide, but focusing one already inside the visible
+                // window must not push `current_index` past the boundary.
+                let idx = (*index).min(ctx.last_index());
                 let current = ctx.current_index();
                 let should_pause = ctx.auto_play.as_ref().is_some_and(|o| o.pause_on_focus);
+
+                if should_pause {
+                    // Pausing on focus mirrors `AutoPlayPause`: leave
+                    // `AutoPlaying` and cancel the timer so slides do not keep
+                    // advancing under keyboard focus.
+                    let plan = if *state == State::AutoPlaying {
+                        TransitionPlan::to(State::Idle)
+                    } else {
+                        TransitionPlan::new()
+                    };
+                    return Some(
+                        plan.apply(move |ctx: &mut Context| {
+                            if idx != current {
+                                ctx.index.set(idx);
+                            }
+                            ctx.auto_play_paused = true;
+                        })
+                        .cancel_effect(Effect::AutoPlayTimer),
+                    );
+                }
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     if idx != current {
                         ctx.index.set(idx);
-                    }
-
-                    if should_pause {
-                        ctx.auto_play_paused = true;
                     }
                 }))
             }
@@ -952,7 +1043,13 @@ impl Api<'_> {
 
         attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
-        let live = if self.ctx.auto_play_stopped || self.ctx.auto_play.is_none() {
+        // "off" only while rotation is actively advancing; once auto-play is
+        // absent, permanently stopped, OR temporarily paused (hover/focus),
+        // manual slide changes must be announced politely.
+        let live = if self.ctx.auto_play.is_none()
+            || self.ctx.auto_play_stopped
+            || self.ctx.auto_play_paused
+        {
             "polite"
         } else {
             "off"
@@ -972,7 +1069,11 @@ impl Api<'_> {
         attrs.set(scope_attr, scope_val).set(part_attr, part_val);
 
         let is_current = index == self.ctx.current_index();
-        let is_hidden = !is_current;
+        // With `slides_per_view > 1` several slides are on-screen at once; only
+        // slides outside the visible window are hidden from assistive tech and
+        // `inert`. Marking a visible slide hidden would make on-screen content
+        // unreachable to screen-reader and keyboard users.
+        let is_hidden = !self.ctx.is_slide_visible(index);
 
         attrs
             .set(HtmlAttr::Role, "group")
@@ -1171,7 +1272,7 @@ impl Api<'_> {
             KeyboardKey::Home => (self.send)(Event::GoToSlide { index: 0 }),
 
             KeyboardKey::End => (self.send)(Event::GoToSlide {
-                index: self.ctx.slide_count.get().saturating_sub(1),
+                index: self.ctx.last_index(),
             }),
 
             _ => {}
@@ -1390,14 +1491,14 @@ mod tests {
     #[test]
     fn transition_end_returns_to_autoplaying_when_active() {
         let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
 
-        drop(service.send(Event::GoToSlide { index: 1 }));
-
+        // An auto-play tick advances without stopping rotation, so settling
+        // the transition returns to AutoPlaying.
+        drop(service.send(Event::AutoPlayTick));
         assert_eq!(service.state(), &State::Transitioning);
 
-        // GoToSlide does not set stop_on_interaction, so auto-play resumes.
         settle(&mut service);
-
         assert_eq!(service.state(), &State::AutoPlaying);
     }
 
@@ -1679,15 +1780,20 @@ mod tests {
     }
 
     #[test]
-    fn autoplay_resume_noop_when_stopped() {
+    fn autoplay_resume_restarts_stopped_carousel() {
         let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
 
         drop(service.send(Event::AutoPlayStop));
+        assert!(service.context().auto_play_stopped);
 
+        // Resume is the restart path: it clears the stopped flag, returns to
+        // AutoPlaying, and re-arms the timer.
         let result = service.send(Event::AutoPlayResume);
-
-        assert!(!result.state_changed);
+        assert_eq!(service.state(), &State::AutoPlaying);
+        assert!(!service.context().auto_play_stopped);
         assert!(!service.context().auto_play_paused);
+        assert_eq!(pending_effect_names(&result), vec![Effect::AutoPlayTimer]);
     }
 
     #[test]
@@ -2179,6 +2285,21 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_item_visible_not_current_multi_view() {
+        // slides_per_view = 2, index 0: slide 1 is on-screen but not the
+        // leading slide — visible (no aria-hidden/inert) yet ars-active=false.
+        let service = service(Props {
+            slides_per_view: Some(2.0),
+            ..props(3)
+        });
+
+        assert_snapshot!(
+            "item_visible_not_current_multi_view",
+            snapshot_attrs(&service.connect(&|_| {}).item_attrs(1))
+        );
+    }
+
+    #[test]
     fn snapshot_prev_trigger_disabled_at_start() {
         let service = service(props(3));
 
@@ -2414,5 +2535,220 @@ mod tests {
 
         assert!(!service.context().auto_play_paused);
         assert!(result.pending_effects.is_empty());
+    }
+
+    // ── Codex review #716: autoplay timer lifecycle ──────────────────
+
+    #[test]
+    fn manual_next_with_stop_on_interaction_cancels_timer() {
+        let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
+        let result = service.send(Event::GoToNext);
+        assert!(service.context().auto_play_stopped);
+        assert_eq!(result.cancel_effects, vec![Effect::AutoPlayTimer]);
+        // Once stopped, settling the transition rests in Idle (no leaked timer).
+        settle(&mut service);
+        assert_eq!(service.state(), &State::Idle);
+    }
+
+    #[test]
+    fn manual_prev_with_stop_on_interaction_cancels_timer() {
+        let mut service = service(Props {
+            default_index: Some(2),
+            ..autoplay_props(3)
+        });
+        drop(service.take_initial_effects());
+        let result = service.send(Event::GoToPrev);
+        assert!(service.context().auto_play_stopped);
+        assert_eq!(result.cancel_effects, vec![Effect::AutoPlayTimer]);
+    }
+
+    #[test]
+    fn goto_slide_with_stop_on_interaction_stops_and_cancels() {
+        let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
+        let result = service.send(Event::GoToSlide { index: 2 });
+        assert_eq!(service.context().current_index(), 2);
+        assert!(service.context().auto_play_stopped);
+        assert_eq!(result.cancel_effects, vec![Effect::AutoPlayTimer]);
+    }
+
+    #[test]
+    fn manual_nav_without_stop_on_interaction_keeps_timer() {
+        let mut service = service(Props {
+            auto_play: Some(AutoPlayOptions {
+                stop_on_interaction: false,
+                ..AutoPlayOptions::default()
+            }),
+            ..props(3)
+        });
+        drop(service.take_initial_effects());
+        let result = service.send(Event::GoToNext);
+        assert!(!service.context().auto_play_stopped);
+        assert!(result.cancel_effects.is_empty());
+        // Auto-play resumes once the transition settles.
+        settle(&mut service);
+        assert_eq!(service.state(), &State::AutoPlaying);
+    }
+
+    #[test]
+    fn swipe_navigation_with_stop_on_interaction_stops_rotation() {
+        let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
+        drop(service.send(Event::PointerDown {
+            pos: 100.0,
+            timestamp: 0.0,
+        }));
+        drop(service.send(Event::PointerMove {
+            pos: 40.0,
+            timestamp: 1000.0,
+        }));
+        let result = service.send(Event::PointerUp);
+        assert_eq!(service.context().current_index(), 1);
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().auto_play_stopped);
+        assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn swipe_navigation_resumes_when_stop_on_interaction_disabled() {
+        let mut service = service(Props {
+            auto_play: Some(AutoPlayOptions {
+                stop_on_interaction: false,
+                ..AutoPlayOptions::default()
+            }),
+            ..props(3)
+        });
+        drop(service.take_initial_effects());
+        drop(service.send(Event::PointerDown {
+            pos: 100.0,
+            timestamp: 0.0,
+        }));
+        drop(service.send(Event::PointerMove {
+            pos: 40.0,
+            timestamp: 1000.0,
+        }));
+        let result = service.send(Event::PointerUp);
+        assert_eq!(service.context().current_index(), 1);
+        assert_eq!(service.state(), &State::AutoPlaying);
+        assert!(!service.context().auto_play_stopped);
+        assert_eq!(pending_effect_names(&result), vec![Effect::AutoPlayTimer]);
+    }
+
+    #[test]
+    fn non_navigating_drag_resumes_autoplay() {
+        let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
+        drop(service.send(Event::PointerDown {
+            pos: 100.0,
+            timestamp: 0.0,
+        }));
+        // Slow, below-threshold drag → no navigation, no stop.
+        drop(service.send(Event::PointerMove {
+            pos: 90.0,
+            timestamp: 1000.0,
+        }));
+        let result = service.send(Event::PointerUp);
+        assert_eq!(service.context().current_index(), 0);
+        assert_eq!(service.state(), &State::AutoPlaying);
+        assert!(!service.context().auto_play_stopped);
+        assert_eq!(pending_effect_names(&result), vec![Effect::AutoPlayTimer]);
+    }
+
+    #[test]
+    fn focus_pause_leaves_autoplaying_and_cancels_timer() {
+        let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
+        let result = service.send(Event::FocusSlide { index: 1 });
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().auto_play_paused);
+        assert_eq!(result.cancel_effects, vec![Effect::AutoPlayTimer]);
+    }
+
+    #[test]
+    fn item_group_live_is_polite_when_paused() {
+        let mut service = service(autoplay_props(3));
+        drop(service.send(Event::AutoPlayPause));
+        assert_eq!(
+            service
+                .connect(&|_| {})
+                .item_group_attrs()
+                .get(&HtmlAttr::Aria(AriaAttr::Live)),
+            Some("polite")
+        );
+    }
+
+    // ── Codex review #716: init clamp + multi-slide-view ─────────────
+
+    #[test]
+    fn init_clamps_out_of_range_default_index() {
+        let service = service(Props {
+            default_index: Some(99),
+            ..props(3)
+        });
+        assert_eq!(service.context().current_index(), 2);
+    }
+
+    #[test]
+    fn last_index_accounts_for_slides_per_view() {
+        let ctx = service(Props {
+            slides_per_view: Some(2.0),
+            ..props(3)
+        })
+        .context()
+        .clone();
+        // 3 slides, 2 visible → last full page starts at index 1.
+        assert_eq!(ctx.last_index(), 1);
+        assert_eq!(ctx.visible_count(), 2);
+    }
+
+    #[test]
+    fn can_go_next_stops_at_last_full_page() {
+        let mut service = service(Props {
+            slides_per_view: Some(2.0),
+            default_index: Some(1),
+            ..props(3)
+        });
+        assert!(!service.context().can_go_next());
+        let api_disabled = service
+            .connect(&|_| {})
+            .next_trigger_attrs()
+            .get(&HtmlAttr::Aria(AriaAttr::Disabled))
+            == Some("true");
+        assert!(api_disabled);
+        // Navigation past the last full page is rejected.
+        let result = service.send(Event::GoToNext);
+        assert!(!result.state_changed);
+        assert_eq!(service.context().current_index(), 1);
+    }
+
+    #[test]
+    fn multi_view_keeps_visible_slides_accessible() {
+        let service = service(Props {
+            slides_per_view: Some(2.0),
+            ..props(3)
+        });
+        let api = service.connect(&|_| {});
+        // index 0 with two visible: slides 0 and 1 are on-screen.
+        let slide0 = api.item_attrs(0);
+        let slide1 = api.item_attrs(1);
+        let slide2 = api.item_attrs(2);
+        assert_eq!(slide0.get(&HtmlAttr::Aria(AriaAttr::Hidden)), None);
+        assert_eq!(slide1.get(&HtmlAttr::Aria(AriaAttr::Hidden)), None);
+        assert_eq!(slide1.get(&HtmlAttr::Inert), None);
+        // slide 2 is off-screen → hidden + inert.
+        assert_eq!(slide2.get(&HtmlAttr::Aria(AriaAttr::Hidden)), Some("true"));
+    }
+
+    #[test]
+    fn end_key_jumps_to_last_full_page() {
+        let service = service(Props {
+            slides_per_view: Some(2.0),
+            ..props(3)
+        });
+        assert_eq!(
+            captured_keydown(&service, KeyboardKey::End),
+            vec![Event::GoToSlide { index: 1 }]
+        );
     }
 }

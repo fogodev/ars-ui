@@ -161,18 +161,44 @@ pub struct Context {
 impl Context {
     pub fn current_index(&self) -> usize { *self.index.get() }
 
+    /// Number of slide slots occupied at once, rounding a fractional
+    /// `slides_per_view` up so a partially visible trailing slide still counts
+    /// as on-screen. Always at least `1`.
+    pub fn visible_count(&self) -> usize {
+        (self.slides_per_view.ceil() as usize).max(1)
+    }
+
+    /// Largest valid starting index for non-looping navigation. With
+    /// `slides_per_view > 1` the last page is flush to the end
+    /// (contain-scroll): `slide_count - visible_count`.
+    pub fn last_index(&self) -> usize {
+        self.slide_count.get().saturating_sub(self.visible_count())
+    }
+
     /// Clamp or wrap an index according to `loop_nav`.
     pub fn clamp_index(&self, i: isize) -> usize {
         let n = self.slide_count.get() as isize;
         if self.loop_nav {
             ((i % n) + n) as usize % self.slide_count.get()
         } else {
-            (i.max(0) as usize).min(self.slide_count.get().saturating_sub(1))
+            (i.max(0) as usize).min(self.last_index())
         }
     }
 
     pub fn can_go_prev(&self) -> bool { self.loop_nav || self.current_index() > 0 }
-    pub fn can_go_next(&self) -> bool { self.loop_nav || self.current_index() + 1 < self.slide_count.get() }
+    pub fn can_go_next(&self) -> bool { self.loop_nav || self.current_index() < self.last_index() }
+
+    /// Whether `index` is within the visible window of `visible_count` slides
+    /// starting at `current_index` (wrapping when `loop_nav` is set). Slides
+    /// outside the window are hidden from assistive technology.
+    pub fn is_slide_visible(&self, index: usize) -> bool {
+        let current = self.current_index();
+        let count = self.slide_count.get();
+        (0..self.visible_count()).any(|offset| {
+            let slot = if self.loop_nav { (current + offset) % count } else { current + offset };
+            slot == index
+        })
+    }
 
     /// CSS translate percentage for the slide track.
     pub fn track_offset_percent(&self, viewport_width: f64) -> f64 {
@@ -272,6 +298,22 @@ pub enum Effect {
 
 pub struct Machine;
 
+/// Build the transition for a manual navigation to `idx`: enter
+/// `Transitioning` and set the index, and — when `stop_on_interaction` is
+/// configured — permanently stop auto-play and cancel its timer. The
+/// cancellation is essential: without it the adapter's recurring interval
+/// keeps running after rotation has "stopped", leaking the timer and
+/// dispatching ignored `AutoPlayTick`s.
+fn navigate_to(ctx: &Context, idx: usize) -> TransitionPlan<Machine> {
+    let stop = ctx.auto_play.as_ref().is_some_and(|o| o.stop_on_interaction);
+    let mut plan = TransitionPlan::to(State::Transitioning).apply(move |ctx| {
+        ctx.index.set(idx);
+        if stop { ctx.auto_play_stopped = true; }
+    });
+    if stop { plan = plan.cancel_effect(Effect::AutoPlayTimer); }
+    plan
+}
+
 impl ars_core::Machine for Machine {
     type State = State;
     type Event = Event;
@@ -287,7 +329,11 @@ impl ars_core::Machine for Machine {
         } else {
             State::Idle
         };
-        let initial_index = props.default_index.unwrap_or(0);
+        // Clamp the uncontrolled default to the last valid starting index so
+        // `current_index < slide_count` holds from the first render.
+        let visible_count = (props.slides_per_view.unwrap_or(1.0).ceil() as usize).max(1);
+        let max_index = props.slide_count.get().saturating_sub(visible_count);
+        let initial_index = props.default_index.unwrap_or(0).min(max_index);
         let locale = env.locale.clone();
         let messages = messages.clone();
         let ctx = Context {
@@ -344,34 +390,25 @@ impl ars_core::Machine for Machine {
             Event::GoToSlide { index } => {
                 if *state == State::Transitioning { return None; }
                 // A direct jump never wraps; clamp out-of-range targets to the
-                // last slide so `current_index` can never exceed the slide
-                // count (every connect method relies on that invariant).
-                let idx = (*index).min(ctx.slide_count.get() - 1);
-                Some(TransitionPlan::to(State::Transitioning).apply(move |ctx| {
-                    ctx.index.set(idx);
-                }))
+                // last valid starting index. A direct jump is a manual
+                // interaction, so it honours `stop_on_interaction` like
+                // Next/Prev (see `navigate_to`).
+                let idx = (*index).min(ctx.last_index());
+                Some(navigate_to(ctx, idx))
             }
 
             Event::GoToNext => {
                 if *state == State::Transitioning || !ctx.can_go_next() { return None; }
                 let step = ctx.slides_per_move as isize;
                 let next = ctx.clamp_index(ctx.current_index() as isize + step);
-                let stop = ctx.auto_play.as_ref().is_some_and(|o| o.stop_on_interaction);
-                Some(TransitionPlan::to(State::Transitioning).apply(move |ctx| {
-                    ctx.index.set(next);
-                    if stop { ctx.auto_play_stopped = true; }
-                }))
+                Some(navigate_to(ctx, next))
             }
 
             Event::GoToPrev => {
                 if *state == State::Transitioning || !ctx.can_go_prev() { return None; }
                 let step = ctx.slides_per_move as isize;
                 let prev = ctx.clamp_index(ctx.current_index() as isize - step);
-                let stop = ctx.auto_play.as_ref().is_some_and(|o| o.stop_on_interaction);
-                Some(TransitionPlan::to(State::Transitioning).apply(move |ctx| {
-                    ctx.index.set(prev);
-                    if stop { ctx.auto_play_stopped = true; }
-                }))
+                Some(navigate_to(ctx, prev))
             }
 
             Event::TransitionEnd => {
@@ -413,10 +450,15 @@ impl ars_core::Machine for Machine {
             }
 
             Event::AutoPlayResume => {
-                if ctx.auto_play_stopped { return None; }
+                // Resume is also the "restart" path the auto-play trigger
+                // dispatches when rotation was stopped (the trigger shows the
+                // "Start" label and sends `AutoPlayResume`), so it clears BOTH
+                // the paused and the stopped flags — otherwise a stopped
+                // carousel's start control would be inert.
                 if ctx.auto_play.is_some() {
                     return Some(TransitionPlan::to(State::AutoPlaying).apply(|ctx| {
                         ctx.auto_play_paused = false;
+                        ctx.auto_play_stopped = false;
                     }).with_effect(PendingEffect::named(Effect::AutoPlayTimer)));
                 }
                 Some(TransitionPlan::context_only(|ctx| { ctx.auto_play_paused = false; }))
@@ -465,7 +507,22 @@ impl ars_core::Machine for Machine {
                     None
                 };
 
-                Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
+                // `PointerDown` cancelled the timer for the drag. Resolve
+                // rotation now the gesture ended: a navigating swipe with
+                // `stop_on_interaction` stops it; otherwise, if rotation was
+                // still active, re-arm the timer (resume) — without this a
+                // swipe silently kills rotation, or leaves the state reporting
+                // "playing" with no timer running.
+                let navigated = next_idx.is_some();
+                let stop = ctx.auto_play.as_ref().is_some_and(|o| o.stop_on_interaction);
+                let mark_stopped = navigated && stop;
+                let resume = ctx.auto_play.is_some()
+                    && !mark_stopped
+                    && !ctx.auto_play_stopped
+                    && !ctx.auto_play_paused;
+                let target = if resume { State::AutoPlaying } else { State::Idle };
+
+                let mut plan = TransitionPlan::to(target).apply(move |ctx| {
                     ctx.drag_start_pos = None;
                     ctx.drag_delta = 0.0;
                     ctx.swipe_velocity = 0.0;
@@ -473,7 +530,10 @@ impl ars_core::Machine for Machine {
                     if let Some(idx) = next_idx {
                         ctx.index.set(idx);
                     }
-                }))
+                    if mark_stopped { ctx.auto_play_stopped = true; }
+                });
+                if resume { plan = plan.with_effect(PendingEffect::named(Effect::AutoPlayTimer)); }
+                Some(plan)
             }
 
             Event::PointerCancel => {
@@ -486,15 +546,28 @@ impl ars_core::Machine for Machine {
             }
 
             Event::FocusSlide { index } => {
-                // Defensive: focus is always reported for a real slide, but
-                // clamp anyway so an out-of-range index can never desync
-                // `current_index` past the slide count.
-                let idx = (*index).min(ctx.slide_count.get() - 1);
+                // Clamp to the last valid starting index: focusing a slide
+                // already inside the visible window must not push
+                // `current_index` past the boundary.
+                let idx = (*index).min(ctx.last_index());
                 let current = ctx.current_index();
                 let should_pause = ctx.auto_play.as_ref().is_some_and(|o| o.pause_on_focus);
+                if should_pause {
+                    // Pausing on focus mirrors `AutoPlayPause`: leave
+                    // `AutoPlaying` and cancel the timer so slides do not keep
+                    // advancing under keyboard focus.
+                    let plan = if *state == State::AutoPlaying {
+                        TransitionPlan::to(State::Idle)
+                    } else {
+                        TransitionPlan::new()
+                    };
+                    return Some(plan.apply(move |ctx| {
+                        if idx != current { ctx.index.set(idx); }
+                        ctx.auto_play_paused = true;
+                    }).cancel_effect(Effect::AutoPlayTimer));
+                }
                 Some(TransitionPlan::context_only(move |ctx| {
                     if idx != current { ctx.index.set(idx); }
-                    if should_pause { ctx.auto_play_paused = true; }
                 }))
             }
 
@@ -587,7 +660,12 @@ impl<'a> Api<'a> {
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ItemGroup.data_attrs();
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
-        let live = if self.ctx.auto_play_stopped || self.ctx.auto_play.is_none() {
+        // "off" only while rotation is actively advancing; absent, stopped, or
+        // paused (hover/focus) carousels announce manual changes politely.
+        let live = if self.ctx.auto_play.is_none()
+            || self.ctx.auto_play_stopped
+            || self.ctx.auto_play_paused
+        {
             "polite"
         } else {
             "off"
@@ -603,7 +681,10 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         let is_current = index == self.ctx.current_index();
-        let is_hidden = !is_current;
+        // With `slides_per_view > 1` several slides are on-screen; only slides
+        // outside the visible window are hidden/inert. Marking a visible slide
+        // hidden would make on-screen content unreachable to AT and keyboard.
+        let is_hidden = !self.ctx.is_slide_visible(index);
         attrs.set(HtmlAttr::Role, "group");
         attrs.set(HtmlAttr::Aria(AriaAttr::RoleDescription), (self.ctx.messages.slide_role_description)(&self.ctx.locale));
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.slide_label)(index + 1, self.ctx.slide_count.get(), &self.ctx.locale));
@@ -725,7 +806,7 @@ impl<'a> Api<'a> {
             k if k == next_key => (self.send)(Event::GoToNext),
             KeyboardKey::Home => (self.send)(Event::GoToSlide { index: 0 }),
             KeyboardKey::End => (self.send)(Event::GoToSlide {
-                index: self.ctx.slide_count.get().saturating_sub(1),
+                index: self.ctx.last_index(),
             }),
             _ => {}
         }
@@ -839,7 +920,7 @@ RTL: Arrow keys reverse per `03-accessibility.md` §4.1.
 
 - `aria-live` on `ItemGroup` is `"off"` during auto-play to prevent disruptive announcements, and `"polite"` when paused or stopped.
 - Auto-play MUST pause on hover (`mouseenter`) and on focus within the carousel (`focusin`). Resumes on `mouseleave` / `focusout` unless `stop_on_interaction` triggered.
-- Non-current slides receive both `aria-hidden="true"` and `inert`, ensuring they are invisible to assistive technology.
+- Slides **outside the visible window** (`current_index` through `current_index + ceil(slides_per_view)`, wrapping when `loop_nav` is set) receive both `aria-hidden="true"` and `inert`, ensuring off-screen slides are invisible to assistive technology. With `slides_per_view > 1` every on-screen slide stays accessible — only the leading slide carries `data-ars-active`.
 
 ## 4. Internationalization
 
