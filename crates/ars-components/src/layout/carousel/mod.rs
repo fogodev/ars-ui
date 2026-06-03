@@ -86,7 +86,9 @@ pub enum State {
 // ────────────────────────────────────────────────────────────────────
 
 /// Events accepted by the [`Carousel`](self) state machine.
-#[derive(Clone, Copy, Debug, PartialEq)]
+///
+/// Not `Copy` because [`Event::SyncProps`] carries an owned [`Props`].
+#[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     /// Navigate to a specific slide by index.
     GoToSlide {
@@ -151,13 +153,14 @@ pub enum Event {
     /// Focus left the carousel.
     Blur,
 
-    /// The parent pushed a new controlled `index` value through `set_props`.
-    /// Emitted by [`Machine::on_props_changed`](ars_core::Machine::on_props_changed)
-    /// so the stored [`Bindable`] tracks the controlled signal without going
-    /// through a `Transitioning` animation or stopping auto-play.
-    SyncControlledIndex {
-        /// The new controlled slide index.
-        index: usize,
+    /// The parent re-rendered with new [`Props`] (via `set_props`). Emitted by
+    /// [`Machine::on_props_changed`](ars_core::Machine::on_props_changed) so the
+    /// machine re-derives its mutable configuration, tracks the controlled
+    /// `index` signal (including controlled→uncontrolled), and reconciles the
+    /// auto-play timer — all without animating.
+    SyncProps {
+        /// The new props to reconcile against the current context.
+        props: Props,
     },
 }
 
@@ -526,7 +529,15 @@ pub struct Machine;
 /// cancel its timer. The cancellation is essential: without it the adapter's
 /// recurring interval keeps running after rotation has "stopped", leaking the
 /// timer and dispatching ignored [`Event::AutoPlayTick`]s forever.
-fn navigate_to(ctx: &Context, idx: usize) -> TransitionPlan<Machine> {
+///
+/// Returns `None` when `idx` equals the current index: the track transform
+/// would not change, so the adapter has no CSS transition to report and
+/// `TransitionEnd` may never arrive — entering `Transitioning` would strand
+/// the machine and block all further navigation.
+fn navigate_to(ctx: &Context, idx: usize) -> Option<TransitionPlan<Machine>> {
+    if idx == ctx.current_index() {
+        return None;
+    }
     let stop = ctx
         .auto_play
         .as_ref()
@@ -540,7 +551,7 @@ fn navigate_to(ctx: &Context, idx: usize) -> TransitionPlan<Machine> {
     if stop {
         plan = plan.cancel_effect(Effect::AutoPlayTimer);
     }
-    plan
+    Some(plan)
 }
 
 impl ars_core::Machine for Machine {
@@ -583,11 +594,16 @@ impl ars_core::Machine for Machine {
         let max_index = props.slide_count.get().saturating_sub(visible_count);
         let initial_index = props.default_index.unwrap_or(0).min(max_index);
 
+        // Clamp the controlled value too: a caller-supplied controlled `index`
+        // past `last_index()` would start the machine out of range before any
+        // prop-change sync could run.
+        let index = match &props.index {
+            Some(controlled) => Bindable::controlled((*controlled.get()).min(max_index)),
+            None => Bindable::uncontrolled(initial_index),
+        };
+
         let ctx = Context {
-            index: props
-                .index
-                .clone()
-                .unwrap_or_else(|| Bindable::uncontrolled(initial_index)),
+            index,
             slide_count: props.slide_count,
             loop_nav: props.loop_nav,
             auto_play: props.auto_play.clone(),
@@ -637,20 +653,14 @@ impl ars_core::Machine for Machine {
             "carousel::Props.id must remain stable after initialization"
         );
 
-        // In controlled mode the parent owns the slide index and pushes new
-        // values through `set_props`. Detect a changed controlled value and
-        // forward it so the stored `Bindable` tracks it (otherwise the active
-        // slide, progress text, and indicators stay stuck on the initial
-        // controlled value).
-        let old_index = old.index.as_ref().map(|bindable| *bindable.get());
-        let new_index = new.index.as_ref().map(|bindable| *bindable.get());
-        if old_index != new_index
-            && let Some(index) = new_index
-        {
-            return vec![Event::SyncControlledIndex { index }];
+        // Any prop change re-syncs the machine's mutable configuration, the
+        // controlled-index signal, and the auto-play timer (see the
+        // `SyncProps` arm). Mirrors the `splitter` convention.
+        if old == new {
+            Vec::new()
+        } else {
+            vec![Event::SyncProps { props: new.clone() }]
         }
-
-        Vec::new()
     }
 
     fn transition(
@@ -671,7 +681,7 @@ impl ars_core::Machine for Machine {
                 // invariant). A direct jump is a manual interaction, so it
                 // honours `stop_on_interaction` like Next/Prev.
                 let idx = (*index).min(ctx.last_index());
-                Some(navigate_to(ctx, idx))
+                navigate_to(ctx, idx)
             }
 
             Event::GoToNext => {
@@ -681,7 +691,7 @@ impl ars_core::Machine for Machine {
 
                 let step = ctx.slides_per_move as isize;
                 let next = ctx.clamp_index(ctx.current_index() as isize + step);
-                Some(navigate_to(ctx, next))
+                navigate_to(ctx, next)
             }
 
             Event::GoToPrev => {
@@ -691,7 +701,7 @@ impl ars_core::Machine for Machine {
 
                 let step = ctx.slides_per_move as isize;
                 let prev = ctx.clamp_index(ctx.current_index() as isize - step);
-                Some(navigate_to(ctx, prev))
+                navigate_to(ctx, prev)
             }
 
             Event::TransitionEnd => {
@@ -707,8 +717,14 @@ impl ars_core::Machine for Machine {
                     return None;
                 }
 
+                // Clear any prior pause: starting auto-play means it is now
+                // actively rotating, so the paused live-region mode and
+                // `aria-pressed="false"` must not linger.
                 Some(
                     TransitionPlan::to(State::AutoPlaying)
+                        .apply(|ctx: &mut Context| {
+                            ctx.auto_play_paused = false;
+                        })
                         .with_effect(PendingEffect::named(Effect::AutoPlayTimer)),
                 )
             }
@@ -722,17 +738,22 @@ impl ars_core::Machine for Machine {
             ),
 
             Event::AutoPlayTick => {
-                // Ignore ticks that cannot advance: at the final non-looping
-                // page `clamp_index` would return the same index, so entering
-                // `Transitioning` risks a missing `transitionend` (the
-                // transform never changes) leaving the machine stuck.
-                if *state != State::AutoPlaying || !ctx.can_go_next() {
+                if *state != State::AutoPlaying {
                     return None;
                 }
 
                 let step = ctx.slides_per_move as isize;
-
                 let next = ctx.clamp_index(ctx.current_index() as isize + step);
+
+                // Ignore ticks that would not move the track: the non-looping
+                // boundary (`clamp` returns the same index) and the looped
+                // no-op case (single slide, or `slides_per_move` a multiple of
+                // `slide_count`). Entering `Transitioning` with no transform
+                // change risks a missing `transitionend` that strands the
+                // machine.
+                if next == ctx.current_index() {
+                    return None;
+                }
 
                 Some(
                     TransitionPlan::to(State::Transitioning).apply(move |ctx: &mut Context| {
@@ -944,14 +965,85 @@ impl ars_core::Machine for Machine {
                 }))
             }
 
-            Event::SyncControlledIndex { index } => {
-                // Push the parent's controlled value into the stored bindable
-                // without animating or stopping auto-play. Clamp defensively so
-                // a bad controlled value can't break the index invariant.
-                let idx = (*index).min(ctx.last_index());
-                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.index.sync_controlled(Some(idx));
-                }))
+            Event::SyncProps { props } => {
+                // Re-derive mutable configuration from the new props, track the
+                // controlled-index signal (including controlled→uncontrolled),
+                // and reconcile the auto-play timer — all without animating.
+                let new_auto = props.auto_play.clone();
+                let auto_changed = ctx.auto_play != new_auto;
+                // After syncing, should a timer be running? (Honours the
+                // preserved stopped/paused flags.)
+                let want_timer =
+                    new_auto.is_some() && !ctx.auto_play_stopped && !ctx.auto_play_paused;
+
+                // Only the auto-play transition moves the resting state:
+                // enabling/resuming → AutoPlaying; disabling while playing → Idle.
+                let target = if auto_changed {
+                    if want_timer {
+                        State::AutoPlaying
+                    } else if *state == State::AutoPlaying {
+                        State::Idle
+                    } else {
+                        *state
+                    }
+                } else {
+                    *state
+                };
+
+                let props = props.clone();
+                let mut plan = TransitionPlan::to(target).apply(move |ctx: &mut Context| {
+                    let slides_per_view = props
+                        .slides_per_view
+                        .filter(|value| value.is_finite() && *value > 0.0)
+                        .unwrap_or(1.0);
+
+                    ctx.slide_count = props.slide_count;
+                    ctx.loop_nav = props.loop_nav;
+                    ctx.auto_play = props.auto_play.clone();
+                    ctx.spacing = props.spacing.unwrap_or(0.0);
+                    ctx.slides_per_view = slides_per_view;
+                    ctx.slides_per_move = props.slides_per_move.unwrap_or(1).max(1);
+                    ctx.align = props.align.unwrap_or_default();
+                    ctx.orientation = props.orientation.unwrap_or_default();
+                    ctx.is_rtl = props.is_rtl;
+                    ctx.transition_duration = props
+                        .transition_duration
+                        .unwrap_or_else(|| Duration::from_millis(300));
+                    ctx.swipe_threshold = props.swipe_threshold.unwrap_or(50.0);
+
+                    // Track the controlled signal (clamped); `None` returns the
+                    // bindable to uncontrolled mode.
+                    let controlled = props
+                        .index
+                        .as_ref()
+                        .map(|bindable| (*bindable.get()).min(ctx.last_index()));
+                    ctx.index.sync_controlled(controlled);
+
+                    // Keep an uncontrolled index in range if the slide count or
+                    // visible window shrank.
+                    if !ctx.index.is_controlled() {
+                        let clamped = ctx.current_index().min(ctx.last_index());
+                        ctx.index.set(clamped);
+                    }
+
+                    // Without auto-play configured, the play/pause flags are
+                    // meaningless — reset them so the controls read correctly.
+                    if ctx.auto_play.is_none() {
+                        ctx.auto_play_paused = false;
+                        ctx.auto_play_stopped = false;
+                    }
+                });
+
+                // Restart the interval when auto-play config changed so a new
+                // interval/enable takes effect; tear it down when disabled.
+                if auto_changed {
+                    plan = plan.cancel_effect(Effect::AutoPlayTimer);
+                    if want_timer {
+                        plan = plan.with_effect(PendingEffect::named(Effect::AutoPlayTimer));
+                    }
+                }
+
+                Some(plan)
             }
 
             Event::Blur => {
@@ -2940,5 +3032,107 @@ mod tests {
         assert!(!result.state_changed);
         assert_eq!(service.state(), &State::AutoPlaying);
         assert_eq!(service.context().current_index(), 2);
+    }
+
+    // ── Codex review #716 (third pass) ───────────────────────────────
+
+    #[test]
+    fn init_clamps_out_of_range_controlled_index() {
+        let service = service(Props {
+            index: Some(Bindable::controlled(100)),
+            ..props(3)
+        });
+        assert_eq!(service.context().current_index(), 2);
+    }
+
+    #[test]
+    fn controlled_to_uncontrolled_via_props() {
+        let mut service = service(Props {
+            index: Some(Bindable::controlled(1)),
+            ..props(4)
+        });
+        assert!(service.context().index.is_controlled());
+
+        // Parent drops controlled mode.
+        drop(service.set_props(props(4)));
+        assert!(!service.context().index.is_controlled());
+
+        // Navigation now actually moves the visible index.
+        drop(service.send(Event::GoToNext));
+        assert_eq!(service.context().current_index(), 2);
+    }
+
+    #[test]
+    fn autoplay_disabled_via_props_cancels_timer() {
+        let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
+        let result = service.set_props(props(3));
+        assert!(service.context().auto_play.is_none());
+        assert_eq!(service.state(), &State::Idle);
+        assert!(result.cancel_effects.contains(&Effect::AutoPlayTimer));
+    }
+
+    #[test]
+    fn autoplay_enabled_via_props_starts_timer() {
+        let mut service = service(props(3));
+        assert_eq!(service.state(), &State::Idle);
+        let result = service.set_props(autoplay_props(3));
+        assert_eq!(service.state(), &State::AutoPlaying);
+        assert!(
+            result
+                .pending_effects
+                .iter()
+                .any(|effect| effect.name == Effect::AutoPlayTimer)
+        );
+    }
+
+    #[test]
+    fn autoplay_tick_noop_for_looped_single_slide() {
+        let mut service = service(Props {
+            loop_nav: true,
+            ..autoplay_props(1)
+        });
+        drop(service.take_initial_effects());
+        let result = service.send(Event::AutoPlayTick);
+        assert!(!result.state_changed);
+        assert_eq!(service.state(), &State::AutoPlaying);
+    }
+
+    #[test]
+    fn goto_slide_to_current_index_is_noop() {
+        let mut service = service(props(3));
+        let result = service.send(Event::GoToSlide { index: 0 });
+        assert!(!result.state_changed);
+        assert_eq!(service.state(), &State::Idle);
+    }
+
+    #[test]
+    fn goto_slide_to_current_does_not_stop_autoplay() {
+        let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
+        // Clicking the already-active indicator is a no-op — it must not stop
+        // rotation or strand the machine in Transitioning.
+        let result = service.send(Event::GoToSlide { index: 0 });
+        assert!(!result.state_changed);
+        assert!(!service.context().auto_play_stopped);
+        assert_eq!(service.state(), &State::AutoPlaying);
+    }
+
+    #[test]
+    fn autoplay_start_after_pause_clears_paused_flag() {
+        let mut service = service(autoplay_props(3));
+        drop(service.take_initial_effects());
+        drop(service.send(Event::AutoPlayPause));
+        assert!(service.context().auto_play_paused);
+
+        let result = service.send(Event::AutoPlayStart);
+        assert_eq!(service.state(), &State::AutoPlaying);
+        assert!(!service.context().auto_play_paused);
+        assert!(
+            result
+                .pending_effects
+                .iter()
+                .any(|effect| effect.name == Effect::AutoPlayTimer)
+        );
     }
 }
