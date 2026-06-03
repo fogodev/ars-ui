@@ -1,0 +1,87 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0e118564c140",
+  "session_id": "019e8b3e-5b1f-7c23-82f5-c27c08733024",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T05:25:23.156257Z",
+  "branch": "codex/data-display-agnostic-audit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/data_display/tag_group/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/data_display/tag_group.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "a03f05a7e9c0",
+  "checkpoint_transcript_start": 1219,
+  "transcript_lines_at_start": 1219,
+  "token_usage": {
+    "input_tokens": 55177,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1006976,
+    "output_tokens": 4474,
+    "api_call_count": 17
+  },
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "summary": {
+    "intent": "Address a PR review comment on TagGroup that flagged an over-broad disabled-state fix — the reviewer wanted disabled tags to still emit observable focus/blur events for accessibility tooling, while keeping mutation and navigation blocked.",
+    "outcome": "Restored Focus/Blur state recording for disabled tags in the TagGroup state machine, narrowed the proptest invariant to only enforce per-item enabled status when the group is interactive, and pushed the fix as a follow-up commit to PR #713.",
+    "learnings": {
+      "repo": [
+        "TagGroup disabled state has two distinct layers: interaction blocking (selection, removal, arrow navigation) vs. state observation (focus/blur for AT/programmatic access) — these must be treated separately.",
+        "tag_attrs() already conditionally emits data-ars-focus-visible based on recorded focus context, so restoring disabled Focus/Blur events automatically surfaces the attribute without extra rendering logic.",
+        "Proptest state machines for TagGroup live in crates/ars-components/tests/proptest_state_machines/data_display/tag_group.rs and are run with --ignored; they require PROPTEST_CASES env var to control fuzz depth.",
+        "The project uses a co-author trailer 'Co-authored-by: Codex <codex@openai.com>' on AI-assisted commits."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/tag_group/mod.rs",
+          "line": 850,
+          "end_line": 1010,
+          "finding": "The disabled event dispatch block: only the Focus arm needed to return Some(state_with_focus); Navigation, selection, deselection, toggle, and removal still return None while disabled."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/data_display/tag_group.rs",
+          "line": 1,
+          "end_line": 260,
+          "finding": "The proptest invariant asserting 'focused tag is per-item enabled' was over-broad; it must only apply when the group itself is in an interactive (non-disabled) state."
+        }
+      ],
+      "workflow": [
+        "Write a failing regression test before touching the implementation to confirm the exact broken behavior, then fix.",
+        "Run the full proptest suite after any state-machine invariant change — the broader fuzz coverage catches over-tightened assertions that unit tests miss.",
+        "Sequence: regression test → implementation patch → proptest → spec-conformance → fmt check → diff review → commit."
+      ]
+    },
+    "friction": [
+      "The original disabled-focus fix was over-broad, requiring a review cycle to discover the AT/programmatic focus distinction — the spec wording ('disabled blocks mutation/navigation/removal') did not make the focus-observation carve-out explicit enough.",
+      "The proptest failure surface was not obvious until actually running the ignored suite; the invariant had been silently over-constrained."
+    ],
+    "open_items": [
+      "Spec wording in spec/components/data-display/tag-group.md could be clarified to explicitly distinguish 'blocked interactions' from 'observable state events' for disabled tags, preventing similar review cycles."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T05:25:04.782616Z",
+    "agent_lines": 22,
+    "agent_removed": 8,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 22,
+    "total_lines_changed": 30,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
