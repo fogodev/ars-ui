@@ -34,11 +34,11 @@ customisation.
 
 ```css
 :root {
-  --ars-splitter-handle-size: 4px;
-  --ars-splitter-handle-color: transparent;
-  --ars-splitter-handle-hover-color: var(--color-accent);
-  --ars-splitter-handle-active-color: var(--color-accent-strong);
-  --ars-splitter-panel-min-size: 0px;
+    --ars-splitter-handle-size: 4px;
+    --ars-splitter-handle-color: transparent;
+    --ars-splitter-handle-hover-color: var(--color-accent);
+    --ars-splitter-handle-active-color: var(--color-accent-strong);
+    --ars-splitter-panel-min-size: 0px;
 }
 ```
 
@@ -46,12 +46,12 @@ customisation.
 
 ```css
 :root {
-  --ars-scrollbar-size: 8px;
-  --ars-scrollbar-track-color: transparent;
-  --ars-scrollbar-thumb-color: rgba(0, 0, 0, 0.3);
-  --ars-scrollbar-thumb-hover-color: rgba(0, 0, 0, 0.5);
-  --ars-scrollbar-thumb-radius: 4px;
-  --ars-scrollbar-fade-duration: 300ms;
+    --ars-scrollbar-size: 8px;
+    --ars-scrollbar-track-color: transparent;
+    --ars-scrollbar-thumb-color: rgba(0, 0, 0, 0.3);
+    --ars-scrollbar-thumb-hover-color: rgba(0, 0, 0, 0.5);
+    --ars-scrollbar-thumb-radius: 4px;
+    --ars-scrollbar-fade-duration: 300ms;
 }
 ```
 
@@ -59,12 +59,12 @@ customisation.
 
 ```css
 :root {
-  --ars-carousel-transition-duration: 300ms;
-  --ars-carousel-transition-easing: ease-in-out;
-  --ars-carousel-indicator-size: 8px;
-  --ars-carousel-indicator-gap: 6px;
-  --ars-carousel-indicator-color: rgba(0, 0, 0, 0.3);
-  --ars-carousel-indicator-active-color: var(--color-accent);
+    --ars-carousel-transition-duration: 300ms;
+    --ars-carousel-transition-easing: ease-in-out;
+    --ars-carousel-indicator-size: 8px;
+    --ars-carousel-indicator-gap: 6px;
+    --ars-carousel-indicator-color: rgba(0, 0, 0, 0.3);
+    --ars-carousel-indicator-active-color: var(--color-accent);
 }
 ```
 
@@ -315,7 +315,10 @@ mod layout_tests {
 ## Appendix D: Feature Flag Map
 
 ```toml
-# crates/ars-core/Cargo.toml
+# crates/ars-leptos/Cargo.toml  (or ars-dioxus/Cargo.toml for Dioxus adapter)
+# Note: ars-core's own features are defined in 01-architecture.md §1.3
+# (default, std, serde, debug). These per-component features live in the
+# adapter crates that re-export layout components to consumers.
 
 [features]
 default = [
