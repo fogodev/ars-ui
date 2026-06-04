@@ -1,0 +1,39 @@
+---
+source: crates/ars-components/src/specialized/image_cropper/mod.rs
+expression: "snapshot_attrs(&Fixture::default().api().reset_trigger_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "reset-trigger",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "image-cropper",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Reset crop",
+            ),
+        ),
+        (
+            Type,
+            String(
+                "button",
+            ),
+        ),
+    ],
+    styles: [],
+}

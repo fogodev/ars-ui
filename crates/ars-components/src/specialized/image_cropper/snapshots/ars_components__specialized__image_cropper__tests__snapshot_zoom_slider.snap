@@ -1,0 +1,69 @@
+---
+source: crates/ars-components/src/specialized/image_cropper/mod.rs
+expression: "snapshot_attrs(&Fixture\n{ zoom: 1.5, ..Default::default() }.api().zoom_slider_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "zoom-slider",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "image-cropper",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Zoom",
+            ),
+        ),
+        (
+            Aria(
+                ValueMax,
+            ),
+            String(
+                "3.00",
+            ),
+        ),
+        (
+            Aria(
+                ValueMin,
+            ),
+            String(
+                "1.00",
+            ),
+        ),
+        (
+            Aria(
+                ValueNow,
+            ),
+            String(
+                "1.50",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "slider",
+            ),
+        ),
+        (
+            TabIndex,
+            String(
+                "0",
+            ),
+        ),
+    ],
+    styles: [],
+}

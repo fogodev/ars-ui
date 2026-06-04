@@ -40,7 +40,10 @@ impl Default for CropArea {
 }
 
 /// Which handle of the crop area the user is interacting with.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// `Hash` is required because `CropHandle` is a field of the `Part::Handle`
+/// anatomy variant, and `ComponentPart` derives `Hash`/`Eq` for the part enum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CropHandle {
     TopLeft,
     TopRight,
@@ -50,6 +53,37 @@ pub enum CropHandle {
     Bottom,
     Left,
     Right,
+}
+
+impl CropHandle {
+    /// The stable kebab-case token for this handle, used in the
+    /// `data-ars-position` attribute and the handle's accessible label.
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::TopLeft => "top-left",
+            Self::TopRight => "top-right",
+            Self::BottomLeft => "bottom-left",
+            Self::BottomRight => "bottom-right",
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+
+    /// All eight handles, in anatomy order.
+    pub const fn all() -> [Self; 8] {
+        [
+            Self::TopLeft,
+            Self::TopRight,
+            Self::BottomLeft,
+            Self::BottomRight,
+            Self::Top,
+            Self::Bottom,
+            Self::Left,
+            Self::Right,
+        ]
+    }
 }
 
 /// Aspect ratio constraint for the crop area.
@@ -70,11 +104,20 @@ pub enum AspectRatio {
 }
 
 impl AspectRatio {
-    /// Get the ratio as a float.
+    /// Get the ratio as a float, or `None` when the crop is unconstrained.
+    ///
+    /// A `Fixed` ratio that is not finite and strictly positive (e.g. `0.0`, a
+    /// negative number, or `NaN`) is rejected as `None` — treated as
+    /// unconstrained — so it can never divide the crop geometry into infinite,
+    /// negative, or `NaN` dimensions. A `Fixed` ratio outside the feasible band
+    /// `[MIN_CROP_SIZE, 1.0 / MIN_CROP_SIZE]` (`[0.05, 20.0]`) is also rejected:
+    /// no crop can keep both axes at the 5% floor inside the unit square at such
+    /// a ratio, so honoring it would collapse a dimension. The named presets all
+    /// sit inside the band.
     pub fn as_ratio(&self) -> Option<f64> {
         match self {
-            Self::Free => None,
-            Self::Fixed(r) => Some(*r),
+            Self::Fixed(r) if r.is_finite() && (MIN_CROP_SIZE..=1.0 / MIN_CROP_SIZE).contains(r) => Some(*r),
+            Self::Free | Self::Fixed(_) => None,
             Self::Square => Some(1.0),
             Self::Landscape4x3 => Some(4.0 / 3.0),
             Self::Portrait3x4 => Some(3.0 / 4.0),
@@ -198,11 +241,20 @@ pub enum Event {
     /// Reset to default crop area.
     Reset,
     /// Focus entered a part.
-    Focus { part: &'static str },
+    Focus { part: Part },
     /// Focus left a part.
-    Blur { part: &'static str },
+    Blur { part: Part },
     /// Keyboard nudge the crop area.
     NudgeCrop { dx: f64, dy: f64 },
+    /// The controlled `Props::crop` changed; re-sync the bound crop area.
+    /// Dispatched by `Machine::on_props_changed`, not by user interaction, and
+    /// processed regardless of `disabled`.
+    SyncCrop,
+    /// A configuration prop (aspect ratio, zoom bounds, disabled, circular,
+    /// flip) changed; mirror the new values into the context. Dispatched by
+    /// `Machine::on_props_changed`, and processed regardless of `disabled` so
+    /// the cropper can be re-enabled.
+    SyncProps,
 }
 ```
 
@@ -232,8 +284,8 @@ pub struct Context {
     pub drag_origin: Option<(f64, f64)>,
     /// Crop area at drag start (for relative movement).
     pub drag_start_crop: Option<CropArea>,
-    /// Focused part.
-    pub focused_part: Option<&'static str>,
+    /// The anatomy part that currently holds focus, if any.
+    pub focused_part: Option<Part>,
     /// Locale for internationalized messages.
     pub locale: Locale,
     /// Resolved translatable messages.
@@ -271,6 +323,12 @@ pub struct Props {
     pub flip: FlipState,
     /// Disabled state.
     pub disabled: bool,
+    /// Fired when the crop area changes through user interaction (drag, resize,
+    /// nudge, direct set, rotation, or reset), carrying the new `CropArea`.
+    /// Required for controlled `crop`: the parent updates its controlled value
+    /// from this callback, then feeds it back via props (triggering
+    /// `Event::SyncCrop`). Not fired for parent-driven syncs.
+    pub on_crop_change: Option<Callback<dyn Fn(CropArea) + Send + Sync>>,
 }
 
 impl Default for Props {
@@ -287,6 +345,7 @@ impl Default for Props {
             circular: false,
             flip: FlipState::default(),
             disabled: false,
+            on_crop_change: None,
         }
     }
 }
@@ -295,6 +354,10 @@ impl Default for Props {
 ### 1.5 Full Machine Implementation
 
 ```rust
+/// The minimum crop dimension, as a fraction of the image, enforced during
+/// resize so a handle drag can never collapse the crop area to nothing.
+const MIN_CROP_SIZE: f64 = 0.05;
+
 /// Resize the crop area based on handle position and pointer delta.
 /// Enforces aspect ratio constraints and boundary clamping.
 fn resize_crop_area(ctx: &mut Context, handle: CropHandle, x: f64, y: f64) {
@@ -305,66 +368,160 @@ fn resize_crop_area(ctx: &mut Context, handle: CropHandle, x: f64, y: f64) {
 
         match handle {
             CropHandle::TopLeft => {
-                crop.x = (start.x + dx).clamp(0.0, start.x + start.width - 0.05);
-                crop.y = (start.y + dy).clamp(0.0, start.y + start.height - 0.05);
+                crop.x = (start.x + dx).clamp(0.0, start.x + start.width - MIN_CROP_SIZE);
+                crop.y = (start.y + dy).clamp(0.0, start.y + start.height - MIN_CROP_SIZE);
                 crop.width = start.width - (crop.x - start.x);
                 crop.height = start.height - (crop.y - start.y);
             }
             CropHandle::TopRight => {
-                crop.y = (start.y + dy).clamp(0.0, start.y + start.height - 0.05);
-                crop.width = (start.width + dx).clamp(0.05, 1.0 - start.x);
+                crop.y = (start.y + dy).clamp(0.0, start.y + start.height - MIN_CROP_SIZE);
+                crop.width = (start.width + dx).clamp(MIN_CROP_SIZE, 1.0 - start.x);
                 crop.height = start.height - (crop.y - start.y);
             }
             CropHandle::BottomLeft => {
-                crop.x = (start.x + dx).clamp(0.0, start.x + start.width - 0.05);
+                crop.x = (start.x + dx).clamp(0.0, start.x + start.width - MIN_CROP_SIZE);
                 crop.width = start.width - (crop.x - start.x);
-                crop.height = (start.height + dy).clamp(0.05, 1.0 - start.y);
+                crop.height = (start.height + dy).clamp(MIN_CROP_SIZE, 1.0 - start.y);
             }
             CropHandle::BottomRight => {
-                crop.width = (start.width + dx).clamp(0.05, 1.0 - start.x);
-                crop.height = (start.height + dy).clamp(0.05, 1.0 - start.y);
+                crop.width = (start.width + dx).clamp(MIN_CROP_SIZE, 1.0 - start.x);
+                crop.height = (start.height + dy).clamp(MIN_CROP_SIZE, 1.0 - start.y);
             }
             CropHandle::Top => {
-                crop.y = (start.y + dy).clamp(0.0, start.y + start.height - 0.05);
+                crop.y = (start.y + dy).clamp(0.0, start.y + start.height - MIN_CROP_SIZE);
                 crop.height = start.height - (crop.y - start.y);
             }
             CropHandle::Bottom => {
-                crop.height = (start.height + dy).clamp(0.05, 1.0 - start.y);
+                crop.height = (start.height + dy).clamp(MIN_CROP_SIZE, 1.0 - start.y);
             }
             CropHandle::Left => {
-                crop.x = (start.x + dx).clamp(0.0, start.x + start.width - 0.05);
+                crop.x = (start.x + dx).clamp(0.0, start.x + start.width - MIN_CROP_SIZE);
                 crop.width = start.width - (crop.x - start.x);
             }
             CropHandle::Right => {
-                crop.width = (start.width + dx).clamp(0.05, 1.0 - start.x);
+                crop.width = (start.width + dx).clamp(MIN_CROP_SIZE, 1.0 - start.x);
             }
         }
 
-        // Enforce aspect ratio if set
         if let Some(ratio) = ctx.aspect_ratio.as_ratio() {
-            crop.height = crop.width / ratio;
-            // Re-clamp after aspect ratio enforcement
-            if crop.y + crop.height > 1.0 {
-                crop.height = 1.0 - crop.y;
-                crop.width = crop.height * ratio;
-            }
+            constrain_to_ratio(&mut crop, ratio);
         }
 
         ctx.crop.set(crop);
     }
 }
 
+/// Re-shape `crop` to the given width:height `ratio`, keeping both dimensions
+/// `>= MIN_CROP_SIZE` and inside the unit square. `lower` is the smallest width
+/// that keeps both sides at the floor (`max(MIN, MIN * ratio)`); `room` is the
+/// largest width the current origin allows. When there's room (`lower <= room`)
+/// the caller's width is preserved within `[lower, room]`; otherwise the crop
+/// shrinks to `lower` and the origin is pulled inward so the minimum-size rect
+/// still fits, rather than collapsing a dimension. `ratio` is always feasible
+/// here (`as_ratio` rejects ratios outside `[MIN, 1/MIN]`), so the reposition
+/// always fits.
+fn constrain_to_ratio(crop: &mut CropArea, ratio: f64) {
+    let lower = MIN_CROP_SIZE.max(MIN_CROP_SIZE * ratio);
+    let room = (1.0 - crop.x).min((1.0 - crop.y) * ratio);
+    let width = if lower <= room { crop.width.clamp(lower, room) } else { lower };
+    crop.width = width;
+    crop.height = width / ratio;
+    crop.x = crop.x.min(1.0 - crop.width).max(0.0);
+    crop.y = crop.y.min(1.0 - crop.height).max(0.0);
+}
+
 /// Re-constrain the current crop area to match the current aspect ratio.
+///
+/// The constrained value is written to the internal slot and, in controlled
+/// mode, mirrored into the controlled slot too — otherwise `get()` (and every
+/// rendered attr/API value) would keep returning the parent's unconstrained
+/// crop until the parent next changes `crop`, even though the ratio just
+/// changed (e.g. via `SetAspectRatio` or a `SyncProps` aspect change).
 fn enforce_aspect_ratio(ctx: &mut Context) {
     if let Some(ratio) = ctx.aspect_ratio.as_ratio() {
-        let mut crop = ctx.crop.get();
-        crop.height = crop.width / ratio;
-        if crop.y + crop.height > 1.0 {
-            crop.height = 1.0 - crop.y;
-            crop.width = crop.height * ratio;
-        }
+        let mut crop = *ctx.crop.pending();
+        constrain_to_ratio(&mut crop, ratio);
         ctx.crop.set(crop);
+        if ctx.crop.is_controlled() {
+            ctx.crop.sync_controlled(Some(crop));
+        }
     }
+}
+
+/// Normalize a rotation in degrees into the `[-180, 180]` range the rotation
+/// slider advertises, so repeated `r`/`R` rotations wrap instead of running
+/// past the declared `aria-valuemin`/`aria-valuemax`. A non-finite input
+/// collapses to `0.0` so a stray `NaN`/`inf` can never reach the rendered
+/// `aria-valuenow`/CSS.
+fn normalize_rotation(degrees: f64) -> f64 {
+    if !degrees.is_finite() {
+        return 0.0;
+    }
+    (degrees + 180.0).rem_euclid(360.0) - 180.0
+}
+
+/// Clamp `zoom` into `[min, max]` without ever panicking. `f64::clamp` panics
+/// when `min > max` or a bound is `NaN` — both reachable through the public
+/// `min_zoom`/`max_zoom` props — so the bounds are ordered first and `.max()`/
+/// `.min()` are used (yielding the value unchanged when a bound is `NaN`).
+const fn clamp_zoom(zoom: f64, min: f64, max: f64) -> f64 {
+    let lower = min.min(max);
+    let upper = min.max(max);
+    zoom.max(lower).min(upper)
+}
+
+/// Coerce an externally-supplied crop area into a renderable, in-bounds value:
+/// non-finite fields fall back to the default crop, width/height are floored at
+/// `MIN_CROP_SIZE` and capped at the image, the origin is pulled inside so
+/// `x + width <= 1` and `y + height <= 1`, and rotation is normalized. Keeps
+/// `SetCropArea`/init/`SyncCrop` from storing geometry that renders invalid CSS
+/// or later inverts a resize clamp and panics.
+fn sanitize_crop(area: CropArea) -> CropArea {
+    let default = CropArea::default();
+    let finite = |value: f64, fallback: f64| if value.is_finite() { value } else { fallback };
+
+    let width = finite(area.width, default.width).clamp(MIN_CROP_SIZE, 1.0);
+    let height = finite(area.height, default.height).clamp(MIN_CROP_SIZE, 1.0);
+    let x = finite(area.x, default.x).clamp(0.0, 1.0 - width);
+    let y = finite(area.y, default.y).clamp(0.0, 1.0 - height);
+
+    CropArea { x, y, width, height, rotation: normalize_rotation(area.rotation) }
+}
+
+/// Typed effect intents emitted by the image-cropper machine.
+///
+/// The agnostic core never touches the live image or the screen reader; it
+/// emits these markers and the framework adapter performs the real work. (The
+/// `&'static str`-named effects of earlier drafts could not work: the core has
+/// no `use_platform_effects()` — that hook is adapter-only — so announcements
+/// must be deferred to the adapter through a typed `Effect`.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effect {
+    /// Adapter announces `Messages::crop_moved` into a polite `aria-live`
+    /// region. Emitted on a drag-move or keyboard nudge. The adapter should
+    /// debounce/throttle this (e.g. at most once per 500ms) so continuous
+    /// pointer movement does not flood the screen reader.
+    AnnounceCropMoved,
+    /// Adapter announces `Messages::crop_resized` into a polite `aria-live`
+    /// region. Emitted on a handle resize-move; debounce/throttle as above.
+    AnnounceCropResized,
+    /// The crop geometry changed through user interaction. Fires
+    /// `Props::on_crop_change` with the new `CropArea` so a parent holding a
+    /// controlled `Props::crop` can observe it. Not emitted for
+    /// `Event::SyncCrop` (that change originates from the parent).
+    CropChange,
+}
+
+/// Builds the `Effect::CropChange` effect that notifies `Props::on_crop_change`
+/// with the new crop area. Reads the bound value's *pending* (internal) crop —
+/// the value just committed by the transition.
+fn crop_change_effect() -> PendingEffect<Machine> {
+    PendingEffect::new(Effect::CropChange, |ctx: &Context, props: &Props, _send| {
+        if let Some(callback) = &props.on_crop_change {
+            callback(*ctx.crop.pending());
+        }
+        no_cleanup()
+    })
 }
 
 /// The machine for the `ImageCropper` component.
@@ -376,22 +533,35 @@ impl ars_core::Machine for Machine {
     type Context = Context;
     type Props = Props;
     type Messages = Messages;
+    type Effect = Effect;
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (Self::State, Self::Context) {
-        let crop = match &props.crop {
-            Some(c) => Bindable::controlled(*c),
-            None => Bindable::uncontrolled(props.default_crop),
+        // Sanitize and ratio-constrain the initial crop *before* building the
+        // `Bindable`, so the constraint is reflected in the controlled slot that
+        // `get()` returns (not just the internal value), and a malformed
+        // `default_crop`/controlled `crop` can never seed out-of-bounds geometry.
+        let mut initial_crop = sanitize_crop(props.crop.unwrap_or(props.default_crop));
+        if let Some(ratio) = props.aspect_ratio.as_ratio() {
+            constrain_to_ratio(&mut initial_crop, ratio);
+        }
+
+        let crop = if props.crop.is_some() {
+            Bindable::controlled(initial_crop)
+        } else {
+            Bindable::uncontrolled(initial_crop)
         };
 
         let ids = ComponentIds::from_id(&props.id);
         let locale = env.locale.clone();
         let messages = messages.clone();
 
-        (State::Idle, Context {
+        let ctx = Context {
             crop,
             aspect_ratio: props.aspect_ratio,
-            zoom: props.zoom,
+            // Clamp the initial zoom so the first render never advertises a value
+            // outside `min_zoom..=max_zoom` (matches `SetZoom`/`SyncProps`).
+            zoom: clamp_zoom(props.zoom, props.min_zoom, props.max_zoom),
             min_zoom: props.min_zoom,
             max_zoom: props.max_zoom,
             disabled: props.disabled,
@@ -403,14 +573,41 @@ impl ars_core::Machine for Machine {
             locale,
             messages,
             ids,
-        })
+        };
+
+        (State::Idle, ctx)
+    }
+
+    fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
+        assert_eq!(old.id, new.id, "image_cropper::Props.id must remain stable after init");
+
+        let mut events = Vec::new();
+
+        if old.crop != new.crop {
+            events.push(Event::SyncCrop);
+        }
+
+        // `zoom` and `flip` are *initial* (uncontrolled) props that become
+        // user-editable state after mount — like `default_crop`. Changing them
+        // post-mount is intentionally ignored so a re-render that only touches an
+        // unrelated prop never clobbers the user's current zoom/flip.
+        if old.aspect_ratio != new.aspect_ratio
+            || old.min_zoom != new.min_zoom
+            || old.max_zoom != new.max_zoom
+            || old.disabled != new.disabled
+            || old.circular != new.circular
+        {
+            events.push(Event::SyncProps);
+        }
+
+        events
     }
 
     fn transition(
         state: &Self::State,
         event: &Self::Event,
         ctx: &Self::Context,
-        _props: &Self::Props,
+        props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         // Focus/Blur always pass through.
         match event {
@@ -425,41 +622,103 @@ impl ars_core::Machine for Machine {
                     ctx.focused_part = None;
                 }));
             }
+            Event::SyncCrop => {
+                // Sanitize and ratio-constrain the parent's value, then store the
+                // constrained crop in *both* the internal and controlled slots so
+                // the rendered geometry (read via `get()`) satisfies the active
+                // aspect ratio — consistent with init/SetCropArea.
+                let aspect_ratio = props.aspect_ratio;
+                let new_crop = props.crop.map(|crop| {
+                    let mut crop = sanitize_crop(crop);
+                    if let Some(ratio) = aspect_ratio.as_ratio() {
+                        constrain_to_ratio(&mut crop, ratio);
+                    }
+                    crop
+                });
+                return Some(TransitionPlan::context_only(move |ctx| {
+                    if let Some(crop) = new_crop {
+                        ctx.crop.set(crop);
+                    }
+                    ctx.crop.sync_controlled(new_crop);
+                }));
+            }
+            Event::SyncProps => {
+                let aspect_ratio = props.aspect_ratio;
+                let min_zoom = props.min_zoom;
+                let max_zoom = props.max_zoom;
+                let disabled = props.disabled;
+                let circular = props.circular;
+
+                // Becoming disabled mid-interaction must not strand the machine
+                // in `Dragging`/`Resizing`; cancel and return to `Idle`.
+                let cancel = disabled && !matches!(state, State::Idle);
+                let target = if cancel { State::Idle } else { *state };
+
+                return Some(TransitionPlan::to(target).apply(move |ctx| {
+                    ctx.aspect_ratio = aspect_ratio;
+                    ctx.min_zoom = min_zoom;
+                    ctx.max_zoom = max_zoom;
+                    ctx.disabled = disabled;
+                    ctx.circular = circular;
+                    // `zoom`/`flip` are user-editable initial values, not synced
+                    // here; only re-clamp the *current* zoom into the (possibly
+                    // new) bounds so it never sits outside the slider range.
+                    ctx.zoom = clamp_zoom(ctx.zoom, min_zoom, max_zoom);
+                    if cancel {
+                        ctx.drag_origin = None;
+                        ctx.drag_start_crop = None;
+                    }
+                    enforce_aspect_ratio(ctx);
+                }));
+            }
             _ => {}
         }
 
         if ctx.disabled { return None; }
+
+        // Drop pointer/nudge events carrying non-finite coordinates (e.g. an
+        // adapter normalizing against a zero-sized rect yields `NaN`); `f64::clamp`
+        // does not sanitize `NaN`, so they would poison the crop geometry.
+        match event {
+            Event::DragStart { x, y }
+            | Event::DragMove { x, y }
+            | Event::ResizeMove { x, y }
+            | Event::ResizeStart { x, y, .. }
+                if !x.is_finite() || !y.is_finite() => return None,
+            Event::NudgeCrop { dx, dy } if !dx.is_finite() || !dy.is_finite() => return None,
+            _ => {}
+        }
 
         match (state, event) {
             (State::Idle, Event::DragStart { x, y }) => {
                 let x = *x; let y = *y;
                 Some(TransitionPlan::to(State::Dragging).apply(move |ctx| {
                     ctx.drag_origin = Some((x, y));
-                    ctx.drag_start_crop = Some(ctx.crop.get());
+                    // Anchor the gesture to the rendered (controlled) crop, not an
+                    // un-accepted internal edit.
+                    ctx.drag_start_crop = Some(*ctx.crop.get());
                 }))
             }
 
             (State::Dragging, Event::DragMove { x, y }) => {
                 let x = *x; let y = *y;
+                // The adapter debounces/throttles `AnnounceCropMoved` (e.g. at
+                // most once per 500ms) so continuous pointer movement does not
+                // flood the screen reader.
                 Some(TransitionPlan::context_only(move |ctx| {
-                    if let (Some((ox, oy)), Some(ref start)) =
-                        (ctx.drag_origin, &ctx.drag_start_crop)
+                    if let (Some((ox, oy)), Some(start)) =
+                        (ctx.drag_origin, ctx.drag_start_crop)
                     {
                         let dx = x - ox;
                         let dy = y - oy;
-                        let mut new_crop = *start;
+                        let mut new_crop = start;
                         new_crop.x = (start.x + dx).clamp(0.0, 1.0 - start.width);
                         new_crop.y = (start.y + dy).clamp(0.0, 1.0 - start.height);
                         ctx.crop.set(new_crop);
                     }
-                }).with_effect(PendingEffect::new("announce-crop-moved", |ctx, _props, _send| {
-                    // NOTE: The adapter should debounce/throttle this announcement
-                    // (e.g., at most once per 500ms) to avoid flooding the screen reader
-                    // with rapid-fire announcements during continuous pointer movement.
-                    let platform = use_platform_effects();
-                    platform.announce(&(ctx.messages.crop_moved)(&ctx.locale));
-                    no_cleanup()
-                })))
+                })
+                .with_effect(PendingEffect::named(Effect::AnnounceCropMoved))
+                .with_effect(crop_change_effect()))
             }
 
             (State::Dragging, Event::DragEnd) => {
@@ -473,22 +732,21 @@ impl ars_core::Machine for Machine {
                 let handle = *handle; let x = *x; let y = *y;
                 Some(TransitionPlan::to(State::Resizing { handle }).apply(move |ctx| {
                     ctx.drag_origin = Some((x, y));
-                    ctx.drag_start_crop = Some(ctx.crop.get());
+                    // Anchor the gesture to the rendered (controlled) crop, not an
+                    // un-accepted internal edit.
+                    ctx.drag_start_crop = Some(*ctx.crop.get());
                 }))
             }
 
             (State::Resizing { handle }, Event::ResizeMove { x, y }) => {
                 let handle = *handle; let x = *x; let y = *y;
+                // The adapter debounces/throttles `AnnounceCropResized` as for
+                // `AnnounceCropMoved` above.
                 Some(TransitionPlan::context_only(move |ctx| {
                     resize_crop_area(ctx, handle, x, y);
-                }).with_effect(PendingEffect::new("announce-crop-resized", |ctx, _props, _send| {
-                    // NOTE: The adapter should debounce/throttle this announcement
-                    // (e.g., at most once per 500ms) to avoid flooding the screen reader
-                    // with rapid-fire announcements during continuous pointer movement.
-                    let platform = use_platform_effects();
-                    platform.announce(&(ctx.messages.crop_resized)(&ctx.locale));
-                    no_cleanup()
-                })))
+                })
+                .with_effect(PendingEffect::named(Effect::AnnounceCropResized))
+                .with_effect(crop_change_effect()))
             }
 
             (State::Resizing { .. }, Event::ResizeEnd) => {
@@ -499,10 +757,14 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::SetCropArea(area)) => {
-                let area = *area;
+                // Sanitize the external geometry into the image before storing,
+                // then apply the active aspect-ratio constraint.
+                let area = sanitize_crop(*area);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.crop.set(area);
-                }))
+                    enforce_aspect_ratio(ctx);
+                })
+                .with_effect(crop_change_effect()))
             }
 
             (_, Event::SetAspectRatio(ratio)) => {
@@ -510,23 +772,28 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.aspect_ratio = ratio;
                     enforce_aspect_ratio(ctx);
-                }))
+                })
+                .with_effect(crop_change_effect()))
             }
 
             (_, Event::SetZoom(zoom)) => {
-                let zoom = zoom.clamp(ctx.min_zoom, ctx.max_zoom);
+                let zoom = clamp_zoom(*zoom, ctx.min_zoom, ctx.max_zoom);
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.zoom = zoom;
                 }))
             }
 
             (_, Event::SetRotation(rotation)) => {
-                let rotation = *rotation;
+                // Wrap into the slider's advertised `[-180, 180]` range so
+                // repeated rotations never report an out-of-range `aria-valuenow`.
+                let rotation = normalize_rotation(*rotation);
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let mut crop = ctx.crop.get();
+                    // Base off the rendered crop; `pending()` is for reporting.
+                    let mut crop = *ctx.crop.get();
                     crop.rotation = rotation;
                     ctx.crop.set(crop);
-                }))
+                })
+                .with_effect(crop_change_effect()))
             }
 
             (_, Event::FlipHorizontal) => {
@@ -542,23 +809,37 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::Reset) => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    ctx.crop.set(CropArea::default());
-                    ctx.zoom = 1.0;
-                    ctx.flip = FlipState::default();
+                // Reset returns to the *configured* initial state — the declared
+                // `default_crop`, initial `zoom`, and initial `flip` — not the
+                // library's hard-coded defaults.
+                let default_crop = sanitize_crop(props.default_crop);
+                let zoom = clamp_zoom(props.zoom, props.min_zoom, props.max_zoom);
+                let flip = props.flip;
+                Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
+                    ctx.crop.set(default_crop);
+                    ctx.zoom = zoom;
+                    ctx.flip = flip;
                     ctx.drag_origin = None;
                     ctx.drag_start_crop = None;
-                }))
+                    // Keep the reset crop consistent with an active ratio.
+                    enforce_aspect_ratio(ctx);
+                })
+                .with_effect(crop_change_effect()))
             }
 
             (_, Event::NudgeCrop { dx, dy }) => {
                 let dx = *dx; let dy = *dy;
+                // Arrow-key nudge: discrete, so `AnnounceCropMoved` need not be
+                // throttled the way the continuous drag/resize moves are.
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let mut crop = ctx.crop.get();
+                    // Base off the rendered crop; `pending()` is for reporting.
+                    let mut crop = *ctx.crop.get();
                     crop.x = (crop.x + dx).clamp(0.0, 1.0 - crop.width);
                     crop.y = (crop.y + dy).clamp(0.0, 1.0 - crop.height);
                     ctx.crop.set(crop);
-                }))
+                })
+                .with_effect(PendingEffect::named(Effect::AnnounceCropMoved))
+                .with_effect(crop_change_effect()))
             }
 
             _ => None,
@@ -579,7 +860,11 @@ impl ars_core::Machine for Machine {
 ### 1.6 Connect / API
 
 ```rust
-#[derive(ComponentPart)]
+// `Copy` is added to the derive list: every field is `Copy` (the unit variants
+// plus `Handle`'s `CropHandle`), and `ComponentPart` supplies the `Clone` impl
+// that `Copy` requires. This lets `Event::Focus`/`Blur` carry a `Part` while
+// staying `Copy`.
+#[derive(ComponentPart, Copy)]
 #[scope = "image-cropper"]
 pub enum Part {
     Root,
@@ -604,9 +889,19 @@ pub struct Api<'a> {
 impl<'a> Api<'a> {
     pub fn is_dragging(&self) -> bool { matches!(self.state, State::Dragging) }
     pub fn is_resizing(&self) -> bool { matches!(self.state, State::Resizing { .. }) }
-    pub fn crop(&self) -> CropArea { self.ctx.crop.get() }
+    pub fn crop(&self) -> CropArea { *self.ctx.crop.get() }
     pub fn zoom(&self) -> f64 { self.ctx.zoom }
     pub fn flip(&self) -> FlipState { self.ctx.flip }
+
+    /// The resolution-independent crop result for the current geometry.
+    pub fn result(&self) -> CropResult {
+        CropResult::from_crop_area(
+            self.ctx.crop.get(),
+            self.ctx.zoom,
+            &self.ctx.aspect_ratio,
+            self.ctx.flip,
+        )
+    }
 
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -623,7 +918,12 @@ impl<'a> Api<'a> {
             State::Resizing { .. } => "resizing",
         };
         attrs.set(HtmlAttr::Data("ars-state"), state_str);
-        if self.ctx.disabled { attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
+            // Crop area / sliders stay keyboard-reachable while disabled, so
+            // expose the inoperable state semantically too.
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
         if self.ctx.circular { attrs.set_bool(HtmlAttr::Data("ars-circular"), true); }
         attrs
     }
@@ -634,7 +934,10 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Id, self.ctx.ids.part("image"));
-        attrs.set(HtmlAttr::Src, &self.props.src);
+        attrs.set(HtmlAttr::Src, self.props.src.clone());
+        // The source image is decorative (the cropper conveys the crop via ARIA);
+        // empty alt marks it so for axe/validators and SR fallbacks.
+        attrs.set(HtmlAttr::Alt, "");
         attrs.set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
         attrs.set_style(CssProperty::Custom("ars-crop-zoom"), format!("{}", self.ctx.zoom));
         let crop = self.ctx.crop.get();
@@ -673,10 +976,8 @@ impl<'a> Api<'a> {
         attrs.set_style(CssProperty::Custom("ars-crop-height"), format!("{:.4}", crop.height));
 
         if self.is_dragging() { attrs.set_bool(HtmlAttr::Data("ars-dragging"), true); }
-        if let Some(part) = self.ctx.focused_part {
-            if part == "crop-area" {
-                attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
-            }
+        if self.ctx.focused_part == Some(Part::CropArea) {
+            attrs.set_bool(HtmlAttr::Data("ars-focus-visible"), true);
         }
         attrs
     }
@@ -698,16 +999,7 @@ impl<'a> Api<'a> {
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Class, "ars-touch-none");
 
-        let pos_str = match position {
-            CropHandle::TopLeft => "top-left",
-            CropHandle::TopRight => "top-right",
-            CropHandle::BottomLeft => "bottom-left",
-            CropHandle::BottomRight => "bottom-right",
-            CropHandle::Top => "top",
-            CropHandle::Bottom => "bottom",
-            CropHandle::Left => "left",
-            CropHandle::Right => "right",
-        };
+        let pos_str = position.token();
         attrs.set(HtmlAttr::Data("ars-position"), pos_str);
         attrs.set(HtmlAttr::Aria(AriaAttr::Label),
             (self.ctx.messages.handle_label)(pos_str, &self.ctx.locale));
@@ -724,9 +1016,13 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "slider");
+        // Advertise *ordered* bounds (same ordering `clamp_zoom` applies) so
+        // inverted `min_zoom`/`max_zoom` props never expose `valuemin > valuemax`.
+        let lower = self.ctx.min_zoom.min(self.ctx.max_zoom);
+        let upper = self.ctx.min_zoom.max(self.ctx.max_zoom);
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{:.2}", self.ctx.zoom));
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{:.2}", self.ctx.min_zoom));
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{:.2}", self.ctx.max_zoom));
+        attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{lower:.2}"));
+        attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{upper:.2}"));
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.zoom_slider_label)(&self.ctx.locale));
         attrs.set(HtmlAttr::TabIndex, "0");
         attrs
@@ -758,7 +1054,7 @@ impl<'a> Api<'a> {
         attrs.set(HtmlAttr::Aria(AriaAttr::Label),
             (self.ctx.messages.reset_label)(&self.ctx.locale));
         if self.ctx.disabled {
-            attrs.set(HtmlAttr::Disabled, "true");
+            attrs.set_bool(HtmlAttr::Disabled, true);
         }
         attrs
     }
@@ -772,39 +1068,42 @@ impl<'a> Api<'a> {
         attrs
     }
 
-    pub fn on_crop_area_keydown(&self, data: &KeyboardEventData, shift: bool) {
+    // `is_rtl` flips horizontal arrows so `ArrowRight` always moves toward the
+    // inline-end (see §4 RTL note). `KeyboardKey` carries no printable-character
+    // variant, so named arrow keys come from `data.key`.
+    pub fn on_crop_area_keydown(&self, data: &KeyboardEventData, shift: bool, is_rtl: bool) {
+        // Arrow keys steer the IME candidate list during composition; don't also
+        // nudge the crop.
+        if data.is_composing { return; }
         let nudge = if shift { 0.1 } else { 0.01 };
+        let inline = if is_rtl { -nudge } else { nudge };
         match data.key {
-            KeyboardKey::ArrowRight => (self.send)(Event::NudgeCrop { dx: nudge, dy: 0.0 }),
-            KeyboardKey::ArrowLeft => (self.send)(Event::NudgeCrop { dx: -nudge, dy: 0.0 }),
+            KeyboardKey::ArrowRight => (self.send)(Event::NudgeCrop { dx: inline, dy: 0.0 }),
+            KeyboardKey::ArrowLeft => (self.send)(Event::NudgeCrop { dx: -inline, dy: 0.0 }),
             KeyboardKey::ArrowDown => (self.send)(Event::NudgeCrop { dx: 0.0, dy: nudge }),
             KeyboardKey::ArrowUp => (self.send)(Event::NudgeCrop { dx: 0.0, dy: -nudge }),
             _ => {}
         }
     }
 
+    // Printable shortcuts read `data.character` (`KeyboardKey` excludes
+    // printable characters by design — the character lives in its own field).
     pub fn on_root_keydown(&self, data: &KeyboardEventData) {
-        match data.key {
-            KeyboardKey::Character('+') | KeyboardKey::Character('=') => {
-                (self.send)(Event::SetZoom(self.ctx.zoom + 0.1));
-            }
-            KeyboardKey::Character('-') => {
-                (self.send)(Event::SetZoom(self.ctx.zoom - 0.1));
-            }
-            KeyboardKey::Character('r') => {
-                let crop = self.ctx.crop.get();
-                (self.send)(Event::SetRotation(crop.rotation + 90.0));
-            }
-            KeyboardKey::Character('R') => {
-                let crop = self.ctx.crop.get();
-                (self.send)(Event::SetRotation(crop.rotation - 90.0));
-            }
-            KeyboardKey::Character('h') => {
-                (self.send)(Event::FlipHorizontal);
-            }
-            KeyboardKey::Character('v') => {
-                (self.send)(Event::FlipVertical);
-            }
+        // A printable key produced mid-IME-composition belongs to the composed
+        // text, not to a cropper shortcut.
+        if data.is_composing { return; }
+        // Ctrl/Cmd/Alt-modified keys are browser/app shortcuts (Ctrl+R reload,
+        // Cmd++ zoom, …); the cropper only owns the unmodified `+`/`-`/`r`/`v`.
+        // Shift is allowed — it produces `+` and uppercase `R`.
+        if data.ctrl_key || data.alt_key || data.meta_key { return; }
+        let Some(character) = data.character else { return; };
+        match character {
+            '+' | '=' => (self.send)(Event::SetZoom(self.ctx.zoom + 0.1)),
+            '-' => (self.send)(Event::SetZoom(self.ctx.zoom - 0.1)),
+            'r' => (self.send)(Event::SetRotation(self.ctx.crop.get().rotation + 90.0)),
+            'R' => (self.send)(Event::SetRotation(self.ctx.crop.get().rotation - 90.0)),
+            'h' => (self.send)(Event::FlipHorizontal),
+            'v' => (self.send)(Event::FlipVertical),
             _ => {}
         }
     }
@@ -885,6 +1184,7 @@ instead of producing pointer events.
 | `role="application"`   | Root                 | Custom interaction model                      |
 | `aria-label`           | Root                 | From `messages.label` (default: "Crop image") |
 | `aria-roledescription` | Root                 | `"cropper"` -- generic type descriptor        |
+| `aria-disabled="true"` | Root                 | When `disabled` (widget stays focusable)      |
 | `role="slider"`        | ZoomSlider           | Zoom control                                  |
 | `role="slider"`        | RotationSlider       | Rotation control                              |
 | `aria-label`           | Handle               | `"Resize {position}"` from messages           |
@@ -905,10 +1205,14 @@ instead of producing pointer events.
 ### 3.3 Screen Reader Announcements
 
 The cropper includes a visually-hidden live region (`aria-live="polite"`) that
-announces crop area changes:
+announces crop area changes. The machine emits `Effect::AnnounceCropMoved` /
+`Effect::AnnounceCropResized` and the adapter performs the announcement,
+debouncing/throttling the continuous pointer-driven cases:
 
-- "Crop area moved" -- after arrow-key nudging
-- "Crop area resized" -- after handle resize
+- "Crop area moved" (`Effect::AnnounceCropMoved`) -- after arrow-key nudging or
+  a pointer drag-move.
+- "Crop area resized" (`Effect::AnnounceCropResized`) -- after a handle
+  resize-move.
 
 ## 4. Internationalization
 
@@ -1016,7 +1320,7 @@ reverses horizontal direction so that `ArrowRight` always moves toward the inlin
 
 | Callback        | ars-ui                           | Ark UI             | Notes      |
 | --------------- | -------------------------------- | ------------------ | ---------- |
-| Crop change     | `Bindable` reactivity            | `onCropChange`     | Equivalent |
+| Crop change     | `on_crop_change` + `Bindable`    | `onCropChange`     | Equivalent |
 | Zoom change     | `Event::SetZoom`                 | `onZoomChange`     | Equivalent |
 | Rotation change | `Event::SetRotation`             | `onRotationChange` | Equivalent |
 | Flip change     | `Event::FlipHorizontal/Vertical` | `onFlipChange`     | Equivalent |

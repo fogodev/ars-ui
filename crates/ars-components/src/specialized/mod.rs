@@ -33,6 +33,9 @@ pub mod contextual_help;
 /// File upload component machine.
 pub mod file_upload;
 
+/// `ImageCropper` crop-region machine and connect API.
+pub mod image_cropper;
+
 /// `QrCode` stateless QR-matrix rendering connect API.
 pub mod qr_code;
 

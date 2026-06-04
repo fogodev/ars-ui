@@ -1,0 +1,47 @@
+---
+source: crates/ars-components/src/specialized/image_cropper/mod.rs
+expression: "snapshot_attrs(&Fixture::default().api().handle_attrs(CropHandle::TopLeft))"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "handle",
+            ),
+        ),
+        (
+            Data(
+                "ars-position",
+            ),
+            String(
+                "top-left",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "image-cropper",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Resize top-left",
+            ),
+        ),
+        (
+            Class,
+            String(
+                "ars-touch-none",
+            ),
+        ),
+    ],
+    styles: [],
+}
