@@ -1,0 +1,70 @@
+---
+source: crates/ars-components/src/specialized/image_cropper/mod.rs
+expression: "snapshot_attrs(&Fixture\n{\n    zoom: 2.0, crop: CropArea { rotation: 90.0, ..CropArea::default() }, flip:\n    FlipState { horizontal: true, vertical: true, }, ..Default::default()\n}.api().image_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "image",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "image-cropper",
+            ),
+        ),
+        (
+            Aria(
+                Hidden,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cropper-image",
+            ),
+        ),
+        (
+            Src,
+            String(
+                "photo.jpg",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Custom(
+                "ars-crop-flip-x",
+            ),
+            "-1",
+        ),
+        (
+            Custom(
+                "ars-crop-flip-y",
+            ),
+            "-1",
+        ),
+        (
+            Custom(
+                "ars-crop-rotation",
+            ),
+            "90deg",
+        ),
+        (
+            Custom(
+                "ars-crop-zoom",
+            ),
+            "2",
+        ),
+    ],
+}

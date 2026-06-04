@@ -1,0 +1,61 @@
+---
+source: crates/ars-components/src/specialized/image_cropper/mod.rs
+expression: "snapshot_attrs(&Fixture\n{\n    state: State::Resizing { handle: CropHandle::BottomRight },\n    ..Default::default()\n}.api().root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "image-cropper",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "resizing",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Crop image",
+            ),
+        ),
+        (
+            Aria(
+                RoleDescription,
+            ),
+            String(
+                "cropper",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cropper",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "application",
+            ),
+        ),
+    ],
+    styles: [],
+}

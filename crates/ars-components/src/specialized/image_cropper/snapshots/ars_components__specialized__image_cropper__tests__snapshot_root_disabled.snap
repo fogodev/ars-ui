@@ -1,0 +1,69 @@
+---
+source: crates/ars-components/src/specialized/image_cropper/mod.rs
+expression: "snapshot_attrs(&Fixture\n{ disabled: true, ..Default::default() }.api().root_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-disabled",
+            ),
+            Bool(
+                true,
+            ),
+        ),
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "root",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "image-cropper",
+            ),
+        ),
+        (
+            Data(
+                "ars-state",
+            ),
+            String(
+                "idle",
+            ),
+        ),
+        (
+            Aria(
+                Label,
+            ),
+            String(
+                "Crop image",
+            ),
+        ),
+        (
+            Aria(
+                RoleDescription,
+            ),
+            String(
+                "cropper",
+            ),
+        ),
+        (
+            Id,
+            String(
+                "cropper",
+            ),
+        ),
+        (
+            Role,
+            String(
+                "application",
+            ),
+        ),
+    ],
+    styles: [],
+}
