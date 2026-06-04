@@ -1,0 +1,34 @@
+---
+source: crates/ars-components/src/layout/carousel/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).viewport_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "viewport",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "carousel",
+            ),
+        ),
+    ],
+    styles: [
+        (
+            Overflow,
+            "hidden",
+        ),
+        (
+            TouchAction,
+            "pan-x",
+        ),
+    ],
+}

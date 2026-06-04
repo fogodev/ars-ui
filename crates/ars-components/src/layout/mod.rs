@@ -3,6 +3,9 @@
 /// `AspectRatio` component connect API.
 pub mod aspect_ratio;
 
+/// Carousel component machine.
+pub mod carousel;
+
 /// Center component connect API.
 pub mod center;
 

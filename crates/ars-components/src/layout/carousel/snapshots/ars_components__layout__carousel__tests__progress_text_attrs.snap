@@ -1,0 +1,41 @@
+---
+source: crates/ars-components/src/layout/carousel/mod.rs
+expression: "snapshot_attrs(&service.connect(&|_| {}).progress_text_attrs())"
+---
+AttrMap {
+    attrs: [
+        (
+            Data(
+                "ars-part",
+            ),
+            String(
+                "progress-text",
+            ),
+        ),
+        (
+            Data(
+                "ars-scope",
+            ),
+            String(
+                "carousel",
+            ),
+        ),
+        (
+            Aria(
+                Atomic,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
+                Live,
+            ),
+            String(
+                "polite",
+            ),
+        ),
+    ],
+    styles: [],
+}
