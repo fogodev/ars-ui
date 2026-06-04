@@ -1,0 +1,111 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "e86929013010",
+  "session_id": "019e8db0-6459-7731-b488-263d077d4b45",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-04T04:45:46.446205Z",
+  "branch": "codex/adapter-docs-parity-workflow",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "f58f068dd84e",
+  "token_usage": {
+    "input_tokens": 7429763,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 173777536,
+    "output_tokens": 502600,
+    "api_call_count": 1174
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "summary": {
+    "intent": "Implement GridList adapter components for Leptos and Dioxus (tasks #398 and #490), including full test coverage, E2E fixtures, widget examples, and documentation improvements to enforce reference-parity and agnostic-first development practices.",
+    "outcome": "GridList adapters were implemented with core-owned behavior, E2E fixtures with browser-verified DnD (drag image, drop placement, grid live preview, persisted reorder), showcase examples across all six widget variants, and adapter workflow docs were restructured into a split file set and published as a separate docs-only PR (#721) with review fixes applied.",
+    "learnings": {
+      "repo": [
+        "The repo uses `cargo xtask e2e <category> --adapter leptos|dioxus` for focused E2E runs; no `--component`, `--visual-only`, or `--behavior-only` flags exist as of this commit",
+        "E2E fixture categories must use directory-backed module structure: `categories/<category>/mod.rs` + `categories/<category>/<component>.rs`; flat category files should be migrated as each component is added",
+        "Adapter test files must be named `test_<component>.rs` and `test_<component>_wasm.rs` (not `<component>.rs`) for `cargo xtask lint adapter-parity` to discover them",
+        "Dioxus `EventHandler` is not `Send + Sync` and cannot be captured inside agnostic `Callback<T>` props; DnD and selection callbacks must be bridged adapter-locally",
+        "Leptos `web_sys` browser APIs (e.g., `DataTransfer`, `MouseEvent` offset methods) require explicit `web-sys` feature flags in `Cargo.toml`; they are not enabled by default",
+        "The agnostic GridList core owns render blocks, item render state, drag key resolution, drop target, preview ordering, and reorder payload construction; adapters must consume `api.render_blocks()` and `ItemRenderState` rather than recomputing those in adapter/demo code",
+        "React Aria / React Spectrum is the primary reference for component parity; counterpart review must happen in-browser before planning begins",
+        "The `spec/AGENTS.md` has a `cargo xtask spec validate` command to enforce spec conformance; part list changes require updating both spec anatomy tables and conformance test expected lists",
+        "Snapshot tests use `INSTA_UPDATE=always cargo test ...` to refresh; stale `.snap.new` files must be reviewed and committed",
+        "Widget examples across the three styling variants (plain/css/tailwind) must expose identical scenarios; copy from tailwind source and adjust only presentation classes"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/grid_list/mod.rs",
+          "line": 620,
+          "end_line": 980,
+          "finding": "Core API exposes `render_blocks()`, `ItemRenderState`, `drag_keys()`, `drop_target()`, and `reorder_payload()` helpers; adapters must consume these instead of recomputing them independently"
+        },
+        {
+          "path": "crates/ars-leptos/src/data_display/grid_list.rs",
+          "line": 1,
+          "end_line": 640,
+          "finding": "Leptos adapter render memo must subscribe to `api.drag_keys()` and `api.drop_target()` as invalidation inputs, otherwise DnD state changes do not trigger cell re-renders for list/stack layout"
+        },
+        {
+          "path": "crates/ars-dioxus/src/data_display/grid_list.rs",
+          "line": 1,
+          "end_line": 700,
+          "finding": "Dioxus drop handlers must read `api.drop_target().cloned()` before computing event-cell fallback; otherwise the drop lands on the moved preview card after grid reflow and resolves back to a no-op"
+        },
+        {
+          "path": "crates/ars-e2e/src/data_display/grid_list.rs",
+          "line": 472,
+          "end_line": 560,
+          "finding": "Synthetic drag helpers must split dragstart and dragover into separate `execute_script` calls so Dioxus/Leptos can apply signal-driven rerenders before dragover resolves a fresh target element"
+        },
+        {
+          "path": "AGENTS.md",
+          "line": 44,
+          "end_line": 70,
+          "finding": "Adapter-level component work now requires reading `docs/implementation/adapter-component-delivery.md` and all linked split workflow docs before planning; checklists are not substitutes for the full doc"
+        },
+        {
+          "path": "docs/implementation/adapter-components/02-adapter-api-and-wiring.md",
+          "line": 56,
+          "end_line": 92,
+          "finding": "Explicit rule: renderer-independent behavior belongs in `crates/ars-components`; duplicating selection, DnD, load-more, or parity rules in Leptos/Dioxus or demo code is a workflow violation"
+        },
+        {
+          "path": "crates/ars-e2e/fixtures/dioxus/src/categories/data_display/grid_list.rs",
+          "line": 45,
+          "end_line": 120,
+          "finding": "DnD demos must pass `dnd_enabled=true` to `GridList` and grid examples must also pass `layout=GridListLayout::Grid`; without these the machine rejects DragStart and items snap back on drop"
+        }
+      ],
+      "workflow": [
+        "For agnostic-first components, add failing core tests before touching adapters; this catches API surface issues before compiling across six example crates",
+        "Use `cargo check --manifest-path <path>/Cargo.toml` for out-of-workspace fixture/example crates instead of `-p`",
+        "The in-app browser automation cannot emit native HTML DragEvents; use the browser-backed E2E (`cargo xtask e2e`) for DnD regression coverage",
+        "Counterpart review must happen in-browser (React Aria first, then Ark UI, then Radix) before writing a plan; skipping it produces examples that technically work but fail visual/UX parity",
+        "When moving demos from local behavior to component callbacks (`on_dnd_event`), scan all six widget example files and both fixture files in parallel to avoid leaving the bug in 3 of 6 variants",
+        "Separating a docs-only PR from a large implementation branch requires `git restore --staged .` followed by targeted `git add <paths>` on a clean new branch; otherwise staged code leaks into the docs commit"
+      ]
+    },
+    "friction": [
+      "Sandbox blocked local server binding repeatedly; E2E and wasm tests required elevated network permissions on every run",
+      "In-app browser automation does not support native DragEvent construction, making visual DnD verification impossible through that surface",
+      "Dioxus hot-reload overlay persisted in the in-app browser tab even after clean server restarts, making visual verification unreliable",
+      "Long git commit hooks (90+ seconds with no output) caused the commit session to appear hung; the commit completed but the shell session did not return",
+      "Synthetic E2E drag events became stale after Dioxus/Leptos rerendered the grid on `dragstart`; required splitting into two WebDriver `execute_script` calls with a frame wait",
+      "Adapter test naming convention (`test_<component>.rs`) was only discovered when `cargo xtask lint adapter-parity` showed `SKIP` after correct implementation",
+      "Leptos `view!` macro rejects turbofish expressions inside prop values; requires extracting complex expressions to local bindings before passing to the macro",
+      "Dioxus preview/reflow timing caused E2E grid drop assertions to fail even after correct event handling; required adding diagnostic dumps to isolate whether events reached handlers"
+    ],
+    "open_items": [
+      "Checkbox adapter components (Leptos + Dioxus) are planned for a separate session; once implemented, GridList selection indicator should be revisited for visual consistency using Checkbox anatomy conventions",
+      "GridList still lacks: keyboard-driven DnD, screen-reader DnD announcements, external file drops, cross-collection moves, GridListSection/Header as first-class adapter components, `keyboardNavigationBehavior`, `disabledBehavior`, `shouldSelectOnPressUp` full wiring, and real IntersectionObserver load-more",
+      "The full GridList implementation (tasks #398/#490 branch `codex/issues-398-490-gridlist-adapters`) is uncommitted and has not been pushed; still awaiting `cargo xci-fast`, user approval, and Codex review",
+      "Docs PR #721 review fixes were committed but not yet pushed to update the open PR",
+      "Utility E2E fixture (`utility/showcase.rs`) still combines multiple components in one file; should be split per component as individual primitives are formalized",
+      "Six widget example files now carry the full Tailwind showcase copied with inline styles for drag previews; a shared demo utility/helper library across widget variants would reduce future maintenance cost"
+    ]
+  }
+}
