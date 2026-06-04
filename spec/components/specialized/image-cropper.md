@@ -109,10 +109,14 @@ impl AspectRatio {
     /// A `Fixed` ratio that is not finite and strictly positive (e.g. `0.0`, a
     /// negative number, or `NaN`) is rejected as `None` — treated as
     /// unconstrained — so it can never divide the crop geometry into infinite,
-    /// negative, or `NaN` dimensions.
+    /// negative, or `NaN` dimensions. A `Fixed` ratio outside the feasible band
+    /// `[MIN_CROP_SIZE, 1.0 / MIN_CROP_SIZE]` (`[0.05, 20.0]`) is also rejected:
+    /// no crop can keep both axes at the 5% floor inside the unit square at such
+    /// a ratio, so honoring it would collapse a dimension. The named presets all
+    /// sit inside the band.
     pub fn as_ratio(&self) -> Option<f64> {
         match self {
-            Self::Fixed(r) if r.is_finite() && *r > 0.0 => Some(*r),
+            Self::Fixed(r) if r.is_finite() && (MIN_CROP_SIZE..=1.0 / MIN_CROP_SIZE).contains(r) => Some(*r),
             Self::Free | Self::Fixed(_) => None,
             Self::Square => Some(1.0),
             Self::Landscape4x3 => Some(4.0 / 3.0),
@@ -408,18 +412,22 @@ fn resize_crop_area(ctx: &mut Context, handle: CropHandle, x: f64, y: f64) {
 }
 
 /// Re-shape `crop` to the given width:height `ratio`, keeping both dimensions
-/// within `[MIN_CROP_SIZE, image edge]`. The width drives the result: it is
-/// held at or above the floor that keeps *both* sides `>= MIN_CROP_SIZE`
-/// (`max(MIN, MIN * ratio)`) and at or below what the right/bottom edges allow,
-/// then the height is derived. `.max().min()` (not `f64::clamp`) is deliberate:
-/// when the crop sits so close to an edge that the bounds cross, fitting the
-/// image wins over the minimum-size floor instead of panicking.
+/// `>= MIN_CROP_SIZE` and inside the unit square. `lower` is the smallest width
+/// that keeps both sides at the floor (`max(MIN, MIN * ratio)`); `room` is the
+/// largest width the current origin allows. When there's room (`lower <= room`)
+/// the caller's width is preserved within `[lower, room]`; otherwise the crop
+/// shrinks to `lower` and the origin is pulled inward so the minimum-size rect
+/// still fits, rather than collapsing a dimension. `ratio` is always feasible
+/// here (`as_ratio` rejects ratios outside `[MIN, 1/MIN]`), so the reposition
+/// always fits.
 fn constrain_to_ratio(crop: &mut CropArea, ratio: f64) {
     let lower = MIN_CROP_SIZE.max(MIN_CROP_SIZE * ratio);
-    let upper = (1.0 - crop.x).min((1.0 - crop.y) * ratio);
-    let width = crop.width.max(lower).min(upper);
+    let room = (1.0 - crop.x).min((1.0 - crop.y) * ratio);
+    let width = if lower <= room { crop.width.clamp(lower, room) } else { lower };
     crop.width = width;
     crop.height = width / ratio;
+    crop.x = crop.x.min(1.0 - crop.width).max(0.0);
+    crop.y = crop.y.min(1.0 - crop.height).max(0.0);
 }
 
 /// Re-constrain the current crop area to match the current aspect ratio.
@@ -667,6 +675,19 @@ impl ars_core::Machine for Machine {
         }
 
         if ctx.disabled { return None; }
+
+        // Drop pointer/nudge events carrying non-finite coordinates (e.g. an
+        // adapter normalizing against a zero-sized rect yields `NaN`); `f64::clamp`
+        // does not sanitize `NaN`, so they would poison the crop geometry.
+        match event {
+            Event::DragStart { x, y }
+            | Event::DragMove { x, y }
+            | Event::ResizeMove { x, y }
+            | Event::ResizeStart { x, y, .. }
+                if !x.is_finite() || !y.is_finite() => return None,
+            Event::NudgeCrop { dx, dy } if !dx.is_finite() || !dy.is_finite() => return None,
+            _ => {}
+        }
 
         match (state, event) {
             (State::Idle, Event::DragStart { x, y }) => {
@@ -1071,6 +1092,10 @@ impl<'a> Api<'a> {
         // A printable key produced mid-IME-composition belongs to the composed
         // text, not to a cropper shortcut.
         if data.is_composing { return; }
+        // Ctrl/Cmd/Alt-modified keys are browser/app shortcuts (Ctrl+R reload,
+        // Cmd++ zoom, …); the cropper only owns the unmodified `+`/`-`/`r`/`v`.
+        // Shift is allowed — it produces `+` and uppercase `R`.
+        if data.ctrl_key || data.alt_key || data.meta_key { return; }
         let Some(character) = data.character else { return; };
         match character {
             '+' | '=' => (self.send)(Event::SetZoom(self.ctx.zoom + 0.1)),

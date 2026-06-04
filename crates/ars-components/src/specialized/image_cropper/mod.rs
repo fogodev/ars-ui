@@ -154,10 +154,21 @@ impl AspectRatio {
     /// (e.g. `0.0`, a negative number, or `NaN`) is rejected as `None` —
     /// treated as unconstrained — so it can never divide the crop geometry into
     /// infinite, negative, or `NaN` dimensions.
+    ///
+    /// A `Fixed` ratio is also rejected when it is *infeasible*: outside the
+    /// `[MIN_CROP_SIZE, 1.0 / MIN_CROP_SIZE]` band (`[0.05, 20.0]`), no crop can
+    /// keep both axes at or above the 5% floor inside the unit square, so
+    /// honoring it would collapse a dimension — treating it as unconstrained
+    /// preserves the documented minimum instead. The named presets all sit
+    /// inside the band.
     #[must_use]
     pub fn as_ratio(&self) -> Option<f64> {
         match self {
-            Self::Fixed(ratio) if ratio.is_finite() && *ratio > 0.0 => Some(*ratio),
+            Self::Fixed(ratio)
+                if ratio.is_finite() && (MIN_CROP_SIZE..=1.0 / MIN_CROP_SIZE).contains(ratio) =>
+            {
+                Some(*ratio)
+            }
             Self::Free | Self::Fixed(_) => None,
             Self::Square => Some(1.0),
             Self::Landscape4x3 => Some(4.0 / 3.0),
@@ -724,22 +735,33 @@ fn resize_crop_area(ctx: &mut Context, handle: CropHandle, x: f64, y: f64) {
 }
 
 /// Re-shape `crop` to the given width:height `ratio`, keeping both dimensions
-/// within `[MIN_CROP_SIZE, image edge]`.
+/// `>= MIN_CROP_SIZE` and inside the unit square.
 ///
-/// The width is the driving dimension: it is held at or above the floor that
-/// keeps *both* sides `>= MIN_CROP_SIZE` (`max(MIN, MIN * ratio)`) and at or
-/// below the largest width the right and bottom edges allow, then the height is
-/// derived from it. `.max().min()` (rather than `f64::clamp`) is deliberate —
-/// when the crop sits so close to an edge that the lower and upper bounds cross,
-/// fitting inside the image wins over the minimum-size floor instead of
-/// panicking.
+/// The width is the driving dimension. `lower` is the smallest width that keeps
+/// *both* sides at the floor (`max(MIN, MIN * ratio)`); `room` is the largest
+/// width the current origin allows before the right/bottom edges. When the
+/// origin leaves enough room (`lower <= room`) the caller's width is preserved
+/// within `[lower, room]`. When it does not, the crop is shrunk to `lower` and
+/// the origin is pulled inward so the minimum-size rect still fits — rather than
+/// collapsing a dimension below the floor. `ratio` is always feasible here
+/// because [`AspectRatio::as_ratio`] rejects ratios outside `[MIN, 1/MIN]`, so
+/// `lower <= 1.0` and `lower / ratio <= 1.0` and the reposition always fits.
 fn constrain_to_ratio(crop: &mut CropArea, ratio: f64) {
     let lower = MIN_CROP_SIZE.max(MIN_CROP_SIZE * ratio);
-    let upper = (1.0 - crop.x).min((1.0 - crop.y) * ratio);
+    let room = (1.0 - crop.x).min((1.0 - crop.y) * ratio);
 
-    let width = crop.width.max(lower).min(upper);
+    let width = if lower <= room {
+        crop.width.clamp(lower, room)
+    } else {
+        lower
+    };
+
     crop.width = width;
     crop.height = width / ratio;
+    // Pull the origin inside the image in case `width`/`height` grew past the
+    // room at the current position (the reposition path above).
+    crop.x = crop.x.min(1.0 - crop.width).max(0.0);
+    crop.y = crop.y.min(1.0 - crop.height).max(0.0);
 }
 
 /// Re-constrain the current crop area to match the current aspect ratio.
@@ -1023,6 +1045,25 @@ impl ars_core::Machine for Machine {
 
         if ctx.disabled {
             return None;
+        }
+
+        // Drop pointer/nudge events carrying non-finite coordinates (e.g. an
+        // adapter normalizing against a zero-sized rect yields `NaN`); `f64::clamp`
+        // does not sanitize `NaN`, so they would poison the crop geometry and
+        // later invert a resize clamp.
+        match event {
+            Event::DragStart { x, y }
+            | Event::DragMove { x, y }
+            | Event::ResizeMove { x, y }
+            | Event::ResizeStart { x, y, .. }
+                if !x.is_finite() || !y.is_finite() =>
+            {
+                return None;
+            }
+            Event::NudgeCrop { dx, dy } if !dx.is_finite() || !dy.is_finite() => {
+                return None;
+            }
+            _ => {}
         }
 
         match (state, event) {
@@ -1625,6 +1666,13 @@ impl Api<'_> {
         // A printable key produced mid-IME-composition belongs to the composed
         // text, not to a cropper shortcut.
         if data.is_composing {
+            return;
+        }
+
+        // Ctrl/Cmd/Alt-modified keys are browser/app shortcuts (Ctrl+R reload,
+        // Cmd++ zoom, …); the cropper only owns the unmodified `+`/`-`/`r`/`v`
+        // keys. Shift is allowed — it produces `+` and uppercase `R`.
+        if data.ctrl_key || data.alt_key || data.meta_key {
             return;
         }
 
@@ -3071,6 +3119,122 @@ mod tests {
 
         drop(service.send(Event::DragStart { x: 0.5, y: 0.5 }));
         assert_eq!(service.context().drag_start_crop, Some(rendered));
+    }
+
+    // ───────────── codex review (round 4): edge hardening ─────────────
+
+    #[test]
+    fn aspect_ratio_rejects_infeasible_extreme_fixed() {
+        // A ratio that can't keep both axes >= 5% inside the unit square is
+        // infeasible and treated as unconstrained.
+        assert_eq!(AspectRatio::Fixed(100.0).as_ratio(), None);
+        assert_eq!(AspectRatio::Fixed(21.0).as_ratio(), None);
+        assert_eq!(AspectRatio::Fixed(0.04).as_ratio(), None);
+        // The feasible band [MIN, 1/MIN] = [0.05, 20] is accepted at the edges.
+        assert_eq!(AspectRatio::Fixed(20.0).as_ratio(), Some(20.0));
+        assert_eq!(AspectRatio::Fixed(0.05).as_ratio(), Some(0.05));
+    }
+
+    #[test]
+    fn extreme_aspect_ratio_never_collapses_below_minimum() {
+        // Infeasible Fixed(100) is unconstrained → default crop kept, both dims
+        // well above the floor.
+        let service = fresh_service(test_props().aspect_ratio(AspectRatio::Fixed(100.0)));
+        let crop = *service.context().crop.get();
+        assert!(crop.width >= MIN_CROP_SIZE - 1e-9 && crop.height >= MIN_CROP_SIZE - 1e-9);
+
+        // A feasible-but-extreme ratio (20:1) keeps both axes at/above the floor
+        // by repositioning when there isn't room at the current origin.
+        let service = fresh_service(test_props().aspect_ratio(AspectRatio::Fixed(20.0)));
+        let crop = *service.context().crop.get();
+        assert!(
+            crop.width >= MIN_CROP_SIZE - 1e-9,
+            "width {} < min",
+            crop.width
+        );
+        assert!(
+            crop.height >= MIN_CROP_SIZE - 1e-9,
+            "height {} < min",
+            crop.height
+        );
+        assert!(crop.x + crop.width <= 1.0 + 1e-9);
+        assert!(crop.y + crop.height <= 1.0 + 1e-9);
+    }
+
+    #[test]
+    fn root_keydown_ignores_command_modifiers() {
+        let log: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&log);
+        let props = Box::leak(Box::new(test_props()));
+        let (_, ctx) = Machine::init(props, &Env::default(), &Messages::default());
+        let ctx = Box::leak(Box::new(ctx));
+        let state = Box::leak(Box::new(State::Idle));
+        let send = Box::leak(Box::new(move |event: Event| {
+            sink.lock().unwrap().push(event);
+        }));
+        let api = Api {
+            state,
+            ctx,
+            props,
+            send,
+        };
+
+        // Ctrl/Cmd/Alt-modified keys belong to the browser/app, not the cropper.
+        api.on_root_keydown(&KeyboardEventData {
+            ctrl_key: true,
+            ..char_key('r')
+        });
+        api.on_root_keydown(&KeyboardEventData {
+            meta_key: true,
+            ..char_key('+')
+        });
+        api.on_root_keydown(&KeyboardEventData {
+            alt_key: true,
+            ..char_key('v')
+        });
+        assert!(log.lock().unwrap().is_empty());
+
+        // Shift is allowed (needed for `+` and uppercase `R`).
+        api.on_root_keydown(&KeyboardEventData {
+            shift_key: true,
+            ..char_key('R')
+        });
+        assert!(matches!(
+            log.lock().unwrap().as_slice(),
+            [Event::SetRotation(_)]
+        ));
+    }
+
+    #[test]
+    fn non_finite_pointer_events_are_ignored() {
+        let mut service = fresh_service(test_props());
+        let before = *service.context().crop.get();
+
+        // A NaN nudge delta is dropped, not stored.
+        drop(service.send(Event::NudgeCrop {
+            dx: f64::NAN,
+            dy: 0.0,
+        }));
+        assert_eq!(*service.context().crop.get(), before);
+
+        // A NaN drag-move mid-gesture is dropped, leaving geometry finite.
+        drop(service.send(Event::DragStart { x: 0.5, y: 0.5 }));
+        let mid = *service.context().crop.get();
+        drop(service.send(Event::DragMove {
+            x: f64::NAN,
+            y: 0.5,
+        }));
+        let after = *service.context().crop.get();
+        assert_eq!(after, mid);
+        assert!(after.x.is_finite() && after.y.is_finite());
+
+        // A non-finite DragStart never enters Dragging.
+        let mut service = fresh_service(test_props());
+        drop(service.send(Event::DragStart {
+            x: f64::INFINITY,
+            y: 0.5,
+        }));
+        assert_eq!(service.state(), &State::Idle);
     }
 
     // ───────────────────────── snapshots ─────────────────────────
