@@ -81,6 +81,8 @@ pub enum Event {
     DeselectItem(Key),
     /// The item is highlighted.
     HighlightItem(Option<Key>),
+    /// An item pointer-down happened before the input blur/click sequence completes.
+    ItemPointerDown(Key),
     /// The first item is highlighted.
     HighlightFirst,
     /// The last item is highlighted.
@@ -104,6 +106,12 @@ pub enum Event {
     CompositionEnd(String),
     /// Commit the current input value when no option is highlighted.
     CommitInput,
+    /// Clear the inline completion suffix while preserving the typed prefix.
+    ClearInlineCompletion,
+    /// Mark whether a description element is rendered.
+    SetDescriptionPresent(bool),
+    /// Synchronize context-backed fields from updated props.
+    SyncProps,
 }
 ```
 
@@ -1137,7 +1145,7 @@ impl ConnectApi for Api<'_> {
 | `aria-autocomplete`     | Input   | `list` (filter only), `inline` (completion only), or `both` (filter + completion)                                                                                                                   |
 | `aria-activedescendant` | Input   | Highlighted item id (only set when a valid item is highlighted; **omit attribute entirely** when `highlighted_key` is `None` — setting it to an empty string or non-existent ID violates ARIA spec) |
 | `role`                  | Content | `listbox`                                                                                                                                                                                           |
-| `aria-label`            | Content | Dedicated localized listbox label from `Messages.listbox_label`; core omits `aria-labelledby` because it does not track whether the Label part is rendered                                           |
+| `aria-label`            | Content | Dedicated localized listbox label from `Messages.listbox_label`; core omits `aria-labelledby` because it does not track whether the Label part is rendered                                          |
 | `role`                  | Item    | `option`                                                                                                                                                                                            |
 | `aria-selected`         | Item    | `"true"` when selected, `"false"` when unselected (must be explicitly set, not omitted)                                                                                                             |
 | `role`                  | Empty   | `"none"`                                                                                                                                                                                            | Dedicated LiveRegion announces empty-state text |
@@ -1165,7 +1173,7 @@ Additional accessibility notes:
 | Typing    | Filters list, opens if closed                                                                                                         |
 | ArrowDown | Open or highlight next                                                                                                                |
 | ArrowUp   | Highlight previous                                                                                                                    |
-| Enter     | Select highlighted item, or commit/revert the raw input according to `allow_custom_value` when no option is highlighted                |
+| Enter     | Select highlighted item, or commit/revert the raw input according to `allow_custom_value` when no option is highlighted               |
 | Escape    | 3-phase (per APG inline autocomplete): (1) clear inline completion text if present, (2) close dropdown if open, (3) clear input value |
 
 > **Inline Autocomplete Announcements**: When using `FilterMode::InlineCompletion`,

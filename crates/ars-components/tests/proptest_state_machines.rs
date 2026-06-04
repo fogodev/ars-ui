@@ -26,7 +26,7 @@ mod navigation;
 #[path = "proptest_state_machines/overlay/mod.rs"]
 mod overlay;
 
-#[path = "proptest_state_machines/selection.rs"]
+#[path = "proptest_state_machines/selection/mod.rs"]
 mod selection;
 
 #[path = "proptest_state_machines/specialized.rs"]

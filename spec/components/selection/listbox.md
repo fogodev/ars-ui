@@ -70,6 +70,8 @@ pub enum Event {
     ToggleItem(Key),
     /// The listbox highlighted an item.
     HighlightItem(Option<Key>),
+    /// Extend selection from the current anchor to the provided item key.
+    ExtendSelection(Key),
     /// The listbox highlighted the next item.
     HighlightNext,
     /// The listbox highlighted the previous item.
@@ -78,6 +80,10 @@ pub enum Event {
     HighlightFirst,
     /// The listbox highlighted the last item.
     HighlightLast,
+    /// Highlight an item one page before the current item.
+    HighlightPageUp,
+    /// Highlight an item one page after the current item.
+    HighlightPageDown,
     /// The listbox selected all items.
     SelectAll,
     /// The listbox deselected all items.
@@ -90,6 +96,10 @@ pub enum Event {
     CompositionStart,
     /// IME composition ended.
     CompositionEnd,
+    /// Mark whether a description element is rendered for the listbox.
+    SetDescriptionPresent(bool),
+    /// Synchronize context-backed fields from updated props.
+    SyncProps,
     /// Replace the item collection dynamically.
     UpdateItems(StaticCollection<Item>),
     /// An item was activated (Enter/double-click) — distinct from selection.

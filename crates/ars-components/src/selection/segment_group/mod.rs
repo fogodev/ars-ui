@@ -522,13 +522,19 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::SetValue(value)) => {
-                let internal = value.clone().or_else(|| ctx.value.get().clone());
+                let sanitized_value = value
+                    .clone()
+                    .filter(|value| item_is_present(ctx, value) && !is_item_disabled(ctx, value));
 
-                if ctx.value.is_controlled() == value.is_some() && ctx.value.get() == &internal {
+                let internal = sanitized_value.clone().or_else(|| ctx.value.get().clone());
+
+                if ctx.value.is_controlled() == value.is_some()
+                    && ctx.value.get() == &sanitized_value
+                {
                     return Some(TransitionPlan::new());
                 }
 
-                let controlled = value.clone().map(Some);
+                let controlled = value.as_ref().map(|_| sanitized_value.clone());
 
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.value.set(internal);
@@ -1725,6 +1731,26 @@ mod tests {
         assert_eq!(service.state(), &State::Idle);
         assert_eq!(service.context().focused_item, None);
         assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn segment_group_set_value_rejects_disabled_controlled_value() {
+        let mut service = Service::<Machine>::new(
+            props()
+                .items(vec![disabled_segment("grid"), segment("list")])
+                .value(key("list")),
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::SetValue(Some(key("grid")))));
+
+        assert_eq!(service.context().value.get(), &None);
+        assert!(service.context().value.is_controlled());
+
+        drop(service.send(Event::SetValue(None)));
+
+        assert!(!service.context().value.is_controlled());
     }
 
     #[test]
