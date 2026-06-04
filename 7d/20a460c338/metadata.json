@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "7d20a460c338",
+  "strategy": "manual-commit",
+  "branch": "codex/adapter-outcome-parity-docs",
+  "checkpoints_count": 15,
+  "files_touched": [
+    "docs/implementation/adapter-component-delivery.md",
+    "docs/implementation/adapter-components/01-before-you-code.md",
+    "docs/implementation/adapter-components/05-e2e-fixtures-and-harnesses.md",
+    "docs/implementation/adapter-components/06-widgets-examples.md",
+    "docs/implementation/adapter-components/07-parity-review.md",
+    "docs/implementation/adapter-components/08-validation-and-pr-closeout.md",
+    "docs/implementation/adapter-components/09-browser-parity-harness.md",
+    "docs/implementation/adapter-components/README.md",
+    "docs/implementation/adapter-components/checklists/component-delivery.md",
+    "docs/implementation/adapter-components/checklists/e2e-feature-matrix.md",
+    "docs/implementation/adapter-components/checklists/widgets-visual-review.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/7d/20a460c338/0/metadata.json",
+      "transcript": "/7d/20a460c338/0/full.jsonl",
+      "content_hash": "/7d/20a460c338/0/content_hash.txt",
+      "prompt": "/7d/20a460c338/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2323992,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 50041984,
+    "output_tokens": 141678,
+    "api_call_count": 358
+  }
+}

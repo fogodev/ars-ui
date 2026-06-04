@@ -1,0 +1,255 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "7d20a460c338",
+  "session_id": "019e92f8-84a9-7fc0-bf0e-061072d47c47",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-04T17:24:25.590668Z",
+  "branch": "codex/adapter-outcome-parity-docs",
+  "checkpoints_count": 15,
+  "files_touched": [
+    "docs/implementation/adapter-component-delivery.md",
+    "docs/implementation/adapter-components/01-before-you-code.md",
+    "docs/implementation/adapter-components/05-e2e-fixtures-and-harnesses.md",
+    "docs/implementation/adapter-components/06-widgets-examples.md",
+    "docs/implementation/adapter-components/07-parity-review.md",
+    "docs/implementation/adapter-components/08-validation-and-pr-closeout.md",
+    "docs/implementation/adapter-components/09-browser-parity-harness.md",
+    "docs/implementation/adapter-components/README.md",
+    "docs/implementation/adapter-components/checklists/component-delivery.md",
+    "docs/implementation/adapter-components/checklists/e2e-feature-matrix.md",
+    "docs/implementation/adapter-components/checklists/widgets-visual-review.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "b7f1a2cc7a2f",
+  "token_usage": {
+    "input_tokens": 2323992,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 50041984,
+    "output_tokens": 141678,
+    "api_call_count": 358
+  },
+  "session_metrics": {
+    "turn_count": 16
+  },
+  "summary": {
+    "intent": "Implement Checkbox adapter components for both Leptos (#320) and Dioxus (#431) frameworks, then iteratively fix browser review issues and harden the adapter delivery workflow documentation around outcome parity.",
+    "outcome": "Checkbox adapters delivered with SSR/unit, wasm browser, E2E, and widget coverage across both frameworks and all six widget crates; multiple browser-review UI fixes applied; a separate docs-only PR created hardening the adapter outcome parity workflow with playwright-cli guidance and a counterpart fallback matrix.",
+    "learnings": {
+      "repo": [
+        "The adapter delivery workflow requires counterpart UX brief, parity matrix, E2E coverage, widgets in all six crates, and wasm browser tests in the same PR — not just the component files.",
+        "`cargo xtask spec issue-deps` validates that native GitHub dependency edges match issue bodies and reports any missing or extra dependencies.",
+        "The adapter parity lint (`cargo xtask lint adapter-parity`) only discovers `test_*.rs` files, not the repo's actual `checkbox.rs` naming convention; a thin `test_checkbox.rs` smoke file is needed to register coverage.",
+        "Core Checkbox events are `SetValue`, `SetProps`, `SetHasDescription`, `Toggle`, `Focus`, `Blur`, `Check`, `Uncheck`, `Reset` — the adapter specs still contained stale `SetDisabled`/`SetChecked`-style names that had to be corrected.",
+        "The `ars-sr-input` CSS class already exists for visually hiding native form inputs; `hidden_input_attrs()` was not emitting it for Checkbox.",
+        "Field/Form/Fieldset agnostic core (#206) is closed but adapter tasks #332 (Leptos) and #423 (Dioxus) are still open — full validation-context integration in Checkbox depends on those.",
+        "Dioxus RSX requires all element attributes to appear before child nodes.",
+        "The workspace lint denies `unused_qualifications`, so RSX expansions inside test files can trigger lint failures."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-leptos/src/input/checkbox.rs",
+          "finding": "`with_api_snapshot` is read-only by design; calling API helper methods that internally send machine events from within it causes a panic. Event dispatch must use direct `machine.send(Event::*)` calls outside the snapshot closure."
+        },
+        {
+          "path": "crates/ars-components/src/input/checkbox/mod.rs",
+          "finding": "`hidden_input_attrs()` was not emitting `class='ars-sr-input'`, causing the native form input to render visibly in widget demos. Adding the class visually hides the input while keeping it form-participatory."
+        },
+        {
+          "path": "crates/ars-leptos/src/input/checkbox.rs",
+          "finding": "Reactive attrs must be derived through memos tied to machine state rather than one-shot `with_api_snapshot` calls, otherwise state changes after interactions are not reflected in the DOM."
+        },
+        {
+          "path": "crates/ars-dioxus/src/input/checkbox.rs",
+          "finding": "Dioxus boolean attrs serialize as the string `'true'` rather than an empty string like HTML; E2E and wasm assertions must check for `'true'` rather than attribute presence."
+        },
+        {
+          "path": "crates/ars-leptos/tests/checkbox_wasm.rs",
+          "finding": "Leptos wasm test cleanup uses drop semantics on the mount handle, not a `.unmount()` method call."
+        },
+        {
+          "path": "crates/ars-e2e/src/input/checkbox.rs",
+          "finding": "WebDriver `send_keys` and direct `.click()` fail on custom non-native controls in E2E; interaction must go through DOM `KeyboardEvent`/`PointerEvent` dispatch via `execute_script`."
+        }
+      ],
+      "workflow": [
+        "The TDD cycle here was genuinely valuable: writing failing SSR tests first exposed the missing module before any implementation, and wasm tests caught the `with_api_snapshot` event-dispatch bug that SSR could not see.",
+        "`playwright-cli run-code 'async page => ...'` is the correct syntax for complex DOM evaluations; the simpler `eval` wrapper does not accept async page functions.",
+        "Use separate named Playwright sessions (`-s=reference`, `-s=local`) to compare counterpart and local pages without losing state between commands.",
+        "E2E fixture servers need localhost binding, which is blocked by the sandbox; those gates must be run outside the sandbox.",
+        "Dioxus optional props (`description`, `error_message`) passed as `None` in RSX must use `None::<ViewFn>` or the equivalent typed None to avoid ambiguous inference.",
+        "Leptos optional macro props take the inner value directly at call sites, not `Some(value)` — the macro wraps it automatically.",
+        "Snapshot files from `cargo insta` accumulate as `.snap.new` when tests fail; `cargo insta accept` must be run to promote them after intentional anatomy changes.",
+        "When measuring rendered dimensions with Playwright, elements may have zero bounding boxes if they are in the DOM but hidden under a non-visible tab; scrolling or tab-switching is required before querying layout."
+      ]
+    },
+    "friction": [
+      "The `with_api_snapshot` read-only constraint is not surfaced at compile time — it panics at runtime during wasm tests, requiring a full browser-target rebuild to discover.",
+      "The adapter parity lint only counts `test_*.rs` files, silently reporting Checkbox as uncovered even after real tests were added under the repo's actual naming convention.",
+      "Sandbox blocked the E2E fixture server from binding localhost, requiring a separate escalation path to run browser tests.",
+      "Playwright session cache creation under `~/Library/Caches/ms-playwright` required user approval mid-session.",
+      "`playwright-cli eval` and `run-code` have different invocation shapes that are not obvious from the skill doc alone.",
+      "The adapter specs contained stale event names (`SetDisabled`, `SetChecked`) that diverged from the actual core API, requiring a spec correction pass after implementation.",
+      "Dioxus wasm tests needed `#[allow(unused_qualifications)]` suppression because RSX macro expansions triggered the workspace lint."
+    ],
+    "open_items": [
+      "Hover and press interaction state (`data-ars-hovered`, `data-ars-pressed`) not yet wired into the Checkbox adapter — foundations exist in `ars-interactions` but Checkbox does not consume them.",
+      "Field/Form/Fieldset adapter delivery (#332 Leptos, #423 Dioxus) is a prerequisite for full validation-context integration in Checkbox and all future input adapters.",
+      "Checkbox indeterminate semantics need an explicit spec decision: visual/presentational state vs. machine value state (relevant to how `isIndeterminate` in React Aria differs from the current tri-state model).",
+      "Custom validation / `validationBehavior` API on Checkbox deferred until Field/Form adapters exist.",
+      "`cargo xci-fast` intentionally not run — deferred until user approves the full CI run.",
+      "Checkbox implementation changes on `codex/issue-320-431-checkbox-adapters` are not yet committed or pushed to a PR — the docs PR was created separately first.",
+      "Checklist items for hover/pressed and field-composition axes will remain incomplete in Checkbox parity matrix until those foundations are delivered."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-04T17:23:21.761981Z",
+    "agent_lines": 224,
+    "agent_removed": 47,
+    "human_added": 0,
+    "human_modified": 20,
+    "human_removed": 0,
+    "total_committed": 234,
+    "total_lines_changed": 291,
+    "agent_percentage": 93.12714776632302,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2644,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3143,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3263,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3500,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3500,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3530,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 120,
+      "user_lines_removed": 6,
+      "agent_lines_added": 3530,
+      "agent_lines_removed": 75,
+      "user_added_per_file": {
+        "examples/widgets-dioxus-css/src/categories/input.rs": 20,
+        "examples/widgets-dioxus-tailwind/src/categories/input.rs": 20,
+        "examples/widgets-dioxus/src/categories/input.rs": 20,
+        "examples/widgets-leptos-css/src/categories/input.rs": 20,
+        "examples/widgets-leptos-tailwind/src/categories/input.rs": 20,
+        "examples/widgets-leptos/src/categories/input.rs": 20
+      },
+      "user_removed_per_file": {
+        "examples/widgets-dioxus-css/src/categories/input.rs": 1,
+        "examples/widgets-dioxus-tailwind/src/categories/input.rs": 1,
+        "examples/widgets-dioxus/src/categories/input.rs": 1,
+        "examples/widgets-leptos-css/src/categories/input.rs": 1,
+        "examples/widgets-leptos-tailwind/src/categories/input.rs": 1,
+        "examples/widgets-leptos/src/categories/input.rs": 1
+      }
+    },
+    {
+      "checkpoint_number": 9,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3644,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 10,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3644,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 11,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3644,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 12,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3644,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 13,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3644,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 14,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3644,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 15,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 3644,
+      "agent_lines_removed": 75
+    },
+    {
+      "checkpoint_number": 16,
+      "user_lines_added": 10,
+      "user_lines_removed": 10,
+      "agent_lines_added": 3888,
+      "agent_lines_removed": 132,
+      "user_added_per_file": {
+        "docs/implementation/adapter-components/07-parity-review.md": 5,
+        "docs/implementation/adapter-components/09-browser-parity-harness.md": 5
+      },
+      "user_removed_per_file": {
+        "docs/implementation/adapter-components/07-parity-review.md": 5,
+        "docs/implementation/adapter-components/09-browser-parity-harness.md": 5
+      }
+    }
+  ]
+}
