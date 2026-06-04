@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "9eda115c4621",
+  "strategy": "manual-commit",
+  "branch": "codex/selection-agnostic-epic-audit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/selection/segment_group/mod.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/9e/da115c4621/0/metadata.json",
+      "transcript": "/9e/da115c4621/0/full.jsonl",
+      "content_hash": "/9e/da115c4621/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 102197,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 2232448,
+    "output_tokens": 6432,
+    "api_call_count": 35
+  }
+}
