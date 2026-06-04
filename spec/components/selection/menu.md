@@ -130,6 +130,8 @@ pub enum Event {
     /// Update the item collection.
     /// Replace the item collection dynamically.
     UpdateItems(StaticCollection<Item>),
+    /// Synchronize context values derived from updated props.
+    SyncProps,
 }
 ```
 

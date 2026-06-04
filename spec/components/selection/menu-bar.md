@@ -218,13 +218,13 @@ Nested item-type parts (`Item`, `CheckboxItem`, `RadioItem`, `Separator`, `SubTr
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Property           | Element       | Value                                        |
-| ------------------ | ------------- | -------------------------------------------- |
-| `role`             | `Root`        | `menubar`                                    |
-| `aria-orientation` | `Root`        | `"horizontal"` or `"vertical"` from props    |
-| `role`             | `MenuTrigger` | `menuitem`                                   |
-| `aria-haspopup`    | `MenuTrigger` | `menu`                                       |
-| `aria-expanded`    | `MenuTrigger` | `true` when menu is open                     |
+| Property           | Element       | Value                                                                                                        |
+| ------------------ | ------------- | ------------------------------------------------------------------------------------------------------------ |
+| `role`             | `Root`        | `menubar`                                                                                                    |
+| `aria-orientation` | `Root`        | `"horizontal"` or `"vertical"` from props                                                                    |
+| `role`             | `MenuTrigger` | `menuitem`                                                                                                   |
+| `aria-haspopup`    | `MenuTrigger` | `menu`                                                                                                       |
+| `aria-expanded`    | `MenuTrigger` | `true` when menu is open                                                                                     |
 | `tabindex`         | `MenuTrigger` | Roving: focused trigger gets `0`, others `-1`; when enabled and menus exist, exactly one trigger is tabbable |
 
 ### 3.2 Keyboard Interaction

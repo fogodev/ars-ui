@@ -96,6 +96,10 @@ pub enum Event {
     Clear,
     /// Clear the typeahead search buffer (fired by timeout).
     ClearTypeahead,
+    /// Mark whether a description element is rendered for the select.
+    SetDescriptionPresent(bool),
+    /// Synchronize context-backed fields from updated props.
+    SyncProps,
     /// Replace the item collection dynamically.
     UpdateItems(StaticCollection<Item>),
 }
