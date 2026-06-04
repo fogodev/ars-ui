@@ -1,0 +1,48 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "1a54ffd03690",
+  "strategy": "manual-commit",
+  "branch": "impl-296",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "crates/ars-components/src/specialized/image_cropper/mod.rs",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_crop_area_dragging.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_crop_area_focused.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_crop_area_idle.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_grid.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_handle_active_when_resizing.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_handle_top_left_idle.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_image_default.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_image_transformed.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_label.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_overlay.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_reset_trigger_disabled.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_reset_trigger_enabled.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_circular.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_disabled.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_dragging.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_idle.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_resizing.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_rotation_slider.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_zoom_slider.snap",
+    "crates/ars-components/src/specialized/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+    "crates/ars-components/tests/spec_conformance/specialized.rs",
+    "spec/components/specialized/image-cropper.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/1a/54ffd03690/0/metadata.json",
+      "transcript": "/1a/54ffd03690/0/full.jsonl",
+      "content_hash": "/1a/54ffd03690/0/content_hash.txt",
+      "prompt": "/1a/54ffd03690/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 49416,
+    "cache_creation_tokens": 1694693,
+    "cache_read_tokens": 43393851,
+    "output_tokens": 168537,
+    "api_call_count": 174
+  }
+}

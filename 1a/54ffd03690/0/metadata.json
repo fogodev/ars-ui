@@ -1,0 +1,194 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "1a54ffd03690",
+  "session_id": "8890cf94-0204-443b-b0d3-c34f03f15446",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-04T00:19:50.007983Z",
+  "branch": "impl-296",
+  "checkpoints_count": 5,
+  "files_touched": [
+    "crates/ars-components/src/specialized/image_cropper/mod.rs",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_crop_area_dragging.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_crop_area_focused.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_crop_area_idle.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_grid.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_handle_active_when_resizing.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_handle_top_left_idle.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_image_default.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_image_transformed.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_label.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_overlay.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_reset_trigger_disabled.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_reset_trigger_enabled.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_circular.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_disabled.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_dragging.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_idle.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_resizing.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_rotation_slider.snap",
+    "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_zoom_slider.snap",
+    "crates/ars-components/src/specialized/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+    "crates/ars-components/tests/spec_conformance/specialized.rs",
+    "spec/components/specialized/image-cropper.md"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "80d13fc4ba9f",
+  "token_usage": {
+    "input_tokens": 49416,
+    "cache_creation_tokens": 1694693,
+    "cache_read_tokens": 43393851,
+    "output_tokens": 168537,
+    "api_call_count": 174
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "summary": {
+    "intent": "Implement task #296: the ImageCropper agnostic core component for ars-ui, including the stateful machine, geometry math, keyboard handling, and test suite.",
+    "outcome": "Delivered the full ImageCropper agnostic core (Idle/Dragging/Resizing machine, 10-part ConnectApi, 64 tests, 19 snapshot fixtures, spec-conformance + proptest entries), reconciled all spec drift, passed a three-phase audit, and committed + pushed a PR closing #296.",
+    "learnings": {
+      "repo": [
+        "The `ComponentPart` derive emits a hand-written `Clone` (no `Copy`) because other `Part` enums in the workspace carry non-`Copy` fields (Key, SafeUrl, calendar dates). To opt a specific `Part` into `Copy`, add it explicitly: `#[derive(ComponentPart, Copy)]` — works whenever all variants/fields are `Copy`.",
+        "The current `Machine` trait requires `type Effect: EffectName` (a typed enum). The agnostic core cannot call `use_platform_effects()` directly; effects must be dispatched by the adapter.",
+        "`Bindable::get()` returns `&T`, not `T`. Mutating closures need explicit deref: `*ctx.crop.pending()`, not `ctx.crop.get()`.",
+        "`KeyboardKey` deliberately excludes printable characters. Matching '+'/'-' must use `data.character: Option<char>`, not `KeyboardKey::Character(...)`.",
+        "Multi-arg `MessageFn` fields trip clippy's `type_complexity` lint. The convention is a `pub type` alias (matches tabs/tree_view pattern).",
+        "Field-carrying `Part` variants (e.g. `Handle { position }`) require the field type to implement `Hash` for the `ComponentPart` derive to compile.",
+        "Snapshot count gate defaults: `min_per_variant=3`, `max_per_component=40`. 3 variants → need 9–40 snapshots minimum.",
+        "Controlled-mode sync pattern (on_change prop + SyncValue/SyncProps events + on_props_changed + effect type) is established in SignaturePad (#295) and must be replicated for every stateful component with a controlled prop.",
+        "ImageCropper does not need a rasterizer trait (unlike SignaturePad) because the core never owns source pixels — only a `src` URL string. The agnostic core's full contribution to export is `CropResult` + `CropOutputFormat`; pixel work is adapter-owned."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-core/src/raster.rs",
+          "line": 205,
+          "end_line": 205,
+          "finding": "SignatureRasterizer::rasterize takes core-owned vector stroke data. The trait exists because the core possesses the source. ImageCropper never possesses pixels, so no analogous trait is warranted."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/image_cropper/mod.rs",
+          "line": 102,
+          "end_line": 107,
+          "finding": "CropHandle::token() arms for TopRight/BottomLeft/Top/Bottom/Left were initially untested — discovered by coverage analysis during the audit phase."
+        }
+      ],
+      "workflow": [
+        "Always verify spec conventions against a recent reference implementation (SignaturePad was used here) before coding. Specs can silently lag behind engine API changes.",
+        "Run `cargo insta test --unreferenced=reject` with `--features i18n`; without it, i18n-gated snapshots in other crates trigger false orphan failures.",
+        "The `post-implementation-audit` skill is mandatory for this project and covers three phases: spec/impl drift, structural completeness (2 clean rounds required), and branch coverage. Run it before committing.",
+        "`cargo xci-fast` is the pre-push gate (~10–15 min); run it in the background while preparing the commit.",
+        "clippy skips `#[automatically_derived]` spans from proc macros, so `#[derive(ComponentPart, Copy)]` stays clean — `expl_impl_clone_on_copy` is not triggered."
+      ]
+    },
+    "friction": [
+      "Spec §1.5 was written against an outdated engine: string-named effects with `use_platform_effects()` in the core, `Bindable::get()` returning `T` (not `&T`), and `KeyboardKey::Character('+')` (non-existent variant). All three caused compile failures and required reconciliation before any code could be written.",
+      "An API socket connection closed mid-session during the spec-sync phase, requiring a manual 'Continue' from the user.",
+      "`cargo insta test --unreferenced=reject` filtered to only image_cropper tests but flagged other crates' i18n-gated snapshots as orphans — required a second run with `--features i18n` and no test filter.",
+      "`.map(|value| value)` in a coverage test triggered clippy's `map_identity` lint and required a follow-up fix.",
+      "A rustdoc warning at the `handle_label` MessageFn type alias was only caught during the final verification pass, after the main implementation was already written.",
+      "Coverage gaps required four separate rounds of test additions (handle token arms → resize arms → dispatcher/part_attrs → keydown arms) before reaching an acceptable floor."
+    ],
+    "open_items": [
+      "Adapter-side pixel export (using CropResult + CropOutputFormat to drive canvas/ctx.drawImage on web, and a decoded-buffer path natively) is explicitly out of scope for #296 and belongs in future leptos/dioxus adapter PRs.",
+      "`CropOutputFormat` currently has no in-core consumer beyond a unit test — it exists as shared vocabulary for adapters (same role as RasterFormat/RasterSpec in ars-core). No action needed until an adapter PR lands.",
+      "Codex-review loop was queued as the next step after PR creation but is not shown as completed in the transcript.",
+      "`Part` has non-focusable variants (Overlay, Image, Grid, Handle) that are now expressible in `Focus { part: Part::Overlay }` without a compile error, even though they're semantically meaningless. A bespoke focusable-only enum would close this, but was deliberately traded off against DRY."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-04T00:18:52.083299Z",
+    "agent_lines": 382,
+    "agent_removed": 77,
+    "human_added": 139,
+    "human_modified": 4,
+    "human_removed": 0,
+    "total_committed": 525,
+    "total_lines_changed": 602,
+    "agent_percentage": 76.24584717607974,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 3649,
+      "user_lines_removed": 1,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "crates/ars-components/src/specialized/image_cropper/mod.rs": 2374,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_crop_area_dragging.snap": 76,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_crop_area_focused.snap": 76,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_crop_area_idle.snap": 68,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_grid.snap": 33,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_handle_active_when_resizing.snap": 55,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_handle_top_left_idle.snap": 47,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_image_default.snap": 70,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_image_transformed.snap": 70,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_label.snap": 31,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_overlay.snap": 39,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_reset_trigger_disabled.snap": 45,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_reset_trigger_enabled.snap": 39,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_circular.snap": 69,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_disabled.snap": 69,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_dragging.snap": 61,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_idle.snap": 61,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_root_resizing.snap": 61,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_rotation_slider.snap": 69,
+        "crates/ars-components/src/specialized/image_cropper/snapshots/ars_components__specialized__image_cropper__tests__snapshot_zoom_slider.snap": 69,
+        "crates/ars-components/src/specialized/mod.rs": 3,
+        "crates/ars-components/tests/proptest_state_machines/specialized.rs": 94,
+        "crates/ars-components/tests/spec_conformance/specialized.rs": 26,
+        "spec/components/specialized/image-cropper.md": 44
+      },
+      "user_removed_per_file": {
+        "spec/components/specialized/image-cropper.md": 1
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 2,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4021,
+      "agent_lines_removed": 72,
+      "user_added_per_file": {
+        "crates/ars-components/tests/proptest_state_machines/specialized.rs": 2
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4046,
+      "agent_lines_removed": 80
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4040,
+      "agent_lines_removed": 81
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 141,
+      "user_lines_removed": 3,
+      "agent_lines_added": 4040,
+      "agent_lines_removed": 81,
+      "user_added_per_file": {
+        "crates/ars-components/src/specialized/image_cropper/mod.rs": 141
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/specialized/image_cropper/mod.rs": 3
+      }
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 4178,
+      "agent_lines_removed": 81
+    }
+  ]
+}

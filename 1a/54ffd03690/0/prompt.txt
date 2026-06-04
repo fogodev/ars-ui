@@ -1,0 +1,38 @@
+Implement task #296
+
+---
+
+Continue
+
+---
+
+<ide_selection>The user selected the lines 341 to 352 from /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-296/crates/ars-components/src/specialized/image_cropper/mod.rs:
+    /// Focus entered a part.
+    Focus {
+        /// The part token (e.g. `"crop-area"`) that received focus.
+        part: &'static str,
+    },
+
+    /// Focus left a part.
+    Blur {
+        /// The part token that lost focus.
+        part: &'static str,
+    },
+
+
+This may or may not be related to the current task.</ide_selection>
+Can these variants here use the `Part` enum instead of `&str`?
+
+---
+
+<ide_opened_file>The user opened the file /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-296/crates/ars-components/src/specialized/image_cropper/mod.rs in the IDE. This may or may not be related to the current task.</ide_opened_file>
+Can't we include `Copy` in the derive annotation directly?
+
+---
+
+For the signature pad we included a rasterizer, with an implementation for the web platform and a trait to be implemented for other platforms. Do we need something similar here for the image cropper?
+
+---
+
+<ide_opened_file>The user opened the file /Users/ericson/Workspace/Rust/ars-ui.worktrees/impl-296/spec/components/specialized/image-cropper.md in the IDE. This may or may not be related to the current task.</ide_opened_file>
+I reviewed here, let's commit and push a PR to github
