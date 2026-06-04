@@ -1245,7 +1245,8 @@ mod tests {
             .map(|(_, v)| v.clone())
             .unwrap();
 
-        assert!(bg.contains("hsl(0,100%,50%)") && bg.contains("hsl(360,100%,50%)"));
+        assert!(bg.contains("hsl(0,100%,50%)"));
+        assert!(bg.contains("hsl(360,100%,50%)"));
     }
 
     #[test]

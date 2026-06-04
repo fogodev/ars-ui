@@ -1064,8 +1064,15 @@ mod tests {
 
         let events = captured.borrow();
 
-        assert!(matches!(events[0], Event::IncrementX { step } if (step - 0.01).abs() < 1e-9));
-        assert!(matches!(events[1], Event::IncrementY { step } if (step - 0.1).abs() < 1e-9));
+        let Event::IncrementX { step } = events[0] else {
+            panic!("expected IncrementX, got {:?}", events[0]);
+        };
+        assert!((step - 0.01).abs() < 1e-9);
+
+        let Event::IncrementY { step } = events[1] else {
+            panic!("expected IncrementY, got {:?}", events[1]);
+        };
+        assert!((step - 0.1).abs() < 1e-9);
     }
 
     #[test]

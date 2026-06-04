@@ -2645,8 +2645,15 @@ mod tests {
 
         assert_eq!(events.len(), 6);
         assert!(matches!(events[0], Event::SetZoom(_)));
-        assert!(matches!(events[2], Event::SetRotation(rotation) if rotation > 0.0));
-        assert!(matches!(events[3], Event::SetRotation(rotation) if rotation < 0.0));
+        let Event::SetRotation(rotation) = events[2] else {
+            panic!("expected positive SetRotation, got {:?}", events[2]);
+        };
+        assert!(rotation > 0.0);
+
+        let Event::SetRotation(rotation) = events[3] else {
+            panic!("expected negative SetRotation, got {:?}", events[3]);
+        };
+        assert!(rotation < 0.0);
         assert_eq!(events[4], Event::FlipHorizontal);
         assert_eq!(events[5], Event::FlipVertical);
     }
@@ -2952,6 +2959,37 @@ mod tests {
     }
 
     #[test]
+    fn on_props_changed_reports_each_live_config_field() {
+        let base = test_props();
+
+        assert!(<Machine as ars_core::Machine>::on_props_changed(&base, &base).is_empty());
+
+        // Initial-only props should not clobber user state after mount.
+        for changed in [
+            test_props().zoom(2.0),
+            test_props().flip(FlipState {
+                horizontal: true,
+                vertical: false,
+            }),
+        ] {
+            assert!(<Machine as ars_core::Machine>::on_props_changed(&base, &changed).is_empty());
+        }
+
+        for changed in [
+            test_props().aspect_ratio(AspectRatio::Square),
+            test_props().min_zoom(0.5),
+            test_props().max_zoom(4.0),
+            test_props().disabled(true),
+            test_props().circular(true),
+        ] {
+            assert_eq!(
+                <Machine as ars_core::Machine>::on_props_changed(&base, &changed),
+                vec![Event::SyncProps]
+            );
+        }
+    }
+
+    #[test]
     fn sync_props_reclamps_zoom_to_new_bounds() {
         let mut service = fresh_service(test_props());
 
@@ -2989,8 +3027,10 @@ mod tests {
 
         assert!((0.0..=1.0).contains(&crop.x));
         assert!((0.0..=1.0).contains(&crop.y));
-        assert!(crop.width >= MIN_CROP_SIZE - 1e-9 && crop.width <= 1.0 + 1e-9);
-        assert!(crop.height >= MIN_CROP_SIZE - 1e-9 && crop.height <= 1.0 + 1e-9);
+        assert!(crop.width >= MIN_CROP_SIZE - 1e-9);
+        assert!(crop.width <= 1.0 + 1e-9);
+        assert!(crop.height >= MIN_CROP_SIZE - 1e-9);
+        assert!(crop.height <= 1.0 + 1e-9);
         assert!(crop.x + crop.width <= 1.0 + 1e-9);
         assert!(crop.y + crop.height <= 1.0 + 1e-9);
         assert_eq!(crop.rotation, 0.0);
@@ -3141,7 +3181,8 @@ mod tests {
         // well above the floor.
         let service = fresh_service(test_props().aspect_ratio(AspectRatio::Fixed(100.0)));
         let crop = *service.context().crop.get();
-        assert!(crop.width >= MIN_CROP_SIZE - 1e-9 && crop.height >= MIN_CROP_SIZE - 1e-9);
+        assert!(crop.width >= MIN_CROP_SIZE - 1e-9);
+        assert!(crop.height >= MIN_CROP_SIZE - 1e-9);
 
         // A feasible-but-extreme ratio (20:1) keeps both axes at/above the floor
         // by repositioning when there isn't room at the current origin.
@@ -3226,7 +3267,8 @@ mod tests {
         }));
         let after = *service.context().crop.get();
         assert_eq!(after, mid);
-        assert!(after.x.is_finite() && after.y.is_finite());
+        assert!(after.x.is_finite());
+        assert!(after.y.is_finite());
 
         // A non-finite DragStart never enters Dragging.
         let mut service = fresh_service(test_props());

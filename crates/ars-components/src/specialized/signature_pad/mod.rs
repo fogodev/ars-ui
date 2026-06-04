@@ -1858,6 +1858,26 @@ mod tests {
     }
 
     #[test]
+    fn on_props_changed_reports_each_synced_config_field() {
+        let base = test_props();
+
+        assert!(<Machine as ars_core::Machine>::on_props_changed(&base, &base).is_empty());
+
+        for changed in [
+            test_props().disabled(true),
+            test_props().readonly(true),
+            test_props().pen_color("#abcdef"),
+            test_props().pen_width(4.0),
+            test_props().min_distance(9.0),
+        ] {
+            assert_eq!(
+                <Machine as ars_core::Machine>::on_props_changed(&base, &changed),
+                vec![Event::SyncProps]
+            );
+        }
+    }
+
+    #[test]
     fn set_props_can_reenable_a_disabled_pad() {
         let mut service = fresh_service(test_props().disabled(true));
 
@@ -2224,6 +2244,17 @@ mod tests {
 
         assert!(!api.clear_trigger_attrs().contains(&HtmlAttr::Disabled));
         assert!(!api.undo_trigger_attrs().contains(&HtmlAttr::Disabled));
+    }
+
+    #[test]
+    fn clear_and_undo_triggers_disabled_when_non_interactive() {
+        for api in [
+            api_for(State::Completed, data_with(1), true, false, false),
+            api_for(State::Completed, data_with(1), false, true, false),
+        ] {
+            assert!(api.clear_trigger_attrs().contains(&HtmlAttr::Disabled));
+            assert!(api.undo_trigger_attrs().contains(&HtmlAttr::Disabled));
+        }
     }
 
     #[test]

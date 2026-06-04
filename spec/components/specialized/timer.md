@@ -633,13 +633,13 @@ Timer
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Part         | Role          | Properties                                               |
-| ------------ | ------------- | -------------------------------------------------------- |
-| Root         | `timer`       | `aria-live="polite"`, `aria-atomic="true"`               |
-| Progress     | `progressbar` | `aria-valuenow`, `aria-valuemin`, `aria-valuemax`        |
-| StartTrigger | `button`      | `aria-label`, `disabled`                                 |
-| PauseTrigger | `button`      | `aria-label`, `disabled`                                 |
-| ResetTrigger | `button`      | `aria-label`, `disabled`                                 |
+| Part         | Role          | Properties                                        |
+| ------------ | ------------- | ------------------------------------------------- |
+| Root         | `timer`       | `aria-live="polite"`, `aria-atomic="true"`        |
+| Progress     | `progressbar` | `aria-valuenow`, `aria-valuemin`, `aria-valuemax` |
+| StartTrigger | `button`      | `aria-label`, `disabled`                          |
+| PauseTrigger | `button`      | `aria-label`, `disabled`                          |
+| ResetTrigger | `button`      | `aria-label`, `disabled`                          |
 
 ### 3.2 Keyboard Interaction
 

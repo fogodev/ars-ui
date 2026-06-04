@@ -6,13 +6,13 @@ use alloc::{
 };
 use std::sync::Mutex;
 
-use ars_core::{AriaAttr, AttrMap, Env, HtmlAttr, Machine as _, Service, StrongSend};
+use ars_core::{AriaAttr, AttrMap, ConnectApi, Env, HtmlAttr, Machine as _, Service, StrongSend};
 use ars_interactions::{KeyboardEventData, KeyboardKey};
 use insta::assert_snapshot;
 
 use super::{
-    Effect, Event, Item, Machine, Messages, Progress, Props, RawFile, RejectionReason, State,
-    Status,
+    Effect, Event, Item, Machine, Messages, Part, Progress, Props, RawFile, Rejection,
+    RejectionReason, State, Status,
 };
 
 fn test_props() -> Props {
@@ -179,6 +179,24 @@ fn file_upload_props_builder_sets_controlled_and_capture_fields() {
         .uncontrolled();
 
     assert_eq!(uncontrolled.files, None);
+}
+
+#[test]
+fn file_upload_props_builder_clearers_reset_optional_fields() {
+    let props = Props::new()
+        .max_file_size(100)
+        .clear_max_file_size()
+        .min_file_size(10)
+        .clear_min_file_size()
+        .max_files(2)
+        .clear_max_files()
+        .on_files_change(|_| {})
+        .clear_on_files_change();
+
+    assert_eq!(props.max_file_size, None);
+    assert_eq!(props.min_file_size, None);
+    assert_eq!(props.max_files, None);
+    assert!(props.on_files_change.is_none());
 }
 
 #[test]
@@ -470,6 +488,48 @@ fn file_upload_api_cancel_file_dispatches_event() {
         &[Event::CancelFile {
             file_id: "file-1".into(),
         }]
+    );
+}
+
+#[test]
+fn file_upload_api_dispatch_methods_send_expected_events() {
+    let events = Arc::new(Mutex::new(Vec::<Event>::new()));
+    let events_capture = Arc::clone(&events);
+    let send = move |event: Event| {
+        events_capture.lock().unwrap().push(event);
+    };
+
+    let service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
+
+    let api = service.connect(&send);
+
+    api.start_upload();
+    api.clear_files();
+    api.remove_file("file-1");
+    api.retry_file("file-2");
+    api.on_dropzone_drag_enter();
+    api.on_dropzone_drag_over();
+    api.on_dropzone_drag_leave();
+    api.on_dropzone_drop(vec![raw_file("drop.png", 10, "image/png")]);
+    api.on_trigger_click();
+
+    assert_eq!(
+        events.lock().unwrap().as_slice(),
+        &[
+            Event::StartUpload,
+            Event::ClearFiles,
+            Event::RemoveFile {
+                file_id: "file-1".into()
+            },
+            Event::RetryFile {
+                file_id: "file-2".into()
+            },
+            Event::DragEnter,
+            Event::DragOver,
+            Event::DragLeave,
+            Event::Drop(vec![raw_file("drop.png", 10, "image/png")]),
+            Event::OpenFilePicker,
+        ]
     );
 }
 
@@ -2406,6 +2466,37 @@ fn file_upload_validation_error_text_uses_rejection_time_limit() {
 }
 
 #[test]
+fn file_upload_validation_error_text_covers_each_rejection_reason() {
+    let api = api_for_state(State::Idle);
+
+    let rejection = |reason| Rejection {
+        name: "bad.bin".into(),
+        size: 1,
+        mime_type: "application/octet-stream".into(),
+        reason,
+    };
+
+    assert!(
+        api.validation_error_text(&rejection(RejectionReason::InvalidType))
+            .contains("type")
+    );
+    assert!(
+        api.validation_error_text(&rejection(RejectionReason::TooMany))
+            .contains("Too many")
+    );
+    assert!(
+        api.validation_error_text(&rejection(RejectionReason::TooSmall { min: 10 }))
+            .contains("10")
+    );
+    assert_eq!(
+        api.validation_error_text(&rejection(RejectionReason::CustomValidation(
+            "custom error".into()
+        ))),
+        "custom error"
+    );
+}
+
+#[test]
 fn file_upload_open_file_picker_emits_effect() {
     let mut service = Service::<Machine>::new(test_props(), &Env::default(), &Messages::default());
 
@@ -2425,6 +2516,14 @@ fn file_upload_api_open_file_picker_sends_event() {
     service.connect(&send_event).open_file_picker();
 
     assert_eq!(*events.lock().unwrap(), vec![Event::OpenFilePicker]);
+}
+
+#[test]
+fn file_upload_api_debug_is_non_empty() {
+    let debug = format!("{:?}", api_for_state(State::Idle));
+
+    assert!(debug.contains("file_upload::Api"));
+    assert!(debug.contains("state"));
 }
 
 #[test]
@@ -2865,4 +2964,51 @@ fn file_upload_item_delete_trigger_snapshot() {
         &api_with_files(vec![item("file-1", "photo.png", Status::Pending)])
             .item_delete_trigger_attrs(0)
     ));
+}
+
+#[test]
+fn file_upload_item_subpart_attrs_expose_data_parts() {
+    let api = api_with_files(vec![item("file-1", "photo.png", Status::Pending)]);
+
+    assert_eq!(
+        api.item_name_attrs(0).get(&HtmlAttr::Data("ars-part")),
+        Some("item-name")
+    );
+    assert_eq!(
+        api.item_size_text_attrs(0).get(&HtmlAttr::Data("ars-part")),
+        Some("item-size-text")
+    );
+    assert_eq!(
+        api.item_progress_attrs(0).get(&HtmlAttr::Data("ars-part")),
+        Some("item-progress")
+    );
+}
+
+#[test]
+fn file_upload_connect_api_dispatches_every_part() {
+    let api = api_with_files(vec![item("file-1", "photo.png", Status::Pending)]);
+
+    assert_eq!(api.part_attrs(Part::Root), api.root_attrs());
+    assert_eq!(api.part_attrs(Part::Label), api.label_attrs());
+    assert_eq!(api.part_attrs(Part::Dropzone), api.dropzone_attrs());
+    assert_eq!(api.part_attrs(Part::Trigger), api.trigger_attrs());
+    assert_eq!(api.part_attrs(Part::ItemGroup), api.item_group_attrs());
+    assert_eq!(api.part_attrs(Part::Item { index: 0 }), api.item_attrs(0));
+    assert_eq!(
+        api.part_attrs(Part::ItemName { index: 0 }),
+        api.item_name_attrs(0)
+    );
+    assert_eq!(
+        api.part_attrs(Part::ItemSizeText { index: 0 }),
+        api.item_size_text_attrs(0)
+    );
+    assert_eq!(
+        api.part_attrs(Part::ItemDeleteTrigger { index: 0 }),
+        api.item_delete_trigger_attrs(0)
+    );
+    assert_eq!(
+        api.part_attrs(Part::ItemProgress { index: 0 }),
+        api.item_progress_attrs(0)
+    );
+    assert_eq!(api.part_attrs(Part::HiddenInput), api.hidden_input_attrs());
 }
