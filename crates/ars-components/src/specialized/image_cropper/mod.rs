@@ -149,11 +149,16 @@ pub enum AspectRatio {
 
 impl AspectRatio {
     /// Get the ratio as a float, or `None` when the crop is unconstrained.
+    ///
+    /// A [`Fixed`](Self::Fixed) ratio that is not finite and strictly positive
+    /// (e.g. `0.0`, a negative number, or `NaN`) is rejected as `None` —
+    /// treated as unconstrained — so it can never divide the crop geometry into
+    /// infinite, negative, or `NaN` dimensions.
     #[must_use]
     pub fn as_ratio(&self) -> Option<f64> {
         match self {
-            Self::Free => None,
-            Self::Fixed(ratio) => Some(*ratio),
+            Self::Fixed(ratio) if ratio.is_finite() && *ratio > 0.0 => Some(*ratio),
+            Self::Free | Self::Fixed(_) => None,
             Self::Square => Some(1.0),
             Self::Landscape4x3 => Some(4.0 / 3.0),
             Self::Portrait3x4 => Some(3.0 / 4.0),
@@ -749,8 +754,55 @@ fn enforce_aspect_ratio(ctx: &mut Context) {
 /// Normalize a rotation in degrees into the `(-180, 180]`-ish slider range the
 /// rotation control advertises, so repeated `r`/`R` rotations wrap instead of
 /// running past the declared `aria-valuemin`/`aria-valuemax`.
+///
+/// A non-finite input collapses to `0.0` so a stray `NaN`/`inf` rotation can
+/// never reach the rendered `aria-valuenow`/CSS.
 fn normalize_rotation(degrees: f64) -> f64 {
+    if !degrees.is_finite() {
+        return 0.0;
+    }
+
     (degrees + 180.0).rem_euclid(360.0) - 180.0
+}
+
+/// Clamp `zoom` into the `[min, max]` band without ever panicking.
+///
+/// `f64::clamp` panics when `min > max` or a bound is `NaN`; both are reachable
+/// through the public `min_zoom`/`max_zoom` props. The bounds are ordered first
+/// and `.max().min()` is used (which yields the value unchanged when a bound is
+/// `NaN`), so a misconfigured cropper degrades to a safe range instead of taking
+/// down the app.
+const fn clamp_zoom(zoom: f64, min: f64, max: f64) -> f64 {
+    let lower = min.min(max);
+    let upper = min.max(max);
+
+    zoom.max(lower).min(upper)
+}
+
+/// Coerce an externally-supplied crop area into a renderable, in-bounds value.
+///
+/// Non-finite fields fall back to the default crop; width/height are floored at
+/// [`MIN_CROP_SIZE`] and capped at the image; the origin is then pulled inside
+/// so `x + width <= 1` and `y + height <= 1`; rotation is normalized. This keeps
+/// `SetCropArea`/init/`SyncCrop` from storing geometry that would render invalid
+/// CSS or later invert a resize clamp and panic.
+fn sanitize_crop(area: CropArea) -> CropArea {
+    let default = CropArea::default();
+    let finite = |value: f64, fallback: f64| if value.is_finite() { value } else { fallback };
+
+    let width = finite(area.width, default.width).clamp(MIN_CROP_SIZE, 1.0);
+    let height = finite(area.height, default.height).clamp(MIN_CROP_SIZE, 1.0);
+
+    let x = finite(area.x, default.x).clamp(0.0, 1.0 - width);
+    let y = finite(area.y, default.y).clamp(0.0, 1.0 - height);
+
+    CropArea {
+        x,
+        y,
+        width,
+        height,
+        rotation: normalize_rotation(area.rotation),
+    }
 }
 
 /// Builds the [`Effect::CropChange`] effect that notifies
@@ -808,18 +860,28 @@ impl ars_core::Machine for Machine {
     type Api<'a> = Api<'a>;
 
     fn init(props: &Self::Props, env: &Env, messages: &Self::Messages) -> (State, Context) {
-        let crop = if let Some(crop) = props.crop {
-            Bindable::controlled(crop)
+        // Sanitize and ratio-constrain the initial crop *before* building the
+        // `Bindable`, so the constraint is reflected in the controlled slot that
+        // `get()` returns (not just the internal value), and a malformed
+        // `default_crop`/controlled `crop` can never seed out-of-bounds geometry.
+        let mut initial_crop = sanitize_crop(props.crop.unwrap_or(props.default_crop));
+
+        if let Some(ratio) = props.aspect_ratio.as_ratio() {
+            constrain_to_ratio(&mut initial_crop, ratio);
+        }
+
+        let crop = if props.crop.is_some() {
+            Bindable::controlled(initial_crop)
         } else {
-            Bindable::uncontrolled(props.default_crop)
+            Bindable::uncontrolled(initial_crop)
         };
 
-        let mut ctx = Context {
+        let ctx = Context {
             crop,
             aspect_ratio: props.aspect_ratio,
             // Clamp the initial zoom so the first render never advertises a
             // value outside `min_zoom..=max_zoom` (matches `SetZoom`/`SyncProps`).
-            zoom: props.zoom.clamp(props.min_zoom, props.max_zoom),
+            zoom: clamp_zoom(props.zoom, props.min_zoom, props.max_zoom),
             min_zoom: props.min_zoom,
             max_zoom: props.max_zoom,
             disabled: props.disabled,
@@ -832,10 +894,6 @@ impl ars_core::Machine for Machine {
             messages: messages.clone(),
             ids: ComponentIds::from_id(&props.id),
         };
-
-        // Apply the aspect-ratio constraint up front so the initial crop is
-        // already consistent with `aspect_ratio` on the first render.
-        enforce_aspect_ratio(&mut ctx);
 
         (State::Idle, ctx)
     }
@@ -852,13 +910,16 @@ impl ars_core::Machine for Machine {
             events.push(Event::SyncCrop);
         }
 
+        // `zoom` and `flip` are *initial* (uncontrolled) props that become
+        // user-editable state after mount — like `default_crop`. Changing them
+        // post-mount is intentionally ignored so a re-render that only touches
+        // an unrelated prop never clobbers the user's current zoom/flip. Only
+        // genuine live config triggers a sync.
         if old.aspect_ratio != new.aspect_ratio
-            || old.zoom != new.zoom
             || old.min_zoom != new.min_zoom
             || old.max_zoom != new.max_zoom
             || old.disabled != new.disabled
             || old.circular != new.circular
-            || old.flip != new.flip
         {
             events.push(Event::SyncProps);
         }
@@ -889,7 +950,21 @@ impl ars_core::Machine for Machine {
             }
 
             Event::SyncCrop => {
-                let new_crop = props.crop;
+                // Sanitize and ratio-constrain the parent's value, then store
+                // the constrained crop in *both* the internal and controlled
+                // slots so the rendered geometry (read via `get()`) satisfies the
+                // active aspect ratio — consistent with init/SetCropArea.
+                let aspect_ratio = props.aspect_ratio;
+                let new_crop = props.crop.map(|crop| {
+                    let mut crop = sanitize_crop(crop);
+
+                    if let Some(ratio) = aspect_ratio.as_ratio() {
+                        constrain_to_ratio(&mut crop, ratio);
+                    }
+
+                    crop
+                });
+
                 return Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     if let Some(crop) = new_crop {
                         ctx.crop.set(crop);
@@ -901,12 +976,10 @@ impl ars_core::Machine for Machine {
 
             Event::SyncProps => {
                 let aspect_ratio = props.aspect_ratio;
-                let zoom = props.zoom.clamp(props.min_zoom, props.max_zoom);
                 let min_zoom = props.min_zoom;
                 let max_zoom = props.max_zoom;
                 let disabled = props.disabled;
                 let circular = props.circular;
-                let flip = props.flip;
 
                 // Becoming disabled mid-interaction must not strand the machine
                 // in `Dragging`/`Resizing` — the disabled gate below would then
@@ -918,12 +991,14 @@ impl ars_core::Machine for Machine {
 
                 return Some(TransitionPlan::to(target).apply(move |ctx: &mut Context| {
                     ctx.aspect_ratio = aspect_ratio;
-                    ctx.zoom = zoom;
                     ctx.min_zoom = min_zoom;
                     ctx.max_zoom = max_zoom;
                     ctx.disabled = disabled;
                     ctx.circular = circular;
-                    ctx.flip = flip;
+                    // `zoom`/`flip` are user-editable initial values, not synced
+                    // here; only re-clamp the *current* zoom into the (possibly
+                    // new) bounds so it never sits outside the slider range.
+                    ctx.zoom = clamp_zoom(ctx.zoom, min_zoom, max_zoom);
 
                     if cancel {
                         ctx.drag_origin = None;
@@ -1011,12 +1086,12 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::SetCropArea(area)) => {
-                let area = *area;
+                // Sanitize the external geometry into the image before storing,
+                // then apply the active aspect-ratio constraint.
+                let area = sanitize_crop(*area);
                 Some(
                     TransitionPlan::context_only(move |ctx: &mut Context| {
                         ctx.crop.set(area);
-                        // A directly-set crop is still subject to the active
-                        // aspect-ratio constraint.
                         enforce_aspect_ratio(ctx);
                     })
                     .with_effect(crop_change_effect()),
@@ -1036,7 +1111,7 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::SetZoom(zoom)) => {
-                let zoom = zoom.clamp(ctx.min_zoom, ctx.max_zoom);
+                let zoom = clamp_zoom(*zoom, ctx.min_zoom, ctx.max_zoom);
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.zoom = zoom;
                 }))
@@ -1072,8 +1147,8 @@ impl ars_core::Machine for Machine {
                 // Reset returns to the *configured* initial state — the
                 // `default_crop`, initial `zoom`, and initial `flip` the
                 // consumer declared — not the library's hard-coded defaults.
-                let default_crop = props.default_crop;
-                let zoom = props.zoom.clamp(props.min_zoom, props.max_zoom);
+                let default_crop = sanitize_crop(props.default_crop);
+                let zoom = clamp_zoom(props.zoom, props.min_zoom, props.max_zoom);
                 let flip = props.flip;
                 Some(
                     TransitionPlan::to(State::Idle)
@@ -1271,6 +1346,9 @@ impl Api<'_> {
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
             .set(HtmlAttr::Src, self.props.src.clone())
+            // The source image is decorative (the cropper conveys the crop via
+            // ARIA). Empty alt marks it so for axe/validators and SR fallbacks.
+            .set(HtmlAttr::Alt, "")
             .set(HtmlAttr::Aria(AriaAttr::Hidden), "true");
 
         let crop = self.ctx.crop.get();
@@ -2323,18 +2401,22 @@ mod tests {
 
     #[test]
     fn sync_props_mirrors_config_and_cancels_active_interaction() {
-        let mut service = fresh_service(test_props());
+        let mut service = fresh_service(test_props().circular(false));
 
+        // Establish a user-edited zoom so we can confirm it survives the sync.
+        drop(service.send(Event::SetZoom(2.5)));
         drop(service.send(Event::DragStart { x: 0.5, y: 0.5 }));
 
         assert_eq!(service.state(), &State::Dragging);
 
-        // Disable mid-drag via props.
-        drop(service.set_props(test_props().disabled(true).zoom(2.0)));
+        // Disable + flip `circular` via props mid-drag.
+        drop(service.set_props(test_props().disabled(true).circular(true)));
 
         assert_eq!(service.state(), &State::Idle);
         assert!(service.context().disabled);
-        assert_eq!(service.context().zoom, 2.0);
+        assert!(service.context().circular);
+        // `zoom` is an initial-only prop: the user's edit is preserved, not reset.
+        assert_eq!(service.context().zoom, 2.5);
         assert_eq!(service.context().drag_origin, None);
     }
 
@@ -2730,6 +2812,154 @@ mod tests {
         api.on_crop_area_keydown(&composing, false, false);
 
         assert!(log.lock().unwrap().is_empty());
+    }
+
+    // ───────────── codex review (round 2): hardening ─────────────
+
+    #[test]
+    fn sync_crop_enforces_active_aspect_ratio() {
+        // A controlled crop pushed in by the parent must satisfy the active
+        // ratio, just like init/SetCropArea do.
+        let mut service = fresh_service(
+            test_props()
+                .crop(CropArea {
+                    x: 0.1,
+                    y: 0.1,
+                    width: 0.5,
+                    height: 0.5,
+                    rotation: 0.0,
+                })
+                .aspect_ratio(AspectRatio::Square),
+        );
+
+        drop(
+            service.set_props(
+                test_props()
+                    .crop(CropArea {
+                        x: 0.1,
+                        y: 0.1,
+                        width: 0.6,
+                        height: 0.2,
+                        rotation: 0.0,
+                    })
+                    .aspect_ratio(AspectRatio::Square),
+            ),
+        );
+
+        let crop = *service.context().crop.get();
+
+        assert!(
+            (crop.width - crop.height).abs() < 1e-9,
+            "synced controlled crop not square: {crop:?}"
+        );
+    }
+
+    #[test]
+    fn init_orders_inverted_zoom_bounds_without_panicking() {
+        // min > max must not panic `f64::clamp`; bounds are ordered first.
+        let service = fresh_service(test_props().zoom(2.0).min_zoom(3.0).max_zoom(1.0));
+
+        let zoom = service.context().zoom;
+
+        assert!(
+            (1.0..=3.0).contains(&zoom),
+            "zoom {zoom} not in ordered range"
+        );
+    }
+
+    #[test]
+    fn sync_props_preserves_user_zoom_and_flip() {
+        // zoom/flip are initial (uncontrolled) values; an unrelated prop change
+        // must not clobber the user's edits.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::SetZoom(2.5)));
+        drop(service.send(Event::FlipHorizontal));
+
+        drop(service.set_props(test_props().disabled(true)));
+
+        assert_eq!(service.context().zoom, 2.5);
+        assert!(service.context().flip.horizontal);
+        assert!(service.context().disabled);
+    }
+
+    #[test]
+    fn sync_props_reclamps_zoom_to_new_bounds() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::SetZoom(2.5)));
+
+        // Tightening max_zoom re-clamps the *current* zoom, not back to props.zoom.
+        drop(service.set_props(test_props().max_zoom(2.0)));
+
+        assert_eq!(service.context().zoom, 2.0);
+    }
+
+    #[test]
+    fn fixed_aspect_ratio_rejects_invalid_values() {
+        assert_eq!(AspectRatio::Fixed(0.0).as_ratio(), None);
+        assert_eq!(AspectRatio::Fixed(-2.0).as_ratio(), None);
+        assert_eq!(AspectRatio::Fixed(f64::NAN).as_ratio(), None);
+        assert_eq!(AspectRatio::Fixed(f64::INFINITY).as_ratio(), None);
+        assert_eq!(AspectRatio::Fixed(1.5).as_ratio(), Some(1.5));
+    }
+
+    #[test]
+    fn set_crop_area_clamps_out_of_bounds_input() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::SetCropArea(CropArea {
+            x: 1.5,
+            y: -0.5,
+            width: 2.0,
+            height: 0.0,
+            // A non-finite rotation must collapse to a finite value.
+            rotation: f64::NAN,
+        })));
+
+        let crop = *service.context().crop.get();
+
+        assert!((0.0..=1.0).contains(&crop.x));
+        assert!((0.0..=1.0).contains(&crop.y));
+        assert!(crop.width >= MIN_CROP_SIZE - 1e-9 && crop.width <= 1.0 + 1e-9);
+        assert!(crop.height >= MIN_CROP_SIZE - 1e-9 && crop.height <= 1.0 + 1e-9);
+        assert!(crop.x + crop.width <= 1.0 + 1e-9);
+        assert!(crop.y + crop.height <= 1.0 + 1e-9);
+        assert_eq!(crop.rotation, 0.0);
+    }
+
+    #[test]
+    fn resize_after_out_of_bounds_set_does_not_panic() {
+        // A sanitized SetCropArea must keep the start snapshot in range so the
+        // resize clamps never invert their bounds and panic.
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::SetCropArea(CropArea {
+            x: 0.99,
+            y: 0.99,
+            width: 0.99,
+            height: 0.99,
+            rotation: 0.0,
+        })));
+        drop(service.send(Event::ResizeStart {
+            handle: CropHandle::BottomRight,
+            x: 0.99,
+            y: 0.99,
+        }));
+        drop(service.send(Event::ResizeMove { x: 0.5, y: 0.5 }));
+
+        // Reaching here without a panic is the assertion; sanity-check bounds.
+        let crop = *service.context().crop.get();
+
+        assert!(crop.x + crop.width <= 1.0 + 1e-9);
+        assert!(crop.y + crop.height <= 1.0 + 1e-9);
+    }
+
+    #[test]
+    fn image_attrs_marks_decorative_alt() {
+        let attrs = Fixture::default().api().image_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Alt), Some(""));
     }
 
     // ───────────────────────── snapshots ─────────────────────────

@@ -35,6 +35,12 @@ AttrMap {
             ),
         ),
         (
+            Alt,
+            String(
+                "",
+            ),
+        ),
+        (
             Src,
             String(
                 "photo.jpg",
