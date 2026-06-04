@@ -1,0 +1,88 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "0bb2c13b311b",
+  "session_id": "019e8db0-6459-7731-b488-263d077d4b45",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-04T05:20:42.37207Z",
+  "branch": "codex/adapter-docs-parity-workflow",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "6404515c9399",
+  "token_usage": {
+    "input_tokens": 8017103,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 188207616,
+    "output_tokens": 518536,
+    "api_call_count": 1263
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "summary": {
+    "intent": "Implement GridList adapter components for both Leptos and Dioxus frameworks in the ars-ui Rust UI library (tasks #398 and #490), with iterative UX improvements to match React Aria's reference implementation, improved adapter-level documentation, and architectural refactoring to move shared behavior into the agnostic core layer.",
+    "outcome": "GridList adapters were implemented for both Leptos and Dioxus with selection, DnD (including grouped drag, live preview, and persisted reorder), and core-driven render state. A docs-only PR (#721) was opened and iterated through multiple Codex review cycles. The implementation code remains uncommitted pending user approval and a final `cargo xci-fast` run.",
+    "learnings": {
+      "repo": [
+        "Adapter test files must be named `test_*.rs` (e.g., `test_grid_list.rs`) not `grid_list.rs` for the parity lint to discover them.",
+        "The repo uses `cargo xtask` for custom commands: `e2e`, `lint adapter-parity`, `spec validate`, etc.",
+        "E2E fixtures use directory-backed category modules: `categories/data_display/grid_list.rs` not `categories/data_display.rs`.",
+        "`cargo xci-fast` must be run before final commit/push per repo workflow.",
+        "Adapter components must not claim 'full parity' in specs unless a parity matrix proves it.",
+        "The agnostic core (`crates/ars-components`) must own all renderer-independent behavior (selection, DnD, layout, loading suppression).",
+        "Examples and demos must NOT reimplement component behavior — they should only hold demo state and apply emitted callbacks.",
+        "Widget examples must visually match the reference implementation (React Aria > Ark UI > Radix > others).",
+        "Browser visual verification must happen before reporting completion on UX work.",
+        "The docs were split from one large `adapter-component-delivery.md` into modular files under `docs/implementation/adapter-components/`."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-leptos/tests/test_grid_list_wasm.rs",
+          "finding": "Leptos wasm tests require `Arc<Mutex<_>>` instead of `Rc<RefCell<_>>` due to Send+Sync bounds on callbacks."
+        },
+        {
+          "path": "crates/ars-dioxus/src/data_display/grid_list.rs",
+          "finding": "Dioxus `EventHandler` is not Send+Sync and cannot be captured inside agnostic `Callback` props. Dioxus render callbacks must also explicitly return `Element` type."
+        },
+        {
+          "path": "crates/ars-components/src/data_display/grid_list/mod.rs",
+          "finding": "Drop completion in DnD must use core's pending drop target (not re-derive from the DOM event), and render callbacks should receive `ItemRenderState` (including selected/drag/drop state from core) not raw `ItemDef`."
+        },
+        {
+          "path": "crates/ars-leptos/src/data_display/grid_list.rs",
+          "finding": "Leptos block rendering must be wrapped in reactive closures for DnD state to update cells correctly; static spread of attrs is insufficient for dynamic state."
+        },
+        {
+          "path": "crates/ars-e2e/fixtures/dioxus/src/categories/data_display/grid_list.rs",
+          "finding": "E2E fixtures use directory-backed category modules; adding a new component requires creating `categories/<category>/<component>.rs` and registering it in the module tree."
+        }
+      ],
+      "workflow": [
+        "Pre-commit hooks run silently for minutes on every commit — monitor git log to verify completion rather than assuming a hung process.",
+        "In-app browser automation cannot emit HTML drag events via pointer/coordinate methods; real Playwright/WebDriver E2E is required for DnD testing.",
+        "Sandbox blocks localhost server binding, requiring escalation for local dev servers.",
+        "`dx serve` dev server frequently shows a stale rebuild overlay in browser tabs — hard-refresh or restart may be needed.",
+        "Codex review thread resolution requires GraphQL thread IDs, not comment database IDs; the fetch_comments.py script provides these.",
+        "GridList DnD grouped drag, live preview, and persisted reorder all required multiple implementation iterations — plan for several cycles on DnD features."
+      ]
+    },
+    "friction": [
+      "Pre-commit hooks run silently for minutes with no progress indicator, making it unclear if the process is stuck.",
+      "Browser automation cannot emit HTML drag events via pointer/coordinate methods, blocking full in-app DnD verification.",
+      "Sandbox environment blocks localhost server binding, preventing local dev server usage without escalation.",
+      "`dx serve` dev server frequently shows stale rebuild overlays, requiring manual intervention to confirm changes.",
+      "Codex review thread resolution requires GraphQL thread IDs rather than the more accessible comment database IDs, adding friction to PR iteration.",
+      "Dioxus `EventHandler` not being Send+Sync required architectural workarounds to avoid capturing it in agnostic core callbacks.",
+      "DnD correctness required multiple implementation iterations — grouped drag, live preview, and persisted reorder each had distinct bugs."
+    ],
+    "open_items": [
+      "Checkbox adapter implementation explicitly deferred to a separate session/branch.",
+      "GridList implementation PR code is uncommitted — pending user approval and a passing `cargo xci-fast` run before commit/push.",
+      "Full E2E drag/drop simulation via synthetic events is still imperfect due to complex timing and re-render issues.",
+      "GridList parity features still partially missing vs React Aria: sections, full DnD API, keyboard DnD, and layout/orientation props are partial implementations.",
+      "Docs PR #721 is still open awaiting final Codex review approval after the last fix commit.",
+      "GridList `dioxus-web` dependency added under the `web` feature — should be audited to confirm it does not affect non-browser builds."
+    ]
+  }
+}
