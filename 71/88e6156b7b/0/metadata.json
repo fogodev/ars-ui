@@ -1,0 +1,161 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "7188e6156b7b",
+  "session_id": "019e9088-e9bc-7f93-8927-ddcd800e6bb2",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-04T04:40:43.015976Z",
+  "branch": "codex/date-time-agnostic-audit",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/calendar.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/date_field.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/date_picker.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/date_range_field.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/date_range_picker.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/date_time_picker.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/helpers.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/range_calendar.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/time_field.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/calendar.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/date_field.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/date_picker.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/date_range_field.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/date_range_picker.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/date_time_picker.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/mod.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/range_calendar.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/time_field.rs",
+    "spec/components/date-time/_category.md",
+    "spec/components/date-time/date-field.md",
+    "spec/components/date-time/date-range-field.md",
+    "spec/components/date-time/date-range-picker.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "56bc1d70338c",
+  "token_usage": {
+    "input_tokens": 493424,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 21360128,
+    "output_tokens": 39784,
+    "api_call_count": 154
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "summary": {
+    "intent": "Audit all eight date-time agnostic components for Epic #224 closure, verifying spec completeness, then split the monolithic category-level spec-conformance and proptest test files into per-component modules to match the pattern already established by data-display and navigation categories.",
+    "outcome": "All audit findings were fixed (spec category file updated from 6 to 8 components, stale test-path references patched in two component specs, stale ars-core path comments fixed in date-field.md), both test files were split into per-component directory modules, branch coverage was brought above the 90% threshold with targeted tests, and the full fast CI gate passed before commit and push.",
+    "learnings": {
+      "repo": [
+        "The pre-push gate is `cargo xci --profile fast`; it includes formatting, clippy, unit/nextest, spec validation, and a final native LLVM branch-coverage pass that must clear per-package thresholds.",
+        "`cargo xcov` runs only the coverage step and is much faster than the full gate — useful for iterating on coverage gaps before spending another full 10-15 min `xci-fast` pass.",
+        "The exact ars-components branch coverage threshold is 90% with numerator/denominator tracked in `target/coverage/native-fast.lcov`; `cargo xtask coverage check --file target/coverage/native-fast.lcov --package ars-components --min 90 --branch-min 90` prints the exact fraction.",
+        "Per-component test modules follow the data-display/navigation precedent: `tests/spec_conformance/<category>/<component>.rs` + `mod.rs`, and `tests/proptest_state_machines/<category>/<component>.rs` + `mod.rs` with a shared `helpers.rs`.",
+        "Splitting a proptest category file requires changing `#![proptest_config(super::common::proptest_config())]` to `#![proptest_config(crate::common::proptest_config())]` in each per-component child module.",
+        "The spec category overview file `_category.md` is not automatically kept in sync with Epic scope; it must be manually updated when new components are added to the category.",
+        "`cargo xtask spec info <component>` and `cargo xtask spec validate` are the canonical tools for checking spec registration and manifest correctness.",
+        "Running multiple `cargo xtask spec info` calls in parallel causes Cargo package-cache lock contention and serializes them anyway."
+      ],
+      "code": [
+        {
+          "path": "spec/components/date-time/_category.md",
+          "line": 1,
+          "end_line": 90,
+          "finding": "Category overview still described 6 components and omitted RangeCalendar and DateTimePicker even though Epic #224 and the manifest both included 8. Must be kept in sync manually."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+          "line": 1,
+          "end_line": 1276,
+          "finding": "1,276-line monolithic category blob; was split into date_time/{helpers,mod,calendar,date_field,date_picker,date_range_field,date_range_picker,date_time_picker,range_calendar,time_field}.rs."
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_time_picker/mod.rs",
+          "line": 1315,
+          "end_line": 1355,
+          "finding": "sync_sub_value time-segment path and TypeBufferCommit readonly guard were uncovered branches that kept ars-components below the 90% branch threshold."
+        },
+        {
+          "path": "spec/components/date-time/date-range-field.md",
+          "line": 840,
+          "end_line": 856,
+          "finding": "Testing appendix still referenced the old category blob path tests/spec_conformance/date_time.rs instead of the new per-component module."
+        },
+        {
+          "path": "spec/components/date-time/date-range-picker.md",
+          "line": 928,
+          "end_line": 936,
+          "finding": "Same stale category blob path reference as date-range-field.md."
+        },
+        {
+          "path": "spec/components/date-time/date-field.md",
+          "line": 1,
+          "end_line": 50,
+          "finding": "Code-example comments used ars-core/src/components/... paths; corrected to crates/ars-components/src/date_time/..."
+        }
+      ],
+      "workflow": [
+        "Using a Python script piped through `exec_command` to parse LCOV files and rank missed branch lines by frequency is the fastest way to target coverage gaps without waiting for annotated HTML reports.",
+        "When splitting a large test file using line-range slices, always regenerate from `git show HEAD:<path>` (canonical source) rather than the working-tree file after partial edits to avoid off-by-one errors from already-applied changes.",
+        "The `nl -ba` command is useful for verifying exact line boundaries before committing to slice operations on large files.",
+        "Coverage branch threshold failures near the minimum require multiple small targeted tests and repeated `cargo xcov` runs; each full pass takes several minutes so targeting branches with confirmed miss records in the LCOV data is essential to avoid wasted cycles.",
+        "Temp split files (.tmp) should be cleaned up immediately with `rm` before switching the harness module declaration, to avoid the compiler seeing both the old file and the new directory simultaneously."
+      ]
+    },
+    "friction": [
+      "The 90% branch coverage threshold was extremely tight (9514/10572 branches covered); four separate `cargo xcov` iterations were needed, each taking several minutes, before the threshold cleared.",
+      "Several targeted tests (typeahead time segment, sync_sub_value path) compiled and passed but did not register as new covered branches in the LCOV data, likely due to instrumentation deduplication or inlining — required reading raw BRDA records to find branches that would actually count.",
+      "The initial Python-based line-range split used incorrect slice boundaries, causing extra closing braces and missing struct derives to appear in the generated files; required re-reading from `git show HEAD:` and regenerating.",
+      "Multiple parallel `cargo xtask spec info` calls serialized on the Cargo lock, providing no speedup over sequential calls.",
+      "Each full `cargo xci --profile fast` pass takes 10-15 minutes; having to rerun it twice (once after finding the coverage failure, once after fixing it) was the largest time cost in the session."
+    ],
+    "open_items": [
+      "Epic #224 was not closed on GitHub — the user needs to do that manually now that the PR is pushed.",
+      "The PR creation step (`gh pr create`) is shown as the last action in the transcript but its completion output is not shown — verify the PR was successfully opened.",
+      "Adapter specs (Leptos/Dioxus) for the date-time category were confirmed to exist and reference all 8 components, but were not audited for content drift against the agnostic spec — that is adapter-layer work and was explicitly out of scope for this epic.",
+      "The `ars-components` branch coverage is now just above 90% — any future branch additions to date_time_picker or calendar/grid.rs risk dropping it below threshold again; the margin is thin."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-04T04:39:35.930885Z",
+    "agent_lines": 1596,
+    "agent_removed": 1505,
+    "human_added": 180,
+    "human_modified": 20,
+    "human_removed": 0,
+    "total_committed": 1786,
+    "total_lines_changed": 3301,
+    "agent_percentage": 93.94122993032414,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 12,
+      "user_lines_removed": 10,
+      "agent_lines_added": 1618,
+      "agent_lines_removed": 1515,
+      "user_added_per_file": {
+        "crates/ars-components/tests/proptest_state_machines/date_time/calendar.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/date_time/range_calendar.rs": 1,
+        "spec/components/date-time/_category.md": 10
+      },
+      "user_removed_per_file": {
+        "spec/components/date-time/_category.md": 10
+      }
+    }
+  ]
+}

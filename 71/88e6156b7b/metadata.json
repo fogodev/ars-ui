@@ -1,0 +1,51 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "7188e6156b7b",
+  "strategy": "manual-commit",
+  "branch": "codex/date-time-agnostic-audit",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/calendar.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/date_field.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/date_picker.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/date_range_field.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/date_range_picker.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/date_time_picker.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/helpers.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/range_calendar.rs",
+    "crates/ars-components/tests/proptest_state_machines/date_time/time_field.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/date_time.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/calendar.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/date_field.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/date_picker.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/date_range_field.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/date_range_picker.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/date_time_picker.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/mod.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/range_calendar.rs",
+    "crates/ars-components/tests/spec_conformance/date_time/time_field.rs",
+    "spec/components/date-time/_category.md",
+    "spec/components/date-time/date-field.md",
+    "spec/components/date-time/date-range-field.md",
+    "spec/components/date-time/date-range-picker.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/71/88e6156b7b/0/metadata.json",
+      "transcript": "/71/88e6156b7b/0/full.jsonl",
+      "content_hash": "/71/88e6156b7b/0/content_hash.txt",
+      "prompt": "/71/88e6156b7b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 493424,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 21360128,
+    "output_tokens": 39784,
+    "api_call_count": 154
+  }
+}
