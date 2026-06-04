@@ -423,14 +423,20 @@ fn constrain_to_ratio(crop: &mut CropArea, ratio: f64) {
 }
 
 /// Re-constrain the current crop area to match the current aspect ratio.
+///
+/// The constrained value is written to the internal slot and, in controlled
+/// mode, mirrored into the controlled slot too — otherwise `get()` (and every
+/// rendered attr/API value) would keep returning the parent's unconstrained
+/// crop until the parent next changes `crop`, even though the ratio just
+/// changed (e.g. via `SetAspectRatio` or a `SyncProps` aspect change).
 fn enforce_aspect_ratio(ctx: &mut Context) {
     if let Some(ratio) = ctx.aspect_ratio.as_ratio() {
-        // Build on the *pending* (internal) crop: in controlled mode `get()`
-        // returns the stale parent value until it round-trips through
-        // `on_crop_change`.
         let mut crop = *ctx.crop.pending();
         constrain_to_ratio(&mut crop, ratio);
         ctx.crop.set(crop);
+        if ctx.crop.is_controlled() {
+            ctx.crop.sync_controlled(Some(crop));
+        }
     }
 }
 
@@ -667,7 +673,9 @@ impl ars_core::Machine for Machine {
                 let x = *x; let y = *y;
                 Some(TransitionPlan::to(State::Dragging).apply(move |ctx| {
                     ctx.drag_origin = Some((x, y));
-                    ctx.drag_start_crop = Some(*ctx.crop.pending());
+                    // Anchor the gesture to the rendered (controlled) crop, not an
+                    // un-accepted internal edit.
+                    ctx.drag_start_crop = Some(*ctx.crop.get());
                 }))
             }
 
@@ -703,7 +711,9 @@ impl ars_core::Machine for Machine {
                 let handle = *handle; let x = *x; let y = *y;
                 Some(TransitionPlan::to(State::Resizing { handle }).apply(move |ctx| {
                     ctx.drag_origin = Some((x, y));
-                    ctx.drag_start_crop = Some(*ctx.crop.pending());
+                    // Anchor the gesture to the rendered (controlled) crop, not an
+                    // un-accepted internal edit.
+                    ctx.drag_start_crop = Some(*ctx.crop.get());
                 }))
             }
 
@@ -757,7 +767,8 @@ impl ars_core::Machine for Machine {
                 // repeated rotations never report an out-of-range `aria-valuenow`.
                 let rotation = normalize_rotation(*rotation);
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let mut crop = *ctx.crop.pending();
+                    // Base off the rendered crop; `pending()` is for reporting.
+                    let mut crop = *ctx.crop.get();
                     crop.rotation = rotation;
                     ctx.crop.set(crop);
                 })
@@ -800,7 +811,8 @@ impl ars_core::Machine for Machine {
                 // Arrow-key nudge: discrete, so `AnnounceCropMoved` need not be
                 // throttled the way the continuous drag/resize moves are.
                 Some(TransitionPlan::context_only(move |ctx| {
-                    let mut crop = *ctx.crop.pending();
+                    // Base off the rendered crop; `pending()` is for reporting.
+                    let mut crop = *ctx.crop.get();
                     crop.x = (crop.x + dx).clamp(0.0, 1.0 - crop.width);
                     crop.y = (crop.y + dy).clamp(0.0, 1.0 - crop.height);
                     ctx.crop.set(crop);
@@ -885,7 +897,12 @@ impl<'a> Api<'a> {
             State::Resizing { .. } => "resizing",
         };
         attrs.set(HtmlAttr::Data("ars-state"), state_str);
-        if self.ctx.disabled { attrs.set_bool(HtmlAttr::Data("ars-disabled"), true); }
+        if self.ctx.disabled {
+            attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
+            // Crop area / sliders stay keyboard-reachable while disabled, so
+            // expose the inoperable state semantically too.
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
+        }
         if self.ctx.circular { attrs.set_bool(HtmlAttr::Data("ars-circular"), true); }
         attrs
     }
@@ -978,9 +995,13 @@ impl<'a> Api<'a> {
         attrs.set(scope_attr, scope_val);
         attrs.set(part_attr, part_val);
         attrs.set(HtmlAttr::Role, "slider");
+        // Advertise *ordered* bounds (same ordering `clamp_zoom` applies) so
+        // inverted `min_zoom`/`max_zoom` props never expose `valuemin > valuemax`.
+        let lower = self.ctx.min_zoom.min(self.ctx.max_zoom);
+        let upper = self.ctx.min_zoom.max(self.ctx.max_zoom);
         attrs.set(HtmlAttr::Aria(AriaAttr::ValueNow), format!("{:.2}", self.ctx.zoom));
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{:.2}", self.ctx.min_zoom));
-        attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{:.2}", self.ctx.max_zoom));
+        attrs.set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{lower:.2}"));
+        attrs.set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{upper:.2}"));
         attrs.set(HtmlAttr::Aria(AriaAttr::Label), (self.ctx.messages.zoom_slider_label)(&self.ctx.locale));
         attrs.set(HtmlAttr::TabIndex, "0");
         attrs
@@ -1138,6 +1159,7 @@ instead of producing pointer events.
 | `role="application"`   | Root                 | Custom interaction model                      |
 | `aria-label`           | Root                 | From `messages.label` (default: "Crop image") |
 | `aria-roledescription` | Root                 | `"cropper"` -- generic type descriptor        |
+| `aria-disabled="true"` | Root                 | When `disabled` (widget stays focusable)      |
 | `role="slider"`        | ZoomSlider           | Zoom control                                  |
 | `role="slider"`        | RotationSlider       | Rotation control                              |
 | `aria-label`           | Handle               | `"Resize {position}"` from messages           |

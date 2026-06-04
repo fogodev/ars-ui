@@ -743,11 +743,20 @@ fn constrain_to_ratio(crop: &mut CropArea, ratio: f64) {
 }
 
 /// Re-constrain the current crop area to match the current aspect ratio.
+///
+/// The constrained value is written to the internal slot and, in controlled
+/// mode, mirrored into the controlled slot too — otherwise `get()` (and every
+/// rendered attr/API value) would keep returning the parent's unconstrained
+/// crop until the parent next changes `crop`, even though the ratio just
+/// changed (e.g. via `SetAspectRatio` or a `SyncProps` aspect change).
 fn enforce_aspect_ratio(ctx: &mut Context) {
     if let Some(ratio) = ctx.aspect_ratio.as_ratio() {
         let mut crop = *ctx.crop.pending();
         constrain_to_ratio(&mut crop, ratio);
         ctx.crop.set(crop);
+        if ctx.crop.is_controlled() {
+            ctx.crop.sync_controlled(Some(crop));
+        }
     }
 }
 
@@ -1022,7 +1031,10 @@ impl ars_core::Machine for Machine {
                 Some(
                     TransitionPlan::to(State::Dragging).apply(move |ctx: &mut Context| {
                         ctx.drag_origin = Some((x, y));
-                        ctx.drag_start_crop = Some(*ctx.crop.pending());
+                        // Anchor the gesture to the *rendered* (controlled) crop,
+                        // not an un-accepted internal edit, so drag math tracks
+                        // what the user sees.
+                        ctx.drag_start_crop = Some(*ctx.crop.get());
                     }),
                 )
             }
@@ -1062,7 +1074,10 @@ impl ars_core::Machine for Machine {
                 Some(TransitionPlan::to(State::Resizing { handle }).apply(
                     move |ctx: &mut Context| {
                         ctx.drag_origin = Some((x, y));
-                        ctx.drag_start_crop = Some(*ctx.crop.pending());
+                        // Anchor the gesture to the *rendered* (controlled) crop,
+                        // not an un-accepted internal edit, so drag math tracks
+                        // what the user sees.
+                        ctx.drag_start_crop = Some(*ctx.crop.get());
                     },
                 ))
             }
@@ -1123,7 +1138,8 @@ impl ars_core::Machine for Machine {
                 let rotation = normalize_rotation(*rotation);
                 Some(
                     TransitionPlan::context_only(move |ctx: &mut Context| {
-                        let mut crop = *ctx.crop.pending();
+                        // Base off the rendered crop; `pending()` is for reporting.
+                        let mut crop = *ctx.crop.get();
 
                         crop.rotation = rotation;
 
@@ -1169,7 +1185,8 @@ impl ars_core::Machine for Machine {
                 let (dx, dy) = (*dx, *dy);
                 Some(
                     TransitionPlan::context_only(move |ctx: &mut Context| {
-                        let mut crop = *ctx.crop.pending();
+                        // Base off the rendered crop; `pending()` is for reporting.
+                        let mut crop = *ctx.crop.get();
 
                         crop.x = (crop.x + dx).clamp(0.0, 1.0 - crop.width);
                         crop.y = (crop.y + dy).clamp(0.0, 1.0 - crop.height);
@@ -1326,6 +1343,9 @@ impl Api<'_> {
 
         if self.ctx.disabled {
             attrs.set_bool(HtmlAttr::Data("ars-disabled"), true);
+            // The crop area / sliders stay keyboard-reachable while disabled, so
+            // expose the inoperable state semantically, not just as a style hook.
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
 
         if self.ctx.circular {
@@ -1474,6 +1494,12 @@ impl Api<'_> {
         let mut attrs = AttrMap::new();
         let [(scope_attr, scope_val), (part_attr, part_val)] = Part::ZoomSlider.data_attrs();
 
+        // Advertise *ordered* bounds — the same ordering `clamp_zoom` applies to
+        // the value — so inverted `min_zoom`/`max_zoom` props never produce an
+        // invalid `aria-valuemin > aria-valuemax` slider range.
+        let lower = self.ctx.min_zoom.min(self.ctx.max_zoom);
+        let upper = self.ctx.min_zoom.max(self.ctx.max_zoom);
+
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
@@ -1482,14 +1508,8 @@ impl Api<'_> {
                 HtmlAttr::Aria(AriaAttr::ValueNow),
                 format!("{:.2}", self.ctx.zoom),
             )
-            .set(
-                HtmlAttr::Aria(AriaAttr::ValueMin),
-                format!("{:.2}", self.ctx.min_zoom),
-            )
-            .set(
-                HtmlAttr::Aria(AriaAttr::ValueMax),
-                format!("{:.2}", self.ctx.max_zoom),
-            )
+            .set(HtmlAttr::Aria(AriaAttr::ValueMin), format!("{lower:.2}"))
+            .set(HtmlAttr::Aria(AriaAttr::ValueMax), format!("{upper:.2}"))
             .set(
                 HtmlAttr::Aria(AriaAttr::Label),
                 (self.ctx.messages.zoom_slider_label)(&self.ctx.locale),
@@ -2960,6 +2980,97 @@ mod tests {
         let attrs = Fixture::default().api().image_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::Alt), Some(""));
+    }
+
+    // ───────────── codex review (round 3): controlled + a11y ─────────────
+
+    #[test]
+    fn sync_props_aspect_change_constrains_controlled_crop() {
+        // A controlled crop must become ratio-consistent when only the
+        // aspect_ratio prop changes (no SyncCrop fires), i.e. the constrained
+        // value is mirrored into the controlled slot that `get()` returns.
+        let non_square = CropArea {
+            x: 0.1,
+            y: 0.1,
+            width: 0.8,
+            height: 0.4,
+            rotation: 0.0,
+        };
+        let mut service = fresh_service(test_props().crop(non_square));
+
+        drop(
+            service.set_props(
+                test_props()
+                    .crop(non_square)
+                    .aspect_ratio(AspectRatio::Square),
+            ),
+        );
+
+        let crop = *service.context().crop.get();
+        assert!(
+            (crop.width - crop.height).abs() < 1e-9,
+            "controlled crop not square after aspect change: {crop:?}"
+        );
+    }
+
+    #[test]
+    fn zoom_slider_advertises_ordered_bounds() {
+        let service = fresh_service(test_props().zoom(2.0).min_zoom(3.0).max_zoom(1.0));
+        let api = service.connect(&|_| {});
+        let attrs = api.zoom_slider_attrs();
+
+        let lo: f64 = attrs
+            .get(&HtmlAttr::Aria(AriaAttr::ValueMin))
+            .expect("valuemin")
+            .parse()
+            .expect("numeric");
+        let hi: f64 = attrs
+            .get(&HtmlAttr::Aria(AriaAttr::ValueMax))
+            .expect("valuemax")
+            .parse()
+            .expect("numeric");
+
+        assert!(lo <= hi, "slider advertises inverted bounds: {lo} > {hi}");
+    }
+
+    #[test]
+    fn root_exposes_aria_disabled_when_disabled() {
+        let attrs = Fixture {
+            disabled: true,
+            ..Default::default()
+        }
+        .api()
+        .root_attrs();
+
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+    }
+
+    #[test]
+    fn controlled_drag_baseline_is_the_rendered_crop() {
+        // In controlled mode an un-accepted internal edit must not become the
+        // baseline for the next gesture; the drag starts from the rendered
+        // (controlled) crop.
+        let rendered = CropArea {
+            x: 0.1,
+            y: 0.1,
+            width: 0.3,
+            height: 0.3,
+            rotation: 0.0,
+        };
+        let mut service = fresh_service(test_props().crop(rendered));
+
+        // A direct set the parent hasn't accepted yet — diverges pending from get.
+        drop(service.send(Event::SetCropArea(CropArea {
+            x: 0.5,
+            y: 0.5,
+            width: 0.4,
+            height: 0.4,
+            rotation: 0.0,
+        })));
+        assert_eq!(*service.context().crop.get(), rendered);
+
+        drop(service.send(Event::DragStart { x: 0.5, y: 0.5 }));
+        assert_eq!(service.context().drag_start_crop, Some(rendered));
     }
 
     // ───────────────────────── snapshots ─────────────────────────

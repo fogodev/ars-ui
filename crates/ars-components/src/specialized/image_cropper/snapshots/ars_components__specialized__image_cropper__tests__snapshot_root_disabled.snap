@@ -38,6 +38,14 @@ AttrMap {
         ),
         (
             Aria(
+                Disabled,
+            ),
+            String(
+                "true",
+            ),
+        ),
+        (
+            Aria(
                 Label,
             ),
             String(
