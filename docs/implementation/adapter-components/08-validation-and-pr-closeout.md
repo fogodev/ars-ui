@@ -52,6 +52,9 @@ cargo check --manifest-path examples/widgets-dioxus-tailwind/Cargo.toml
 
 Run any existing category E2E command that exercises the widgets page. Do not
 list a dedicated `cargo xtask e2e widgets` command unless the PR implements it.
+For visible adapter components, the PR must also run or add a browser widget
+smoke path that loads the public widgets examples with their real styling; cargo
+check alone is only a compile gate.
 
 ## Spec And Workspace Gates
 
@@ -60,7 +63,7 @@ Run when applicable:
 ```bash
 cargo xtask spec validate
 cargo xtask lint adapter-parity
-cargo +nightly fmt --check
+cargo +nightly fmt --all --check
 ```
 
 After user approval and before pushing:

@@ -8,7 +8,8 @@ Leptos, Dioxus, or target behavior.
 When a per-instance value is captured by multiple closures:
 
 - use `StoredValue<T>` in Leptos;
-- use `CopyValue<T>` in Dioxus.
+- use `use_hook(|| CopyValue::new(value))` in Dioxus so the `CopyValue`
+  allocation is stable for the component instance across rerenders.
 
 Do this instead of cloning the same value into each handler. The adapter should
 make ownership stable and explicit.

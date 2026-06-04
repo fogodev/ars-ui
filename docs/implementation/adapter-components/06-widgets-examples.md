@@ -92,7 +92,8 @@ Use SVG for visual glyphs instead of Unicode marks when geometry matters.
 ## Widget Smoke Checks
 
 Every visible adapter component must have a public widget verification path
-against the real example CSS. Use existing commands only. Today, that means:
+against the real example CSS. Type-checking examples is required, but it is not
+widget visual coverage:
 
 ```bash
 cargo check --manifest-path examples/widgets-leptos/Cargo.toml
@@ -103,10 +104,16 @@ cargo check --manifest-path examples/widgets-dioxus-css/Cargo.toml
 cargo check --manifest-path examples/widgets-dioxus-tailwind/Cargo.toml
 ```
 
-If the category has an existing `cargo xtask e2e <category>` command that
-drives widget examples, run it for both adapters. If a PR adds a dedicated
-`widgets` subcommand or focused widget flags, it may document and use them only
-after implementing them in the same PR.
+If the category has an existing browser E2E command that drives public widget
+examples, run it for every adapter/style variant the component supports. If no
+such command exists, the adapter PR must add one, or add an equivalent checked-in
+browser smoke harness, before claiming widget visual coverage. A valid widget
+browser smoke path must load the public widgets crate in a browser, use the real
+plain/CSS/Tailwind styling, inspect the console, and assert the visible states
+listed below.
+
+Do not list a dedicated `cargo xtask e2e widgets` command or focused widget
+flags unless the same PR implements them.
 
 At minimum, widget smoke should:
 
