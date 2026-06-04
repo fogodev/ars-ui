@@ -61,6 +61,11 @@ Cover every prop, slot, callback, ARIA path, keyboard path, pointer
 interaction, controlled/uncontrolled mode, and discrete state branch the
 component exposes.
 
+When both Leptos and Dioxus adapters exist for a component, their E2E harnesses
+must cover the same feature axes. If a feature assertion lands for one adapter,
+add the matching assertion for the other adapter in the same PR, or document why
+that axis is not applicable to the other adapter.
+
 If the adapter spec lists a feature and no E2E test function drives it, the
 coverage is incomplete.
 

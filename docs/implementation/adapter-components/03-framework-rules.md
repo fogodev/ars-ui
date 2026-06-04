@@ -27,6 +27,13 @@ read if the value is not meant to establish a reactive dependency.
 Reactive-context warnings in widgets count as user-visible regressions. A demo
 that floods the browser console on mount is not shippable.
 
+## Leptos Children
+
+For Leptos slot components, prefer `TypedChildren<T>` over plain `Children`
+when the slot has a typed child-root contract or participates in `add_attr` /
+as-child style composition. Plain `Children` can compile while erasing the
+typed surface that adapter consumers and tests rely on.
+
 ## Dynamic Attributes
 
 Use the adapter's reactive attribute helper for dynamic attrs instead of
