@@ -6,7 +6,7 @@ foundation_deps: [architecture, accessibility]
 shared_deps: []
 related: []
 references:
-  radix-ui: AspectRatio
+    radix-ui: AspectRatio
 ---
 
 # AspectRatio

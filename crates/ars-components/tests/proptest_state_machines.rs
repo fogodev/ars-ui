@@ -17,7 +17,7 @@ mod date_time;
 #[path = "proptest_state_machines/data_display/mod.rs"]
 mod data_display;
 
-#[path = "proptest_state_machines/layout.rs"]
+#[path = "proptest_state_machines/layout/mod.rs"]
 mod layout;
 
 #[path = "proptest_state_machines/navigation/mod.rs"]

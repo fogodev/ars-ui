@@ -26,7 +26,7 @@ mod date_time;
 #[path = "spec_conformance/input/mod.rs"]
 mod input;
 
-#[path = "spec_conformance/layout.rs"]
+#[path = "spec_conformance/layout/mod.rs"]
 mod layout;
 
 #[path = "spec_conformance/navigation/mod.rs"]

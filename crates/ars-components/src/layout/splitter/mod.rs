@@ -1958,6 +1958,15 @@ mod tests {
     }
 
     #[test]
+    fn collapse_panel_ignores_index_outside_panel_slice() {
+        let mut sizes = vec![40.0, 60.0];
+
+        collapse_panel(&mut sizes, 1, &[collapsible_panel("left", 40.0)]);
+
+        assert_eq!(sizes, vec![40.0, 60.0]);
+    }
+
+    #[test]
     fn expand_panel_ignores_invalid_or_non_collapsed_panels() {
         let mut invalid = vec![0.0];
 
@@ -2026,6 +2035,53 @@ mod tests {
         expand_panel(&mut sizes, 0, &[collapsible_panel("only", 40.0)], None);
 
         assert_eq!(sizes, vec![0.0]);
+    }
+
+    #[test]
+    fn expand_panel_ignores_index_outside_panel_slice() {
+        let mut sizes = vec![0.0, 100.0];
+
+        assert!(!expand_panel(
+            &mut sizes,
+            1,
+            &[collapsible_panel("left", 40.0)],
+            None
+        ));
+        assert_eq!(sizes, vec![0.0, 100.0]);
+    }
+
+    #[test]
+    fn remember_collapse_size_ignores_invalid_and_non_collapsible_panels() {
+        let mut ctx =
+            Context::from_props(&two_panel_props(), &Env::default(), &Messages::default());
+
+        remember_collapse_size(&mut ctx, 2);
+        remember_collapse_size(&mut ctx, 0);
+
+        assert_eq!(ctx.collapsed_restore_sizes, vec![None, None]);
+
+        let mut ctx = Context::from_props(
+            &Props::new()
+                .id("split")
+                .panels(vec![collapsible_panel("left", 40.0), panel("right", 60.0)])
+                .default_sizes(vec![0.0, 100.0]),
+            &Env::default(),
+            &Messages::default(),
+        );
+
+        remember_collapse_size(&mut ctx, 0);
+
+        assert_eq!(ctx.collapsed_restore_sizes, vec![None, None]);
+    }
+
+    #[test]
+    fn handle_keyboard_ignores_invalid_handle_index_directly() {
+        let mut ctx =
+            Context::from_props(&two_panel_props(), &Env::default(), &Messages::default());
+
+        handle_keyboard(&mut ctx, 9, &key(KeyboardKey::ArrowRight));
+
+        assert_eq!(ctx.sizes.get(), &vec![50.0, 50.0]);
     }
 
     #[test]
