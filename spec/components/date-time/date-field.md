@@ -20,7 +20,7 @@ Unlike a plain `<input type="date">`, `DateField` exposes fine-grained control o
 ### 1.1 States
 
 ```rust
-// ars-core/src/components/date_field/machine.rs
+// crates/ars-components/src/date_time/date_field/mod.rs
 
 use crate::{bindable::Bindable, machine::Machine};
 use ars_core::{TransitionPlan, PendingEffect, AttrMap};
@@ -340,7 +340,7 @@ fn is_readonly(ctx: &Context) -> bool { ctx.readonly }
 ### 1.6 Date Segment Types
 
 ```rust
-// ars-core/src/components/date_field/segment.rs
+// crates/ars-components/src/date_time/date_field/segment.rs
 
 /// The logical kind of a date or time segment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1506,7 +1506,7 @@ fn digits_needed(n: u32) -> usize {
 ### 1.14 Connect / API
 
 ```rust
-// ars-core/src/components/date_field/connect.rs
+// crates/ars-components/src/date_time/date_field/mod.rs
 
 #[derive(ComponentPart)]
 #[scope = "date-field"]

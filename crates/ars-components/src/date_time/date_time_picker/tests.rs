@@ -549,6 +549,34 @@ fn type_ahead_single_digit_advances_when_unambiguous() {
 }
 
 #[test]
+fn type_ahead_time_segment_updates_time_sub_value() {
+    let mut svc = service();
+
+    drop(svc.send(Event::FocusSegment(DateSegmentKind::Minute)));
+    drop(svc.send(Event::TypeIntoSegment {
+        segment: DateSegmentKind::Minute,
+        ch: '5',
+    }));
+
+    assert_eq!(
+        svc.context().segment_value(DateSegmentKind::Minute),
+        Some(5)
+    );
+    assert_eq!(svc.context().time_value, None);
+
+    drop(svc.send(Event::TypeIntoSegment {
+        segment: DateSegmentKind::Minute,
+        ch: '9',
+    }));
+
+    assert_eq!(
+        svc.context().segment_value(DateSegmentKind::Minute),
+        Some(59)
+    );
+    assert_eq!(svc.context().time_value, None);
+}
+
+#[test]
 fn day_period_accepts_a_and_p() {
     let mut svc = service();
 
@@ -587,6 +615,28 @@ fn day_period_rejects_other_characters() {
         svc.context().segment_value(DateSegmentKind::DayPeriod),
         None
     );
+}
+
+#[test]
+fn private_typeahead_helpers_ignore_non_editable_and_non_numeric_segments() {
+    let mut svc = service();
+
+    assert!(
+        type_into_segment(svc.context(), DateSegmentKind::Era, '1').is_none(),
+        "non-numeric date-time picker segments are not editable through numeric typeahead"
+    );
+    assert!(
+        type_into_segment(svc.context(), DateSegmentKind::Month, 'x').is_none(),
+        "numeric segments ignore non-digit typeahead"
+    );
+
+    svc.context_mut().type_buffer = String::from("7");
+
+    commit_buffer_for_kind(svc.context_mut(), DateSegmentKind::Era);
+
+    assert!(svc.context().type_buffer.is_empty());
+    assert_eq!(svc.context().date_value, None);
+    assert_eq!(svc.context().time_value, None);
 }
 
 #[test]
@@ -641,6 +691,21 @@ fn readonly_blocks_segment_editing() {
 
     assert!(!result.context_changed);
     assert_eq!(svc.context().segment_value(DateSegmentKind::Month), None);
+}
+
+#[test]
+fn readonly_blocks_type_buffer_commit() {
+    let mut svc = service_with(props().readonly(true), en_us());
+
+    svc.context_mut().type_buffer = String::from("12");
+
+    let result = svc.send(Event::TypeBufferCommit {
+        segment: DateSegmentKind::Month,
+    });
+
+    assert!(!result.context_changed);
+    assert_eq!(svc.context().segment_value(DateSegmentKind::Month), None);
+    assert_eq!(svc.context().type_buffer, "12");
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -807,6 +872,82 @@ fn on_segment_keydown_rtl_swaps_arrow_direction() {
     );
 
     assert_eq!(sent.borrow().as_slice(), &[Event::FocusNextSegment]);
+}
+
+#[test]
+fn on_segment_keydown_covers_navigation_and_editing_branches() {
+    let sent = RefCell::new(Vec::new());
+    let push = |event| sent.borrow_mut().push(event);
+
+    let svc = service();
+
+    let api = svc.connect(&push);
+
+    api.on_segment_keydown(
+        DateSegmentKind::Hour,
+        &keyboard(KeyboardKey::ArrowLeft),
+        Direction::Ltr,
+    );
+    api.on_segment_keydown(
+        DateSegmentKind::Hour,
+        &keyboard(KeyboardKey::ArrowRight),
+        Direction::Ltr,
+    );
+
+    let mut shift_tab = keyboard(KeyboardKey::Tab);
+
+    shift_tab.shift_key = true;
+
+    api.on_segment_keydown(DateSegmentKind::Minute, &shift_tab, Direction::Ltr);
+    api.on_segment_keydown(
+        DateSegmentKind::Minute,
+        &keyboard(KeyboardKey::Tab),
+        Direction::Ltr,
+    );
+    api.on_segment_keydown(
+        DateSegmentKind::Minute,
+        &keyboard(KeyboardKey::Delete),
+        Direction::Ltr,
+    );
+    api.on_segment_keydown(
+        DateSegmentKind::Minute,
+        &keyboard(KeyboardKey::Escape),
+        Direction::Ltr,
+    );
+
+    assert_eq!(
+        sent.borrow().as_slice(),
+        &[
+            Event::FocusPrevSegment,
+            Event::FocusNextSegment,
+            Event::FocusPrevSegment,
+            Event::FocusNextSegment,
+            Event::ClearSegment {
+                segment: DateSegmentKind::Minute,
+            },
+            Event::KeyDown {
+                key: KeyboardKey::Escape,
+            },
+        ]
+    );
+}
+
+#[test]
+fn on_segment_keydown_rtl_arrow_right_moves_previous() {
+    let sent = RefCell::new(Vec::new());
+    let push = |event| sent.borrow_mut().push(event);
+
+    let svc = service_with(props().is_rtl(true), en_us());
+
+    let api = svc.connect(&push);
+
+    api.on_segment_keydown(
+        DateSegmentKind::Hour,
+        &keyboard(KeyboardKey::ArrowRight),
+        Direction::Rtl,
+    );
+
+    assert_eq!(sent.borrow().as_slice(), &[Event::FocusPrevSegment]);
 }
 
 #[test]
@@ -1250,6 +1391,21 @@ fn on_trigger_keydown_enter_and_arrow_down() {
     api.on_trigger_keydown(&keyboard(KeyboardKey::ArrowDown));
 
     assert_eq!(sent.borrow().as_slice(), &[Event::Toggle, Event::Open]);
+}
+
+#[test]
+fn on_trigger_keydown_space_toggles_and_unhandled_key_is_ignored() {
+    let sent = RefCell::new(Vec::new());
+    let push = |event| sent.borrow_mut().push(event);
+
+    let svc = service();
+
+    let api = svc.connect(&push);
+
+    api.on_trigger_keydown(&keyboard(KeyboardKey::Space));
+    api.on_trigger_keydown(&keyboard(KeyboardKey::Home));
+
+    assert_eq!(sent.borrow().as_slice(), &[Event::Toggle]);
 }
 
 #[test]

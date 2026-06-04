@@ -11,7 +11,7 @@ mod common;
 #[path = "proptest_state_machines/input/mod.rs"]
 mod input;
 
-#[path = "proptest_state_machines/date_time.rs"]
+#[path = "proptest_state_machines/date_time/mod.rs"]
 mod date_time;
 
 #[path = "proptest_state_machines/data_display/mod.rs"]

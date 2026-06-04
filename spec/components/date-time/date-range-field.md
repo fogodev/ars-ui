@@ -847,8 +847,9 @@ returns `Result`; tests use a `date(y, m, d)` helper that `.expect`s the result.
 `DateRange::new`/`DateRange::normalized` return `Option`. Snapshot tests prefixed
 `snapshot_` use `insta::assert_snapshot!`. The full test suite lives in
 `crates/ars-components/src/date_time/date_range_field/tests.rs` (unit + snapshot),
-`tests/spec_conformance/date_time.rs` (anatomy), and
-`tests/proptest_state_machines/date_time.rs` (normalized-range invariants).
+`tests/spec_conformance/date_time/date_range_field.rs` (anatomy), and
+`tests/proptest_state_machines/date_time/date_range_field.rs` (normalized-range
+invariants).
 
 ```rust
 #[cfg(test)]
