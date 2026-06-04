@@ -86,8 +86,11 @@ the state, append the axe call and use a name ending in `_and_axe_clean`.
 
 ## Matrix Entries
 
-Every implemented adapter component must be represented in
-`crates/ars-e2e/src/matrix.rs`.
+Every implemented adapter component must have explicit E2E axis accounting in
+the component harness module or in an existing shared E2E matrix file. Do not
+point tasks at a matrix path that does not exist in the current tree. If a PR
+introduces a shared matrix module, it must wire that module into the E2E runner
+in the same PR before listing it as a required destination.
 
 Account for every axis:
 
