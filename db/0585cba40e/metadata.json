@@ -1,0 +1,23 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "db0585cba40e",
+  "strategy": "manual-commit",
+  "branch": "codex/adapter-docs-parity-workflow",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/db/0585cba40e/0/metadata.json",
+      "transcript": "/db/0585cba40e/0/full.jsonl",
+      "content_hash": "/db/0585cba40e/0/content_hash.txt",
+      "prompt": "/db/0585cba40e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 7584819,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 177396864,
+    "output_tokens": 507321,
+    "api_call_count": 1202
+  }
+}

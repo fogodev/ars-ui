@@ -1,0 +1,125 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "db0585cba40e",
+  "session_id": "019e8db0-6459-7731-b488-263d077d4b45",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-04T04:57:41.080272Z",
+  "branch": "codex/adapter-docs-parity-workflow",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "f58f068dd84e",
+  "token_usage": {
+    "input_tokens": 7584819,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 177396864,
+    "output_tokens": 507321,
+    "api_call_count": 1202
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "summary": {
+    "intent": "Implement GridList adapter components for Leptos and Dioxus (tasks #398/#490), then progressively improve visual parity with React Aria, DnD functionality, documentation, and code architecture to enforce agnostic-first behavior ownership.",
+    "outcome": "GridList adapters were implemented for both frameworks with DnD, sections, load-more, selection behavior variants, and full showcase across 6 widget crates; implementation docs were split into a navigable workflow and published as PR #721 (under review). The main GridList implementation remains uncommitted.",
+    "learnings": {
+      "repo": [
+        "Adapter-parity lint (cargo xtask lint adapter-parity) only discovers tests named test_*.rs — files like grid_list.rs are silently skipped",
+        "E2E fixture category modules must be directory-backed: categories/<category>/<component>.rs with a mod.rs aggregator, not a flat category file",
+        "Framework adapter skills (.agents/skills/leptos/SKILL.md and .agents/skills/dioxus/SKILL.md) must be loaded before editing any adapter crate code",
+        "Post-implementation audit skill (.agents/skills/post-implementation-audit/SKILL.md) must be invoked and all findings fixed before presenting results",
+        "cargo xtask spec component-deps and cargo xtask spec issue-deps --dry-run are required blocker checks before any adapter implementation starts",
+        "Dioxus EventHandler is not Send + Sync, so it cannot be captured inside agnostic Callback props — adapter-local bridging is required",
+        "The adapter preludes expose framework-specific re-exports; new prop-facing types (DisabledBehavior, CollectionDndEvent, DropPosition) must be added there symmetrically",
+        "GitHub project status updates require the PVTSSF field ID and option ID from project field-list, not just item ID",
+        "The spec-conformance test has a hardcoded expected Part list alongside the spec file — both must be updated when adding new anatomy parts",
+        "StoredValue in Leptos and CopyValue in Dioxus are required for per-instance values captured by multiple closures; failing to use them causes ownership panics",
+        "cargo xtask spec validate checks spec metadata; cargo xtask spec toc validates heading structure; both must pass for docs changes",
+        "The xtask e2e command requires an explicit --no-server --headed --port flags to keep the fixture alive for debugging"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/grid_list/mod.rs",
+          "line": 1,
+          "end_line": 1645,
+          "finding": "Core agnostic GridList owns all behavior: layout/orientation attrs, disabled behavior, press-up vs press-down selection policy, hover/press/drop-target state, DnD drag-key resolution, reorder payload construction, section/header traversal, load-more suppression. Adapters must consume API helpers and render_blocks(), not recompute this."
+        },
+        {
+          "path": "crates/ars-dioxus/src/data_display/grid_list.rs",
+          "line": 1,
+          "end_line": 700,
+          "finding": "Dioxus adapter bridges to agnostic core via use_machine; must not use EventHandler inside Send+Sync callbacks. drop event handler must read api.drop_target().cloned() first before computing event-hit-testing fallback, otherwise grid preview reflow causes snap-back on release."
+        },
+        {
+          "path": "crates/ars-leptos/src/data_display/grid_list.rs",
+          "line": 1,
+          "end_line": 640,
+          "finding": "Leptos adapter: render projection must invalidate on api.drag_keys() and api.drop_target() or DnD state changes won't trigger cell re-render. Browser drag image API gated behind #[cfg(target_arch = 'wasm32')] to avoid web-sys method not found on native."
+        },
+        {
+          "path": "crates/ars-e2e/src/data_display/grid_list.rs",
+          "line": 472,
+          "end_line": 560,
+          "finding": "Synthetic drag simulation must split into two execute calls: (1) dispatch dragstart and wait, (2) re-query the drop target from the live DOM after the framework re-renders from DragStart, then dispatch dragenter/dragover on the fresh reference. Stale element refs after rerender cause dragover to silently no-op."
+        },
+        {
+          "path": "crates/ars-e2e/fixtures/dioxus/src/categories/data_display/grid_list.rs",
+          "line": 1,
+          "end_line": 280,
+          "finding": "E2E fixtures must pass dnd_enabled=true to GridList for persisted reorder via on_dnd_event to work. Without it, the visual drag preview moves but the agnostic machine rejects DragStart/Drop so no CollectionDndEvent::Reorder fires and the item snaps back."
+        },
+        {
+          "path": "examples/widgets-dioxus-tailwind/src/categories/data_display.rs",
+          "line": 1,
+          "end_line": 760,
+          "finding": "Widget examples must not reimplement GridList behavior (drag-key resolution, drop placement math, can-drop checks). They should only hold demo item state and apply reorder from on_dnd_event callback. Duplicated policy was removed when render_blocks() API exposed ItemRenderState."
+        },
+        {
+          "path": "AGENTS.md",
+          "line": 44,
+          "end_line": 60,
+          "finding": "Adapter-level component work requires fully reading docs/implementation/adapter-component-delivery.md plus all linked workflow files. The checklist in AGENTS.md is explicitly not a substitute for the full doc. Added requirement for browser-based counterpart review before planning."
+        },
+        {
+          "path": "docs/implementation/adapter-components/02-adapter-api-and-wiring.md",
+          "line": 56,
+          "end_line": 92,
+          "finding": "New explicit rule: renderer-independent behavior (selection, DnD, layout, load-more, parity rules) belongs in crates/ars-components or shared crates. Duplicating it separately in Leptos/Dioxus is a workflow violation. Only DOM refs, event translation, observers, native browser APIs, and rendering belong in adapters."
+        }
+      ],
+      "workflow": [
+        "React Aria / React Spectrum is the required primary counterpart for visual and functional parity review; a live browser inspection of the reference page must happen before planning, not after",
+        "Browser-based visual verification of DnD is unreliable via the in-app browser's evaluate() context because DataTransfer and DragEvent constructors are not available there; E2E Playwright path is the only reliable automation for HTML drag events",
+        "Before/after drop placement must be computed from pointer position relative to target element midpoint, not from item index; index-based logic causes first-position drops to land in wrong position",
+        "Grid DnD live preview must re-render cards before drop to communicate the insertion slot; on drop, commit must use the stored core pending target (api.drop_target()) not re-derive from the DOM event, because the preview reflow moves the drop element under the pointer",
+        "When multiple items are selected, dragging a selected item should drag the full selected set in collection order; drag image should represent the entire set using a hidden preview element referenced via drag_preview_id prop",
+        "Adapter tests, E2E assertions, and widget examples must cover every supported React Aria feature axis; unsupported axes must be documented as N/A with concrete reasons in the spec/PR body",
+        "cargo +nightly fmt must be run and checked after every code change because rustfmt line-wrap differences accumulate quickly across large generated file changes",
+        "Documentation should describe the reference preference order (React Aria > Ark UI > Radix UI > others) and require developers to cite which counterpart features were verified in the browser"
+      ]
+    },
+    "friction": [
+      "Sandbox blocked local server binding (127.0.0.1:5201, 4127) for E2E tests and dev server, requiring repeated escalation for every browser E2E run",
+      "In-app browser evaluate() context lacked DataTransfer/DragEvent constructors, making it impossible to synthesize HTML drag events for live page verification; had to rely on E2E Playwright path instead",
+      "Dioxus dev server served a rebuild overlay even after successful builds, making in-app browser visual verification unreliable throughout the session",
+      "Git commit hooks took 5+ minutes without any output, creating uncertainty about whether commits had succeeded; required checking git log after each attempt",
+      "cargo test accepts only one test-name filter at a time, causing repeated 'no tests found' failures when passing two filter patterns",
+      "Synthetic E2E dragover events silently no-op when the target element reference becomes stale after the framework re-renders from DragStart state change; required splitting into two execute() calls with a DOM re-query between them",
+      "Drop events land on the preview item after grid reflows during drag, causing the drop handler to derive a wrong target; required using api.drop_target() pending state instead of event-hit-testing",
+      "Leptos view! macro parser rejects turbofish syntax (collection::<Type>::new()) inside prop expressions; requires moving these into helper bindings first",
+      "Dioxus rsx! macro requires event attributes before children/spreads; ordering violations produce cryptic parse errors",
+      "dx serve has interactive vs non-interactive mode issues and port binding failures in this environment; --interactive false was required for reliable background serving"
+    ],
+    "open_items": [
+      "cargo xtask e2e data-display --adapter dioxus grid live-preview reflow assertion was failing at session end due to synthetic dragover not reaching the DOM target after Dioxus re-renders; more investigation needed on the correct event dispatch sequence",
+      "Checkbox adapter component deliberately deferred to a separate session/branch; GridList selection visual indicators currently use ad-hoc checkbox markup",
+      "GridList still has React Aria parity gaps not yet implemented: real IntersectionObserver load-more callback, keyboard DnD, disabledBehavior full semantics, shouldSelectOnPressUp, sections/headers rendering from StaticCollection structural nodes",
+      "Utility E2E fixture category was only conservatively split into utility/showcase.rs instead of per-component files; should be split further when individual primitives are added",
+      "GridList implementation code (adapters, tests, E2E, examples, core extensions) is entirely uncommitted in the worktree on branch codex/issues-398-490-gridlist-adapters; needs full validation suite pass before commit",
+      "Docs-only PR #721 was under active Codex review at session end; final review pass with TypedChildren rule, cross-adapter E2E parity language, and clone-guidance reference fixes was pushed but not yet approved",
+      "The dioxus-web crate was added as an optional dependency under the web feature in ars-dioxus to enable native DataTransfer.set_drag_image; this dependency addition should be verified in the workspace Cargo.toml",
+      "Temporary E2E debug diagnostics (grid_list_debug_dump function) were left in crates/ars-e2e/src/data_display/grid_list.rs and should be removed before the final PR commit"
+    ]
+  }
+}
