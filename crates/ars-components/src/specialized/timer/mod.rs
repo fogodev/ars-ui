@@ -1215,6 +1215,37 @@ mod tests {
 
         assert_ne!(ctx, shifted);
 
+        let mut shifted = ctx.clone();
+        shifted.target = Duration::from_secs(5);
+        assert_ne!(ctx, shifted);
+
+        let mut shifted = ctx.clone();
+        shifted.interval = Duration::from_millis(250);
+        assert_ne!(ctx, shifted);
+
+        let mut shifted = ctx.clone();
+        shifted.mode = Mode::Stopwatch;
+        assert_ne!(ctx, shifted);
+
+        let mut shifted = ctx.clone();
+        shifted.auto_start = true;
+        assert_ne!(ctx, shifted);
+
+        let mut shifted = ctx.clone();
+        shifted.locale = Locale::parse("fr").expect("`fr` is a valid BCP-47 tag");
+        assert_ne!(ctx, shifted);
+
+        let mut shifted = ctx.clone();
+        shifted.messages = Messages {
+            start_label: MessageFn::static_str("Start"),
+            ..Messages::default()
+        };
+        assert_ne!(ctx, shifted);
+
+        let mut shifted = ctx.clone();
+        shifted.ids = ComponentIds::from_id("other");
+        assert_ne!(ctx, shifted);
+
         // Debug redacts the trait object rather than attempting to print it.
         let debug = format!("{ctx:?}");
 

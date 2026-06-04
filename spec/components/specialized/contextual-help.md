@@ -348,7 +348,7 @@ ContextualHelp
 | Heading       | `<h3>`     | `id` (linked from `aria-labelledby`)                                                         |
 | Body          | `<div>`    | main help text                                                                               |
 | Footer        | `<div>`    | optional link/action area                                                                    |
-| DismissButton | `<button>` | `type="button"`, `aria-label` (close label), visually hidden                               |
+| DismissButton | `<button>` | `type="button"`, `aria-label` (close label), visually hidden                                 |
 
 ## 3. Accessibility
 
