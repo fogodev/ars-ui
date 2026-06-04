@@ -1,0 +1,72 @@
+Implement tasks #398 and #490
+
+---
+
+Have you checked @docs/implementation/adapter-component-delivery.md ?
+
+---
+
+Then include in your plan to update the AGENTS.md file to enforce agents to fully read this file when asked to implement adapter level components
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# GridList Leptos + Dioxus Adapter Implementation Plan
+
+## Summary
+Implement tasks #398 and #490 in one combined PR closing both issues. The PR will deliver both GridList adapters, all adapter tests, browser/E2E coverage, widgets demos across all six example crates, first `data-display` E2E category plumbing, and mandatory audit/review loops.
+
+Before editing, verify blockers with `cargo xtask spec component-deps grid-list --adapter leptos`, `--adapter dioxus`, and both `cargo xtask spec issue-deps ... --dry-run` commands. Fully read the GridList agnostic and adapter specs, `docs/implementation/adapter-component-delivery.md`, `docs/implementation/adapter-contract.md`, and `examples/widgets-ownership.md`.
+
+## Policy Update
+- Update root `AGENTS.md` so adapter-level component work explicitly requires agents to fully read `docs/implementation/adapter-component-delivery.md` before planning or implementing any component in `crates/ars-leptos` or `crates/ars-dioxus`.
+- Keep the current checklist, but make clear it is not a substitute for reading the full workflow document.
+- Do not change `spec/AGENTS.md` unless the implementation touches spec-specific agent instructions.
+
+## Key Changes
+- Add `data_display::grid_list` modules to `ars-leptos` and `ars-dioxus`, wire category modules, lib exports, and symmetric preludes.
+- Prelude exports must include both module and root component entry point, e.g. `data_display::{self, grid_list, grid_list::GridList}`, plus stable aliases for prop-facing selection config such as `SelectionMode`, `SelectionBehavior`, and `SelectionSet`.
+- Match spec APIs exactly:
+  - Leptos `GridListRenderItem(pub Callback<grid_list::ItemDef, AnyView>)` and `#[component] GridList(...)`.
+  - Dioxus `GridListRenderItem(pub EventHandler<grid_list::ItemDef>)`, `GridListProps`, and `#[component] GridList(props)`.
+- Render all semantic/anatomy attrs from the agnostic API only. Use `StoredValue` in Leptos and `CopyValue` in Dioxus for per-instance values captured by multiple closures.
+- Forward consumer styling with Leptos `class` and Dioxus `GlobalAttributes`.
+
+## Counterpart Parity
+- Use React Aria GridList as the primary counterpart for feature, interaction, and visual parity review.
+- Record Ark UI Listbox as closest non-direct counterpart and Radix Themes Grid as layout-only/not applicable.
+- Every supported parity axis must have adapter tests, E2E assertions, and widgets visual coverage. Unsupported axes must be listed as N/A with reasons in the PR body.
+
+## Tests And Coverage
+- Add Leptos and Dioxus GridList SSR/unit tests plus wasm tests.
+- Cover SSR markup, ARIA/data attrs, controlled selected-key sync, callbacks, keyboard focus/selection, pointer action, disabled states, empty state, loading sentinel suppression, and axe.
+- Add first `data-display` E2E category, focused E2E flags, fixture scenarios, matrix entry, computed visual assertions, and clean-console checks.
+- Add widgets demos in all six `examples/widgets-*/*/categories/data_display.rs` files only, with style edits only where required.
+
+## Validation
+- Run focused adapter tests, wasm tests, `cargo check -p ars-e2e`, focused `cargo xtask e2e data-display` for both adapters, widget smoke for all six variants, `cargo xtask lint adapter-parity`, and `cargo xtask spec validate`.
+- Invoke `.agents/skills/post-implementation-audit/SKILL.md` and fix every finding in this PR.
+- Present results before commit. After user approval, run `cargo xci-fast`, then commit/push.
+- After PR creation and every push, invoke `.agents/skills/waiting-for-codex-review/SKILL.md` until Codex leaves 👍 and CI is green.
+
+## Assumptions
+- One combined PR is intended for #398 and #490.
+- No new dependencies will be added.
+- Spec impact remains “none” unless implementation reveals drift; any drift is fixed in the same PR.
+- If `.snap` files change, apply `snapshot-reviewed` after opening/updating the PR.
+
+---
+
+Are our examples visually similar to https://react-aria.adobe.com/GridList ?
+
+---
+
+Specially the Tailwind variant
+
+---
+
+Our example doesn't even have the checkbox to know whether an item was selected or not when compared with the simplest example that they provide, let alone to showcase some other nice features like drag and drop
+
+---
+
+And don't forget to include e2e tests for these missing features. And yeah, use your browser

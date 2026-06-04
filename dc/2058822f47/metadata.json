@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "dc2058822f47",
+  "strategy": "manual-commit",
+  "branch": "codex/adapter-docs-parity-workflow",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "AGENTS.md",
+    "docs/implementation/adapter-component-dependency-inventory.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/dc/2058822f47/0/metadata.json",
+      "transcript": "/dc/2058822f47/0/full.jsonl",
+      "content_hash": "/dc/2058822f47/0/content_hash.txt",
+      "prompt": "/dc/2058822f47/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 7215406,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 170368000,
+    "output_tokens": 491479,
+    "api_call_count": 1139
+  }
+}
