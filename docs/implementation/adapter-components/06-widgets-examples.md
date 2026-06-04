@@ -35,6 +35,8 @@ Each component demo panel should exercise the supported feature surface:
 - single and multiple selection;
 - disabled, readonly, invalid, selected, focused, active, loading, and empty
   states;
+- checked or selected, indeterminate, focus-visible, hovered, pressed,
+  required, form submit, and form reset states where relevant;
 - callbacks with visible readouts;
 - links and actions;
 - grouping or sections;
@@ -57,8 +59,11 @@ missing a required surface.
 
 ## Counterpart Baseline
 
-The first public demo should be visually comparable to the counterpart's
-simplest documented example. For React Aria GridList, that meant visible
+The first public demo should be visually comparable to the chosen
+counterpart's simplest documented example. React Aria / React Spectrum is the
+default counterpart when available; otherwise use Ark UI / Chakra UI, then
+Radix UI / shadcn/ui, then another mature library only when those do not cover
+the component or feature axis. For React Aria GridList, that meant visible
 checkboxes, row-wide selected feedback, and clear focus/selection affordances.
 
 Additional sections should cover supported advanced examples from the
@@ -83,6 +88,8 @@ Demo CSS must make features tangible:
 - drop targets should highlight the full placement area;
 - popup and overlay positioners should visibly anchor to their trigger;
 - controls should not shrink, shift, or overlap after state changes.
+- form submit and reset buttons should use ars-ui components when the demo is
+  proving ars-ui component integration.
 
 Honour `data-ars-visually-hidden`. Do not override hidden helper styles in demo
 CSS.
@@ -120,15 +127,19 @@ At minimum, widget smoke should:
 - navigate to the relevant category;
 - perform representative pointer and keyboard interactions;
 - assert clean browser console;
-- assert visible selected, active, open, disabled, invalid, loading, and drop
-  states where supported;
+- assert visible selected or checked, indeterminate, active, open, disabled,
+  readonly, invalid, required, focus-visible, hovered, pressed, loading, and
+  drop states where supported;
 - assert controls maintain stable dimensions;
 - assert hidden form inputs serialize values where relevant.
 
 ## Browser Review
 
-Before presenting the result, use the browser to compare the local widgets page
-with the counterpart docs used in the parity brief.
+Before presenting the result, use `playwright-cli` or an equivalent checked-in
+browser harness to compare the local widgets page with the counterpart docs used
+in the counterpart outcome matrix. Follow
+[09-browser-parity-harness.md](09-browser-parity-harness.md) for snapshots,
+computed style checks, console review, and artifact paths.
 
 Record in the PR body:
 

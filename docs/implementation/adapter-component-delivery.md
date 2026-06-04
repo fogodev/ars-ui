@@ -15,6 +15,7 @@ The detailed workflow is split across:
 - [adapter-components/04-adapter-tests.md](adapter-components/04-adapter-tests.md)
 - [adapter-components/05-e2e-fixtures-and-harnesses.md](adapter-components/05-e2e-fixtures-and-harnesses.md)
 - [adapter-components/06-widgets-examples.md](adapter-components/06-widgets-examples.md)
+- [adapter-components/09-browser-parity-harness.md](adapter-components/09-browser-parity-harness.md)
 - [adapter-components/08-validation-and-pr-closeout.md](adapter-components/08-validation-and-pr-closeout.md)
 - [adapter-components/checklists/component-delivery.md](adapter-components/checklists/component-delivery.md)
 - [adapter-components/checklists/e2e-feature-matrix.md](adapter-components/checklists/e2e-feature-matrix.md)
@@ -42,6 +43,8 @@ Adapter delivery spans several distinct concerns:
 - adapter SSR/unit and wasm browser tests;
 - E2E fixtures, harnesses, matrix entries, axe, and computed visual assertions;
 - public widgets demos in all six example crates;
+- repeatable browser evidence with `playwright-cli` comparing the local widgets
+  page against the chosen counterpart;
 - validation, audit, PR, CI, and Codex review closeout.
 
 Keeping these directions as separate files makes it easier to review the
@@ -54,16 +57,17 @@ inspect the live documentation page for the strongest counterpart, using this
 preference order:
 
 1. React Aria / React Spectrum;
-2. Ark UI;
-3. Radix UI;
+2. Ark UI / Chakra UI;
+3. Radix UI / shadcn/ui;
 4. another mature component library only when the first three do not cover the
    primitive or feature axis.
 
-Adapter-level components target maximum practical parity with that reference,
-not merely minimum spec completion. The counterpart's simplest example sets the
-minimum UX quality bar for the first widgets demo, and every supported
-counterpart feature must map to agnostic logic, adapter wiring, adapter tests,
-E2E assertions, and widgets visual coverage in the same PR.
+Adapter-level components target maximum practical outcome parity with that
+reference, not API-shape parity with the reference framework and not merely
+minimum spec completion. The counterpart's simplest example sets the minimum UX
+quality bar for the first widgets demo, and every supported counterpart feature
+must map to agnostic logic, adapter wiring, adapter tests, E2E assertions,
+widgets visual coverage, and repeatable browser evidence in the same PR.
 
 Renderer-independent behavior belongs in `crates/ars-components` or another
 shared crate before adapter wiring. Duplicating selection, layout, drag/drop,
@@ -80,4 +84,4 @@ drag image setup may live in Leptos/Dioxus because it needs `DataTransfer`, but
 the dragged key set must come from `crates/ars-components`.
 
 For details, read [adapter-components/07-parity-review.md](adapter-components/07-parity-review.md)
-and [adapter-components/06-widgets-examples.md](adapter-components/06-widgets-examples.md).
+and [adapter-components/09-browser-parity-harness.md](adapter-components/09-browser-parity-harness.md).

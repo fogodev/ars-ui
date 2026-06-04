@@ -13,7 +13,9 @@ workflow docs.
 - [ ] `adapter-contract.md` read.
 - [ ] `examples/widgets-ownership.md` read.
 - [ ] Framework skills loaded when touching Leptos/Dioxus.
-- [ ] Counterpart UX brief written from live browser review.
+- [ ] Counterpart outcome matrix written from live browser review.
+- [ ] Counterpart outcome matrix records primary and fallback sources.
+- [ ] `playwright-cli` reference/local browser evidence plan written.
 
 ## Adapter Code
 
@@ -39,6 +41,7 @@ workflow docs.
 - [ ] Computed visual assertions cover visible states.
 - [ ] Widgets examples updated in all six crates.
 - [ ] Widget smoke covers counterpart UX states.
+- [ ] Browser evidence compares counterpart and local widgets pages.
 
 ## Closeout
 
@@ -49,5 +52,6 @@ workflow docs.
 - [ ] Results presented before commit.
 - [ ] User approval received before commit/push.
 - [ ] `cargo xci-fast` passes before push.
-- [ ] PR opened with auto-close keyword and counterpart UX brief.
+- [ ] PR opened with auto-close keyword and counterpart outcome matrix.
+- [ ] PR body includes browser evidence paths and parity status.
 - [ ] `waiting-for-codex-review` loop completed after every push.
