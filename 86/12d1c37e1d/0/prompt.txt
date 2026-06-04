@@ -1,0 +1,432 @@
+Implement tasks #398 and #490
+
+---
+
+Have you checked @docs/implementation/adapter-component-delivery.md ?
+
+---
+
+Then include in your plan to update the AGENTS.md file to enforce agents to fully read this file when asked to implement adapter level components
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# GridList Leptos + Dioxus Adapter Implementation Plan
+
+## Summary
+Implement tasks #398 and #490 in one combined PR closing both issues. The PR will deliver both GridList adapters, all adapter tests, browser/E2E coverage, widgets demos across all six example crates, first `data-display` E2E category plumbing, and mandatory audit/review loops.
+
+Before editing, verify blockers with `cargo xtask spec component-deps grid-list --adapter leptos`, `--adapter dioxus`, and both `cargo xtask spec issue-deps ... --dry-run` commands. Fully read the GridList agnostic and adapter specs, `docs/implementation/adapter-component-delivery.md`, `docs/implementation/adapter-contract.md`, and `examples/widgets-ownership.md`.
+
+## Policy Update
+- Update root `AGENTS.md` so adapter-level component work explicitly requires agents to fully read `docs/implementation/adapter-component-delivery.md` before planning or implementing any component in `crates/ars-leptos` or `crates/ars-dioxus`.
+- Keep the current checklist, but make clear it is not a substitute for reading the full workflow document.
+- Do not change `spec/AGENTS.md` unless the implementation touches spec-specific agent instructions.
+
+## Key Changes
+- Add `data_display::grid_list` modules to `ars-leptos` and `ars-dioxus`, wire category modules, lib exports, and symmetric preludes.
+- Prelude exports must include both module and root component entry point, e.g. `data_display::{self, grid_list, grid_list::GridList}`, plus stable aliases for prop-facing selection config such as `SelectionMode`, `SelectionBehavior`, and `SelectionSet`.
+- Match spec APIs exactly:
+  - Leptos `GridListRenderItem(pub Callback<grid_list::ItemDef, AnyView>)` and `#[component] GridList(...)`.
+  - Dioxus `GridListRenderItem(pub EventHandler<grid_list::ItemDef>)`, `GridListProps`, and `#[component] GridList(props)`.
+- Render all semantic/anatomy attrs from the agnostic API only. Use `StoredValue` in Leptos and `CopyValue` in Dioxus for per-instance values captured by multiple closures.
+- Forward consumer styling with Leptos `class` and Dioxus `GlobalAttributes`.
+
+## Counterpart Parity
+- Use React Aria GridList as the primary counterpart for feature, interaction, and visual parity review.
+- Record Ark UI Listbox as closest non-direct counterpart and Radix Themes Grid as layout-only/not applicable.
+- Every supported parity axis must have adapter tests, E2E assertions, and widgets visual coverage. Unsupported axes must be listed as N/A with reasons in the PR body.
+
+## Tests And Coverage
+- Add Leptos and Dioxus GridList SSR/unit tests plus wasm tests.
+- Cover SSR markup, ARIA/data attrs, controlled selected-key sync, callbacks, keyboard focus/selection, pointer action, disabled states, empty state, loading sentinel suppression, and axe.
+- Add first `data-display` E2E category, focused E2E flags, fixture scenarios, matrix entry, computed visual assertions, and clean-console checks.
+- Add widgets demos in all six `examples/widgets-*/*/categories/data_display.rs` files only, with style edits only where required.
+
+## Validation
+- Run focused adapter tests, wasm tests, `cargo check -p ars-e2e`, focused `cargo xtask e2e data-display` for both adapters, widget smoke for all six variants, `cargo xtask lint adapter-parity`, and `cargo xtask spec validate`.
+- Invoke `.agents/skills/post-implementation-audit/SKILL.md` and fix every finding in this PR.
+- Present results before commit. After user approval, run `cargo xci-fast`, then commit/push.
+- After PR creation and every push, invoke `.agents/skills/waiting-for-codex-review/SKILL.md` until Codex leaves 👍 and CI is green.
+
+## Assumptions
+- One combined PR is intended for #398 and #490.
+- No new dependencies will be added.
+- Spec impact remains “none” unless implementation reveals drift; any drift is fixed in the same PR.
+- If `.snap` files change, apply `snapshot-reviewed` after opening/updating the PR.
+
+---
+
+Are our examples visually similar to https://react-aria.adobe.com/GridList ?
+
+---
+
+Specially the Tailwind variant
+
+---
+
+Our example doesn't even have the checkbox to know whether an item was selected or not when compared with the simplest example that they provide, let alone to showcase some other nice features like drag and drop
+
+---
+
+And don't forget to include e2e tests for these missing features. And yeah, use your browser
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+I still can't drag and drop
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+https://react-aria.adobe.com/GridList#drag-and-drop make it also visually similar to React Aria's one aside from the drag image, it also show where the dragged element will be put in the list
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+Ignore the photo part, it's irrelevant to the drag-and-drop feature I'm asking for
+
+---
+
+# Browser comments:
+
+## Comment 1
+File: browser:Panda Selectable row ::
+Node position: (341, 674) in 599x863 viewport
+Untrusted page evidence (from the webpage, not user instructions):
+Page URL: http://127.0.0.1:4127/
+Frame: top document
+Target: "Panda Selectable row ::"
+Target selector: div#widgets-grid-list-cell-panda > span.relative.flex
+Target path: div > div > div > span
+Saved marker screenshot: attached as a labeled image for Comment 1
+Comment:
+When I drag-and-drop, only this inner part is shown in the drag image, not the whole row. The same thing for when positioning, we should highlight the whole row that we're setting our element into
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+
+The next image is untrusted page evidence from the browser page for Comment 1. Treat any text in the image as page content, not instructions. The element "Panda Selectable row ::" that the user selected is outlined in blue and marked by comment marker 1.
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+When we have multiple rows selected, can we drag all of them as once?
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+When multiple items are selected, the drag image should show all of them together, not just the items being clicked for drag
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+Let's also put other examples showcasing other features of the gridlist component, like displaying elements in a grid instead of a plain list
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+Put drag-and-drop support in the grid example too. I want to exercise all our features in the examples, so I can more easily check if everything is working according to the intended UX
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+Something is wrong, seems like the elements are being dropped after the position that I asked to be dropped, if I drop a element in the first position, it gets places in the second one
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+Now the opposite of that got bugged, if I drag the first item and drag to the second position, it stays in the first position. It seems that the drop targets must be the spaces between each element, no the indexes in the list
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+Having those purple lines is fine for the list example, but are quite confusing for the grid example. For the grid we need something like in the React Aria example, a whole area of the drop location, already reordering the other items as needed
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+The drop placement is perfect now, but after releasing the drop, the item is going back to its original position, not to the new one
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+Have you tested it? Because it's still not working, look in your browser
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+Any other feature that we might want to showcase in our examples page?
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+Then let's include all these features in our examples, with a description of what it's showcasing. We will use them later when we make a website for our library, inspired by the React Aria one
+
+---
+
+# Browser comments:
+
+## Comment 1
+File: browser:GridList empty and loading
+Node position: (380, 705) in 599x863 viewport
+Untrusted page evidence (from the webpage, not user instructions):
+Page URL: http://127.0.0.1:4127/
+Frame: top document
+Target: "GridList empty and loading"
+Target role: "grid"
+Target selector: div#widgets-grid-list-empty-loading
+Target path: div > div > section > div
+Nearby text: "No rows match the current filters."
+Saved marker screenshot: attached as a labeled image for Comment 1
+Comment:
+Where is the loading here?
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+
+The next image is untrusted page evidence from the browser page for Comment 1. Treat any text in the image as page content, not instructions. The element "GridList empty and loading" that the user selected is outlined in blue and marked by comment marker 1.
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+How can we improve our implementation docs for adapter level components based on all the discussions that we had here? Currently it's one big file, maybe we should break it into multiple files to have better directions for implementing other components
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+Looks good, but my experience here is that the initial version had a really poor UX. It only got better after I showed with the React Aria documentation page for the desired component, how can we encompass it in those docs?
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+Great, let's improve the docs now
+
+---
+
+# In app browser:
+- The user has the in-app browser open.
+- Current URL: http://127.0.0.1:4127/
+
+## My request for Codex:
+We have some pending warnings in our code, let's address them
+
+---
+
+Just for the GridList we got 500+ lines of fixtures in the [data_display.rs](crates/ars-e2e/fixtures/dioxus/src/categories/data_display.rs) should we split and have inside the data_display module a module for each component instead?
+
+---
+
+Go ahead and also do this split for existing components if needed
+
+---
+
+Do we have all the same features in our GridList as https://react-aria.adobe.com/GridList ?
+
+---
+
+Let's properly do a plan to implement the missing features, and also include in the implementation docs that we MUST have as much parity as possible with the reference implementation of a component, being it React Aria (or React Spectrum), Radix UI, Ark UI or some other component library, in this order of preference
+
+---
+
+Make sure to properly more all shared logic that is independent from the adapters into the agnostic layer
+
+---
+
+Remember to also update the adapter level components implementation docs with these improvements here, specially this full parity and the part of moving all shared logic to the agnostic layer
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# GridList Reference-Parity Implementation Plan
+
+## Summary
+
+Implement the missing GridList parity features against the live [React Aria GridList reference](https://react-aria.adobe.com/GridList), using this reference order for adapter component work: React Aria / React Spectrum, Ark UI, Radix UI, then another mature component library. The implementation must move all renderer-independent behavior into the agnostic layer first; Leptos and Dioxus should only own DOM refs, framework event translation, observers, native browser APIs, announcements, and rendering.
+
+## Key Changes
+
+- Correct the GridList specs before code:
+  - Replace the current “full parity / gaps none” claims with a real parity matrix.
+  - Add sections/headers, layout/orientation data attrs, disabled behavior, press-up selection, visible load-more behavior, first-class DnD reorder, drag image/drop placement expectations, hover/press state attrs, and render-state data attrs.
+  - Document N/A axes only when the feature does not belong in GridList or cannot be supported by existing primitives without new dependencies.
+
+- Put shared logic in the agnostic layer:
+  - Core owns layout metadata, section/header traversal, structural-node skipping, selection semantics, disabled behavior, press-down vs press-up selection policy, hover/press/drop-target state, loading suppression state, DnD drag-key resolution, DnD validity rules, reorder payload construction, and non-DOM reorder math.
+  - Adapters own only framework event conversion, live element refs, DOM rectangle hit-testing, `IntersectionObserver`/scroll observation, native `DataTransfer` drag image setup, live announcements, and applying core attrs to rendered hosts.
+  - Widget examples must not reimplement component behavior; they should only hold demo item state and reorder it from the component’s emitted callback.
+
+- Add public API surface conservatively:
+  - Core `Props`: add `layout`, `orientation`, `disabled_behavior`, `should_select_on_press_up`, `load_more_scroll_offset`, and `on_dnd_event: Option<Callback<CollectionDndEvent>>`.
+  - Core parts/API: add `Section`, `SectionHeader`, section/header attrs, root `data-ars-layout` / `data-ars-orientation`, item hover/press/drop-target attrs, and adapter-safe helpers for DnD state.
+  - Leptos/Dioxus props mirror those props, plus optional `render_section_header` and `load_more` slot content.
+  - Keep existing `render_item` signatures intact unless the spec proves a signature change is required.
+
+- Implement first-class GridList DnD:
+  - Dragging a selected item drags all selected item keys in collection order.
+  - Drag image represents the full dragged key set.
+  - List layout shows between-row drop indicators.
+  - Grid layout shows a full drop placement area and live reordered preview.
+  - Drop completion emits `CollectionDndEvent::Reorder { keys, target, position }`.
+
+- Implement real load-more and section rendering:
+  - Render visible load-more slot content when configured.
+  - Attach observer/scroll-threshold behavior in adapters and suppress duplicate callbacks while `loading=true`.
+  - Render section headers from `StaticCollection` structural nodes, keeping headers non-focusable and excluding them from selection, typeahead, and DnD source keys.
+
+- Update adapter-level implementation docs as part of this work:
+  - `docs/implementation/adapter-component-delivery.md` must state that adapter-level components target maximum practical parity with the chosen reference implementation, not merely minimum spec completion.
+  - The split adapter workflow docs must require live browser review of the reference page before planning, with reference preference order: React Aria / React Spectrum, Ark UI, Radix UI, then another mature component library.
+  - The docs must require every supported reference feature to land with agnostic logic, adapter wiring, tests, E2E, and widgets coverage in the same PR.
+  - The docs must explicitly say renderer-independent behavior belongs in `crates/ars-components` or shared crates first; duplicating shared state, selection, layout, DnD, load-more, or parity rules separately in Leptos/Dioxus is a workflow violation.
+  - The docs must make clear that checklists do not replace reading the full workflow docs.
+
+## Tests And Coverage
+
+- Add agnostic GridList tests for section/header attrs, structural-node skipping, layout/orientation attrs, disabled behavior, press-up selection, loading suppression, DnD drag-key resolution, reorder payload construction, invalid self-drop handling, hover/press attrs, and drop-target attrs.
+
+- Add Leptos and Dioxus SSR/unit/wasm tests for sections/header rendering, press-down vs press-up selection, load-more observer firing and suppression, first-class DnD reorder callbacks, multi-selected drag image content, list drop line, grid drop-area preview, and keyboard DnD where existing primitives support it cleanly.
+
+- Update E2E fixtures/harnesses to assert persisted reorder after drop, selected multi-drag keys, grid live preview reflow, visible load-more content/callback behavior, axe, clean console, keyboard behavior, pointer behavior, and computed visuals.
+
+- Update all six widgets examples with simple selectable, sectioned, grid layout, actions/links, empty/loading, disabled behavior, press-up selection, and DnD examples with concise descriptions.
+
+## Validation
+
+Run blocker checks first, then focused verification:
+
+```bash
+cargo xtask spec component-deps grid-list --adapter leptos
+cargo xtask spec component-deps grid-list --adapter dioxus
+cargo xtask spec issue-deps --adapter leptos --component grid-list --dry-run
+cargo xtask spec issue-deps --adapter dioxus --component grid-list --dry-run
+cargo +nightly fmt --check
+cargo test -p ars-components data_display::grid_list
+cargo test -p ars-leptos --test test_grid_list
+cargo test -p ars-dioxus --test test_grid_list
+cargo check -p ars-e2e
+cargo xtask e2e data-display --adapter leptos
+cargo xtask e2e data-display --adapter dioxus
+cargo xtask lint adapter-parity
+cargo xtask spec validate
+cargo clippy --workspace --all-targets
+```
+
+Use the browser during implementation to compare against React Aria’s basic, sections, layout, empty/loading, selection/action, and drag/drop examples.
+
+## Assumptions
+
+- No new dependency crates will be added.
+- This stays on the current GridList adapter branch unless dependency checks reveal a blocker.
+- External drops, cross-collection moves, and custom insert payloads are implemented only if existing primitives support them cleanly; otherwise they are documented as N/A.
+- The final PR must not claim “full parity” unless the final parity matrix proves it.
+
+---
+
+How can we debug this e2e test to keep working here?
+
+---
+
+The issue is that we got back to that error from before, when I release the pointer in the drop position, the reordering doesn't take place, the element goes back to its original position in the grid
+
+---
+
+You messed up the layout in this last batch of improvements, both in the list as in the grid. Both cases the lower part is a bit too big
+
+---
+
+But shouldn't the adapters use what is provided by the agnostic layer instead of defining their own logic? Actual question, don't change any code yet
+
+---
+
+Then let's implement according to this reasoning, make sure to include it in the implementation docs too
+
+---
+
+All 3 examples for each adapter, aside from styling which is fine to diverge, have full parity between them?
+
+---
+
+Alright, I want to push a PR just with the documentation that we improved here, in the [AGENTS.md](AGENTS.md) and in [implementation](docs/implementation/)
+
+---
+
+There are reviews in your docs PR, let's give then a check
+
+---
+
+There are many threads without comments and unresolved, if they were resolved, do the reply and mark as resolved

@@ -1,0 +1,176 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8612d1c37e1d",
+  "session_id": "019e8db0-6459-7731-b488-263d077d4b45",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-04T05:10:56.919058Z",
+  "branch": "codex/adapter-docs-parity-workflow",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "6404515c9399",
+  "token_usage": {
+    "input_tokens": 7868750,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 183125632,
+    "output_tokens": 514669,
+    "api_call_count": 1238
+  },
+  "session_metrics": {
+    "turn_count": 7
+  },
+  "summary": {
+    "intent": "Implement GridList adapter components for Leptos and Dioxus (tasks #398/#490), then iteratively improve examples, DnD behavior, and documentation to achieve practical parity with React Aria's GridList reference implementation.",
+    "outcome": "GridList adapters were implemented with SSR/unit/wasm tests and E2E coverage, examples were upgraded to showcase all major features, a docs-only PR (#721) was opened restructuring adapter workflow documentation into a split guide with agnostic-first and counterpart-parity requirements, and DnD snap-back bugs were fixed by moving shared behavior into the agnostic core layer.",
+    "learnings": {
+      "repo": [
+        "Adapter test files must be named `test_*.rs` (not `grid_list.rs`) for `cargo xtask lint adapter-parity` to discover and count them",
+        "Leptos wasm tests require `--no-default-features --features csr,ars-i18n/web-intl`; Dioxus wasm tests require `--no-default-features --features web,ars-i18n/web-intl`",
+        "Fixture crates are not workspace members; must use `cargo check --manifest-path <path>/Cargo.toml` instead of `-p`",
+        "E2E category modules should use directory-backed structure: `categories/<category>/mod.rs` + `categories/<category>/<component>.rs`",
+        "The `cargo xtask spec validate` and `cargo xtask lint adapter-parity` gates must stay green throughout adapter work",
+        "`dx serve --web --port PORT --open false --interactive false` is required for non-TTY dev server; `dx serve` without `--interactive false` hangs in non-terminal contexts",
+        "The pre-commit hook runs silently for several minutes and the git commit tool session does not return output until it completes — Git has still recorded the commit",
+        "Dioxus `EventHandler<T>` is not `Send + Sync` and cannot be captured inside agnostic `Callback` props; adapter must bridge via local effects instead",
+        "Leptos `view!` macro rejects turbofish syntax inside prop expressions; move to a local binding first",
+        "`cargo xtask spec component-deps` and `cargo xtask spec issue-deps --dry-run` must be run before starting adapter implementation to verify blockers",
+        "The adapter spec files (spec/leptos-components/, spec/dioxus-components/) have a spec-conformance test that checks expected part lists — both the spec and the conformance test must be updated together"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/data_display/grid_list/mod.rs",
+          "line": 1,
+          "end_line": 1645,
+          "finding": "Core agnostic layer owns: layout metadata, section/header traversal, structural-node skipping, selection semantics, disabled behavior, press-up selection policy, hover/press/drop-target state, loading suppression, DnD drag-key resolution, drop validity, reorder payload construction, grid preview ordering, and render blocks — adapters must not reimplement any of these"
+        },
+        {
+          "path": "crates/ars-leptos/src/data_display/grid_list.rs",
+          "line": 1,
+          "end_line": 640,
+          "finding": "Leptos adapter owns: DOM event conversion, NodeRef refs, IntersectionObserver setup, native DataTransfer drag image setup via web-sys (wasm-only gated), and rendering core attrs into Leptos view nodes. Render must be reactive to core DnD state to avoid stale cell attrs."
+        },
+        {
+          "path": "crates/ars-dioxus/src/data_display/grid_list.rs",
+          "line": 1,
+          "end_line": 700,
+          "finding": "Dioxus adapter uses CopyValue for per-instance values captured by multiple closures; EventHandler is not Send+Sync so DnD callbacks use a local bridge pattern. setDragImage requires dioxus-web::WebEventExt behind the `web` feature flag."
+        },
+        {
+          "path": "AGENTS.md",
+          "line": 44,
+          "end_line": 60,
+          "finding": "Adapter-level component work must fully read docs/implementation/adapter-component-delivery.md and all linked workflow files before planning; the checklist is not a substitute. Must include live browser review of counterpart (React Aria first, then Ark UI, Radix) before implementation."
+        },
+        {
+          "path": "crates/ars-e2e/src/data_display/grid_list.rs",
+          "line": 460,
+          "end_line": 560,
+          "finding": "Synthetic browser DnD in E2E requires: (1) fire dragstart, (2) wait a frame for framework rerender, (3) reacquire target element from fresh DOM query, (4) fire dragenter/dragover on the fresh element. Stale element references after dragstart-triggered rerenders cause dragover to silently fail."
+        },
+        {
+          "path": "docs/implementation/adapter-component-delivery.md",
+          "line": 1,
+          "end_line": 80,
+          "finding": "Converted from monolithic 1300-line doc to a routing entry point; detailed guidance split into docs/implementation/adapter-components/ with 8 workflow files and 3 checklists."
+        },
+        {
+          "path": "examples/widgets-dioxus-tailwind/src/categories/data_display.rs",
+          "line": 1,
+          "end_line": 760,
+          "finding": "Widget examples must not reimplement component behavior (drag keys, drop targets, placement, grid preview order). They should only hold demo item state and apply reorder from on_dnd_event. Demo DnD visual state (preview, indicator) comes from ItemRenderState provided by the adapter."
+        },
+        {
+          "path": "crates/ars-collections/src/dnd.rs",
+          "line": 1,
+          "end_line": 220,
+          "finding": "DropPosition has Before/After/On variants. On is for tree-style drops; should be mapped conservatively to After in list/grid reorder helpers."
+        }
+      ],
+      "workflow": [
+        "React Aria / React Spectrum is the primary reference for component parity; must inspect the live docs page in-browser before planning adapter implementation, not just reading spec files",
+        "Adapter examples must visually showcase all supported features (selection indicators, disabled states, actions/links, empty/loading, DnD with drop preview, grid vs list layout) — this must be verified with a browser check before reporting the task complete",
+        "Renderer-independent behavior (selection rules, drag key sets, drop validity, reorder math, loading suppression, section skipping) belongs in crates/ars-components; duplicating these in each adapter or in widget demos is a workflow violation",
+        "Browser DnD requires dragover.preventDefault() for drop to fire; once dragstart triggers a framework rerender moving the source element under the pointer, the source element must accept dragover events as a proxy while a pending drop target is stored",
+        "Grid live preview must commit reorder using the core-stored pending drop target, not the event's current target, because the source preview card moves under the pointer during dragover",
+        "The in-app browser automation layer does not emit HTML drag events through coordinate or pointer APIs; browser-backed E2E (Playwright/WebDriver) is required to prove DnD behavior",
+        "Sandbox blocks local server binding for E2E and dev server commands; requires explicit escalation/approval for those network operations",
+        "All six widget crates (plain/CSS/Tailwind × Leptos/Dioxus) must have feature parity — copying Tailwind showcase and patching only styling-specific markup is the correct approach",
+        "Pre-commit hooks run silently for minutes; the git tool session appears hung but the commit usually succeeds — verify with `git log -1` rather than interrupting"
+      ]
+    },
+    "friction": [
+      "Sandbox blocked local server binding for E2E fixture dev servers and dx serve on every run, requiring repeated escalation approvals",
+      "Pre-commit hooks ran silently for 3-5 minutes on every commit, making the git commit tool appear hung and requiring manual `git log` checks to confirm success",
+      "In-app browser automation cannot synthesize HTML drag events, making visual DnD verification impossible through that path; relied on browser-backed E2E instead",
+      "Dioxus EventHandler is not Send+Sync — discovered at compile time after initial adapter design was already implemented, requiring a bridge pattern redesign",
+      "dx serve with TTY hung mid-rebuild; required --interactive false flag for reliable non-interactive use",
+      "Leptos view! macro rejects turbofish syntax in prop expressions, requiring local bindings as workarounds",
+      "Synthetic E2E drag events hit stale DOM element references after dragstart-triggered rerenders, requiring a multi-step fresh-query approach",
+      "Adapter parity lint (`cargo xtask lint adapter-parity`) silently skips test files not named `test_*.rs`, leading to false green before renaming",
+      "cargo +nightly fmt reformatted large files, causing subsequent apply_patch calls to fail with context mismatches",
+      "The `cargo xtask spec component-deps` command required building xtask in the fresh worktree, adding significant latency at the start",
+      "Codex review bot added new threads requiring multiple push/trigger/wait cycles before PR could be approved"
+    ],
+    "open_items": [
+      "Checkbox adapter component implementation deferred to separate session; GridList selection indicator visual consistency with Checkbox pending until that work is done",
+      "GridList parity gaps still remain: sections/headers adapter rendering partially implemented but not fully exercised in E2E, IntersectionObserver-based load-more not yet wired, keyboard DnD not implemented",
+      "React Aria API surface not yet mapped: disabledBehavior='selection', shouldSelectOnPressUp, keyboardNavigationBehavior, layout/orientation runtime data attrs, dragAndDropHooks full API",
+      "Large GridList implementation branch (codex/issues-398-490-gridlist-adapters) has uncommitted code; not yet pushed or PR'd — docs PR (#721) was the only thing pushed",
+      "DropPosition::On variant conservatively mapped to After in reorder helpers; proper tree-style drop support not investigated",
+      "Dioxus E2E synthetic drag path still fragile — frame-wait timing between dragstart and dragover may need adjustment for CI environments",
+      "Docs PR (#721) was still in Codex review cycle at session end; final approval and merge pending",
+      "The adapter-component-dependency-inventory.md had a pre-existing dirty edit in the worktree that was never committed or explained",
+      "Utility E2E fixture kept as a single showcase.rs file rather than splitting by component — deferred as too risky to split mid-session",
+      "Agnostic GridList spec still shows some bounded-parity language instead of a completed parity matrix; N/A axes need concrete reason documentation"
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 3428,
+      "user_lines_removed": 1142,
+      "agent_lines_added": 7489,
+      "agent_lines_removed": 99,
+      "user_added_per_file": {
+        "crates/ars-components/src/data_display/grid_list/mod.rs": 1249,
+        "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_cell_dnd_enabled.snap": 7,
+        "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_empty_root.snap": 16,
+        "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_root_grid.snap": 16,
+        "crates/ars-components/src/data_display/grid_list/snapshots/ars_components__data_display__grid_list__tests__grid_list_root_non_composite.snap": 16,
+        "crates/ars-components/tests/spec_conformance/data_display/grid_list.rs": 12,
+        "crates/ars-dioxus/Cargo.toml": 2,
+        "crates/ars-e2e/fixtures/dioxus/Cargo.toml": 2,
+        "crates/ars-e2e/fixtures/dioxus/public/style.css": 44,
+        "crates/ars-e2e/fixtures/dioxus/src/categories/data_display/grid_list.rs": 405,
+        "crates/ars-e2e/fixtures/dioxus/src/categories/data_display/mod.rs": 17,
+        "crates/ars-e2e/fixtures/dioxus/src/categories/navigation/mod.rs": 19,
+        "crates/ars-e2e/fixtures/dioxus/src/categories/navigation/tabs.rs": 113,
+        "crates/ars-e2e/fixtures/dioxus/src/categories/utility/mod.rs": 5,
+        "crates/ars-e2e/fixtures/dioxus/src/categories/utility/showcase.rs": 441,
+        "crates/ars-e2e/fixtures/leptos/Cargo.toml": 1,
+        "crates/ars-e2e/fixtures/leptos/src/categories/data_display/grid_list.rs": 406,
+        "crates/ars-e2e/fixtures/leptos/src/categories/data_display/mod.rs": 17,
+        "crates/ars-e2e/fixtures/leptos/src/categories/navigation/mod.rs": 19,
+        "crates/ars-e2e/fixtures/leptos/src/categories/navigation/tabs.rs": 121,
+        "crates/ars-e2e/fixtures/leptos/src/categories/utility/mod.rs": 5,
+        "crates/ars-e2e/fixtures/leptos/src/categories/utility/showcase.rs": 422,
+        "crates/ars-e2e/fixtures/leptos/style.css": 44,
+        "examples/widgets-dioxus-tailwind/Cargo.toml": 2,
+        "examples/widgets-leptos-tailwind/Cargo.toml": 1,
+        "spec/components/data-display/grid-list.md": 26
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/data_display/grid_list/mod.rs": 27,
+        "crates/ars-dioxus/Cargo.toml": 1,
+        "crates/ars-e2e/fixtures/dioxus/Cargo.toml": 1,
+        "crates/ars-e2e/fixtures/dioxus/src/categories/navigation.rs": 114,
+        "crates/ars-e2e/fixtures/dioxus/src/categories/utility.rs": 441,
+        "crates/ars-e2e/fixtures/leptos/src/categories/navigation.rs": 122,
+        "crates/ars-e2e/fixtures/leptos/src/categories/utility.rs": 422,
+        "examples/widgets-dioxus-tailwind/Cargo.toml": 1,
+        "spec/components/data-display/grid-list.md": 13
+      }
+    }
+  ]
+}
