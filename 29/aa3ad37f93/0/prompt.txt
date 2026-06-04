@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>bjg7fbv0l</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-ericson-Workspace-Rust-ars-ui-worktrees-impl-296/8890cf94-0204-443b-b0d3-c34f03f15446/tasks/bjg7fbv0l.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll Codex second-pass verdict" completed (exit code 0)</summary>
+</task-notification>
