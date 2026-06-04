@@ -6,19 +6,24 @@ violation unless the PR body records a valid exception.
 
 ## Required Files
 
-When both adapters exist, update both fixture category aggregators:
+When both adapters exist, update both fixture category aggregators.
 
-- `crates/ars-e2e/fixtures/leptos/src/categories/<category>/mod.rs`
-- `crates/ars-e2e/fixtures/dioxus/src/categories/<category>/mod.rs`
+Existing categories may still be flat Rust modules:
 
-Component-specific fixture code belongs in component modules:
+- `crates/ars-e2e/fixtures/leptos/src/categories/<category>.rs`
+- `crates/ars-e2e/fixtures/dioxus/src/categories/<category>.rs`
+
+If a category is already directory-backed, or the PR migrates it to a
+directory-backed module and updates `categories/mod.rs` to import that module,
+component-specific fixture code belongs in sibling component modules:
 
 - `crates/ars-e2e/fixtures/leptos/src/categories/<category>/<component>.rs`
 - `crates/ars-e2e/fixtures/dioxus/src/categories/<category>/<component>.rs`
 
-The category `mod.rs` should aggregate component panels and delegate message
-registration. Do not append hundreds of component-specific lines to
-`<category>/mod.rs`; when a new component lands, add a sibling component module.
+For large categories, prefer migrating to the directory-backed form in the same
+PR instead of appending hundreds of component-specific lines to a flat
+`<category>.rs` file. The category `mod.rs` should aggregate component panels
+and delegate message registration.
 
 Then add or update:
 
@@ -112,19 +117,25 @@ Prefer computed style and layout assertions:
 Avoid brittle screenshot baselines unless rendering is deterministic enough to
 avoid churn.
 
-## Focused Runs
+## Category Runs
 
-Every category E2E command must support focused execution:
+Use the category commands that actually exist in the current tree. Check
+`cargo xtask e2e --help` and `cargo xtask e2e <category> --help` before adding
+commands to an issue plan or PR body.
 
 ```bash
-cargo xtask e2e <category> --adapter leptos --component <component>
-cargo xtask e2e <category> --adapter dioxus --component <component>
-cargo xtask e2e <category> --adapter dioxus --component <component> --test-filter <substring>
-cargo xtask e2e <category> --adapter dioxus --component <component> --visual-only
-cargo xtask e2e <category> --adapter dioxus --component <component> --behavior-only
+cargo xtask e2e <category> --adapter leptos
+cargo xtask e2e <category> --adapter dioxus
 ```
 
-The full category command must still work.
+Current category commands accept the adapter, port, WebDriver, server, and
+headed/headless options exposed by their `--help` output. Do not document or
+require focused flags such as `--component`, `--test-filter`, `--visual-only`,
+or `--behavior-only` unless the same PR implements those flags in `xtask` and
+the standalone E2E harness.
+
+When a PR adds the first E2E-covered component in a category, it must add the
+category command before listing it as validation.
 
 ## Exceptions
 

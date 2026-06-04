@@ -26,12 +26,15 @@ documented in `AGENTS.md`.
 
 ```bash
 cargo check -p ars-e2e
-cargo xtask e2e <category> --adapter leptos --component <component>
-cargo xtask e2e <category> --adapter dioxus --component <component>
+cargo xtask e2e --help
+cargo xtask e2e <category> --help
+cargo xtask e2e <category> --adapter leptos
+cargo xtask e2e <category> --adapter dioxus
 ```
 
-Run focused filters while debugging, then run the full relevant category before
-presenting the result.
+Use only flags shown by the current `--help` output. If focused component or
+test-filter flags are useful, add them to `xtask` and the standalone E2E
+harness in the same PR before documenting them as validation.
 
 If the task adds the first E2E-covered component in a category, add the category
 subcommand before documenting the validation command as available.
@@ -39,22 +42,16 @@ subcommand before documenting the validation command as available.
 ## Widgets Checks
 
 ```bash
-cargo xtask e2e widgets --adapter leptos --style plain --category <category>
-cargo xtask e2e widgets --adapter leptos --style css --category <category>
-cargo xtask e2e widgets --adapter leptos --style tailwind --category <category>
-cargo xtask e2e widgets --adapter dioxus --style plain --category <category>
-cargo xtask e2e widgets --adapter dioxus --style css --category <category>
-cargo xtask e2e widgets --adapter dioxus --style tailwind --category <category>
+cargo check --manifest-path examples/widgets-leptos/Cargo.toml
+cargo check --manifest-path examples/widgets-leptos-css/Cargo.toml
+cargo check --manifest-path examples/widgets-leptos-tailwind/Cargo.toml
+cargo check --manifest-path examples/widgets-dioxus/Cargo.toml
+cargo check --manifest-path examples/widgets-dioxus-css/Cargo.toml
+cargo check --manifest-path examples/widgets-dioxus-tailwind/Cargo.toml
 ```
 
-Also check the example crates:
-
-```bash
-cd examples
-cargo check -p widgets-leptos -p widgets-dioxus \
-  -p widgets-leptos-css -p widgets-dioxus-css \
-  -p widgets-leptos-tailwind -p widgets-dioxus-tailwind
-```
+Run any existing category E2E command that exercises the widgets page. Do not
+list a dedicated `cargo xtask e2e widgets` command unless the PR implements it.
 
 ## Spec And Workspace Gates
 

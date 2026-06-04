@@ -14,7 +14,12 @@ Add or update the matching category module in all six widgets crates:
 - `examples/widgets-leptos-tailwind`
 - `examples/widgets-dioxus-tailwind`
 
-Use the matching `src/categories/<category>.rs` file.
+Use the matching Rust module file for the spec category. Hyphenated spec
+category names become underscore module filenames:
+
+- `data-display` -> `src/categories/data_display.rs`;
+- `date-time` -> `src/categories/date_time.rs`;
+- all other current categories already match their module filename.
 
 Do not put category-specific example text in root `WidgetsText`. Add it to the
 category-local text enum.
@@ -86,17 +91,22 @@ Use SVG for visual glyphs instead of Unicode marks when geometry matters.
 
 ## Widget Smoke Checks
 
-Every visible adapter component must have a public widgets smoke path against
-the real example CSS:
+Every visible adapter component must have a public widget verification path
+against the real example CSS. Use existing commands only. Today, that means:
 
 ```bash
-cargo xtask e2e widgets --adapter leptos --style plain --category <category>
-cargo xtask e2e widgets --adapter leptos --style css --category <category>
-cargo xtask e2e widgets --adapter leptos --style tailwind --category <category>
-cargo xtask e2e widgets --adapter dioxus --style plain --category <category>
-cargo xtask e2e widgets --adapter dioxus --style css --category <category>
-cargo xtask e2e widgets --adapter dioxus --style tailwind --category <category>
+cargo check --manifest-path examples/widgets-leptos/Cargo.toml
+cargo check --manifest-path examples/widgets-leptos-css/Cargo.toml
+cargo check --manifest-path examples/widgets-leptos-tailwind/Cargo.toml
+cargo check --manifest-path examples/widgets-dioxus/Cargo.toml
+cargo check --manifest-path examples/widgets-dioxus-css/Cargo.toml
+cargo check --manifest-path examples/widgets-dioxus-tailwind/Cargo.toml
 ```
+
+If the category has an existing `cargo xtask e2e <category>` command that
+drives widget examples, run it for both adapters. If a PR adds a dedicated
+`widgets` subcommand or focused widget flags, it may document and use them only
+after implementing them in the same PR.
 
 At minimum, widget smoke should:
 
