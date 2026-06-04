@@ -345,6 +345,10 @@ impl Default for Props {
 ### 1.5 Full Machine Implementation
 
 ```rust
+/// The minimum crop dimension, as a fraction of the image, enforced during
+/// resize so a handle drag can never collapse the crop area to nothing.
+const MIN_CROP_SIZE: f64 = 0.05;
+
 /// Resize the crop area based on handle position and pointer delta.
 /// Enforces aspect ratio constraints and boundary clamping.
 fn resize_crop_area(ctx: &mut Context, handle: CropHandle, x: f64, y: f64) {
@@ -355,53 +359,62 @@ fn resize_crop_area(ctx: &mut Context, handle: CropHandle, x: f64, y: f64) {
 
         match handle {
             CropHandle::TopLeft => {
-                crop.x = (start.x + dx).clamp(0.0, start.x + start.width - 0.05);
-                crop.y = (start.y + dy).clamp(0.0, start.y + start.height - 0.05);
+                crop.x = (start.x + dx).clamp(0.0, start.x + start.width - MIN_CROP_SIZE);
+                crop.y = (start.y + dy).clamp(0.0, start.y + start.height - MIN_CROP_SIZE);
                 crop.width = start.width - (crop.x - start.x);
                 crop.height = start.height - (crop.y - start.y);
             }
             CropHandle::TopRight => {
-                crop.y = (start.y + dy).clamp(0.0, start.y + start.height - 0.05);
-                crop.width = (start.width + dx).clamp(0.05, 1.0 - start.x);
+                crop.y = (start.y + dy).clamp(0.0, start.y + start.height - MIN_CROP_SIZE);
+                crop.width = (start.width + dx).clamp(MIN_CROP_SIZE, 1.0 - start.x);
                 crop.height = start.height - (crop.y - start.y);
             }
             CropHandle::BottomLeft => {
-                crop.x = (start.x + dx).clamp(0.0, start.x + start.width - 0.05);
+                crop.x = (start.x + dx).clamp(0.0, start.x + start.width - MIN_CROP_SIZE);
                 crop.width = start.width - (crop.x - start.x);
-                crop.height = (start.height + dy).clamp(0.05, 1.0 - start.y);
+                crop.height = (start.height + dy).clamp(MIN_CROP_SIZE, 1.0 - start.y);
             }
             CropHandle::BottomRight => {
-                crop.width = (start.width + dx).clamp(0.05, 1.0 - start.x);
-                crop.height = (start.height + dy).clamp(0.05, 1.0 - start.y);
+                crop.width = (start.width + dx).clamp(MIN_CROP_SIZE, 1.0 - start.x);
+                crop.height = (start.height + dy).clamp(MIN_CROP_SIZE, 1.0 - start.y);
             }
             CropHandle::Top => {
-                crop.y = (start.y + dy).clamp(0.0, start.y + start.height - 0.05);
+                crop.y = (start.y + dy).clamp(0.0, start.y + start.height - MIN_CROP_SIZE);
                 crop.height = start.height - (crop.y - start.y);
             }
             CropHandle::Bottom => {
-                crop.height = (start.height + dy).clamp(0.05, 1.0 - start.y);
+                crop.height = (start.height + dy).clamp(MIN_CROP_SIZE, 1.0 - start.y);
             }
             CropHandle::Left => {
-                crop.x = (start.x + dx).clamp(0.0, start.x + start.width - 0.05);
+                crop.x = (start.x + dx).clamp(0.0, start.x + start.width - MIN_CROP_SIZE);
                 crop.width = start.width - (crop.x - start.x);
             }
             CropHandle::Right => {
-                crop.width = (start.width + dx).clamp(0.05, 1.0 - start.x);
+                crop.width = (start.width + dx).clamp(MIN_CROP_SIZE, 1.0 - start.x);
             }
         }
 
-        // Enforce aspect ratio if set
         if let Some(ratio) = ctx.aspect_ratio.as_ratio() {
-            crop.height = crop.width / ratio;
-            // Re-clamp after aspect ratio enforcement
-            if crop.y + crop.height > 1.0 {
-                crop.height = 1.0 - crop.y;
-                crop.width = crop.height * ratio;
-            }
+            constrain_to_ratio(&mut crop, ratio);
         }
 
         ctx.crop.set(crop);
     }
+}
+
+/// Re-shape `crop` to the given width:height `ratio`, keeping both dimensions
+/// within `[MIN_CROP_SIZE, image edge]`. The width drives the result: it is
+/// held at or above the floor that keeps *both* sides `>= MIN_CROP_SIZE`
+/// (`max(MIN, MIN * ratio)`) and at or below what the right/bottom edges allow,
+/// then the height is derived. `.max().min()` (not `f64::clamp`) is deliberate:
+/// when the crop sits so close to an edge that the bounds cross, fitting the
+/// image wins over the minimum-size floor instead of panicking.
+fn constrain_to_ratio(crop: &mut CropArea, ratio: f64) {
+    let lower = MIN_CROP_SIZE.max(MIN_CROP_SIZE * ratio);
+    let upper = (1.0 - crop.x).min((1.0 - crop.y) * ratio);
+    let width = crop.width.max(lower).min(upper);
+    crop.width = width;
+    crop.height = width / ratio;
 }
 
 /// Re-constrain the current crop area to match the current aspect ratio.
@@ -411,13 +424,16 @@ fn enforce_aspect_ratio(ctx: &mut Context) {
         // returns the stale parent value until it round-trips through
         // `on_crop_change`.
         let mut crop = *ctx.crop.pending();
-        crop.height = crop.width / ratio;
-        if crop.y + crop.height > 1.0 {
-            crop.height = 1.0 - crop.y;
-            crop.width = crop.height * ratio;
-        }
+        constrain_to_ratio(&mut crop, ratio);
         ctx.crop.set(crop);
     }
+}
+
+/// Normalize a rotation in degrees into the `[-180, 180]` range the rotation
+/// slider advertises, so repeated `r`/`R` rotations wrap instead of running
+/// past the declared `aria-valuemin`/`aria-valuemax`.
+fn normalize_rotation(degrees: f64) -> f64 {
+    (degrees + 180.0).rem_euclid(360.0) - 180.0
 }
 
 /// Typed effect intents emitted by the image-cropper machine.
@@ -478,10 +494,12 @@ impl ars_core::Machine for Machine {
         let locale = env.locale.clone();
         let messages = messages.clone();
 
-        (State::Idle, Context {
+        let mut ctx = Context {
             crop,
             aspect_ratio: props.aspect_ratio,
-            zoom: props.zoom,
+            // Clamp the initial zoom so the first render never advertises a value
+            // outside `min_zoom..=max_zoom` (matches `SetZoom`/`SyncProps`).
+            zoom: props.zoom.clamp(props.min_zoom, props.max_zoom),
             min_zoom: props.min_zoom,
             max_zoom: props.max_zoom,
             disabled: props.disabled,
@@ -493,7 +511,13 @@ impl ars_core::Machine for Machine {
             locale,
             messages,
             ids,
-        })
+        };
+
+        // Apply the aspect-ratio constraint up front so the initial crop is
+        // already consistent with `aspect_ratio` on the first render.
+        enforce_aspect_ratio(&mut ctx);
+
+        (State::Idle, ctx)
     }
 
     fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
@@ -648,6 +672,9 @@ impl ars_core::Machine for Machine {
                 let area = *area;
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.crop.set(area);
+                    // A directly-set crop is still subject to the active
+                    // aspect-ratio constraint.
+                    enforce_aspect_ratio(ctx);
                 })
                 .with_effect(crop_change_effect()))
             }
@@ -669,7 +696,9 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::SetRotation(rotation)) => {
-                let rotation = *rotation;
+                // Wrap into the slider's advertised `[-180, 180]` range so
+                // repeated rotations never report an out-of-range `aria-valuenow`.
+                let rotation = normalize_rotation(*rotation);
                 Some(TransitionPlan::context_only(move |ctx| {
                     let mut crop = *ctx.crop.pending();
                     crop.rotation = rotation;
@@ -691,12 +720,20 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::Reset) => {
-                Some(TransitionPlan::to(State::Idle).apply(|ctx| {
-                    ctx.crop.set(CropArea::default());
-                    ctx.zoom = 1.0;
-                    ctx.flip = FlipState::default();
+                // Reset returns to the *configured* initial state — the declared
+                // `default_crop`, initial `zoom`, and initial `flip` — not the
+                // library's hard-coded defaults.
+                let default_crop = props.default_crop;
+                let zoom = props.zoom.clamp(props.min_zoom, props.max_zoom);
+                let flip = props.flip;
+                Some(TransitionPlan::to(State::Idle).apply(move |ctx| {
+                    ctx.crop.set(default_crop);
+                    ctx.zoom = zoom;
+                    ctx.flip = flip;
                     ctx.drag_origin = None;
                     ctx.drag_start_crop = None;
+                    // Keep the reset crop consistent with an active ratio.
+                    enforce_aspect_ratio(ctx);
                 })
                 .with_effect(crop_change_effect()))
             }
@@ -933,6 +970,9 @@ impl<'a> Api<'a> {
     // inline-end (see §4 RTL note). `KeyboardKey` carries no printable-character
     // variant, so named arrow keys come from `data.key`.
     pub fn on_crop_area_keydown(&self, data: &KeyboardEventData, shift: bool, is_rtl: bool) {
+        // Arrow keys steer the IME candidate list during composition; don't also
+        // nudge the crop.
+        if data.is_composing { return; }
         let nudge = if shift { 0.1 } else { 0.01 };
         let inline = if is_rtl { -nudge } else { nudge };
         match data.key {
@@ -947,6 +987,9 @@ impl<'a> Api<'a> {
     // Printable shortcuts read `data.character` (`KeyboardKey` excludes
     // printable characters by design — the character lives in its own field).
     pub fn on_root_keydown(&self, data: &KeyboardEventData) {
+        // A printable key produced mid-IME-composition belongs to the composed
+        // text, not to a cropper shortcut.
+        if data.is_composing { return; }
         let Some(character) = data.character else { return; };
         match character {
             '+' | '=' => (self.send)(Event::SetZoom(self.ctx.zoom + 0.1)),

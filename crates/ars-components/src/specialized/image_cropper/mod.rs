@@ -710,35 +710,47 @@ fn resize_crop_area(ctx: &mut Context, handle: CropHandle, x: f64, y: f64) {
             }
         }
 
-        // Enforce aspect ratio if set, re-clamping height against the bottom
-        // edge so the constrained crop never overflows the image.
         if let Some(ratio) = ctx.aspect_ratio.as_ratio() {
-            crop.height = crop.width / ratio;
-
-            if crop.y + crop.height > 1.0 {
-                crop.height = 1.0 - crop.y;
-                crop.width = crop.height * ratio;
-            }
+            constrain_to_ratio(&mut crop, ratio);
         }
 
         ctx.crop.set(crop);
     }
 }
 
+/// Re-shape `crop` to the given width:height `ratio`, keeping both dimensions
+/// within `[MIN_CROP_SIZE, image edge]`.
+///
+/// The width is the driving dimension: it is held at or above the floor that
+/// keeps *both* sides `>= MIN_CROP_SIZE` (`max(MIN, MIN * ratio)`) and at or
+/// below the largest width the right and bottom edges allow, then the height is
+/// derived from it. `.max().min()` (rather than `f64::clamp`) is deliberate —
+/// when the crop sits so close to an edge that the lower and upper bounds cross,
+/// fitting inside the image wins over the minimum-size floor instead of
+/// panicking.
+fn constrain_to_ratio(crop: &mut CropArea, ratio: f64) {
+    let lower = MIN_CROP_SIZE.max(MIN_CROP_SIZE * ratio);
+    let upper = (1.0 - crop.x).min((1.0 - crop.y) * ratio);
+
+    let width = crop.width.max(lower).min(upper);
+    crop.width = width;
+    crop.height = width / ratio;
+}
+
 /// Re-constrain the current crop area to match the current aspect ratio.
 fn enforce_aspect_ratio(ctx: &mut Context) {
     if let Some(ratio) = ctx.aspect_ratio.as_ratio() {
         let mut crop = *ctx.crop.pending();
-
-        crop.height = crop.width / ratio;
-
-        if crop.y + crop.height > 1.0 {
-            crop.height = 1.0 - crop.y;
-            crop.width = crop.height * ratio;
-        }
-
+        constrain_to_ratio(&mut crop, ratio);
         ctx.crop.set(crop);
     }
+}
+
+/// Normalize a rotation in degrees into the `(-180, 180]`-ish slider range the
+/// rotation control advertises, so repeated `r`/`R` rotations wrap instead of
+/// running past the declared `aria-valuemin`/`aria-valuemax`.
+fn normalize_rotation(degrees: f64) -> f64 {
+    (degrees + 180.0).rem_euclid(360.0) - 180.0
 }
 
 /// Builds the [`Effect::CropChange`] effect that notifies
@@ -802,25 +814,30 @@ impl ars_core::Machine for Machine {
             Bindable::uncontrolled(props.default_crop)
         };
 
-        (
-            State::Idle,
-            Context {
-                crop,
-                aspect_ratio: props.aspect_ratio,
-                zoom: props.zoom,
-                min_zoom: props.min_zoom,
-                max_zoom: props.max_zoom,
-                disabled: props.disabled,
-                circular: props.circular,
-                flip: props.flip,
-                drag_origin: None,
-                drag_start_crop: None,
-                focused_part: None,
-                locale: env.locale.clone(),
-                messages: messages.clone(),
-                ids: ComponentIds::from_id(&props.id),
-            },
-        )
+        let mut ctx = Context {
+            crop,
+            aspect_ratio: props.aspect_ratio,
+            // Clamp the initial zoom so the first render never advertises a
+            // value outside `min_zoom..=max_zoom` (matches `SetZoom`/`SyncProps`).
+            zoom: props.zoom.clamp(props.min_zoom, props.max_zoom),
+            min_zoom: props.min_zoom,
+            max_zoom: props.max_zoom,
+            disabled: props.disabled,
+            circular: props.circular,
+            flip: props.flip,
+            drag_origin: None,
+            drag_start_crop: None,
+            focused_part: None,
+            locale: env.locale.clone(),
+            messages: messages.clone(),
+            ids: ComponentIds::from_id(&props.id),
+        };
+
+        // Apply the aspect-ratio constraint up front so the initial crop is
+        // already consistent with `aspect_ratio` on the first render.
+        enforce_aspect_ratio(&mut ctx);
+
+        (State::Idle, ctx)
     }
 
     fn on_props_changed(old: &Props, new: &Props) -> Vec<Event> {
@@ -998,6 +1015,9 @@ impl ars_core::Machine for Machine {
                 Some(
                     TransitionPlan::context_only(move |ctx: &mut Context| {
                         ctx.crop.set(area);
+                        // A directly-set crop is still subject to the active
+                        // aspect-ratio constraint.
+                        enforce_aspect_ratio(ctx);
                     })
                     .with_effect(crop_change_effect()),
                 )
@@ -1023,7 +1043,9 @@ impl ars_core::Machine for Machine {
             }
 
             (_, Event::SetRotation(rotation)) => {
-                let rotation = *rotation;
+                // Wrap into the slider's advertised range so repeated rotations
+                // never report an `aria-valuenow` outside `[-180, 180]`.
+                let rotation = normalize_rotation(*rotation);
                 Some(
                     TransitionPlan::context_only(move |ctx: &mut Context| {
                         let mut crop = *ctx.crop.pending();
@@ -1046,17 +1068,27 @@ impl ars_core::Machine for Machine {
                 ctx.flip.vertical = !ctx.flip.vertical;
             })),
 
-            (_, Event::Reset) => Some(
-                TransitionPlan::to(State::Idle)
-                    .apply(|ctx: &mut Context| {
-                        ctx.crop.set(CropArea::default());
-                        ctx.zoom = 1.0;
-                        ctx.flip = FlipState::default();
-                        ctx.drag_origin = None;
-                        ctx.drag_start_crop = None;
-                    })
-                    .with_effect(crop_change_effect()),
-            ),
+            (_, Event::Reset) => {
+                // Reset returns to the *configured* initial state — the
+                // `default_crop`, initial `zoom`, and initial `flip` the
+                // consumer declared — not the library's hard-coded defaults.
+                let default_crop = props.default_crop;
+                let zoom = props.zoom.clamp(props.min_zoom, props.max_zoom);
+                let flip = props.flip;
+                Some(
+                    TransitionPlan::to(State::Idle)
+                        .apply(move |ctx: &mut Context| {
+                            ctx.crop.set(default_crop);
+                            ctx.zoom = zoom;
+                            ctx.flip = flip;
+                            ctx.drag_origin = None;
+                            ctx.drag_start_crop = None;
+                            // Keep the reset crop consistent with an active ratio.
+                            enforce_aspect_ratio(ctx);
+                        })
+                        .with_effect(crop_change_effect()),
+                )
+            }
 
             (_, Event::NudgeCrop { dx, dy }) => {
                 let (dx, dy) = (*dx, *dy);
@@ -1458,6 +1490,12 @@ impl Api<'_> {
     /// moves toward the inline-end (decreasing x) so the crop always tracks the
     /// arrow's reading-direction meaning.
     pub fn on_crop_area_keydown(&self, data: &KeyboardEventData, shift: bool, is_rtl: bool) {
+        // Arrow keys steer the IME candidate list during composition; don't also
+        // nudge the crop.
+        if data.is_composing {
+            return;
+        }
+
         let nudge = if shift { 0.1 } else { 0.01 };
         let inline = if is_rtl { -nudge } else { nudge };
 
@@ -1486,6 +1524,12 @@ impl Api<'_> {
     /// Dispatches root-level keyboard shortcuts: `+`/`=` zoom in, `-` zoom out,
     /// `r`/`R` rotate +/-90 degrees, `h` flip horizontal, `v` flip vertical.
     pub fn on_root_keydown(&self, data: &KeyboardEventData) {
+        // A printable key produced mid-IME-composition belongs to the composed
+        // text, not to a cropper shortcut.
+        if data.is_composing {
+            return;
+        }
+
         let Some(character) = data.character else {
             return;
         };
@@ -2513,6 +2557,179 @@ mod tests {
                 Some("image-cropper")
             );
         }
+    }
+
+    // ───────────────── codex review: contract fixes ─────────────────
+
+    #[test]
+    fn reset_restores_configured_initial_state() {
+        // Reset must return to the *configured* initial crop/zoom/flip, not the
+        // library's hard-coded `CropArea::default()`.
+        let custom = CropArea {
+            x: 0.2,
+            y: 0.2,
+            width: 0.5,
+            height: 0.5,
+            rotation: 0.0,
+        };
+        let flip = FlipState {
+            horizontal: true,
+            vertical: false,
+        };
+        let mut service = fresh_service(test_props().default_crop(custom).zoom(2.0).flip(flip));
+
+        drop(service.send(Event::SetCropArea(CropArea {
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            rotation: 30.0,
+        })));
+        drop(service.send(Event::SetZoom(3.0)));
+        drop(service.send(Event::FlipVertical));
+
+        drop(service.send(Event::Reset));
+
+        assert_eq!(*service.context().crop.get(), custom);
+        assert_eq!(service.context().zoom, 2.0);
+        assert_eq!(service.context().flip, flip);
+    }
+
+    #[test]
+    fn resize_aspect_lock_keeps_minimum_crop_size() {
+        // Collapsing a handle under a wide fixed ratio must not drive either
+        // dimension below the 5% floor.
+        let mut service = fresh_service(test_props().aspect_ratio(AspectRatio::Wide16x9));
+        drop(service.send(Event::ResizeStart {
+            handle: CropHandle::BottomRight,
+            x: 0.9,
+            y: 0.9,
+        }));
+        drop(service.send(Event::ResizeMove { x: 0.0, y: 0.0 }));
+
+        let crop = *service.context().crop.get();
+        assert!(
+            crop.width >= MIN_CROP_SIZE - 1e-9,
+            "width {} < min",
+            crop.width
+        );
+        assert!(
+            crop.height >= MIN_CROP_SIZE - 1e-9,
+            "height {} < min",
+            crop.height
+        );
+    }
+
+    #[test]
+    fn init_clamps_zoom_to_bounds() {
+        let service = fresh_service(test_props().zoom(10.0).min_zoom(1.0).max_zoom(3.0));
+        assert_eq!(service.context().zoom, 3.0);
+
+        let service = fresh_service(test_props().zoom(0.1).min_zoom(1.0).max_zoom(3.0));
+        assert_eq!(service.context().zoom, 1.0);
+    }
+
+    #[test]
+    fn set_rotation_normalizes_into_slider_range() {
+        let mut service = fresh_service(test_props());
+        drop(service.send(Event::SetRotation(270.0)));
+
+        let rotation = service.context().crop.get().rotation;
+        assert!(
+            (-180.0..=180.0).contains(&rotation),
+            "rotation {rotation} out of slider range"
+        );
+        assert!((rotation - (-90.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn init_enforces_aspect_ratio_on_initial_crop() {
+        let service = fresh_service(
+            test_props()
+                .default_crop(CropArea {
+                    x: 0.1,
+                    y: 0.1,
+                    width: 0.8,
+                    height: 0.4,
+                    rotation: 0.0,
+                })
+                .aspect_ratio(AspectRatio::Square),
+        );
+
+        let crop = *service.context().crop.get();
+        assert!(
+            (crop.width - crop.height).abs() < 1e-9,
+            "initial crop not square: {crop:?}"
+        );
+    }
+
+    #[test]
+    fn set_crop_area_enforces_active_aspect_ratio() {
+        let mut service = fresh_service(test_props().aspect_ratio(AspectRatio::Square));
+        drop(service.send(Event::SetCropArea(CropArea {
+            x: 0.0,
+            y: 0.0,
+            width: 0.6,
+            height: 0.2,
+            rotation: 0.0,
+        })));
+
+        let crop = *service.context().crop.get();
+        assert!((crop.width - crop.height).abs() < 1e-9);
+    }
+
+    #[test]
+    fn root_keydown_ignores_ime_composition() {
+        let log: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&log);
+        let props = Box::leak(Box::new(test_props()));
+        let (_, ctx) = Machine::init(props, &Env::default(), &Messages::default());
+        let ctx = Box::leak(Box::new(ctx));
+        let state = Box::leak(Box::new(State::Idle));
+        let send = Box::leak(Box::new(move |event: Event| {
+            sink.lock().unwrap().push(event);
+        }));
+        let api = Api {
+            state,
+            ctx,
+            props,
+            send,
+        };
+
+        let composing = KeyboardEventData {
+            is_composing: true,
+            ..char_key('r')
+        };
+        api.on_root_keydown(&composing);
+
+        assert!(log.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn crop_area_keydown_ignores_ime_composition() {
+        let log: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&log);
+        let props = Box::leak(Box::new(test_props()));
+        let (_, ctx) = Machine::init(props, &Env::default(), &Messages::default());
+        let ctx = Box::leak(Box::new(ctx));
+        let state = Box::leak(Box::new(State::Idle));
+        let send = Box::leak(Box::new(move |event: Event| {
+            sink.lock().unwrap().push(event);
+        }));
+        let api = Api {
+            state,
+            ctx,
+            props,
+            send,
+        };
+
+        let composing = KeyboardEventData {
+            is_composing: true,
+            ..key(KeyboardKey::ArrowRight)
+        };
+        api.on_crop_area_keydown(&composing, false, false);
+
+        assert!(log.lock().unwrap().is_empty());
     }
 
     // ───────────────────────── snapshots ─────────────────────────

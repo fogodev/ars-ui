@@ -997,6 +997,9 @@ mod image_cropper_proptests {
             prop_assert!(crop.x + crop.width <= 1.0 + EPS);
             prop_assert!(crop.y + crop.height <= 1.0 + EPS);
 
+            // Rotation always stays within the slider's advertised range.
+            prop_assert!((-180.0 - EPS..=180.0 + EPS).contains(&crop.rotation));
+
             // Zoom never escapes its configured bounds.
             prop_assert!((Props::default().min_zoom..=Props::default().max_zoom)
                 .contains(&svc.context().zoom));
