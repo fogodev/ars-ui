@@ -524,7 +524,7 @@ impl ars_core::Machine for Machine {
             (_, Event::SetValue(value)) => {
                 let sanitized_value = value
                     .clone()
-                    .filter(|value| item_is_present(ctx, value) && !is_item_disabled(ctx, value));
+                    .filter(|value| controlled_value_is_selectable(ctx, value));
 
                 let internal = sanitized_value.clone().or_else(|| ctx.value.get().clone());
 
@@ -556,10 +556,6 @@ impl ars_core::Machine for Machine {
 
         let mut events = Vec::new();
 
-        if old.value != new.value {
-            events.push(Event::SetValue(new.value.clone()));
-        }
-
         if old.disabled != new.disabled
             || old.readonly != new.readonly
             || old.orientation != new.orientation
@@ -568,6 +564,10 @@ impl ars_core::Machine for Machine {
             || old.items != new.items
         {
             events.push(Event::SetProps);
+        }
+
+        if old.value != new.value {
+            events.push(Event::SetValue(new.value.clone()));
         }
 
         events
@@ -962,6 +962,10 @@ fn item_is_present(ctx: &Context, item: &Key) -> bool {
     ordered_items(ctx)
         .iter()
         .any(|registered| registered == item)
+}
+
+fn controlled_value_is_selectable(ctx: &Context, item: &Key) -> bool {
+    item_definition(ctx, item).is_some_and(|segment| !segment.disabled)
 }
 
 fn can_focus_item(ctx: &Context, item: &Key) -> bool {
@@ -1712,7 +1716,7 @@ mod tests {
 
         assert_eq!(
             <Machine as ars_core::Machine>::on_props_changed(&old, &new),
-            [Event::SetValue(Some(key("table"))), Event::SetProps]
+            [Event::SetProps, Event::SetValue(Some(key("table")))]
         );
 
         let mut service = Service::<Machine>::new(old, &Env::default(), &Messages);
@@ -1731,6 +1735,37 @@ mod tests {
         assert_eq!(service.state(), &State::Idle);
         assert_eq!(service.context().focused_item, None);
         assert!(result.pending_effects.is_empty());
+    }
+
+    #[test]
+    fn segment_group_set_props_selects_item_introduced_by_same_prop_sync() {
+        let old = props().items(vec![segment("grid")]).value(key("grid"));
+        let new = props()
+            .items(vec![segment("grid"), segment("table")])
+            .value(key("table"));
+
+        let mut service = Service::<Machine>::new(old, &Env::default(), &Messages);
+
+        drop(service.set_props(new));
+
+        assert_eq!(service.context().value.get().as_ref(), Some(&key("table")));
+    }
+
+    #[test]
+    fn segment_group_set_value_accepts_enabled_controlled_value_when_group_disabled() {
+        let mut service = Service::<Machine>::new(
+            props()
+                .disabled(true)
+                .items(vec![segment("grid"), segment("list")])
+                .value(key("grid")),
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::SetValue(Some(key("list")))));
+
+        assert_eq!(service.context().value.get().as_ref(), Some(&key("list")));
+        assert!(service.context().value.is_controlled());
     }
 
     #[test]

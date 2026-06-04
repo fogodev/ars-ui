@@ -15,6 +15,13 @@ fn arb_tag_value() -> impl Strategy<Value = String> {
     ]
 }
 
+fn arb_controlled_tag_values() -> impl Strategy<Value = Option<Vec<String>>> {
+    prop::option::of(
+        prop::collection::btree_set(arb_tag_value(), 0..=1)
+            .prop_map(|values| values.into_iter().collect()),
+    )
+}
+
 fn arb_tags_input_event() -> impl Strategy<Value = tags_input::Event> {
     prop_oneof![
         arb_tag_value().prop_map(tags_input::Event::AddTag),
@@ -34,8 +41,7 @@ fn arb_tags_input_event() -> impl Strategy<Value = tags_input::Event> {
         Just(tags_input::Event::DeselectTags),
         Just(tags_input::Event::CompositionStart),
         Just(tags_input::Event::CompositionEnd),
-        prop::option::of(prop::collection::vec(arb_tag_value(), 0..5))
-            .prop_map(tags_input::Event::SetValue),
+        arb_controlled_tag_values().prop_map(tags_input::Event::SetValue),
         Just(tags_input::Event::SetProps),
     ]
 }
