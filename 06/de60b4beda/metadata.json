@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "06de60b4beda",
+  "strategy": "manual-commit",
+  "branch": "impl-296",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/specialized/image_cropper/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+    "spec/components/specialized/image-cropper.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/06/de60b4beda/0/metadata.json",
+      "transcript": "/06/de60b4beda/0/full.jsonl",
+      "content_hash": "/06/de60b4beda/0/content_hash.txt",
+      "prompt": "/06/de60b4beda/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 5561,
+    "cache_creation_tokens": 506822,
+    "cache_read_tokens": 23217229,
+    "output_tokens": 43198,
+    "api_call_count": 54
+  }
+}
