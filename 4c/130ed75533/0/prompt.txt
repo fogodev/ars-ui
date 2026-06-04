@@ -1,0 +1,48 @@
+We recently completed all agnostic components of the specialized category. Now I wanna do a full audit of them, to be able to close the Epic #227 on Github. In this audit we need to make sure that everything related to this category in the spec was properly implemented, on all specialized agnostic components. Including auditing their respective proptests and spec conformance tests, and while you're in those two, take your time to properly separate the proptests and the spec conformance tests into modules for each component, as currently we have a bloat of tests for all specialized components together in the same file.
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Specialized Agnostic Category Audit Plan
+
+## Summary
+Audit Epic #227 as a category-closure PR for all 15 framework-agnostic specialized components: `AngleSlider`, `Clipboard`, `ColorArea`, `ColorField`, `ColorPicker`, `ColorSlider`, `ColorSwatch`, `ColorSwatchPicker`, `ColorWheel`, `ContextualHelp`, `FileUpload`, `ImageCropper`, `QrCode`, `SignaturePad`, and `Timer`.
+
+The work stays in agnostic core scope: `crates/ars-components`, `spec/components/specialized`, `crates/ars-components/tests`, and an audit document under `docs/implementation`. No Leptos/Dioxus adapter implementation is in scope.
+
+## Key Changes
+- Move Epic #227 to `In Progress` before execution, then produce one closure PR with `Closes #227` only after local validation and user approval.
+- Create `docs/implementation/specialized-category-audit.md` with a per-component disposition table covering implementation surface, spec drift, test disposition, and fixed findings.
+- Split `crates/ars-components/tests/spec_conformance/specialized.rs` into `crates/ars-components/tests/spec_conformance/specialized/mod.rs` plus one module per component.
+- Split `crates/ars-components/tests/proptest_state_machines/specialized.rs` into `crates/ars-components/tests/proptest_state_machines/specialized/mod.rs` plus one module per component.
+- For stateless specialized components, still create a per-component proptest module and either add meaningful property coverage for pure attr/API invariants or document in-module why no state-machine proptest exists.
+- Audit each component against its spec sections: public types, state/events/context/props/messages/effects, `ConnectApi` methods, anatomy `Part`, ARIA/data attrs, keyboard semantics, i18n messages, snapshots, and library-parity commitments.
+- Fix every audit finding in the same PR. If the implementation is right and the spec is stale, update the spec. If the spec is right, update implementation and tests. If both are wrong or the best contract is unclear, stop for a user decision.
+
+## Test Reorganization
+- `spec_conformance/specialized/mod.rs` should only contain shared imports/helpers and `mod <component>;` declarations.
+- Each spec-conformance component module should own exactly that component’s anatomy and public contract assertions.
+- `proptest_state_machines/specialized/mod.rs` should own shared specialized strategies only when they are used by multiple component modules.
+- Existing proptests move mechanically first, preserving behavior before adding audit-driven gaps.
+- Expected new or reviewed proptest coverage includes at least `Clipboard`, `ColorField`, and `FileUpload`, because they are stateful/complex and currently do not appear as standalone property-test blocks.
+
+## Verification
+- Run focused moved-test verification after the split:
+  - `cargo test -p ars-components --test spec_conformance specialized::`
+  - `cargo test -p ars-components --test proptest_state_machines specialized:: -- --ignored`
+- Run focused component/unit verification for changed specialized modules:
+  - `cargo test -p ars-components --lib specialized::`
+  - `cargo insta test -p ars-components --lib -- specialized::`
+- Run spec gates:
+  - `cargo xtask spec validate`
+  - `cargo xtask spec compile-snippets`
+- Run coverage audit for `ars-components` specialized code with annotated output, then add tests for real `^0` branch gaps:
+  - `cargo llvm-cov test -p ars-components --features i18n --lib --no-fail-fast --text -- specialized::`
+- Invoke `.agents/skills/post-implementation-audit/SKILL.md` after implementation and fix all findings from its three phases in the same PR.
+- Before push, after user approval, run `cargo xci --profile fast` or `cargo xci-fast`.
+- If any `.snap` fixtures change, inspect them and label the PR `snapshot-reviewed`.
+
+## Assumptions
+- The audit is a closure task for Epic #227, not a new component implementation wave.
+- Adapter specs may be read for drift signals only; adapter code and examples remain out of scope unless agnostic spec corrections require wording updates.
+- Mutation testing is not a pre-PR gate; surviving mutants remain Nightly-CI follow-up work per repo policy.

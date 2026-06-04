@@ -1,0 +1,62 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "4c130ed75533",
+  "strategy": "manual-commit",
+  "branch": "codex/specialized-agnostic-audit",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/specialized/file_upload/tests.rs",
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/angle_slider.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/clipboard.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_area.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_field.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_picker.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_slider.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_swatch.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_swatch_picker.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_wheel.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/contextual_help.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/file_upload.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/image_cropper.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/qr_code.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/signature_pad.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/timer.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/specialized.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/angle_slider.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/clipboard.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_area.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_field.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_picker.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_slider.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_swatch.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_swatch_picker.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_wheel.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/contextual_help.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/file_upload.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/image_cropper.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/mod.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/qr_code.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/signature_pad.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/timer.rs",
+    "docs/implementation/specialized-category-audit.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/4c/130ed75533/0/metadata.json",
+      "transcript": "/4c/130ed75533/0/full.jsonl",
+      "content_hash": "/4c/130ed75533/0/content_hash.txt",
+      "prompt": "/4c/130ed75533/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1004971,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 18959872,
+    "output_tokens": 56184,
+    "api_call_count": 138
+  }
+}

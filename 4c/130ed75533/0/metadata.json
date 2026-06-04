@@ -1,0 +1,187 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "4c130ed75533",
+  "session_id": "019e908f-5a7e-7e62-93f9-cba7162ace72",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-04T04:14:31.382204Z",
+  "branch": "codex/specialized-agnostic-audit",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/specialized/file_upload/tests.rs",
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/angle_slider.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/clipboard.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_area.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_field.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_picker.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_slider.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_swatch.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_swatch_picker.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/color_wheel.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/contextual_help.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/file_upload.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/image_cropper.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/qr_code.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/signature_pad.rs",
+    "crates/ars-components/tests/proptest_state_machines/specialized/timer.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/specialized.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/angle_slider.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/clipboard.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_area.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_field.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_picker.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_slider.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_swatch.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_swatch_picker.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/color_wheel.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/contextual_help.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/file_upload.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/image_cropper.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/mod.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/qr_code.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/signature_pad.rs",
+    "crates/ars-components/tests/spec_conformance/specialized/timer.rs",
+    "docs/implementation/specialized-category-audit.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "8af4dc6b3ae9",
+  "token_usage": {
+    "input_tokens": 1004971,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 18959872,
+    "output_tokens": 56184,
+    "api_call_count": 138
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Audit all 15 specialized agnostic components against their specs to close Epic #227, while reorganizing the bloated monolithic test files into per-component modules for both spec conformance and proptest state machines.",
+    "outcome": "Completed the full audit and test reorganization: split both test blobs into 15 per-component modules each, added missing proptest coverage for Clipboard/ColorField/FileUpload/ColorSwatch/ContextualHelp, created the audit closure document, fixed a branch-coverage regression that dropped ars-components below its 90% threshold, and committed after passing cargo xci --profile fast.",
+    "learnings": {
+      "repo": [
+        "Category audit pattern is consistent across data-display, utility, and now specialized: per-component modules under tests/spec_conformance/<category>/ and tests/proptest_state_machines/<category>/, plus an audit doc under docs/implementation/<category>-category-audit.md.",
+        "Proptest state machine tests use #[ignore] and must be run with -- --ignored; the fast profile does not run them automatically.",
+        "cargo xtask spec info <component> validates that a component resolves in the spec registry; cargo xtask spec validate and cargo xtask spec compile-snippets are the two spec gates.",
+        "ars-components has a 90% branch coverage threshold enforced by cargo xci --profile fast via target/coverage/native-fast.lcov; the isolated gate is cargo xci --profile fast coverage-native.",
+        "GitHub project board item status is updated via gh project item-edit with explicit --field-id and --single-select-option-id flags; the project ID is PVT_kwHOAKgEE84BTlkR (project #2 for fogodev).",
+        "Branch naming convention for Codex/agent work is codex/<task-description>; the worktree starts detached so a branch must be explicitly created before editing files.",
+        "Test assertions using &&, ||, or matches! with guards each count as instrumented branches in LLVM coverage, so overly complex assertions in tests can artificially reduce branch coverage.",
+        "mod.rs aggregators for split test directories should contain only shared imports/helpers and mod <component>; declarations—no test logic.",
+        "cargo +nightly fmt is the project formatter; cargo insta test is used for snapshot gate; both are separate steps from cargo xci.",
+        "The post-implementation audit skill lives at .agents/skills/post-implementation-audit/SKILL.md and defines a three-phase check (spec drift, missing coverage, test/contract gaps)."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/tests/spec_conformance/specialized.rs",
+          "line": 1,
+          "end_line": 343,
+          "finding": "Was a 343-line monolithic blob covering all 15 specialized components; replaced by specialized/mod.rs + 15 per-component files."
+        },
+        {
+          "path": "crates/ars-components/tests/proptest_state_machines/specialized.rs",
+          "line": 1,
+          "end_line": 1018,
+          "finding": "Was a 1018-line monolithic blob; replaced by specialized/mod.rs + 15 per-component files (16 ignored tests preserved, 5 new component modules added)."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/file_upload/tests.rs",
+          "line": 2060,
+          "end_line": 2520,
+          "finding": "Missing unit coverage for public API dispatch, item subpart attrs, validation-message enum arms, ConnectApi dispatch, and builder clearers; these were the top lcov branch misses for the file_upload module."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/color_area/mod.rs",
+          "line": 320,
+          "end_line": 1075,
+          "finding": "Had uncovered branches in attr builders and sync logic identified by native-fast.lcov; fixed by adding targeted test cases for prop-sync OR-chain branches."
+        },
+        {
+          "path": "crates/ars-components/src/specialized/image_cropper/mod.rs",
+          "line": 2260,
+          "end_line": 3245,
+          "finding": "on_props_changed prop-sync matrix had several uncovered OR-chain branches; added a direct matrix test to cover aspect_ratio, min_zoom, max_zoom, and circular combinations."
+        },
+        {
+          "path": "target/coverage/native-fast.lcov",
+          "line": 1,
+          "end_line": 1,
+          "finding": "Authoritative source for branch coverage; parsed with awk to extract per-file hit/total/miss counts; overall ars-components was 9507/10642 branches before fixes, 90.2% after."
+        }
+      ],
+      "workflow": [
+        "cargo xci --profile fast runs in order: fmt → clippy → unit (workspace nextest + i18n splits) → integration → adapter → spec gates → native coverage; the coverage gate is the slowest and last.",
+        "Run cargo xci --profile fast coverage-native in isolation to validate the coverage threshold without re-running all earlier gates—saves significant time when iterating on coverage fixes.",
+        "Mechanical test splits should happen first (preserving all existing behavior) before adding audit-driven gap tests, so any failures are attributable to the split rather than new logic.",
+        "Use awk on the .lcov file to extract per-file miss counts before deciding what tests to add; avoids over-engineering tests for noise (debug impls, unreachable instrumentation artifacts).",
+        "cargo llvm-cov report --text --output-path /tmp/report.txt is needed when the inline coverage output is too large for the tool response buffer.",
+        "When a new test fails to compile due to an API mismatch (e.g., ComponentIds::from_id vs ::new), run cargo test --lib <module>:: in isolation before re-running the full fast profile."
+      ]
+    },
+    "friction": [
+      "cargo xci --profile fast failed on the first full run because the audit work added test assertions with && and || that consumed branch budget, dropping ars-components from ~90.0% to just below the 90% threshold.",
+      "The coverage tool output was truncated/too large to return intact, requiring a workaround of writing to /tmp and parsing with awk to identify actionable gaps.",
+      "New proptest modules had compile errors: a non-existent color constructor, a borrowed temporary in attrs, and a contextual-help helper that returned an API tied to a local service scope.",
+      "ComponentIds API name mismatch (from_id vs new) was only caught at compile time during the focused lib test run, not during the initial patch application.",
+      "The full cargo xci --profile fast run takes long enough that it required multiple polling cycles (~10+ write_stdin waits) making it hard to know if the gate was stalled or just slow.",
+      "GitHub project item status update required knowing the exact --field-id and --single-select-option-id values ahead of time; these are not discoverable from gh issue view alone."
+    ],
+    "open_items": [
+      "Pre-existing rustdoc warnings across unrelated categories in ars-components were not introduced by this PR but remain unresolved.",
+      "Mutation testing for specialized components is not a pre-PR gate; surviving mutants are deferred to Nightly-CI per repo policy.",
+      "Epic #227 is moved to In Progress but formal closure depends on the PR being merged; the GitHub issue close (Closes #227) is in the PR body, not yet executed.",
+      "Adapter implementations for the 15 specialized components remain out of scope for this audit and will need a separate epic/PR wave."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-04T04:13:23.535113Z",
+    "agent_lines": 1852,
+    "agent_removed": 1340,
+    "human_added": 167,
+    "human_modified": 60,
+    "human_removed": 0,
+    "total_committed": 2053,
+    "total_lines_changed": 3436,
+    "agent_percentage": 92.89871944121072,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 57,
+      "user_lines_removed": 34,
+      "agent_lines_added": 1935,
+      "agent_lines_removed": 1366,
+      "user_added_per_file": {
+        "crates/ars-components/src/specialized/file_upload/tests.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/specialized/clipboard.rs": 4,
+        "crates/ars-components/tests/proptest_state_machines/specialized/color_area.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/specialized/color_field.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/specialized/color_picker.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/specialized/color_swatch.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/specialized/contextual_help.rs": 4,
+        "crates/ars-components/tests/proptest_state_machines/specialized/file_upload.rs": 9,
+        "crates/ars-components/tests/proptest_state_machines/specialized/timer.rs": 1,
+        "docs/implementation/specialized-category-audit.md": 26,
+        "spec/components/specialized/contextual-help.md": 1,
+        "spec/components/specialized/timer.md": 7
+      },
+      "user_removed_per_file": {
+        "docs/implementation/specialized-category-audit.md": 26,
+        "spec/components/specialized/contextual-help.md": 1,
+        "spec/components/specialized/timer.md": 7
+      }
+    }
+  ]
+}
