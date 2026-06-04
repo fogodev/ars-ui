@@ -929,9 +929,11 @@ impl ComponentMessages for Messages {}
 
 The full unit, ARIA, snapshot, spec-conformance, and proptest suites live in
 `crates/ars-components/src/date_time/date_range_picker/` (`tests.rs` +
-`snapshots/`), `crates/ars-components/tests/spec_conformance/date_time.rs`, and
-`crates/ars-components/tests/proptest_state_machines/date_time.rs`. The
-illustrative cases below drive the machine through a `Service`.
+`snapshots/`),
+`crates/ars-components/tests/spec_conformance/date_time/date_range_picker.rs`,
+and
+`crates/ars-components/tests/proptest_state_machines/date_time/date_range_picker.rs`.
+The illustrative cases below drive the machine through a `Service`.
 
 ```rust
 #[cfg(test)]

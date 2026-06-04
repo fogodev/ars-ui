@@ -278,6 +278,26 @@ mod tests {
     }
 
     #[test]
+    fn ordered_weekdays_covers_every_possible_start_day() {
+        for weekday in [
+            Weekday::Sunday,
+            Weekday::Monday,
+            Weekday::Tuesday,
+            Weekday::Wednesday,
+            Weekday::Thursday,
+            Weekday::Friday,
+            Weekday::Saturday,
+        ] {
+            let ordered = ordered_weekdays(weekday);
+
+            assert_eq!(ordered[0], weekday);
+            assert_eq!(ordered.len(), 7);
+            assert!(ordered.contains(&Weekday::Sunday));
+            assert!(ordered.contains(&Weekday::Saturday));
+        }
+    }
+
+    #[test]
     fn is_outside_month_detects_leading_and_trailing_days() {
         let weeks = weeks_for(1, 2024, Weekday::Sunday, 0);
 

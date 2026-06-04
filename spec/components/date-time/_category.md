@@ -7,27 +7,30 @@ Cross-references: `00-overview.md` for naming conventions and data attributes, `
 - [DateField](date-field.md)
 - [TimeField](time-field.md)
 - [Calendar](calendar.md)
+- [RangeCalendar](range-calendar.md)
 - [DatePicker](date-picker.md)
-- [DateRangePicker](date-range-picker.md)
 - [DateRangeField](date-range-field.md)
+- [DateRangePicker](date-range-picker.md)
 - [DateTimePicker](date-time-picker.md)
 
 ---
 
 ## Overview
 
-This document specifies six closely related components that together form ars-ui's date and time input system:
+This document specifies eight closely related components that together form ars-ui's date and time input system:
 
-| Component         | Purpose                                                                      |
-| ----------------- | ---------------------------------------------------------------------------- |
-| `DateField`       | Segmented date input; each field (month, day, year) is individually editable |
-| `TimeField`       | Segmented time input; segments for hour, minute, second, AM/PM               |
-| `Calendar`        | Grid-based calendar for date browsing and selection                          |
-| `DatePicker`      | `DateField` + `Calendar` in a popover                                        |
-| `DateRangePicker` | Two `DateField`s + range-mode `Calendar` in a popover                        |
-| `DateRangeField`  | Inline two-field range input without a popover                               |
+| Component         | Purpose                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------- |
+| `DateField`       | Segmented date input; each field (month, day, year) is individually editable          |
+| `TimeField`       | Segmented time input; segments for hour, minute, second, AM/PM                        |
+| `Calendar`        | Grid-based calendar for date browsing and single or multiple date selection           |
+| `RangeCalendar`   | Grid-based calendar for selecting normalized date ranges                              |
+| `DatePicker`      | `DateField` + `Calendar` in a popover                                                 |
+| `DateRangeField`  | Inline two-field range input without a popover                                        |
+| `DateRangePicker` | `DateRangeField` + `RangeCalendar` with preset, trigger, and popover composition      |
+| `DateTimePicker`  | Date and time segmented input with calendar popover selection for combined date-times |
 
-All six components live in `ars-core` as state machine definitions (zero framework dependencies) and are exposed via thin adapter wrappers in `ars-leptos` and `ars-dioxus`.
+All eight components live in `ars-components` as framework-agnostic state machine definitions and are exposed through adapter wrappers in `ars-leptos` and `ars-dioxus`.
 
 ### Shared Types (`ars-i18n`)
 
