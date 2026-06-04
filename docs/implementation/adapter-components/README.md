@@ -19,7 +19,8 @@ file below:
 5. [04-adapter-tests.md](04-adapter-tests.md)
 6. [05-e2e-fixtures-and-harnesses.md](05-e2e-fixtures-and-harnesses.md)
 7. [06-widgets-examples.md](06-widgets-examples.md)
-8. [08-validation-and-pr-closeout.md](08-validation-and-pr-closeout.md)
+8. [09-browser-parity-harness.md](09-browser-parity-harness.md)
+9. [08-validation-and-pr-closeout.md](08-validation-and-pr-closeout.md)
 
 Then keep the checklists open while implementing:
 
@@ -41,7 +42,9 @@ An adapter component task is complete only when the same PR includes:
   assertions;
 - widgets examples in all six widgets crates;
 - counterpart-driven visual UX review, starting with React Aria / React
-  Spectrum when available;
+  Spectrum when available, then Ark UI / Chakra UI, then Radix UI / shadcn/ui;
+- repeatable browser comparison evidence collected with `playwright-cli` or an
+  equivalent checked-in browser harness;
 - spec synchronization for any drift surfaced during implementation;
 - focused validation, `post-implementation-audit`, user review before commit,
   `cargo xci-fast`, and the Codex review loop after push.

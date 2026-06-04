@@ -68,6 +68,8 @@ that axis is not applicable to the other adapter.
 
 If the adapter spec lists a feature and no E2E test function drives it, the
 coverage is incomplete.
+If the counterpart outcome matrix marks an axis as supported and no E2E test
+drives it, the parity claim is incomplete.
 
 ## Axe Across Visible States
 
@@ -99,6 +101,8 @@ Account for every axis:
 - focus;
 - state;
 - forms;
+- validation;
+- hover and press;
 - visual;
 - accessibility;
 - lifecycle.
@@ -120,6 +124,8 @@ Prefer computed style and layout assertions:
 - popup anchoring;
 - selected, hovered, focused, disabled, invalid, loading, and drop-target
   feedback;
+- indeterminate, readonly, required, pressed, focus-visible, and form
+  validation feedback when supported;
 - clean browser console after representative interactions.
 
 Avoid brittle screenshot baselines unless rendering is deterministic enough to

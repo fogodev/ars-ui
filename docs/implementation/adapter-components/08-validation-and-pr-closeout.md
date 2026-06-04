@@ -54,7 +54,8 @@ Run any existing category E2E command that exercises the widgets page. Do not
 list a dedicated `cargo xtask e2e widgets` command unless the PR implements it.
 For visible adapter components, the PR must also run or add a browser widget
 smoke path that loads the public widgets examples with their real styling; cargo
-check alone is only a compile gate.
+check alone is only a compile gate. Browser evidence should follow
+[09-browser-parity-harness.md](09-browser-parity-harness.md).
 
 ## Spec And Workspace Gates
 
@@ -91,7 +92,11 @@ The audit must cover:
 Before any commit, present:
 
 - changed surfaces;
-- counterpart UX brief summary;
+- counterpart outcome matrix summary;
+- counterpart outcome matrix status: outcome-complete, partial, or
+  intentionally scoped;
+- `playwright-cli` or browser-harness artifact paths for reference and local
+  evidence;
 - validation commands and results;
 - known N/A axes with reasons;
 - remaining risk.
@@ -104,7 +109,11 @@ The PR body must include:
 
 - issue auto-close keywords;
 - spec references;
-- counterpart UX brief;
+- counterpart outcome matrix summary;
+- chosen counterpart and fallback counterparts inspected;
+- Playwright/browser evidence paths;
+- intentional differences from the chosen counterpart;
+- parity status: outcome-complete, partial, or intentionally scoped;
 - supported parity axes and N/A axes;
 - validation commands;
 - snapshot review note if `.snap` files changed.

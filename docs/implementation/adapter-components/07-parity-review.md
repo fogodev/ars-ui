@@ -4,17 +4,18 @@ Counterpart review is a design input, not a late checklist. The initial
 adapter, widgets examples, and E2E matrix should be shaped by the best
 available counterpart before implementation starts.
 
-The goal is maximum practical parity with the chosen reference implementation,
-not minimum spec completion. A PR must not say "full parity" unless the spec
-and PR body include a real parity matrix that proves it.
+The goal is maximum practical outcome parity with the chosen reference
+implementation, not framework API parity and not minimum spec completion. A PR
+must not say "full parity" unless the spec and PR body include a real parity
+matrix that proves it.
 
 ## Source Order
 
 Inspect external component libraries in this order:
 
 1. React Aria / React Spectrum;
-2. Ark UI;
-3. Radix UI;
+2. Ark UI / Chakra UI;
+3. Radix UI / shadcn/ui;
 4. another mature component library only when the first three do not cover the
    primitive or a needed feature axis.
 
@@ -37,16 +38,20 @@ For each counterpart, review:
 The simplest counterpart example sets the minimum UX quality bar for the first
 widgets demo.
 
-## Counterpart UX Brief
+## Counterpart Outcome Matrix
 
 Before coding, write a short brief in the plan, issue note, local task note, or
 PR draft:
 
 ```md
-## Counterpart UX Brief
+## Counterpart Outcome Matrix
 
 Primary counterpart: React Aria <Component>
 URL: <docs URL>
+Fallback counterparts inspected:
+
+- Ark UI / Chakra UI: <URL or NotApplicable with reason>
+- Radix UI / shadcn/ui: <URL or NotApplicable with reason>
 
 Observed examples:
 
@@ -56,13 +61,11 @@ Observed examples:
 - Drag/drop: ...
 - Forms: ...
 
-Implemented in ars-ui:
-
-- [ ] ...
-
-Not applicable:
-
-- <axis>: <reason>
+| Axis          | Reference evidence | Local evidence     | Tests/E2E     | Status    | Notes                             |
+| ------------- | ------------------ | ------------------ | ------------- | --------- | --------------------------------- |
+| Basic         | <snapshot or note> | <snapshot or note> | <test name>   | Supported | <intentional differences>         |
+| Invalid/error | <snapshot or note> | <snapshot or note> | <test name>   | Supported | <native/custom validation policy> |
+| Loading       | NotApplicable      | NotApplicable      | NotApplicable | N/A       | <reason>                          |
 ```
 
 Do not leave a feature gap unexplained.
@@ -72,9 +75,10 @@ Do not leave a feature gap unexplained.
 Feature surface:
 
 - controlled and uncontrolled state;
-- disabled, readonly, invalid, required, selected, active, focused, loading,
-  and empty states;
+- disabled, readonly, invalid, required, selected or checked, indeterminate,
+  active, focused, focus-visible, hovered, pressed, loading, and empty states;
 - grouping, sections, slots, composition, links, actions, and forms;
+- form submit and form reset behavior;
 - async loading, virtualization, drag/drop, overlays, and portals where
   relevant.
 
@@ -91,7 +95,8 @@ Interaction surface:
 
 Visual/UX surface:
 
-- selected, hovered, focused, disabled, invalid, and loading feedback;
+- selected or checked, indeterminate, hovered, pressed, focused,
+  focus-visible, disabled, readonly, invalid, required, and loading feedback;
 - icon and control alignment;
 - full-row or full-card feedback when the state applies to the whole item;
 - popup anchoring;
@@ -137,6 +142,8 @@ Every supported parity axis must have:
 - adapter wiring in both in-scope adapters;
 - adapter tests for API/semantic output;
 - E2E assertions for browser behavior;
-- widgets visual coverage and widget-smoke/computed-visual assertions.
+- widgets visual coverage and widget-smoke/computed-visual assertions;
+- browser comparison evidence following
+  [09-browser-parity-harness.md](09-browser-parity-harness.md).
 
 Unsupported axes must be listed as N/A with reasons in the PR body.

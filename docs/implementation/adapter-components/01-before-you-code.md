@@ -73,13 +73,15 @@ Before planning the adapter API or examples, inspect the live documentation page
 for the strongest mature counterpart in this order:
 
 1. React Aria / React Spectrum;
-2. Ark UI;
-3. Radix UI;
-4. another mature component library.
+2. Ark UI / Chakra UI;
+3. Radix UI / shadcn/ui;
+4. another mature component library only when the first three do not cover the
+   primitive or feature axis.
 
-The implementation target is maximum practical parity with that reference. Do
-not claim full parity unless the component spec contains a real feature matrix
-showing every supported, unsupported, and not-applicable axis with reasons.
+The implementation target is maximum practical outcome parity with that
+reference. Do not claim full parity unless the component spec contains a real
+feature matrix showing every supported, unsupported, and not-applicable axis
+with reasons.
 
 ## Planning Output
 
@@ -87,7 +89,7 @@ Every adapter implementation plan must include:
 
 - blocker-check command results;
 - spec files read;
-- counterpart UX brief source URLs and feature axes;
+- counterpart outcome matrix source URLs and feature axes;
 - shared agnostic work required before adapter wiring;
 - adapter crate deliverables;
 - adapter test deliverables;
