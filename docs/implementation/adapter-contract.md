@@ -106,5 +106,9 @@ restated here for completeness. See also
 - `spec/foundation/09-adapter-dioxus.md` — Dioxus adapter contract
 - `spec/foundation/12-adapter-component-spec-template.md` — Adapter component spec authoring rules
 - `spec/testing/05-adapter-harness.md` — Adapter parity testing
-- `docs/implementation/adapter-component-delivery.md` — End-to-end adapter component implementation workflow
+- `docs/implementation/adapter-component-delivery.md` — Entry point for the
+  end-to-end adapter component implementation workflow
+- `docs/implementation/adapter-components/` — Split workflow files for
+  counterpart UX review, adapter wiring, framework rules, tests, E2E, widgets,
+  validation, and PR closeout
 - `docs/implementation/roadmap.md` — Spec synchronization rules
