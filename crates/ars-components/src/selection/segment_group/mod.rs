@@ -377,7 +377,10 @@ impl ars_core::Machine for Machine {
             State::Idle,
             Context {
                 value: if let Some(value) = &props.value {
-                    Bindable::controlled(Some(value.clone()))
+                    Bindable::controlled(
+                        controlled_value_is_selectable_in_items(&props.items, value)
+                            .then(|| value.clone()),
+                    )
                 } else {
                     Bindable::uncontrolled(props.default_value.clone())
                 },
@@ -556,17 +559,19 @@ impl ars_core::Machine for Machine {
 
         let mut events = Vec::new();
 
-        if old.disabled != new.disabled
+        let items_changed = old.items != new.items;
+        let context_fields_changed = old.disabled != new.disabled
             || old.readonly != new.readonly
             || old.orientation != new.orientation
             || old.dir != new.dir
             || old.loop_focus != new.loop_focus
-            || old.items != new.items
-        {
+            || items_changed;
+
+        if context_fields_changed {
             events.push(Event::SetProps);
         }
 
-        if old.value != new.value {
+        if old.value != new.value || (items_changed && new.value.is_some()) {
             events.push(Event::SetValue(new.value.clone()));
         }
 
@@ -965,7 +970,13 @@ fn item_is_present(ctx: &Context, item: &Key) -> bool {
 }
 
 fn controlled_value_is_selectable(ctx: &Context, item: &Key) -> bool {
-    item_definition(ctx, item).is_some_and(|segment| !segment.disabled)
+    controlled_value_is_selectable_in_items(&ctx.items, item)
+}
+
+fn controlled_value_is_selectable_in_items(items: &[Segment], item: &Key) -> bool {
+    items
+        .iter()
+        .any(|segment| &segment.value == item && !segment.disabled)
 }
 
 fn can_focus_item(ctx: &Context, item: &Key) -> bool {
@@ -1749,6 +1760,51 @@ mod tests {
         drop(service.set_props(new));
 
         assert_eq!(service.context().value.get().as_ref(), Some(&key("table")));
+    }
+
+    #[test]
+    fn segment_group_set_props_revalidates_unchanged_controlled_value_when_items_change() {
+        let old = props()
+            .items(vec![segment("grid"), segment("table")])
+            .value(key("grid"));
+        let new = props()
+            .items(vec![disabled_segment("grid"), segment("table")])
+            .value(key("grid"));
+
+        assert_eq!(
+            <Machine as ars_core::Machine>::on_props_changed(&old, &new),
+            [Event::SetProps, Event::SetValue(Some(key("grid")))]
+        );
+
+        let mut service = Service::<Machine>::new(old, &Env::default(), &Messages);
+
+        drop(service.set_props(new));
+
+        assert_eq!(service.context().value.get(), &None);
+        assert!(service.context().value.is_controlled());
+    }
+
+    #[test]
+    fn segment_group_init_sanitizes_invalid_controlled_values() {
+        let disabled = Service::<Machine>::new(
+            props()
+                .items(vec![disabled_segment("grid"), segment("table")])
+                .value(key("grid")),
+            &Env::default(),
+            &Messages,
+        );
+
+        assert_eq!(disabled.context().value.get(), &None);
+        assert!(disabled.context().value.is_controlled());
+
+        let missing = Service::<Machine>::new(
+            props().items(vec![segment("table")]).value(key("grid")),
+            &Env::default(),
+            &Messages,
+        );
+
+        assert_eq!(missing.context().value.get(), &None);
+        assert!(missing.context().value.is_controlled());
     }
 
     #[test]
