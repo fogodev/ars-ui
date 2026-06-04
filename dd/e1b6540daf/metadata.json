@@ -1,0 +1,55 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "dde1b6540daf",
+  "strategy": "manual-commit",
+  "branch": "codex/selection-agnostic-epic-audit",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/selection/segment_group/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/autocomplete.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/combobox.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/common.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/context_menu.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/listbox.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/menu.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/menu_bar.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/segment_group.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/select.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/tags_input.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/selection.rs",
+    "crates/ars-components/tests/spec_conformance/selection/autocomplete.rs",
+    "crates/ars-components/tests/spec_conformance/selection/combobox.rs",
+    "crates/ars-components/tests/spec_conformance/selection/context_menu.rs",
+    "crates/ars-components/tests/spec_conformance/selection/listbox.rs",
+    "crates/ars-components/tests/spec_conformance/selection/menu.rs",
+    "crates/ars-components/tests/spec_conformance/selection/menu_bar.rs",
+    "crates/ars-components/tests/spec_conformance/selection/mod.rs",
+    "crates/ars-components/tests/spec_conformance/selection/segment_group.rs",
+    "crates/ars-components/tests/spec_conformance/selection/select.rs",
+    "crates/ars-components/tests/spec_conformance/selection/tags_input.rs",
+    "docs/implementation/selection-category-audit.md",
+    "spec/components/selection/combobox.md",
+    "spec/components/selection/listbox.md",
+    "spec/components/selection/menu.md",
+    "spec/components/selection/select.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/dd/e1b6540daf/0/metadata.json",
+      "transcript": "/dd/e1b6540daf/0/full.jsonl",
+      "content_hash": "/dd/e1b6540daf/0/content_hash.txt",
+      "prompt": "/dd/e1b6540daf/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 644553,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 14333184,
+    "output_tokens": 42550,
+    "api_call_count": 99
+  }
+}

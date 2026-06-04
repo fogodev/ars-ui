@@ -1,0 +1,161 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "dde1b6540daf",
+  "session_id": "019e908d-1451-78a2-81d6-320b32bbb5d8",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-04T04:16:55.851248Z",
+  "branch": "codex/selection-agnostic-epic-audit",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-components/src/selection/segment_group/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/autocomplete.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/combobox.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/common.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/context_menu.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/listbox.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/menu.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/menu_bar.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/segment_group.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/select.rs",
+    "crates/ars-components/tests/proptest_state_machines/selection/tags_input.rs",
+    "crates/ars-components/tests/spec_conformance.rs",
+    "crates/ars-components/tests/spec_conformance/selection.rs",
+    "crates/ars-components/tests/spec_conformance/selection/autocomplete.rs",
+    "crates/ars-components/tests/spec_conformance/selection/combobox.rs",
+    "crates/ars-components/tests/spec_conformance/selection/context_menu.rs",
+    "crates/ars-components/tests/spec_conformance/selection/listbox.rs",
+    "crates/ars-components/tests/spec_conformance/selection/menu.rs",
+    "crates/ars-components/tests/spec_conformance/selection/menu_bar.rs",
+    "crates/ars-components/tests/spec_conformance/selection/mod.rs",
+    "crates/ars-components/tests/spec_conformance/selection/segment_group.rs",
+    "crates/ars-components/tests/spec_conformance/selection/select.rs",
+    "crates/ars-components/tests/spec_conformance/selection/tags_input.rs",
+    "docs/implementation/selection-category-audit.md",
+    "spec/components/selection/combobox.md",
+    "spec/components/selection/listbox.md",
+    "spec/components/selection/menu.md",
+    "spec/components/selection/select.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "a53daf26a298",
+  "token_usage": {
+    "input_tokens": 644553,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 14333184,
+    "output_tokens": 42550,
+    "api_call_count": 99
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Audit all 9 agnostic selection components for Epic #221 closure, ensuring spec alignment, then split the monolithic selection test files into per-component modules.",
+    "outcome": "Test files split into per-component modules, spec drift fixed in 4 component specs (Combobox, Listbox, Menu, Select), a SegmentGroup controlled-value bug fixed, an audit record added, and a PR pushed to `codex/selection-agnostic-epic-audit`.",
+    "learnings": {
+      "repo": [
+        "The per-component test module split pattern is already established in data-display, input, navigation, overlay, and utility categories — selection follows the same shape: `category/mod.rs` aggregator + one module per component + shared `common.rs` for fixtures.",
+        "The selection proptest suite has an intentional 2-active / 7-ignored split; the ignored tests are not failures and must be preserved unless a concrete reason to activate them is found.",
+        "The checkout lives in a git linked worktree and was in detached HEAD state; a named branch must be created with `git switch -c` before any implementation work.",
+        "Epic #221 acceptance criteria explicitly require all 9 agnostic components: Autocomplete, Combobox, ContextMenu, Listbox, Menu, MenuBar, SegmentGroup, Select, TagsInput.",
+        "`cargo xcov` enforces a 90% branch coverage threshold on `ars-components`; the suite reached 98.5% lines / 90.0% branches after the audit changes.",
+        "ContextMenu and MenuBar specs declare their `Part` enum members in prose rather than a Rust snippet, unlike the other 7 selection component specs."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/selection/segment_group/mod.rs",
+          "line": 390,
+          "end_line": 570,
+          "finding": "Bug: `SetValue(Some(disabled_key))` in the controlled-prop sync path bypassed the enabled-only guard, allowing a disabled item key to enter selected state. Fix: sanitize externally synced values the same way user selection does — only present, enabled keys are accepted; invalid controlled values sync to `None`."
+        },
+        {
+          "path": "spec/components/selection/listbox.md",
+          "line": 55,
+          "end_line": 115,
+          "finding": "Spec drift: implementation exposed range and page navigation events (e.g. `SelectItemRange`, `PageDown`) not listed in the spec event enum snippet; spec was updated to match the public implementation surface."
+        },
+        {
+          "path": "spec/components/selection/select.md",
+          "line": 50,
+          "end_line": 110,
+          "finding": "Spec drift: implementation exposed sync/description events absent from the spec; spec event snippet updated to match."
+        },
+        {
+          "path": "spec/components/selection/combobox.md",
+          "line": 55,
+          "end_line": 115,
+          "finding": "Spec drift: implementation exposed controlled-value and collection-update events not listed in spec; spec updated."
+        },
+        {
+          "path": "spec/components/selection/menu.md",
+          "line": 50,
+          "end_line": 120,
+          "finding": "Spec drift: implementation exposed adapter-sync events absent from spec event snippet; spec updated."
+        }
+      ],
+      "workflow": [
+        "Running `cargo llvm-cov` and `cargo xcov` concurrently causes an OS SIGKILL — instrumented builds must be run sequentially, not in parallel.",
+        "A Python script using regex against both spec markdown and Rust source is an effective way to diff Event and Part enum variants across 9 component pairs without reading each file manually.",
+        "`cargo insta test -p ars-components --lib -- selection` matches more tests than expected because the filter substring also hits shared selection utilities outside the selection category module.",
+        "`cargo xci --profile fast` runs 10 sequential gates (fmt → clippy → unit → adapter → spec snippets → error coverage → mutual exclusion → snapshot count → native coverage → threshold check); the slow UI contract test suites inside the unit gate can run for 2+ minutes each.",
+        "New split files created outside git tracking do not appear in `git diff --stat`; use `git ls-files --others --exclude-standard` to confirm untracked new modules are present before staging."
+      ]
+    },
+    "friction": [
+      "OS killed `cargo llvm-cov` with SIGKILL when it ran concurrently with `cargo xcov`; had to re-run coverage commands sequentially.",
+      "`cargo xci --profile fast` required many polling cycles — the slow UI test suites ran past 2 minutes each, making the total gate very long.",
+      "The checkout was in detached HEAD state inside a linked worktree, requiring an explicit `git switch -c` before any implementation could begin.",
+      "Broadening proptest event strategies immediately surfaced a real SegmentGroup bug, blocking the green proptest run and requiring an unplanned implementation fix mid-audit.",
+      "`cargo xtask spec search` / `cargo xtask spec info` did not clearly return usable results; the component list had to be assembled from `spec/manifest.toml` and the epic body instead."
+    ],
+    "open_items": [
+      "7 selection proptests remain `#[ignore]`'d — activating them is future work once the machines are stable enough to generate shrinkable counterexamples.",
+      "Epic #221 is not yet closed; closure requires the PR to be merged, CI to pass, and Codex review approval.",
+      "ContextMenu and MenuBar specs still declare `Part` members in prose rather than a Rust enum snippet, inconsistent with the other 7 component specs — minor cleanup deferred.",
+      "No Leptos or Dioxus adapter implementation was included in this audit; adapter-side work for the selection category remains out of scope for this PR."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-04T04:16:03.028972Z",
+    "agent_lines": 1901,
+    "agent_removed": 1601,
+    "human_added": 6,
+    "human_modified": 43,
+    "human_removed": 0,
+    "total_committed": 1932,
+    "total_lines_changed": 3558,
+    "agent_percentage": 98.42608206857786,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 28,
+      "user_lines_removed": 25,
+      "agent_lines_added": 1947,
+      "agent_lines_removed": 1619,
+      "user_added_per_file": {
+        "crates/ars-components/src/selection/segment_group/mod.rs": 1,
+        "crates/ars-components/tests/proptest_state_machines/selection/tags_input.rs": 2,
+        "docs/implementation/selection-category-audit.md": 16,
+        "spec/components/selection/combobox.md": 2,
+        "spec/components/selection/menu-bar.md": 7
+      },
+      "user_removed_per_file": {
+        "docs/implementation/selection-category-audit.md": 16,
+        "spec/components/selection/combobox.md": 2,
+        "spec/components/selection/menu-bar.md": 7
+      }
+    }
+  ]
+}
