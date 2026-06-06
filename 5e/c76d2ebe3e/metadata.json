@@ -1,0 +1,40 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "5ec76d2ebe3e",
+  "strategy": "manual-commit",
+  "branch": "codex/issue-332-423-field-form-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-components/src/utility/fieldset/mod.rs",
+    "crates/ars-components/tests/proptest_state_machines/utility/mod.rs",
+    "crates/ars-dioxus/src/provider.rs",
+    "crates/ars-dioxus/src/utility/field.rs",
+    "crates/ars-dioxus/src/utility/fieldset.rs",
+    "crates/ars-dioxus/src/utility/form.rs",
+    "crates/ars-dioxus/tests/fieldset.rs",
+    "crates/ars-dioxus/tests/form.rs",
+    "crates/ars-leptos/src/utility/field.rs",
+    "crates/ars-leptos/src/utility/fieldset.rs",
+    "crates/ars-leptos/src/utility/form.rs",
+    "crates/ars-leptos/tests/fieldset.rs",
+    "crates/ars-leptos/tests/form.rs",
+    "spec/dioxus-components/utility/field.md",
+    "spec/dioxus-components/utility/fieldset.md",
+    "spec/leptos-components/utility/fieldset.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/5e/c76d2ebe3e/0/metadata.json",
+      "transcript": "/5e/c76d2ebe3e/0/full.jsonl",
+      "content_hash": "/5e/c76d2ebe3e/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 425072,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 11244288,
+    "output_tokens": 25852,
+    "api_call_count": 95
+  }
+}
