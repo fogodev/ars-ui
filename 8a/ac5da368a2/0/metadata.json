@@ -1,0 +1,104 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8aac5da368a2",
+  "session_id": "019e93b2-e997-7881-b092-7b1fb63bf491",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-06T18:42:44.974152Z",
+  "branch": "codex/issue-332-423-field-form-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "1e3c3c0a4883",
+  "checkpoint_transcript_start": 13418,
+  "transcript_lines_at_start": 13418,
+  "token_usage": {
+    "input_tokens": 603095,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 13688320,
+    "output_tokens": 27871,
+    "api_call_count": 101
+  },
+  "session_metrics": {
+    "turn_count": 33
+  },
+  "summary": {
+    "intent": "Address a batch of Codex review findings on PR #724 in the ars-ui repo, covering reactive prop staleness in Dioxus Input, description registration ordering in Dioxus SSR, Leptos Form validation-behavior reactivity, and Leptos Fieldset controlled prop reactivity.",
+    "outcome": "All four review findings were fixed, wasm browser tests pass for both adapters, formatting and clippy are clean, and the changes were committed as a single batched commit. Coverage CI failure was identified as a Codecov GPG uploader issue unrelated to the code changes.",
+    "learnings": {
+      "repo": [
+        "machine.derive() only tracks machine signals (state/context), not arbitrary captured Rust values — plain Dioxus props captured inside it go stale.",
+        "Leptos Fieldset inherited context should expose the original Signal<bool> values directly rather than wrapping them in additional Memos to avoid reactive borrow panics during descendant field sync.",
+        "Dioxus VNode internals are public enough to inspect component names but not safe to walk for evaluating future child components from a parent, making pre-scan approaches for SSR description ordering unviable.",
+        "In Leptos, reactive attribute closures passed to custom_attribute are tracked by Leptos itself, so get() is correct there; get_untracked() is needed only in event handlers that are not reactive tracking contexts.",
+        "The clean adapter split is: machine.derive() for machine-driven attrs (aria-invalid, aria-describedby, data-ars-state), plain prop merging outside that memo for HTML attrs like type/name/placeholder."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-dioxus/src/utility/field.rs",
+          "line": 180,
+          "end_line": 225,
+          "finding": "machine.derive() result is now called inline (no shadowed binding) and prop-dependent attrs are merged outside the memo so Dioxus component rerenders update them."
+        },
+        {
+          "path": "crates/ars-leptos/src/utility/fieldset.rs",
+          "finding": "Inherited context now carries controlled Signal<bool> values directly; removed the intermediate Memo layer that caused reactive borrow panics when descendant fields derived inherited state during the same update wave."
+        },
+        {
+          "path": "crates/ars-leptos/src/utility/form.rs",
+          "finding": "Validation-behavior reactivity fixed; submit handler uses get_untracked() since event handlers are not reactive tracking contexts."
+        },
+        {
+          "path": "crates/ars-leptos/src/attrs.rs",
+          "finding": "Leptos custom_attribute receives the reactive closure directly, so get() inside AttrValue::reactive_bool closures is correct — Leptos owns the tracking context when it materializes the attribute."
+        }
+      ],
+      "workflow": [
+        "Batch all review findings from a Codex review pass before making any commit — avoids multiple CI roundtrips for closely related fixes.",
+        "For wasm-bindgen browser tests, the sandbox blocks wasm-bindgen-test-runner from spawning its browser test server without escalation.",
+        "Codecov uploader GPG key verification failures are infra-level flakes unrelated to code changes and can be distinguished from real coverage regressions by inspecting the job log.",
+        "cargo xtask ci fmt and cargo xclippy are the local gates that mirror CI fmt/clippy checks.",
+        "When clippy suggests converting a closure to a method item but the closure is required due to lifetime constraints, a targeted #[expect] on the specific statement is the correct suppression approach."
+      ]
+    },
+    "friction": [
+      "wasm-bindgen-test-runner was blocked by the sandbox, requiring escalation to run browser tests.",
+      "The Leptos fieldset regression (reactive borrow panic) required two iterative patches before the root cause (Memo wrapping Signals in inherited context) was identified.",
+      "A typo in a GraphQL query for review threads caused one poll to fail silently and required a rerun.",
+      "Clippy suggested converting a closure to a method item but the method form hit a lifetime-generalization limitation, requiring a narrow #[expect] workaround.",
+      "The Dioxus SSR description ordering issue required reading Dioxus VNode internals to rule out a VNode-walker approach before settling on the deterministic ID merge fix.",
+      "GitHub transient connection errors interrupted one workflow run metadata fetch, requiring a retry."
+    ],
+    "open_items": [
+      "Coverage CI failure due to Codecov GPG uploader key verification ('Can't check signature: No public key') is unresolved — needs a workflow-level fix or rerun independent of this PR.",
+      "The release verification CI job outcome was not confirmed before the commit; it was still pending when Codex review results arrived.",
+      "Dioxus props that must be observed across callback lifetimes (not just render-time) may still warrant Signal<T> — the distinction between render-time props and signal props in Dioxus adapters is not fully documented.",
+      "The block v0.1.6 future-incompat clippy note is a known standing issue not addressed in this batch."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 323,
+      "user_lines_removed": 61,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "crates/ars-dioxus/src/utility/field.rs": 58,
+        "crates/ars-dioxus/tests/field.rs": 1,
+        "crates/ars-dioxus/tests/test_field_wasm.rs": 71,
+        "crates/ars-leptos/src/utility/field.rs": 6,
+        "crates/ars-leptos/src/utility/fieldset.rs": 30,
+        "crates/ars-leptos/src/utility/form.rs": 17,
+        "crates/ars-leptos/tests/test_fieldset_wasm.rs": 77,
+        "crates/ars-leptos/tests/test_form_wasm.rs": 63
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus/src/utility/field.rs": 20,
+        "crates/ars-leptos/src/utility/field.rs": 5,
+        "crates/ars-leptos/src/utility/fieldset.rs": 27,
+        "crates/ars-leptos/src/utility/form.rs": 9
+      }
+    }
+  ]
+}
