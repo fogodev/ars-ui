@@ -2,7 +2,10 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use ars_leptos::utility::fieldset::{Content, Description, ErrorMessage, Fieldset, Legend};
+use ars_leptos::utility::{
+    field::{Field, Input, Label},
+    fieldset::{Content, Description, ErrorMessage, Fieldset, Legend},
+};
 use leptos::{mount::mount_to, prelude::*};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -64,6 +67,11 @@ async fn fieldset_browser_mounts_group_anatomy() {
         fieldset.get_attribute("data-ars-scope").as_deref(),
         Some("fieldset")
     );
+    assert_eq!(
+        fieldset.get_attribute("aria-describedby").as_deref(),
+        Some("wasm-billing-description"),
+        "rendered fieldset descriptions must be associated with the fieldset"
+    );
 
     let legend = parent
         .query_selector("#wasm-billing-legend")
@@ -103,6 +111,46 @@ async fn fieldset_browser_mounts_group_anatomy() {
     );
     assert_eq!(error.get_attribute("role").as_deref(), Some("alert"));
     assert_eq!(error.get_attribute("hidden").as_deref(), Some(""));
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn fieldset_state_reaches_descendant_field_input_attrs() {
+    let owner = Owner::new();
+
+    let (_mount_handle, parent) = owner.with(|| {
+        let parent = container();
+
+        let mount_handle = mount_to(parent.clone(), || {
+            view! {
+                <Fieldset id="wasm-disabled-group" disabled=true invalid=true readonly=true>
+                    <Legend>"Account"</Legend>
+                    <Content>
+                        <Field id="wasm-grouped-email">
+                            <Label>"Email"</Label>
+                            <Input name="email" />
+                        </Field>
+                    </Content>
+                </Fieldset>
+            }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+
+    let input = parent
+        .query_selector("#wasm-grouped-email-input")
+        .expect("query should succeed")
+        .expect("grouped field input should exist");
+
+    assert_eq!(input.get_attribute("disabled").as_deref(), Some(""));
+    assert_eq!(input.get_attribute("aria-disabled").as_deref(), Some("true"));
+    assert_eq!(input.get_attribute("readonly").as_deref(), Some(""));
+    assert_eq!(input.get_attribute("aria-readonly").as_deref(), Some("true"));
+    assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
 
     parent.remove();
 }

@@ -12,6 +12,13 @@ struct FieldsetContext {
     machine: crate::UseMachineReturn<fieldset::Machine>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct InheritedFieldsetContext {
+    pub(crate) disabled: Memo<bool>,
+    pub(crate) invalid: Memo<bool>,
+    pub(crate) readonly: Memo<bool>,
+}
+
 fn fieldset_context() -> FieldsetContext {
     use_context::<FieldsetContext>()
         .expect("Fieldset subcomponents must be rendered inside <Fieldset/>")
@@ -19,6 +26,10 @@ fn fieldset_context() -> FieldsetContext {
 
 /// Leptos Fieldset root component.
 #[component]
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "fieldset::Api method items are not lifetime-general enough for derive()."
+)]
 pub fn Fieldset<T: 'static>(
     /// Optional component instance ID.
     #[prop(optional, into)]
@@ -64,17 +75,26 @@ where
 
     let machine = use_machine::<fieldset::Machine>(props);
 
+    let inherited = InheritedFieldsetContext {
+        disabled: machine.derive(|api| api.root_attrs().contains(&ars_core::HtmlAttr::Disabled)),
+        invalid: machine.derive(|api| api.is_invalid()),
+        readonly: machine.derive(|api| api.is_readonly()),
+    };
+
     let attrs = machine.with_api_snapshot(|api| {
         let mut attrs = api.root_attrs();
 
         crate::merge_consumer_class_prop_into(&mut attrs, class);
+        add_dynamic_root_attrs(&mut attrs, machine);
 
         attr_map_to_leptos_inline_attrs(attrs)
     });
 
     view! {
         <Provider value=FieldsetContext { machine }>
-            <fieldset {..attrs}>{children.into_inner()()}</fieldset>
+            <Provider value=inherited>
+                <fieldset {..attrs}>{children.into_inner()()}</fieldset>
+            </Provider>
         </Provider>
     }
 }
@@ -104,11 +124,39 @@ pub fn Description<T>(
 where
     View<T>: IntoView,
 {
+    let machine = fieldset_context().machine;
+
+    machine
+        .send
+        .run(fieldset::Event::SetHasDescription(true));
+
+    on_cleanup(move || {
+        machine
+            .send
+            .run(fieldset::Event::SetHasDescription(false));
+    });
+
     let attrs = fieldset_context()
         .machine
         .with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.description_attrs()));
 
     view! { <div {..attrs}>{children.into_inner()()}</div> }
+}
+
+fn add_dynamic_root_attrs(
+    attrs: &mut ars_core::AttrMap,
+    machine: crate::UseMachineReturn<fieldset::Machine>,
+) {
+    let described_by = machine.derive(|api| {
+        api.root_attrs()
+            .get(&ars_core::HtmlAttr::Aria(ars_core::AriaAttr::DescribedBy))
+            .map(str::to_owned)
+    });
+
+    attrs.set(
+        ars_core::HtmlAttr::Aria(ars_core::AriaAttr::DescribedBy),
+        ars_core::AttrValue::reactive_optional(move || described_by.get()),
+    );
 }
 
 /// Leptos Fieldset error message part.

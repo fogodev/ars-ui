@@ -238,3 +238,51 @@ async fn field_reactive_errors_update_invalid_relationship() {
 
     parent.remove();
 }
+
+#[wasm_bindgen_test(async)]
+async fn field_controlled_value_updates_live_input_property() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent, email) = owner.with(|| {
+        let parent = container();
+
+        let email = RwSignal::new(String::from("initial@example.com"));
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <Field id="wasm-controlled-email-field">
+                    <Label>"Email"</Label>
+                    <Input r#type=InputType::Email name="email" value=email />
+                </Field>
+            }
+        });
+
+        (mount_handle, parent, email)
+    });
+
+    leptos::task::tick().await;
+
+    let input = parent
+        .query_selector("#wasm-controlled-email-field-input")
+        .expect("query should succeed")
+        .expect("field input should exist")
+        .dyn_into::<web_sys::HtmlInputElement>()
+        .expect("field input should be an HtmlInputElement");
+
+    assert_eq!(input.value(), "initial@example.com");
+
+    input.set_value("typed@example.com");
+    email.set(String::from("normalized@example.com"));
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        input.value(),
+        "normalized@example.com",
+        "controlled value changes must update the live input property"
+    );
+
+    drop(mount_handle);
+
+    parent.remove();
+}

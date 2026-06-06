@@ -2,9 +2,13 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::BTreeMap};
 
-use ars_dioxus::utility::form::{Form, StatusRegion};
+use ars_dioxus::utility::{
+    field::{ErrorMessage, Field, Input, Label},
+    form::{Form, StatusRegion},
+};
+use ars_forms::validation::Error;
 use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -142,6 +146,79 @@ async fn form_browser_renders_status_region_and_dispatches_callbacks() {
     FORM_EVENTS.with(|events| {
         assert_eq!(events.borrow().as_slice(), &["submit", "reset"]);
     });
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+#[expect(
+    unused_qualifications,
+    reason = "Dioxus rsx! reports the event handler closure as an unused qualification on wasm."
+)]
+async fn form_validation_errors_update_existing_descendant_field() {
+    fn app() -> Element {
+        let mut errors = use_signal(BTreeMap::<String, Vec<Error>>::new);
+
+        rsx! {
+            Form {
+                id: "wasm-validation-form",
+                validation_errors: errors(),
+                Field { id: "wasm-validation-email", name: "email",
+                    Label { "Email" }
+                    Input { name: "email" }
+                    ErrorMessage { "Email is required." }
+                }
+                button {
+                    r#type: "button",
+                    onclick: move |_| {
+                        let mut next = BTreeMap::new();
+                        next.insert(
+                            String::from("email"),
+                            vec![Error::server("Email is required.")],
+                        );
+                        errors.set(next);
+                    },
+                    "Invalidate"
+                }
+                StatusRegion { "Ready" }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let input = parent
+        .query_selector("#wasm-validation-email-input")
+        .expect("query should succeed")
+        .expect("field input should exist");
+
+    assert_eq!(input.get_attribute("aria-invalid"), None);
+
+    let button = parent
+        .query_selector("button[type='button']")
+        .expect("query should succeed")
+        .expect("invalidate button should exist")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("invalidate button should be an HtmlElement");
+
+    button.click();
+
+    flush().await;
+
+    assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
+    assert_eq!(
+        input.get_attribute("aria-errormessage").as_deref(),
+        Some("wasm-validation-email-error-message")
+    );
 
     parent.remove();
 }

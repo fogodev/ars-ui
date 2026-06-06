@@ -4,7 +4,7 @@ use ars_components::utility::field;
 pub use ars_components::utility::field::{InputType, Part, Props};
 use ars_core::{AriaAttr, AttrMap, AttrValue, Direction, HtmlAttr};
 use ars_forms::validation::Error;
-use leptos::{children::TypedChildren, context::Provider, prelude::*};
+use leptos::{children::TypedChildren, context::Provider, either::Either, prelude::*};
 
 use crate::{attr_map_to_leptos_inline_attrs, callbacks, use_id, use_machine_with_reactive_props};
 
@@ -84,6 +84,7 @@ where
             errors,
             name,
             form_context: use_context::<super::form::FormContext>(),
+            fieldset_context: use_context::<super::fieldset::InheritedFieldsetContext>(),
         },
     ));
 
@@ -140,6 +141,7 @@ struct FieldReactiveProps {
     errors: Signal<Vec<Error>>,
     name: Option<Oco<'static, str>>,
     form_context: Option<super::form::FormContext>,
+    fieldset_context: Option<super::fieldset::InheritedFieldsetContext>,
 }
 
 fn field_props_signal(
@@ -152,15 +154,20 @@ fn field_props_signal(
         errors,
         name,
         form_context,
+        fieldset_context,
     }: FieldReactiveProps,
 ) -> Signal<Props> {
     Signal::derive(move || {
+        let inherited_disabled = fieldset_context.is_some_and(|ctx| ctx.disabled.get());
+        let inherited_readonly = fieldset_context.is_some_and(|ctx| ctx.readonly.get());
+        let inherited_invalid = fieldset_context.is_some_and(|ctx| ctx.invalid.get());
+
         props
             .clone()
             .required(required.get())
-            .disabled(disabled.get())
-            .readonly(readonly.get())
-            .invalid(invalid.get())
+            .disabled(disabled.get() || inherited_disabled)
+            .readonly(readonly.get() || inherited_readonly)
+            .invalid(invalid.get() || inherited_invalid)
             .errors(merged_validation_errors(
                 errors.get(),
                 name.as_deref(),
@@ -219,18 +226,29 @@ pub fn Input(
 
         add_dynamic_input_attrs(&mut attrs, machine);
 
-        apply_input_attrs(&mut attrs, r#type, name, placeholder, value, class);
+        apply_input_attrs(&mut attrs, r#type, name, placeholder, class);
 
         attr_map_to_leptos_inline_attrs(attrs)
     });
 
-    view! {
-        <input
-            {..attrs}
-            on:input:target=move |event| {
-                callbacks::emit(on_value_input.as_ref(), event.target().value());
-            }
-        />
+    match value {
+        Some(value) => Either::Left(view! {
+            <input
+                {..attrs}
+                prop:value=move || value.get()
+                on:input:target=move |event| {
+                    callbacks::emit(on_value_input.as_ref(), event.target().value());
+                }
+            />
+        }),
+        None => Either::Right(view! {
+            <input
+                {..attrs}
+                on:input:target=move |event| {
+                    callbacks::emit(on_value_input.as_ref(), event.target().value());
+                }
+            />
+        }),
     }
 }
 
@@ -351,7 +369,6 @@ fn apply_input_attrs(
     r#type: Option<Signal<InputType>>,
     name: Option<Oco<'static, str>>,
     placeholder: Option<TextProp>,
-    value: Option<Signal<String>>,
     class: Option<TextProp>,
 ) {
     if let Some(input_type) = r#type {
@@ -370,10 +387,6 @@ fn apply_input_attrs(
             HtmlAttr::Placeholder,
             AttrValue::reactive(move || placeholder.get().into_owned()),
         );
-    }
-
-    if let Some(value) = value {
-        attrs.set(HtmlAttr::Value, AttrValue::reactive(move || value.get()));
     }
 
     crate::merge_consumer_class_prop_into(attrs, class);

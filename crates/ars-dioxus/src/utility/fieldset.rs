@@ -2,7 +2,7 @@
 
 use ars_components::utility::fieldset;
 pub use ars_components::utility::fieldset::{Part, Props};
-use ars_core::Direction;
+use ars_core::{Direction, HtmlAttr};
 use dioxus::prelude::*;
 
 use crate::{
@@ -12,6 +12,13 @@ use crate::{
 #[derive(Clone, Copy)]
 struct FieldsetContext {
     machine: crate::UseMachineReturn<fieldset::Machine>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct InheritedFieldsetContext {
+    pub(crate) disabled: Memo<bool>,
+    pub(crate) invalid: Memo<bool>,
+    pub(crate) readonly: Memo<bool>,
 }
 
 fn fieldset_context() -> FieldsetContext {
@@ -51,6 +58,10 @@ pub struct FieldsetProps {
 }
 
 /// Dioxus Fieldset root component.
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "fieldset::Api method items are not lifetime-general enough for derive()."
+)]
 #[component]
 pub fn Fieldset(props: FieldsetProps) -> Element {
     let generated_id = use_stable_id("fieldset");
@@ -68,7 +79,17 @@ pub fn Fieldset(props: FieldsetProps) -> Element {
 
     let machine = use_machine::<fieldset::Machine>(core_props);
 
+    let inherited_disabled =
+        machine.derive(|api| api.root_attrs().contains(&HtmlAttr::Disabled));
+    let inherited_invalid = machine.derive(|api| api.is_invalid());
+    let inherited_readonly = machine.derive(|api| api.is_readonly());
+
     use_context_provider(|| FieldsetContext { machine });
+    use_context_provider(|| InheritedFieldsetContext {
+        disabled: inherited_disabled,
+        invalid: inherited_invalid,
+        readonly: inherited_readonly,
+    });
 
     let component_attrs = machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.root_attrs()));
     let attrs = merge_dioxus_attrs(props.attrs, component_attrs());
@@ -107,8 +128,17 @@ pub struct DescriptionProps {
 /// Dioxus Fieldset description part.
 #[component]
 pub fn Description(props: DescriptionProps) -> Element {
-    let attrs = fieldset_context()
-        .machine
+    let machine = fieldset_context().machine;
+
+    use_effect(move || {
+        machine.send.call(fieldset::Event::SetHasDescription(true));
+    });
+
+    use_drop(move || {
+        machine.send.call(fieldset::Event::SetHasDescription(false));
+    });
+
+    let attrs = machine
         .derive(|api| attr_map_to_dioxus_inline_attrs(api.description_attrs()))();
 
     rsx! {

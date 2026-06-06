@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use ars_components::utility::form;
 pub use ars_components::utility::form::{Part, Props, ValidationBehavior};
+use ars_core::{AriaAttr, AttrMap, AttrValue, HtmlAttr};
 use ars_forms::validation::Error;
 use leptos::{children::TypedChildren, context::Provider, prelude::*};
 
@@ -84,6 +85,7 @@ where
         let mut attrs = api.root_attrs();
 
         crate::merge_consumer_class_prop_into(&mut attrs, class);
+        add_dynamic_root_attrs(&mut attrs, machine);
 
         attr_map_to_leptos_inline_attrs(attrs)
     });
@@ -115,6 +117,25 @@ fn form_props_signal(
     validation_errors: Signal<BTreeMap<String, Vec<Error>>>,
 ) -> Signal<Props> {
     Signal::derive(move || props.clone().validation_errors(validation_errors.get()))
+}
+
+fn add_dynamic_root_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<form::Machine>) {
+    let state = machine.derive(|api| {
+        api.root_attrs()
+            .get(&HtmlAttr::Data("ars-state"))
+            .map(str::to_owned)
+    });
+    let busy = machine.derive(|api| api.root_attrs().contains(&HtmlAttr::Aria(AriaAttr::Busy)));
+
+    attrs
+        .set(
+            HtmlAttr::Data("ars-state"),
+            AttrValue::reactive_optional(move || state.get()),
+        )
+        .set(
+            HtmlAttr::Aria(AriaAttr::Busy),
+            AttrValue::reactive_bool(move || busy.get()),
+        );
 }
 
 /// Leptos Form status live-region part.

@@ -127,6 +127,19 @@ async fn form_submit_and_reset_callbacks_fire_and_block_native_submit() {
     form.dispatch_event(&submit)
         .expect("submit event should dispatch");
 
+    leptos::task::tick().await;
+
+    assert_eq!(
+        form.get_attribute("data-ars-state").as_deref(),
+        Some("submitting"),
+        "submit should update the rendered form state"
+    );
+    assert_eq!(
+        form.get_attribute("aria-busy").as_deref(),
+        Some("true"),
+        "submit should expose busy state to assistive technology"
+    );
+
     let reset = cancelable_event("reset");
 
     form.dispatch_event(&reset)

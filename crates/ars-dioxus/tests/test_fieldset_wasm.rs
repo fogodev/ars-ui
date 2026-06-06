@@ -2,7 +2,10 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use ars_dioxus::utility::fieldset::{Content, Description, ErrorMessage, Fieldset, Legend};
+use ars_dioxus::utility::{
+    field::{Field, Input, Label},
+    fieldset::{Content, Description, ErrorMessage, Fieldset, Legend},
+};
 use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -118,6 +121,11 @@ async fn fieldset_browser_renders_group_anatomy_attrs() {
         Some("fieldset")
     );
     assert_eq!(
+        fieldset.get_attribute("aria-describedby").as_deref(),
+        Some("wasm-billing-description"),
+        "rendered fieldset descriptions must be associated with the fieldset"
+    );
+    assert_eq!(
         legend.get_attribute("data-ars-part").as_deref(),
         Some("legend")
     );
@@ -135,6 +143,51 @@ async fn fieldset_browser_renders_group_anatomy_attrs() {
     );
     assert_eq!(error.get_attribute("role").as_deref(), Some("alert"));
     assert_bool_attr(&error, "hidden");
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn fieldset_state_reaches_descendant_field_input_attrs() {
+    fn app() -> Element {
+        rsx! {
+            Fieldset {
+                id: "wasm-disabled-group",
+                disabled: true,
+                invalid: true,
+                readonly: true,
+                Legend { "Account" }
+                Content {
+                    Field { id: "wasm-grouped-email",
+                        Label { "Email" }
+                        Input { name: "email" }
+                    }
+                }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let input = parent
+        .query_selector("#wasm-grouped-email-input")
+        .expect("query should succeed")
+        .expect("grouped field input should exist");
+
+    assert_bool_attr(&input, "disabled");
+    assert_eq!(input.get_attribute("aria-disabled").as_deref(), Some("true"));
+    assert_bool_attr(&input, "readonly");
+    assert_eq!(input.get_attribute("aria-readonly").as_deref(), Some("true"));
+    assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
 
     parent.remove();
 }
