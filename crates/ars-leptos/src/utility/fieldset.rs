@@ -3,6 +3,7 @@
 use ars_components::utility::fieldset;
 pub use ars_components::utility::fieldset::{Part, Props};
 use ars_core::Direction;
+use ars_forms::validation::Error;
 use leptos::{children::TypedChildren, context::Provider, prelude::*};
 
 use crate::{attr_map_to_leptos_inline_attrs, use_id, use_machine_with_reactive_props};
@@ -43,6 +44,10 @@ pub fn Fieldset<T: 'static>(
     #[prop(optional, into)]
     readonly: Signal<bool>,
 
+    /// Fieldset-level validation errors.
+    #[prop(optional, into)]
+    errors: Signal<Vec<Error>>,
+
     /// Optional text direction override.
     #[prop(optional)]
     dir: Option<Direction>,
@@ -66,7 +71,7 @@ where
     }
 
     let machine = use_machine_with_reactive_props::<fieldset::Machine>(fieldset_props_signal(
-        props, disabled, invalid, readonly,
+        props, disabled, invalid, readonly, errors,
     ));
 
     let inherited = InheritedFieldsetContext {
@@ -98,6 +103,7 @@ fn fieldset_props_signal(
     disabled: Signal<bool>,
     invalid: Signal<bool>,
     readonly: Signal<bool>,
+    errors: Signal<Vec<Error>>,
 ) -> Signal<Props> {
     Signal::derive(move || {
         props
@@ -105,6 +111,7 @@ fn fieldset_props_signal(
             .disabled(disabled.get())
             .invalid(invalid.get())
             .readonly(readonly.get())
+            .errors(errors.get())
     })
 }
 
@@ -179,9 +186,22 @@ pub fn ErrorMessage<T>(
 where
     View<T>: IntoView,
 {
-    let attrs = fieldset_context()
-        .machine
-        .with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.error_message_attrs()));
+    let machine = fieldset_context().machine;
+    let hidden = machine.derive(|api| {
+        api.error_message_attrs()
+            .contains(&ars_core::HtmlAttr::Hidden)
+    });
+
+    let attrs = machine.with_api_snapshot(|api| {
+        let mut attrs = api.error_message_attrs();
+
+        attrs.set(
+            ars_core::HtmlAttr::Hidden,
+            ars_core::AttrValue::reactive_bool(move || hidden.get()),
+        );
+
+        attr_map_to_leptos_inline_attrs(attrs)
+    });
 
     view! { <div {..attrs}>{children.into_inner()()}</div> }
 }

@@ -3,6 +3,7 @@
 use ars_components::utility::fieldset;
 pub use ars_components::utility::fieldset::{Part, Props};
 use ars_core::{Direction, HtmlAttr};
+use ars_forms::validation::Error;
 use dioxus::prelude::*;
 
 use crate::{
@@ -45,6 +46,10 @@ pub struct FieldsetProps {
     #[props(default = false)]
     pub readonly: bool,
 
+    /// Fieldset-level validation errors.
+    #[props(default)]
+    pub errors: Vec<Error>,
+
     /// Optional text direction override.
     #[props(optional)]
     pub dir: Option<Direction>,
@@ -71,7 +76,8 @@ pub fn Fieldset(props: FieldsetProps) -> Element {
         .id(&id)
         .disabled(props.disabled)
         .invalid(props.invalid)
-        .readonly(props.readonly);
+        .readonly(props.readonly)
+        .errors(props.errors);
 
     if let Some(dir) = props.dir {
         core_props = core_props.dir(dir);
@@ -128,10 +134,12 @@ pub struct DescriptionProps {
 #[component]
 pub fn Description(props: DescriptionProps) -> Element {
     let machine = fieldset_context().machine;
+    let mut registered = use_signal(|| false);
 
-    use_effect(move || {
+    if !*registered.peek() {
         machine.send.call(fieldset::Event::SetHasDescription(true));
-    });
+        registered.set(true);
+    }
 
     use_drop(move || {
         machine.send.call(fieldset::Event::SetHasDescription(false));

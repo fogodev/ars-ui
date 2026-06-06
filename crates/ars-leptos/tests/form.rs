@@ -103,6 +103,7 @@ fn form_validation_errors_drive_matching_field_by_name() {
         r#"data-ars-invalid"#,
         r#"id="email-field-input""#,
         r#"aria-invalid="true""#,
+        r#"aria-describedby="email-field-error-message""#,
         r#"aria-errormessage="email-field-error-message""#,
         r#"id="email-field-error-message""#,
         r#"role="alert""#,
@@ -110,4 +111,9 @@ fn form_validation_errors_drive_matching_field_by_name() {
     ] {
         assert!(html.contains(fragment), "missing {fragment}: {html}");
     }
+
+    assert!(
+        !html.contains("email-field-description"),
+        "field input must not reference a missing description element: {html}"
+    );
 }

@@ -190,8 +190,6 @@ pub fn Input(props: InputProps) -> Element {
     )]
     let mut component_attrs = machine.derive(|api| api.input_attrs())();
 
-    machine.with_api_snapshot(|api| add_description_relationship(&mut component_attrs, api));
-
     apply_input_attrs(
         &mut component_attrs,
         props.r#type,
@@ -292,34 +290,5 @@ fn apply_input_attrs(
 
     if attrs.contains(&HtmlAttr::Aria(AriaAttr::Disabled)) {
         attrs.set_bool(HtmlAttr::Disabled, true);
-    }
-}
-
-fn add_description_relationship(attrs: &mut AttrMap, api: &field::Api<'_>) {
-    let Some(description_id) = api.description_attrs().take(&HtmlAttr::Id) else {
-        return;
-    };
-
-    let mut described_by = Vec::new();
-
-    if let Some(description_id) = description_id.materialize_string()
-        && !description_id.is_empty()
-    {
-        described_by.push(description_id);
-    }
-
-    if let Some(existing) = attrs.take(&HtmlAttr::Aria(AriaAttr::DescribedBy))
-        && let Some(existing) = existing.materialize_string()
-        && !existing.is_empty()
-    {
-        described_by.extend(existing.split_whitespace().map(str::to_owned));
-    }
-
-    if !described_by.is_empty() {
-        described_by.dedup();
-        attrs.set(
-            HtmlAttr::Aria(AriaAttr::DescribedBy),
-            described_by.join(" "),
-        );
     }
 }

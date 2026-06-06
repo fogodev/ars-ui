@@ -3,6 +3,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use ars_dioxus::utility::fieldset::{Content, Description, ErrorMessage, Fieldset, Legend};
+use ars_forms::validation::Error;
 use dioxus::prelude::*;
 
 fn render_app(app: fn() -> Element) -> String {
@@ -17,7 +18,11 @@ fn render_app(app: fn() -> Element) -> String {
 fn fieldset_renders_group_anatomy() {
     fn app() -> Element {
         rsx! {
-            Fieldset { id: "billing", disabled: true, class: "billing-group",
+            Fieldset {
+                id: "billing",
+                disabled: true,
+                errors: vec![Error::server("Billing information is incomplete.")],
+                class: "billing-group",
                 Legend { "Billing" }
                 Description { "Fields marked required must be completed." }
                 Content {
@@ -34,6 +39,7 @@ fn fieldset_renders_group_anatomy() {
         r#"<fieldset"#,
         r#"id="billing""#,
         r#"disabled"#,
+        r#"aria-describedby="billing-error-message""#,
         r#"data-ars-scope="fieldset""#,
         r#"data-ars-part="root""#,
         r#"class="billing-group""#,
@@ -47,7 +53,13 @@ fn fieldset_renders_group_anatomy() {
         r#"id="billing-error-message""#,
         r#"role="alert""#,
         r#"data-ars-part="error-message""#,
+        "Billing information is incomplete.",
     ] {
         assert!(html.contains(fragment), "missing {fragment}: {html}");
     }
+
+    assert!(
+        !html.contains(r#"id="billing-error-message" hidden"#),
+        "fieldset error message must be reachable when errors are present: {html}"
+    );
 }

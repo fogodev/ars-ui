@@ -11,7 +11,7 @@ use web_sys::wasm_bindgen::JsCast as _;
 
 use crate::{
     as_child::merge_dioxus_attrs, attr_map_to_dioxus_inline_attrs, callbacks, use_machine,
-    use_stable_id,
+    use_messages_and_locale, use_stable_id,
 };
 
 #[derive(Clone, Copy)]
@@ -92,6 +92,8 @@ pub fn Form(props: FormProps) -> Element {
     let validation_behavior = core_props.validation_behavior;
 
     let machine = use_machine::<form::Machine>(core_props);
+    let (form_messages, form_locale) =
+        use_messages_and_locale::<ars_forms::form::Messages>(None, None);
 
     use_context_provider(|| FormContext { machine });
 
@@ -115,11 +117,14 @@ pub fn Form(props: FormProps) -> Element {
                 if validation_behavior == ValidationBehavior::Aria
                     && !form_is_valid(&event, form_ref())
                 {
+                    let error_count = invalid_control_count(&event, form_ref()).max(1);
                     machine
                         .send
                         .call(
                             form::Event::SetStatusMessage(
-                                Some(String::from("Please correct the highlighted fields.")),
+                                Some(
+                                    (form_messages.submit_error_count)(error_count, &form_locale),
+                                ),
                             ),
                         );
                     return;
@@ -166,18 +171,26 @@ pub fn StatusRegion(props: StatusRegionProps) -> Element {
     }
 }
 
+fn invalid_control_count(event: &Event<FormData>, form_ref: Option<Rc<MountedData>>) -> usize {
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    {
+        form_element(event, form_ref)
+            .and_then(|form| form.query_selector_all(":invalid").ok())
+            .map_or(0, |nodes| nodes.length() as usize)
+    }
+
+    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+    {
+        let _ = event;
+        drop(form_ref);
+        0
+    }
+}
+
 fn form_is_valid(event: &Event<FormData>, form_ref: Option<Rc<MountedData>>) -> bool {
     #[cfg(all(feature = "web", target_arch = "wasm32"))]
     {
-        event
-            .data()
-            .downcast::<web_sys::Event>()
-            .and_then(web_sys::Event::target)
-            .and_then(|target| target.dyn_into::<web_sys::HtmlFormElement>().ok())
-            .or_else(|| {
-                form_ref.and_then(|form| form.downcast::<web_sys::HtmlFormElement>().cloned())
-            })
-            .is_none_or(|form| form.check_validity())
+        form_element(event, form_ref).is_none_or(|form| form.check_validity())
     }
 
     #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
@@ -186,4 +199,17 @@ fn form_is_valid(event: &Event<FormData>, form_ref: Option<Rc<MountedData>>) -> 
         drop(form_ref);
         true
     }
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn form_element(
+    event: &Event<FormData>,
+    form_ref: Option<Rc<MountedData>>,
+) -> Option<web_sys::HtmlFormElement> {
+    event
+        .data()
+        .downcast::<web_sys::Event>()
+        .and_then(web_sys::Event::target)
+        .and_then(|target| target.dyn_into::<web_sys::HtmlFormElement>().ok())
+        .or_else(|| form_ref.and_then(|form| form.downcast::<web_sys::HtmlFormElement>().cloned()))
 }

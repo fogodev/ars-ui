@@ -8,7 +8,10 @@ use ars_core::{AriaAttr, AttrMap, AttrValue, HtmlAttr};
 use ars_forms::validation::Error;
 use leptos::{children::TypedChildren, context::Provider, html, prelude::*};
 
-use crate::{attr_map_to_leptos_inline_attrs, callbacks, use_id, use_machine_with_reactive_props};
+use crate::{
+    attr_map_to_leptos_inline_attrs, callbacks, use_id, use_machine_with_reactive_props,
+    use_messages_and_locale,
+};
 
 #[derive(Clone, Copy)]
 pub(crate) struct FormContext {
@@ -78,6 +81,7 @@ where
         validation_behavior,
         validation_errors,
     ));
+    let form_messages = use_messages_and_locale::<ars_forms::form::Messages>(None, None);
 
     let attrs = machine.with_api_snapshot(|api| {
         let mut attrs = api.root_attrs();
@@ -102,11 +106,13 @@ where
                     if validation_behavior.get_untracked() == ValidationBehavior::Aria
                         && !form_is_valid(form_ref)
                     {
+                        let (messages, locale) = form_messages.get_untracked();
+                        let error_count = invalid_control_count(form_ref).max(1);
                         machine
                             .send
                             .run(
                                 form::Event::SetStatusMessage(
-                                    Some(String::from("Please correct the highlighted fields.")),
+                                    Some((messages.submit_error_count)(error_count, &locale)),
                                 ),
                             );
                         return;
@@ -208,5 +214,25 @@ fn form_is_valid(form_ref: NodeRef<html::Form>) -> bool {
     {
         let _ = form_ref;
         true
+    }
+}
+
+#[expect(
+    clippy::missing_const_for_fn,
+    reason = "The wasm implementation reads live form controls through querySelectorAll."
+)]
+fn invalid_control_count(form_ref: NodeRef<html::Form>) -> usize {
+    #[cfg(target_arch = "wasm32")]
+    {
+        form_ref
+            .get()
+            .and_then(|form| form.query_selector_all(":invalid").ok())
+            .map_or(0, |nodes| nodes.length() as usize)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = form_ref;
+        0
     }
 }

@@ -595,6 +595,7 @@ fn arb_fieldset_props() -> impl Strategy<Value = utility_core::fieldset::Props> 
             disabled,
             invalid,
             readonly,
+            errors: Vec::new(),
             dir,
         },
     )

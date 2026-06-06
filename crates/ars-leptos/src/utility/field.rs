@@ -224,9 +224,8 @@ pub fn Input(
 
     let attrs = machine.with_api_snapshot(|api| {
         let mut attrs = api.input_attrs();
-        let description_id = description_id(api);
 
-        add_dynamic_input_attrs(&mut attrs, machine, description_id);
+        add_dynamic_input_attrs(&mut attrs, machine);
 
         apply_input_attrs(&mut attrs, r#type, name, placeholder, class);
 
@@ -303,12 +302,8 @@ where
     view! { <div {..attrs}>{children.into_inner()()}</div> }
 }
 
-fn add_dynamic_input_attrs(
-    attrs: &mut AttrMap,
-    machine: crate::UseMachineReturn<field::Machine>,
-    description_id: Option<String>,
-) {
-    let described_by = input_described_by_memo(machine, description_id);
+fn add_dynamic_input_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<field::Machine>) {
+    let described_by = input_attr_string_memo(machine, HtmlAttr::Aria(AriaAttr::DescribedBy));
     let aria_invalid = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Invalid));
     let error_message = input_attr_string_memo(machine, HtmlAttr::Aria(AriaAttr::ErrorMessage));
     let aria_required = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Required));
@@ -356,13 +351,6 @@ fn add_dynamic_input_attrs(
         );
 }
 
-fn description_id(api: &field::Api<'_>) -> Option<String> {
-    api.description_attrs()
-        .take(&HtmlAttr::Id)
-        .and_then(|value| value.materialize_string())
-        .filter(|id| !id.is_empty())
-}
-
 fn add_dynamic_root_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<field::Machine>) {
     let invalid = machine.derive(|api| api.root_attrs().contains(&HtmlAttr::Data("ars-invalid")));
 
@@ -377,35 +365,6 @@ fn input_attr_string_memo(
     attr: HtmlAttr,
 ) -> Memo<Option<String>> {
     machine.derive(move |api| api.input_attrs().get(&attr).map(str::to_owned))
-}
-
-fn input_described_by_memo(
-    machine: crate::UseMachineReturn<field::Machine>,
-    description_id: Option<String>,
-) -> Memo<Option<String>> {
-    machine.derive(move |api| {
-        let mut ids = Vec::new();
-
-        if let Some(description_id) = &description_id {
-            ids.push(description_id.clone());
-        }
-
-        if let Some(value) = api
-            .input_attrs()
-            .get(&HtmlAttr::Aria(AriaAttr::DescribedBy))
-            && !value.is_empty()
-        {
-            ids.extend(value.split_whitespace().map(str::to_owned));
-        }
-
-        ids.dedup();
-
-        if ids.is_empty() {
-            None
-        } else {
-            Some(ids.join(" "))
-        }
-    })
 }
 
 fn input_attr_bool_memo(

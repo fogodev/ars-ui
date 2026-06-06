@@ -30,7 +30,7 @@ pub struct FieldProps {
     #[props(optional)]
     pub name: Option<String>,
     #[props(default)]
-    pub errors: Vec<String>,
+    pub errors: Vec<ars_forms::validation::Error>,
     #[props(optional)]
     pub dir: Option<Direction>,
     pub children: Element,

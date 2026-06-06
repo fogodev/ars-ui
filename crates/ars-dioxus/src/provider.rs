@@ -1919,10 +1919,10 @@ mod wasm_tests {
             let modality = use_modality_context();
             let platform = use_platform();
             let locale = Locale::parse("pt-BR").expect("locale should parse");
-            let resolved = use_messages::<TestMessages>(None, Some(&locale));
+            let (messages, locale) = use_messages_and_locale::<TestMessages>(None, Some(locale));
 
             assert_eq!(modality.snapshot(), ars_core::ModalitySnapshot::default());
-            assert_eq!((resolved.label)(&locale), "Default");
+            assert_eq!((messages.label)(&locale), "Default");
             assert_eq!(t(AppText::Greeting), "Hello");
 
             let generated_id = platform.new_id();
@@ -1976,12 +1976,10 @@ mod wasm_tests {
 
             use_context_provider(|| ctx);
 
-            let locale = Locale::parse("es-MX").expect("locale should parse");
-
-            let resolved = use_messages::<TestMessages>(None, None);
+            let (messages, locale) = use_messages_and_locale::<TestMessages>(None, None);
 
             assert!(Arc::ptr_eq(&use_modality_context(), &expected_modality));
-            assert_eq!((resolved.label)(&locale), "Etiqueta");
+            assert_eq!((messages.label)(&locale), "Etiqueta");
 
             rsx! {
                 div {}
@@ -2058,7 +2056,7 @@ mod wasm_tests {
 
             let explicit = Locale::parse("pt-BR").expect("locale should parse");
 
-            assert_eq!(resolve_locale(Some(&explicit)).to_bcp47(), "pt-BR");
+            assert_eq!(resolve_locale(Some(explicit)).to_bcp47(), "pt-BR");
             assert_eq!(resolve_locale(None).to_bcp47(), "en-US");
             assert!(Arc::ptr_eq(&use_intl_backend(), &expected));
 
