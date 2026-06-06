@@ -192,18 +192,26 @@ pub fn Input(props: InputProps) -> Element {
             props.r#type,
             props.name.clone(),
             props.placeholder.clone(),
-            props.value.clone(),
         );
 
         attr_map_to_dioxus_inline_attrs(attrs)
     });
     let attrs = merge_dioxus_attrs(props.attrs, component_attrs());
 
-    rsx! {
-        input {
-            oninput: move |event| callbacks::emit(props.on_value_input.as_ref(), event.value()),
-            ..attrs,
-        }
+    match props.value.clone() {
+        Some(value) => rsx! {
+            input {
+                value,
+                oninput: move |event| callbacks::emit(props.on_value_input.as_ref(), event.value()),
+                ..attrs,
+            }
+        },
+        None => rsx! {
+            input {
+                oninput: move |event| callbacks::emit(props.on_value_input.as_ref(), event.value()),
+                ..attrs,
+            }
+        },
     }
 }
 
@@ -260,7 +268,6 @@ fn apply_input_attrs(
     r#type: Option<InputType>,
     name: Option<String>,
     placeholder: Option<String>,
-    value: Option<String>,
 ) {
     if let Some(input_type) = r#type {
         attrs.set(HtmlAttr::Type, input_type.as_str());
@@ -274,7 +281,7 @@ fn apply_input_attrs(
         attrs.set(HtmlAttr::Placeholder, placeholder);
     }
 
-    if let Some(value) = value {
-        attrs.set(HtmlAttr::Value, value);
+    if attrs.contains(&HtmlAttr::Aria(ars_core::AriaAttr::Disabled)) {
+        attrs.set_bool(HtmlAttr::Disabled, true);
     }
 }

@@ -75,6 +75,18 @@ async fn form_browser_mounts_status_region() {
     assert_eq!(form.get_attribute("novalidate").as_deref(), Some(""));
     assert_eq!(status.get_attribute("role").as_deref(), Some("status"));
 
+    let submit = cancelable_event("submit");
+
+    form.dispatch_event(&submit)
+        .expect("submit event should dispatch");
+
+    leptos::task::tick().await;
+
+    assert!(
+        submit.default_prevented(),
+        "default ARIA validation behavior should prevent native navigation even without a callback"
+    );
+
     parent.remove();
 }
 
@@ -131,13 +143,13 @@ async fn form_submit_and_reset_callbacks_fire_and_block_native_submit() {
 
     assert_eq!(
         form.get_attribute("data-ars-state").as_deref(),
-        Some("submitting"),
-        "submit should update the rendered form state"
+        Some("idle"),
+        "intercepted submit should complete the rendered form state after the callback"
     );
     assert_eq!(
-        form.get_attribute("aria-busy").as_deref(),
-        Some("true"),
-        "submit should expose busy state to assistive technology"
+        form.get_attribute("aria-busy"),
+        None,
+        "completed submit should clear busy state"
     );
 
     let reset = cancelable_event("reset");

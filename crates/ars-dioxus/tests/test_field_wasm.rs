@@ -272,3 +272,55 @@ async fn field_reactive_errors_update_invalid_relationship() {
 
     parent.remove();
 }
+
+#[wasm_bindgen_test(async)]
+async fn field_controlled_value_reapplies_rejected_input() {
+    fn app() -> Element {
+        let mut email = use_signal(|| String::from("fixed@example.com"));
+
+        rsx! {
+            Field {
+                id: "wasm-controlled-email-field",
+                Label { "Email" }
+                Input {
+                    r#type: InputType::Email,
+                    name: "email",
+                    value: email(),
+                    on_value_input: move |_| email.set(String::from("fixed@example.com")),
+                }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let input = parent
+        .query_selector("#wasm-controlled-email-field-input")
+        .expect("query should succeed")
+        .expect("field input should exist")
+        .dyn_into::<web_sys::HtmlInputElement>()
+        .expect("field input should be an HtmlInputElement");
+
+    assert_eq!(input.value(), "fixed@example.com");
+
+    dispatch_input(&input, "typed@example.com");
+
+    flush().await;
+
+    assert_eq!(
+        input.value(),
+        "fixed@example.com",
+        "controlled input should reapply the canonical value after rejecting user text"
+    );
+
+    parent.remove();
+}

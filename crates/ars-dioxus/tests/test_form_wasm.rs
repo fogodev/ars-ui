@@ -134,6 +134,19 @@ async fn form_browser_renders_status_region_and_dispatches_callbacks() {
     form.dispatch_event(&submit)
         .expect("submit event should dispatch");
 
+    flush().await;
+
+    assert_eq!(
+        form.get_attribute("data-ars-state").as_deref(),
+        Some("idle"),
+        "intercepted submit should complete the rendered form state after the callback"
+    );
+    assert_eq!(
+        form.get_attribute("aria-busy"),
+        None,
+        "completed submit should clear busy state"
+    );
+
     let reset = cancelable_event("reset");
 
     form.dispatch_event(&reset)
@@ -146,6 +159,50 @@ async fn form_browser_renders_status_region_and_dispatches_callbacks() {
     FORM_EVENTS.with(|events| {
         assert_eq!(events.borrow().as_slice(), &["submit", "reset"]);
     });
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn form_default_aria_submit_prevents_native_navigation_without_callback() {
+    fn app() -> Element {
+        rsx! {
+            Form {
+                id: "wasm-default-aria-form",
+                action: "/account",
+                input { name: "email" }
+                StatusRegion { "Ready" }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let form = parent
+        .query_selector("#wasm-default-aria-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    let submit = cancelable_event("submit");
+
+    form.dispatch_event(&submit)
+        .expect("submit event should dispatch");
+
+    flush().await;
+
+    assert!(
+        submit.default_prevented(),
+        "default ARIA validation behavior should prevent native navigation even without a callback"
+    );
 
     parent.remove();
 }

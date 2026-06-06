@@ -187,11 +187,16 @@ async fn field_reactive_errors_update_invalid_relationship() {
 
     leptos::task::tick().await;
 
+    let root = parent
+        .query_selector("#wasm-reactive-email-field")
+        .expect("query should succeed")
+        .expect("field root should exist");
     let input = parent
         .query_selector("#wasm-reactive-email-field-input")
         .expect("query should succeed")
         .expect("field input should exist");
 
+    assert_eq!(root.get_attribute("data-ars-invalid").as_deref(), Some(""));
     assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
     assert_eq!(
         input.get_attribute("aria-errormessage").as_deref(),
@@ -213,6 +218,11 @@ async fn field_reactive_errors_update_invalid_relationship() {
 
     leptos::task::tick().await;
 
+    assert_eq!(
+        root.get_attribute("data-ars-invalid"),
+        None,
+        "valid email should clear stale root invalid state"
+    );
     assert_eq!(
         input.get_attribute("aria-invalid"),
         None,

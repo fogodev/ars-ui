@@ -84,6 +84,8 @@ pub fn Form(props: FormProps) -> Element {
         core_props = core_props.validation_behavior(validation_behavior);
     }
 
+    let validation_behavior = core_props.validation_behavior;
+
     core_props = core_props.validation_errors(props.validation_errors);
 
     let machine = use_machine::<form::Machine>(core_props);
@@ -96,12 +98,15 @@ pub fn Form(props: FormProps) -> Element {
     rsx! {
         form {
             onsubmit: move |event| {
-                if props.on_submit.is_some() {
+                if validation_behavior == ValidationBehavior::Aria || props.on_submit.is_some() {
                     event.prevent_default();
                 }
 
                 machine.send.call(form::Event::Submit);
                 callbacks::call(props.on_submit.as_ref());
+                machine
+                    .send
+                    .call(form::Event::SubmitComplete { success: true });
             },
             onreset: move |_event| {
                 machine.send.call(form::Event::Reset);

@@ -92,6 +92,7 @@ where
         let mut attrs = api.root_attrs();
 
         crate::merge_consumer_class_prop_into(&mut attrs, class.clone());
+        add_dynamic_root_attrs(&mut attrs, machine);
 
         attr_map_to_leptos_inline_attrs(attrs)
     });
@@ -307,7 +308,6 @@ fn add_dynamic_input_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn
     let aria_required = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Required));
     let native_required = input_attr_bool_memo(machine, HtmlAttr::Required);
     let aria_disabled = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Disabled));
-    let native_disabled = input_attr_bool_memo(machine, HtmlAttr::Disabled);
     let aria_readonly = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::ReadOnly));
     let native_readonly = input_attr_bool_memo(machine, HtmlAttr::ReadOnly);
 
@@ -338,7 +338,7 @@ fn add_dynamic_input_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn
         )
         .set(
             HtmlAttr::Disabled,
-            AttrValue::reactive_bool(move || native_disabled.get()),
+            AttrValue::reactive_bool(move || aria_disabled.get()),
         )
         .set(
             HtmlAttr::Aria(AriaAttr::ReadOnly),
@@ -348,6 +348,15 @@ fn add_dynamic_input_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn
             HtmlAttr::ReadOnly,
             AttrValue::reactive_bool(move || native_readonly.get()),
         );
+}
+
+fn add_dynamic_root_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<field::Machine>) {
+    let invalid = machine.derive(|api| api.root_attrs().contains(&HtmlAttr::Data("ars-invalid")));
+
+    attrs.set(
+        HtmlAttr::Data("ars-invalid"),
+        AttrValue::reactive_bool(move || invalid.get()),
+    );
 }
 
 fn input_attr_string_memo(

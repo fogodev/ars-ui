@@ -576,9 +576,7 @@ impl<'a> Api<'a> {
         }
 
         if self.ctx.disabled {
-            attrs
-                .set(HtmlAttr::Aria(AriaAttr::Disabled), "true")
-                .set_bool(HtmlAttr::Disabled, true);
+            attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true");
         }
 
         if self.ctx.readonly {
@@ -823,6 +821,7 @@ mod tests {
         let attrs = api.input_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+        assert!(!attrs.contains(&HtmlAttr::Disabled));
     }
 
     #[test]

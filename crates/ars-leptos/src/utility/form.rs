@@ -76,6 +76,8 @@ where
         props = props.validation_behavior(validation_behavior);
     }
 
+    let validation_behavior = props.validation_behavior;
+
     let machine = use_machine_with_reactive_props::<form::Machine>(form_props_signal(
         props,
         validation_errors,
@@ -95,11 +97,14 @@ where
             <form
                 {..attrs}
                 on:submit:capture=move |event| {
-                    if on_submit.is_some() {
+                    if validation_behavior == ValidationBehavior::Aria || on_submit.is_some() {
                         event.prevent_default();
                     }
                     machine.send.run(form::Event::Submit);
                     callbacks::call(on_submit.as_ref());
+                    machine
+                        .send
+                        .run(form::Event::SubmitComplete { success: true });
                 }
                 on:reset:capture=move |_event| {
                     machine.send.run(form::Event::Reset);
