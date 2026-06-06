@@ -15,7 +15,7 @@ use ars_dioxus::{
         error_boundary::{CapturedError, ErrorBoundary},
         field::{self, Field},
         fieldset::{self, Fieldset},
-        form::{self, Form},
+        form::{self, Form, StatusRegion},
         heading::{self, Heading, HeadingLevelProvider},
         highlight::Highlight,
         landmark::{self, Landmark},
@@ -546,6 +546,7 @@ pub(crate) fn UtilityPanel(locale_key: String) -> Element {
                             value: "admin@email.com",
                         }
                     }
+                    StatusRegion { {t(UtilityText::Ready)} }
                 }
             }
             section {

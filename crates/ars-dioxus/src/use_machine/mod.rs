@@ -55,6 +55,11 @@ where
     /// Used by [`derive()`](Self::derive) to track context mutations even when
     /// state remains the same.
     pub context_version: ReadSignal<u64>,
+
+    /// Monotonically increasing counter that increments whenever service props change.
+    /// Used by [`derive()`](Self::derive) to track API output that is derived from props
+    /// rather than state or context.
+    pub props_version: ReadSignal<u64>,
 }
 
 const fn current_render_mode(_hydrated_snapshot: bool) -> RenderMode {
@@ -82,6 +87,7 @@ where
     service: Signal<Service<M>>,
     state: Signal<M::State>,
     context_version: Signal<u64>,
+    props_version: Signal<u64>,
     effect_cleanups: Signal<HashMap<M::Effect, CleanupFn>>,
     pending_events: Arc<Mutex<Vec<M::Event>>>,
 }
@@ -95,6 +101,7 @@ where
             service: self.service,
             state: self.state,
             context_version: self.context_version,
+            props_version: self.props_version,
             effect_cleanups: self.effect_cleanups,
             pending_events: Arc::clone(&self.pending_events),
         }
@@ -129,6 +136,7 @@ where
         f.debug_struct("UseMachineReturn")
             .field("state", &self.state)
             .field("context_version", &self.context_version)
+            .field("props_version", &self.props_version)
             .finish_non_exhaustive()
     }
 }
@@ -162,8 +170,8 @@ where
 
     /// Creates a fine-grained memo that derives a value from the connect API.
     ///
-    /// Only re-computes when the underlying state or context changes, and only
-    /// notifies dependents when the derived value actually changes.
+    /// Only re-computes when the underlying state, context, or service props
+    /// change, and only notifies dependents when the derived value actually changes.
     ///
     /// **Important:** `Api<'a>` has a non-`'static` lifetime and cannot be stored
     /// in Dioxus signals. The `&M::Api<'_>` reference passed to the closure is
@@ -177,12 +185,14 @@ where
     ) -> Memo<T> {
         let state = self.state;
         let context_version = self.context_version;
+        let props_version = self.props_version;
         let service = self.service;
         use_memo(move || {
-            // Subscribe to both state and context_version so the memo
-            // re-computes when either changes.
+            // Subscribe to state, context, and prop revisions so the memo
+            // re-computes when any API input changes.
             let _ = &*state.read();
             let _ = &*context_version.read();
+            let _ = &*props_version.read();
 
             let svc = service.peek();
 
@@ -246,9 +256,7 @@ where
     M::Event: Send + 'static,
     M::Messages: Send + Sync + 'static,
 {
-    let (result, ..) = use_machine_inner::<M>(props, None);
-
-    result
+    use_machine_inner::<M>(props, None)
 }
 
 /// Creates and manages a machine service from an SSR hydration snapshot.
@@ -268,12 +276,10 @@ where
     M::Event: Send + 'static,
     M::Messages: Send + Sync + 'static,
 {
-    let (result, ..) = use_machine_inner::<M>(
+    use_machine_inner::<M>(
         props_with_snapshot_id::<M>(props, &snapshot),
         Some(snapshot.state),
-    );
-
-    result
+    )
 }
 
 /// Creates a machine that watches an external props signal for changes.
@@ -313,12 +319,10 @@ where
 
 /// Internal implementation shared between public hooks.
 ///
-/// Returns the public `UseMachineReturn` plus the internal `context_version`
-/// signal so body-level prop sync can update it during re-renders.
 fn use_machine_inner<M: Machine + 'static>(
     props: M::Props,
     hydrated_state: Option<M::State>,
-) -> (UseMachineReturn<M>, Signal<u64>)
+) -> UseMachineReturn<M>
 where
     M::State: Clone + PartialEq + 'static,
     M::Context: Clone + 'static,
@@ -372,6 +376,7 @@ where
     // Context version counter — incremented on every context change so that
     // derive() memos re-run even when state itself hasn't changed.
     let context_version = use_signal(|| 0u64);
+    let props_version = use_signal(|| 0u64);
 
     let effect_cleanups = use_signal(HashMap::<M::Effect, CleanupFn>::new);
 
@@ -381,6 +386,7 @@ where
         service: service_signal,
         state: state_signal,
         context_version,
+        props_version,
         effect_cleanups,
         pending_events: Arc::clone(&pending_events),
     };
@@ -452,14 +458,13 @@ where
         cleanup_runtime.service.write().unmount(cleanups);
     });
 
-    let result = UseMachineReturn {
+    UseMachineReturn {
         state: state_signal.into(),
         send,
         service: service_signal,
         context_version: context_version.into(),
-    };
-
-    (result, context_version)
+        props_version: props_version.into(),
+    }
 }
 
 /// Synchronizes external props into an existing Dioxus machine service.
@@ -495,6 +500,8 @@ where
                 if send_result.context_changed {
                     *runtime.context_version.write() += 1;
                 }
+
+                *runtime.props_version.write() += 1;
 
                 let ctx = service.context().clone();
 

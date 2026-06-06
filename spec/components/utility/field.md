@@ -38,14 +38,17 @@ The core machine props are:
 - `disabled: bool`
 - `readonly: bool`
 - `invalid: bool`
+- `errors: Vec<ars_forms::validation::Error>`
 - `dir: Option<Direction>`
 
 The `id` is immutable after initialization because `ComponentIds::from_id(&props.id)` is cached in
 context.
 
 Construct via the inherent builder: `Props::new()` returns the default; setters (`id`, `required`,
-`disabled`, `readonly`, `invalid`, `dir`) accept the natural argument and return `Self` for
-chaining. The `dir` setter accepts a `Direction` and wraps it in `Some` automatically.
+`disabled`, `readonly`, `invalid`, `errors`, `dir`) accept the natural argument and return `Self`
+for chaining. The `errors` setter accepts the controlled field-level validation errors used to
+derive invalid state and error-message relationships. The `dir` setter accepts a `Direction` and
+wraps it in `Some` automatically.
 
 ```rust,no_check
 let props = field::Props::new()

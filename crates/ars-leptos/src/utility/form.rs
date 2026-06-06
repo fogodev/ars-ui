@@ -8,7 +8,10 @@ use ars_core::{AriaAttr, AttrMap, AttrValue, HtmlAttr};
 use ars_forms::validation::Error;
 use leptos::{children::TypedChildren, context::Provider, html, prelude::*};
 #[cfg(target_arch = "wasm32")]
-use leptos::{wasm_bindgen::JsCast as _, web_sys};
+use leptos::{
+    wasm_bindgen::{JsCast as _, JsValue},
+    web_sys,
+};
 
 use crate::{
     attr_map_to_leptos_inline_attrs, callbacks, use_id, use_machine_with_reactive_props,
@@ -125,6 +128,11 @@ where
                                 ),
                             );
                         return;
+                    }
+                    if validation_behavior.get_untracked() == ValidationBehavior::Aria {
+                        machine
+                            .send
+                            .run(form::Event::SetValidationErrors(BTreeMap::new()));
                     }
                     machine.send.run(form::Event::Submit);
                     callbacks::call(on_submit.as_ref());
@@ -303,7 +311,9 @@ fn native_validation_error(
     messages: &ars_forms::form::Messages,
     locale: &ars_i18n::Locale,
 ) -> Error {
-    if element.has_attribute("required") {
+    if element.has_attribute("required")
+        && element_value(element).is_none_or(|value| value.is_empty())
+    {
         return Error::required(messages, locale);
     }
 
@@ -355,4 +365,72 @@ fn native_validation_error(
     }
 
     Error::custom("native", (messages.pattern_error)(locale))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn element_value(element: &web_sys::Element) -> Option<String> {
+    js_sys::Reflect::get(element.as_ref(), &JsValue::from_str("value"))
+        .ok()
+        .and_then(|value| value.as_string())
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_tests {
+    use ars_forms::validation::ErrorCode;
+
+    use super::*;
+
+    fn input_element() -> web_sys::Element {
+        web_sys::window()
+            .and_then(|window| window.document())
+            .expect("document should exist")
+            .create_element("input")
+            .expect("input element should be created")
+    }
+
+    fn messages_and_locale() -> (ars_forms::form::Messages, ars_i18n::Locale) {
+        (
+            ars_forms::form::Messages::default(),
+            ars_i18n::Locale::parse("en-US").expect("test locale should parse"),
+        )
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn native_validation_error_prefers_required_for_empty_required_inputs() {
+        let element = input_element();
+        element
+            .set_attribute("required", "")
+            .expect("required attribute should set");
+
+        let (messages, locale) = messages_and_locale();
+
+        assert_eq!(
+            native_validation_error(&element, &messages, &locale).code,
+            ErrorCode::Required
+        );
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn native_validation_error_prefers_email_for_nonempty_required_email_inputs() {
+        let element = input_element();
+        element
+            .set_attribute("required", "")
+            .expect("required attribute should set");
+        element
+            .set_attribute("type", "email")
+            .expect("type attribute should set");
+        js_sys::Reflect::set(
+            element.as_ref(),
+            &JsValue::from_str("value"),
+            &JsValue::from_str("not-an-email"),
+        )
+        .expect("value property should set");
+
+        let (messages, locale) = messages_and_locale();
+
+        assert_eq!(
+            native_validation_error(&element, &messages, &locale).code,
+            ErrorCode::Email
+        );
+    }
 }

@@ -17,7 +17,7 @@ use ars_leptos::{
         error_boundary::ErrorBoundary,
         field::{self, Field},
         fieldset::{self, Fieldset},
-        form::{self, Form},
+        form::{self, Form, StatusRegion},
         heading::{self, Heading, HeadingLevelProvider, Section},
         highlight::Highlight,
         landmark::{self, Landmark},
@@ -556,6 +556,7 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                             value=valid_email_value
                         />
                     </Field>
+                    <StatusRegion>{t(UtilityText::Ready)}</StatusRegion>
                 </Form>
             </section>
             <section class="showcase-panel wide" aria-labelledby="dismissable">

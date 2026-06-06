@@ -445,5 +445,29 @@ async fn form_invalid_required_submit_updates_named_field_errors() {
         None
     );
 
+    input
+        .dyn_ref::<web_sys::HtmlInputElement>()
+        .expect("field input should be an HtmlInputElement")
+        .set_value("admin@email.com");
+
+    let valid_submit = cancelable_event("submit");
+
+    form.dispatch_event(&valid_submit)
+        .expect("valid submit event should dispatch");
+
+    flush().await;
+
+    assert!(valid_submit.default_prevented());
+    assert_eq!(
+        input.get_attribute("aria-invalid"),
+        None,
+        "valid ARIA submit should clear native validation errors from descendant fields"
+    );
+    assert_eq!(
+        input.get_attribute("aria-errormessage"),
+        None,
+        "valid ARIA submit should clear stale error relationships"
+    );
+
     parent.remove();
 }

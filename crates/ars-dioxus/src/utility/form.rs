@@ -7,7 +7,7 @@ pub use ars_components::utility::form::{Part, Props, ValidationBehavior};
 use ars_forms::validation::Error;
 use dioxus::{events::MountedData, prelude::*};
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-use web_sys::wasm_bindgen::JsCast as _;
+use web_sys::wasm_bindgen::{JsCast as _, JsValue};
 
 use crate::{
     as_child::merge_dioxus_attrs, attr_map_to_dioxus_inline_attrs, callbacks, use_machine,
@@ -97,10 +97,7 @@ pub fn Form(props: FormProps) -> Element {
 
     use_context_provider(|| FormContext { machine });
 
-    let _ = &*machine.state.read();
-    let _ = &*machine.context_version.read();
-    let component_attrs =
-        machine.with_api_snapshot(|api| attr_map_to_dioxus_inline_attrs(api.root_attrs()));
+    let component_attrs = machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.root_attrs()))();
     let attrs = merge_dioxus_attrs(props.attrs, component_attrs);
     let status_message =
         machine.derive(|api| api.status_message().map(str::to_owned).unwrap_or_default())();
@@ -139,6 +136,9 @@ pub fn Form(props: FormProps) -> Element {
                             ),
                         );
                     return;
+                }
+                if validation_behavior == ValidationBehavior::Aria {
+                    machine.send.call(form::Event::SetValidationErrors(BTreeMap::new()));
                 }
                 machine.send.call(form::Event::Submit);
                 callbacks::call(props.on_submit.as_ref());
@@ -267,7 +267,9 @@ fn native_validation_error(
     messages: &ars_forms::form::Messages,
     locale: &ars_i18n::Locale,
 ) -> Error {
-    if element.has_attribute("required") {
+    if element.has_attribute("required")
+        && element_value(element).is_none_or(|value| value.is_empty())
+    {
         return Error::required(messages, locale);
     }
 
@@ -322,6 +324,13 @@ fn native_validation_error(
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn element_value(element: &web_sys::Element) -> Option<String> {
+    js_sys::Reflect::get(element.as_ref(), &JsValue::from_str("value"))
+        .ok()
+        .and_then(|value| value.as_string())
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
 fn form_element(
     event: &Event<FormData>,
     form_ref: Option<Rc<MountedData>>,
@@ -332,4 +341,65 @@ fn form_element(
         .and_then(web_sys::Event::target)
         .and_then(|target| target.dyn_into::<web_sys::HtmlFormElement>().ok())
         .or_else(|| form_ref.and_then(|form| form.downcast::<web_sys::HtmlFormElement>().cloned()))
+}
+
+#[cfg(all(test, feature = "web", target_arch = "wasm32"))]
+mod wasm_tests {
+    use ars_forms::validation::ErrorCode;
+
+    use super::*;
+
+    fn input_element() -> web_sys::Element {
+        web_sys::window()
+            .and_then(|window| window.document())
+            .expect("document should exist")
+            .create_element("input")
+            .expect("input element should be created")
+    }
+
+    fn messages_and_locale() -> (ars_forms::form::Messages, ars_i18n::Locale) {
+        (
+            ars_forms::form::Messages::default(),
+            ars_i18n::Locale::parse("en-US").expect("test locale should parse"),
+        )
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn native_validation_error_prefers_required_for_empty_required_inputs() {
+        let element = input_element();
+        element
+            .set_attribute("required", "")
+            .expect("required attribute should set");
+
+        let (messages, locale) = messages_and_locale();
+
+        assert_eq!(
+            native_validation_error(&element, &messages, &locale).code,
+            ErrorCode::Required
+        );
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn native_validation_error_prefers_email_for_nonempty_required_email_inputs() {
+        let element = input_element();
+        element
+            .set_attribute("required", "")
+            .expect("required attribute should set");
+        element
+            .set_attribute("type", "email")
+            .expect("type attribute should set");
+        js_sys::Reflect::set(
+            element.as_ref(),
+            &JsValue::from_str("value"),
+            &JsValue::from_str("not-an-email"),
+        )
+        .expect("value property should set");
+
+        let (messages, locale) = messages_and_locale();
+
+        assert_eq!(
+            native_validation_error(&element, &messages, &locale).code,
+            ErrorCode::Email
+        );
+    }
 }

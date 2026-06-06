@@ -140,6 +140,7 @@ pub(super) struct PropProps {
     pub(super) id: String,
     pub(super) checked: bool,
     pub(super) label: &'static str,
+    pub(super) title: &'static str,
 }
 
 impl HasId for PropProps {
@@ -159,6 +160,7 @@ impl HasId for PropProps {
 pub(super) struct PropApi {
     pub(super) is_on: bool,
     pub(super) sync_count: u32,
+    pub(super) title: &'static str,
 }
 
 impl PropApi {
@@ -169,8 +171,8 @@ impl PropApi {
             reason = "Only the wasm render tests snapshot derived prop state."
         )
     )]
-    pub(super) const fn snapshot(&self) -> (bool, u32) {
-        (self.is_on, self.sync_count)
+    pub(super) const fn snapshot(&self) -> (bool, u32, &'static str) {
+        (self.is_on, self.sync_count, self.title)
     }
 }
 
@@ -236,12 +238,13 @@ impl Machine for PropMachine {
     fn connect<'a>(
         state: &'a Self::State,
         context: &'a Self::Context,
-        _props: &'a Self::Props,
+        props: &'a Self::Props,
         _send: &'a dyn Fn(Self::Event),
     ) -> Self::Api<'a> {
         PropApi {
             is_on: *state == PropState::On,
             sync_count: context.sync_count,
+            title: props.title,
         }
     }
 
@@ -272,7 +275,7 @@ impl Machine for PropMachine {
         reason = "Only the wasm render tests use the prop snapshot alias."
     )
 )]
-pub(super) type PropSnapshot = ((bool, u32), PropState, u64);
+pub(super) type PropSnapshot = ((bool, u32, &'static str), PropState, u64, u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DerivedState {
