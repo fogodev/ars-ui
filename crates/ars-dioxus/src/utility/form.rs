@@ -19,10 +19,6 @@ pub(crate) struct FormContext {
     pub(crate) machine: crate::UseMachineReturn<form::Machine>,
 }
 
-fn form_context() -> FormContext {
-    try_use_context::<FormContext>().expect("Form subcomponents must be rendered inside <Form/>")
-}
-
 /// Props for the Dioxus [`Form`] component.
 #[derive(Props, Clone, PartialEq, Debug)]
 pub struct FormProps {
@@ -105,7 +101,7 @@ pub fn Form(props: FormProps) -> Element {
     use_context_provider(|| FormContext { machine });
 
     let component_attrs = machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.root_attrs()))();
-    let attrs = merge_dioxus_attrs(props.attrs, component_attrs);
+    let attrs = strip_form_event_attrs(merge_dioxus_attrs(props.attrs, component_attrs));
     let status_message =
         machine.derive(|api| api.status_message().map(str::to_owned).unwrap_or_default())();
     let status_attrs =
@@ -117,11 +113,14 @@ pub fn Form(props: FormProps) -> Element {
                 form_ref.set(Some(event.data()));
             },
             onsubmit: move |event| {
+                let skip_validation = submitter_skips_validation(&event);
+
                 if validation_behavior == ValidationBehavior::Aria || props.on_submit.is_some() {
                     event.prevent_default();
                 }
 
                 if validation_behavior == ValidationBehavior::Aria
+                    && !skip_validation
                     && !form_is_valid(&event, form_ref())
                 {
                     let current_form_ref = form_ref();
@@ -129,10 +128,10 @@ pub fn Form(props: FormProps) -> Element {
                     merge_validation_errors(
                         &mut errors,
                         invalid_control_errors(
-                        &event,
-                        current_form_ref.clone(),
-                        &form_messages,
-                        &form_locale,
+                            &event,
+                            current_form_ref.clone(),
+                            &form_messages,
+                            &form_locale,
                         ),
                     );
                     let error_count = invalid_control_count(&event, current_form_ref).max(1);
@@ -151,7 +150,11 @@ pub fn Form(props: FormProps) -> Element {
                 if validation_behavior == ValidationBehavior::Aria {
                     machine
                         .send
-                        .call(form::Event::SetValidationErrors(controlled_validation_errors.clone()));
+                        .call(
+                            form::Event::SetValidationErrors(
+                                controlled_validation_errors.clone(),
+                            ),
+                        );
                 }
                 machine.send.call(form::Event::Submit);
                 callbacks::call(props.on_submit.as_ref());
@@ -172,6 +175,11 @@ pub fn Form(props: FormProps) -> Element {
     }
 }
 
+fn strip_form_event_attrs(mut attrs: Vec<Attribute>) -> Vec<Attribute> {
+    attrs.retain(|attr| !matches!(attr.name, "onsubmit" | "onreset" | "onmounted"));
+    attrs
+}
+
 fn merge_validation_errors(
     errors: &mut BTreeMap<String, Vec<Error>>,
     additional_errors: BTreeMap<String, Vec<Error>>,
@@ -181,29 +189,6 @@ fn merge_validation_errors(
         .for_each(|(name, mut field_errors)| {
             errors.entry(name).or_default().append(&mut field_errors);
         });
-}
-
-/// Props for the Dioxus [`StatusRegion`] component.
-#[derive(Props, Clone, PartialEq, Debug)]
-pub struct StatusRegionProps {
-    /// Status region content.
-    pub children: Element,
-}
-
-/// Dioxus Form status live-region part.
-#[component]
-pub fn StatusRegion(props: StatusRegionProps) -> Element {
-    let machine = form_context().machine;
-    let status_message =
-        machine.derive(|api| api.status_message().map(str::to_owned).unwrap_or_default())();
-    let attrs = machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.status_region_attrs()))();
-
-    rsx! {
-        div {..attrs,
-            {props.children}
-            {status_message}
-        }
-    }
 }
 
 fn invalid_control_count(event: &Event<FormData>, form_ref: Option<Rc<MountedData>>) -> usize {
@@ -361,6 +346,30 @@ fn validity_flag(element: &web_sys::Element, flag: &str) -> bool {
         .and_then(|validity| js_sys::Reflect::get(&validity, &JsValue::from_str(flag)).ok())
         .and_then(|flag| flag.as_bool())
         .unwrap_or(false)
+}
+
+#[expect(
+    clippy::missing_const_for_fn,
+    reason = "The wasm implementation reflects on the live submit event's submitter property."
+)]
+fn submitter_skips_validation(event: &Event<FormData>) -> bool {
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    {
+        event
+            .data()
+            .downcast::<web_sys::Event>()
+            .and_then(|event| {
+                js_sys::Reflect::get(event.as_ref(), &JsValue::from_str("submitter")).ok()
+            })
+            .and_then(|submitter| submitter.dyn_into::<web_sys::Element>().ok())
+            .is_some_and(|submitter| submitter.has_attribute("formnovalidate"))
+    }
+
+    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+    {
+        let _ = event;
+        false
+    }
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]

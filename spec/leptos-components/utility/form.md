@@ -37,7 +37,9 @@ callbacks. `on_submit` dispatches the core `Submit` event before emitting
 input so server/custom validation errors can appear and clear after mount
 without rebuilding the form subtree. `status_message` is a reactive
 `Signal<Option<String>>` used to seed or control the adapter-owned status live
-region without rendering a second `StatusRegion` child.
+region. The status region is structural and always rendered by `Form`; it is
+not exposed as a separate public child component because doing so would create
+duplicate live-region nodes and duplicate announcements.
 
 ## 3. Mapping to Core Component Contract
 
@@ -58,11 +60,12 @@ region without rendering a second `StatusRegion` child.
 | Target node    | Core attrs                                                            | Adapter-owned attrs                                                     | Consumer attrs                                                          | Merge order                                                                                                                                                                              | Ownership notes                   |
 | -------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
 | `Root`         | `api.root_attrs()` including validation, busy, action, and role attrs | adapter submit/reset handlers and structural `data-*` helpers if needed | consumer attrs on the form root                                         | core submission, validation, and accessibility attrs win when conflict would break the contract; `class`/`style` merge additively; handlers compose around normalized submit/reset logic | adapter-owned native `<form>`     |
-| `StatusRegion` | `api.status_region_attrs()`                                           | status wrapper visibility helpers if needed                             | no direct consumer attrs unless a dedicated override slot is documented | core live-region attrs win; consumer content cannot replace the region node                                                                                                              | always adapter-owned              |
+| `StatusRegion` | `api.status_region_attrs()`                                           | status wrapper visibility helpers if needed                             | none                                                                    | core live-region attrs win; consumer content cannot replace the region node                                                                                                              | always adapter-owned              |
 | form children  | none directly                                                         | none                                                                    | consumer field/tree content                                             | consumer children live inside the form root and consume context as needed                                                                                                                | descendants remain consumer-owned |
 
 - Consumer overrides must not remove `novalidate`, busy semantics, or required live-region attrs when the core contract requires them.
 - Form root event handlers are composed around normalized submit/reset handling; consumer handlers may observe normalized state but must not re-enable blocked submission.
+- `StatusRegion` is an adapter-owned structural node, not a public child component; user-facing status text flows through `status_message`.
 
 ## 6. Composition / Context Contract
 

@@ -61,6 +61,12 @@ fn form_renders_root_and_status_region() {
     ] {
         assert!(html.contains(fragment), "missing {fragment}: {html}");
     }
+
+    assert_eq!(
+        html.matches(r#"data-ars-part="status-region""#).count(),
+        1,
+        "Form must render exactly one adapter-owned status region: {html}"
+    );
 }
 
 #[test]

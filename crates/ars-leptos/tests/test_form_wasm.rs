@@ -388,6 +388,97 @@ async fn form_default_aria_blocks_invalid_required_submit_callback() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn formnovalidate_submitter_skips_aria_constraint_validation() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent, log) = owner.with(|| {
+        let parent = container();
+
+        let log = Arc::new(Mutex::new(Vec::<String>::new()));
+        let submit_log = Arc::clone(&log);
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <Form
+                    id="wasm-formnovalidate-form"
+                    on_submit=Callback::new(move |()| {
+                        submit_log
+                            .lock()
+                            .expect("form log should not be poisoned")
+                            .push(String::from("submit"));
+                    })
+                >
+                    <input name="email" required />
+                    <button type="submit" formnovalidate=true>
+                        "Submit without validation"
+                    </button>
+                </Form>
+            }
+        });
+
+        (mount_handle, parent, log)
+    });
+
+    leptos::task::tick().await;
+
+    let form = parent
+        .query_selector("#wasm-formnovalidate-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    let button = parent
+        .query_selector("button[formnovalidate]")
+        .expect("query should succeed")
+        .expect("formnovalidate button should exist")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("formnovalidate button should be an HtmlElement");
+
+    let default_prevented = Arc::new(Mutex::new(false));
+    let observed_default_prevented = Arc::clone(&default_prevented);
+
+    let submit_observer =
+        Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            *observed_default_prevented
+                .lock()
+                .expect("submit observation should not be poisoned") = event.default_prevented();
+        });
+
+    form.add_event_listener_with_callback("submit", submit_observer.as_ref().unchecked_ref())
+        .expect("submit observer should attach");
+
+    button.click();
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        log.lock()
+            .expect("form log should not be poisoned")
+            .as_slice(),
+        &[String::from("submit")],
+        "formnovalidate submitter should bypass ARIA constraint blocking"
+    );
+    assert!(
+        *default_prevented
+            .lock()
+            .expect("submit observation should not be poisoned"),
+        "ARIA form should still prevent native navigation"
+    );
+    assert_eq!(
+        form.query_selector("[data-ars-part='status-region']")
+            .expect("query should succeed")
+            .expect("status region should exist")
+            .text_content()
+            .as_deref(),
+        Some("")
+    );
+
+    drop(submit_observer);
+    drop(mount_handle);
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
 async fn form_invalid_required_submit_updates_named_field_errors() {
     let owner = Owner::new();
 
@@ -484,7 +575,10 @@ async fn form_valid_submit_preserves_controlled_validation_errors() {
                 <Form
                     id="wasm-controlled-error-form"
                     validation_errors=BTreeMap::from([
-                        ("email".to_string(), vec![Error::server("Server still rejects this email.")]),
+                        (
+                            "email".to_string(),
+                            vec![Error::server("Server still rejects this email.")],
+                        ),
                     ])
                 >
                     <Field id="wasm-controlled-error-email-field" name="email" required=true>

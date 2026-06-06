@@ -9,7 +9,7 @@ use ars_dioxus::utility::{
     form::Form,
 };
 use ars_forms::validation::Error;
-use dioxus::prelude::*;
+use dioxus::{dioxus_core::AttributeValue, prelude::*};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
@@ -379,6 +379,155 @@ async fn form_default_aria_blocks_invalid_required_submit_callback() {
             .as_deref(),
         Some("Please correct the highlighted fields.")
     );
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn form_global_onsubmit_does_not_replace_adapter_handler() {
+    FORM_EVENTS.with(|events| events.borrow_mut().clear());
+
+    fn app() -> Element {
+        rsx! {
+            Form {
+                id: "wasm-global-submit-form",
+                attrs: vec![
+                    Attribute::new(
+                        "onsubmit",
+                        AttributeValue::listener(move |event: Event<FormData>| {
+                            event.prevent_default();
+                            FORM_EVENTS.with(|events| events.borrow_mut().push("raw-submit"));
+                        }),
+                        None,
+                        false,
+                    ),
+                ],
+                on_submit: move |()| {
+                    FORM_EVENTS.with(|events| events.borrow_mut().push("adapter-submit"));
+                },
+                input { name: "email", required: true }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let form = parent
+        .query_selector("#wasm-global-submit-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    let submit = cancelable_event("submit");
+
+    form.dispatch_event(&submit)
+        .expect("submit event should dispatch");
+
+    flush().await;
+
+    assert!(submit.default_prevented());
+    FORM_EVENTS.with(|events| {
+        assert!(
+            events.borrow().is_empty(),
+            "raw global onsubmit must not replace the adapter's validation handler"
+        );
+    });
+    assert_eq!(
+        form.query_selector("[data-ars-part='status-region']")
+            .expect("query should succeed")
+            .expect("status region should exist")
+            .text_content()
+            .as_deref(),
+        Some("Please correct the highlighted fields.")
+    );
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn formnovalidate_submitter_skips_aria_constraint_validation() {
+    FORM_EVENTS.with(|events| events.borrow_mut().clear());
+
+    fn app() -> Element {
+        rsx! {
+            Form {
+                id: "wasm-formnovalidate-form",
+                on_submit: move |()| {
+                    FORM_EVENTS.with(|events| events.borrow_mut().push("submit"));
+                },
+                input { name: "email", required: true }
+                button { r#type: "submit", formnovalidate: true, "Submit without validation" }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let form = parent
+        .query_selector("#wasm-formnovalidate-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    let default_prevented = std::rc::Rc::new(std::cell::Cell::new(false));
+    let observed_default_prevented = std::rc::Rc::clone(&default_prevented);
+    let submit_observer = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(
+        move |event: web_sys::Event| {
+            observed_default_prevented.set(event.default_prevented());
+        },
+    );
+
+    form.add_event_listener_with_callback("submit", submit_observer.as_ref().unchecked_ref())
+        .expect("submit observer should attach");
+
+    let button = parent
+        .query_selector("button[formnovalidate]")
+        .expect("query should succeed")
+        .expect("formnovalidate button should exist")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("formnovalidate button should be an HtmlElement");
+
+    button.click();
+
+    flush().await;
+
+    FORM_EVENTS.with(|events| {
+        assert_eq!(
+            events.borrow().as_slice(),
+            &["submit"],
+            "formnovalidate submitter should bypass ARIA constraint blocking"
+        );
+    });
+    assert!(
+        default_prevented.get(),
+        "ARIA form should still prevent native navigation"
+    );
+    assert_eq!(
+        form.query_selector("[data-ars-part='status-region']")
+            .expect("query should succeed")
+            .expect("status region should exist")
+            .text_content()
+            .as_deref(),
+        Some("")
+    );
+
+    drop(submit_observer);
 
     parent.remove();
 }

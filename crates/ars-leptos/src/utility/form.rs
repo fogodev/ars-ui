@@ -23,10 +23,6 @@ pub(crate) struct FormContext {
     pub(crate) machine: crate::UseMachineReturn<form::Machine>,
 }
 
-fn form_context() -> FormContext {
-    use_context::<FormContext>().expect("Form subcomponents must be rendered inside <Form/>")
-}
-
 /// Leptos Form root component.
 #[component]
 pub fn Form<T: 'static>(
@@ -108,13 +104,14 @@ where
                 {..attrs}
                 node_ref=form_ref
                 on:submit:capture=move |event| {
+                    let skip_validation = submitter_skips_validation(&event);
                     if validation_behavior.get_untracked() == ValidationBehavior::Aria
                         || on_submit.is_some()
                     {
                         event.prevent_default();
                     }
                     if validation_behavior.get_untracked() == ValidationBehavior::Aria
-                        && !form_is_valid(form_ref)
+                        && !skip_validation && !form_is_valid(form_ref)
                     {
                         let (messages, locale) = form_messages.get_untracked();
                         let error_count = invalid_control_count(form_ref).max(1);
@@ -123,13 +120,7 @@ where
                             &mut errors,
                             invalid_control_errors(form_ref, &messages, &locale),
                         );
-                        machine
-                            .send
-                            .run(
-                                form::Event::SetValidationErrors(
-                                    errors,
-                                ),
-                            );
+                        machine.send.run(form::Event::SetValidationErrors(errors));
                         machine
                             .send
                             .run(
@@ -142,7 +133,9 @@ where
                     if validation_behavior.get_untracked() == ValidationBehavior::Aria {
                         machine
                             .send
-                            .run(form::Event::SetValidationErrors(validation_errors.get_untracked()));
+                            .run(
+                                form::Event::SetValidationErrors(validation_errors.get_untracked()),
+                            );
                     }
                     machine.send.run(form::Event::Submit);
                     callbacks::call(on_submit.as_ref());
@@ -214,20 +207,6 @@ fn add_dynamic_root_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<
         );
 }
 
-/// Leptos Form status live-region part.
-#[component]
-pub fn StatusRegion<T>(
-    /// Status region content.
-    children: TypedChildren<T>,
-) -> impl IntoView
-where
-    View<T>: IntoView,
-{
-    let machine = form_context().machine;
-
-    status_region(machine, Some(children.into_inner()().into_any()))
-}
-
 fn status_region(
     machine: crate::UseMachineReturn<form::Machine>,
     children: Option<AnyView>,
@@ -238,6 +217,20 @@ fn status_region(
         machine.with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.status_region_attrs()));
 
     view! { <div {..attrs}>{children} {status_message}</div> }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn submitter_skips_validation(event: &web_sys::SubmitEvent) -> bool {
+    event
+        .submitter()
+        .and_then(|submitter| submitter.dyn_into::<web_sys::Element>().ok())
+        .is_some_and(|submitter| submitter.has_attribute("formnovalidate"))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const fn submitter_skips_validation<T>(event: &T) -> bool {
+    let _ = event;
+    false
 }
 
 #[expect(
