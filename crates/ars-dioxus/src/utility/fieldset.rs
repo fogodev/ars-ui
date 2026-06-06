@@ -79,8 +79,7 @@ pub fn Fieldset(props: FieldsetProps) -> Element {
 
     let machine = use_machine::<fieldset::Machine>(core_props);
 
-    let inherited_disabled =
-        machine.derive(|api| api.root_attrs().contains(&HtmlAttr::Disabled));
+    let inherited_disabled = machine.derive(|api| api.root_attrs().contains(&HtmlAttr::Disabled));
     let inherited_invalid = machine.derive(|api| api.is_invalid());
     let inherited_readonly = machine.derive(|api| api.is_readonly());
 
@@ -138,8 +137,7 @@ pub fn Description(props: DescriptionProps) -> Element {
         machine.send.call(fieldset::Event::SetHasDescription(false));
     });
 
-    let attrs = machine
-        .derive(|api| attr_map_to_dioxus_inline_attrs(api.description_attrs()))();
+    let attrs = machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.description_attrs()))();
 
     rsx! {
         div { ..attrs,{props.children} }

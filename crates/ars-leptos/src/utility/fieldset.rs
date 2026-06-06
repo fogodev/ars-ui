@@ -126,14 +126,10 @@ where
 {
     let machine = fieldset_context().machine;
 
-    machine
-        .send
-        .run(fieldset::Event::SetHasDescription(true));
+    machine.send.run(fieldset::Event::SetHasDescription(true));
 
     on_cleanup(move || {
-        machine
-            .send
-            .run(fieldset::Event::SetHasDescription(false));
+        machine.send.run(fieldset::Event::SetHasDescription(false));
     });
 
     let attrs = fieldset_context()

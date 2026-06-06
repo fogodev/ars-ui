@@ -147,9 +147,15 @@ async fn fieldset_state_reaches_descendant_field_input_attrs() {
         .expect("grouped field input should exist");
 
     assert_eq!(input.get_attribute("disabled").as_deref(), Some(""));
-    assert_eq!(input.get_attribute("aria-disabled").as_deref(), Some("true"));
+    assert_eq!(
+        input.get_attribute("aria-disabled").as_deref(),
+        Some("true")
+    );
     assert_eq!(input.get_attribute("readonly").as_deref(), Some(""));
-    assert_eq!(input.get_attribute("aria-readonly").as_deref(), Some("true"));
+    assert_eq!(
+        input.get_attribute("aria-readonly").as_deref(),
+        Some("true")
+    );
     assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
 
     parent.remove();
