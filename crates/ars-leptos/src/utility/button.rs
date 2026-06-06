@@ -812,7 +812,13 @@ mod tests {
             Some("save-label".into()),
         );
 
-        assert_eq!(attrs.get(&HtmlAttr::Class), Some("app-button"));
+        assert_eq!(
+            attrs
+                .get_value(&HtmlAttr::Class)
+                .and_then(AttrValue::materialize_string)
+                .as_deref(),
+            Some("app-button")
+        );
         assert_eq!(
             attrs
                 .get_value(&HtmlAttr::Aria(AriaAttr::Label))
@@ -846,6 +852,12 @@ mod tests {
             );
         }
 
-        assert_eq!(attrs.get(&HtmlAttr::Class), Some("app-button"));
+        assert_eq!(
+            attrs
+                .get_value(&HtmlAttr::Class)
+                .and_then(AttrValue::materialize_string)
+                .as_deref(),
+            Some("app-button")
+        );
     }
 }
