@@ -26,13 +26,13 @@ fn field_renders_root_label_input_and_messages() {
                 errors: vec![Error::server("Email is required.")],
                 class: "account-field",
                 Label { "Email" }
+                Description { "Use your work email address." }
                 Input {
                     r#type: InputType::Email,
                     name: "email",
                     placeholder: "name@example.com",
                     class: "account-input",
                 }
-                Description { "Use your work email address." }
                 ErrorMessage { "Email is required." }
             }
         }
