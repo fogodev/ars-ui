@@ -27,6 +27,10 @@ fn fieldset_context() -> FieldsetContext {
 
 /// Leptos Fieldset root component.
 #[component]
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "fieldset::Api method items are not lifetime-general enough for derive()."
+)]
 pub fn Fieldset<T: 'static>(
     /// Optional component instance ID.
     #[prop(optional, into)]
@@ -76,7 +80,7 @@ where
 
     let inherited = InheritedFieldsetContext {
         disabled,
-        invalid,
+        invalid: machine.derive(|api| api.is_invalid()).into(),
         readonly,
     };
 

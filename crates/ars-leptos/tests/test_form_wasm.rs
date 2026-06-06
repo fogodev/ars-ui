@@ -4,7 +4,10 @@
 
 use std::sync::{Arc, Mutex};
 
-use ars_leptos::utility::form::Form;
+use ars_leptos::utility::{
+    field::{ErrorMessage, Field, Input, Label},
+    form::Form,
+};
 use leptos::{mount::mount_to, prelude::*};
 use wasm_bindgen::{JsCast, closure::Closure};
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -376,6 +379,67 @@ async fn form_default_aria_blocks_invalid_required_submit_callback() {
     );
 
     drop(mount_handle);
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn form_invalid_required_submit_updates_named_field_errors() {
+    let owner = Owner::new();
+
+    let (_mount_handle, parent) = owner.with(|| {
+        let parent = container();
+
+        let mount_handle = mount_to(parent.clone(), || {
+            view! {
+                <Form id="wasm-invalid-field-form">
+                    <Field id="wasm-invalid-email-field" name="email" required=true>
+                        <Label>"Email"</Label>
+                        <Input name="email" />
+                        <ErrorMessage>"Email is required."</ErrorMessage>
+                    </Field>
+                </Form>
+            }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+
+    let form = parent
+        .query_selector("#wasm-invalid-field-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    let input = parent
+        .query_selector("#wasm-invalid-email-field-input")
+        .expect("query should succeed")
+        .expect("field input should exist");
+
+    assert_eq!(input.get_attribute("aria-invalid"), None);
+
+    let submit = cancelable_event("submit");
+
+    form.dispatch_event(&submit)
+        .expect("submit event should dispatch");
+
+    leptos::task::tick().await;
+
+    assert!(submit.default_prevented());
+    assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
+    assert_eq!(
+        input.get_attribute("aria-errormessage").as_deref(),
+        Some("wasm-invalid-email-field-error-message")
+    );
+    assert_eq!(
+        parent
+            .query_selector("#wasm-invalid-email-field-error-message")
+            .expect("query should succeed")
+            .expect("field error should exist")
+            .get_attribute("hidden"),
+        None
+    );
 
     parent.remove();
 }

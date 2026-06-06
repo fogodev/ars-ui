@@ -271,6 +271,61 @@ async fn form_validation_errors_update_existing_descendant_field() {
 }
 
 #[wasm_bindgen_test(async)]
+#[expect(
+    unused_qualifications,
+    reason = "Dioxus rsx! reports the event handler closure as an unused qualification on wasm."
+)]
+async fn form_root_action_and_role_follow_prop_rerenders() {
+    fn app() -> Element {
+        let mut alternate = use_signal(|| false);
+        let action = if alternate() { "/second" } else { "/first" };
+        let role = if alternate() { "search" } else { "form" };
+
+        rsx! {
+            Form { id: "wasm-rerender-form", action, role,
+                input { name: "email" }
+                button { r#type: "button", onclick: move |_| alternate.set(true), "Change" }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let form = parent
+        .query_selector("#wasm-rerender-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    assert_eq!(form.get_attribute("action").as_deref(), Some("/first"));
+    assert_eq!(form.get_attribute("role").as_deref(), Some("form"));
+
+    let button = parent
+        .query_selector("button[type='button']")
+        .expect("query should succeed")
+        .expect("change button should exist")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("change button should be an HtmlElement");
+
+    button.click();
+
+    flush().await;
+
+    assert_eq!(form.get_attribute("action").as_deref(), Some("/second"));
+    assert_eq!(form.get_attribute("role").as_deref(), Some("search"));
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
 async fn form_default_aria_blocks_invalid_required_submit_callback() {
     FORM_EVENTS.with(|events| events.borrow_mut().clear());
 
@@ -323,6 +378,71 @@ async fn form_default_aria_blocks_invalid_required_submit_callback() {
             .text_content()
             .as_deref(),
         Some("Please correct the highlighted fields.")
+    );
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn form_invalid_required_submit_updates_named_field_errors() {
+    fn app() -> Element {
+        rsx! {
+            Form { id: "wasm-invalid-field-form",
+                Field {
+                    id: "wasm-invalid-email-field",
+                    name: "email",
+                    required: true,
+                    Label { "Email" }
+                    Input { name: "email" }
+                    ErrorMessage { "Email is required." }
+                }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let form = parent
+        .query_selector("#wasm-invalid-field-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    let input = parent
+        .query_selector("#wasm-invalid-email-field-input")
+        .expect("query should succeed")
+        .expect("field input should exist");
+
+    assert_eq!(input.get_attribute("aria-invalid"), None);
+
+    let submit = cancelable_event("submit");
+
+    form.dispatch_event(&submit)
+        .expect("submit event should dispatch");
+
+    flush().await;
+
+    assert!(submit.default_prevented());
+    assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
+    assert_eq!(
+        input.get_attribute("aria-errormessage").as_deref(),
+        Some("wasm-invalid-email-field-error-message")
+    );
+    assert_eq!(
+        parent
+            .query_selector("#wasm-invalid-email-field-error-message")
+            .expect("query should succeed")
+            .expect("field error should exist")
+            .get_attribute("hidden"),
+        None
     );
 
     parent.remove();

@@ -7,6 +7,8 @@ pub use ars_components::utility::form::{Part, Props, ValidationBehavior};
 use ars_core::{AriaAttr, AttrMap, AttrValue, HtmlAttr};
 use ars_forms::validation::Error;
 use leptos::{children::TypedChildren, context::Provider, html, prelude::*};
+#[cfg(target_arch = "wasm32")]
+use leptos::{wasm_bindgen::JsCast as _, web_sys};
 
 use crate::{
     attr_map_to_leptos_inline_attrs, callbacks, use_id, use_machine_with_reactive_props,
@@ -108,6 +110,13 @@ where
                     {
                         let (messages, locale) = form_messages.get_untracked();
                         let error_count = invalid_control_count(form_ref).max(1);
+                        machine
+                            .send
+                            .run(
+                                form::Event::SetValidationErrors(
+                                    invalid_control_errors(form_ref, &messages, &locale),
+                                ),
+                            );
                         machine
                             .send
                             .run(
@@ -235,4 +244,115 @@ fn invalid_control_count(form_ref: NodeRef<html::Form>) -> usize {
         let _ = form_ref;
         0
     }
+}
+
+#[expect(
+    clippy::missing_const_for_fn,
+    reason = "The wasm implementation reads live form controls through querySelectorAll."
+)]
+fn invalid_control_errors(
+    form_ref: NodeRef<html::Form>,
+    messages: &ars_forms::form::Messages,
+    locale: &ars_i18n::Locale,
+) -> BTreeMap<String, Vec<Error>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut errors = BTreeMap::new();
+
+        if let Some(form) = form_ref.get()
+            && let Ok(nodes) = form.query_selector_all(":invalid")
+        {
+            for index in 0..nodes.length() {
+                let Some(node) = nodes.item(index) else {
+                    continue;
+                };
+
+                let Ok(element) = node.dyn_into::<web_sys::Element>() else {
+                    continue;
+                };
+
+                let Some(name) = element
+                    .get_attribute("name")
+                    .filter(|name| !name.is_empty())
+                else {
+                    continue;
+                };
+
+                errors
+                    .entry(name)
+                    .or_insert_with(Vec::new)
+                    .push(native_validation_error(&element, messages, locale));
+            }
+        }
+
+        errors
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = form_ref;
+        let _ = messages;
+        let _ = locale;
+        BTreeMap::new()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_validation_error(
+    element: &web_sys::Element,
+    messages: &ars_forms::form::Messages,
+    locale: &ars_i18n::Locale,
+) -> Error {
+    if element.has_attribute("required") {
+        return Error::required(messages, locale);
+    }
+
+    if let Some(input_type) = element.get_attribute("type") {
+        match input_type.as_str() {
+            "email" => return Error::email(messages, locale),
+            "url" => return Error::url(messages, locale),
+            _ => {}
+        }
+    }
+
+    if let Some(pattern) = element.get_attribute("pattern") {
+        return Error::pattern(pattern, messages, locale);
+    }
+
+    if let Some(min_length) = element
+        .get_attribute("minlength")
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        return Error::min_length(min_length, messages, locale);
+    }
+
+    if let Some(max_length) = element
+        .get_attribute("maxlength")
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        return Error::max_length(max_length, messages, locale);
+    }
+
+    if let Some(min) = element
+        .get_attribute("min")
+        .and_then(|value| value.parse::<f64>().ok())
+    {
+        return Error::min(min, messages, locale);
+    }
+
+    if let Some(max) = element
+        .get_attribute("max")
+        .and_then(|value| value.parse::<f64>().ok())
+    {
+        return Error::max(max, messages, locale);
+    }
+
+    if let Some(step) = element
+        .get_attribute("step")
+        .and_then(|value| value.parse::<f64>().ok())
+    {
+        return Error::step(step, messages, locale);
+    }
+
+    Error::custom("native", (messages.pattern_error)(locale))
 }

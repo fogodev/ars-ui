@@ -2,6 +2,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use ars_forms::validation::Error;
 use ars_leptos::utility::{
     field::{Field, Input, Label},
     fieldset::{Content, Description, ErrorMessage, Fieldset, Legend},
@@ -156,6 +157,45 @@ async fn fieldset_state_reaches_descendant_field_input_attrs() {
         input.get_attribute("aria-readonly").as_deref(),
         Some("true")
     );
+    assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn fieldset_errors_reach_descendant_field_invalid_attrs() {
+    let owner = Owner::new();
+
+    let (_mount_handle, parent) = owner.with(|| {
+        let parent = container();
+
+        let mount_handle = mount_to(parent.clone(), || {
+            view! {
+                <Fieldset
+                    id="wasm-error-group"
+                    errors=vec![Error::server("Account details are incomplete.")]
+                >
+                    <Legend>"Account"</Legend>
+                    <Content>
+                        <Field id="wasm-error-grouped-email">
+                            <Label>"Email"</Label>
+                            <Input name="email" />
+                        </Field>
+                    </Content>
+                </Fieldset>
+            }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+
+    let input = parent
+        .query_selector("#wasm-error-grouped-email-input")
+        .expect("query should succeed")
+        .expect("grouped field input should exist");
+
     assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
 
     parent.remove();

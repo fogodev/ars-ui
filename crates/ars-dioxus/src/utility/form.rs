@@ -97,8 +97,11 @@ pub fn Form(props: FormProps) -> Element {
 
     use_context_provider(|| FormContext { machine });
 
-    let component_attrs = machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.root_attrs()));
-    let attrs = merge_dioxus_attrs(props.attrs, component_attrs());
+    let _ = &*machine.state.read();
+    let _ = &*machine.context_version.read();
+    let component_attrs =
+        machine.with_api_snapshot(|api| attr_map_to_dioxus_inline_attrs(api.root_attrs()));
+    let attrs = merge_dioxus_attrs(props.attrs, component_attrs);
     let status_message =
         machine.derive(|api| api.status_message().map(str::to_owned).unwrap_or_default())();
     let status_attrs =
@@ -117,7 +120,15 @@ pub fn Form(props: FormProps) -> Element {
                 if validation_behavior == ValidationBehavior::Aria
                     && !form_is_valid(&event, form_ref())
                 {
-                    let error_count = invalid_control_count(&event, form_ref()).max(1);
+                    let current_form_ref = form_ref();
+                    let native_errors = invalid_control_errors(
+                        &event,
+                        current_form_ref.clone(),
+                        &form_messages,
+                        &form_locale,
+                    );
+                    let error_count = invalid_control_count(&event, current_form_ref).max(1);
+                    machine.send.call(form::Event::SetValidationErrors(native_errors));
                     machine
                         .send
                         .call(
@@ -199,6 +210,115 @@ fn form_is_valid(event: &Event<FormData>, form_ref: Option<Rc<MountedData>>) -> 
         drop(form_ref);
         true
     }
+}
+
+fn invalid_control_errors(
+    event: &Event<FormData>,
+    form_ref: Option<Rc<MountedData>>,
+    messages: &ars_forms::form::Messages,
+    locale: &ars_i18n::Locale,
+) -> BTreeMap<String, Vec<Error>> {
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    {
+        let mut errors = BTreeMap::new();
+
+        if let Some(form) = form_element(event, form_ref)
+            && let Ok(nodes) = form.query_selector_all(":invalid")
+        {
+            for index in 0..nodes.length() {
+                let Some(node) = nodes.item(index) else {
+                    continue;
+                };
+
+                let Ok(element) = node.dyn_into::<web_sys::Element>() else {
+                    continue;
+                };
+
+                let Some(name) = element
+                    .get_attribute("name")
+                    .filter(|name| !name.is_empty())
+                else {
+                    continue;
+                };
+
+                errors
+                    .entry(name)
+                    .or_insert_with(Vec::new)
+                    .push(native_validation_error(&element, messages, locale));
+            }
+        }
+
+        errors
+    }
+
+    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+    {
+        let _ = event;
+        drop(form_ref);
+        let _ = messages;
+        let _ = locale;
+        BTreeMap::new()
+    }
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn native_validation_error(
+    element: &web_sys::Element,
+    messages: &ars_forms::form::Messages,
+    locale: &ars_i18n::Locale,
+) -> Error {
+    if element.has_attribute("required") {
+        return Error::required(messages, locale);
+    }
+
+    if let Some(input_type) = element.get_attribute("type") {
+        match input_type.as_str() {
+            "email" => return Error::email(messages, locale),
+            "url" => return Error::url(messages, locale),
+            _ => {}
+        }
+    }
+
+    if let Some(pattern) = element.get_attribute("pattern") {
+        return Error::pattern(pattern, messages, locale);
+    }
+
+    if let Some(min_length) = element
+        .get_attribute("minlength")
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        return Error::min_length(min_length, messages, locale);
+    }
+
+    if let Some(max_length) = element
+        .get_attribute("maxlength")
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        return Error::max_length(max_length, messages, locale);
+    }
+
+    if let Some(min) = element
+        .get_attribute("min")
+        .and_then(|value| value.parse::<f64>().ok())
+    {
+        return Error::min(min, messages, locale);
+    }
+
+    if let Some(max) = element
+        .get_attribute("max")
+        .and_then(|value| value.parse::<f64>().ok())
+    {
+        return Error::max(max, messages, locale);
+    }
+
+    if let Some(step) = element
+        .get_attribute("step")
+        .and_then(|value| value.parse::<f64>().ok())
+    {
+        return Error::step(step, messages, locale);
+    }
+
+    Error::custom("native", (messages.pattern_error)(locale))
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
