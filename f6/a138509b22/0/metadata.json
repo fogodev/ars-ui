@@ -1,0 +1,66 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "f6a138509b22",
+  "session_id": "019e93b2-e997-7881-b092-7b1fb63bf491",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-06T17:22:19.482523Z",
+  "branch": "codex/issue-332-423-field-form-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "84698f9c70a9",
+  "checkpoint_transcript_start": 12418,
+  "transcript_lines_at_start": 12418,
+  "token_usage": {
+    "input_tokens": 121690,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 3958272,
+    "output_tokens": 4694,
+    "api_call_count": 24
+  },
+  "session_metrics": {
+    "turn_count": 33
+  },
+  "summary": {
+    "intent": "Get PR #724 merged by fixing CI failures and passing Codex review on the fogodev/ars-ui repository.",
+    "outcome": "Fixed the Adapter Parity CI failure by adding a Dioxus Field wasm test mirroring an existing Leptos test; all local gates (format, clippy, parity) passed and the fix was committed and pushed.",
+    "learnings": {
+      "repo": [
+        "The repo has an 'adapter-parity' xtask gate that enforces the test count delta between Leptos and Dioxus adapters stays within a threshold — adding Leptos tests without matching Dioxus tests will break CI.",
+        "Dioxus renders boolean HTML attributes as `hidden=\"true\"` rather than the empty-string encoding Leptos uses; assertions must use a framework-appropriate boolean-attribute helper.",
+        "The repo uses a pre-commit formatting hook that must complete before pushing — bypassing it with --no-verify is not acceptable practice here.",
+        "Codex review is triggered via `@codex review` PR comment and signals active review with an 'eyes' reaction on the issue."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-dioxus/tests/test_field_wasm.rs",
+          "line": 1,
+          "end_line": 260,
+          "finding": "Dioxus Field wasm tests use button-driven signal updates to keep behaviors browser-observable; new parity tests must follow this style."
+        },
+        {
+          "path": "crates/ars-dioxus/src/utility/field.rs",
+          "line": 140,
+          "end_line": 290,
+          "finding": "Dioxus Field component API uses a `value:` prop pattern; reviewed to understand how to wire a reactive error-visibility test."
+        }
+      ],
+      "workflow": [
+        "After a formatting commit changes the branch head, any in-flight Codex review must be re-triggered since it was started against the previous commit.",
+        "CI failures should be addressed immediately rather than waiting for cascading checks to complete — pulling the failing job log early avoids wasted polling time.",
+        "Running the focused wasm test (`--test test_field_wasm`) before the broader parity gate gives faster feedback on new test correctness."
+      ]
+    },
+    "friction": [
+      "Formatting commit was required mid-session, which changed the branch head and invalidated the already-triggered Codex review, requiring a second trigger.",
+      "Dioxus boolean attribute rendering difference (`hidden=\"true\"` vs empty string) caused the new parity test to fail on first run, requiring an assertion fix.",
+      "Polling CI/Codex required manual sleep intervals with no event-driven notification, making the wait loop tedious."
+    ],
+    "open_items": [
+      "Codex review result not yet confirmed — the session ended while Codex still had the 'eyes' reaction, meaning the review outcome and any new threads are unresolved.",
+      "Clippy was still pending in CI at the time the adapter parity failure was discovered — its final result after the parity fix was not confirmed.",
+      "The underlying reason Field accumulated more Leptos tests than Dioxus tests (the review-driven behaviors) suggests a broader parity gap that was only partially addressed by adding one test."
+    ]
+  }
+}
