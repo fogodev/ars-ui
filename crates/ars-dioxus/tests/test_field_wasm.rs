@@ -169,3 +169,106 @@ async fn field_browser_renders_relationship_attrs_and_input_callback() {
 
     parent.remove();
 }
+
+#[wasm_bindgen_test(async)]
+#[expect(
+    unused_qualifications,
+    reason = "Dioxus rsx! reports the event handler closure as an unused qualification on wasm."
+)]
+async fn field_reactive_errors_update_invalid_relationship() {
+    fn app() -> Element {
+        let mut email = use_signal(String::new);
+        let errors = if email().is_empty() {
+            vec![Error::server("Email is required.")]
+        } else {
+            Vec::new()
+        };
+        let invalid = !errors.is_empty();
+
+        rsx! {
+            Field {
+                id: "wasm-reactive-email-field",
+                required: true,
+                invalid,
+                errors,
+                Label { "Email" }
+                Description { "Use a reachable email." }
+                Input {
+                    r#type: InputType::Email,
+                    name: "email",
+                    value: email(),
+                    on_value_input: move |value: String| email.set(value),
+                }
+                ErrorMessage { "Email is required." }
+                button {
+                    r#type: "button",
+                    onclick: move |_| email.set(String::from("admin@email.com")),
+                    "Make valid"
+                }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let input = parent
+        .query_selector("#wasm-reactive-email-field-input")
+        .expect("query should succeed")
+        .expect("field input should exist");
+
+    assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
+    assert_eq!(
+        input.get_attribute("aria-errormessage").as_deref(),
+        Some("wasm-reactive-email-field-error-message")
+    );
+
+    let error_message = parent
+        .query_selector("#wasm-reactive-email-field-error-message")
+        .expect("query should succeed")
+        .expect("field error message should exist");
+
+    assert_eq!(
+        error_message.get_attribute("hidden"),
+        None,
+        "invalid email should reveal the field error message"
+    );
+
+    let button = parent
+        .query_selector("button[type='button']")
+        .expect("query should succeed")
+        .expect("valid button should exist")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("valid button should be an HtmlElement");
+
+    button.click();
+
+    flush().await;
+
+    assert_eq!(
+        input.get_attribute("aria-invalid"),
+        None,
+        "valid email should clear stale invalid state"
+    );
+    assert_eq!(
+        input.get_attribute("aria-errormessage"),
+        None,
+        "valid email should clear stale error relationship"
+    );
+    assert_eq!(
+        input.get_attribute("aria-describedby").as_deref(),
+        Some("wasm-reactive-email-field-description"),
+        "valid email should keep only the description relationship"
+    );
+    assert_bool_attr(&error_message, "hidden");
+
+    parent.remove();
+}
