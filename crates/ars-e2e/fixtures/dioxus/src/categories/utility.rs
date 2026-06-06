@@ -532,19 +532,19 @@ pub(crate) fn UtilityPanel(locale_key: String) -> Element {
                                 }
                                 field::ErrorMessage { {t(UtilityText::EmailIncompleteDomain)} }
                             }
-                            Field {
-                                id: "dioxus-fixture-email-valid-field",
-                                name: "email-valid",
-                                field::Label { {t(UtilityText::EmailLabel)} }
-                                field::Description { {t(UtilityText::EmailDescription)} }
-                                field::Input {
-                                    r#type: field::InputType::Email,
-                                    name: "email-valid",
-                                    value: "admin@email.com",
-                                }
-                            }
                         }
                         fieldset::ErrorMessage { {t(UtilityText::AccountIncomplete)} }
+                    }
+                    Field {
+                        id: "dioxus-fixture-email-valid-field",
+                        name: "email-valid",
+                        field::Label { {t(UtilityText::EmailLabel)} }
+                        field::Description { {t(UtilityText::EmailDescription)} }
+                        field::Input {
+                            r#type: field::InputType::Email,
+                            name: "email-valid",
+                            value: "admin@email.com",
+                        }
                     }
                 }
             }

@@ -540,22 +540,22 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                                     {t(UtilityText::EmailIncompleteDomain)}
                                 </field::ErrorMessage>
                             </Field>
-                            <Field id="leptos-fixture-email-valid-field" name="email-valid">
-                                <field::Label>{t(UtilityText::EmailLabel)}</field::Label>
-                                <field::Description>
-                                    {t(UtilityText::EmailDescription)}
-                                </field::Description>
-                                <field::Input
-                                    r#type=field::InputType::Email
-                                    name="email-valid"
-                                    value=valid_email_value
-                                />
-                            </Field>
                         </fieldset::Content>
                         <fieldset::ErrorMessage>
                             {t(UtilityText::AccountIncomplete)}
                         </fieldset::ErrorMessage>
                     </Fieldset>
+                    <Field id="leptos-fixture-email-valid-field" name="email-valid">
+                        <field::Label>{t(UtilityText::EmailLabel)}</field::Label>
+                        <field::Description>
+                            {t(UtilityText::EmailDescription)}
+                        </field::Description>
+                        <field::Input
+                            r#type=field::InputType::Email
+                            name="email-valid"
+                            value=valid_email_value
+                        />
+                    </Field>
                 </Form>
             </section>
             <section class="showcase-panel wide" aria-labelledby="dismissable">
