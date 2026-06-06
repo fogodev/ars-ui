@@ -1,0 +1,64 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8320ac8da233",
+  "session_id": "019e93b2-e997-7881-b092-7b1fb63bf491",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-06T19:55:20.74951Z",
+  "branch": "codex/issue-332-423-field-form-adapters",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "f236af13dbf1",
+  "token_usage": {
+    "input_tokens": 13761074,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 323421184,
+    "output_tokens": 703625,
+    "api_call_count": 2184
+  },
+  "session_metrics": {
+    "turn_count": 35
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 285,
+      "user_lines_removed": 40,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".github/workflows/ci.yml": 2,
+        "crates/ars-dioxus/Cargo.toml": 1,
+        "crates/ars-dioxus/src/utility/form.rs": 49,
+        "crates/ars-dioxus/tests/form.rs": 1,
+        "crates/ars-dioxus/tests/test_form_wasm.rs": 59,
+        "crates/ars-leptos/src/utility/field.rs": 44,
+        "crates/ars-leptos/src/utility/fieldset.rs": 21,
+        "crates/ars-leptos/src/utility/form.rs": 41,
+        "crates/ars-leptos/tests/field.rs": 1,
+        "crates/ars-leptos/tests/form.rs": 1,
+        "crates/ars-leptos/tests/test_form_wasm.rs": 65
+      },
+      "user_removed_per_file": {
+        ".github/workflows/ci.yml": 1,
+        "crates/ars-dioxus/src/utility/form.rs": 4,
+        "crates/ars-dioxus/tests/form.rs": 2,
+        "crates/ars-dioxus/tests/test_form_wasm.rs": 4,
+        "crates/ars-e2e/fixtures/dioxus/src/categories/utility.rs": 1,
+        "crates/ars-e2e/fixtures/leptos/src/categories/utility.rs": 1,
+        "crates/ars-leptos/src/utility/field.rs": 3,
+        "crates/ars-leptos/src/utility/fieldset.rs": 9,
+        "crates/ars-leptos/src/utility/form.rs": 2,
+        "crates/ars-leptos/tests/form.rs": 2,
+        "crates/ars-leptos/tests/test_form_wasm.rs": 5,
+        "examples/widgets-dioxus-css/src/categories/utility.rs": 1,
+        "examples/widgets-dioxus-tailwind/src/categories/utility.rs": 1,
+        "examples/widgets-dioxus/src/categories/utility.rs": 1,
+        "examples/widgets-leptos-css/src/categories/utility.rs": 1,
+        "examples/widgets-leptos-tailwind/src/categories/utility.rs": 1,
+        "examples/widgets-leptos/src/categories/utility.rs": 1
+      }
+    }
+  ]
+}
