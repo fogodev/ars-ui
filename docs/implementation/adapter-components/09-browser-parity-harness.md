@@ -3,6 +3,12 @@
 This workflow turns counterpart comparison into repeatable evidence. Use it for
 every visible adapter component before claiming outcome parity.
 
+The first pass against the reference implementation happens before coding and
+is recorded in the implementation sketch described in
+[10-reference-exploration-sketch.md](10-reference-exploration-sketch.md). The
+later local-vs-reference pass updates the same sketch and the PR body with
+local evidence.
+
 ## Counterpart Sessions
 
 Use `playwright-cli` with separate sessions for the reference page and local
@@ -27,6 +33,7 @@ For each supported counterpart axis:
 2. Drive the same local state.
 3. Compare behavior, visible feedback, and accessibility state.
 4. Record the artifact path or harness test that proves the comparison.
+5. Update the sketch matrix row with the proof and final status.
 
 Use snapshots after page load and after every meaningful state transition:
 
@@ -114,13 +121,17 @@ uncaught exceptions are user-visible regressions.
 
 ## Outcome Matrix
 
-Record the result in the issue note, plan, PR draft, or PR body:
+Record the result in the implementation sketch and PR body:
 
-| Axis    | Reference evidence                    | Local evidence                    | Tests/E2E                      | Status    | Notes                                 |
-| ------- | ------------------------------------- | --------------------------------- | ------------------------------ | --------- | ------------------------------------- |
-| Basic   | `.playwright-cli/reference-basic.yml` | `.playwright-cli/local-basic.yml` | `basic_pointer_and_keyboard`   | Supported | Matches outcome, not API shape        |
-| Invalid | `/tmp/reference-invalid.png`          | `/tmp/local-invalid.png`          | `invalid_visual_and_axe_clean` | Supported | Custom error UI replaces native popup |
-| Loading | NotApplicable                         | NotApplicable                     | NotApplicable                  | N/A       | Component has no loading state        |
+| Reference outcome                  | Reference evidence                    | Local evidence                    | Tests/E2E                      | I18n proof                       | A11y proof                    | Status                  | Notes                                 |
+| ---------------------------------- | ------------------------------------- | --------------------------------- | ------------------------------ | -------------------------------- | ----------------------------- | ----------------------- | ------------------------------------- |
+| Basic labelled control             | `.playwright-cli/reference-basic.yml` | `.playwright-cli/local-basic.yml` | `basic_pointer_and_keyboard`   | `pt-BR local snapshot`           | `axe basic`                   | ReferenceOutcomeMatched | Matches outcome, not API shape        |
+| Invalid message shown after submit | `/tmp/reference-invalid.png`          | `/tmp/local-invalid.png`          | `invalid_visual_and_axe_clean` | browser-native localized message | `aria-errormessage` assertion | ReferenceOutcomeMatched | Custom error UI replaces native popup |
+| Loading state                      | NotApplicable                         | NotApplicable                     | NotApplicable                  | NotApplicable                    | NotApplicable                 | OutOfScopeWithReason    | Component has no loading state        |
 
-Use `Supported`, `IntentionallyDifferent`, or `NotApplicable`. Do not leave a
-counterpart feature unclassified.
+Use the final statuses from
+[12-parity-audit-loop.md](12-parity-audit-loop.md):
+`ReferenceOutcomeMatched`, `IntentionallyDifferent`, or
+`OutOfScopeWithReason`. Do not leave a counterpart feature unclassified, and do
+not use `outcome-complete` while any row is `Unknown`, `Unverified`,
+`ContractGap`, `AdapterApiGap`, or `WidgetOnlyWorkaround`.

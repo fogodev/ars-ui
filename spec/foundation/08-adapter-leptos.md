@@ -314,12 +314,11 @@ where
         p
     };
 
-    // Resolve environment values from ArsProvider context.
-    // These are snapshot reads — Leptos components run once, so each component
-    // gets the locale/intl_backend/messages at mount time.
-    let locale = resolve_locale(None);
+    // Resolve environment values and messages from ArsProvider context.
+    // These are snapshot reads for machine initialization; messages are grouped
+    // with the locale that selected them.
+    let (messages, locale) = use_messages_and_locale::<M::Messages>(None, None).get_untracked();
     let intl_backend = use_intl_backend();
-    let messages = use_messages::<M::Messages>(None, Some(&locale));
     let env = Env::new(locale, intl_backend)
         .with_render_mode(current_render_mode(hydrated_state.is_some()));
 
@@ -1420,7 +1419,7 @@ mod checkbox {
     /// both state and context changes.
     #[component]
     pub fn Control(
-        #[prop(optional)] class: Option<Signal<String>>,
+        #[prop(optional, into)] class: Option<TextProp>,
         children: Children,
     ) -> impl IntoView {
         // Convention: use_context().expect() over expect_context() for custom panic messages.
@@ -2441,30 +2440,55 @@ fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
         .cloned()
         .unwrap_or_else(|| use_locale().get())
 }
+
+fn resolve_locale_untracked(adapter_props_locale: Option<&Locale>) -> Locale {
+    adapter_props_locale
+        .cloned()
+        .unwrap_or_else(|| use_locale().get_untracked())
+}
 ```
 
-### 13.4 use_messages() — Adapter Message Resolution
+Use `resolve_locale()` when the caller intentionally wants to subscribe to
+provider locale changes. Use `resolve_locale_untracked()` only for setup-time
+snapshots such as `Machine::init` environments and one-shot message bundle
+resolution.
+
+### 13.4 use_messages_and_locale() — Adapter Message Resolution
 
 ```rust
 use ars_core::resolve_messages as core_resolve_messages;
 
-/// Resolve per-component i18n messages from adapter props, ArsProvider context,
-/// or built-in defaults.
+/// Resolve per-component i18n messages and the locale used to select them from
+/// adapter props, ArsProvider context, or built-in defaults.
 ///
 /// This adapter helper owns the hook-based part of message resolution:
 /// - `adapter_props_messages` wins when present
 /// - otherwise, locale comes from `resolve_locale()`
 /// - registries come from `ArsProvider` context when available
 /// - final fallback is `M::default()` via `ars_core::resolve_messages()`
-pub fn use_messages<M: ComponentMessages + Send + Sync + 'static>(
-    adapter_props_messages: Option<&M>,
-    adapter_props_locale: Option<&Locale>,
-) -> M {
-    let locale = resolve_locale(adapter_props_locale);
+///
+/// Returning the messages with their resolved locale keeps component render
+/// paths from combining a message bundle selected for one locale with a
+/// separately-read locale from another render.
+pub fn use_messages_and_locale<M: ComponentMessages + Send + Sync + 'static>(
+    adapter_props_messages: Option<M>,
+    adapter_props_locale: Option<Locale>,
+) -> Signal<(M, Locale)> {
     let registries = current_ars_context()
         .map(|ctx| Arc::clone(&ctx.i18n_registries))
         .unwrap_or_else(|| Arc::new(I18nRegistries::new()));
-    core_resolve_messages(adapter_props_messages, registries.as_ref(), &locale)
+
+    Signal::derive(move || {
+        let locale = resolve_locale(adapter_props_locale.as_ref());
+        (
+            core_resolve_messages(
+                adapter_props_messages.as_ref(),
+                registries.as_ref(),
+                &locale,
+            ),
+            locale,
+        )
+    })
 }
 ```
 
@@ -2538,7 +2562,7 @@ where
 /// Resolve user-defined `Translate` text into a reactive string.
 ///
 /// Reads the current locale and ICU provider from `ArsProvider` context,
-/// then returns a `Signal<String>` that calls `msg.translate()`. The signal
+/// then returns a `Memo<String>` containing the translated text. The memo
 /// subscribes to both the locale signal and to the message signal when a
 /// reactive message is passed, so changing locale or message value updates
 /// only consumers of the translated string (fine-grained reactivity).
@@ -2549,15 +2573,15 @@ where
 /// and §7.5 for the `t()` function contract.
 #[inline]
 #[must_use]
-pub fn t<T>(msg: impl Into<Translatable<T>>) -> Signal<String>
+pub fn t<T>(msg: impl Into<Translatable<T>>) -> Memo<String>
 where
     T: Translate + Send + Sync + 'static,
 {
+    let msg = msg.into().into_signal();
     let locale = use_locale();
     let intl_backend = use_intl_backend();
-    let msg = msg.into().into_signal();
 
-    Signal::derive(move || msg.with(|msg| msg.translate(&locale.get(), &*intl_backend)))
+    Memo::new(move |_| msg.with(|msg| msg.translate(&locale.get(), intl_backend.as_ref())))
 }
 ```
 

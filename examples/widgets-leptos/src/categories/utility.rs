@@ -1,22 +1,6 @@
 use std::fmt::{self, Display};
 
-use ars_leptos::{
-    MessageFn,
-    prelude::{Orientation, Translate, t},
-    utility::{
-        button::{self, Button, ButtonAsChild},
-        client_only::ClientOnly,
-        dismissable,
-        error_boundary::Boundary,
-        heading::{self, Heading, HeadingLevelProvider, Section},
-        highlight::Highlight,
-        landmark::{self, Landmark},
-        separator::{Separator, SeparatorAsChild},
-        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
-        z_index_allocator::{Context as ZIndexContext, ZIndexAllocatorProvider},
-    },
-};
-use leptos::prelude::*;
+use ars_leptos::prelude::*;
 
 #[derive(Clone, Debug, Translate)]
 #[translate(fallback = "en-US")]
@@ -86,6 +70,42 @@ pub(crate) enum UtilityText {
 
     #[translate(en_US = "Reset", pt_BR = "Redefinir")]
     Reset,
+
+    #[translate(en_US = "Submit", pt_BR = "Enviar")]
+    Submit,
+
+    #[translate(en_US = "Field and form", pt_BR = "Campo e formulário")]
+    FieldForm,
+
+    #[translate(en_US = "Account details", pt_BR = "Detalhes da conta")]
+    AccountDetails,
+
+    #[translate(
+        en_US = "Required fields are announced from their labels and descriptions.",
+        pt_BR = "Campos obrigatórios são anunciados a partir de seus rótulos e descrições."
+    )]
+    RequiredFieldsDescription,
+
+    #[translate(en_US = "Name", pt_BR = "Nome")]
+    NameLabel,
+
+    #[translate(en_US = "Enter your full name", pt_BR = "Digite seu nome completo")]
+    NamePlaceholder,
+
+    #[translate(en_US = "Email", pt_BR = "E-mail")]
+    EmailLabel,
+
+    #[translate(
+        en_US = "Use a reachable address.",
+        pt_BR = "Use um endereço acessível."
+    )]
+    EmailDescription,
+
+    #[translate(en_US = "Enter your email", pt_BR = "Digite seu e-mail")]
+    EmailPlaceholder,
+
+    #[translate(en_US = "Ready to submit", pt_BR = "Pronto para enviar")]
+    ReadyToSubmit,
 
     #[translate(en_US = "Visually hidden", pt_BR = "Visualmente oculto")]
     VisuallyHidden,
@@ -358,8 +378,13 @@ const SEPARATOR_STYLE: &str = r#"
 }
 "#;
 
-#[derive(Debug)]
-struct ExampleError(Signal<String>);
+struct ExampleError(TextProp);
+
+impl fmt::Debug for ExampleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ExampleError").finish_non_exhaustive()
+    }
+}
 
 impl Display for ExampleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -369,8 +394,8 @@ impl Display for ExampleError {
 
 impl std::error::Error for ExampleError {}
 
-fn example_error(message: Signal<String>) -> Result<&'static str, ExampleError> {
-    Err(ExampleError(message))
+fn example_error(message: impl Into<TextProp>) -> Result<&'static str, ExampleError> {
+    Err(ExampleError(message.into()))
 }
 
 #[component]
@@ -488,6 +513,48 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                     </div>
                 </form>
             </section>
+            <section aria-labelledby="field-form">
+                <h3 id="field-form">{t(UtilityText::FieldForm)}</h3>
+                <Form
+                    id="leptos-field-form-demo"
+                    action="/account"
+                    on_submit=Callback::new(|()| ())
+                >
+                    <Fieldset id="leptos-fieldset-demo">
+                        <fieldset::Legend>{t(UtilityText::AccountDetails)}</fieldset::Legend>
+                        <fieldset::Description>
+                            {t(UtilityText::RequiredFieldsDescription)}
+                        </fieldset::Description>
+                        <fieldset::Content>
+                            <Field id="leptos-name-field" required=true>
+                                <field::Label>{t(UtilityText::NameLabel)}</field::Label>
+                                <field::Input
+                                    name="name"
+                                    placeholder=t(UtilityText::NamePlaceholder)
+                                />
+                            </Field>
+                            <Field id="leptos-email-field" name="email" required=true>
+                                <field::Label>{t(UtilityText::EmailLabel)}</field::Label>
+                                <field::Description>
+                                    {t(UtilityText::EmailDescription)}
+                                </field::Description>
+                                <field::Input
+                                    r#type=field::InputType::Email
+                                    name="email"
+                                    placeholder=t(UtilityText::EmailPlaceholder)
+                                />
+                            </Field>
+                        </fieldset::Content>
+                    </Fieldset>
+                    <div class="button-row">
+                        <Button r#type=button::Type::Submit>{t(UtilityText::Submit)}</Button>
+                        <Button r#type=button::Type::Reset variant=button::Variant::Secondary>
+                            {t(UtilityText::Reset)}
+                        </Button>
+                    </div>
+                    <form::StatusRegion>{t(UtilityText::ReadyToSubmit)}</form::StatusRegion>
+                </Form>
+            </section>
             <section aria-labelledby="visually-hidden">
                 <h3 id="visually-hidden">{t(UtilityText::VisuallyHidden)}</h3>
                 <p>
@@ -547,10 +614,10 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
             <section aria-labelledby="errors">
                 <h3 id="errors">{t(UtilityText::ErrorBoundary)}</h3>
                 <div class="button-row">
-                    <Boundary>
+                    <ErrorBoundary>
                         <p>{t(UtilityText::HealthyChild)}</p>
-                    </Boundary>
-                    <Boundary>{example_error(error_message)}</Boundary>
+                    </ErrorBoundary>
+                    <ErrorBoundary>{example_error(error_message)}</ErrorBoundary>
                 </div>
             </section>
             <section aria-labelledby="heading-primitive">
@@ -606,14 +673,14 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                     >
                         {t(UtilityText::HeadingProvider)}
                     </Heading>
-                    <Section>
+                    <heading::Section>
                         <Heading
                             id="leptos-heading-section"
                             attr:style="font-size: 1.5rem; font-weight: 700; line-height: 1.3; margin: 0.4rem 0;"
                         >
                             {t(UtilityText::HeadingSection)}
                         </Heading>
-                    </Section>
+                    </heading::Section>
                 </HeadingLevelProvider>
             </section>
             <section aria-labelledby="landmark-primitive">

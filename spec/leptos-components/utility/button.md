@@ -38,9 +38,9 @@ pub fn Button<T>(
     #[prop(optional)] exclude_from_tab_order: bool,
     #[prop(optional)] auto_focus: bool,
     #[prop(optional)] prevent_focus_on_press: bool,
-    #[prop(optional, into)] class: Option<String>,
-    #[prop(optional, into)] style: Option<String>,
-    #[prop(optional, into)] aria_label: Option<String>,
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+    #[prop(optional, into)] aria_label: Option<TextProp>,
     #[prop(optional, into)] aria_labelledby: Option<String>,
     #[prop(optional)] on_press_start: Option<Callback<PressEvent>>,
     #[prop(optional)] on_press_end: Option<Callback<PressEvent>>,
@@ -60,9 +60,9 @@ pub fn ButtonAsChild<T>(
     #[prop(optional, into)] variant: Option<button::Variant>,
     #[prop(optional, into)] size: Option<button::Size>,
     #[prop(optional)] exclude_from_tab_order: bool,
-    #[prop(optional, into)] class: Option<String>,
-    #[prop(optional, into)] style: Option<String>,
-    #[prop(optional, into)] aria_label: Option<String>,
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
+    #[prop(optional, into)] aria_label: Option<TextProp>,
     #[prop(optional, into)] aria_labelledby: Option<String>,
     children: TypedChildren<T>,
 ) -> impl IntoView
@@ -71,7 +71,7 @@ where
     <View<T> as AddAnyAttr>::Output<Vec<LeptosAttribute>>: IntoView
 ```
 
-The native `Button` surfaces the full core prop set. `ButtonAsChild` exposes state, visual, tab-order, and consumer root attrs only; native button/form attrs belong on a consumer-owned child root when needed. `disabled` and `loading` are the common reactive inputs; all other props may be plain Leptos values unless a wrapper makes them reactive.
+The native `Button` surfaces the full core prop set. `ButtonAsChild` exposes state, visual, tab-order, and consumer root attrs only; native button/form attrs belong on a consumer-owned child root when needed. `disabled` and `loading` are common reactive inputs. User-facing semantic text such as `aria_label` uses Leptos `TextProp` so static strings, signals, and `t(MessageKey)` update the DOM without remounting. Consumer styling escape hatches (`class` and `style`) also use `TextProp` so application state can update styling without remounting. DOM identity and association props such as `id`, `form`, `name`, `aria_labelledby`, and form override tokens remain static strings because they are identifiers or serialized browser attributes rather than translatable prose.
 
 ## 3. Mapping to Core Component Contract
 

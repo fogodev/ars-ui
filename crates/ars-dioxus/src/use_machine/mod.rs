@@ -17,7 +17,7 @@ use dioxus::prelude::*;
 
 use crate::{
     ephemeral::EphemeralRef,
-    provider::{resolve_locale, use_intl_backend, use_messages},
+    provider::{use_intl_backend, use_messages_and_locale},
     use_stable_id,
 };
 
@@ -149,7 +149,7 @@ where
     /// immutable borrow on the `Signal`, preventing `send` (which calls
     /// `write()`) from re-entering. Sending events from API snapshots would
     /// cause a re-entrant borrow panic.
-    pub fn with_api_snapshot<T>(&self, f: impl Fn(&M::Api<'_>) -> T) -> T {
+    pub fn with_api_snapshot<T>(&self, f: impl FnOnce(&M::Api<'_>) -> T) -> T {
         let svc = self.service.peek();
 
         let api = svc.connect(&|_e| {
@@ -340,14 +340,11 @@ where
         props
     };
 
-    let locale = resolve_locale(None);
-
+    let (messages, locale) = use_messages_and_locale::<M::Messages>(None, None);
     let intl_backend = use_intl_backend();
 
     let env = Env::new(locale, intl_backend)
         .with_render_mode(current_render_mode(hydrated_state.is_some()));
-
-    let messages = use_messages::<M::Messages>(None, Some(&env.locale));
 
     // Create the service once — use_signal runs its closure only on first mount.
     let service_signal = use_signal(move || {

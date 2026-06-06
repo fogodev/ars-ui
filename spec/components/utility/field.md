@@ -102,6 +102,46 @@ Field
 The core Field contract does **not** define a `RequiredIndicator` part. Any visual required marker
 is adapter- or consumer-owned presentation layered on top of the machine’s `required` state.
 
+## 2.1 Native Input Type Vocabulary
+
+Adapters that ship a native `<input>` helper use the shared `InputType` enum
+instead of accepting arbitrary stringly typed `type` tokens. The enum maps the
+HTML input type vocabulary into Rust while remaining forward-compatible with
+future platform additions:
+
+```rust,no_check
+#[non_exhaustive]
+pub enum InputType {
+    Button,
+    Checkbox,
+    Color,
+    Date,
+    DateTimeLocal,
+    Email,
+    File,
+    Hidden,
+    Image,
+    Month,
+    Number,
+    Password,
+    Radio,
+    Range,
+    Reset,
+    Search,
+    Submit,
+    Tel,
+    Text,
+    Time,
+    Url,
+    Week,
+}
+```
+
+`InputType::Text` is the default semantic value. Adapter components may omit
+the native `type` attribute when no explicit type is supplied because browsers
+default `<input>` to text; when a type is supplied, adapters serialize it through
+the shared enum rather than duplicating string constants in examples.
+
 ## 3. Accessibility
 
 ### 3.1 ARIA Wiring

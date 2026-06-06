@@ -78,6 +78,7 @@ fn arb_field_props() -> impl Strategy<Value = utility_core::field::Props> {
                 disabled,
                 readonly,
                 invalid,
+                errors: Vec::new(),
                 dir,
             },
         )
@@ -618,10 +619,10 @@ fn arb_validation_behavior() -> impl Strategy<Value = utility_core::form::Valida
     ]
 }
 
-fn arb_error_map() -> impl Strategy<Value = BTreeMap<String, Vec<String>>> {
+fn arb_error_map() -> impl Strategy<Value = BTreeMap<String, Vec<Error>>> {
     prop::collection::btree_map(
         "[a-z]{1,8}".prop_map(String::from),
-        prop::collection::vec("[a-zA-Z0-9 _-]{1,16}".prop_map(String::from), 1..4),
+        prop::collection::vec(arb_error(), 1..4),
         0..4,
     )
 }
@@ -649,8 +650,8 @@ fn arb_form_event() -> impl Strategy<Value = utility_core::form::Event> {
         Just(utility_core::form::Event::Submit),
         any::<bool>().prop_map(|success| utility_core::form::Event::SubmitComplete { success }),
         Just(utility_core::form::Event::Reset),
-        arb_error_map().prop_map(utility_core::form::Event::SetServerErrors),
-        Just(utility_core::form::Event::ClearServerErrors),
+        arb_error_map().prop_map(utility_core::form::Event::SetValidationErrors),
+        Just(utility_core::form::Event::ClearValidationErrors),
         arb_validation_behavior().prop_map(utility_core::form::Event::SetValidationBehavior),
         prop::option::of("[a-zA-Z0-9 _-]{1,16}".prop_map(String::from))
             .prop_map(utility_core::form::Event::SetStatusMessage),

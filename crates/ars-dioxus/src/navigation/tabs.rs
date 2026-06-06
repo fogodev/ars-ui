@@ -58,7 +58,7 @@ use crate::{
     event_mapping::dioxus_key_to_keyboard_key,
     id::use_stable_id,
     platform::{DioxusPlatform, use_platform},
-    provider::{use_locale, use_messages, use_modality_context, use_platform_effects},
+    provider::{use_messages_and_locale, use_modality_context, use_platform_effects},
     use_machine::use_machine_with_reactive_props,
 };
 
@@ -887,8 +887,7 @@ fn use_tabs_machine(core_props: Props) -> crate::use_machine::UseMachineReturn<t
 }
 
 fn use_tabs_messages_sync(machine: crate::use_machine::UseMachineReturn<tabs::Machine>) {
-    let locale = use_locale()();
-    let messages = use_messages::<Messages>(None, Some(&locale));
+    let (messages, locale) = use_messages_and_locale::<Messages>(None, None);
 
     let mut previous = use_signal(|| None::<(ars_core::Locale, Messages)>);
 

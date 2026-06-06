@@ -1,20 +1,4 @@
-use ars_dioxus::{
-    MessageFn,
-    prelude::{Orientation, Translate, t},
-    utility::{
-        button::{self, Button, ButtonAsChild},
-        client_only::ClientOnly,
-        dismissable,
-        error_boundary::{Boundary, CapturedError},
-        heading::{self, Heading, HeadingLevelProvider, Section},
-        highlight::Highlight,
-        landmark::{self, Landmark},
-        separator::{Separator, SeparatorAsChild},
-        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
-        z_index_allocator::{Context as ZIndexContext, ZIndexAllocatorProvider},
-    },
-};
-use dioxus::prelude::*;
+use ars_dioxus::prelude::*;
 
 #[derive(Clone, Debug, Translate, PartialEq)]
 #[translate(fallback = "en-US")]
@@ -90,6 +74,48 @@ pub(crate) enum UtilityText {
 
     #[translate(en_US = "Reset", pt_BR = "Redefinir")]
     Reset,
+
+    #[translate(en_US = "Submit", pt_BR = "Enviar")]
+    Submit,
+
+    #[translate(en_US = "Field and form", pt_BR = "Campo e formulário")]
+    FieldForm,
+
+    #[translate(
+        en_US = "React Aria-style form fields with labels, helper text, and validation.",
+        pt_BR = "Campos de formulário no estilo React Aria com rótulos, texto de ajuda e validação."
+    )]
+    FieldFormDescription,
+
+    #[translate(en_US = "Account details", pt_BR = "Detalhes da conta")]
+    AccountDetails,
+
+    #[translate(
+        en_US = "Required fields are announced from their labels and descriptions.",
+        pt_BR = "Campos obrigatórios são anunciados a partir de seus rótulos e descrições."
+    )]
+    RequiredFieldsDescription,
+
+    #[translate(en_US = "Name", pt_BR = "Nome")]
+    NameLabel,
+
+    #[translate(en_US = "Enter your full name", pt_BR = "Digite seu nome completo")]
+    NamePlaceholder,
+
+    #[translate(en_US = "Email", pt_BR = "E-mail")]
+    EmailLabel,
+
+    #[translate(
+        en_US = "Use a reachable address.",
+        pt_BR = "Use um endereço acessível."
+    )]
+    EmailDescription,
+
+    #[translate(en_US = "Enter your email", pt_BR = "Digite seu e-mail")]
+    EmailPlaceholder,
+
+    #[translate(en_US = "Ready to submit", pt_BR = "Pronto para enviar")]
+    ReadyToSubmit,
 
     #[translate(en_US = "Visually hidden", pt_BR = "Visualmente oculto")]
     VisuallyHidden,
@@ -364,7 +390,7 @@ pub(crate) enum UtilityText {
 
 #[component]
 fn ExampleErrorChild() -> Element {
-    Err(CapturedError::from_display(t(UtilityText::ExampleChildError)).into())
+    Err(error_boundary::CapturedError::from_display(t(UtilityText::ExampleChildError)).into())
 }
 
 #[component]
@@ -389,6 +415,7 @@ pub(crate) fn UtilityPanel() -> Element {
 
     let dismiss_props = dismissable::Props::new().on_dismiss(move |reason| {
         let mut dismiss_status = dismiss_status;
+
         dismiss_status.set(UtilityText::DismissReason {
             reason: format!("{reason:?}"),
         });
@@ -544,6 +571,68 @@ pub(crate) fn UtilityPanel() -> Element {
             }
             section {
                 class: "rounded-lg border border-slate-200 bg-white/85 p-5 shadow-lg shadow-slate-900/10",
+                "aria-labelledby": "field-form",
+                div { class: "mb-4 flex flex-wrap items-center justify-between gap-3",
+                    h2 {
+                        id: "field-form",
+                        class: "text-base font-bold text-slate-950",
+                        {t(UtilityText::FieldForm)}
+                    }
+                    p { class: "text-sm text-slate-500", {t(UtilityText::FieldFormDescription)} }
+                }
+                Form {
+                    id: "dioxus-tw-field-form-demo",
+                    action: "/account",
+                    on_submit: move |()| {},
+                    class: "grid max-w-md gap-4 [&_fieldset]:grid [&_fieldset]:m-0 [&_fieldset]:gap-4 [&_fieldset]:rounded-lg [&_fieldset]:border [&_fieldset]:border-slate-300 [&_fieldset]:p-4 [&_legend]:px-1.5 [&_legend]:font-bold **:data-[ars-part=content]:grid **:data-[ars-part=content]:gap-3 **:data-[ars-part=description]:text-sm **:data-[ars-part=description]:text-slate-500 **:data-[ars-part=status-region]:text-sm **:data-[ars-part=status-region]:font-semibold **:data-[ars-part=status-region]:text-emerald-700",
+                    Fieldset { id: "dioxus-tw-fieldset-demo",
+                        fieldset::Legend { {t(UtilityText::AccountDetails)} }
+                        fieldset::Description { {t(UtilityText::RequiredFieldsDescription)} }
+                        fieldset::Content {
+                            Field {
+                                id: "dioxus-tw-name-field",
+                                required: true,
+                                class: "grid gap-2",
+                                field::Label { {t(UtilityText::NameLabel)} }
+                                field::Input {
+                                    class: "rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm",
+                                    name: "name",
+                                    placeholder: t(UtilityText::NamePlaceholder),
+                                }
+                            }
+                            Field {
+                                id: "dioxus-tw-email-field",
+                                name: "email",
+                                required: true,
+                                class: "grid gap-2",
+                                field::Label { {t(UtilityText::EmailLabel)} }
+                                field::Description { {t(UtilityText::EmailDescription)} }
+                                field::Input {
+                                    class: "rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm",
+                                    r#type: field::InputType::Email,
+                                    name: "email",
+                                    placeholder: t(UtilityText::EmailPlaceholder),
+                                }
+                            }
+                        }
+                    }
+                    div { class: "flex flex-wrap gap-3",
+                        Button {
+                            class: "rounded-md bg-black px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-slate-900/20",
+                            r#type: button::Type::Submit,
+                            {t(UtilityText::Submit)}
+                        }
+                        Button {
+                            class: "rounded-md bg-slate-200 px-4 py-2.5 text-sm font-bold text-slate-950 shadow-lg shadow-slate-900/10",
+                            r#type: button::Type::Reset,
+                            {t(UtilityText::Reset)}
+                        }
+                    }
+                    form::StatusRegion { {t(UtilityText::ReadyToSubmit)} }
+                }
+            }
+            section {
+                class: "rounded-lg border border-slate-200 bg-white/85 p-5 shadow-lg shadow-slate-900/10",
                 "aria-labelledby": "visually-hidden",
                 div { class: "mb-4 flex flex-wrap items-center justify-between gap-3",
                     h2 {
@@ -673,12 +762,12 @@ pub(crate) fn UtilityPanel() -> Element {
                     p { class: "text-sm text-slate-500", {t(UtilityText::ErrorBoundaryNote)} }
                 }
                 div { class: "grid gap-4 md:grid-cols-2",
-                    Boundary {
+                    ErrorBoundary {
                         p { class: "rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900 shadow-sm",
                             {t(UtilityText::HealthyChild)}
                         }
                     }
-                    Boundary { ExampleErrorChild {} }
+                    ErrorBoundary { ExampleErrorChild {} }
                 }
             }
             section {
@@ -738,7 +827,7 @@ pub(crate) fn UtilityPanel() -> Element {
                             class: "text-3xl font-bold",
                             {t(UtilityText::HeadingProvider)}
                         }
-                        Section {
+                        heading::Section {
                             Heading {
                                 id: "dioxus-tailwind-heading-section",
                                 class: "text-2xl font-bold",

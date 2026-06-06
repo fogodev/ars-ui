@@ -42,10 +42,8 @@ use {
 };
 
 use crate::{
-    as_child::merge_dioxus_attrs,
-    attrs::attr_map_to_dioxus_inline_attrs,
-    id::use_stable_id,
-    provider::{resolve_locale, use_messages},
+    as_child::merge_dioxus_attrs, attrs::attr_map_to_dioxus_inline_attrs, id::use_stable_id,
+    provider::use_messages_and_locale,
 };
 
 // ────────────────────────────────────────────────────────────────────
@@ -72,7 +70,7 @@ pub struct Handle {
     /// `props.on_dismiss(DismissReason::DismissButton)` if a callback is
     /// registered. Backed by Dioxus's arena-allocated callback storage so
     /// the handle stays `Copy`.
-    pub dismiss: EventHandler<()>,
+    pub dismiss: EventHandler,
 
     /// Stable id used for overlay-stack registration, portal-owner
     /// matching, and DOM root resolution. Stored in the Dioxus arena via
@@ -86,7 +84,7 @@ impl Debug for Handle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug = f.debug_struct("Handle");
 
-        debug.field("dismiss", &"<EventHandler<()>>");
+        debug.field("dismiss", &"<EventHandler>");
 
         if let Ok(id) = self.overlay_id.try_read() {
             debug.field("overlay_id", &*id);
@@ -152,7 +150,7 @@ pub fn use_dismissable(
 /// and into [`Handle::dismiss`]. Invoking it fires
 /// `props.on_dismiss(DismissReason::DismissButton)` directly per spec
 /// §11 — no veto-capable callbacks run first.
-fn build_dismiss_button_callback(props: &Props) -> EventHandler<()> {
+fn build_dismiss_button_callback(props: &Props) -> EventHandler {
     let on_dismiss = props.on_dismiss.clone();
 
     EventHandler::new(move |()| {
@@ -412,7 +410,7 @@ pub struct RegionProps {
     /// Explicit locale override used when resolving provider/default
     /// [`Messages`].
     #[props(optional, into)]
-    pub locale: Option<Signal<Locale>>,
+    pub locale: Option<Locale>,
 
     /// Explicit message-bundle override used when `dismiss_label` is
     /// omitted.
@@ -452,33 +450,21 @@ pub struct RegionProps {
     reason = "rsx! macro expansion confuses the unused-qualifications lint on onclick: bindings."
 )]
 pub fn Region(props: RegionProps) -> Element {
-    let RegionProps {
-        props,
-        inside_boundaries,
-        dismiss_label,
-        locale,
-        messages,
-        attrs: consumer_attrs,
-        children,
-    } = props;
-
     let boundaries_fallback = use_signal(Vec::<String>::new);
 
-    let boundaries = inside_boundaries.unwrap_or_else(|| ReadSignal::from(boundaries_fallback));
+    let boundaries = props
+        .inside_boundaries
+        .unwrap_or_else(|| ReadSignal::from(boundaries_fallback));
 
-    let provider_locale = resolve_locale(None);
-    let resolved_locale = locale
-        .as_ref()
-        .map_or(provider_locale, |locale| locale.read().clone());
+    let (messages, locale) = use_messages_and_locale(props.messages, props.locale);
+    let dismiss_label = props
+        .dismiss_label
+        .unwrap_or_else(|| (messages.dismiss_label)(&locale));
 
-    let resolved_messages = use_messages(messages.as_ref(), Some(&resolved_locale));
-    let dismiss_label =
-        dismiss_label.unwrap_or_else(|| (resolved_messages.dismiss_label)(&resolved_locale));
-
-    let api = Api::new(props.clone(), dismiss_label);
+    let api = Api::new(props.props.clone(), dismiss_label);
 
     let component_root_attrs = attr_map_to_dioxus_inline_attrs(api.root_attrs());
-    let root_attrs = merge_dioxus_attrs(consumer_attrs, component_root_attrs);
+    let root_attrs = merge_dioxus_attrs(props.attrs, component_root_attrs);
 
     let inline_attrs = attr_map_to_dioxus_inline_attrs(api.dismiss_button_attrs());
     let start_attrs = inline_attrs.clone();
@@ -486,7 +472,7 @@ pub fn Region(props: RegionProps) -> Element {
 
     let mut root_ref = use_signal(|| None::<Rc<MountedData>>);
 
-    let handle = use_dismissable(ReadSignal::from(root_ref), props, boundaries);
+    let handle = use_dismissable(ReadSignal::from(root_ref), props.props, boundaries);
     let root_id = handle.overlay_id.cloned();
 
     rsx! {
@@ -502,7 +488,7 @@ pub fn Region(props: RegionProps) -> Element {
                 },
                 ..start_attrs,
             }
-            {children}
+            {props.children}
             button {
                 onclick: move |_| {
                     handle.dismiss.call(());

@@ -2933,10 +2933,9 @@ messages can update without hand-written locale plumbing.
 ///
 /// # Reactivity
 ///
-/// - **Leptos:** Returns `Signal<String>`. The signal subscribes to locale
-///   and to the message signal when a reactive message is passed; when either
-///   changes, only consumers of the translated string re-evaluate
-///   (fine-grained reactivity). Static messages and `Signal<T>` /
+/// - **Leptos:** Returns `Memo<String>`. The memo subscribes to the grouped
+///   locale/message dependencies so text and `TextProp` consumers update
+///   without component-owned mirror state. Static messages and `Signal<T>` /
 ///   `ReadSignal<T>` / `RwSignal<T>` / `Memo<T>` message sources are accepted.
 /// - **Dioxus:** Returns a `String` evaluated during render. The `Signal::read()`
 ///   call inside `t()` subscribes the calling component to locale changes;

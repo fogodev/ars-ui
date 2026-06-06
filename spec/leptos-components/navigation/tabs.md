@@ -80,6 +80,32 @@ only the visible trigger while preserving the translated semantic label.
 
 The adapter owns ordered tab registration, selected-tab indicator measurement, panel presence policy, closable-tab trigger semantics, and reorder announcements.
 
+Tab labels carry semantic text separately from custom trigger views:
+
+```rust,no_check
+#[derive(Clone)]
+pub enum TabLabel {
+    Static(Oco<'static, str>),
+    Dynamic(TextProp),
+}
+
+impl TabLabel {
+    pub fn static_text(text: impl Into<Oco<'static, str>>) -> Self;
+    pub fn translated<T>(message: T) -> Self
+    where
+        T: Translate + Send + Sync + 'static;
+    pub fn dynamic(text: impl Into<TextProp>) -> Self;
+    pub fn resolve(&self) -> String;
+    pub fn resolve_untracked(&self) -> String;
+}
+```
+
+`Static` is for non-localized literals. `Dynamic` is the required shape for
+provider-backed i18n or any other reactive semantic label. The adapter uses the
+resolved label for default visible triggers, close-button accessible names, and
+reorder announcements; a custom trigger view must not be the only source of
+semantic tab text.
+
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with selected tab, activation mode, orientation, direction, disabled keys, and lazy panel behavior.

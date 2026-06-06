@@ -19,12 +19,12 @@ This spec maps the core [`ColorSwatch`](../../components/specialized/color-swatc
 pub fn ColorSwatch(
     value: ColorValue,
     #[prop(optional)] alpha_grid: bool,
-    #[prop(optional)] aria_label: Option<String>,
-    #[prop(optional)] class: Option<String>,
+    #[prop(optional, into)] aria_label: Option<TextProp>,
+    #[prop(optional, into)] class: Option<TextProp>,
 ) -> impl IntoView
 ```
 
-The adapter exposes a single semantic surface. It does not publish writable signals or callbacks because the core component is stateless and display-only.
+The adapter exposes a single semantic surface. User-facing text and consumer class styling use `TextProp` so they can react to provider translations or application state. It does not publish writable signals or callbacks because the core component is stateless and display-only.
 
 ## 3. Mapping to Core Component Contract
 

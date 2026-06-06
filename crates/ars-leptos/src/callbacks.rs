@@ -2,6 +2,13 @@
 
 use leptos::prelude::{Callable, Callback};
 
+/// Call an optional Leptos callback.
+pub fn call(callback: Option<&Callback<()>>) {
+    if let Some(callback) = callback {
+        callback.run(());
+    }
+}
+
 /// Emits a value through an optional Leptos callback.
 pub fn emit<T>(callback: Option<&Callback<T>>, value: T) {
     if let Some(callback) = callback {
@@ -20,7 +27,28 @@ pub fn emit_map<T, U>(callback: Option<&Callback<U>>, value: T, f: impl Fn(T) ->
 mod tests {
     use leptos::{prelude::*, reactive::owner::Owner};
 
-    use super::{emit, emit_map};
+    use super::{call, emit, emit_map};
+
+    #[test]
+    fn call_dispatches_when_callback_is_present() {
+        let owner = Owner::new();
+
+        owner.with(|| {
+            let captured = StoredValue::new(Vec::<u32>::new());
+            let callback = Callback::from(move || {
+                captured.update_value(|values| values.push(42));
+            });
+
+            call(Some(&callback));
+
+            assert_eq!(captured.with_value(Clone::clone), vec![42]);
+        });
+    }
+
+    #[test]
+    fn call_is_noop_when_callback_is_absent() {
+        call(None);
+    }
 
     #[test]
     fn emit_dispatches_when_callback_is_present() {

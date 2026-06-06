@@ -12,7 +12,7 @@ pub use ars_components::utility::heading::{
 use ars_core::{AttrValue, HtmlAttr};
 use leptos::{children::TypedChildren, either::EitherOf6, prelude::*};
 
-use crate::{attr_map_to_leptos_inline_attrs, merge_consumer_class_into};
+use crate::attr_map_to_leptos_inline_attrs;
 
 /// Reads the inherited heading level context, defaulting to [`HeadingContext::new`]
 /// (level one) when no provider is in scope.
@@ -42,7 +42,7 @@ pub fn Heading<T>(
     /// merge with whatever class the component itself emits so both reach
     /// the rendered `<h*>` as a single `class` attribute.
     #[prop(optional, into)]
-    class: Option<Oco<'static, str>>,
+    class: Option<TextProp>,
 
     /// Heading content rendered inside the resolved tag.
     children: TypedChildren<T>,
@@ -51,7 +51,6 @@ where
     View<T>: IntoView,
 {
     let id = id.map(Oco::into_owned);
-    let class = class.map(Oco::into_owned);
 
     let ctx = inherited_context();
 
@@ -75,7 +74,7 @@ where
         attrs.set(HtmlAttr::Id, AttrValue::None);
     }
 
-    merge_consumer_class_into(&mut attrs, class.as_deref());
+    crate::merge_consumer_class_prop_into(&mut attrs, class);
 
     let attrs = attr_map_to_leptos_inline_attrs(attrs);
 

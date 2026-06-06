@@ -1,0 +1,155 @@
+//! Dioxus Fieldset adapter.
+
+use ars_components::utility::fieldset;
+pub use ars_components::utility::fieldset::{Part, Props};
+use ars_core::Direction;
+use dioxus::prelude::*;
+
+use crate::{
+    as_child::merge_dioxus_attrs, attr_map_to_dioxus_inline_attrs, use_machine, use_stable_id,
+};
+
+#[derive(Clone, Copy)]
+struct FieldsetContext {
+    machine: crate::UseMachineReturn<fieldset::Machine>,
+}
+
+fn fieldset_context() -> FieldsetContext {
+    try_use_context::<FieldsetContext>()
+        .expect("Fieldset subcomponents must be rendered inside <Fieldset/>")
+}
+
+/// Props for the Dioxus [`Fieldset`] component.
+#[derive(Props, Clone, PartialEq, Debug)]
+pub struct FieldsetProps {
+    /// Optional component instance ID.
+    #[props(optional, into)]
+    pub id: Option<String>,
+
+    /// Whether every descendant form control is disabled.
+    #[props(default = false)]
+    pub disabled: bool,
+
+    /// Whether the fieldset is invalid.
+    #[props(default = false)]
+    pub invalid: bool,
+
+    /// Whether the fieldset is read-only.
+    #[props(default = false)]
+    pub readonly: bool,
+
+    /// Optional text direction override.
+    #[props(optional)]
+    pub dir: Option<Direction>,
+
+    /// Global HTML attributes forwarded onto the fieldset.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+
+    /// Fieldset anatomy children.
+    pub children: Element,
+}
+
+/// Dioxus Fieldset root component.
+#[component]
+pub fn Fieldset(props: FieldsetProps) -> Element {
+    let generated_id = use_stable_id("fieldset");
+    let id = props.id.unwrap_or(generated_id);
+
+    let mut core_props = Props::new()
+        .id(&id)
+        .disabled(props.disabled)
+        .invalid(props.invalid)
+        .readonly(props.readonly);
+
+    if let Some(dir) = props.dir {
+        core_props = core_props.dir(dir);
+    }
+
+    let machine = use_machine::<fieldset::Machine>(core_props);
+
+    use_context_provider(|| FieldsetContext { machine });
+
+    let component_attrs = machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.root_attrs()));
+    let attrs = merge_dioxus_attrs(props.attrs, component_attrs());
+
+    rsx! {
+        fieldset { ..attrs,{props.children} }
+    }
+}
+
+/// Props for the Dioxus [`Legend`] component.
+#[derive(Props, Clone, PartialEq, Debug)]
+pub struct LegendProps {
+    /// Legend content.
+    pub children: Element,
+}
+
+/// Dioxus Fieldset legend part.
+#[component]
+pub fn Legend(props: LegendProps) -> Element {
+    let attrs = fieldset_context()
+        .machine
+        .derive(|api| attr_map_to_dioxus_inline_attrs(api.legend_attrs()))();
+
+    rsx! {
+        legend { ..attrs,{props.children} }
+    }
+}
+
+/// Props for the Dioxus [`Description`] component.
+#[derive(Props, Clone, PartialEq, Debug)]
+pub struct DescriptionProps {
+    /// Description content.
+    pub children: Element,
+}
+
+/// Dioxus Fieldset description part.
+#[component]
+pub fn Description(props: DescriptionProps) -> Element {
+    let attrs = fieldset_context()
+        .machine
+        .derive(|api| attr_map_to_dioxus_inline_attrs(api.description_attrs()))();
+
+    rsx! {
+        div { ..attrs,{props.children} }
+    }
+}
+
+/// Props for the Dioxus [`ErrorMessage`] component.
+#[derive(Props, Clone, PartialEq, Debug)]
+pub struct ErrorMessageProps {
+    /// Error message content.
+    pub children: Element,
+}
+
+/// Dioxus Fieldset error message part.
+#[component]
+pub fn ErrorMessage(props: ErrorMessageProps) -> Element {
+    let attrs = fieldset_context()
+        .machine
+        .derive(|api| attr_map_to_dioxus_inline_attrs(api.error_message_attrs()))();
+
+    rsx! {
+        div { ..attrs,{props.children} }
+    }
+}
+
+/// Props for the Dioxus [`Content`] component.
+#[derive(Props, Clone, PartialEq, Debug)]
+pub struct ContentProps {
+    /// Descendant form controls.
+    pub children: Element,
+}
+
+/// Dioxus Fieldset content part.
+#[component]
+pub fn Content(props: ContentProps) -> Element {
+    let attrs = fieldset_context()
+        .machine
+        .derive(|api| attr_map_to_dioxus_inline_attrs(api.content_attrs()))();
+
+    rsx! {
+        div { ..attrs,{props.children} }
+    }
+}

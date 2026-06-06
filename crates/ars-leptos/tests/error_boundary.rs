@@ -1,4 +1,4 @@
-//! Unit tests for `error_boundary::Boundary` (issue #629, sibling of #197).
+//! Unit tests for `error_boundary::ErrorBoundary` (issue #629, sibling of #197).
 //!
 //! Exercises `spec/components/utility/error-boundary.md` and the
 //! Leptos-specific contract at `spec/leptos-components/utility/error-boundary.md`:
@@ -30,7 +30,7 @@ use ars_core::{
 use ars_i18n::{Direction, Locale, StubIntlBackend};
 use ars_leptos::{
     ArsContext, provide_ars_context,
-    utility::error_boundary::{self, Boundary, default_fallback},
+    utility::error_boundary::{self, ErrorBoundary, default_fallback},
 };
 use leptos::prelude::*;
 
@@ -53,9 +53,9 @@ const fn boom() -> Result<&'static str, BoomError> {
 #[test]
 fn renders_children_when_no_error() {
     let html = view! {
-        <Boundary>
+        <ErrorBoundary>
             <p>"child-ok"</p>
-        </Boundary>
+        </ErrorBoundary>
     }
     .to_html();
 
@@ -68,7 +68,7 @@ fn renders_children_when_no_error() {
 
 #[test]
 fn renders_canonical_fallback_attrs_when_child_returns_err() {
-    let html = view! { <Boundary>{boom()}</Boundary> }.to_html();
+    let html = view! { <ErrorBoundary>{boom()}</ErrorBoundary> }.to_html();
 
     assert!(
         html.contains(r#"data-ars-scope="error-boundary""#),
@@ -98,7 +98,7 @@ fn renders_canonical_fallback_attrs_when_child_returns_err() {
 
 #[test]
 fn fallback_includes_default_message_and_error_text() {
-    let html = view! { <Boundary>{boom()}</Boundary> }.to_html();
+    let html = view! { <ErrorBoundary>{boom()}</ErrorBoundary> }.to_html();
 
     assert!(
         html.contains("A component encountered an error."),
@@ -116,7 +116,7 @@ fn fallback_includes_default_message_and_error_text() {
 
 #[test]
 fn fallback_wraps_errors_in_unordered_list() {
-    let html = view! { <Boundary>{boom()}</Boundary> }.to_html();
+    let html = view! { <ErrorBoundary>{boom()}</ErrorBoundary> }.to_html();
 
     assert!(
         html.contains(r#"data-ars-part="list""#),
@@ -128,7 +128,7 @@ fn fallback_wraps_errors_in_unordered_list() {
 
 #[test]
 fn fallback_emits_data_ars_error_count() {
-    let html = view! { <Boundary>{boom()}</Boundary> }.to_html();
+    let html = view! { <ErrorBoundary>{boom()}</ErrorBoundary> }.to_html();
 
     assert!(
         html.contains(r#"data-ars-error-count="1""#),
@@ -140,7 +140,7 @@ fn fallback_emits_data_ars_error_count() {
 fn boundary_does_not_propagate_error_past_wrapper() {
     let html = view! {
         <div data-outside="1">
-            <Boundary>{boom()}</Boundary>
+            <ErrorBoundary>{boom()}</ErrorBoundary>
             <p>"after-boundary"</p>
         </div>
     }
@@ -168,7 +168,7 @@ fn on_error_telemetry_fires_with_captured_error() {
             .push(err.to_string());
     });
 
-    let _html = view! { <Boundary on_error=on_error>{boom()}</Boundary> }.to_html();
+    let _html = view! { <ErrorBoundary on_error=on_error>{boom()}</ErrorBoundary> }.to_html();
 
     let captured = captured.lock().expect("lock");
 
@@ -184,7 +184,7 @@ fn custom_fallback_replaces_default_markup() {
         view! { <div class="my-custom-error">"Custom UI"</div> }
     });
 
-    let html = view! { <Boundary fallback=fallback>{boom()}</Boundary> }.to_html();
+    let html = view! { <ErrorBoundary fallback=fallback>{boom()}</ErrorBoundary> }.to_html();
 
     assert!(
         html.contains("Custom UI"),
@@ -212,7 +212,7 @@ fn custom_messages_override_default_heading() {
         message: MessageFn::static_str("Algo deu errado."),
     };
 
-    let html = view! { <Boundary messages=messages>{boom()}</Boundary> }.to_html();
+    let html = view! { <ErrorBoundary messages=messages>{boom()}</ErrorBoundary> }.to_html();
 
     assert!(
         html.contains("Algo deu errado."),
@@ -228,19 +228,22 @@ fn custom_messages_override_default_heading() {
 fn explicit_locale_prop_is_passed_to_messages_override() {
     let messages = error_boundary::Messages {
         message: MessageFn::new(|locale: &Locale| {
-            format!("Boundary heading for {}", locale.to_bcp47())
+            format!("ErrorBoundary heading for {}", locale.to_bcp47())
         }),
     };
 
     let html = view! {
-        <Boundary messages=messages locale=Locale::parse("pt-BR").expect("locale should parse")>
+        <ErrorBoundary
+            messages=messages
+            locale=Locale::parse("pt-BR").expect("locale should parse")
+        >
             {boom()}
-        </Boundary>
+        </ErrorBoundary>
     }
     .to_html();
 
     assert!(
-        html.contains("Boundary heading for pt-BR"),
+        html.contains("ErrorBoundary heading for pt-BR"),
         "explicit locale prop was not passed to the messages override: {html}"
     );
 }
@@ -253,7 +256,7 @@ fn explicit_locale_prop_is_passed_to_messages_override() {
 /// 3. `Messages::default()` fallback
 ///
 /// This test exercises path 2 — registering a Spanish bundle in the
-/// provider and confirming `Boundary` renders the localized heading
+/// provider and confirming `ErrorBoundary` renders the localized heading
 /// without the consumer passing `messages` directly.
 #[test]
 fn provider_registry_messages_drive_heading_when_no_prop_override() {
@@ -286,7 +289,7 @@ fn provider_registry_messages_drive_heading_when_no_prop_override() {
             StyleStrategy::Inline,
         ));
 
-        view! { <Boundary>{boom()}</Boundary> }.to_html()
+        view! { <ErrorBoundary>{boom()}</ErrorBoundary> }.to_html()
     });
 
     assert!(
@@ -331,7 +334,10 @@ fn explicit_locale_prop_selects_provider_registry_bundle() {
             StyleStrategy::Inline,
         ));
 
-        view! { <Boundary locale=Locale::parse("es-MX").expect("locale should parse")>{boom()}</Boundary> }
+        view! {
+            <ErrorBoundary locale=Locale::parse("es-MX")
+                .expect("locale should parse")>{boom()}</ErrorBoundary>
+        }
         .to_html()
     });
 
@@ -368,7 +374,7 @@ fn fallback_attrs_are_invariant_under_rtl_locale() {
                 StyleStrategy::Inline,
             ));
 
-            view! { <Boundary>{boom()}</Boundary> }.to_html()
+            view! { <ErrorBoundary>{boom()}</ErrorBoundary> }.to_html()
         })
     }
 
@@ -459,7 +465,7 @@ fn public_types_have_non_empty_debug_impls() {
 fn fallback_render_is_deterministic_across_two_owners() {
     fn render() -> String {
         let owner = Owner::new();
-        owner.with(|| view! { <Boundary>{boom()}</Boundary> }.to_html())
+        owner.with(|| view! { <ErrorBoundary>{boom()}</ErrorBoundary> }.to_html())
     }
 
     let first = render();
@@ -488,7 +494,7 @@ fn fallback_render_is_deterministic_across_two_owners() {
 ///   checks because the misspelling silently never appears).
 #[test]
 fn fallback_satisfies_wai_aria_alert_region_contract() {
-    let html = view! { <Boundary>{boom()}</Boundary> }.to_html();
+    let html = view! { <ErrorBoundary>{boom()}</ErrorBoundary> }.to_html();
 
     assert_eq!(
         html.matches(r#"role="alert""#).count(),
@@ -591,7 +597,7 @@ fn explicit_messages_prop_wins_over_provider_registry() {
             message: MessageFn::static_str("DIRECT_PROP"),
         };
 
-        view! { <Boundary messages=direct>{boom()}</Boundary> }.to_html()
+        view! { <ErrorBoundary messages=direct>{boom()}</ErrorBoundary> }.to_html()
     });
 
     assert!(
@@ -654,7 +660,7 @@ fn custom_fallback_can_clear_errors_for_reactive_recovery() {
         }
     });
 
-    let html = view! { <Boundary fallback=fallback>{boom()}</Boundary> }.to_html();
+    let html = view! { <ErrorBoundary fallback=fallback>{boom()}</ErrorBoundary> }.to_html();
 
     assert!(
         html.contains("after-clear"),
@@ -745,7 +751,8 @@ fn error_message_text_is_html_escaped_in_fallback_list() {
     impl std::error::Error for ScriptyError {}
 
     let html =
-        view! { <Boundary>{Result::<&str, ScriptyError>::Err(ScriptyError)}</Boundary> }.to_html();
+        view! { <ErrorBoundary>{Result::<&str, ScriptyError>::Err(ScriptyError)}</ErrorBoundary> }
+            .to_html();
 
     assert!(
         !html.contains("<script>alert('xss')</script>"),
@@ -777,8 +784,9 @@ fn non_ascii_error_text_is_preserved_through_render() {
 
     impl std::error::Error for JapaneseError {}
 
-    let html = view! { <Boundary>{Result::<&str, JapaneseError>::Err(JapaneseError)}</Boundary> }
-        .to_html();
+    let html =
+        view! { <ErrorBoundary>{Result::<&str, JapaneseError>::Err(JapaneseError)}</ErrorBoundary> }
+            .to_html();
 
     assert!(
         html.contains("値が無効です"),
@@ -808,9 +816,9 @@ fn on_error_does_not_fire_for_empty_errors_signal() {
         let signal = ArcRwSignal::new(Errors::default());
 
         let html = view! {
-            <Boundary on_error=on_error>
+            <ErrorBoundary on_error=on_error>
                 <p>"child-ok"</p>
-            </Boundary>
+            </ErrorBoundary>
         }
         .to_html();
 
@@ -871,9 +879,9 @@ fn default_fallback_with_empty_errors_signal_emits_zero_count() {
 #[test]
 fn error_boundary_html_snapshot_happy_path() {
     let html = view! {
-        <Boundary>
+        <ErrorBoundary>
             <p>"child-ok"</p>
-        </Boundary>
+        </ErrorBoundary>
     }
     .to_html();
 
@@ -884,36 +892,36 @@ fn error_boundary_html_snapshot_happy_path() {
 /// fallback markup including localized heading and one error item.
 #[test]
 fn error_boundary_html_snapshot_error_path() {
-    let html = view! { <Boundary>{boom()}</Boundary> }.to_html();
+    let html = view! { <ErrorBoundary>{boom()}</ErrorBoundary> }.to_html();
 
     insta::assert_snapshot!(html, @r#"<div data-ars-error="true" data-ars-error-count="1" data-ars-part="root" data-ars-scope="error-boundary" aria-atomic="true" aria-live="assertive" role="alert"><p data-ars-part="message" data-ars-scope="error-boundary">A component encountered an error.</p><ul data-ars-part="list" data-ars-scope="error-boundary"><li data-ars-part="item" data-ars-scope="error-boundary">boom-from-child</li><!></ul></div>"#);
 }
 
-/// Nested-Boundary contract: when an inner `Boundary` catches an error,
-/// the outer `Boundary` stays idle (no fallback markup, children render
+/// Nested-ErrorBoundary contract: when an inner `ErrorBoundary` catches an error,
+/// the outer `ErrorBoundary` stays idle (no fallback markup, children render
 /// normally). This guards against an aria-live double-announcement that
 /// would arise if both boundaries fired their fallbacks for the same
 /// caught error.
 #[test]
 fn inner_boundary_catches_outer_stays_idle() {
     let html = view! {
-        <Boundary>
+        <ErrorBoundary>
             <p>"outer-sibling"</p>
-            <Boundary>{boom()}</Boundary>
-        </Boundary>
+            <ErrorBoundary>{boom()}</ErrorBoundary>
+        </ErrorBoundary>
     }
     .to_html();
 
     assert!(
         html.contains("outer-sibling"),
-        "outer Boundary's non-erroring sibling should render: {html}"
+        "outer ErrorBoundary's non-erroring sibling should render: {html}"
     );
 
     let fallback_opens = html.matches(r#"data-ars-error="true""#).count();
 
     assert_eq!(
         fallback_opens, 1,
-        "inner Boundary should swallow the error; outer should stay idle. \
+        "inner ErrorBoundary should swallow the error; outer should stay idle. \
          Saw {fallback_opens} fallback container(s) in: {html}"
     );
 

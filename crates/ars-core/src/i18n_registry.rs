@@ -118,12 +118,12 @@ impl Debug for I18nRegistries {
 /// Resolves component messages using prop override, provider registries, then defaults.
 #[must_use]
 pub fn resolve_messages<M: ComponentMessages + Send + Sync + 'static>(
-    adapter_props_messages: Option<&M>,
+    adapter_props_messages: Option<M>,
     registries: &I18nRegistries,
     locale: &Locale,
 ) -> M {
     if let Some(messages) = adapter_props_messages {
-        return messages.clone();
+        return messages;
     }
 
     if let Some(registry) = registries.get::<M>() {
@@ -270,7 +270,7 @@ mod tests {
             close_label: MessageFn::static_str("Override"),
         };
 
-        let resolved = resolve_messages(Some(&override_messages), &registries, &locale);
+        let resolved = resolve_messages(Some(override_messages), &registries, &locale);
 
         assert_eq!((resolved.close_label)(&locale), "Override");
     }

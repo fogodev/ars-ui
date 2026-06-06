@@ -4,6 +4,11 @@ The fixture and harness layer must cover every browser-observable public
 feature of every adapter-level component. Smoke-only coverage is a workflow
 violation unless the PR body records a valid exception.
 
+E2E owns full user-visible outcome parity. Adapter wasm tests may prove focused
+browser wiring, but they do not replace E2E coverage for complete workflows,
+cross-adapter parity, styled visible states, computed visual feedback, axe
+checks across reached states, or reference-outcome claims.
+
 ## Required Files
 
 When both adapters exist, update both fixture category aggregators.
@@ -41,6 +46,13 @@ The fixture page must expose one id'd instance per feature combination the
 harness drives. Duplication is intentional. Do not share state between fixture
 instances.
 
+Fixtures follow the same consumer boundary as widgets. They may provide sample
+data, controlled prop values, and callback sinks that make assertions possible.
+They must not recreate component-owned validation, keyboard navigation,
+selection, focus, ARIA relationship, localized-message, drag/drop, loading, or
+layout policy just to make a harness pass. If the harness needs that logic, add
+or expose it through the component and adapter contract.
+
 Example instance set for a selection component:
 
 - `#component-single-basic`
@@ -70,6 +82,39 @@ If the adapter spec lists a feature and no E2E test function drives it, the
 coverage is incomplete.
 If the counterpart outcome matrix marks an axis as supported and no E2E test
 drives it, the parity claim is incomplete.
+
+Every browser review comment about UX must become either:
+
+- an E2E assertion that fails before the fix and passes after it; or
+- a documented `NotApplicable` / `IntentionallyDifferent` matrix row with the
+  reason and owner.
+
+Do not close a UX complaint with only manual browser screenshots, a wasm test,
+or a code comparison. The E2E harness must encode the complaint at the
+user-visible level that triggered it: visible text, DOM placement, computed
+style, locale output, form submission/result flow, keyboard/focus behavior,
+screen-reader relationship, or cross-adapter parity.
+
+Do not cite a wasm test as the only proof for a supported counterpart outcome
+unless the outcome is strictly adapter/browser wiring with no user-visible
+workflow, styling, accessibility-state transition, or cross-adapter comparison.
+For example, a wasm test can prove that `on_submit` fires and prevents native
+navigation; the E2E harness should still prove the public form scenario, visible
+status/error placement, axe-clean reached state, and Leptos/Dioxus parity.
+
+For forms and validation-like surfaces, E2E must cover at least:
+
+- one valid state and every supported invalid reason as separate fixture ids;
+- the visible error message text for each invalid reason;
+- placement of field errors below the related input, not in a form status
+  region or unrelated sibling;
+- form status/live-region text staying separate from field-level errors;
+- `aria-describedby`, `aria-errormessage`, `aria-invalid`, required/disabled
+  semantics, and accessible names;
+- computed invalid visual feedback;
+- localized visible text for every component-owned or fixture-owned message the
+  component displays;
+- Leptos and Dioxus parity for the same state matrix.
 
 ## Axe Across Visible States
 

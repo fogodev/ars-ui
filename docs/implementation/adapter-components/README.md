@@ -13,14 +13,17 @@ Before planning or implementing any adapter-level component task, read every
 file below:
 
 1. [01-before-you-code.md](01-before-you-code.md)
-2. [07-parity-review.md](07-parity-review.md)
-3. [02-adapter-api-and-wiring.md](02-adapter-api-and-wiring.md)
-4. [03-framework-rules.md](03-framework-rules.md)
-5. [04-adapter-tests.md](04-adapter-tests.md)
-6. [05-e2e-fixtures-and-harnesses.md](05-e2e-fixtures-and-harnesses.md)
-7. [06-widgets-examples.md](06-widgets-examples.md)
-8. [09-browser-parity-harness.md](09-browser-parity-harness.md)
-9. [08-validation-and-pr-closeout.md](08-validation-and-pr-closeout.md)
+2. [10-reference-exploration-sketch.md](10-reference-exploration-sketch.md)
+3. [07-parity-review.md](07-parity-review.md)
+4. [11-i18n-and-a11y-support.md](11-i18n-and-a11y-support.md)
+5. [02-adapter-api-and-wiring.md](02-adapter-api-and-wiring.md)
+6. [03-framework-rules.md](03-framework-rules.md)
+7. [04-adapter-tests.md](04-adapter-tests.md)
+8. [05-e2e-fixtures-and-harnesses.md](05-e2e-fixtures-and-harnesses.md)
+9. [06-widgets-examples.md](06-widgets-examples.md)
+10. [09-browser-parity-harness.md](09-browser-parity-harness.md)
+11. [12-parity-audit-loop.md](12-parity-audit-loop.md)
+12. [08-validation-and-pr-closeout.md](08-validation-and-pr-closeout.md)
 
 Then keep the checklists open while implementing:
 
@@ -36,15 +39,30 @@ An adapter component task is complete only when the same PR includes:
 
 - adapter crate code, module wiring, feature wiring, and symmetric prelude
   exports;
-- adapter SSR/unit tests and wasm browser tests for interactive behavior;
-- E2E fixtures and harness coverage for both adapters;
+- adapter SSR/unit tests and focused wasm browser tests for adapter/browser
+  wiring that SSR cannot prove;
+- E2E fixtures and harness coverage for both adapters, covering complete
+  user-visible workflows and outcome parity;
 - matrix entries, axe coverage across visible states, and computed visual
   assertions;
 - widgets examples in all six widgets crates;
+- proof that widgets and fixtures behave as consumer applications: they may
+  provide sample data and apply callbacks, but they must not duplicate
+  component-owned validation, accessibility, selection, keyboard, focus,
+  drag/drop, layout, or message policy;
 - counterpart-driven visual UX review, starting with React Aria / React
   Spectrum when available, then Ark UI / Chakra UI, then Radix UI / shadcn/ui;
+- a checked-in reference-exploration sketch under
+  `docs/implementation/sketches/` that records `playwright-cli` reference
+  evidence, outcome axes, ars-ui contract mapping, and any pre-code gaps;
+- i18n and accessibility mappings for every user-facing string, validation
+  message, announcement, accessible relationship, focus path, keyboard path,
+  locale-sensitive output, and direction-sensitive layout behavior;
 - repeatable browser comparison evidence collected with `playwright-cli` or an
   equivalent checked-in browser harness;
+- a completed parity audit loop with at least three passes over reference
+  outcomes, consumer reality, and i18n/a11y/test proof, leaving no unverified
+  or workaround-backed supported outcomes;
 - spec synchronization for any drift surfaced during implementation;
 - focused validation, `post-implementation-audit`, user review before commit,
   `cargo xci-fast`, and the Codex review loop after push.

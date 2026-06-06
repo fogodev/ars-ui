@@ -23,15 +23,11 @@
 //! See `spec/leptos-components/utility/dismissable.md` for the full
 //! adapter contract.
 
-use std::{
-    fmt::{self, Debug},
-    sync::Arc,
-};
+use std::fmt::{self, Debug};
 
 pub use ars_components::utility::dismissable::{
     Api, DismissAttempt, DismissReason, Messages, Part, Props, dismiss_button_attrs,
 };
-use ars_core::{I18nRegistries, resolve_messages};
 use ars_i18n::Locale;
 use leptos::{callback::Callback, children::TypedChildren, html, prelude::*};
 #[cfg(not(feature = "ssr"))]
@@ -45,11 +41,7 @@ use {
     std::{cell::RefCell, rc::Rc},
 };
 
-use crate::{
-    attrs::attr_map_to_leptos_inline_attrs,
-    id::use_id,
-    provider::{current_ars_context, use_locale},
-};
+use crate::{attrs::attr_map_to_leptos_inline_attrs, id::use_id, use_messages_and_locale};
 
 // ────────────────────────────────────────────────────────────────────
 // Handle
@@ -377,7 +369,7 @@ pub fn Region<T>(
     /// Explicit locale override used when resolving provider/default
     /// [`Messages`].
     #[prop(optional, into)]
-    locale: Option<Signal<Locale>>,
+    locale: Option<Locale>,
 
     /// Explicit message-bundle override used when `dismiss_label` is
     /// omitted.
@@ -388,7 +380,7 @@ pub fn Region<T>(
     /// Merges with whatever class the component itself emits so both reach
     /// the rendered element as a single `class` attribute.
     #[prop(optional, into)]
-    class: Option<Oco<'static, str>>,
+    class: Option<TextProp>,
 
     /// Children rendered between the start and end dismiss buttons.
     children: TypedChildren<T>,
@@ -396,38 +388,27 @@ pub fn Region<T>(
 where
     View<T>: IntoView,
 {
-    let class = class.map(Oco::into_owned);
-
     let root_ref = NodeRef::<html::Div>::new();
 
     let boundaries = inside_boundaries.unwrap_or_else(|| Signal::stored(Vec::new()));
 
-    let provider_locale = use_locale();
-
-    let registries = current_ars_context().map_or_else(
-        || Arc::new(I18nRegistries::new()),
-        |ctx| Arc::clone(&ctx.i18n_registries),
-    );
+    let resolved_messages_and_locale = use_messages_and_locale(messages, locale);
 
     let dismiss_label = dismiss_label.unwrap_or_else(|| {
         Signal::derive(move || {
-            let resolved_locale = locale
-                .as_ref()
-                .map_or_else(|| provider_locale.get(), |locale| locale.get());
+            let (resolved_messages, locale) = resolved_messages_and_locale.get();
 
-            let resolved_messages =
-                resolve_messages(messages.as_ref(), registries.as_ref(), &resolved_locale);
-
-            (resolved_messages.dismiss_label)(&resolved_locale)
+            (resolved_messages.dismiss_label)(&locale)
         })
     });
 
     let api = Api::new(props.clone(), move || dismiss_label.get());
 
     let mut root_attr_map = api.root_attrs();
-    crate::merge_consumer_class_into(&mut root_attr_map, class.as_deref());
-    let root_attrs = attr_map_to_leptos_inline_attrs(root_attr_map);
 
+    crate::merge_consumer_class_prop_into(&mut root_attr_map, class);
+
+    let root_attrs = attr_map_to_leptos_inline_attrs(root_attr_map);
     let inline_attrs = attr_map_to_leptos_inline_attrs(api.dismiss_button_attrs());
     let start_attrs = inline_attrs.clone();
     let end_attrs = inline_attrs;

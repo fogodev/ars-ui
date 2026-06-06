@@ -17,11 +17,35 @@ This spec maps the core [`Field`](../../components/utility/field.md) contract an
 ```rust,no_check
 #[component] pub fn Field(...) -> impl IntoView
 #[component] pub fn Label(children: Children) -> impl IntoView
+#[component] pub fn Input(...) -> impl IntoView
 #[component] pub fn Description(children: Children) -> impl IntoView
 #[component] pub fn ErrorMessage(children: Children) -> impl IntoView
 ```
 
-The root `Field` component surfaces the full core prop set: `id`, `required`, `disabled`, `readonly`, `invalid`, and `dir`.
+The root `Field` component surfaces the full core prop set: `id`, `required`,
+`disabled`, `readonly`, `invalid`, `errors`, and `dir`, plus the adapter-level
+`name` lookup key for form-scoped validation errors. `errors` is a controlled
+field-error message vector and `required`, `disabled`, `readonly`, and
+`invalid` are reactive Leptos props (`Signal<T>` inputs). The adapter
+synchronizes those props into the field machine so `ErrorMessage` visibility,
+`aria-describedby`, `aria-invalid`, and `aria-errormessage` update after mount
+instead of being inferred from a sibling alert alone. When `Field` is rendered
+inside `Form`, `name` selects matching `Form.validation_errors` entries and
+merges those consumer/server-provided messages into the field error vector
+without generating adapter-owned English text.
+
+The native `Input` helper also exposes `on_value_input: Option<Callback<String>>`
+for the common text-field path. The callback receives the current native input
+value after the input event is normalized and after core field attrs remain
+attached to the actual `<input>` node. `Input.value` accepts a reactive
+`Signal<String>` so controlled values stay in sync with user input, form reset,
+and URL/application state. `Input.r#type` accepts `Signal<InputType>` so input
+type changes can participate in the same reactive prop model as other native
+input state without using stringly typed HTML tokens. `Input.placeholder` and
+public `class` props use Leptos `TextProp` so static strings, signals, and
+`t(MessageKey)` can all provide localized/reactive text without browser-console
+tracking warnings. Consumers that need raw framework event data can still
+provide a custom input-like child that consumes `api.input_attrs()`.
 
 ## 3. Mapping to Core Component Contract
 
@@ -31,14 +55,14 @@ The root `Field` component surfaces the full core prop set: `id`, `required`, `d
 
 ## 4. Part Mapping
 
-| Core part / structure | Required?                   | Adapter rendering target                      | Ownership                               | Attr source                                   | Notes                                                                |
-| --------------------- | --------------------------- | --------------------------------------------- | --------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------- |
-| `Root`                | required                    | wrapper `<div>` from `Field`                  | adapter-owned compound root             | `api.root_attrs()`                            | Hosts all field subparts.                                            |
-| `Label`               | conditional                 | `<label>` from `field::Label`                 | compound subcomponent                   | `api.label_attrs()`                           | Optional if the consumer omits a label.                              |
-| `Input`               | required structurally       | consumer input-like child inside `Field`      | consumer-owned node                     | `api.input_attrs()` consumed by child control | No dedicated DOM wrapper; attrs are forwarded to the actual control. |
-| `Description`         | conditional                 | `<span>` or similar from `field::Description` | compound subcomponent                   | `api.description_attrs()`                     | Mount state affects `aria-describedby`.                              |
-| `ErrorMessage`        | conditional                 | `<span>` from `field::ErrorMessage`           | compound subcomponent                   | `api.error_message_attrs()`                   | Uses `role="alert"`.                                                 |
-| `RequiredIndicator`   | conditional structural node | `<span>` inside `Label`                       | compound or consumer-owned substructure | adapter-owned structural attrs                | Decorative marker, typically rendered only when `required=true`.     |
+| Core part / structure | Required?                   | Adapter rendering target                                                                      | Ownership                                   | Attr source                                        | Notes                                                                                                                                   |
+| --------------------- | --------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `Root`                | required                    | wrapper `<div>` from `Field`                                                                  | adapter-owned compound root                 | `api.root_attrs()`                                 | Hosts all field subparts.                                                                                                               |
+| `Label`               | conditional                 | `<label>` from `field::Label`                                                                 | compound subcomponent                       | `api.label_attrs()`                                | Optional if the consumer omits a label.                                                                                                 |
+| `Input`               | required structurally       | native `<input>` from `field::Input` or a consumer input-like child that consumes field attrs | adapter-owned helper or consumer-owned node | `api.input_attrs()` consumed by the actual control | The adapter ships a native `Input` helper for the common TextField shape; richer controls may still consume the same attr set directly. |
+| `Description`         | conditional                 | `<span>` or similar from `field::Description`                                                 | compound subcomponent                       | `api.description_attrs()`                          | Mount state affects `aria-describedby`.                                                                                                 |
+| `ErrorMessage`        | conditional                 | `<span>` from `field::ErrorMessage`                                                           | compound subcomponent                       | `api.error_message_attrs()`                        | Uses `role="alert"`.                                                                                                                    |
+| `RequiredIndicator`   | conditional structural node | `<span>` inside `Label`                                                                       | compound or consumer-owned substructure     | adapter-owned structural attrs                     | Decorative marker, typically rendered only when `required=true`.                                                                        |
 
 ## 5. Attr Merge and Ownership Rules
 
@@ -62,32 +86,38 @@ The root `Field` component surfaces the full core prop set: `id`, `required`, `d
 
 Controlled/uncontrolled switching is not applicable to the compound shell itself. Root state comes from explicit field props plus inherited field context. Presence-sensitive subparts update machine state through mount/unmount registration.
 
-| Adapter prop         | Mode                        | Sync trigger                       | Machine event / update path                            | Visible effect                                              | Notes                                                                     |
-| -------------------- | --------------------------- | ---------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `disabled`           | controlled                  | root prop change after mount       | `SetDisabled` or equivalent prop-to-machine sync       | disables the input attr set and descendant affordances      | local prop participates in merge with parent context                      |
-| `readonly`           | controlled                  | root prop change after mount       | `SetReadonly` or equivalent prop-to-machine sync       | updates input attrs and read-only affordances               | merge with inherited readonly follows explicit precedence                 |
-| `invalid`            | controlled                  | root prop change after mount       | `SetInvalid` or equivalent prop-to-machine sync        | updates error attrs and validation styling                  | merged with parent invalid state                                          |
-| `required`           | non-reactive adapter prop   | render time only                   | included in machine props                              | toggles required semantics and required indicator rendering | changes after mount should be treated as unsupported unless reinitialized |
-| parent field context | derived from context        | parent context update or recompute | merge into effective field props before deriving attrs | inherited disabled/invalid state reaches descendants        | explicit local props must win where the core contract says so             |
-| description presence | uncontrolled internal state | `Description` mount/unmount        | `SetHasDescription(true/false)`                        | updates `aria-describedby`                                  | registration-driven                                                       |
-| error presence       | uncontrolled internal state | `ErrorMessage` mount/unmount       | `SetHasErrorMessage(true/false)` or equivalent         | updates `aria-describedby` and alert structure              | registration-driven                                                       |
+| Adapter prop           | Mode                        | Sync trigger                         | Machine event / update path                            | Visible effect                                                         | Notes                                                                          |
+| ---------------------- | --------------------------- | ------------------------------------ | ------------------------------------------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `required`             | controlled                  | root prop signal change after mount  | prop-to-machine sync                                   | toggles required semantics, native `required`, and ARIA required attrs | local prop participates in merge with parent context                           |
+| `disabled`             | controlled                  | root prop signal change after mount  | `SetDisabled` or equivalent prop-to-machine sync       | disables the input attr set and descendant affordances                 | local prop participates in merge with parent context                           |
+| `readonly`             | controlled                  | root prop signal change after mount  | `SetReadonly` or equivalent prop-to-machine sync       | updates input attrs and read-only affordances                          | merge with inherited readonly follows explicit precedence                      |
+| `invalid`              | controlled                  | root prop signal change after mount  | `SetInvalid` or equivalent prop-to-machine sync        | updates error attrs and validation styling                             | merged with parent invalid state                                               |
+| `name`                 | controlled lookup key       | render or form context recompute     | merges matching `Form.validation_errors[name]`         | localized/server field errors reach the field error relationship       | separate from `Input.name`, which remains the native HTML field name           |
+| `errors`               | controlled                  | root prop signal change after mount  | `SetErrors` / `ClearErrors`                            | updates invalid state, error attrs, and `ErrorMessage` visibility      | server/custom messages enter the field through this vector                     |
+| `Input.value`          | controlled                  | input prop signal change after mount | reactive native value attr                             | updates the actual input value without remounting the field            | pair with `Input.on_value_input` for controlled text-entry demos               |
+| `Input.r#type`         | controlled                  | input prop signal change after mount | reactive native type attr                              | updates the native input type without stringly typed call sites        | supplied as `Signal<InputType>`; omitted type falls back to browser text input |
+| `Input.on_value_input` | observational callback      | native input event                   | value emitted through adapter callback                 | consumer state can update while field relationships stay core-owned    | callback payload is `String`, not a raw framework event                        |
+| parent field context   | derived from context        | parent context update or recompute   | merge into effective field props before deriving attrs | inherited disabled/invalid state reaches descendants                   | explicit local props must win where the core contract says so                  |
+| description presence   | uncontrolled internal state | `Description` mount/unmount          | `SetHasDescription(true/false)`                        | updates `aria-describedby`                                             | registration-driven                                                            |
+| error state            | controlled by field errors  | root/form error synchronization      | `SetErrors` / `ClearErrors`                            | updates `aria-describedby`, `aria-errormessage`, and alert visibility  | error message presence alone does not create an error relationship             |
 
 | UI event                     | Preconditions                          | Machine event / callback path                 | Ordering notes                                                                              | Notes                                                        |
 | ---------------------------- | -------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | compound subpart render      | inside a valid `Field` context         | attr derivation only                          | context lookup must happen before attrs are derived                                         | missing context is a contract failure for required subparts  |
 | input-like descendant events | child control consumes `input_attrs()` | handled by the concrete child control adapter | child control normalizes events first, then field relationships update through shared attrs | `Field` does not steal ownership of the input event pipeline |
+| native `Input` value input   | adapter `Input` helper rendered        | `on_value_input(String)`                      | input attrs are already on the actual control before the callback runs                      | ergonomic common path for interactive validation demos       |
 
 ## 8. Registration and Cleanup Contract
 
-- Presence-sensitive parts must register on mount and unregister on cleanup.
-- Registration order is not semantically meaningful for `Description` versus `ErrorMessage`, but both must be reflected in the current `aria-describedby` set.
+- Presence-sensitive description parts must register on mount and unregister on cleanup.
+- Error message visibility and `aria-errormessage` relationships are driven by the field error vector, not by `ErrorMessage` mount alone.
 - Missing-context failures for `Label`, `Description`, and `ErrorMessage` should fail fast rather than silently no-op.
 
-| Registered entity                    | Registration trigger              | Identity key                                   | Cleanup trigger      | Cleanup action                                                          | Notes                                            |
-| ------------------------------------ | --------------------------------- | ---------------------------------------------- | -------------------- | ----------------------------------------------------------------------- | ------------------------------------------------ |
-| `Description` part                   | `Description` subcomponent mount  | component instance plus derived description ID | subcomponent cleanup | dispatch `SetHasDescription(false)` and drop any stored ID contribution | must not leave stale describedby tokens          |
-| `ErrorMessage` part                  | `ErrorMessage` subcomponent mount | component instance plus derived error ID       | subcomponent cleanup | dispatch error-presence removal and drop any stored ID contribution     | alert relationship must disappear when unmounted |
-| inherited field context subscription | root `Field` mount                | field instance                                 | root cleanup         | drop inherited-state subscription                                       | parent updates must not outlive the child field  |
+| Registered entity                    | Registration trigger                          | Identity key                                   | Cleanup trigger      | Cleanup action                                                          | Notes                                                        |
+| ------------------------------------ | --------------------------------------------- | ---------------------------------------------- | -------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `Description` part                   | `Description` subcomponent mount              | component instance plus derived description ID | subcomponent cleanup | dispatch `SetHasDescription(false)` and drop any stored ID contribution | must not leave stale describedby tokens                      |
+| `ErrorMessage` part                  | render when consumer wants an error container | derived error ID                               | subcomponent cleanup | no machine event; empty error vectors keep the part hidden              | alert relationship appears only when core field errors exist |
+| inherited field context subscription | root `Field` mount                            | field instance                                 | root cleanup         | drop inherited-state subscription                                       | parent updates must not outlive the child field              |
 
 ## 9. Ref and Node Contract
 
@@ -105,9 +135,10 @@ Controlled/uncontrolled switching is not applicable to the compound shell itself
 
 ## 11. Callback Payload Contract
 
-| Callback                                                 | Payload source             | Payload shape                                                              | Timing                            | Cancelable?                           | Notes                                                                                                                   |
-| -------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------- | --------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| field-level callbacks exposed by concrete child controls | normalized adapter payload | child-control-specific payload enriched with canonical field IDs/relations | after child-control normalization | depends on the child control contract | `Field` itself does not invent independent payloads; it enriches downstream control behavior through attrs and context. |
+| Callback                                                 | Payload source             | Payload shape                                                              | Timing                                                   | Cancelable?                           | Notes                                                                                                                   |
+| -------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| field-level callbacks exposed by concrete child controls | normalized adapter payload | child-control-specific payload enriched with canonical field IDs/relations | after child-control normalization                        | depends on the child control contract | `Field` itself does not invent independent payloads; it enriches downstream control behavior through attrs and context. |
+| `Input.on_value_input`                                   | native input value         | `String`                                                                   | during native input event, after field attrs are applied | no                                    | Convenience callback for the adapter-owned native input helper.                                                         |
 
 ## 12. Failure and Degradation Rules
 
@@ -135,6 +166,7 @@ Controlled/uncontrolled switching is not applicable to the compound shell itself
 - Description and error presence must only register/unregister on mount-state changes, not every rerender.
 - `input_attrs()` should be derived once per machine/context change and merged at the input node, not reconstructed ad hoc in nested wrappers.
 - Parent-context inheritance should update deterministically without forcing unrelated subparts to re-register.
+- Leptos input relationship attrs that can appear or disappear after mount (`aria-describedby`, `aria-invalid`, `aria-errormessage`, native `required`, `disabled`, and `readonly`) must render as reactive attributes from the live field API.
 
 ## 16. Implementation Dependencies
 
@@ -184,7 +216,7 @@ Controlled/uncontrolled switching is not applicable to the compound shell itself
 
 ## 23. Framework-Specific Behavior
 
-Leptos compound components are the adapter representation of `Label`, `Description`, and `ErrorMessage`. `Input` remains consumer-owned but must consume the field attrs from context.
+Leptos compound components are the adapter representation of `Label`, `Input`, `Description`, and `ErrorMessage`. `Input` renders a native input for the common React Aria TextField-style composition; custom controls may still consume the field attrs from context.
 
 ## 24. Canonical Implementation Sketch
 

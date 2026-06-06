@@ -4499,6 +4499,18 @@ impl AttrMap {
             .map(|i| &self.attrs[i].1)
     }
 
+    /// Remove and return an attribute's typed value by key.
+    ///
+    /// Use this instead of `get_value().cloned()` when the caller will replace
+    /// the same key after inspecting it. This preserves zero-copy ownership of
+    /// string values and reactive closures while maintaining the map's sorted
+    /// storage invariant.
+    pub fn take(&mut self, attr: &HtmlAttr) -> Option<AttrValue> {
+        self.attrs.binary_search_by(|(k, _)| k.cmp(attr))
+            .ok()
+            .map(|i| self.attrs.remove(i).1)
+    }
+
     /// Iterate over all attribute key-value pairs.
     pub fn iter_attrs(&self) -> impl Iterator<Item = &(HtmlAttr, AttrValue)> {
         self.attrs.iter()

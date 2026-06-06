@@ -9,12 +9,15 @@ use std::fmt::{self, Display};
 
 use ars_leptos::{
     I18nRegistries, MessageFn, MessagesRegistry,
-    prelude::{Orientation, Translate, t},
+    prelude::{Orientation, Translate, ValidationError, t},
     utility::{
         button::{self, Button, ButtonAsChild},
         client_only::ClientOnly,
         dismissable,
-        error_boundary::Boundary,
+        error_boundary::ErrorBoundary,
+        field::{self, Field},
+        fieldset::{self, Fieldset},
+        form::{self, Form},
         heading::{self, Heading, HeadingLevelProvider, Section},
         highlight::Highlight,
         landmark::{self, Landmark},
@@ -145,6 +148,54 @@ pub(crate) enum UtilityText {
 
     #[translate(en_US = "Sidebar region", pt_BR = "Região da barra lateral")]
     LandmarkRegion,
+
+    #[translate(
+        en_US = "Field and form primitives",
+        pt_BR = "Primitivos de campo e formulário"
+    )]
+    FieldFormHeading,
+
+    #[translate(en_US = "Account details", pt_BR = "Detalhes da conta")]
+    AccountDetails,
+
+    #[translate(
+        en_US = "Grouped controls inherit the fieldset contract.",
+        pt_BR = "Controles agrupados herdam o contrato do fieldset."
+    )]
+    FieldsetDescription,
+
+    #[translate(en_US = "Email", pt_BR = "E-mail")]
+    EmailLabel,
+
+    #[translate(
+        en_US = "Use a reachable address.",
+        pt_BR = "Use um endereço acessível."
+    )]
+    EmailDescription,
+
+    #[translate(en_US = "Email is required.", pt_BR = "E-mail é obrigatório.")]
+    EmailRequired,
+
+    #[translate(
+        en_US = "Include an @ in the email address.",
+        pt_BR = "Inclua um @ no endereço de e-mail."
+    )]
+    EmailMissingAt,
+
+    #[translate(
+        en_US = "Enter a domain after @.",
+        pt_BR = "Informe um domínio depois de @."
+    )]
+    EmailIncompleteDomain,
+
+    #[translate(
+        en_US = "Account details are incomplete.",
+        pt_BR = "Os detalhes da conta estão incompletos."
+    )]
+    AccountIncomplete,
+
+    #[translate(en_US = "Ready", pt_BR = "Pronto")]
+    Ready,
 }
 
 /// Registers the utility category's localized message bundles with the
@@ -226,6 +277,30 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
             reason: format!("{reason:?}"),
         });
     });
+    let required_error = t(UtilityText::EmailRequired);
+    let missing_at_error = t(UtilityText::EmailMissingAt);
+    let incomplete_domain_error = t(UtilityText::EmailIncompleteDomain);
+    let form_errors = Signal::derive(move || {
+        std::collections::BTreeMap::from([(
+            "email-required".to_string(),
+            vec![ValidationError::server(required_error.get())],
+        )])
+    });
+    let missing_at_errors = Signal::derive(move || {
+        vec![ValidationError::custom(
+            "email-missing-at",
+            missing_at_error.get(),
+        )]
+    });
+    let incomplete_domain_errors = Signal::derive(move || {
+        vec![ValidationError::custom(
+            "email-incomplete-domain",
+            incomplete_domain_error.get(),
+        )]
+    });
+    let missing_at_value = Signal::stored(String::from("admin"));
+    let incomplete_domain_value = Signal::stored(String::from("admin@"));
+    let valid_email_value = Signal::stored(String::from("admin@email.com"));
 
     view! {
         <div class="gallery-grid">
@@ -401,6 +476,89 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                     />
                 </div>
             </section>
+            <section class="showcase-panel wide" aria-labelledby="field-form">
+                <h2 id="field-form">{t(UtilityText::FieldFormHeading)}</h2>
+                <Form
+                    id="leptos-fixture-account-form"
+                    action="/account"
+                    validation_errors=form_errors
+                    class="fixture-form"
+                >
+                    <Fieldset id="leptos-fixture-account-fieldset" disabled=true invalid=true>
+                        <fieldset::Legend>{t(UtilityText::AccountDetails)}</fieldset::Legend>
+                        <fieldset::Description>
+                            {t(UtilityText::FieldsetDescription)}
+                        </fieldset::Description>
+                        <fieldset::Content>
+                            <Field
+                                id="leptos-fixture-email-required-field"
+                                name="email-required"
+                                required=true
+                            >
+                                <field::Label>{t(UtilityText::EmailLabel)}</field::Label>
+                                <field::Description>
+                                    {t(UtilityText::EmailDescription)}
+                                </field::Description>
+                                <field::Input r#type=field::InputType::Email name="email-required" />
+                                <field::ErrorMessage>
+                                    {t(UtilityText::EmailRequired)}
+                                </field::ErrorMessage>
+                            </Field>
+                            <Field
+                                id="leptos-fixture-email-missing-at-field"
+                                name="email-missing-at"
+                                errors=missing_at_errors
+                            >
+                                <field::Label>{t(UtilityText::EmailLabel)}</field::Label>
+                                <field::Description>
+                                    {t(UtilityText::EmailDescription)}
+                                </field::Description>
+                                <field::Input
+                                    r#type=field::InputType::Email
+                                    name="email-missing-at"
+                                    value=missing_at_value
+                                />
+                                <field::ErrorMessage>
+                                    {t(UtilityText::EmailMissingAt)}
+                                </field::ErrorMessage>
+                            </Field>
+                            <Field
+                                id="leptos-fixture-email-incomplete-domain-field"
+                                name="email-incomplete-domain"
+                                errors=incomplete_domain_errors
+                            >
+                                <field::Label>{t(UtilityText::EmailLabel)}</field::Label>
+                                <field::Description>
+                                    {t(UtilityText::EmailDescription)}
+                                </field::Description>
+                                <field::Input
+                                    r#type=field::InputType::Email
+                                    name="email-incomplete-domain"
+                                    value=incomplete_domain_value
+                                />
+                                <field::ErrorMessage>
+                                    {t(UtilityText::EmailIncompleteDomain)}
+                                </field::ErrorMessage>
+                            </Field>
+                            <Field id="leptos-fixture-email-valid-field" name="email-valid">
+                                <field::Label>{t(UtilityText::EmailLabel)}</field::Label>
+                                <field::Description>
+                                    {t(UtilityText::EmailDescription)}
+                                </field::Description>
+                                <field::Input
+                                    r#type=field::InputType::Email
+                                    name="email-valid"
+                                    value=valid_email_value
+                                />
+                            </Field>
+                        </fieldset::Content>
+                        <fieldset::ErrorMessage>
+                            {t(UtilityText::AccountIncomplete)}
+                        </fieldset::ErrorMessage>
+                    </Fieldset>
+                    <form::StatusRegion>{t(UtilityText::Ready)}</form::StatusRegion>
+                </Form>
+            </section>
             <section class="showcase-panel wide" aria-labelledby="dismissable">
                 <h2 id="dismissable">"Dismissable primitive"</h2>
                 <dismissable::Region props=dismiss_props dismiss_label="Dismiss example region">
@@ -412,10 +570,10 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
             </section>
             <section class="showcase-panel wide" aria-labelledby="errors">
                 <h2 id="errors">"Error boundary"</h2>
-                <Boundary>
+                <ErrorBoundary>
                     <p class="healthy-boundary">"Healthy child rendered"</p>
-                </Boundary>
-                <Boundary>{fixture_error()}</Boundary>
+                </ErrorBoundary>
+                <ErrorBoundary>{fixture_error()}</ErrorBoundary>
             </section>
         </div>
     }

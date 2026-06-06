@@ -1,6 +1,6 @@
 //! Error boundary wrapper.
 //!
-//! [`Boundary`] wraps a subtree in Dioxus's [`ErrorBoundary`] and renders the
+//! [`ErrorBoundary`] wraps a subtree in Dioxus's [`dioxus::prelude::ErrorBoundary`] and renders the
 //! canonical accessible fallback (`<div role="alert">` with a localized
 //! heading and `<ul>`/`<li>` error list) defined in
 //! `spec/components/utility/error-boundary.md`. It composes around the
@@ -20,10 +20,7 @@ use ars_i18n::{Locale, locales};
 pub use dioxus::CapturedError;
 use dioxus::prelude::*;
 
-use crate::{
-    attrs::attr_map_to_dioxus_inline_attrs,
-    provider::{resolve_locale, use_messages},
-};
+use crate::{attrs::attr_map_to_dioxus_inline_attrs, provider::use_messages_and_locale};
 
 // ────────────────────────────────────────────────────────────────────
 // FallbackHandler
@@ -32,7 +29,7 @@ use crate::{
 /// Adapter-side fallback handler.
 ///
 /// A thin alias over [`Callback<ErrorContext, Element>`] so consumers can
-/// pass a closure directly to [`BoundaryProps::fallback`] without spelling
+/// pass a closure directly to [`ErrorBoundaryProps::fallback`] without spelling
 /// out the generic parameters.
 pub type FallbackHandler = Callback<ErrorContext, Element>;
 
@@ -40,9 +37,9 @@ pub type FallbackHandler = Callback<ErrorContext, Element>;
 // Props
 // ────────────────────────────────────────────────────────────────────
 
-/// Props for [`Boundary`].
+/// Props for [`ErrorBoundary`].
 #[derive(Props, Clone, Debug, PartialEq)]
-pub struct BoundaryProps {
+pub struct ErrorBoundaryProps {
     /// Subtree wrapped by the boundary.
     pub children: Element,
 
@@ -81,10 +78,10 @@ pub struct BoundaryProps {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Boundary
+// ErrorBoundary
 // ────────────────────────────────────────────────────────────────────
 
-/// Wrapper around Dioxus's [`ErrorBoundary`] that renders an accessible
+/// Wrapper around Dioxus's [`dioxus::prelude::ErrorBoundary`] that renders an accessible
 /// fallback when a descendant component returns `Err`.
 ///
 /// The fallback is a `<div role="alert" data-ars-error="true">` containing
@@ -96,27 +93,18 @@ pub struct BoundaryProps {
 /// See `spec/dioxus-components/utility/error-boundary.md` for the full
 /// adapter contract.
 #[component]
-pub fn Boundary(props: BoundaryProps) -> Element {
-    let BoundaryProps {
-        children,
-        fallback,
-        on_error,
-        messages,
-        locale,
-    } = props;
-
-    let resolved_locale = resolve_locale(locale.as_ref());
-
-    let resolved_messages = use_messages(messages.as_ref(), Some(&resolved_locale));
+pub fn ErrorBoundary(props: ErrorBoundaryProps) -> Element {
+    let (resolved_messages, resolved_locale) =
+        use_messages_and_locale(props.messages, props.locale);
 
     let heading = (resolved_messages.message)(&resolved_locale);
 
     let seen_error = Rc::new(RefCell::new(None));
 
     rsx! {
-        ErrorBoundary {
+        dioxus::prelude::ErrorBoundary {
             handle_error: move |ctx: ErrorContext| {
-                if let (Some(error), Some(handler)) = (ctx.error(), on_error.as_ref()) {
+                if let (Some(error), Some(handler)) = (ctx.error(), props.on_error.as_ref()) {
                     let mut seen = seen_error.borrow_mut();
 
                     if should_emit_new_error(&error, &mut seen) {
@@ -124,13 +112,13 @@ pub fn Boundary(props: BoundaryProps) -> Element {
                     }
                 }
 
-                if let Some(custom) = fallback.as_ref() {
+                if let Some(custom) = props.fallback.as_ref() {
                     custom.call(ctx)
                 } else {
                     render_default_fallback(&ctx, &heading)
                 }
             },
-            {children}
+            {props.children}
         }
     }
 }
@@ -153,8 +141,8 @@ fn should_emit_new_error(error: &CapturedError, seen_error: &mut Option<Captured
 
 /// Renders the canonical accessible fallback markup using English defaults.
 ///
-/// Use this when consuming Dioxus's [`ErrorBoundary`] directly without
-/// the [`Boundary`] wrapper:
+/// Use this when consuming Dioxus's [`dioxus::prelude::ErrorBoundary`] directly without
+/// the [`ErrorBoundary`] wrapper:
 ///
 /// ```ignore
 /// rsx! {
@@ -165,7 +153,7 @@ fn should_emit_new_error(error: &CapturedError, seen_error: &mut Option<Captured
 /// }
 /// ```
 ///
-/// For localized headings, use [`Boundary`] which resolves [`Messages`]
+/// For localized headings, use [`ErrorBoundary`] which resolves [`Messages`]
 /// from the surrounding `ArsProvider`. This standalone function intentionally
 /// does **not** read any reactive context (it cannot, since it is not a
 /// component) and always falls back to English.

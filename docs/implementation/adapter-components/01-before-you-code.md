@@ -83,13 +83,21 @@ reference. Do not claim full parity unless the component spec contains a real
 feature matrix showing every supported, unsupported, and not-applicable axis
 with reasons.
 
+Before coding, create an implementation sketch under
+`docs/implementation/sketches/` following
+[10-reference-exploration-sketch.md](10-reference-exploration-sketch.md). The
+sketch must be based on live `playwright-cli` interaction with the reference
+page, not only static docs. Treat the sketch as the implementation plan's source
+of truth; update it when the work discovers new axes or contract gaps.
+
 ## Planning Output
 
 Every adapter implementation plan must include:
 
 - blocker-check command results;
 - spec files read;
-- counterpart outcome matrix source URLs and feature axes;
+- reference-exploration sketch path;
+- counterpart outcome matrix source URLs, artifact paths, and feature axes;
 - shared agnostic work required before adapter wiring;
 - adapter crate deliverables;
 - adapter test deliverables;

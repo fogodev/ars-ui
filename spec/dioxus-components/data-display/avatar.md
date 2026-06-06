@@ -21,7 +21,7 @@ use core::time::Duration;
 pub struct AvatarProps {
     #[props(optional)]
     pub id: Option<String>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub src: Option<Signal<Option<String>>>,
     pub name: String,
     #[props(optional)]
@@ -35,10 +35,10 @@ pub struct AvatarProps {
     #[props(optional)]
     pub messages: Option<avatar::Messages>,
     pub fallback: Element,
-    #[props(optional)]
-    pub on_load: Option<EventHandler<()>>,
-    #[props(optional)]
-    pub on_error: Option<EventHandler<()>>,
+    #[props(optional, into)]
+    pub on_load: Option<EventHandler>,
+    #[props(optional, into)]
+    pub on_error: Option<EventHandler>,
 }
 
 #[component]

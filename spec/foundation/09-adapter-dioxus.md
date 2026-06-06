@@ -287,15 +287,12 @@ where
         p
     };
 
-    // Resolve environment values from ArsProvider context.
+    // Resolve environment values and messages from ArsProvider context.
     // These are adapter-only hooks — core code receives Env and Messages as parameters.
-    let locale = resolve_locale(None);
+    let (messages, locale) = use_messages_and_locale::<M::Messages>(None, None);
     let intl_backend = use_intl_backend();
     let env = Env::new(locale, intl_backend)
         .with_render_mode(current_render_mode(hydrated_state.is_some()));
-
-    // Resolve messages from adapter-level i18n hooks.
-    let messages = use_messages::<M::Messages>(None, Some(&env.locale));
 
     // `use_machine_hydrated()` passes `Some(snapshot.state)` so client hydration
     // preserves the server-rendered state while recomputing context from the
@@ -2882,8 +2879,9 @@ fn use_intl_backend() -> Arc<dyn IntlBackend> {
         })
 }
 
-/// Resolve per-component i18n messages from an optional adapter prop override,
-/// ArsProvider i18n registries, or built-in defaults.
+/// Resolve per-component i18n messages and the locale used to select them from
+/// an optional adapter prop override, ArsProvider i18n registries, or built-in
+/// defaults.
 ///
 /// Resolution chain:
 /// 1. Explicit adapter prop override (if provided)
@@ -2892,16 +2890,21 @@ fn use_intl_backend() -> Arc<dyn IntlBackend> {
 ///
 /// This is an adapter-level hook helper. It reads locale and registries from
 /// `ArsProvider` context, then delegates the pure resolution logic to
-/// `ars_core::resolve_messages()`.
-fn use_messages<M: ComponentMessages + Send + Sync + 'static>(
-    adapter_props_messages: Option<&M>,
-    adapter_props_locale: Option<&Locale>,
-) -> M {
+/// `ars_core::resolve_messages()`. Returning the messages with their resolved
+/// locale keeps component render paths from combining a message bundle selected
+/// for one locale with a separately-read locale from another render.
+fn use_messages_and_locale<M: ComponentMessages + Send + Sync + 'static>(
+    adapter_props_messages: Option<M>,
+    adapter_props_locale: Option<Locale>,
+) -> (M, Locale) {
     let locale = resolve_locale(adapter_props_locale);
     let registries = try_use_context::<ArsContext>()
         .map(|ctx| ctx.i18n_registries.clone())
         .unwrap_or_else(|| Arc::new(I18nRegistries::new()));
-    ars_core::resolve_messages(adapter_props_messages, registries.as_ref(), &locale)
+    (
+        ars_core::resolve_messages(adapter_props_messages, registries.as_ref(), &locale),
+        locale,
+    )
 }
 ```
 

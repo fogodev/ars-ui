@@ -4,6 +4,9 @@ pub mod button;
 pub mod client_only;
 pub mod dismissable;
 pub mod error_boundary;
+pub mod field;
+pub mod fieldset;
+pub mod form;
 pub mod heading;
 #[cfg(feature = "icu4x")]
 pub mod highlight;

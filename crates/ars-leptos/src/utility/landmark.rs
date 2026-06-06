@@ -8,14 +8,11 @@
 pub use ars_components::utility::landmark::{Api, Messages, Part, Props, Role};
 use ars_core::{AttrValue, Env, HtmlAttr, Locale};
 use leptos::{
-    children::TypedChildren,
     either::{Either, EitherOf7},
     prelude::*,
 };
 
-use crate::{
-    attr_map_to_leptos_inline_attrs, merge_consumer_class_into, resolve_locale, use_messages,
-};
+use crate::{attr_map_to_leptos_inline_attrs, use_messages_and_locale};
 
 /// Leptos `Landmark` component.
 ///
@@ -27,10 +24,6 @@ use crate::{
 /// registry when omitted) using the optional `locale` override or the
 /// surrounding [`ArsProvider`](crate::ArsProvider) locale.
 #[component]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "Leptos #[component] requires props to be passed by value."
-)]
 pub fn Landmark<T>(
     /// Optional component instance ID.
     #[prop(optional, into)]
@@ -61,19 +54,18 @@ pub fn Landmark<T>(
     /// whatever class the component itself emits so both reach the rendered
     /// element as a single `class` attribute.
     #[prop(optional, into)]
-    class: Option<Oco<'static, str>>,
+    class: Option<TextProp>,
 
     /// Children rendered inside the landmark element.
-    children: TypedChildren<T>,
+    children: TypedChildrenFn<T>,
 ) -> impl IntoView
 where
     View<T>: IntoView,
+    T: 'static,
 {
     let id = id.map(Oco::into_owned);
 
     let labelledby_id = labelledby_id.map(Oco::into_owned);
-
-    let class = class.map(Oco::into_owned);
 
     let resolved_role = role.unwrap_or(Role::Region);
 
@@ -87,46 +79,53 @@ where
         props = props.labelledby_id(labelledby);
     }
 
-    let resolved_locale = resolve_locale(locale.as_ref());
-    let resolved_messages = use_messages::<Messages>(messages.as_ref(), Some(&resolved_locale));
+    let props = StoredValue::new(props);
 
-    let env = Env {
-        locale: resolved_locale,
-        ..Env::default()
-    };
-
-    let api = Api::new(props, &env, &resolved_messages);
-
-    let is_native = !api.prefers_generic_fallback_element();
-
-    let mut attrs = api.root_attrs(is_native);
-
-    if id.is_none() {
-        attrs.set(HtmlAttr::Id, AttrValue::None);
-    }
-
-    merge_consumer_class_into(&mut attrs, class.as_deref());
-
-    let attrs = attr_map_to_leptos_inline_attrs(attrs);
+    let resolved_messages_and_locale = use_messages_and_locale::<Messages>(messages, locale);
 
     let children = children.into_inner();
 
-    let body = children();
+    move || {
+        let (messages, locale) = resolved_messages_and_locale.get();
 
-    if is_native {
-        Either::Right(match resolved_role {
-            Role::Banner => EitherOf7::A(view! { <header {..attrs}>{body}</header> }),
-            Role::Navigation => EitherOf7::B(view! { <nav {..attrs}>{body}</nav> }),
-            Role::Main => EitherOf7::C(view! { <main {..attrs}>{body}</main> }),
-            Role::Complementary => EitherOf7::D(view! { <aside {..attrs}>{body}</aside> }),
-            Role::ContentInfo => EitherOf7::E(view! { <footer {..attrs}>{body}</footer> }),
-            Role::Form => EitherOf7::F(view! { <form {..attrs}>{body}</form> }),
-            Role::Region => EitherOf7::G(view! { <section {..attrs}>{body}</section> }),
-            Role::Search => {
-                unreachable!("Role::Search is handled by Api::prefers_generic_fallback_element()")
-            }
-        })
-    } else {
-        Either::Left(view! { <div {..attrs}>{body}</div> })
+        let env = Env {
+            locale,
+            ..Env::default()
+        };
+
+        let api = Api::new(props.get_value(), &env, &messages);
+
+        let is_native = !api.prefers_generic_fallback_element();
+
+        let mut attrs = api.root_attrs(is_native);
+
+        if id.is_none() {
+            attrs.set(HtmlAttr::Id, AttrValue::None);
+        }
+
+        crate::merge_consumer_class_prop_into(&mut attrs, class.clone());
+
+        let attrs = attr_map_to_leptos_inline_attrs(attrs);
+
+        let body = children();
+
+        if is_native {
+            Either::Right(match resolved_role {
+                Role::Banner => EitherOf7::A(view! { <header {..attrs}>{body}</header> }),
+                Role::Navigation => EitherOf7::B(view! { <nav {..attrs}>{body}</nav> }),
+                Role::Main => EitherOf7::C(view! { <main {..attrs}>{body}</main> }),
+                Role::Complementary => EitherOf7::D(view! { <aside {..attrs}>{body}</aside> }),
+                Role::ContentInfo => EitherOf7::E(view! { <footer {..attrs}>{body}</footer> }),
+                Role::Form => EitherOf7::F(view! { <form {..attrs}>{body}</form> }),
+                Role::Region => EitherOf7::G(view! { <section {..attrs}>{body}</section> }),
+                Role::Search => {
+                    unreachable!(
+                        "Role::Search is handled by Api::prefers_generic_fallback_element()"
+                    )
+                }
+            })
+        } else {
+            Either::Left(view! { <div {..attrs}>{body}</div> })
+        }
     }
 }

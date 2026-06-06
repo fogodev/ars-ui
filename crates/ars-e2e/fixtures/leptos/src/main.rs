@@ -42,6 +42,26 @@ fn App() -> impl IntoView {
         <ArsProvider locale=locale i18n_registries=i18n_registries()>
             <main class="e2e-shell">
                 <h1>"ars-ui Leptos E2E fixture"</h1>
+                <div class="locale-controls" aria-label="Fixture locale">
+                    <button
+                        id="leptos-fixture-locale-en"
+                        type="button"
+                        on:click=move |_| {
+                            locale.set(Locale::parse("en-US").expect("valid fixture locale"));
+                        }
+                    >
+                        "en-US"
+                    </button>
+                    <button
+                        id="leptos-fixture-locale-pt"
+                        type="button"
+                        on:click=move |_| {
+                            locale.set(Locale::parse("pt-BR").expect("valid fixture locale"));
+                        }
+                    >
+                        "pt-BR"
+                    </button>
+                </div>
                 <Tabs
                     default_value=CategoryTab::Utility
                     tabs=[

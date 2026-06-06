@@ -35,8 +35,20 @@
 //!   Used by component modules inside the adapter crate, not by end users
 //!   who consume the ready-made components. (Still publicly accessible via
 //!   `ars_dioxus::use_machine` for advanced users building custom machines.)
-//! - **Framework re-exports** — `dioxus::prelude::*` should be imported
-//!   separately; we do not re-export Dioxus types to avoid version coupling.
+//! - **Framework internals outside `dioxus::prelude`** — the adapter prelude
+//!   intentionally re-exports `dioxus::prelude::*` so application code can use a
+//!   single `use ars_dioxus::prelude::*;` import. Lower-level Dioxus modules,
+//!   unstable internals, and implementation-only adapter hooks still stay out of
+//!   this prelude.
+//!
+//! # Name collisions with Dioxus
+//!
+//! Adapter wrapper components may intentionally shadow framework component names
+//! when the ars-ui wrapper is the outcome users should get by default. For
+//! example, `ErrorBoundary` resolves to
+//! [`crate::utility::error_boundary::ErrorBoundary`] from this prelude; users who
+//! need the raw framework primitive can spell `dioxus::prelude::ErrorBoundary`
+//! explicitly.
 //!
 //! # Growth policy
 //!
@@ -51,7 +63,10 @@ pub use ars_collections::{Key, TabKey};
 pub use ars_core::{
     ColorMode, I18nRegistries, MessageFn, MessagesRegistry, SafeUrl, UnsafeUrlError,
 };
+pub use ars_forms::validation::Error as ValidationError;
 pub use ars_i18n::{Direction, IntlBackend, Locale, Orientation, ResolvedDirection, Translate};
+// -- Re-export Dioxus prelude for end users
+pub use dioxus::prelude::*;
 
 // -- Component modules --
 //
@@ -71,7 +86,7 @@ pub use crate::as_child;
 // `spec/foundation/09-adapter-dioxus.md` §21. End users reach it as
 // `error_boundary::ArsErrorBoundary` after `use ars_dioxus::prelude::*;`.
 #[cfg(feature = "icu4x")]
-pub use crate::utility::highlight;
+pub use crate::utility::highlight::{self, Highlight};
 // -- Root provider --
 // `ArsProvider` is the single root provider every ars-ui application wraps its
 // tree with. It publishes locale, direction, color mode, disabled/read-only,
@@ -85,7 +100,18 @@ pub use crate::{Translatable, t, use_number_formatter};
 pub use crate::{
     navigation::{self, tabs},
     utility::{
-        self, button, client_only, dismissable, error_boundary, heading, landmark, separator,
-        visually_hidden, z_index_allocator,
+        self,
+        button::{self, Button, ButtonAsChild},
+        client_only::{self, ClientOnly},
+        dismissable::{self, use_dismissable},
+        error_boundary::{self, ErrorBoundary},
+        field::{self, Field},
+        fieldset::{self, Fieldset},
+        form::{self, Form},
+        heading::{self, Heading, HeadingLevelProvider},
+        landmark::{self, Landmark},
+        separator::{self, Separator, SeparatorAsChild},
+        visually_hidden::{self, VisuallyHidden, VisuallyHiddenAsChild},
+        z_index_allocator::{self, Context as ZIndexContext, ZIndexAllocatorProvider},
     },
 };

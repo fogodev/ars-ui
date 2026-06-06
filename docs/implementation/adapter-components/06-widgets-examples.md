@@ -48,6 +48,40 @@ Each component demo panel should exercise the supported feature surface:
 
 A one-row smoke demo is not enough for a component with real behavior.
 
+## Examples Are Consumers
+
+Widgets examples must showcase the public ars-ui components. They are not a
+place to build a second component implementation because the adapter API is
+missing a convenient surface.
+
+Allowed example logic:
+
+- choosing sample data and initial prop values;
+- storing values that a normal application would own, such as submitted form
+  fields or the current locale switch;
+- applying public component callbacks to sample data;
+- choosing copy that is explicitly consumer-owned;
+- arranging layout and styling around public component parts.
+
+Forbidden example logic:
+
+- validation policy or message selection that the component contract owns;
+- keyboard navigation, roving focus, typeahead, focus restoration, or open/close
+  state machines;
+- ARIA relationship construction for component-owned labels, descriptions,
+  errors, announcements, or form state;
+- selection, disabled-state, section traversal, drag-key resolution,
+  drop-target validity, preview ordering, loading suppression, or layout
+  policy;
+- localized component messages, plural handling, number/date formatting, or
+  BiDi-safe interpolation that should come from `Translate`, a component
+  message bundle, browser-native localization, or documented consumer-owned
+  text.
+
+When the demo needs any forbidden logic to look like the reference, the adapter
+or agnostic API is incomplete. Fix that surface first, then make the example
+consume it.
+
 Widgets may own local demo data, such as the list of rows displayed on the
 page, and may apply component-emitted callbacks to that data so the demo visibly
 updates. They must not own or recompute component policy. Selection state,
@@ -56,6 +90,13 @@ live preview order, loading suppression, section traversal, and similar rules
 must come from the agnostic component API and adapter render state. If an
 example needs to duplicate that behavior to look correct, the component API is
 missing a required surface.
+
+The parity loop's consumer reality pass must inspect these demos as rendered
+code, not only as screenshots. If a widget uses raw native controls, sibling
+error elements, hardcoded English component text, or duplicated policy because
+the adapter component is not ergonomic enough, mark the related outcome
+`WidgetOnlyWorkaround` and fix the adapter or agnostic contract before claiming
+`ReferenceOutcomeMatched`.
 
 ## Counterpart Baseline
 
@@ -132,6 +173,9 @@ At minimum, widget smoke should:
   drop states where supported;
 - assert controls maintain stable dimensions;
 - assert hidden form inputs serialize values where relevant.
+- switch to at least one non-English locale when the page supports locales and
+  assert component-owned labels, descriptions, placeholders, validation
+  messages, status text, and button text update.
 
 ## Browser Review
 

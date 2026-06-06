@@ -1,22 +1,6 @@
 use std::fmt::{self, Display};
 
-use ars_leptos::{
-    MessageFn,
-    prelude::{Orientation, Translate, t},
-    utility::{
-        button::{self, Button, ButtonAsChild},
-        client_only::ClientOnly,
-        dismissable,
-        error_boundary::Boundary,
-        heading::{self, Heading, HeadingLevelProvider, Section},
-        highlight::Highlight,
-        landmark::{self, Landmark},
-        separator::{Separator, SeparatorAsChild},
-        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
-        z_index_allocator::{Context as ZIndexContext, ZIndexAllocatorProvider},
-    },
-};
-use leptos::prelude::*;
+use ars_leptos::prelude::*;
 
 #[derive(Clone, Debug, Translate)]
 #[translate(fallback = "en-US")]
@@ -92,6 +76,48 @@ pub(crate) enum UtilityText {
 
     #[translate(en_US = "Reset", pt_BR = "Redefinir")]
     Reset,
+
+    #[translate(en_US = "Submit", pt_BR = "Enviar")]
+    Submit,
+
+    #[translate(en_US = "Field and form", pt_BR = "Campo e formulário")]
+    FieldForm,
+
+    #[translate(
+        en_US = "React Aria-style form fields with labels, helper text, and validation.",
+        pt_BR = "Campos de formulário no estilo React Aria com rótulos, texto de ajuda e validação."
+    )]
+    FieldFormDescription,
+
+    #[translate(en_US = "Account details", pt_BR = "Detalhes da conta")]
+    AccountDetails,
+
+    #[translate(
+        en_US = "Required fields are announced from their labels and descriptions.",
+        pt_BR = "Campos obrigatórios são anunciados a partir de seus rótulos e descrições."
+    )]
+    RequiredFieldsDescription,
+
+    #[translate(en_US = "Name", pt_BR = "Nome")]
+    NameLabel,
+
+    #[translate(en_US = "Enter your full name", pt_BR = "Digite seu nome completo")]
+    NamePlaceholder,
+
+    #[translate(en_US = "Email", pt_BR = "E-mail")]
+    EmailLabel,
+
+    #[translate(
+        en_US = "Use a reachable address.",
+        pt_BR = "Use um endereço acessível."
+    )]
+    EmailDescription,
+
+    #[translate(en_US = "Enter your email", pt_BR = "Digite seu e-mail")]
+    EmailPlaceholder,
+
+    #[translate(en_US = "Ready to submit", pt_BR = "Pronto para enviar")]
+    ReadyToSubmit,
 
     #[translate(en_US = "Visually hidden", pt_BR = "Visualmente oculto")]
     VisuallyHidden,
@@ -364,8 +390,13 @@ pub(crate) enum UtilityText {
     HighlightDescription,
 }
 
-#[derive(Debug)]
-struct ExampleError(Signal<String>);
+struct ExampleError(TextProp);
+
+impl fmt::Debug for ExampleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ExampleError").finish_non_exhaustive()
+    }
+}
 
 impl Display for ExampleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -375,8 +406,8 @@ impl Display for ExampleError {
 
 impl std::error::Error for ExampleError {}
 
-fn example_error(message: Signal<String>) -> Result<&'static str, ExampleError> {
-    Err(ExampleError(message))
+fn example_error(message: impl Into<TextProp>) -> Result<&'static str, ExampleError> {
+    Err(ExampleError(message.into()))
 }
 
 #[component]
@@ -543,6 +574,64 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
             </section>
             <section
                 class="p-5 rounded-lg border shadow-lg border-slate-200 bg-white/85 shadow-slate-900/10"
+                aria-labelledby="field-form"
+            >
+                <div class="flex flex-wrap gap-3 justify-between items-center mb-4">
+                    <h2 id="field-form" class="text-base font-bold text-slate-950">
+                        {t(UtilityText::FieldForm)}
+                    </h2>
+                    <p class="text-sm text-slate-500">{t(UtilityText::FieldFormDescription)}</p>
+                </div>
+                <Form
+                    id="leptos-tw-field-form-demo"
+                    action="/account"
+                    on_submit=Callback::new(|()| ())
+                    class="grid gap-4 max-w-md [&_fieldset]:grid [&_fieldset]:gap-4 [&_fieldset]:m-0 [&_fieldset]:p-4 [&_fieldset]:rounded-lg [&_fieldset]:border [&_fieldset]:border-slate-300 [&_legend]:px-1.5 [&_legend]:font-bold **:data-[ars-part=content]:grid **:data-[ars-part=content]:gap-3 **:data-[ars-part=description]:text-sm **:data-[ars-part=description]:text-slate-500 **:data-[ars-part=status-region]:text-sm **:data-[ars-part=status-region]:font-semibold **:data-[ars-part=status-region]:text-emerald-700"
+                >
+                    <Fieldset id="leptos-tw-fieldset-demo">
+                        <fieldset::Legend>{t(UtilityText::AccountDetails)}</fieldset::Legend>
+                        <fieldset::Description>
+                            {t(UtilityText::RequiredFieldsDescription)}
+                        </fieldset::Description>
+                        <fieldset::Content>
+                            <Field id="leptos-tw-name-field" required=true class="grid gap-2">
+                                <field::Label>{t(UtilityText::NameLabel)}</field::Label>
+                                <field::Input
+                                    class="py-2 px-3 text-sm rounded-md border shadow-sm border-slate-300"
+                                    name="name"
+                                    placeholder=t(UtilityText::NamePlaceholder)
+                                />
+                            </Field>
+                            <Field
+                                id="leptos-tw-email-field"
+                                name="email"
+                                required=true
+                                class="grid gap-2"
+                            >
+                                <field::Label>{t(UtilityText::EmailLabel)}</field::Label>
+                                <field::Description>
+                                    {t(UtilityText::EmailDescription)}
+                                </field::Description>
+                                <field::Input
+                                    class="py-2 px-3 text-sm rounded-md border shadow-sm border-slate-300"
+                                    r#type=field::InputType::Email
+                                    name="email"
+                                    placeholder=t(UtilityText::EmailPlaceholder)
+                                />
+                            </Field>
+                        </fieldset::Content>
+                    </Fieldset>
+                    <div class="flex flex-wrap gap-3">
+                        <Button r#type=button::Type::Submit>{t(UtilityText::Submit)}</Button>
+                        <Button r#type=button::Type::Reset variant=button::Variant::Secondary>
+                            {t(UtilityText::Reset)}
+                        </Button>
+                    </div>
+                    <form::StatusRegion>{t(UtilityText::ReadyToSubmit)}</form::StatusRegion>
+                </Form>
+            </section>
+            <section
+                class="p-5 rounded-lg border shadow-lg border-slate-200 bg-white/85 shadow-slate-900/10"
                 aria-labelledby="visually-hidden"
             >
                 <div class="flex flex-wrap gap-3 justify-between items-center mb-4">
@@ -658,12 +747,12 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                     <p class="text-sm text-slate-500">{t(UtilityText::ErrorBoundaryNote)}</p>
                 </div>
                 <div class="grid gap-4 md:grid-cols-2">
-                    <Boundary>
+                    <ErrorBoundary>
                         <p class="p-4 text-sm font-medium text-emerald-900 bg-emerald-50 rounded-lg border border-emerald-200 shadow-sm">
                             {t(UtilityText::HealthyChild)}
                         </p>
-                    </Boundary>
-                    <Boundary>{example_error(error_message)}</Boundary>
+                    </ErrorBoundary>
+                    <ErrorBoundary>{example_error(error_message)}</ErrorBoundary>
                 </div>
             </section>
             <section
@@ -726,14 +815,14 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                         <Heading id="leptos-tailwind-heading-provided" class="text-3xl font-bold">
                             {t(UtilityText::HeadingProvider)}
                         </Heading>
-                        <Section>
+                        <heading::Section>
                             <Heading
                                 id="leptos-tailwind-heading-section"
                                 class="text-2xl font-bold"
                             >
                                 {t(UtilityText::HeadingSection)}
                             </Heading>
-                        </Section>
+                        </heading::Section>
                     </HeadingLevelProvider>
                 </div>
             </section>

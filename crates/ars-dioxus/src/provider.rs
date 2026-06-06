@@ -412,10 +412,8 @@ pub fn use_direction() -> Memo<Direction> {
 /// component authors should reach for this helper instead of
 /// hand-rolling the `Option` + provider fallback chain.
 #[must_use]
-pub fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
-    adapter_props_locale
-        .cloned()
-        .unwrap_or_else(|| use_locale().read().clone())
+pub fn resolve_locale(adapter_props_locale: Option<Locale>) -> Locale {
+    adapter_props_locale.unwrap_or_else(|| use_locale().read().clone())
 }
 
 /// Resolves a memoized number formatter from the current provider locale.
@@ -497,18 +495,20 @@ pub fn use_platform_effects() -> Arc<dyn PlatformEffects> {
 
 /// Resolves per-component messages from override, provider registry, or defaults.
 #[must_use]
-pub fn use_messages<M: ars_core::ComponentMessages + Send + Sync + 'static>(
-    adapter_props_messages: Option<&M>,
-    adapter_props_locale: Option<&Locale>,
-) -> M {
+pub fn use_messages_and_locale<M: ars_core::ComponentMessages + Send + Sync + 'static>(
+    adapter_props_messages: Option<M>,
+    adapter_props_locale: Option<Locale>,
+) -> (M, Locale) {
     let locale = resolve_locale(adapter_props_locale);
-
     let registries = try_use_context::<ArsContext>().map_or_else(
         || Arc::new(I18nRegistries::new()),
         |ctx| Arc::clone(&ctx.i18n_registries),
     );
 
-    core_resolve_messages(adapter_props_messages, registries.as_ref(), &locale)
+    (
+        core_resolve_messages(adapter_props_messages, registries.as_ref(), &locale),
+        locale,
+    )
 }
 
 /// Input accepted by [`t`] for Dioxus translation.
@@ -905,9 +905,9 @@ mod tests {
 
             let locale = Locale::parse("es-MX").expect("locale should parse");
 
-            let resolved = use_messages::<TestMessages>(None, None);
+            let (messages, locale) = use_messages_and_locale::<TestMessages>(None, Some(locale));
 
-            assert_eq!((resolved.label)(&locale), "Etiqueta");
+            assert_eq!((messages.label)(&locale), "Etiqueta");
 
             rsx! {
                 div {}
@@ -924,9 +924,9 @@ mod tests {
         fn app() -> Element {
             let locale = Locale::parse("pt-BR").expect("locale should parse");
 
-            let resolved = use_messages::<TestMessages>(None, Some(&locale));
+            let (messages, locale) = use_messages_and_locale::<TestMessages>(None, Some(locale));
 
-            assert_eq!((resolved.label)(&locale), "Default");
+            assert_eq!((messages.label)(&locale), "Default");
 
             rsx! {
                 div {}
@@ -1239,7 +1239,7 @@ mod tests {
 
             let explicit = Locale::parse("es-ES").expect("locale should parse");
 
-            assert_eq!(resolve_locale(Some(&explicit)).to_bcp47(), "es-ES");
+            assert_eq!(resolve_locale(Some(explicit)).to_bcp47(), "es-ES");
             assert_eq!(resolve_locale(None).to_bcp47(), "fr-FR");
 
             rsx! {

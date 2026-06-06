@@ -1,0 +1,380 @@
+//! Leptos Field adapter.
+
+use ars_components::utility::field;
+pub use ars_components::utility::field::{InputType, Part, Props};
+use ars_core::{AriaAttr, AttrMap, AttrValue, Direction, HtmlAttr};
+use ars_forms::validation::Error;
+use leptos::{children::TypedChildren, context::Provider, prelude::*};
+
+use crate::{attr_map_to_leptos_inline_attrs, callbacks, use_id, use_machine_with_reactive_props};
+
+#[derive(Clone, Copy)]
+struct FieldContext {
+    machine: crate::UseMachineReturn<field::Machine>,
+}
+
+fn field_context() -> FieldContext {
+    use_context::<FieldContext>().expect("Field subcomponents must be rendered inside <Field/>")
+}
+
+/// Leptos Field root component.
+#[component]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Leptos component props are owned builder inputs; borrowing the Oco class prop avoids allocating with Oco::into_owned just to satisfy Clippy."
+)]
+pub fn Field<T: 'static>(
+    /// Optional component instance ID.
+    #[prop(optional, into)]
+    id: Option<Oco<'static, str>>,
+
+    /// Whether the field is required.
+    #[prop(optional, into)]
+    required: Signal<bool>,
+
+    /// Whether the field is disabled.
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
+
+    /// Whether the field is read-only.
+    #[prop(optional, into)]
+    readonly: Signal<bool>,
+
+    /// Whether the field is invalid.
+    #[prop(optional, into)]
+    invalid: Signal<bool>,
+
+    /// Field name used to consume matching form-level validation errors.
+    #[prop(optional, into)]
+    name: Option<Oco<'static, str>>,
+
+    /// Field-level validation errors.
+    #[prop(optional, into)]
+    errors: Signal<Vec<Error>>,
+
+    /// Optional text direction override.
+    #[prop(optional)]
+    dir: Option<Direction>,
+
+    /// Consumer class tokens appended to the root.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Field anatomy children.
+    children: TypedChildren<T>,
+) -> impl IntoView
+where
+    View<T>: IntoView,
+{
+    let id = id.map_or_else(|| use_id("field"), Oco::into_owned);
+
+    let mut props = Props::new().id(id);
+
+    if let Some(dir) = dir {
+        props = props.dir(dir);
+    }
+
+    let machine = use_machine_with_reactive_props::<field::Machine>(field_props_signal(
+        props,
+        FieldReactiveProps {
+            required,
+            disabled,
+            readonly,
+            invalid,
+            errors,
+            name,
+            form_context: use_context::<super::form::FormContext>(),
+        },
+    ));
+
+    let attrs = machine.with_api_snapshot(|api| {
+        let mut attrs = api.root_attrs();
+
+        crate::merge_consumer_class_prop_into(&mut attrs, class.clone());
+
+        attr_map_to_leptos_inline_attrs(attrs)
+    });
+
+    view! {
+        <Provider value=FieldContext { machine }>
+            <div {..attrs}>{children.into_inner()()}</div>
+        </Provider>
+    }
+}
+
+fn merged_validation_errors(
+    mut messages: Vec<Error>,
+    name: Option<&str>,
+    form_context: Option<super::form::FormContext>,
+) -> Vec<Error> {
+    if let Some(name) = name
+        && let Some(form_context) = form_context
+    {
+        let _ = form_context.machine.context_version.get();
+
+        if let Some(form_errors) = form_context
+            .machine
+            .service
+            .read_value()
+            .context()
+            .validation_errors
+            .get(name)
+            && !form_errors.is_empty()
+        {
+            messages.reserve(form_errors.len());
+
+            for error in form_errors {
+                messages.push(error.clone());
+            }
+        }
+    }
+
+    messages
+}
+
+struct FieldReactiveProps {
+    required: Signal<bool>,
+    disabled: Signal<bool>,
+    readonly: Signal<bool>,
+    invalid: Signal<bool>,
+    errors: Signal<Vec<Error>>,
+    name: Option<Oco<'static, str>>,
+    form_context: Option<super::form::FormContext>,
+}
+
+fn field_props_signal(
+    props: Props,
+    FieldReactiveProps {
+        required,
+        disabled,
+        readonly,
+        invalid,
+        errors,
+        name,
+        form_context,
+    }: FieldReactiveProps,
+) -> Signal<Props> {
+    Signal::derive(move || {
+        props
+            .clone()
+            .required(required.get())
+            .disabled(disabled.get())
+            .readonly(readonly.get())
+            .invalid(invalid.get())
+            .errors(merged_validation_errors(
+                errors.get(),
+                name.as_deref(),
+                form_context,
+            ))
+    })
+}
+
+/// Leptos Field label part.
+#[component]
+pub fn Label<T>(
+    /// Label content.
+    children: TypedChildren<T>,
+) -> impl IntoView
+where
+    View<T>: IntoView,
+{
+    let attrs = field_context()
+        .machine
+        .with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.label_attrs()));
+
+    view! { <label {..attrs}>{children.into_inner()()}</label> }
+}
+
+/// Leptos Field input part.
+#[component]
+pub fn Input(
+    /// Native input type.
+    #[prop(optional, into)]
+    r#type: Option<Signal<InputType>>,
+
+    /// Native form field name.
+    #[prop(optional, into)]
+    name: Option<Oco<'static, str>>,
+
+    /// Placeholder text.
+    #[prop(optional, into)]
+    placeholder: Option<TextProp>,
+
+    /// Current input value.
+    #[prop(optional, into)]
+    value: Option<Signal<String>>,
+
+    /// Consumer class tokens appended to the input.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Fires with the current value when the native input event runs.
+    #[prop(optional)]
+    on_value_input: Option<Callback<String>>,
+) -> impl IntoView {
+    let machine = field_context().machine;
+
+    let attrs = machine.with_api_snapshot(|api| {
+        let mut attrs = api.input_attrs();
+
+        add_dynamic_input_attrs(&mut attrs, machine);
+
+        apply_input_attrs(&mut attrs, r#type, name, placeholder, value, class);
+
+        attr_map_to_leptos_inline_attrs(attrs)
+    });
+
+    view! {
+        <input
+            {..attrs}
+            on:input:target=move |event| {
+                callbacks::emit(on_value_input.as_ref(), event.target().value());
+            }
+        />
+    }
+}
+
+/// Leptos Field description part.
+#[component]
+pub fn Description<T>(
+    /// Description content.
+    children: TypedChildren<T>,
+) -> impl IntoView
+where
+    View<T>: IntoView,
+{
+    let machine = field_context().machine;
+
+    machine.send.run(field::Event::SetHasDescription(true));
+
+    on_cleanup(move || machine.send.run(field::Event::SetHasDescription(false)));
+
+    let attrs =
+        machine.with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.description_attrs()));
+
+    view! { <div {..attrs}>{children.into_inner()()}</div> }
+}
+
+/// Leptos Field error message part.
+#[component]
+pub fn ErrorMessage<T>(
+    /// Error message content.
+    children: TypedChildren<T>,
+) -> impl IntoView
+where
+    View<T>: IntoView,
+{
+    let machine = field_context().machine;
+
+    let hidden = machine.derive(|api| api.error_message_attrs().contains(&HtmlAttr::Hidden));
+
+    let attrs = machine.with_api_snapshot(|api| {
+        let mut attrs = api.error_message_attrs();
+
+        attrs.set(
+            HtmlAttr::Hidden,
+            AttrValue::reactive_bool(move || hidden.get()),
+        );
+
+        attr_map_to_leptos_inline_attrs(attrs)
+    });
+
+    view! { <div {..attrs}>{children.into_inner()()}</div> }
+}
+
+fn add_dynamic_input_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<field::Machine>) {
+    let described_by = input_attr_string_memo(machine, HtmlAttr::Aria(AriaAttr::DescribedBy));
+    let aria_invalid = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Invalid));
+    let error_message = input_attr_string_memo(machine, HtmlAttr::Aria(AriaAttr::ErrorMessage));
+    let aria_required = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Required));
+    let native_required = input_attr_bool_memo(machine, HtmlAttr::Required);
+    let aria_disabled = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Disabled));
+    let native_disabled = input_attr_bool_memo(machine, HtmlAttr::Disabled);
+    let aria_readonly = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::ReadOnly));
+    let native_readonly = input_attr_bool_memo(machine, HtmlAttr::ReadOnly);
+
+    attrs
+        .set(
+            HtmlAttr::Aria(AriaAttr::DescribedBy),
+            AttrValue::reactive_optional(move || described_by.get()),
+        )
+        .set(
+            HtmlAttr::Aria(AriaAttr::Invalid),
+            AttrValue::reactive_bool(move || aria_invalid.get()),
+        )
+        .set(
+            HtmlAttr::Aria(AriaAttr::ErrorMessage),
+            AttrValue::reactive_optional(move || error_message.get()),
+        )
+        .set(
+            HtmlAttr::Aria(AriaAttr::Required),
+            AttrValue::reactive_bool(move || aria_required.get()),
+        )
+        .set(
+            HtmlAttr::Required,
+            AttrValue::reactive_bool(move || native_required.get()),
+        )
+        .set(
+            HtmlAttr::Aria(AriaAttr::Disabled),
+            AttrValue::reactive_bool(move || aria_disabled.get()),
+        )
+        .set(
+            HtmlAttr::Disabled,
+            AttrValue::reactive_bool(move || native_disabled.get()),
+        )
+        .set(
+            HtmlAttr::Aria(AriaAttr::ReadOnly),
+            AttrValue::reactive_bool(move || aria_readonly.get()),
+        )
+        .set(
+            HtmlAttr::ReadOnly,
+            AttrValue::reactive_bool(move || native_readonly.get()),
+        );
+}
+
+fn input_attr_string_memo(
+    machine: crate::UseMachineReturn<field::Machine>,
+    attr: HtmlAttr,
+) -> Memo<Option<String>> {
+    machine.derive(move |api| api.input_attrs().get(&attr).map(str::to_owned))
+}
+
+fn input_attr_bool_memo(
+    machine: crate::UseMachineReturn<field::Machine>,
+    attr: HtmlAttr,
+) -> Memo<bool> {
+    machine.derive(move |api| api.input_attrs().contains(&attr))
+}
+
+fn apply_input_attrs(
+    attrs: &mut AttrMap,
+    r#type: Option<Signal<InputType>>,
+    name: Option<Oco<'static, str>>,
+    placeholder: Option<TextProp>,
+    value: Option<Signal<String>>,
+    class: Option<TextProp>,
+) {
+    if let Some(input_type) = r#type {
+        attrs.set(
+            HtmlAttr::Type,
+            AttrValue::reactive(move || input_type.get().as_str().to_owned()),
+        );
+    }
+
+    if let Some(name) = name {
+        attrs.set(HtmlAttr::Name, name.into_owned());
+    }
+
+    if let Some(placeholder) = placeholder {
+        attrs.set(
+            HtmlAttr::Placeholder,
+            AttrValue::reactive(move || placeholder.get().into_owned()),
+        );
+    }
+
+    if let Some(value) = value {
+        attrs.set(HtmlAttr::Value, AttrValue::reactive(move || value.get()));
+    }
+
+    crate::merge_consumer_class_prop_into(attrs, class);
+}

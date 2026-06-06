@@ -196,7 +196,7 @@ where
     let locale = locale.unwrap_or_else(|| Signal::stored(locales::en_us()));
 
     let direction =
-        direction.unwrap_or_else(|| Signal::derive(move || direction_from_locale(&locale.get())));
+        direction.unwrap_or_else(|| Signal::derive(move || locale.with(direction_from_locale)));
 
     let color_mode = color_mode.unwrap_or_else(|| Signal::stored(ColorMode::System));
 
@@ -358,14 +358,12 @@ where
 /// Resolves a provider-derived number formatter from an explicit locale or provider context.
 #[must_use]
 pub(crate) fn use_resolved_number_formatter<F>(
-    adapter_props_locale: Option<&Locale>,
+    adapter_props_locale: Option<Locale>,
     options: F,
 ) -> Signal<number::Formatter, LocalStorage>
 where
     F: Fn() -> number::FormatOptions + 'static,
 {
-    let explicit_locale = adapter_props_locale.cloned();
-
     let locale = use_locale();
 
     let cache = StoredValue::<
@@ -374,7 +372,13 @@ where
     >::new_local(None);
 
     Signal::derive_local(move || {
-        let resolved_locale = explicit_locale.clone().unwrap_or_else(|| locale.get());
+        let provided_locale: Locale;
+        let resolved_locale = if let Some(locale) = adapter_props_locale.as_ref() {
+            locale
+        } else {
+            provided_locale = locale.get();
+            &provided_locale
+        };
 
         let resolved_options = options();
 
@@ -382,7 +386,7 @@ where
 
         cache.update_value(|cached| {
             if let Some((cached_locale, cached_options, cached_formatter)) = cached
-                && *cached_locale == resolved_locale
+                && cached_locale == resolved_locale
                 && *cached_options == resolved_options
             {
                 resolved_formatter = Some(cached_formatter.clone());
@@ -390,9 +394,13 @@ where
                 return;
             }
 
-            let next_formatter = number::Formatter::new(&resolved_locale, resolved_options.clone());
+            let next_formatter = number::Formatter::new(resolved_locale, resolved_options.clone());
 
-            *cached = Some((resolved_locale, resolved_options, next_formatter.clone()));
+            *cached = Some((
+                resolved_locale.clone(),
+                resolved_options,
+                next_formatter.clone(),
+            ));
 
             resolved_formatter = Some(next_formatter);
         });
@@ -403,26 +411,29 @@ where
 
 /// Resolves the effective locale for an adapter component instance.
 #[must_use]
-pub fn resolve_locale(adapter_props_locale: Option<&Locale>) -> Locale {
-    adapter_props_locale
-        .cloned()
-        .unwrap_or_else(|| use_locale().get())
+pub fn resolve_locale(adapter_props_locale: Option<Locale>) -> Locale {
+    adapter_props_locale.unwrap_or_else(|| use_locale().get())
 }
 
 /// Resolves per-component messages from override, provider registry, or defaults.
 #[must_use]
-pub fn use_messages<M: ars_core::ComponentMessages + Send + Sync + 'static>(
-    adapter_props_messages: Option<&M>,
-    adapter_props_locale: Option<&Locale>,
-) -> M {
-    let locale = resolve_locale(adapter_props_locale);
-
+pub fn use_messages_and_locale<M: ars_core::ComponentMessages + Send + Sync + 'static>(
+    adapter_props_messages: Option<M>,
+    adapter_props_locale: Option<Locale>,
+) -> Signal<(M, Locale)> {
     let registries = current_ars_context().map_or_else(
         || Arc::new(I18nRegistries::new()),
         |ctx| Arc::clone(&ctx.i18n_registries),
     );
 
-    core_resolve_messages(adapter_props_messages, registries.as_ref(), &locale)
+    Signal::derive(move || {
+        let locale = resolve_locale(adapter_props_locale.clone());
+
+        (
+            core_resolve_messages(adapter_props_messages.clone(), registries.as_ref(), &locale),
+            locale,
+        )
+    })
 }
 
 /// Input accepted by [`t`] for reactive translation.
@@ -500,22 +511,18 @@ where
     }
 }
 
-fn translated_text<T: Translate + Send + Sync + 'static>(msg: Signal<T>) -> Signal<String> {
-    let locale = use_locale();
-
-    let intl_backend = use_intl_backend();
-
-    Signal::derive(move || msg.with(|msg| msg.translate(&locale.get(), &*intl_backend)))
-}
-
-/// Resolves application-owned translatable text into a reactive text node.
+/// Resolves application-owned translatable text into reactive renderable text.
 #[inline]
 #[must_use]
-pub fn t<T>(msg: impl Into<Translatable<T>>) -> Signal<String>
+pub fn t<T>(msg: impl Into<Translatable<T>>) -> Memo<String>
 where
     T: Translate + Send + Sync + 'static,
 {
-    translated_text(msg.into().into_signal())
+    let msg = msg.into().into_signal();
+    let locale = use_locale();
+    let intl_backend = use_intl_backend();
+
+    Memo::new(move |_| msg.with(|msg| msg.translate(&locale.get(), intl_backend.as_ref())))
 }
 
 #[cfg(test)]
@@ -530,8 +537,8 @@ mod tests {
     use leptos::prelude::{Get, GetUntracked, Memo, Owner, RwSignal, Set, Signal};
 
     use super::{
-        ArsContext, current_ars_context, resolve_locale, t, translated_text, use_direction,
-        use_intl_backend, use_locale, use_messages, use_modality_context, use_number_formatter,
+        ArsContext, current_ars_context, resolve_locale, t, use_direction, use_intl_backend,
+        use_locale, use_messages_and_locale, use_modality_context, use_number_formatter,
         use_resolved_number_formatter,
     };
 
@@ -749,7 +756,7 @@ mod tests {
 
             let override_locale = Locale::parse("pt-BR").expect("locale should parse");
 
-            assert_eq!(resolve_locale(Some(&override_locale)).to_bcp47(), "pt-BR");
+            assert_eq!(resolve_locale(Some(override_locale)).to_bcp47(), "pt-BR");
             assert_eq!(resolve_locale(None).to_bcp47(), "fr-FR");
         });
     }
@@ -881,11 +888,10 @@ mod tests {
                 StyleStrategy::Inline,
             ));
 
-            let resolved = use_messages::<TestMessages>(None, None);
+            let (messages, locale) =
+                use_messages_and_locale::<TestMessages>(None, None).get_untracked();
 
-            let locale = Locale::parse("es-MX").expect("locale should parse");
-
-            assert_eq!((resolved.label)(&locale), "Etiqueta");
+            assert_eq!((messages.label)(&locale), "Etiqueta");
         });
     }
 
@@ -895,14 +901,15 @@ mod tests {
         owner.with(|| {
             let locale = Locale::parse("pt-BR").expect("locale should parse");
 
-            let resolved = use_messages::<TestMessages>(None, Some(&locale));
+            let (messages, locale) =
+                use_messages_and_locale::<TestMessages>(None, Some(locale)).get_untracked();
 
-            assert_eq!((resolved.label)(&locale), "Default");
+            assert_eq!((messages.label)(&locale), "Default");
         });
     }
 
     #[test]
-    fn translated_text_reacts_to_locale_changes() {
+    fn t_reacts_to_locale_changes() {
         let owner = Owner::new();
         owner.with(|| {
             let (context, locale_signal) =
@@ -910,7 +917,7 @@ mod tests {
 
             crate::provide_ars_context(context);
 
-            let text = translated_text(Signal::stored(AppText::Greeting));
+            let text = t(AppText::Greeting);
 
             assert_eq!(text.get(), "Hello");
 
@@ -1034,7 +1041,7 @@ mod tests {
             let explicit = locales::de_de();
 
             let formatter =
-                use_resolved_number_formatter(Some(&explicit), number::FormatOptions::default);
+                use_resolved_number_formatter(Some(explicit), number::FormatOptions::default);
 
             assert_eq!(formatter.get().format(1234.56), "1.234,56");
         });
@@ -1049,7 +1056,7 @@ mod tests {
                 Arc::new(StubIntlBackend),
             ));
 
-            let _ = t(AppText::Greeting);
+            let _text = t(AppText::Greeting);
 
             use crate::prelude::use_number_formatter as prelude_use_number_formatter;
 
@@ -1076,8 +1083,8 @@ mod wasm_tests {
     #[cfg(feature = "csr")]
     use super::ArsProvider;
     use super::{
-        ArsContext, current_ars_context, resolve_locale, t, translated_text, use_intl_backend,
-        use_locale, use_messages, use_modality_context, use_number_formatter,
+        ArsContext, current_ars_context, resolve_locale, t, use_intl_backend, use_locale,
+        use_messages_and_locale, use_modality_context, use_number_formatter,
         use_resolved_number_formatter,
     };
     #[cfg(feature = "csr")]
@@ -1234,7 +1241,7 @@ mod wasm_tests {
     }
 
     #[wasm_bindgen_test]
-    fn translated_text_reacts_to_locale_changes_on_wasm() {
+    fn t_reacts_to_locale_changes_on_wasm() {
         let owner = Owner::new();
         owner.with(|| {
             let (context, locale_signal) =
@@ -1242,7 +1249,7 @@ mod wasm_tests {
 
             crate::provide_ars_context(context);
 
-            let text = translated_text(Signal::stored(AppText::Greeting));
+            let text = t(Signal::stored(AppText::Greeting));
 
             assert_eq!(text.get(), "Hello");
 
@@ -1250,7 +1257,7 @@ mod wasm_tests {
 
             assert_eq!(text.get(), "Hola");
 
-            let _ = t(AppText::Greeting);
+            let _text = t(AppText::Greeting);
         });
     }
 
@@ -1333,14 +1340,12 @@ mod wasm_tests {
 
             let modality = use_modality_context();
 
-            let resolved = use_messages::<TestMessages>(None, Some(&locale));
+            let (messages, locale) =
+                use_messages_and_locale::<TestMessages>(None, Some(locale)).get_untracked();
 
             assert_eq!(modality.snapshot(), ars_core::ModalitySnapshot::default());
-            assert_eq!((resolved.label)(&locale), "Default");
-            assert_eq!(
-                translated_text(Signal::stored(AppText::Greeting)).get(),
-                "Hello"
-            );
+            assert_eq!((messages.label)(&locale), "Default");
+            assert_eq!(t(Signal::stored(AppText::Greeting)).get(), "Hello");
 
             let _ = t(AppText::Greeting);
         });
@@ -1374,12 +1379,11 @@ mod wasm_tests {
 
             crate::provide_ars_context(context);
 
-            let locale = Locale::parse("es-MX").expect("locale should parse");
-
-            let resolved = use_messages::<TestMessages>(None, None);
+            let (messages, locale) =
+                use_messages_and_locale::<TestMessages>(None, None).get_untracked();
 
             assert!(Arc::ptr_eq(&use_modality_context(), &expected));
-            assert_eq!((resolved.label)(&locale), "Etiqueta");
+            assert_eq!((messages.label)(&locale), "Etiqueta");
         });
     }
 

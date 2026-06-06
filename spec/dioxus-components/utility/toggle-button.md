@@ -17,7 +17,7 @@ This spec maps the core [`ToggleButton`](../../components/utility/toggle-button.
 ```rust,no_check
 #[derive(Props, Clone, PartialEq)]
 pub struct ToggleButtonProps {
-    #[props(optional)]
+    #[props(optional, into)]
     pub id: Option<String>,
     #[props(optional)]
     pub pressed: Option<bool>,
@@ -29,21 +29,21 @@ pub struct ToggleButtonProps {
     pub invalid: bool,
     #[props(default = false)]
     pub required: bool,
-    #[props(optional)]
+    #[props(optional, into)]
     pub value: Option<String>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub name: Option<String>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub form: Option<String>,
     #[props(default = false)]
     pub prevent_focus_on_press: bool,
-    #[props(optional)]
+    #[props(optional, into)]
     pub on_change: Option<EventHandler<bool>>,
-    #[props(optional)]
-    pub on_hover_start: Option<EventHandler<()>>,
-    #[props(optional)]
-    pub on_hover_end: Option<EventHandler<()>>,
-    #[props(optional)]
+    #[props(optional, into)]
+    pub on_hover_start: Option<EventHandler>,
+    #[props(optional, into)]
+    pub on_hover_end: Option<EventHandler>,
+    #[props(optional, into)]
     pub on_hover_change: Option<EventHandler<bool>>,
     pub children: Element,
 }

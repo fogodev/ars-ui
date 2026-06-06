@@ -1926,6 +1926,12 @@ pub fn styles_to_nonce_css(id: &str, styles: &[(CssProperty, String)]) -> String
 /// originating component scope.
 pub type ReactiveStringFn = dyn Fn() -> String + Send + Sync + 'static;
 
+/// Type alias for an [`AttrValue::ReactiveOptional`] closure — takes no
+/// arguments and returns the current optional [`String`] value of the
+/// attribute. Returning [`None`] removes the attribute from adapters that
+/// support reactive optional attributes.
+pub type ReactiveOptionalStringFn = dyn Fn() -> Option<String> + Send + Sync + 'static;
+
 /// Type alias for an [`AttrValue::ReactiveBool`] closure — takes no arguments
 /// and returns the current `bool` value of the attribute. Same `Send + Sync +
 /// 'static` reasoning as [`ReactiveStringFn`].
@@ -1955,6 +1961,11 @@ pub enum AttrValue {
     /// [`AttrValue::reactive`] to construct.
     Reactive(Arc<ReactiveStringFn>),
 
+    /// Reactive optional string attribute value — the closure is called every
+    /// time the attribute needs to be (re-)rendered. [`None`] removes the
+    /// attribute. Use [`AttrValue::reactive_optional`] to construct.
+    ReactiveOptional(Arc<ReactiveOptionalStringFn>),
+
     /// Reactive boolean attribute value — the closure is called every time
     /// the attribute needs to be (re-)rendered. Use
     /// [`AttrValue::reactive_bool`] to construct.
@@ -1973,6 +1984,16 @@ impl AttrValue {
         F: Fn() -> String + Send + Sync + 'static,
     {
         Self::Reactive(Arc::new(f))
+    }
+
+    /// Constructs an [`AttrValue::ReactiveOptional`] from any closure that
+    /// returns a fresh optional [`String`] on each invocation. The closure is
+    /// wrapped in [`Arc`] so the resulting [`AttrValue`] stays cheaply cloneable.
+    pub fn reactive_optional<F>(f: F) -> Self
+    where
+        F: Fn() -> Option<String> + Send + Sync + 'static,
+    {
+        Self::ReactiveOptional(Arc::new(f))
     }
 
     /// Constructs an [`AttrValue::ReactiveBool`] from any closure that
@@ -1996,7 +2017,9 @@ impl AttrValue {
             Self::String(value) => Some(value.as_str()),
             Self::Bool(true) => Some("true"),
             Self::Bool(false) => Some("false"),
-            Self::Reactive(_) | Self::ReactiveBool(_) | Self::None => None,
+            Self::Reactive(_) | Self::ReactiveOptional(_) | Self::ReactiveBool(_) | Self::None => {
+                None
+            }
         }
     }
 
@@ -2015,6 +2038,7 @@ impl AttrValue {
             Self::String(value) => Some(value.clone()),
             Self::Bool(true) => Some(String::new()),
             Self::Reactive(f) => Some(f()),
+            Self::ReactiveOptional(f) => f(),
             Self::ReactiveBool(f) => f().then(String::new),
             Self::Bool(false) | Self::None => None,
         }
@@ -2027,6 +2051,7 @@ impl Clone for AttrValue {
             Self::String(value) => Self::String(value.clone()),
             Self::Bool(value) => Self::Bool(*value),
             Self::Reactive(f) => Self::Reactive(Arc::clone(f)),
+            Self::ReactiveOptional(f) => Self::ReactiveOptional(Arc::clone(f)),
             Self::ReactiveBool(f) => Self::ReactiveBool(Arc::clone(f)),
             Self::None => Self::None,
         }
@@ -2039,6 +2064,10 @@ impl Debug for AttrValue {
             Self::String(value) => f.debug_tuple("String").field(value).finish(),
             Self::Bool(value) => f.debug_tuple("Bool").field(value).finish(),
             Self::Reactive(_) => f.debug_tuple("Reactive").field(&"<closure>").finish(),
+            Self::ReactiveOptional(_) => f
+                .debug_tuple("ReactiveOptional")
+                .field(&"<closure>")
+                .finish(),
             Self::ReactiveBool(_) => f.debug_tuple("ReactiveBool").field(&"<closure>").finish(),
             Self::None => f.write_str("None"),
         }
@@ -2051,6 +2080,7 @@ impl PartialEq for AttrValue {
             (Self::String(a), Self::String(b)) => a == b,
             (Self::Bool(a), Self::Bool(b)) => a == b,
             (Self::Reactive(a), Self::Reactive(b)) => Arc::ptr_eq(a, b),
+            (Self::ReactiveOptional(a), Self::ReactiveOptional(b)) => Arc::ptr_eq(a, b),
             (Self::ReactiveBool(a), Self::ReactiveBool(b)) => Arc::ptr_eq(a, b),
             (Self::None, Self::None) => true,
             _ => false,
@@ -2086,6 +2116,13 @@ impl serde::Serialize for AttrValue {
             Self::Reactive(f) => {
                 serializer.serialize_newtype_variant("AttrValue", 0, "String", &f())
             }
+
+            Self::ReactiveOptional(f) => match f() {
+                Some(value) => {
+                    serializer.serialize_newtype_variant("AttrValue", 0, "String", &value)
+                }
+                None => serializer.serialize_unit_variant("AttrValue", 2, "None"),
+            },
 
             Self::ReactiveBool(f) => {
                 serializer.serialize_newtype_variant("AttrValue", 1, "Bool", &f())
@@ -2248,6 +2285,19 @@ impl AttrMap {
             .binary_search_by(|(key, _)| key.cmp(attr))
             .ok()
             .map(|index| &self.attrs[index].1)
+    }
+
+    /// Removes and returns the raw typed value for the given attribute.
+    ///
+    /// This is the owned counterpart to [`Self::get_value`]. Use it when the
+    /// caller intends to replace the attribute after inspecting its current
+    /// value, avoiding the clone that would be required by `get_value()`.
+    #[must_use]
+    pub fn take(&mut self, attr: &HtmlAttr) -> Option<AttrValue> {
+        self.attrs
+            .binary_search_by(|(key, _)| key.cmp(attr))
+            .ok()
+            .map(|index| self.attrs.remove(index).1)
     }
 
     /// Iterates over the stored attribute entries.
@@ -3116,6 +3166,22 @@ mod tests {
 
         assert_eq!(attrs.attrs(), &[]);
         assert_eq!(attrs.styles(), &[]);
+    }
+
+    #[test]
+    fn attr_map_take_removes_and_returns_owned_value() {
+        let mut attrs = AttrMap::new();
+
+        attrs.set(HtmlAttr::Title, "Tooltip");
+        attrs.set(HtmlAttr::Role, "button");
+
+        assert_eq!(
+            attrs.take(&HtmlAttr::Title),
+            Some(AttrValue::String(String::from("Tooltip")))
+        );
+        assert_eq!(attrs.get(&HtmlAttr::Title), None);
+        assert_eq!(attrs.get(&HtmlAttr::Role), Some("button"));
+        assert_eq!(attrs.take(&HtmlAttr::Title), None);
     }
 
     #[test]

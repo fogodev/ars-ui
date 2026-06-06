@@ -88,12 +88,25 @@ core-owned state.
 ## Consumer Styling
 
 Leptos components must forward consumer styling through a `class` prop where
-the adapter convention expects one.
+the adapter convention expects one. Leptos `class` props must be `TextProp`;
+there is no non-reactive class-prop path. Use `TextProp` for `style` too when
+the component exposes raw inline style. This lets application state and
+locale-driven styling flow through the same prop without examples rebuilding
+component logic. Merge consumer class props with `merge_consumer_class_prop_into`
+so component-owned classes and reactive consumer classes end up in one final
+`class` attribute; do not split classes across separate attributes or hardcode
+example-only class branching.
 
 Dioxus props must extend `GlobalAttributes` when the component exposes global
 HTML attributes to consumers.
 
 Avoid swallowing consumer classes or replacing them with fixed demo styling.
+
+When a merge helper needs to inspect an existing `AttrMap` value and then
+overwrite that same key, use `AttrMap::take()` instead of `get()` plus a clone.
+This is especially relevant for class merging in adapters:
+`merge_consumer_class_prop_into` consumes the existing component-owned class,
+builds the merged reactive value, and sets the key once.
 
 ## Prop Ergonomics
 
@@ -103,3 +116,31 @@ framework supports it and the local adapter convention uses it.
 Keep semantic data separate from rendered views. Rich framework views are useful
 for customization, but components still need semantic sources for accessible
 names, ids, announcements, form serialization, and state-machine wiring.
+
+For Leptos adapter APIs, use `TextProp` for user-facing semantic text props that
+must accept static strings, provider-localized text, or application state:
+placeholders, accessible labels, status text, validation messages, live
+announcements, empty-state text, and semantic labels behind custom views. The
+public `t(...)` helper returns `Memo<String>`, which converts into
+`TextProp`, so examples and widgets should pass `t(MessageKey)` without a
+parallel helper.
+
+Resolve component message bundles together with the locale used to select them.
+Leptos uses `use_messages_and_locale(...) -> Signal<(M, Locale)>`; Dioxus uses
+`use_messages_and_locale(...) -> (M, Locale)` because `use_memo` would require
+an extra `PartialEq` bound not guaranteed by `ComponentMessages`. Do not resolve
+messages and then separately read locale for the same render path.
+
+Do not use reactive text types for DOM tokens and relationships that the browser
+serializes as identifiers: `id`, `form`, `name`, `aria-labelledby`,
+`aria-describedby`, `aria-controls`, and similar IDREF props should remain
+static strings unless the component spec names a reactive association. Leptos
+consumer styling props are the exception: use `TextProp` for `class` and raw
+`style` escape hatches when exposed, and merge them into the adapter attr map.
+Native form ownership is `form="form-id"`; a `NodeRef` helper may only be an
+ergonomic addition if it resolves to a stable element ID.
+
+Use typed semantic enums for well-known HTML vocabularies when the component
+owns the helper element. For example, Field's native input helper exposes
+`InputType` instead of raw `type` strings, with `#[non_exhaustive]` on the enum
+so future HTML input types can be added without breaking consumers.
