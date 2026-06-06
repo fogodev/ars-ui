@@ -14,9 +14,9 @@ struct FieldsetContext {
 
 #[derive(Clone, Copy)]
 pub(crate) struct InheritedFieldsetContext {
-    pub(crate) disabled: Memo<bool>,
-    pub(crate) invalid: Memo<bool>,
-    pub(crate) readonly: Memo<bool>,
+    pub(crate) disabled: Signal<bool>,
+    pub(crate) invalid: Signal<bool>,
+    pub(crate) readonly: Signal<bool>,
 }
 
 fn fieldset_context() -> FieldsetContext {
@@ -26,26 +26,22 @@ fn fieldset_context() -> FieldsetContext {
 
 /// Leptos Fieldset root component.
 #[component]
-#[expect(
-    clippy::redundant_closure_for_method_calls,
-    reason = "fieldset::Api method items are not lifetime-general enough for derive()."
-)]
 pub fn Fieldset<T: 'static>(
     /// Optional component instance ID.
     #[prop(optional, into)]
     id: Option<Oco<'static, str>>,
 
     /// Whether every descendant form control is disabled.
-    #[prop(optional)]
-    disabled: bool,
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
 
     /// Whether the fieldset is invalid.
-    #[prop(optional)]
-    invalid: bool,
+    #[prop(optional, into)]
+    invalid: Signal<bool>,
 
     /// Whether the fieldset is read-only.
-    #[prop(optional)]
-    readonly: bool,
+    #[prop(optional, into)]
+    readonly: Signal<bool>,
 
     /// Optional text direction override.
     #[prop(optional)]
@@ -63,29 +59,30 @@ where
 {
     let id = id.map_or_else(|| use_id("fieldset"), Oco::into_owned);
 
-    let mut props = Props::new()
-        .id(&id)
-        .disabled(disabled)
-        .invalid(invalid)
-        .readonly(readonly);
+    let mut props = Props::new().id(&id);
 
     if let Some(dir) = dir {
         props = props.dir(dir);
     }
 
-    let machine = use_machine::<fieldset::Machine>(props);
+    let initial_props = props
+        .disabled(disabled.get_untracked())
+        .invalid(invalid.get_untracked())
+        .readonly(readonly.get_untracked());
+
+    let machine = use_machine::<fieldset::Machine>(initial_props);
 
     let inherited = InheritedFieldsetContext {
-        disabled: machine.derive(|api| api.root_attrs().contains(&ars_core::HtmlAttr::Disabled)),
-        invalid: machine.derive(|api| api.is_invalid()),
-        readonly: machine.derive(|api| api.is_readonly()),
+        disabled,
+        invalid,
+        readonly,
     };
 
     let attrs = machine.with_api_snapshot(|api| {
         let mut attrs = api.root_attrs();
 
         crate::merge_consumer_class_prop_into(&mut attrs, class);
-        add_dynamic_root_attrs(&mut attrs, machine);
+        add_dynamic_root_attrs(&mut attrs, disabled, machine);
 
         attr_map_to_leptos_inline_attrs(attrs)
     });
@@ -141,6 +138,7 @@ where
 
 fn add_dynamic_root_attrs(
     attrs: &mut ars_core::AttrMap,
+    disabled: Signal<bool>,
     machine: crate::UseMachineReturn<fieldset::Machine>,
 ) {
     let described_by = machine.derive(|api| {
@@ -149,10 +147,15 @@ fn add_dynamic_root_attrs(
             .map(str::to_owned)
     });
 
-    attrs.set(
-        ars_core::HtmlAttr::Aria(ars_core::AriaAttr::DescribedBy),
-        ars_core::AttrValue::reactive_optional(move || described_by.get()),
-    );
+    attrs
+        .set(
+            ars_core::HtmlAttr::Disabled,
+            ars_core::AttrValue::reactive_bool(move || disabled.get()),
+        )
+        .set(
+            ars_core::HtmlAttr::Aria(ars_core::AriaAttr::DescribedBy),
+            ars_core::AttrValue::reactive_optional(move || described_by.get()),
+        );
 }
 
 /// Leptos Fieldset error message part.

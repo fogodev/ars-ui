@@ -323,3 +323,74 @@ async fn field_controlled_value_reapplies_rejected_input() {
 
     parent.remove();
 }
+
+#[wasm_bindgen_test(async)]
+#[expect(
+    unused_qualifications,
+    reason = "Dioxus rsx! reports the event handler closure as an unused qualification on wasm."
+)]
+async fn field_input_attrs_follow_parent_prop_rerenders() {
+    fn app() -> Element {
+        let mut localized = use_signal(|| false);
+        let (input_type, name, placeholder) = if localized() {
+            (
+                InputType::Search,
+                "consulta",
+                "Pesquisar por endereco de email",
+            )
+        } else {
+            (InputType::Email, "email", "Enter your email")
+        };
+
+        rsx! {
+            Field { id: "wasm-localized-email-field",
+                Label { "Email" }
+                Input { r#type: input_type, name, placeholder }
+                button { r#type: "button", onclick: move |_| localized.set(true), "Localize" }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let input = parent
+        .query_selector("#wasm-localized-email-field-input")
+        .expect("query should succeed")
+        .expect("field input should exist");
+
+    assert_eq!(input.get_attribute("type").as_deref(), Some("email"));
+    assert_eq!(input.get_attribute("name").as_deref(), Some("email"));
+    assert_eq!(
+        input.get_attribute("placeholder").as_deref(),
+        Some("Enter your email")
+    );
+
+    let button = parent
+        .query_selector("button[type='button']")
+        .expect("query should succeed")
+        .expect("localize button should exist")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("localize button should be an HtmlElement");
+
+    button.click();
+
+    flush().await;
+
+    assert_eq!(input.get_attribute("type").as_deref(), Some("search"));
+    assert_eq!(input.get_attribute("name").as_deref(), Some("consulta"));
+    assert_eq!(
+        input.get_attribute("placeholder").as_deref(),
+        Some("Pesquisar por endereco de email")
+    );
+
+    parent.remove();
+}

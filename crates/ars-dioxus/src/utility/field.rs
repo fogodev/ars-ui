@@ -2,7 +2,7 @@
 
 use ars_components::utility::field;
 pub use ars_components::utility::field::{InputType, Part, Props};
-use ars_core::{AttrMap, Direction, HtmlAttr};
+use ars_core::{AriaAttr, AttrMap, Direction, HtmlAttr};
 use ars_forms::validation::Error;
 use dioxus::prelude::*;
 
@@ -184,34 +184,41 @@ pub struct InputProps {
 pub fn Input(props: InputProps) -> Element {
     let machine = field_context().machine;
 
-    let component_attrs = machine.derive(move |api| {
-        let mut attrs = api.input_attrs();
+    #[expect(
+        clippy::redundant_closure_for_method_calls,
+        reason = "field::Api method items are not lifetime-general enough for derive()."
+    )]
+    let mut component_attrs = machine.derive(|api| api.input_attrs())();
 
-        apply_input_attrs(
-            &mut attrs,
-            props.r#type,
-            props.name.clone(),
-            props.placeholder.clone(),
-        );
+    machine.with_api_snapshot(|api| add_description_relationship(&mut component_attrs, api));
 
-        attr_map_to_dioxus_inline_attrs(attrs)
-    });
-    let attrs = merge_dioxus_attrs(props.attrs, component_attrs());
+    apply_input_attrs(
+        &mut component_attrs,
+        props.r#type,
+        props.name,
+        props.placeholder,
+    );
 
-    match props.value.clone() {
-        Some(value) => rsx! {
+    let attrs = merge_dioxus_attrs(
+        props.attrs,
+        attr_map_to_dioxus_inline_attrs(component_attrs),
+    );
+
+    if let Some(value) = props.value {
+        rsx! {
             input {
                 value,
                 oninput: move |event| callbacks::emit(props.on_value_input.as_ref(), event.value()),
                 ..attrs,
             }
-        },
-        None => rsx! {
+        }
+    } else {
+        rsx! {
             input {
                 oninput: move |event| callbacks::emit(props.on_value_input.as_ref(), event.value()),
                 ..attrs,
             }
-        },
+        }
     }
 }
 
@@ -226,10 +233,12 @@ pub struct DescriptionProps {
 #[component]
 pub fn Description(props: DescriptionProps) -> Element {
     let machine = field_context().machine;
+    let mut registered = use_signal(|| false);
 
-    use_effect(move || {
+    if !*registered.peek() {
         machine.send.call(field::Event::SetHasDescription(true));
-    });
+        registered.set(true);
+    }
 
     use_drop(move || {
         machine.send.call(field::Event::SetHasDescription(false));
@@ -281,7 +290,36 @@ fn apply_input_attrs(
         attrs.set(HtmlAttr::Placeholder, placeholder);
     }
 
-    if attrs.contains(&HtmlAttr::Aria(ars_core::AriaAttr::Disabled)) {
+    if attrs.contains(&HtmlAttr::Aria(AriaAttr::Disabled)) {
         attrs.set_bool(HtmlAttr::Disabled, true);
+    }
+}
+
+fn add_description_relationship(attrs: &mut AttrMap, api: &field::Api<'_>) {
+    let Some(description_id) = api.description_attrs().take(&HtmlAttr::Id) else {
+        return;
+    };
+
+    let mut described_by = Vec::new();
+
+    if let Some(description_id) = description_id.materialize_string()
+        && !description_id.is_empty()
+    {
+        described_by.push(description_id);
+    }
+
+    if let Some(existing) = attrs.take(&HtmlAttr::Aria(AriaAttr::DescribedBy))
+        && let Some(existing) = existing.materialize_string()
+        && !existing.is_empty()
+    {
+        described_by.extend(existing.split_whitespace().map(str::to_owned));
+    }
+
+    if !described_by.is_empty() {
+        described_by.dedup();
+        attrs.set(
+            HtmlAttr::Aria(AriaAttr::DescribedBy),
+            described_by.join(" "),
+        );
     }
 }

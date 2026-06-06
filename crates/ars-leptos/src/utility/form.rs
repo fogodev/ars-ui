@@ -36,7 +36,7 @@ pub fn Form<T: 'static>(
 
     /// Validation display behavior.
     #[prop(optional, into)]
-    validation_behavior: Option<ValidationBehavior>,
+    validation_behavior: Signal<ValidationBehavior>,
 
     /// Validation errors keyed by field name.
     #[prop(optional, into)]
@@ -72,14 +72,9 @@ where
         props = props.role(role.into_owned());
     }
 
-    if let Some(validation_behavior) = validation_behavior {
-        props = props.validation_behavior(validation_behavior);
-    }
-
-    let validation_behavior = props.validation_behavior;
-
     let machine = use_machine_with_reactive_props::<form::Machine>(form_props_signal(
         props,
+        validation_behavior,
         validation_errors,
     ));
 
@@ -97,7 +92,9 @@ where
             <form
                 {..attrs}
                 on:submit:capture=move |event| {
-                    if validation_behavior == ValidationBehavior::Aria || on_submit.is_some() {
+                    if validation_behavior.get_untracked() == ValidationBehavior::Aria
+                        || on_submit.is_some()
+                    {
                         event.prevent_default();
                     }
                     machine.send.run(form::Event::Submit);
@@ -121,9 +118,15 @@ where
 
 fn form_props_signal(
     props: Props,
+    validation_behavior: Signal<ValidationBehavior>,
     validation_errors: Signal<BTreeMap<String, Vec<Error>>>,
 ) -> Signal<Props> {
-    Signal::derive(move || props.clone().validation_errors(validation_errors.get()))
+    Signal::derive(move || {
+        props
+            .clone()
+            .validation_behavior(validation_behavior.get())
+            .validation_errors(validation_errors.get())
+    })
 }
 
 fn add_dynamic_root_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<form::Machine>) {
@@ -133,6 +136,7 @@ fn add_dynamic_root_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<
             .map(str::to_owned)
     });
     let busy = machine.derive(|api| api.root_attrs().contains(&HtmlAttr::Aria(AriaAttr::Busy)));
+    let no_validate = machine.derive(|api| api.root_attrs().contains(&HtmlAttr::NoValidate));
 
     attrs
         .set(
@@ -142,6 +146,10 @@ fn add_dynamic_root_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<
         .set(
             HtmlAttr::Aria(AriaAttr::Busy),
             AttrValue::reactive_bool(move || busy.get()),
+        )
+        .set(
+            HtmlAttr::NoValidate,
+            AttrValue::reactive_bool(move || no_validate.get()),
         );
 }
 

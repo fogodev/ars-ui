@@ -160,3 +160,80 @@ async fn fieldset_state_reaches_descendant_field_input_attrs() {
 
     parent.remove();
 }
+
+#[wasm_bindgen_test(async)]
+async fn fieldset_state_updates_reach_descendant_fields_without_remount() {
+    let owner = Owner::new();
+
+    let (_mount_handle, parent, set_disabled, set_invalid, set_readonly) = owner.with(|| {
+        let parent = container();
+        let (disabled, set_disabled) = signal(false);
+        let (invalid, set_invalid) = signal(false);
+        let (readonly, set_readonly) = signal(false);
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <Fieldset
+                    id="wasm-reactive-group"
+                    disabled=disabled
+                    invalid=invalid
+                    readonly=readonly
+                >
+                    <Legend>"Account"</Legend>
+                    <Content>
+                        <Field id="wasm-reactive-grouped-email">
+                            <Label>"Email"</Label>
+                            <Input name="email" />
+                        </Field>
+                    </Content>
+                </Fieldset>
+            }
+        });
+
+        (
+            mount_handle,
+            parent,
+            set_disabled,
+            set_invalid,
+            set_readonly,
+        )
+    });
+
+    leptos::task::tick().await;
+
+    let fieldset = parent
+        .query_selector("#wasm-reactive-group")
+        .expect("query should succeed")
+        .expect("fieldset should exist");
+
+    let input = parent
+        .query_selector("#wasm-reactive-grouped-email-input")
+        .expect("query should succeed")
+        .expect("grouped field input should exist");
+
+    assert_eq!(fieldset.get_attribute("disabled"), None);
+    assert_eq!(input.get_attribute("disabled"), None);
+    assert_eq!(input.get_attribute("aria-invalid"), None);
+    assert_eq!(input.get_attribute("readonly"), None);
+
+    set_disabled.set(true);
+    set_invalid.set(true);
+    set_readonly.set(true);
+
+    leptos::task::tick().await;
+
+    assert_eq!(fieldset.get_attribute("disabled").as_deref(), Some(""));
+    assert_eq!(input.get_attribute("disabled").as_deref(), Some(""));
+    assert_eq!(
+        input.get_attribute("aria-disabled").as_deref(),
+        Some("true")
+    );
+    assert_eq!(input.get_attribute("readonly").as_deref(), Some(""));
+    assert_eq!(
+        input.get_attribute("aria-readonly").as_deref(),
+        Some("true")
+    );
+    assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
+
+    parent.remove();
+}

@@ -232,8 +232,8 @@ pub fn Input(
         attr_map_to_leptos_inline_attrs(attrs)
     });
 
-    match value {
-        Some(value) => Either::Left(view! {
+    if let Some(value) = value {
+        Either::Left(view! {
             <input
                 {..attrs}
                 prop:value=move || value.get()
@@ -241,15 +241,16 @@ pub fn Input(
                     callbacks::emit(on_value_input.as_ref(), event.target().value());
                 }
             />
-        }),
-        None => Either::Right(view! {
+        })
+    } else {
+        Either::Right(view! {
             <input
                 {..attrs}
                 on:input:target=move |event| {
                     callbacks::emit(on_value_input.as_ref(), event.target().value());
                 }
             />
-        }),
+        })
     }
 }
 

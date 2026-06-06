@@ -256,3 +256,66 @@ async fn form_submit_button_click_fires_submit_callback_without_navigation() {
 
     parent.remove();
 }
+
+#[wasm_bindgen_test(async)]
+async fn form_validation_behavior_updates_without_remount() {
+    let owner = Owner::new();
+
+    let (_mount_handle, parent, set_behavior) = owner.with(|| {
+        let parent = container();
+        let (behavior, set_behavior) =
+            signal(ars_leptos::utility::form::ValidationBehavior::Native);
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <Form
+                    id="wasm-validation-behavior-form"
+                    action="/account"
+                    validation_behavior=behavior
+                >
+                    <input name="email" />
+                    <StatusRegion>"Ready"</StatusRegion>
+                </Form>
+            }
+        });
+
+        (mount_handle, parent, set_behavior)
+    });
+
+    leptos::task::tick().await;
+
+    let form = parent
+        .query_selector("#wasm-validation-behavior-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    assert_eq!(
+        form.get_attribute("novalidate"),
+        None,
+        "native validation behavior should not render novalidate"
+    );
+
+    set_behavior.set(ars_leptos::utility::form::ValidationBehavior::Aria);
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        form.get_attribute("novalidate").as_deref(),
+        Some(""),
+        "aria validation behavior should update root novalidate without remount"
+    );
+
+    let submit = cancelable_event("submit");
+
+    form.dispatch_event(&submit)
+        .expect("submit event should dispatch");
+
+    leptos::task::tick().await;
+
+    assert!(
+        submit.default_prevented(),
+        "submit prevention should use the latest validation behavior"
+    );
+
+    parent.remove();
+}
