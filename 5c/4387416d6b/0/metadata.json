@@ -1,0 +1,117 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "5c4387416d6b",
+  "session_id": "019e93b2-e997-7881-b092-7b1fb63bf491",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-06T17:52:34.552797Z",
+  "branch": "codex/issue-332-423-field-form-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "48df91d3707f",
+  "checkpoint_transcript_start": 12824,
+  "transcript_lines_at_start": 12824,
+  "token_usage": {
+    "input_tokens": 307836,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 6407168,
+    "output_tokens": 13850,
+    "api_call_count": 56
+  },
+  "session_metrics": {
+    "turn_count": 33
+  },
+  "summary": {
+    "intent": "Address five Codex review findings on PR #724 for ars-ui field/form adapters in a single batched commit, covering reactive Leptos Field root state, ARIA submit prevention, controlled Dioxus input value reapplication, native disabled placement, and submit lifecycle completion.",
+    "outcome": "All five review items were fixed across ars-components, ars-leptos, and ars-dioxus with accompanying wasm browser tests; fmt, clippy, adapter parity, and SSR/native tests passed; changes committed as a single batched commit and pushed.",
+    "learnings": {
+      "repo": [
+        "The repo enforces a zero-warning rule — unused #[expect] annotations must be removed before committing.",
+        "Codex reviews are triggered by posting '@codex review' as a comment on the PR via gh api.",
+        "The agnostic Field API should only emit aria-disabled, not native disabled; native disabled belongs in adapter input helpers.",
+        "Dioxus controlled inputs require using the native value: prop rather than the generic AttrMap path so rejected/normalized edits can be reapplied to the DOM.",
+        "ARIA form mode must prevent native navigation even when no submit callback is provided.",
+        "The form machine lifecycle must be completed (SubmitComplete) after intercepted submissions, not left in a stuck-busy state.",
+        "Leptos Field root and native input attributes must be derived reactively from the live machine snapshot, not computed once at render.",
+        "Adapter parity is verified via cargo xtask ci adapter-parity.",
+        "Wasm browser tests require wasm-bindgen-test-runner to bind a local browser server and cannot run inside the sandbox."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/field/mod.rs",
+          "line": 808,
+          "end_line": 832,
+          "finding": "Core Field input attrs snapshot test was updated to assert aria-disabled only, removing native disabled from the agnostic API surface."
+        },
+        {
+          "path": "crates/ars-leptos/src/utility/field.rs",
+          "line": 180,
+          "end_line": 360,
+          "finding": "Root and native input attributes made reactive from live machine snapshot; previously computed statically at render time."
+        },
+        {
+          "path": "crates/ars-dioxus/src/utility/field.rs",
+          "line": 145,
+          "end_line": 215,
+          "finding": "Controlled input value extracted from AttrMap and rendered via Dioxus native value: prop to enable DOM reapplication after rejected edits."
+        },
+        {
+          "path": "crates/ars-leptos/src/utility/form.rs",
+          "line": 1,
+          "end_line": 180,
+          "finding": "ARIA form now prevents native navigation by default even without a submit callback; intercepted submissions now complete the machine lifecycle."
+        },
+        {
+          "path": "crates/ars-dioxus/src/utility/form.rs",
+          "line": 1,
+          "end_line": 180,
+          "finding": "Same submit semantics as Leptos Form applied for adapter parity."
+        },
+        {
+          "path": "crates/ars-dioxus/tests/test_field_wasm.rs",
+          "line": 260,
+          "end_line": 290,
+          "finding": "Unnecessary #[expect] annotation removed from new controlled-value wasm test to satisfy zero-warning rule."
+        }
+      ],
+      "workflow": [
+        "Batch all review fixes before pushing — do not push partial review fixes mid-session.",
+        "Accept insta snapshot .snap.new files by mv rather than re-running with UPDATE_EXPECT to keep the accept step explicit and auditable.",
+        "Run cargo fmt --all after clippy because formatting changes source text and a post-fmt clippy recheck is needed to confirm cleanliness.",
+        "Use focused test filters (--test field, --test form) for faster feedback before running full wasm suite.",
+        "Poll gh pr checks after a push rather than assuming checks attach immediately — new head SHA may take time to register workflow runs.",
+        "When apply_patch misses due to nearby context, split into smaller targeted edits rather than retrying the full patch."
+      ]
+    },
+    "friction": [
+      "apply_patch missed on first attempt for Leptos Field root attributes due to nearby context mismatch, requiring the patch to be split into smaller edits.",
+      "cargo test does not accept multiple test name filters in a single invocation — initial commands were malformed and had to be split.",
+      "wasm-bindgen-test-runner cannot spawn its browser server inside the sandbox, requiring tests to be rerun outside it.",
+      "GitHub checks did not attach to the new head SHA immediately after push, requiring repeated polling before CI state was visible.",
+      "cargo fmt found a trailing comma style change after the clippy pass, requiring an extra fmt + re-clippy cycle."
+    ],
+    "open_items": [
+      "The known upstream 'block' clippy notice is suppressed but not resolved — flagged as a pre-existing issue to revisit when upstream fixes land.",
+      "Wasm browser tests for Dioxus controlled-value reapplication cover the rejection case but the broader controlled input contract (e.g. async normalization) is not yet tested.",
+      "Native readonly handling in the agnostic Field API was explicitly left as-is (appropriate for native inputs); the review's disabled concern was the only item actioned — readonly scope may warrant a follow-up review thread."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 3,
+      "user_lines_removed": 5,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "crates/ars-components/src/utility/field/mod.rs": 1,
+        "crates/ars-leptos/src/utility/field.rs": 2
+      },
+      "user_removed_per_file": {
+        "crates/ars-components/src/utility/field/mod.rs": 3,
+        "crates/ars-leptos/src/utility/field.rs": 2
+      }
+    }
+  ]
+}
