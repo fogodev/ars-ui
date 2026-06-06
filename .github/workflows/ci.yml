@@ -172,6 +172,11 @@ jobs:
     name: Adapter Tests
     needs: [clippy]
     runs-on: ubuntu-latest
+    env:
+      # Adapter test binaries pull in both UI frameworks and can link several
+      # large Leptos/Dioxus targets at once. Serializing Cargo jobs avoids
+      # transient rust-lld bus errors on hosted runners.
+      CARGO_BUILD_JOBS: "1"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
