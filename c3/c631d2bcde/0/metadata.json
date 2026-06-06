@@ -1,0 +1,94 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c3c631d2bcde",
+  "session_id": "019e93b2-e997-7881-b092-7b1fb63bf491",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-06T17:09:41.781828Z",
+  "branch": "codex/issue-332-423-field-form-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "84698f9c70a9",
+  "checkpoint_transcript_start": 11747,
+  "transcript_lines_at_start": 11747,
+  "token_usage": {
+    "input_tokens": 405424,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 16098944,
+    "output_tokens": 22681,
+    "api_call_count": 92
+  },
+  "session_metrics": {
+    "turn_count": 33
+  },
+  "summary": {
+    "intent": "Implement Field, Fieldset, and Form adapter components for Leptos and Dioxus (issues #332/#423), open a PR, and then address the five review findings returned by the automated Codex reviewer.",
+    "outcome": "PR #724 was opened with the initial implementation, Codex review was triggered and returned five findings, all five were fixed with wasm regression tests added, and the fixes were committed. The PR was not yet re-reviewed or merged at transcript end.",
+    "learnings": {
+      "repo": [
+        "Snapshots changes require the `snapshot-reviewed` label on the PR (`gh pr edit <n> --add-label snapshot-reviewed`).",
+        "The Codex review loop is started by posting `@codex review` as a PR comment; 👀 reaction = still reviewing, 👍 = approved.",
+        "`cargo xclippy` is the required root clippy gate before handoff; individual crate clippy uses `cargo clippy -p <crate> --all-targets --all-features -- -D warnings`.",
+        "Dioxus wasm tests must use `--features web` (not `--all-features`) to avoid pulling native Tokio/Mio paths into the wasm32-unknown-unknown target.",
+        "Leptos wasm tests require `--no-default-features --features csr,ars-i18n/web-intl` to match the adapter's documented CSR profile.",
+        "The `block v0.1.6` future-incompatibility note from the Dioxus dependency tree is a known upstream issue and is expected in `cargo xclippy` output.",
+        "Clippy method-reference closures over fieldset API helpers fail due to lifetime constraints; the pattern is to use explicit closures with targeted `#[expect(clippy::...)]` annotations instead of method-item paths."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-dioxus/src/utility/fieldset.rs",
+          "finding": "Inherited state memos (invalid/readonly/etc.) must be created as top-level component hooks, then passed into the context provider — creating them inside the provider initializer closure breaks Dioxus hook ordering rules and causes a runtime hook-order panic in wasm tests."
+        },
+        {
+          "path": "crates/ars-dioxus/src/utility/field.rs",
+          "line": 60,
+          "end_line": 130,
+          "finding": "Field must subscribe to form validation changes and merge inherited fieldset state into its machine props; the original implementation did not observe form context version changes or pull fieldset group state."
+        },
+        {
+          "path": "crates/ars-leptos/src/utility/field.rs",
+          "line": 120,
+          "end_line": 170,
+          "finding": "Leptos Field must add nearest fieldset context to its props signal so inherited group state (invalid/readonly) flows through the machine rather than requiring manual DOM mutation."
+        },
+        {
+          "path": "crates/ars-leptos/src/utility/form.rs",
+          "finding": "Submit state and aria-busy must be reactive attr-map closures, not static initial values; otherwise the form root attrs do not update when submission state changes."
+        },
+        {
+          "path": "crates/ars-leptos/src/utility/field.rs",
+          "line": 330,
+          "end_line": 395,
+          "finding": "Controlled input values must bind via `prop:value` (DOM property) not a generic HTML attribute; the attribute path does not update the DOM value for controlled inputs after initial render."
+        },
+        {
+          "path": "crates/ars-dioxus/tests/test_form_wasm.rs",
+          "finding": "`rsx!` macro expansion can emit `unused_qualifications` warnings in wasm test targets; requires a targeted `#[expect(unused_qualifications)]` on the affected test function since the call site is inside macro-generated code."
+        }
+      ],
+      "workflow": [
+        "Poll Codex review state by combining three signals: `gh api .../reactions` (👀 present), GraphQL reviewThreads (unresolved threads), and `gh pr view --json statusCheckRollup` — all three together give a complete picture.",
+        "When a wasm test run exposes a hook-order or API-usage bug, fix and re-run before committing; do not commit code that only compiles but fails wasm browser tests.",
+        "Use `#[expect(clippy::lint_name, reason = \"...\")]` with an explicit reason string rather than `#[allow]` for suppressions that are genuinely unavoidable due to framework API constraints.",
+        "Stage specific files (`git add <files>`) rather than `git add -A` to avoid accidentally including unrelated in-progress work.",
+        "When responding to review threads, confirm the exact diff before committing so the thread responses describe what actually changed."
+      ]
+    },
+    "friction": [
+      "Initial `gh pr create` failed with a network connection error to api.github.com and required a retry with explicit network approval.",
+      "Codex review required approximately 8+ minutes of polling at 120-second intervals before returning findings.",
+      "First Leptos wasm test run used the wrong feature profile (missing `--no-default-features --features csr`) and silently ran with wrong defaults.",
+      "First Dioxus wasm test run with `--all-features` compiled but failed at runtime because native Tokio/Mio networking is incompatible with wasm32-unknown-unknown.",
+      "The wasm browser test runner requires a local browser/server process that is blocked under sandbox permissions, requiring an explicit approval prompt each run.",
+      "Clippy method-item path approach for fieldset helpers had to be tried, found to fail due to API lifetimes, and then reverted — two extra edit/check cycles.",
+      "A duplicate code block was left in `crates/ars-dioxus/src/utility/field.rs` after the validation merge patch and required a separate cleanup pass."
+    ],
+    "open_items": [
+      "The known `block v0.1.6` future-incompatibility warning from the Dioxus dependency tree remains unresolved; it is upstream and deferred.",
+      "Codex review threads on PR #724 need to be individually resolved/replied-to after the fix commit, and a second `@codex review` trigger may be needed — the transcript ends before this step.",
+      "SSR-level tests for fieldset `aria-describedby` registration and form busy state were not added, only wasm browser tests; SSR coverage for these reactive paths is deferred.",
+      "The `use_machine_with_reactive_props` hook in `crates/ars-dioxus/src/use_machine/mod.rs` only seeds from the initial prop value and does not propagate subsequent prop changes to child consumers — identified as a broader limitation but deliberately not changed to avoid scope creep."
+    ]
+  }
+}
