@@ -104,7 +104,9 @@ where
                     callbacks::call(on_submit.as_ref());
                     machine
                         .send
-                        .run(form::Event::SubmitComplete { success: true });
+                        .run(form::Event::SubmitComplete {
+                            success: true,
+                        });
                 }
                 on:reset:capture=move |_event| {
                     machine.send.run(form::Event::Reset);
@@ -152,9 +154,12 @@ pub fn StatusRegion<T>(
 where
     View<T>: IntoView,
 {
-    let attrs = form_context()
-        .machine
-        .with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.status_region_attrs()));
+    let machine = form_context().machine;
 
-    view! { <div {..attrs}>{children.into_inner()()}</div> }
+    let status_message = machine.derive(|api| api.status_message().map(str::to_owned));
+
+    let attrs =
+        machine.with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.status_region_attrs()));
+
+    view! { <div {..attrs}>{children.into_inner()()} {status_message}</div> }
 }

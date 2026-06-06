@@ -106,7 +106,9 @@ pub fn Form(props: FormProps) -> Element {
                 callbacks::call(props.on_submit.as_ref());
                 machine
                     .send
-                    .call(form::Event::SubmitComplete { success: true });
+                    .call(form::Event::SubmitComplete {
+                        success: true,
+                    });
             },
             onreset: move |_event| {
                 machine.send.call(form::Event::Reset);
@@ -128,11 +130,15 @@ pub struct StatusRegionProps {
 /// Dioxus Form status live-region part.
 #[component]
 pub fn StatusRegion(props: StatusRegionProps) -> Element {
-    let attrs = form_context()
-        .machine
-        .derive(|api| attr_map_to_dioxus_inline_attrs(api.status_region_attrs()))();
+    let machine = form_context().machine;
+    let status_message =
+        machine.derive(|api| api.status_message().map(str::to_owned).unwrap_or_default())();
+    let attrs = machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.status_region_attrs()))();
 
     rsx! {
-        div { ..attrs,{props.children} }
+        div {..attrs,
+            {props.children}
+            {status_message}
+        }
     }
 }

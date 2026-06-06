@@ -279,8 +279,7 @@ async fn field_controlled_value_reapplies_rejected_input() {
         let mut email = use_signal(|| String::from("fixed@example.com"));
 
         rsx! {
-            Field {
-                id: "wasm-controlled-email-field",
+            Field { id: "wasm-controlled-email-field",
                 Label { "Email" }
                 Input {
                     r#type: InputType::Email,

@@ -167,9 +167,7 @@ async fn form_browser_renders_status_region_and_dispatches_callbacks() {
 async fn form_default_aria_submit_prevents_native_navigation_without_callback() {
     fn app() -> Element {
         rsx! {
-            Form {
-                id: "wasm-default-aria-form",
-                action: "/account",
+            Form { id: "wasm-default-aria-form", action: "/account",
                 input { name: "email" }
                 StatusRegion { "Ready" }
             }
@@ -217,9 +215,7 @@ async fn form_validation_errors_update_existing_descendant_field() {
         let mut errors = use_signal(BTreeMap::<String, Vec<Error>>::new);
 
         rsx! {
-            Form {
-                id: "wasm-validation-form",
-                validation_errors: errors(),
+            Form { id: "wasm-validation-form", validation_errors: errors(),
                 Field { id: "wasm-validation-email", name: "email",
                     Label { "Email" }
                     Input { name: "email" }
@@ -229,10 +225,7 @@ async fn form_validation_errors_update_existing_descendant_field() {
                     r#type: "button",
                     onclick: move |_| {
                         let mut next = BTreeMap::new();
-                        next.insert(
-                            String::from("email"),
-                            vec![Error::server("Email is required.")],
-                        );
+                        next.insert(String::from("email"), vec![Error::server("Email is required.")]);
                         errors.set(next);
                     },
                     "Invalidate"
