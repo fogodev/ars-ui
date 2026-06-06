@@ -15,7 +15,7 @@ use ars_dioxus::{
         error_boundary::{CapturedError, ErrorBoundary},
         field::{self, Field},
         fieldset::{self, Fieldset},
-        form::{self, Form, StatusRegion},
+        form::{self, Form},
         heading::{self, Heading, HeadingLevelProvider},
         highlight::Highlight,
         landmark::{self, Landmark},
@@ -484,6 +484,7 @@ pub(crate) fn UtilityPanel(locale_key: String) -> Element {
                             vec![ValidationError::server(required_error.clone())],
                         ),
                     ]),
+                    status_message: t(UtilityText::Ready),
                     class: "fixture-form",
                     Fieldset {
                         id: "dioxus-fixture-account-fieldset",
@@ -546,7 +547,6 @@ pub(crate) fn UtilityPanel(locale_key: String) -> Element {
                             value: "admin@email.com",
                         }
                     }
-                    StatusRegion { {t(UtilityText::Ready)} }
                 }
             }
             section {

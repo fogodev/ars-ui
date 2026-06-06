@@ -119,6 +119,9 @@ pub struct Props {
     /// error state remains deterministic across local resets.
     pub validation_errors: BTreeMap<String, Vec<Error>>,
 
+    /// Controlled status message shown in the status live region.
+    pub status_message: Option<String>,
+
     /// The URL to submit the form to.
     pub action: Option<String>,
 
@@ -160,6 +163,23 @@ impl Props {
     #[must_use]
     pub fn validation_errors(mut self, errors: BTreeMap<String, Vec<Error>>) -> Self {
         self.validation_errors = errors;
+        self
+    }
+
+    /// Sets [`status_message`](Self::status_message) — the controlled
+    /// status text shown in the form status live region. Wraps the
+    /// supplied value in [`Some`].
+    #[must_use]
+    pub fn status_message(mut self, status_message: impl Into<String>) -> Self {
+        self.status_message = Some(status_message.into());
+        self
+    }
+
+    /// Replaces [`status_message`](Self::status_message) with an
+    /// optional controlled status value.
+    #[must_use]
+    pub fn maybe_status_message(mut self, status_message: Option<String>) -> Self {
+        self.status_message = status_message;
         self
     }
 
@@ -207,7 +227,7 @@ impl ars_core::Machine for Machine {
                 validation_behavior: props.validation_behavior,
                 is_submitting: false,
                 validation_errors: props.validation_errors.clone(),
-                status_message: None,
+                status_message: props.status_message.clone(),
                 last_submit_succeeded: None,
                 ids: ComponentIds::from_id(&props.id),
             },
@@ -234,6 +254,10 @@ impl ars_core::Machine for Machine {
             }
         }
 
+        if old.status_message != new.status_message {
+            events.push(Event::SetStatusMessage(new.status_message.clone()));
+        }
+
         events
     }
 
@@ -244,20 +268,24 @@ impl ars_core::Machine for Machine {
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
-            (State::Idle, Event::Submit) => Some(TransitionPlan::to(State::Submitting).apply(
-                |ctx: &mut Context| {
-                    ctx.is_submitting = true;
-                    ctx.status_message = None;
-                },
-            )),
+            (State::Idle, Event::Submit) => {
+                let status_message = props.status_message.clone();
+                Some(
+                    TransitionPlan::to(State::Submitting).apply(move |ctx: &mut Context| {
+                        ctx.is_submitting = true;
+                        ctx.status_message = status_message;
+                    }),
+                )
+            }
 
             (State::Submitting, Event::SubmitComplete { success }) => {
                 let success = *success;
+                let status_message = props.status_message.clone();
                 Some(
                     TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
                         ctx.is_submitting = false;
                         ctx.last_submit_succeeded = Some(success);
-                        ctx.status_message = None;
+                        ctx.status_message = status_message;
                     }),
                 )
             }
@@ -265,12 +293,13 @@ impl ars_core::Machine for Machine {
             (_, Event::Reset) => {
                 let behavior = props.validation_behavior;
                 let validation_errors = props.validation_errors.clone();
+                let status_message = props.status_message.clone();
                 Some(
                     TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
                         ctx.is_submitting = false;
                         ctx.last_submit_succeeded = None;
                         ctx.validation_errors = validation_errors;
-                        ctx.status_message = None;
+                        ctx.status_message = status_message;
                         ctx.validation_behavior = behavior;
                     }),
                 )

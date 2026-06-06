@@ -23,6 +23,8 @@ pub struct FormProps {
     pub validation_behavior: Option<form::ValidationBehavior>,
     #[props(default, into)]
     pub validation_errors: BTreeMap<String, Vec<ars_forms::validation::Error>>,
+    #[props(optional, into)]
+    pub status_message: Option<String>,
     #[props(optional)]
     pub action: Option<String>,
     #[props(optional)]
@@ -42,11 +44,13 @@ The adapter surfaces the full core prop set plus observational submit/reset
 callbacks. `on_submit` dispatches the core `Submit` event before emitting
 `EventHandler` and prevents native navigation when the handler is present.
 `on_reset` dispatches the core `Reset` event before emitting
-`EventHandler`.
+`EventHandler`. `status_message` seeds or controls the adapter-owned status
+live region without requiring consumers to render a second `StatusRegion`
+child.
 
 ## 3. Mapping to Core Component Contract
 
-- Props parity: full parity with `validation_behavior`, `validation_errors`, `action`, and `role`.
+- Props parity: full parity with `validation_behavior`, `validation_errors`, `status_message`, `action`, and `role`.
 - Structure parity: `Root` and `StatusRegion` are both concrete adapter-rendered nodes.
 - Event parity: submit, reset, prop-sync, and status announcement behavior all remain adapter-driven on top of the core forms machine.
 

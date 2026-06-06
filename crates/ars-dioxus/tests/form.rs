@@ -31,6 +31,7 @@ fn form_renders_root_and_status_region() {
                 validation_errors: [
                     ("email".to_string(), vec![Error::server("Email is already registered.")]),
                 ],
+                status_message: "Ready",
                 class: "account-form",
                 input { name: "email" }
             }
@@ -54,6 +55,7 @@ fn form_renders_root_and_status_region() {
         r#"aria-live="polite""#,
         r#"aria-atomic="true""#,
         r#"data-ars-part="status-region""#,
+        "Ready",
     ] {
         assert!(html.contains(fragment), "missing {fragment}: {html}");
     }

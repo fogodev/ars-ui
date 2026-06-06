@@ -471,3 +471,68 @@ async fn form_invalid_required_submit_updates_named_field_errors() {
 
     parent.remove();
 }
+
+#[wasm_bindgen_test(async)]
+async fn form_valid_submit_preserves_controlled_validation_errors() {
+    fn app() -> Element {
+        rsx! {
+            Form {
+                id: "wasm-controlled-error-form",
+                validation_errors: BTreeMap::from([
+                    ("email".to_string(), vec![Error::server("Server still rejects this email.")]),
+                ]),
+                Field {
+                    id: "wasm-controlled-error-email-field",
+                    name: "email",
+                    required: true,
+                    Label { "Email" }
+                    Input { name: "email", value: "admin@email.com" }
+                    ErrorMessage { "Server still rejects this email." }
+                }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let form = parent
+        .query_selector("#wasm-controlled-error-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    let input = parent
+        .query_selector("#wasm-controlled-error-email-field-input")
+        .expect("query should succeed")
+        .expect("field input should exist");
+
+    assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
+
+    let submit = cancelable_event("submit");
+
+    form.dispatch_event(&submit)
+        .expect("submit event should dispatch");
+
+    flush().await;
+
+    assert!(submit.default_prevented());
+    assert_eq!(
+        input.get_attribute("aria-invalid").as_deref(),
+        Some("true"),
+        "valid native submit must preserve controlled server errors"
+    );
+    assert_eq!(
+        input.get_attribute("aria-errormessage").as_deref(),
+        Some("wasm-controlled-error-email-field-error-message")
+    );
+
+    parent.remove();
+}

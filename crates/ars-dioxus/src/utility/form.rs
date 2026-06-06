@@ -46,6 +46,10 @@ pub struct FormProps {
     #[props(default, into)]
     pub validation_errors: BTreeMap<String, Vec<Error>>,
 
+    /// Controlled status text shown in the form live region.
+    #[props(optional, into)]
+    pub status_message: Option<String>,
+
     /// Fires when the form submit event runs.
     #[props(optional, into)]
     pub on_submit: Option<EventHandler>,
@@ -87,9 +91,12 @@ pub fn Form(props: FormProps) -> Element {
         core_props = core_props.validation_behavior(validation_behavior);
     }
 
-    core_props = core_props.validation_errors(props.validation_errors);
+    core_props = core_props
+        .validation_errors(props.validation_errors.clone())
+        .maybe_status_message(props.status_message.clone());
 
     let validation_behavior = core_props.validation_behavior;
+    let controlled_validation_errors = core_props.validation_errors.clone();
 
     let machine = use_machine::<form::Machine>(core_props);
     let (form_messages, form_locale) =
@@ -118,14 +125,18 @@ pub fn Form(props: FormProps) -> Element {
                     && !form_is_valid(&event, form_ref())
                 {
                     let current_form_ref = form_ref();
-                    let native_errors = invalid_control_errors(
+                    let mut errors = controlled_validation_errors.clone();
+                    merge_validation_errors(
+                        &mut errors,
+                        invalid_control_errors(
                         &event,
                         current_form_ref.clone(),
                         &form_messages,
                         &form_locale,
+                        ),
                     );
                     let error_count = invalid_control_count(&event, current_form_ref).max(1);
-                    machine.send.call(form::Event::SetValidationErrors(native_errors));
+                    machine.send.call(form::Event::SetValidationErrors(errors));
                     machine
                         .send
                         .call(
@@ -138,7 +149,9 @@ pub fn Form(props: FormProps) -> Element {
                     return;
                 }
                 if validation_behavior == ValidationBehavior::Aria {
-                    machine.send.call(form::Event::SetValidationErrors(BTreeMap::new()));
+                    machine
+                        .send
+                        .call(form::Event::SetValidationErrors(controlled_validation_errors.clone()));
                 }
                 machine.send.call(form::Event::Submit);
                 callbacks::call(props.on_submit.as_ref());
@@ -157,6 +170,17 @@ pub fn Form(props: FormProps) -> Element {
             div { ..status_attrs,{status_message} }
         }
     }
+}
+
+fn merge_validation_errors(
+    errors: &mut BTreeMap<String, Vec<Error>>,
+    additional_errors: BTreeMap<String, Vec<Error>>,
+) {
+    additional_errors
+        .into_iter()
+        .for_each(|(name, mut field_errors)| {
+            errors.entry(name).or_default().append(&mut field_errors);
+        });
 }
 
 /// Props for the Dioxus [`StatusRegion`] component.
@@ -267,55 +291,62 @@ fn native_validation_error(
     messages: &ars_forms::form::Messages,
     locale: &ars_i18n::Locale,
 ) -> Error {
-    if element.has_attribute("required")
-        && element_value(element).is_none_or(|value| value.is_empty())
-    {
+    if validity_flag(element, "valueMissing") {
         return Error::required(messages, locale);
     }
 
-    if let Some(input_type) = element.get_attribute("type") {
-        match input_type.as_str() {
-            "email" => return Error::email(messages, locale),
-            "url" => return Error::url(messages, locale),
-            _ => {}
-        }
+    if validity_flag(element, "typeMismatch")
+        && let Some(input_type) = element.get_attribute("type")
+    {
+        return match input_type.as_str() {
+            "email" => Error::email(messages, locale),
+            "url" => Error::url(messages, locale),
+            _ => Error::custom("native", (messages.pattern_error)(locale)),
+        };
     }
 
-    if let Some(pattern) = element.get_attribute("pattern") {
+    if validity_flag(element, "patternMismatch")
+        && let Some(pattern) = element.get_attribute("pattern")
+    {
         return Error::pattern(pattern, messages, locale);
     }
 
-    if let Some(min_length) = element
-        .get_attribute("minlength")
-        .and_then(|value| value.parse::<usize>().ok())
+    if validity_flag(element, "tooShort")
+        && let Some(min_length) = element
+            .get_attribute("minlength")
+            .and_then(|value| value.parse::<usize>().ok())
     {
         return Error::min_length(min_length, messages, locale);
     }
 
-    if let Some(max_length) = element
-        .get_attribute("maxlength")
-        .and_then(|value| value.parse::<usize>().ok())
+    if validity_flag(element, "tooLong")
+        && let Some(max_length) = element
+            .get_attribute("maxlength")
+            .and_then(|value| value.parse::<usize>().ok())
     {
         return Error::max_length(max_length, messages, locale);
     }
 
-    if let Some(min) = element
-        .get_attribute("min")
-        .and_then(|value| value.parse::<f64>().ok())
+    if validity_flag(element, "rangeUnderflow")
+        && let Some(min) = element
+            .get_attribute("min")
+            .and_then(|value| value.parse::<f64>().ok())
     {
         return Error::min(min, messages, locale);
     }
 
-    if let Some(max) = element
-        .get_attribute("max")
-        .and_then(|value| value.parse::<f64>().ok())
+    if validity_flag(element, "rangeOverflow")
+        && let Some(max) = element
+            .get_attribute("max")
+            .and_then(|value| value.parse::<f64>().ok())
     {
         return Error::max(max, messages, locale);
     }
 
-    if let Some(step) = element
-        .get_attribute("step")
-        .and_then(|value| value.parse::<f64>().ok())
+    if validity_flag(element, "stepMismatch")
+        && let Some(step) = element
+            .get_attribute("step")
+            .and_then(|value| value.parse::<f64>().ok())
     {
         return Error::step(step, messages, locale);
     }
@@ -324,10 +355,12 @@ fn native_validation_error(
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn element_value(element: &web_sys::Element) -> Option<String> {
-    js_sys::Reflect::get(element.as_ref(), &JsValue::from_str("value"))
+fn validity_flag(element: &web_sys::Element, flag: &str) -> bool {
+    js_sys::Reflect::get(element.as_ref(), &JsValue::from_str("validity"))
         .ok()
-        .and_then(|value| value.as_string())
+        .and_then(|validity| js_sys::Reflect::get(&validity, &JsValue::from_str(flag)).ok())
+        .and_then(|flag| flag.as_bool())
+        .unwrap_or(false)
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -400,6 +433,33 @@ mod wasm_tests {
         assert_eq!(
             native_validation_error(&element, &messages, &locale).code,
             ErrorCode::Email
+        );
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn native_validation_error_uses_range_overflow_before_min_attribute() {
+        let element = input_element();
+        element
+            .set_attribute("type", "number")
+            .expect("type attribute should set");
+        element
+            .set_attribute("min", "0")
+            .expect("min attribute should set");
+        element
+            .set_attribute("max", "10")
+            .expect("max attribute should set");
+        js_sys::Reflect::set(
+            element.as_ref(),
+            &JsValue::from_str("value"),
+            &JsValue::from_str("12"),
+        )
+        .expect("value property should set");
+
+        let (messages, locale) = messages_and_locale();
+
+        assert_eq!(
+            native_validation_error(&element, &messages, &locale).code,
+            ErrorCode::Max(10.0)
         );
     }
 }

@@ -640,6 +640,7 @@ fn arb_form_props() -> impl Strategy<Value = utility_core::form::Props> {
                 id: "form".to_string(),
                 validation_behavior,
                 validation_errors,
+                status_message: None,
                 action,
                 role,
             }

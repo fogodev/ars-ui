@@ -63,6 +63,7 @@ The core machine props are:
 - `id: String`
 - `validation_behavior: ValidationBehavior`
 - `validation_errors: BTreeMap<String, Vec<ars_forms::validation::Error>>`
+- `status_message: Option<String>`
 - `action: Option<String>`
 - `role: Option<String>`
 
@@ -70,14 +71,16 @@ The machine uses `type Messages = ()`. Localized wording is resolved separately 
 domain-level `ars_forms::form::Messages` bundle.
 
 Construct via the inherent builder: `Props::new()` returns the default; setters
-(`id`, `validation_behavior`, `validation_errors`, `action`, `role`) accept owned values or
-`impl Into<String>` and return `Self` for chaining. `Option<String>` setters wrap the supplied
-value in `Some` automatically:
+(`id`, `validation_behavior`, `validation_errors`, `status_message`, `maybe_status_message`,
+`action`, `role`) accept owned values or `impl Into<String>` and return `Self` for chaining.
+`Option<String>` setters wrap the supplied value in `Some` automatically, and
+`maybe_status_message` accepts the complete optional controlled status value:
 
 ```rust,no_check
 let props = form::Props::new()
     .id("checkout")
     .validation_behavior(ValidationBehavior::Aria)
+    .status_message("Ready")
     .action("/submit")
     .role("search");
 ```

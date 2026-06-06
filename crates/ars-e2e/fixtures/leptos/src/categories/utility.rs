@@ -17,7 +17,7 @@ use ars_leptos::{
         error_boundary::ErrorBoundary,
         field::{self, Field},
         fieldset::{self, Fieldset},
-        form::{self, Form, StatusRegion},
+        form::{self, Form},
         heading::{self, Heading, HeadingLevelProvider, Section},
         highlight::Highlight,
         landmark::{self, Landmark},
@@ -482,6 +482,7 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                     id="leptos-fixture-account-form"
                     action="/account"
                     validation_errors=form_errors
+                    status_message=move || Some(t(UtilityText::Ready))
                     class="fixture-form"
                 >
                     <Fieldset id="leptos-fixture-account-fieldset" disabled=true invalid=true>
@@ -556,7 +557,6 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                             value=valid_email_value
                         />
                     </Field>
-                    <StatusRegion>{t(UtilityText::Ready)}</StatusRegion>
                 </Form>
             </section>
             <section class="showcase-panel wide" aria-labelledby="dismissable">

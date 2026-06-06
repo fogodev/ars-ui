@@ -20,6 +20,7 @@ pub fn Form(
     #[prop(optional)] id: Option<String>,
     #[prop(optional)] validation_behavior: Option<form::ValidationBehavior>,
     #[prop(optional, into)] validation_errors: Signal<BTreeMap<String, Vec<ars_forms::validation::Error>>>,
+    #[prop(optional, into)] status_message: Signal<Option<String>>,
     #[prop(optional)] action: Option<String>,
     #[prop(optional)] role: Option<String>,
     #[prop(optional, into)] on_submit: Option<Callback<()>>,
@@ -34,11 +35,13 @@ callbacks. `on_submit` dispatches the core `Submit` event before emitting
 `on_reset` dispatches the core `Reset` event before emitting `Callback<()>`.
 `validation_errors` is a reactive `Signal<BTreeMap<String, Vec<ars_forms::validation::Error>>>`
 input so server/custom validation errors can appear and clear after mount
-without rebuilding the form subtree.
+without rebuilding the form subtree. `status_message` is a reactive
+`Signal<Option<String>>` used to seed or control the adapter-owned status live
+region without rendering a second `StatusRegion` child.
 
 ## 3. Mapping to Core Component Contract
 
-- Props parity: full parity with `validation_behavior`, `validation_errors`, `action`, and `role`.
+- Props parity: full parity with `validation_behavior`, `validation_errors`, `status_message`, `action`, and `role`.
 - Structure parity: `Root` and `StatusRegion` are both concrete adapter-rendered nodes.
 - Event parity: submit, reset, prop-sync, and status announcement behavior all remain adapter-driven on top of the core forms machine.
 
