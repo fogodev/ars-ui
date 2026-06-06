@@ -1,0 +1,75 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "446aac43707e",
+  "session_id": "019e93b2-e997-7881-b092-7b1fb63bf491",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-06T21:33:50.401038Z",
+  "branch": "codex/issue-332-423-field-form-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-dioxus/tests/field.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "05c9a3549202",
+  "checkpoint_transcript_start": 16418,
+  "transcript_lines_at_start": 16418,
+  "token_usage": {
+    "input_tokens": 112292,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 5269376,
+    "output_tokens": 6271,
+    "api_call_count": 25
+  },
+  "session_metrics": {
+    "turn_count": 35
+  },
+  "summary": {
+    "intent": "Fix five Codex review thread issues on PR #724 in the ars-ui repo related to ARIA form accessibility, then push changes and trigger a new Codex review pass while monitoring CI.",
+    "outcome": "All five Codex threads were addressed in commit 363607c3, replied to, and resolved. A CI failure in Dioxus SSR field tests was subsequently discovered and fixed by correcting test child order in a follow-up commit.",
+    "learnings": {
+      "repo": [
+        "Dioxus SSR requires Description components to be registered before Input in raw/low-level composition — post-input Description cannot retroactively affect already-rendered input attributes.",
+        "aria-describedby on Field inputs must come from machine state only, not unconditionally synthesized description-id values.",
+        "Dioxus Fieldset Description registers during render behind a stable guard rather than waiting for an effect.",
+        "FieldProps.errors must be Vec<ars_forms::validation::Error> to match implementation and the shared field/form validation contract.",
+        "ARIA-mode invalid submit status resolves through adapter provider helpers, not hard-coded English strings.",
+        "The arbitrary raw child-order limitation in Fieldset composition is a known user-approved tradeoff; owned TextField-style components will have enough upfront structure to avoid order constraints."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-dioxus/tests/field.rs",
+          "finding": "Test `field_renders_root_label_input_and_messages` had Description placed after Input; reordering to Description-before-Input fixed the SSR rendering assertion."
+        }
+      ],
+      "workflow": [
+        "Codex review is triggered by posting '@codex review' as a PR comment and monitored via GitHub reactions (👀 = in progress) and unresolved thread count via GraphQL.",
+        "CI job logs are fetched via `gh api repos/{owner}/{repo}/actions/jobs/{job_id}/logs` to diagnose failures.",
+        "The review loop polls every ~120 seconds checking both Codex reaction state and open thread count before deciding next action.",
+        "Inline Codex thread replies reference the fixing commit hash for traceability before resolving via GraphQL mutation."
+      ]
+    },
+    "friction": [
+      "Commit hooks caused a delay before the push could proceed, requiring repeated polling via write_stdin.",
+      "CI adapter test failure appeared only after the main fix was pushed, requiring a second diagnostic and fix cycle.",
+      "The Dioxus SSR child-order constraint is an inherent low-level composition limitation that surfaces as test fragility."
+    ],
+    "open_items": [
+      "Owned TextField-style components need to be implemented to eliminate the raw child-order constraint in Fieldset composition.",
+      "Longer CI jobs (adapter, feature, unit, release, coverage) were still pending at session end — final CI status unconfirmed.",
+      "A fresh Codex review pass was triggered but had not yet produced findings or approval at session end."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-06T21:33:29.051847Z",
+    "agent_lines": 1,
+    "agent_removed": 1,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1,
+    "total_lines_changed": 2,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
