@@ -1,0 +1,77 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "8a6a5209bbd3",
+  "session_id": "019e93b2-e997-7881-b092-7b1fb63bf491",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-06T18:01:10.5716Z",
+  "branch": "codex/issue-332-423-field-form-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "48df91d3707f",
+  "checkpoint_transcript_start": 13196,
+  "transcript_lines_at_start": 13196,
+  "token_usage": {
+    "input_tokens": 150725,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 6224896,
+    "output_tokens": 7800,
+    "api_call_count": 32
+  },
+  "session_metrics": {
+    "turn_count": 33
+  },
+  "summary": {
+    "intent": "Address five Codex review thread findings on PR #724 in fogodev/ars-ui, push the fixes, resolve the threads, and trigger a fresh Codex review pass.",
+    "outcome": "All five original threads were fixed, replied to, and resolved. A follow-up Codex pass surfaced a Form status-region gap, which was implemented in both Leptos and Dioxus adapters along with CI formatting fixes, and committed as a second batch.",
+    "learnings": {
+      "repo": [
+        "The repo uses `cargo xtask ci fmt` as the CI formatting gate, which runs both `leptosfmt` and nightly rustfmt; `leptosfmt` failures silently cause downstream CI jobs to be skipped rather than explicitly fail.",
+        "Leptos and Dioxus adapters must be kept in parity for component behavior (e.g., StatusRegion, Field input_attrs, form submission lifecycle).",
+        "The `snapshot-reviewed` label must be reapplied after any snapshot-changing push to keep CI green.",
+        "The agnostic core (`ars-components`) emits `aria-disabled` only; native disabled is added by the concrete Leptos/Dioxus Input adapters — this is an intentional API boundary.",
+        "Form StatusRegion is spec'd to derive content from `api.status_message()` in both adapter specs (`spec/leptos-components/utility/form.md`, `spec/dioxus-components/utility/form.md`).",
+        "`dx fmt` normalizes Dioxus wasm test snippets as a side effect of formatting runs."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-leptos/src/utility/form.rs",
+          "line": 140,
+          "end_line": 170,
+          "finding": "StatusRegion renders live machine status via `api.status_message()`; children are preserved as adjacent/fallback content."
+        },
+        {
+          "path": "crates/ars-dioxus/src/utility/form.rs",
+          "line": 125,
+          "end_line": 145,
+          "finding": "Dioxus StatusRegion mirrors the Leptos change, reading live machine status message into the persistent live region."
+        },
+        {
+          "path": "crates/ars-components/src/utility/form/mod.rs",
+          "line": 240,
+          "end_line": 310,
+          "finding": "Core form machine exposes `status_message()` and `status_region_attrs()` but does not yet expose a public status-message setter; render-path coverage is possible but setter-driven tests are deferred."
+        }
+      ],
+      "workflow": [
+        "Run `leptosfmt --check --experimental-tailwind` directly (without quiet mode) to see the exact diff when `cargo xtask ci fmt` fails silently.",
+        "Use `gh api repos/{owner}/{repo}/issues/{number}/labels -f 'labels[]=label-name'` (with the key quoted) instead of `gh pr edit --add-label` when GitHub connection errors occur; bracket expansion in zsh requires the key to be quoted.",
+        "Batch all review fixes into a single commit before pushing to avoid multiple CI runs and reduce round-trips with the Codex reviewer.",
+        "Poll `gh pr checks` and `gh api .../reactions` together after triggering a Codex review to track both CI and review status in one pass."
+      ]
+    },
+    "friction": [
+      "The commit hook ran silently for an extended period, requiring repeated polling before the push could proceed.",
+      "`gh pr edit --add-label snapshot-reviewed` failed with a transient GitHub connection error and had to be retried via the direct API endpoint.",
+      "zsh bracket expansion broke `gh api ... -f labels[]=snapshot-reviewed`; the key had to be quoted as `'labels[]=snapshot-reviewed'`.",
+      "`cargo xtask ci fmt` runs in quiet mode, hiding the actual leptosfmt diff and requiring a separate manual `leptosfmt --check` invocation to identify the exact lines to fix.",
+      "A fresh Codex review pass reopened a thread that duplicated an already-fixed issue (Leptos Field root invalid), adding noise to the review cycle."
+    ],
+    "open_items": [
+      "No public setter for `status_message()` exists on the form machine yet; wasm tests for the status-region only cover the render path, not setter-driven announcements.",
+      "The duplicate Codex thread (Leptos Field root invalid) was identified as a false positive from the fresh review pass — it should be replied to and resolved in a subsequent step not shown in this transcript.",
+      "CI was still running at the end of the session; the outcome of the fresh Codex review pass and the full CI matrix for the status-region commit is unknown."
+    ]
+  }
+}
