@@ -614,7 +614,8 @@ mod wasm_tests {
     use leptos::prelude::NodeRefAttribute;
     use leptos::{
         either::Either,
-        prelude::{AddAnyAttr, Get, GlobalAttributes, Owner, Set},
+        mount::mount_to,
+        prelude::{AddAnyAttr, Get, GlobalAttributes, NodeRef, Owner, Set, signal},
     };
     use wasm_bindgen::JsCast;
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -668,7 +669,7 @@ mod wasm_tests {
             let inline_attrs = inline.attrs;
             let nonce_attrs = nonce.attrs;
 
-            let mount_handle = leptos::mount::mount_to(parent.clone(), move || {
+            let mount_handle = mount_to(parent.clone(), move || {
                 leptos::view! {
                     <div id="inline-target" {..inline_attrs}></div>
                     <div id="nonce-target" {..nonce_attrs}></div>
@@ -738,8 +739,8 @@ mod wasm_tests {
                 .dyn_into::<web_sys::HtmlElement>()
                 .expect("created div should be an HtmlElement");
 
-            let (label, set_label) = leptos::prelude::signal(String::from("first"));
-            let (disabled, set_disabled) = leptos::prelude::signal(false);
+            let (label, set_label) = signal(String::from("first"));
+            let (disabled, set_disabled) = signal(false);
 
             let mut map = AttrMap::new();
 
@@ -754,7 +755,7 @@ mod wasm_tests {
 
             let attrs = attr_map_to_leptos(map, &StyleStrategy::Inline, None).attrs;
 
-            let mount_handle = leptos::mount::mount_to(parent.clone(), move || {
+            let mount_handle = mount_to(parent.clone(), move || {
                 leptos::view! { <button id="reactive-attrs" {..attrs}></button> }
             });
 
@@ -948,8 +949,8 @@ mod wasm_tests {
 
             let result = attr_map_to_leptos(map, &StyleStrategy::Cssom, None);
 
-            let mount_handle = leptos::mount::mount_to(parent.clone(), move || {
-                let target = leptos::prelude::NodeRef::<leptos::html::Div>::new();
+            let mount_handle = mount_to(parent.clone(), move || {
+                let target = NodeRef::<leptos::html::Div>::new();
 
                 use_cssom_styles_from_attrs(target, &result);
 
@@ -1009,10 +1010,10 @@ mod wasm_tests {
                 .dyn_into::<web_sys::HtmlElement>()
                 .expect("created div should be an HtmlElement");
 
-            let (show_second, set_second) = leptos::prelude::signal(false);
+            let (show_second, set_second) = signal(false);
 
-            let mount_handle = leptos::mount::mount_to(parent.clone(), move || {
-                let target = leptos::prelude::NodeRef::<leptos::html::Div>::new();
+            let mount_handle = mount_to(parent.clone(), move || {
+                let target = NodeRef::<leptos::html::Div>::new();
 
                 use_cssom_styles(target, || vec![(CssProperty::Width, String::from("120px"))]);
 
@@ -1087,8 +1088,8 @@ mod wasm_tests {
                 .dyn_into::<web_sys::HtmlElement>()
                 .expect("created div should be an HtmlElement");
 
-            leptos::mount::mount_to(parent, move || {
-                let target = leptos::prelude::NodeRef::<leptos::html::Div>::new();
+            mount_to(parent, move || {
+                let target = NodeRef::<leptos::html::Div>::new();
 
                 use_cssom_styles(target, || vec![(CssProperty::Width, String::from("120px"))]);
 

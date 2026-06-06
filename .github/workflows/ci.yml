@@ -312,6 +312,7 @@ jobs:
           disable_search: true
           files: lcov.info
           fail_ci_if_error: true
+          skip_validation: true
           token: ${{ secrets.CODECOV_TOKEN }}
 
   feature-flags-core:

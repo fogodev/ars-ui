@@ -1397,7 +1397,7 @@ mod wasm_tests {
 
             let override_locale = Locale::parse("pt-BR").expect("locale should parse");
 
-            assert_eq!(resolve_locale(Some(&override_locale)).to_bcp47(), "pt-BR");
+            assert_eq!(resolve_locale(Some(override_locale)).to_bcp47(), "pt-BR");
             assert_eq!(resolve_locale(None).to_bcp47(), "en-US");
         });
     }
@@ -1502,7 +1502,7 @@ mod wasm_tests {
 
             let explicit = locales::de_de();
             let formatter =
-                use_resolved_number_formatter(Some(&explicit), number::FormatOptions::default);
+                use_resolved_number_formatter(Some(explicit), number::FormatOptions::default);
 
             assert_eq!(formatter.get().format(1234.56), "1.234,56");
         });
