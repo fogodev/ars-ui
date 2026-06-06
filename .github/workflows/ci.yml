@@ -307,8 +307,9 @@ jobs:
           if-no-files-found: warn
       - name: Upload to Codecov
         if: always()
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
+          disable_search: true
           files: lcov.info
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}

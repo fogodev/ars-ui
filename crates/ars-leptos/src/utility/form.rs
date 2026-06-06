@@ -6,7 +6,7 @@ use ars_components::utility::form;
 pub use ars_components::utility::form::{Part, Props, ValidationBehavior};
 use ars_core::{AriaAttr, AttrMap, AttrValue, HtmlAttr};
 use ars_forms::validation::Error;
-use leptos::{children::TypedChildren, context::Provider, prelude::*};
+use leptos::{children::TypedChildren, context::Provider, html, prelude::*};
 
 use crate::{attr_map_to_leptos_inline_attrs, callbacks, use_id, use_machine_with_reactive_props};
 
@@ -61,6 +61,7 @@ where
     View<T>: IntoView,
 {
     let id = id.map_or_else(|| use_id("form"), Oco::into_owned);
+    let form_ref = NodeRef::<html::Form>::new();
 
     let mut props = Props::new().id(&id);
 
@@ -91,11 +92,24 @@ where
         <Provider value=FormContext { machine }>
             <form
                 {..attrs}
+                node_ref=form_ref
                 on:submit:capture=move |event| {
                     if validation_behavior.get_untracked() == ValidationBehavior::Aria
                         || on_submit.is_some()
                     {
                         event.prevent_default();
+                    }
+                    if validation_behavior.get_untracked() == ValidationBehavior::Aria
+                        && !form_is_valid(form_ref)
+                    {
+                        machine
+                            .send
+                            .run(
+                                form::Event::SetStatusMessage(
+                                    Some(String::from("Please correct the highlighted fields.")),
+                                ),
+                            );
+                        return;
                     }
                     machine.send.run(form::Event::Submit);
                     callbacks::call(on_submit.as_ref());
@@ -111,6 +125,7 @@ where
                 }
             >
                 {children.into_inner()()}
+                {status_region(machine, None)}
             </form>
         </Provider>
     }
@@ -164,10 +179,34 @@ where
 {
     let machine = form_context().machine;
 
+    status_region(machine, Some(children.into_inner()().into_any()))
+}
+
+fn status_region(
+    machine: crate::UseMachineReturn<form::Machine>,
+    children: Option<AnyView>,
+) -> impl IntoView {
     let status_message = machine.derive(|api| api.status_message().map(str::to_owned));
 
     let attrs =
         machine.with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.status_region_attrs()));
 
-    view! { <div {..attrs}>{children.into_inner()()} {status_message}</div> }
+    view! { <div {..attrs}>{children} {status_message}</div> }
+}
+
+#[expect(
+    clippy::missing_const_for_fn,
+    reason = "The wasm implementation reads the live form NodeRef and calls DOM constraint validation."
+)]
+fn form_is_valid(form_ref: NodeRef<html::Form>) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        form_ref.get().is_none_or(|form| form.check_validity())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = form_ref;
+        true
+    }
 }

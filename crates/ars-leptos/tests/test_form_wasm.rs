@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use ars_leptos::utility::form::{Form, StatusRegion};
+use ars_leptos::utility::form::Form;
 use leptos::{mount::mount_to, prelude::*};
 use wasm_bindgen::{JsCast, closure::Closure};
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -52,7 +52,6 @@ async fn form_browser_mounts_status_region() {
             view! {
                 <Form id="wasm-account-form" action="/account">
                     <input name="email" />
-                    <StatusRegion>"Ready"</StatusRegion>
                 </Form>
             }
         });
@@ -119,7 +118,6 @@ async fn form_submit_and_reset_callbacks_fire_and_block_native_submit() {
                     })
                 >
                     <input name="email" />
-                    <StatusRegion>"Ready"</StatusRegion>
                 </Form>
             }
         });
@@ -199,7 +197,6 @@ async fn form_submit_button_click_fires_submit_callback_without_navigation() {
                 >
                     <input name="email" value="admin@email.com" />
                     <button type="submit">"Submit"</button>
-                    <StatusRegion>"Ready"</StatusRegion>
                 </Form>
             }
         });
@@ -274,7 +271,6 @@ async fn form_validation_behavior_updates_without_remount() {
                     validation_behavior=behavior
                 >
                     <input name="email" />
-                    <StatusRegion>"Ready"</StatusRegion>
                 </Form>
             }
         });
@@ -316,6 +312,70 @@ async fn form_validation_behavior_updates_without_remount() {
         submit.default_prevented(),
         "submit prevention should use the latest validation behavior"
     );
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn form_default_aria_blocks_invalid_required_submit_callback() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent, log) = owner.with(|| {
+        let parent = container();
+
+        let log = Arc::new(Mutex::new(Vec::<String>::new()));
+        let submit_log = Arc::clone(&log);
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <Form
+                    id="wasm-invalid-required-form"
+                    on_submit=Callback::new(move |()| {
+                        submit_log
+                            .lock()
+                            .expect("form log should not be poisoned")
+                            .push(String::from("submit"));
+                    })
+                >
+                    <input name="email" required />
+                </Form>
+            }
+        });
+
+        (mount_handle, parent, log)
+    });
+
+    leptos::task::tick().await;
+
+    let form = parent
+        .query_selector("#wasm-invalid-required-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    let submit = cancelable_event("submit");
+
+    form.dispatch_event(&submit)
+        .expect("submit event should dispatch");
+
+    leptos::task::tick().await;
+
+    assert!(submit.default_prevented());
+    assert!(
+        log.lock()
+            .expect("form log should not be poisoned")
+            .is_empty(),
+        "invalid ARIA submit should not emit the submit callback"
+    );
+    assert_eq!(
+        form.query_selector("[data-ars-part='status-region']")
+            .expect("query should succeed")
+            .expect("status region should exist")
+            .text_content()
+            .as_deref(),
+        Some("Please correct the highlighted fields.")
+    );
+
+    drop(mount_handle);
 
     parent.remove();
 }

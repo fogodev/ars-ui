@@ -5,7 +5,7 @@
 use ars_components::utility::form;
 use ars_dioxus::utility::{
     field::{ErrorMessage, Field, Input, Label},
-    form::{Form, StatusRegion},
+    form::Form,
 };
 use ars_forms::validation::Error;
 use dioxus::prelude::*;
@@ -33,7 +33,6 @@ fn form_renders_root_and_status_region() {
                 ],
                 class: "account-form",
                 input { name: "email" }
-                StatusRegion { "Ready" }
             }
         }
     }

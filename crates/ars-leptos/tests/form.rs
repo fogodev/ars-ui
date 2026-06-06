@@ -8,7 +8,7 @@ use ars_components::utility::form;
 use ars_forms::validation::Error;
 use ars_leptos::utility::{
     field::{ErrorMessage, Field, Input, Label},
-    form::{Form, StatusRegion},
+    form::Form,
 };
 use leptos::{prelude::*, reactive::owner::Owner};
 
@@ -36,7 +36,6 @@ fn form_renders_root_and_status_region() {
                 class="account-form"
             >
                 <input name="email" />
-                <StatusRegion>"Ready"</StatusRegion>
             </Form>
         }
         .to_html()

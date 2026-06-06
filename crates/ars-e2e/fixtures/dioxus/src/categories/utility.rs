@@ -546,7 +546,6 @@ pub(crate) fn UtilityPanel(locale_key: String) -> Element {
                         }
                         fieldset::ErrorMessage { {t(UtilityText::AccountIncomplete)} }
                     }
-                    form::StatusRegion { {t(UtilityText::Ready)} }
                 }
             }
             section {

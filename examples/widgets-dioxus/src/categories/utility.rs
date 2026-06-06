@@ -535,7 +535,6 @@ pub(crate) fn UtilityPanel() -> Element {
                             {t(UtilityText::Reset)}
                         }
                     }
-                    form::StatusRegion { {t(UtilityText::ReadyToSubmit)} }
                 }
             }
             section { "aria-labelledby": "visually-hidden",

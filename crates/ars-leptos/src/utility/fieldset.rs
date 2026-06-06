@@ -5,7 +5,7 @@ pub use ars_components::utility::fieldset::{Part, Props};
 use ars_core::Direction;
 use leptos::{children::TypedChildren, context::Provider, prelude::*};
 
-use crate::{attr_map_to_leptos_inline_attrs, use_id, use_machine};
+use crate::{attr_map_to_leptos_inline_attrs, use_id, use_machine_with_reactive_props};
 
 #[derive(Clone, Copy)]
 struct FieldsetContext {
@@ -65,12 +65,9 @@ where
         props = props.dir(dir);
     }
 
-    let initial_props = props
-        .disabled(disabled.get_untracked())
-        .invalid(invalid.get_untracked())
-        .readonly(readonly.get_untracked());
-
-    let machine = use_machine::<fieldset::Machine>(initial_props);
+    let machine = use_machine_with_reactive_props::<fieldset::Machine>(fieldset_props_signal(
+        props, disabled, invalid, readonly,
+    ));
 
     let inherited = InheritedFieldsetContext {
         disabled,
@@ -82,7 +79,7 @@ where
         let mut attrs = api.root_attrs();
 
         crate::merge_consumer_class_prop_into(&mut attrs, class);
-        add_dynamic_root_attrs(&mut attrs, disabled, machine);
+        add_dynamic_root_attrs(&mut attrs, machine);
 
         attr_map_to_leptos_inline_attrs(attrs)
     });
@@ -94,6 +91,21 @@ where
             </Provider>
         </Provider>
     }
+}
+
+fn fieldset_props_signal(
+    props: Props,
+    disabled: Signal<bool>,
+    invalid: Signal<bool>,
+    readonly: Signal<bool>,
+) -> Signal<Props> {
+    Signal::derive(move || {
+        props
+            .clone()
+            .disabled(disabled.get())
+            .invalid(invalid.get())
+            .readonly(readonly.get())
+    })
 }
 
 /// Leptos Fieldset legend part.
@@ -138,9 +150,9 @@ where
 
 fn add_dynamic_root_attrs(
     attrs: &mut ars_core::AttrMap,
-    disabled: Signal<bool>,
     machine: crate::UseMachineReturn<fieldset::Machine>,
 ) {
+    let disabled = machine.derive(|api| api.root_attrs().contains(&ars_core::HtmlAttr::Disabled));
     let described_by = machine.derive(|api| {
         api.root_attrs()
             .get(&ars_core::HtmlAttr::Aria(ars_core::AriaAttr::DescribedBy))

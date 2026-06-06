@@ -556,7 +556,6 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                             {t(UtilityText::AccountIncomplete)}
                         </fieldset::ErrorMessage>
                     </Fieldset>
-                    <form::StatusRegion>{t(UtilityText::Ready)}</form::StatusRegion>
                 </Form>
             </section>
             <section class="showcase-panel wide" aria-labelledby="dismissable">

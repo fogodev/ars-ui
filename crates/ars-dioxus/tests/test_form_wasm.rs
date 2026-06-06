@@ -6,7 +6,7 @@ use std::{cell::RefCell, collections::BTreeMap};
 
 use ars_dioxus::utility::{
     field::{ErrorMessage, Field, Input, Label},
-    form::{Form, StatusRegion},
+    form::Form,
 };
 use ars_forms::validation::Error;
 use dioxus::prelude::*;
@@ -97,7 +97,6 @@ async fn form_browser_renders_status_region_and_dispatches_callbacks() {
                     FORM_EVENTS.with(|events| events.borrow_mut().push("reset"));
                 },
                 input { name: "email" }
-                StatusRegion { "Ready" }
             }
         }
     }
@@ -169,7 +168,6 @@ async fn form_default_aria_submit_prevents_native_navigation_without_callback() 
         rsx! {
             Form { id: "wasm-default-aria-form", action: "/account",
                 input { name: "email" }
-                StatusRegion { "Ready" }
             }
         }
     }
@@ -230,7 +228,6 @@ async fn form_validation_errors_update_existing_descendant_field() {
                     },
                     "Invalidate"
                 }
-                StatusRegion { "Ready" }
             }
         }
     }
@@ -268,6 +265,64 @@ async fn form_validation_errors_update_existing_descendant_field() {
     assert_eq!(
         input.get_attribute("aria-errormessage").as_deref(),
         Some("wasm-validation-email-error-message")
+    );
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn form_default_aria_blocks_invalid_required_submit_callback() {
+    FORM_EVENTS.with(|events| events.borrow_mut().clear());
+
+    fn app() -> Element {
+        rsx! {
+            Form {
+                id: "wasm-invalid-required-form",
+                on_submit: move |()| {
+                    FORM_EVENTS.with(|events| events.borrow_mut().push("submit"));
+                },
+                input { name: "email", required: true }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let form = parent
+        .query_selector("#wasm-invalid-required-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    let submit = cancelable_event("submit");
+
+    form.dispatch_event(&submit)
+        .expect("submit event should dispatch");
+
+    flush().await;
+
+    assert!(submit.default_prevented());
+    FORM_EVENTS.with(|events| {
+        assert!(
+            events.borrow().is_empty(),
+            "invalid ARIA submit should not emit the submit callback"
+        );
+    });
+    assert_eq!(
+        form.query_selector("[data-ars-part='status-region']")
+            .expect("query should succeed")
+            .expect("status region should exist")
+            .text_content()
+            .as_deref(),
+        Some("Please correct the highlighted fields.")
     );
 
     parent.remove();

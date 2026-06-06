@@ -592,7 +592,6 @@ pub(crate) fn UtilityPanel() -> Element {
                             {t(UtilityText::Reset)}
                         }
                     }
-                    form::StatusRegion { {t(UtilityText::ReadyToSubmit)} }
                 }
             }
             section { class: "showcase-panel", "aria-labelledby": "visually-hidden",

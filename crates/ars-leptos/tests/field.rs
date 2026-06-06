@@ -55,6 +55,7 @@ fn field_renders_root_label_input_and_messages() {
         r#"id="email-field-input""#,
         r#"data-ars-part="input""#,
         r#"aria-labelledby="email-field-label""#,
+        r#"aria-describedby="email-field-description email-field-error-message""#,
         r#"aria-required="true""#,
         r#"required"#,
         r#"aria-invalid="true""#,

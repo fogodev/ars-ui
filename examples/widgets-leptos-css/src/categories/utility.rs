@@ -602,7 +602,6 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                             {t(UtilityText::Reset)}
                         </Button>
                     </div>
-                    <form::StatusRegion>{t(UtilityText::ReadyToSubmit)}</form::StatusRegion>
                 </Form>
             </section>
             <section class="showcase-panel" aria-labelledby="visually-hidden">
