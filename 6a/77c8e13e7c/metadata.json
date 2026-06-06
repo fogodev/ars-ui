@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "6a77c8e13e7c",
+  "strategy": "manual-commit",
+  "branch": "codex/issue-332-423-field-form-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-e2e/fixtures/dioxus/src/categories/utility.rs",
+    "crates/ars-e2e/fixtures/leptos/src/categories/utility.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/6a/77c8e13e7c/0/metadata.json",
+      "transcript": "/6a/77c8e13e7c/0/full.jsonl",
+      "content_hash": "/6a/77c8e13e7c/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 188713,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 9923712,
+    "output_tokens": 8146,
+    "api_call_count": 47
+  }
+}
