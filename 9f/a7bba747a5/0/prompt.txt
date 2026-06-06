@@ -1,0 +1,22 @@
+Why those lines of:
+```
+let _ = &*machine.state.read();
+let _ = &*machine.context_version.read();
+```
+Just to subscribe to those signals? Can't them be subscribed inside the with_api_snapshot method or something like that? Actual question here, don't change anything yet
+
+---
+
+In this case here, aren't we needing a derive then?
+
+---
+
+Yeah, it feels like we need a proper fix here instead of having to remember to subscribe ourselves. Doesn't Dioxus provide a way to subscribe for changes on non-reactive data?
+
+---
+
+Alright, go ahead with it
+
+---
+
+Great, don't push it yet. We have more reviews on github, proceed with them and push everything together, following [SKILL.md](.agents/skills/waiting-for-codex-review/SKILL.md)
