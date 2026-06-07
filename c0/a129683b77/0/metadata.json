@@ -3,18 +3,41 @@
   "checkpoint_id": "c0a129683b77",
   "session_id": "019e93b2-e997-7881-b092-7b1fb63bf491",
   "strategy": "manual-commit",
-  "created_at": "2026-06-06T23:59:24.539389Z",
+  "created_at": "2026-06-07T00:08:38.9657Z",
   "branch": "codex/issue-332-423-field-form-adapters",
   "checkpoints_count": 1,
-  "files_touched": [],
+  "files_touched": [
+    "AGENTS.md"
+  ],
   "agent": "Codex",
   "model": "gpt-5.5",
-  "turn_id": "da4cd505e46a",
+  "turn_id": "e01c00c2b1fe",
   "token_usage": {
-    "input_tokens": 17161412,
+    "input_tokens": 17336581,
     "cache_creation_tokens": 0,
-    "cache_read_tokens": 422571520,
-    "output_tokens": 866739,
-    "api_call_count": 2858
-  }
+    "cache_read_tokens": 425911168,
+    "output_tokens": 874501,
+    "api_call_count": 2899
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-07T00:08:35.040632Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 330,
+    "human_modified": 4,
+    "human_removed": 0,
+    "total_committed": 330,
+    "total_lines_changed": 401,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
 }

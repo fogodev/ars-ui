@@ -4,7 +4,9 @@
   "strategy": "manual-commit",
   "branch": "codex/issue-332-423-field-form-adapters",
   "checkpoints_count": 1,
-  "files_touched": null,
+  "files_touched": [
+    "AGENTS.md"
+  ],
   "sessions": [
     {
       "metadata": "/c0/a129683b77/0/metadata.json",
@@ -14,10 +16,10 @@
     }
   ],
   "token_usage": {
-    "input_tokens": 17161412,
+    "input_tokens": 17336581,
     "cache_creation_tokens": 0,
-    "cache_read_tokens": 422571520,
-    "output_tokens": 866739,
-    "api_call_count": 2858
+    "cache_read_tokens": 425911168,
+    "output_tokens": 874501,
+    "api_call_count": 2899
   }
 }

@@ -20,3 +20,11 @@ Alright, go ahead with it
 ---
 
 Great, don't push it yet. We have more reviews on github, proceed with them and push everything together, following [SKILL.md](.agents/skills/waiting-for-codex-review/SKILL.md)
+
+---
+
+Dude, you keep pushing broken commits, you must run `cargo xfmt` before committing
+
+---
+
+Add that in your AGENTS.md or something similar
