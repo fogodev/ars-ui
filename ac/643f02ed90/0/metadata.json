@@ -1,0 +1,58 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "ac643f02ed90",
+  "session_id": "019e93b2-e997-7881-b092-7b1fb63bf491",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-07T01:57:11.06856Z",
+  "branch": "codex/issue-332-423-field-form-adapters",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-leptos/src/utility/fieldset.rs",
+    "crates/ars-leptos/src/utility/fieldset.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "c69d17ef4d19",
+  "token_usage": {
+    "input_tokens": 19143322,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 460734848,
+    "output_tokens": 921153,
+    "api_call_count": 3145
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-07T01:57:07.080931Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 8,
+    "human_modified": 35,
+    "human_removed": 0,
+    "total_committed": 8,
+    "total_lines_changed": 63,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 41,
+      "user_lines_removed": 25,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "crates/ars-dioxus/src/utility/form.rs": 22,
+        "crates/ars-dioxus/tests/test_form_wasm.rs": 13,
+        "crates/ars-leptos/src/utility/fieldset.rs": 1,
+        "crates/ars-leptos/tests/test_form_wasm.rs": 1,
+        "xtask/src/coverage.rs": 4
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus/src/utility/form.rs": 1,
+        "crates/ars-dioxus/tests/test_form_wasm.rs": 17,
+        "crates/ars-leptos/src/utility/fieldset.rs": 5,
+        "crates/ars-leptos/tests/test_form_wasm.rs": 1,
+        "xtask/src/coverage.rs": 1
+      }
+    }
+  ]
+}
