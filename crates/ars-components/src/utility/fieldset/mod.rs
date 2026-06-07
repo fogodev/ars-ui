@@ -92,6 +92,9 @@ pub struct Props {
     /// Whether the fieldset is read-only.
     pub readonly: bool,
 
+    /// Initial or controlled fieldset-level validation errors.
+    pub errors: Vec<Error>,
+
     /// The configured text direction for RTL-aware rendering.
     pub dir: Option<Direction>,
 }
@@ -137,6 +140,14 @@ impl Props {
         self
     }
 
+    /// Replaces [`errors`](Self::errors) with controlled fieldset-level
+    /// validation errors.
+    #[must_use]
+    pub fn errors(mut self, errors: Vec<Error>) -> Self {
+        self.errors = errors;
+        self
+    }
+
     /// Sets [`dir`](Self::dir) — the configured text direction for
     /// RTL-aware rendering. Wraps the supplied value in [`Some`].
     #[must_use]
@@ -168,10 +179,10 @@ impl ars_core::Machine for Machine {
             State::Idle,
             Context {
                 disabled: props.disabled,
-                invalid: props.invalid,
+                invalid: props.invalid || !props.errors.is_empty(),
                 readonly: props.readonly,
                 dir: props.dir,
-                errors: Vec::new(),
+                errors: props.errors.clone(),
                 has_description: false,
                 ids: ComponentIds::from_id(&props.id),
             },
@@ -200,6 +211,14 @@ impl ars_core::Machine for Machine {
 
         if old.dir != new.dir {
             events.push(Event::SetDir(new.dir));
+        }
+
+        if old.errors != new.errors {
+            if new.errors.is_empty() {
+                events.push(Event::ClearErrors);
+            } else {
+                events.push(Event::SetErrors(new.errors.clone()));
+            }
         }
 
         events
@@ -465,6 +484,13 @@ mod tests {
         }
     }
 
+    fn test_props_with_errors() -> Props {
+        Props {
+            errors: vec![custom_error()],
+            ..test_props()
+        }
+    }
+
     fn custom_error() -> Error {
         Error::custom("group", "Group is invalid")
     }
@@ -560,6 +586,7 @@ mod tests {
             disabled: false,
             invalid: false,
             readonly: false,
+            errors: Vec::new(),
             dir: None,
         };
 
@@ -568,16 +595,18 @@ mod tests {
             disabled: true,
             invalid: true,
             readonly: true,
+            errors: vec![custom_error()],
             dir: Some(Direction::Rtl),
         };
 
         let events = <Machine as ars_core::Machine>::on_props_changed(&old, &new);
 
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 5);
         assert!(matches!(events[0], Event::SetDisabled(true)));
         assert!(matches!(events[1], Event::SetInvalid(true)));
         assert!(matches!(events[2], Event::SetReadonly(true)));
         assert!(matches!(events[3], Event::SetDir(Some(Direction::Rtl))));
+        assert!(matches!(events[4], Event::SetErrors(_)));
     }
 
     #[test]
@@ -710,6 +739,21 @@ mod tests {
 
         assert!(service.context().invalid);
         assert_eq!(service.context().errors.len(), 1);
+    }
+
+    #[test]
+    fn fieldset_initial_errors_force_invalid() {
+        let service = Service::<Machine>::new(test_props_with_errors(), &Env::default(), &());
+
+        assert!(service.context().invalid);
+        assert_eq!(service.context().errors.len(), 1);
+
+        let attrs = service.connect(&|_| {}).root_attrs();
+
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("billing-error-message")
+        );
     }
 
     #[test]

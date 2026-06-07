@@ -14,27 +14,15 @@ pub use ars_interactions::{PressEvent, PressEventType};
 use leptos::{children::TypedChildren, prelude::*, tachys::view::add_attr::AddAnyAttr};
 
 use crate::{
-    LeptosAttribute, as_child::AsChildAttrs, attr_map_to_leptos_inline_attrs, attrs::string_attr,
-    use_id, use_machine_with_reactive_props,
+    LeptosAttribute, as_child::AsChildAttrs, attr_map_to_leptos_inline_attrs, use_id,
+    use_machine_with_reactive_props,
 };
 
-fn root_attrs(api: &Api<'_>) -> AttrMap {
-    api.root_attrs()
-}
-
-fn loading_indicator_attrs(api: &Api<'_>) -> AttrMap {
-    api.loading_indicator_attrs()
-}
-
-fn content_attrs(api: &Api<'_>) -> AttrMap {
-    api.content_attrs()
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 struct UserRootAttrs {
-    class: Option<Oco<'static, str>>,
-    style: Option<Oco<'static, str>>,
-    aria_label: Option<Oco<'static, str>>,
+    class: Option<TextProp>,
+    style: Option<TextProp>,
+    aria_label: Option<TextProp>,
     aria_labelledby: Option<Oco<'static, str>>,
 }
 
@@ -111,15 +99,15 @@ pub fn Button<T>(
 
     /// Consumer class tokens appended to the root.
     #[prop(optional, into)]
-    class: Option<Oco<'static, str>>,
+    class: Option<TextProp>,
 
     /// Consumer inline style text applied to the root.
     #[prop(optional, into)]
-    style: Option<Oco<'static, str>>,
+    style: Option<TextProp>,
 
     /// Accessible label applied to the root.
     #[prop(optional, into)]
-    aria_label: Option<Oco<'static, str>>,
+    aria_label: Option<TextProp>,
 
     /// Accessible label relationship applied to the root.
     #[prop(optional, into)]
@@ -295,8 +283,12 @@ where
                 is_loading
                     .get()
                     .then(|| {
+                        #[expect(
+                            clippy::redundant_closure_for_method_calls,
+                            reason = "The `button::Api::loading_indicator_attrs` method item is not lifetime-general enough for `with_api_snapshot`."
+                        )]
                         let loading_attrs = attr_map_to_leptos_inline_attrs(
-                            machine.with_api_snapshot(loading_indicator_attrs),
+                            machine.with_api_snapshot(|api| api.loading_indicator_attrs()),
                         );
 
                         view! { <span {..loading_attrs}></span> }
@@ -336,15 +328,15 @@ pub fn ButtonAsChild<T>(
 
     /// Consumer class tokens appended to the root.
     #[prop(optional, into)]
-    class: Option<Oco<'static, str>>,
+    class: Option<TextProp>,
 
     /// Consumer inline style text applied to the root.
     #[prop(optional, into)]
-    style: Option<Oco<'static, str>>,
+    style: Option<TextProp>,
 
     /// Accessible label applied to the root.
     #[prop(optional, into)]
-    aria_label: Option<Oco<'static, str>>,
+    aria_label: Option<TextProp>,
 
     /// Accessible label relationship applied to the root.
     #[prop(optional, into)]
@@ -407,35 +399,44 @@ struct PressCallbacks {
 
 fn leptos_root_attrs(
     machine: crate::UseMachineReturn<button::Machine>,
-    user_attrs: UserRootAttrs,
+    UserRootAttrs {
+        class,
+        style,
+        aria_label,
+        aria_labelledby,
+    }: UserRootAttrs,
     filter_native: bool,
 ) -> Vec<LeptosAttribute> {
-    let id = machine.service.with_value(|svc| svc.props().id.clone());
+    let svc = machine.service;
 
-    let mut attrs = machine.with_api_snapshot(root_attrs);
+    machine.with_api_snapshot(|api| {
+        let mut attrs = api.root_attrs();
 
-    attrs.set(HtmlAttr::Id, id);
+        let id = svc.with_value(|svc| svc.props().id.clone());
 
-    apply_user_root_attrs(&mut attrs, &user_attrs);
-    strip_dynamic_root_attrs(&mut attrs);
-    add_dynamic_root_attrs(&mut attrs, machine);
+        apply_user_root_attrs(&mut attrs, class, aria_label, aria_labelledby);
 
-    if filter_native {
-        filter_native_button_attrs(&mut attrs);
-    }
+        strip_dynamic_root_attrs(&mut attrs);
 
-    let mut leptos_attrs = attr_map_to_leptos_inline_attrs(attrs);
+        attrs.set(HtmlAttr::Id, id);
 
-    if let Some(style) = user_attrs.style {
-        leptos_attrs.push(string_attr(String::from("style"), style.into_owned()));
-    }
+        add_dynamic_root_attrs(&mut attrs, machine);
 
-    leptos_attrs
+        if filter_native {
+            filter_native_button_attrs(&mut attrs);
+        }
+
+        let mut leptos_attrs = attr_map_to_leptos_inline_attrs(attrs);
+
+        if let Some(style) = crate::consumer_style_prop_to_leptos_attr(style) {
+            leptos_attrs.push(style);
+        }
+
+        leptos_attrs
+    })
 }
 
 fn leptos_content_attrs(machine: crate::UseMachineReturn<button::Machine>) -> Vec<LeptosAttribute> {
-    let mut attrs = machine.with_api_snapshot(content_attrs);
-
     let loading = machine.derive(|api| {
         api.content_attrs()
             .get(&HtmlAttr::Data("ars-loading"))
@@ -443,22 +444,34 @@ fn leptos_content_attrs(machine: crate::UseMachineReturn<button::Machine>) -> Ve
             .to_owned()
     });
 
-    attrs.set(
-        HtmlAttr::Data("ars-loading"),
-        AttrValue::reactive(move || loading.get()),
-    );
+    machine.with_api_snapshot(|api| {
+        let mut attrs = api.content_attrs();
 
-    attr_map_to_leptos_inline_attrs(attrs)
+        attrs.set(
+            HtmlAttr::Data("ars-loading"),
+            AttrValue::reactive(move || loading.get()),
+        );
+
+        attr_map_to_leptos_inline_attrs(attrs)
+    })
 }
 
-fn apply_user_root_attrs(attrs: &mut AttrMap, user_attrs: &UserRootAttrs) {
-    crate::merge_consumer_class_into(attrs, user_attrs.class.as_deref());
+fn apply_user_root_attrs(
+    attrs: &mut AttrMap,
+    class: Option<TextProp>,
+    aria_label: Option<TextProp>,
+    aria_labelledby: Option<Oco<'static, str>>,
+) {
+    crate::merge_consumer_class_prop_into(attrs, class);
 
-    if let Some(label) = &user_attrs.aria_label {
-        attrs.set(HtmlAttr::Aria(AriaAttr::Label), label.as_str());
+    if let Some(label) = aria_label {
+        attrs.set(
+            HtmlAttr::Aria(AriaAttr::Label),
+            AttrValue::reactive(move || label.get().into_owned()),
+        );
     }
 
-    if let Some(labelledby) = &user_attrs.aria_labelledby {
+    if let Some(labelledby) = aria_labelledby {
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), labelledby.as_str());
     }
 }
@@ -794,17 +807,23 @@ mod tests {
 
         apply_user_root_attrs(
             &mut attrs,
-            &UserRootAttrs {
-                class: Some("app-button".into()),
-                style: None,
-                aria_label: Some("Save account".into()),
-                aria_labelledby: Some("save-label".into()),
-            },
+            Some("app-button".into()),
+            Some(TextProp::from("Save account")),
+            Some("save-label".into()),
         );
 
-        assert_eq!(attrs.get(&HtmlAttr::Class), Some("app-button"));
         assert_eq!(
-            attrs.get(&HtmlAttr::Aria(AriaAttr::Label)),
+            attrs
+                .get_value(&HtmlAttr::Class)
+                .and_then(AttrValue::materialize_string)
+                .as_deref(),
+            Some("app-button")
+        );
+        assert_eq!(
+            attrs
+                .get_value(&HtmlAttr::Aria(AriaAttr::Label))
+                .and_then(AttrValue::materialize_string)
+                .as_deref(),
             Some("Save account")
         );
         assert_eq!(
@@ -833,6 +852,12 @@ mod tests {
             );
         }
 
-        assert_eq!(attrs.get(&HtmlAttr::Class), Some("app-button"));
+        assert_eq!(
+            attrs
+                .get_value(&HtmlAttr::Class)
+                .and_then(AttrValue::materialize_string)
+                .as_deref(),
+            Some("app-button")
+        );
     }
 }

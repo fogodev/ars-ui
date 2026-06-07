@@ -20,6 +20,35 @@ Do not short-circuit hooks into `unwrap_or_else`, conditionals, loops, or other
 closures that can violate Dioxus's Rules of Hooks. Initialize hooks at the
 component top level in a stable order.
 
+Bad:
+
+```rust
+let id = props.id.unwrap_or_else(|| use_stable_id("field"));
+```
+
+Good:
+
+```rust
+let generated_id = use_stable_id("field");
+let id = props.id.unwrap_or(generated_id);
+```
+
+This applies even when the fallback hook looks harmless, deterministic, or only
+runs when an optional prop is absent. Dioxus tracks hook calls by position; a
+prop changing from `None` to `Some(_)`, or the reverse, must not change which
+hooks run during render.
+
+Before handoff, search the Dioxus adapter files changed by the task for hooks
+hidden inside fallback closures:
+
+```bash
+rg 'unwrap_or_else\(\|\| use_|map_or_else\([^\n]*use_' <changed-dioxus-files>
+```
+
+Then manually review those same changed files for hooks inside conditionals,
+loops, iterator adapters, nested closures, and early-return branches. Fix the
+hook order first, then run the focused Dioxus checks.
+
 ## Reactive Context
 
 When reading provider signals during component construction, use an untracked

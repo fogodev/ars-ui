@@ -1,4 +1,4 @@
-//! Non-web desktop smoke test for `error_boundary::Boundary`.
+//! Non-web desktop smoke test for `error_boundary::ErrorBoundary`.
 //!
 //! The SSR string-render tests in `tests/error_boundary.rs` cover the spec'd
 //! HTML contract end-to-end, but they exercise `dioxus-ssr` rather than the
@@ -28,7 +28,7 @@ use ars_core::{
 };
 use ars_dioxus::{
     ArsContext, NullPlatform,
-    utility::error_boundary::{self, Boundary},
+    utility::error_boundary::{self, ErrorBoundary},
 };
 use ars_i18n::{Direction, Locale, StubIntlBackend};
 use ars_test_harness_dioxus::desktop::DesktopHarness;
@@ -63,7 +63,7 @@ fn fixture(state: Fixture) -> Element {
     });
 
     rsx! {
-        Boundary { on_error: EventHandler::new(move |err| on_error.call(err)),
+        ErrorBoundary { on_error: EventHandler::new(move |err| on_error.call(err)),
             if state.cause_error {
                 ThrowingChild {}
             } else {
@@ -111,7 +111,7 @@ fn boundary_fires_on_error_under_desktop_runtime() {
     );
 }
 
-/// Locale signal mutation triggers `Boundary` to re-resolve `Messages`
+/// Locale signal mutation triggers `ErrorBoundary` to re-resolve `Messages`
 /// from the registry. Unlike the SSR-side
 /// `locale_change_in_provider_re_resolves_registered_messages` test
 /// (which renders two separate `VirtualDom`s and asserts each picks a
@@ -210,9 +210,8 @@ fn locale_signal_mutation_re_renders_boundary_with_new_heading() {
     /// the runtime.
     #[component]
     fn HeadingProbe(recorded: Recorder) -> Element {
-        let messages = ars_dioxus::use_messages::<error_boundary::Messages>(None, None);
-
-        let locale = ars_dioxus::resolve_locale(None);
+        let (messages, locale) =
+            ars_dioxus::use_messages_and_locale::<error_boundary::Messages>(None, None);
 
         let heading = (messages.message)(&locale);
 
@@ -238,7 +237,7 @@ fn locale_signal_mutation_re_renders_boundary_with_new_heading() {
         use_context_provider(|| ctx);
 
         rsx! {
-            Boundary {
+            ErrorBoundary {
                 HeadingProbe { recorded: Recorder(Arc::clone(&state.recorded)) }
             }
         }

@@ -19,9 +19,9 @@ use core::time::Duration;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct DropZoneProps {
-    #[props(optional)]
+    #[props(optional, into)]
     pub id: Option<String>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub accept: Option<Vec<String>>,
     #[props(optional)]
     pub max_files: Option<usize>,
@@ -31,7 +31,7 @@ pub struct DropZoneProps {
     pub disabled: bool,
     #[props(optional)]
     pub label: Option<String>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub allowed_operations: Option<Vec<DropOperation>>,
     #[props(optional)]
     pub name: Option<String>,
@@ -45,24 +45,24 @@ pub struct DropZoneProps {
     pub activate_delay: Duration,
     #[props(default = Duration::from_millis(1500))]
     pub reset_delay: Duration,
-    #[props(optional)]
+    #[props(optional, into)]
     pub get_drop_operation: Option<Callback<DropOperationFn>>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub on_drop: Option<EventHandler<Vec<DragItem>>>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub on_drop_rejected: Option<EventHandler<DropRejection>>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub on_drop_enter: Option<EventHandler<DragData>>,
-    #[props(optional)]
-    pub on_drop_exit: Option<EventHandler<()>>,
-    #[props(optional)]
+    #[props(optional, into)]
+    pub on_drop_exit: Option<EventHandler>,
+    #[props(optional, into)]
     pub on_drop_move: Option<EventHandler<DragData>>,
-    #[props(optional)]
-    pub on_hover_start: Option<EventHandler<()>>,
-    #[props(optional)]
-    pub on_drop_activate: Option<EventHandler<()>>,
-    #[props(optional)]
-    pub on_hover_end: Option<EventHandler<()>>,
+    #[props(optional, into)]
+    pub on_hover_start: Option<EventHandler>,
+    #[props(optional, into)]
+    pub on_drop_activate: Option<EventHandler>,
+    #[props(optional, into)]
+    pub on_hover_end: Option<EventHandler>,
     pub children: Element,
 }
 
@@ -106,15 +106,15 @@ Drop-zone configuration props are usually non-reactive after mount unless a wrap
 | accepted kinds / options    | non-reactive adapter prop | render time only | initial machine props                                                | determines accepted drag payloads                      | dynamic changes require reinitialization   |
 | `name` / form participation | non-reactive adapter prop | render time only | adapter form-bridge setup reads `api.form_data()` during form submit | dropped payload is appended to `FormData` when enabled | disabled state returns an empty form slice |
 
-| UI event           | Preconditions                                                   | Machine event / callback path                                                               | Ordering notes                                                          | Notes                                                                   |
-| ------------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `dragenter`        | acceptable drag candidate                                       | drag-enter path                                                                             | normalization runs before consumer callbacks                            | may set active styling                                                  |
-| `dragover`         | active drag candidate                                           | drag-over path and `dropEffect` update                                                      | browser prevention must happen before callbacks when accepting the drop | controls drop affordance                                                |
-| `dragleave`        | previously active drag leaves root                              | drag-leave path                                                                             | may clear active styling after containment check                        | nested-target handling must be normalized                               |
-| `drop`             | root active                                                     | drop path then accepted or rejected public callback                                         | normalization and payload extraction run before public callback         | rejection callbacks receive `DropRejection` with every validation error |
+| UI event           | Preconditions                                                   | Machine event / callback path                                                               | Ordering notes                                                          | Notes                                                                                  |
+| ------------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `dragenter`        | acceptable drag candidate                                       | drag-enter path                                                                             | normalization runs before consumer callbacks                            | may set active styling                                                                 |
+| `dragover`         | active drag candidate                                           | drag-over path and `dropEffect` update                                                      | browser prevention must happen before callbacks when accepting the drop | controls drop affordance                                                               |
+| `dragleave`        | previously active drag leaves root                              | drag-leave path                                                                             | may clear active styling after containment check                        | nested-target handling must be normalized                                              |
+| `drop`             | root active                                                     | drop path then accepted or rejected public callback                                         | normalization and payload extraction run before public callback         | rejection callbacks receive `DropRejection` with every validation error                |
 | terminal reset     | state is `DropAccepted` or `DropRejected`                       | adapter timer dispatches `AutoReset` after `reset_delay`                                    | callback effects run before the reset timer fires                       | keeps success/rejection affordance visible briefly without clearing accepted form data |
-| reset/clear action | payload currently stored                                        | clear path                                                                                  | clear occurs before notification-only callbacks                         | removes stored payload state                                            |
-| parent form submit | `name` set and the drop-zone participates in form serialization | adapter form-submit bridge reads `api.form_data()` and appends accepted items to `FormData` | serialization runs after current machine payload is finalized           | read-only preserves serialization; disabled contributes an empty slice  |
+| reset/clear action | payload currently stored                                        | clear path                                                                                  | clear occurs before notification-only callbacks                         | removes stored payload state                                                           |
+| parent form submit | `name` set and the drop-zone participates in form serialization | adapter form-submit bridge reads `api.form_data()` and appends accepted items to `FormData` | serialization runs after current machine payload is finalized           | read-only preserves serialization; disabled contributes an empty slice                 |
 
 ## 8. Registration and Cleanup Contract
 

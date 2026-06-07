@@ -36,17 +36,32 @@ enum CategoryTab {
 
 #[component]
 fn App() -> Element {
-    let locale = use_signal(|| Locale::parse("en-US").expect("valid fixture locale"));
+    let mut locale = use_signal(|| Locale::parse("en-US").expect("valid fixture locale"));
+    let locale_key = locale.read().to_bcp47();
 
     rsx! {
         ArsProvider { locale, i18n_registries: i18n_registries(),
             main { class: "e2e-shell",
                 h1 { "ars-ui Dioxus E2E fixture" }
+                div { class: "locale-controls", "aria-label": "Fixture locale",
+                    button {
+                        id: "dioxus-fixture-locale-en",
+                        r#type: "button",
+                        onclick: move |_| locale.set(Locale::parse("en-US").expect("valid fixture locale")),
+                        "en-US"
+                    }
+                    button {
+                        id: "dioxus-fixture-locale-pt",
+                        r#type: "button",
+                        onclick: move |_| locale.set(Locale::parse("pt-BR").expect("valid fixture locale")),
+                        "pt-BR"
+                    }
+                }
                 Tabs {
                     default_value: CategoryTab::Utility,
                     tabs: [
                         Tab::new(CategoryTab::Navigation, NavigationPanel()),
-                        Tab::new(CategoryTab::Utility, UtilityPanel()),
+                        Tab::new(CategoryTab::Utility, rsx! { UtilityPanel { locale_key } }),
                     ],
                 }
             }

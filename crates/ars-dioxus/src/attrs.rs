@@ -165,6 +165,18 @@ pub fn attr_map_to_dioxus(
                 false,
             )),
 
+            // Reactive optional strings follow the same render-time evaluation
+            // model as `Reactive`, but skip the attribute when the current
+            // value is absent.
+            AttrValue::ReactiveOptional(f) => f().map(|value| {
+                Attribute::new(
+                    intern_attr_name(&key),
+                    AttributeValue::Text(value),
+                    None,
+                    false,
+                )
+            }),
+
             // Reactive booleans follow the HTML presence/absence
             // semantics symmetric with the static [`AttrValue::Bool`]
             // path: `true` materializes to a Dioxus boolean Attribute,

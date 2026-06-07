@@ -341,6 +341,20 @@ fn apply_attr_value(element: &web_sys::Element, attr: HtmlAttr, value: &AttrValu
             );
         }
 
+        AttrValue::ReactiveOptional(f) => {
+            if let Some(value) = f() {
+                crate::debug::warn_dom_error(
+                    &format!("setting reactive live region attribute {attr}"),
+                    element.set_attribute(&attr.to_string(), &value),
+                );
+            } else {
+                crate::debug::warn_dom_error(
+                    &format!("removing reactive live region attribute {attr}"),
+                    element.remove_attribute(&attr.to_string()),
+                );
+            }
+        }
+
         AttrValue::ReactiveBool(f) => {
             if f() {
                 crate::debug::warn_dom_error(

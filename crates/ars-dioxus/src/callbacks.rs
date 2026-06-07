@@ -2,6 +2,13 @@
 
 use dioxus::prelude::EventHandler;
 
+/// Call an optional Dioxus event handler.
+pub fn call(handler: Option<&EventHandler>) {
+    if let Some(handler) = handler {
+        handler.call(());
+    }
+}
+
 /// Emits a value through an optional Dioxus event handler.
 pub fn emit<T: 'static>(handler: Option<&EventHandler<T>>, value: T) {
     if let Some(handler) = handler {
@@ -20,7 +27,37 @@ pub fn emit_map<T, U: 'static>(handler: Option<&EventHandler<U>>, value: T, f: i
 mod tests {
     use dioxus::prelude::*;
 
-    use super::{emit, emit_map};
+    use super::{call, emit, emit_map};
+
+    #[test]
+    fn call_dispatches_when_handler_is_present() {
+        fn app() -> Element {
+            let captured = use_signal(Vec::<u32>::new);
+
+            let mut captured_for_handler = captured;
+
+            let handler = EventHandler::new(move |()| {
+                captured_for_handler.write().push(42);
+            });
+
+            call(Some(&handler));
+
+            assert_eq!(captured.peek().as_slice(), &[42]);
+
+            rsx! {
+                div {}
+            }
+        }
+
+        let mut dom = VirtualDom::new(app);
+
+        dom.rebuild_in_place();
+    }
+
+    #[test]
+    fn call_is_noop_when_handler_is_absent() {
+        call(None);
+    }
 
     #[test]
     fn emit_dispatches_when_handler_is_present() {

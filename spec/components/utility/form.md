@@ -40,8 +40,8 @@ Shared validator types, form registry/context, and the domain-level `form::Messa
 - `Submit`
 - `SubmitComplete { success: bool }`
 - `Reset`
-- `SetServerErrors(BTreeMap<String, Vec<String>>)`
-- `ClearServerErrors`
+- `SetValidationErrors(BTreeMap<String, Vec<ars_forms::validation::Error>>)`
+- `ClearValidationErrors`
 - `SetValidationBehavior(ValidationBehavior)`
 - `SetStatusMessage(Option<String>)`
 
@@ -51,7 +51,7 @@ The machine context stores:
 
 - `validation_behavior`
 - `is_submitting`
-- `server_errors`
+- `validation_errors`
 - `status_message`
 - `last_submit_succeeded`
 - `ids: ComponentIds`
@@ -62,7 +62,8 @@ The core machine props are:
 
 - `id: String`
 - `validation_behavior: ValidationBehavior`
-- `validation_errors: BTreeMap<String, Vec<String>>`
+- `validation_errors: BTreeMap<String, Vec<ars_forms::validation::Error>>`
+- `status_message: Option<String>`
 - `action: Option<String>`
 - `role: Option<String>`
 
@@ -70,14 +71,16 @@ The machine uses `type Messages = ()`. Localized wording is resolved separately 
 domain-level `ars_forms::form::Messages` bundle.
 
 Construct via the inherent builder: `Props::new()` returns the default; setters
-(`id`, `validation_behavior`, `validation_errors`, `action`, `role`) accept owned values or
-`impl Into<String>` and return `Self` for chaining. `Option<String>` setters wrap the supplied
-value in `Some` automatically:
+(`id`, `validation_behavior`, `validation_errors`, `status_message`, `maybe_status_message`,
+`action`, `role`) accept owned values or `impl Into<String>` and return `Self` for chaining.
+`Option<String>` setters wrap the supplied value in `Some` automatically, and
+`maybe_status_message` accepts the complete optional controlled status value:
 
 ```rust,no_check
 let props = form::Props::new()
     .id("checkout")
     .validation_behavior(ValidationBehavior::Aria)
+    .status_message("Ready")
     .action("/submit")
     .role("search");
 ```
@@ -135,7 +138,7 @@ Adapters must:
 
 1. Prevent default submit behavior when `validation_behavior == Aria`.
 2. Run validation on registered fields before dispatching `Event::Submit`.
-3. Synchronize server errors into child fields.
+3. Synchronize validation errors into child fields.
 4. Reset registered field state on `Reset`.
 5. Resolve localized status text through `ars_forms::form::Messages` and send it via
    `SetStatusMessage`.

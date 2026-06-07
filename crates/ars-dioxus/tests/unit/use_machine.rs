@@ -587,6 +587,7 @@ fn use_machine_syncs_external_prop_changes_on_rerender() {
             id: String::from("toggle"),
             checked: false,
             label: "a",
+            title: "first",
         });
 
         let mut phase = use_signal(|| 0u8);
@@ -608,6 +609,7 @@ fn use_machine_syncs_external_prop_changes_on_rerender() {
                 id: String::from("toggle"),
                 checked: true,
                 label: "a",
+                title: "first",
             });
         } else if phase() == 1 {
             phase.set(2);
@@ -616,6 +618,7 @@ fn use_machine_syncs_external_prop_changes_on_rerender() {
                 id: String::from("toggle"),
                 checked: true,
                 label: "b",
+                title: "first",
             });
         }
 
@@ -697,6 +700,7 @@ fn use_machine_with_reactive_props_syncs_external_prop_changes() {
             id: String::from("toggle"),
             checked: false,
             label: "a",
+            title: "first",
         });
 
         let mut phase = use_signal(|| 0u8);
@@ -718,6 +722,7 @@ fn use_machine_with_reactive_props_syncs_external_prop_changes() {
                 id: String::from("toggle"),
                 checked: true,
                 label: "a",
+                title: "first",
             });
         } else if phase() == 1 {
             phase.set(2);
@@ -726,6 +731,7 @@ fn use_machine_with_reactive_props_syncs_external_prop_changes() {
                 id: String::from("toggle"),
                 checked: true,
                 label: "b",
+                title: "first",
             });
         }
 
@@ -765,6 +771,7 @@ fn reactive_props_sync_preserves_service_id_when_signal_props_omit_id() {
             id: String::new(),
             checked: false,
             label: "a",
+            title: "first",
         });
 
         let mut phase = use_signal(|| 0u8);
@@ -785,6 +792,7 @@ fn reactive_props_sync_preserves_service_id_when_signal_props_omit_id() {
                 id: String::new(),
                 checked: true,
                 label: "a",
+                title: "first",
             });
         } else if phase() == 1 {
             phase.set(2);
@@ -793,6 +801,7 @@ fn reactive_props_sync_preserves_service_id_when_signal_props_omit_id() {
                 id: String::new(),
                 checked: true,
                 label: "b",
+                title: "first",
             });
         }
 
@@ -842,6 +851,7 @@ fn reactive_props_sync_preserves_explicit_service_id_when_next_props_omit_id() {
             id: String::from("stable"),
             checked: false,
             label: "a",
+            title: "first",
         });
 
         let mut phase = use_signal(|| 0u8);
@@ -859,6 +869,7 @@ fn reactive_props_sync_preserves_explicit_service_id_when_next_props_omit_id() {
                 id: String::new(),
                 checked: true,
                 label: "a",
+                title: "first",
             });
         }
 

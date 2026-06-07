@@ -138,6 +138,72 @@ h2 {
     gap: 12px;
 }
 
+.field-form-demo {
+    display: grid;
+    gap: 14px;
+    max-width: 420px;
+}
+
+.field-form-demo fieldset {
+    display: grid;
+    gap: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    border-radius: 8px;
+    margin: 0;
+    padding: 16px;
+}
+
+.field-form-demo legend {
+    padding: 0 6px;
+    font-weight: 800;
+}
+
+.field-form-demo [data-ars-scope="fieldset"][data-ars-part="content"],
+.field-form-field {
+    display: grid;
+    gap: 8px;
+}
+
+.field-form-field label,
+.field-form-demo [data-ars-scope="field"][data-ars-part="label"] {
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.field-form-input {
+    border: 1px solid #94a3b8;
+    border-radius: 7px;
+    font: inherit;
+    padding: 10px 12px;
+}
+
+.field-form-input[aria-invalid="true"] {
+    border-color: #dc2626;
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+}
+
+.field-form-demo [data-ars-scope="field"][data-ars-part="description"],
+.field-form-demo [data-ars-scope="fieldset"][data-ars-part="description"],
+.field-form-help {
+    color: #64748b;
+    font-size: 0.84rem;
+}
+
+.field-form-demo [data-ars-scope="field"][data-ars-part="error-message"],
+.field-form-demo [data-ars-scope="fieldset"][data-ars-part="error-message"],
+.field-form-error {
+    color: #b91c1c;
+    font-size: 0.84rem;
+    font-weight: 700;
+}
+
+.field-form-demo [data-ars-scope="form"][data-ars-part="status-region"],
+.field-form-status {
+    color: #166534;
+    font-size: 0.86rem;
+    font-weight: 700;
+}
+
 .separator-demo-row {
     display: flex;
     align-items: stretch;

@@ -24,17 +24,17 @@ pub struct TableProps {
     pub id: Option<String>,
     pub columns: StaticCollection<table::ColumnDef>,
     pub rows: StaticCollection<table::RowDef>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub selected_rows: Option<Signal<selection::Set>>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub expanded_rows: Option<Signal<BTreeSet<Key>>>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub sort_descriptor: Option<Signal<Option<SortDescriptor<String>>>>,
     #[props(optional)]
     pub selection_mode: Option<selection::Mode>,
     #[props(optional)]
     pub selection_behavior: Option<selection::Behavior>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub disabled_keys: Option<BTreeSet<Key>>,
     #[props(default = false)]
     pub disallow_empty_selection: bool,
@@ -44,14 +44,14 @@ pub struct TableProps {
     pub sticky_header: bool,
     #[props(default = false)]
     pub loading: bool,
-    #[props(optional)]
+    #[props(optional, into)]
     pub on_selection_change: Option<EventHandler<selection::Set>>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub on_sort_change: Option<EventHandler<Option<SortDescriptor<String>>>>,
     #[props(optional)]
     pub on_row_action: Option<EventHandler<Key>>,
-    #[props(optional)]
-    pub on_load_more: Option<EventHandler<()>>,
+    #[props(optional, into)]
+    pub on_load_more: Option<EventHandler>,
     pub render_cell: TableRenderCell,
     #[props(optional)]
     pub render_expanded_row: Option<TableRenderExpandedRow>,

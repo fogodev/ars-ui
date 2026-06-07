@@ -1,6 +1,6 @@
 //! Error boundary wrapper.
 //!
-//! [`Boundary`] wraps a subtree in Leptos's [`ErrorBoundary`] and renders the
+//! [`ErrorBoundary`] wraps a subtree in Leptos's [`ErrorBoundary`] and renders the
 //! canonical accessible fallback (`<div role="alert">` with a localized
 //! heading and `<ul>`/`<li>` error list) defined in
 //! `spec/components/utility/error-boundary.md`. It composes around the
@@ -26,18 +26,15 @@ use leptos::{
     prelude::*,
 };
 
-use crate::{
-    attrs::attr_map_to_leptos_inline_attrs,
-    provider::{resolve_locale, use_messages},
-};
+use crate::{attrs::attr_map_to_leptos_inline_attrs, provider::use_messages_and_locale};
 
 // ────────────────────────────────────────────────────────────────────
 // FallbackHandler
 // ────────────────────────────────────────────────────────────────────
 
-/// Adapter-side fallback handler for [`Boundary`].
+/// Adapter-side fallback handler for [`ErrorBoundary`].
 ///
-/// Consumers can pass a closure directly to [`Boundary`]'s `fallback` prop
+/// Consumers can pass a closure directly to [`ErrorBoundary`]'s `fallback` prop
 /// without spelling out this type. The closure receives Leptos's reactive
 /// multi-error signal and returns any typed Leptos view. The adapter erases
 /// that view only after the closure runs, matching Leptos's framework
@@ -78,7 +75,7 @@ where
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Boundary
+// ErrorBoundary
 // ────────────────────────────────────────────────────────────────────
 
 /// Wrapper around Leptos's [`ErrorBoundary`] that renders an accessible
@@ -95,7 +92,7 @@ where
 /// See `spec/leptos-components/utility/error-boundary.md` for the full
 /// adapter contract.
 #[component]
-pub fn Boundary<T: 'static>(
+pub fn ErrorBoundary<T: 'static>(
     /// Optional override for the entire fallback closure. When `None`,
     /// the wrapper renders the canonical accessible default markup.
     #[prop(optional, into)]
@@ -132,24 +129,29 @@ where
     // framework primitive.
     let seen_errors = Arc::new(Mutex::new(HashMap::new()));
 
+    let resolved_messages_and_locale = use_messages_and_locale(messages, locale);
+
     let fallback_closure = move |errors: ArcRwSignal<Errors>| {
-        let resolved_locale = resolve_locale(locale.as_ref());
-        let resolved_messages = use_messages(messages.as_ref(), Some(&resolved_locale));
+        let (messages, locale) = resolved_messages_and_locale.get();
 
         run_fallback(
             errors,
             on_error,
             fallback,
-            (resolved_messages.message)(&resolved_locale),
+            (messages.message)(&locale),
             &seen_errors,
         )
         .run()
     };
 
-    view! { <ErrorBoundary fallback=fallback_closure>{children.into_inner()()}</ErrorBoundary> }
+    view! {
+        <leptos::prelude::ErrorBoundary fallback=fallback_closure>
+            {children.into_inner()()}
+        </leptos::prelude::ErrorBoundary>
+    }
 }
 
-/// Internal dispatch helper for the [`Boundary`] fallback closure.
+/// Internal dispatch helper for the [`ErrorBoundary`] fallback closure.
 ///
 /// Extracted so the on-error iteration, custom-fallback delegation, and
 /// default-fallback fall-through paths can be unit-tested without going
@@ -165,6 +167,7 @@ fn run_fallback(
 ) -> ViewFnOnce {
     if let Some(handler) = on_error {
         let snapshot = errors.get().into_iter().collect::<Vec<_>>();
+
         let current_ids = snapshot
             .iter()
             .map(|(id, _)| id.clone())
@@ -179,6 +182,7 @@ fn run_fallback(
 
             if seen.get(&id) != Some(&error_fingerprint) {
                 seen.insert(id, error_fingerprint);
+
                 handler.run(error.clone());
             }
         }
@@ -198,7 +202,7 @@ fn run_fallback(
 /// Renders the canonical accessible fallback markup using English defaults.
 ///
 /// Use this when consuming Leptos's [`ErrorBoundary`] directly without
-/// the [`Boundary`] wrapper:
+/// the [`ErrorBoundary`] wrapper:
 ///
 /// ```ignore
 /// view! {
@@ -208,7 +212,7 @@ fn run_fallback(
 /// }
 /// ```
 ///
-/// For localized headings, use [`Boundary`] which resolves [`Messages`]
+/// For localized headings, use [`ErrorBoundary`] which resolves [`Messages`]
 /// from the surrounding `ArsProvider`. This standalone function does not
 /// read any reactive context (it cannot — it is a plain function, not a
 /// component) and always falls back to English.

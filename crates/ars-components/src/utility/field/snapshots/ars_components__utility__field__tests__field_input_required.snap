@@ -1,6 +1,5 @@
 ---
 source: crates/ars-components/src/utility/field/mod.rs
-assertion_line: 806
 expression: "snapshot_attrs(&service.connect(&|_| {}).input_attrs())"
 ---
 AttrMap {

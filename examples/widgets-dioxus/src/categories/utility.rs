@@ -1,20 +1,4 @@
-use ars_dioxus::{
-    MessageFn,
-    prelude::{Orientation, Translate, t},
-    utility::{
-        button::{self, Button, ButtonAsChild},
-        client_only::ClientOnly,
-        dismissable,
-        error_boundary::{Boundary, CapturedError},
-        heading::{self, Heading, HeadingLevelProvider, Section},
-        highlight::Highlight,
-        landmark::{self, Landmark},
-        separator::{Separator, SeparatorAsChild},
-        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
-        z_index_allocator::{Context as ZIndexContext, ZIndexAllocatorProvider},
-    },
-};
-use dioxus::prelude::*;
+use ars_dioxus::prelude::*;
 
 const LANDMARK_BANNER_STYLE: &str = "display: block; border: 2px solid #a78bfa; background: #f5f3ff; padding: 0.5rem 0.75rem; margin: 0.4rem 0; border-radius: 0.375rem;";
 const LANDMARK_NAVIGATION_STYLE: &str = "display: block; border: 2px solid #60a5fa; background: #eff6ff; padding: 0.5rem 0.75rem; margin: 0.4rem 0; border-radius: 0.375rem;";
@@ -117,6 +101,42 @@ pub(crate) enum UtilityText {
 
     #[translate(en_US = "Reset", pt_BR = "Redefinir")]
     Reset,
+
+    #[translate(en_US = "Submit", pt_BR = "Enviar")]
+    Submit,
+
+    #[translate(en_US = "Field and form", pt_BR = "Campo e formulário")]
+    FieldForm,
+
+    #[translate(en_US = "Account details", pt_BR = "Detalhes da conta")]
+    AccountDetails,
+
+    #[translate(
+        en_US = "Required fields are announced from their labels and descriptions.",
+        pt_BR = "Campos obrigatórios são anunciados a partir de seus rótulos e descrições."
+    )]
+    RequiredFieldsDescription,
+
+    #[translate(en_US = "Name", pt_BR = "Nome")]
+    NameLabel,
+
+    #[translate(en_US = "Enter your full name", pt_BR = "Digite seu nome completo")]
+    NamePlaceholder,
+
+    #[translate(en_US = "Email", pt_BR = "E-mail")]
+    EmailLabel,
+
+    #[translate(
+        en_US = "Use a reachable address.",
+        pt_BR = "Use um endereço acessível."
+    )]
+    EmailDescription,
+
+    #[translate(en_US = "Enter your email", pt_BR = "Digite seu e-mail")]
+    EmailPlaceholder,
+
+    #[translate(en_US = "Ready to submit", pt_BR = "Pronto para enviar")]
+    ReadyToSubmit,
 
     #[translate(en_US = "Visually hidden", pt_BR = "Visualmente oculto")]
     VisuallyHidden,
@@ -358,7 +378,7 @@ pub(crate) enum UtilityText {
 
 #[component]
 fn ExampleErrorChild() -> Element {
-    Err(CapturedError::from_display(t(UtilityText::ExampleChildError)).into())
+    Err(error_boundary::CapturedError::from_display(t(UtilityText::ExampleChildError)).into())
 }
 
 #[component]
@@ -476,6 +496,47 @@ pub(crate) fn UtilityPanel() -> Element {
                     }
                 }
             }
+            section { "aria-labelledby": "field-form",
+                h3 { id: "field-form", {t(UtilityText::FieldForm)} }
+                Form {
+                    id: "dioxus-field-form-demo",
+                    action: "/account",
+                    on_submit: move |()| {},
+                    Fieldset { id: "dioxus-fieldset-demo",
+                        fieldset::Legend { {t(UtilityText::AccountDetails)} }
+                        fieldset::Description { {t(UtilityText::RequiredFieldsDescription)} }
+                        fieldset::Content {
+                            Field { id: "dioxus-name-field", required: true,
+                                field::Label { {t(UtilityText::NameLabel)} }
+                                field::Input {
+                                    name: "name",
+                                    placeholder: t(UtilityText::NamePlaceholder),
+                                }
+                            }
+                            Field {
+                                id: "dioxus-email-field",
+                                name: "email",
+                                required: true,
+                                field::Label { {t(UtilityText::EmailLabel)} }
+                                field::Description { {t(UtilityText::EmailDescription)} }
+                                field::Input {
+                                    r#type: field::InputType::Email,
+                                    name: "email",
+                                    placeholder: t(UtilityText::EmailPlaceholder),
+                                }
+                            }
+                        }
+                    }
+                    div { class: "button-row",
+                        Button { r#type: button::Type::Submit, {t(UtilityText::Submit)} }
+                        Button {
+                            r#type: button::Type::Reset,
+                            variant: button::Variant::Secondary,
+                            {t(UtilityText::Reset)}
+                        }
+                    }
+                }
+            }
             section { "aria-labelledby": "visually-hidden",
                 h3 { id: "visually-hidden", {t(UtilityText::VisuallyHidden)} }
                 p {
@@ -549,10 +610,10 @@ pub(crate) fn UtilityPanel() -> Element {
             section { "aria-labelledby": "errors",
                 h3 { id: "errors", {t(UtilityText::ErrorBoundary)} }
                 div { class: "button-row",
-                    Boundary {
+                    ErrorBoundary {
                         p { {t(UtilityText::HealthyChild)} }
                     }
-                    Boundary { ExampleErrorChild {} }
+                    ErrorBoundary { ExampleErrorChild {} }
                 }
             }
             section { "aria-labelledby": "heading-primitive",
@@ -601,7 +662,7 @@ pub(crate) fn UtilityPanel() -> Element {
                         style: "font-size: 1.875rem; font-weight: 700; line-height: 1.25; margin: 0.4rem 0;",
                         {t(UtilityText::HeadingProvider)}
                     }
-                    Section {
+                    heading::Section {
                         Heading {
                             id: "dioxus-heading-section",
                             style: "font-size: 1.5rem; font-weight: 700; line-height: 1.3; margin: 0.4rem 0;",

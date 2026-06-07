@@ -11,7 +11,7 @@ pub use ars_components::utility::highlight::{Api, HighlightChunk, MatchStrategy,
 use ars_i18n::Locale;
 use leptos::{either::Either, prelude::*};
 
-use crate::{attr_map_to_leptos_inline_attrs, merge_consumer_class_into, use_locale};
+use crate::{attr_map_to_leptos_inline_attrs, use_locale};
 
 /// Leptos `Highlight` component.
 ///
@@ -49,10 +49,8 @@ pub fn Highlight(
     /// any class the component itself emits so both reach the rendered
     /// element as a single `class` attribute.
     #[prop(optional, into)]
-    class: Option<Oco<'static, str>>,
+    class: Option<TextProp>,
 ) -> impl IntoView {
-    let class = class.map(Oco::into_owned);
-
     let props = Props::new()
         .query(query)
         .text(text)
@@ -61,29 +59,39 @@ pub fn Highlight(
 
     let api = Api::new(props);
 
-    let locale = locale.unwrap_or_else(|| use_locale().get());
-
     let mut root_attr_map = api.root_attrs();
 
-    merge_consumer_class_into(&mut root_attr_map, class.as_deref());
+    crate::merge_consumer_class_prop_into(&mut root_attr_map, class);
 
     let root_attrs = attr_map_to_leptos_inline_attrs(root_attr_map);
 
-    let chunks = api
-        .chunks(&locale)
-        .into_iter()
-        .map(|chunk| {
-            let chunk_attrs = attr_map_to_leptos_inline_attrs(api.chunk_attrs(chunk.highlighted));
+    let locale_provider = use_locale();
 
-            let text = chunk.text.to_owned();
+    let chunks = move || {
+        let provided_locale: Locale;
+        let locale = if let Some(locale) = locale.as_ref() {
+            locale
+        } else {
+            provided_locale = locale_provider.get();
+            &provided_locale
+        };
 
-            if chunk.highlighted {
-                Either::Left(view! { <mark {..chunk_attrs}>{text}</mark> })
-            } else {
-                Either::Right(view! { <span {..chunk_attrs}>{text}</span> })
-            }
-        })
-        .collect_view();
+        api.chunks(locale)
+            .into_iter()
+            .map(|chunk| {
+                let chunk_attrs =
+                    attr_map_to_leptos_inline_attrs(api.chunk_attrs(chunk.highlighted));
+
+                let text = chunk.text.to_owned();
+
+                if chunk.highlighted {
+                    Either::Left(view! { <mark {..chunk_attrs}>{text}</mark> })
+                } else {
+                    Either::Right(view! { <span {..chunk_attrs}>{text}</span> })
+                }
+            })
+            .collect_view()
+    };
 
     view! { <span {..root_attrs}>{chunks}</span> }
 }

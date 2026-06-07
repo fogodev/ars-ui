@@ -90,10 +90,9 @@ pub struct VisuallyHiddenAsChildProps {
 pub fn VisuallyHidden(props: VisuallyHiddenProps) -> Element {
     let component_attrs = root_attrs(props.id.as_deref(), props.is_focusable, false);
     let attrs = merge_dioxus_attrs(props.attrs, component_attrs);
-    let children = props.children;
 
     rsx! {
-        span { ..attrs,{children} }
+        span { ..attrs,{props.children} }
     }
 }
 

@@ -19,7 +19,7 @@ This spec maps the core [`Listbox`](../../components/selection/listbox.md) contr
 pub struct ListboxProps {
     #[props(optional)]
     pub id: Option<String>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub value: Option<Signal<selection::Set>>,
     #[props(optional, default)]
     pub default_value: selection::Set,
@@ -27,12 +27,12 @@ pub struct ListboxProps {
     pub selection_mode: Option<selection::Mode>,
     #[props(optional)]
     pub selection_behavior: Option<selection::Behavior>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub disabled_keys: Option<BTreeSet<Key>>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub on_action: Option<EventHandler<Key>>,
-    #[props(optional)]
-    pub on_load_more: Option<EventHandler<()>>,
+    #[props(optional, into)]
+    pub on_load_more: Option<EventHandler>,
     pub children: Element,
 }
 

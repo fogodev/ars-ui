@@ -46,9 +46,9 @@ pub use attrs::{
 };
 pub use attrs::{
     LeptosAttrResult, LeptosAttribute, attr_map_to_leptos, attr_map_to_leptos_inline_attrs,
-    merge_consumer_class_into, use_style_strategy,
+    consumer_style_prop_to_leptos_attr, merge_consumer_class_prop_into, use_style_strategy,
 };
-pub use callbacks::{emit, emit_map};
+pub use callbacks::{call, emit, emit_map};
 pub use controlled::use_controlled_prop;
 pub use ephemeral::EphemeralRef;
 pub use event_mapping::leptos_key_to_keyboard_key;
@@ -70,8 +70,8 @@ pub use nonce::{
 };
 pub use provider::{
     ArsContext, ArsProvider, Translatable, provide_ars_context, resolve_locale, t, use_direction,
-    use_intl_backend, use_locale, use_messages, use_modality_context, use_number_formatter,
-    use_platform_effects, warn_missing_provider,
+    use_intl_backend, use_locale, use_messages_and_locale, use_modality_context,
+    use_number_formatter, use_platform_effects, warn_missing_provider,
 };
 pub use reactive_stores;
 pub use safe_listener::{

@@ -86,6 +86,7 @@ features = [
   "FocusEvent",
   "HtmlCollection",
   "HtmlElement",
+  "HtmlFormElement",
   "KeyboardEvent",
   "KeyboardEventInit",
   "MouseEvent",

@@ -19,18 +19,31 @@ This spec maps the core [`Form`](../../components/utility/form.md) and canonical
 pub fn Form(
     #[prop(optional)] id: Option<String>,
     #[prop(optional)] validation_behavior: Option<form::ValidationBehavior>,
-    #[prop(optional)] validation_errors: Option<BTreeMap<String, Vec<String>>>,
+    #[prop(optional, into)] validation_errors: Signal<BTreeMap<String, Vec<ars_forms::validation::Error>>>,
+    #[prop(optional, into)] status_message: Signal<Option<String>>,
     #[prop(optional)] action: Option<String>,
     #[prop(optional)] role: Option<String>,
+    #[prop(optional, into)] on_submit: Option<Callback<()>>,
+    #[prop(optional, into)] on_reset: Option<Callback<()>>,
     children: Children,
 ) -> impl IntoView
 ```
 
-The adapter surfaces the full core prop set. Submission callbacks or server action wrappers may be layered on top without changing the core contract.
+The adapter surfaces the full core prop set plus observational submit/reset
+callbacks. `on_submit` dispatches the core `Submit` event before emitting
+`Callback<()>` and prevents native navigation when the callback is present.
+`on_reset` dispatches the core `Reset` event before emitting `Callback<()>`.
+`validation_errors` is a reactive `Signal<BTreeMap<String, Vec<ars_forms::validation::Error>>>`
+input so server/custom validation errors can appear and clear after mount
+without rebuilding the form subtree. `status_message` is a reactive
+`Signal<Option<String>>` used to seed or control the adapter-owned status live
+region. The status region is structural and always rendered by `Form`; it is
+not exposed as a separate public child component because doing so would create
+duplicate live-region nodes and duplicate announcements.
 
 ## 3. Mapping to Core Component Contract
 
-- Props parity: full parity with `validation_behavior`, `validation_errors`, `action`, and `role`.
+- Props parity: full parity with `validation_behavior`, `validation_errors`, `status_message`, `action`, and `role`.
 - Structure parity: `Root` and `StatusRegion` are both concrete adapter-rendered nodes.
 - Event parity: submit, reset, prop-sync, and status announcement behavior all remain adapter-driven on top of the core forms machine.
 
@@ -47,11 +60,12 @@ The adapter surfaces the full core prop set. Submission callbacks or server acti
 | Target node    | Core attrs                                                            | Adapter-owned attrs                                                     | Consumer attrs                                                          | Merge order                                                                                                                                                                              | Ownership notes                   |
 | -------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
 | `Root`         | `api.root_attrs()` including validation, busy, action, and role attrs | adapter submit/reset handlers and structural `data-*` helpers if needed | consumer attrs on the form root                                         | core submission, validation, and accessibility attrs win when conflict would break the contract; `class`/`style` merge additively; handlers compose around normalized submit/reset logic | adapter-owned native `<form>`     |
-| `StatusRegion` | `api.status_region_attrs()`                                           | status wrapper visibility helpers if needed                             | no direct consumer attrs unless a dedicated override slot is documented | core live-region attrs win; consumer content cannot replace the region node                                                                                                              | always adapter-owned              |
+| `StatusRegion` | `api.status_region_attrs()`                                           | status wrapper visibility helpers if needed                             | none                                                                    | core live-region attrs win; consumer content cannot replace the region node                                                                                                              | always adapter-owned              |
 | form children  | none directly                                                         | none                                                                    | consumer field/tree content                                             | consumer children live inside the form root and consume context as needed                                                                                                                | descendants remain consumer-owned |
 
 - Consumer overrides must not remove `novalidate`, busy semantics, or required live-region attrs when the core contract requires them.
 - Form root event handlers are composed around normalized submit/reset handling; consumer handlers may observe normalized state but must not re-enable blocked submission.
+- `StatusRegion` is an adapter-owned structural node, not a public child component; user-facing status text flows through `status_message`.
 
 ## 6. Composition / Context Contract
 
@@ -61,18 +75,20 @@ The adapter surfaces the full core prop set. Submission callbacks or server acti
 
 Controlled/uncontrolled switching is not supported for validation state sources after mount unless a higher-level wrapper documents reinitialization. Default values are read at initialization; `validation_errors` and other reactive inputs follow effect-based sync.
 
-| Adapter prop          | Mode                      | Sync trigger            | Machine event / update path                          | Visible effect                                                     | Notes                                                                    |
-| --------------------- | ------------------------- | ----------------------- | ---------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| `validation_behavior` | controlled                | prop change after mount | `SetValidationBehavior` or equivalent machine update | switches between native and ARIA-managed validation behavior       | sync is immediate and effect-based                                       |
-| `validation_errors`   | controlled                | prop change after mount | `SetValidationErrors` / server-error sync path       | updates field error state and status messaging                     | deterministic prop-to-machine path                                       |
-| `action`              | non-reactive adapter prop | render time only        | included in root props                               | changes form submission target semantics                           | post-mount changes should be treated as unsupported unless reinitialized |
-| `role`                | non-reactive adapter prop | render time only        | included in root props                               | affects root semantics when non-native role is explicitly required | must not break native form semantics                                     |
+| Adapter prop          | Mode                      | Sync trigger            | Machine event / update path                          | Visible effect                                                      | Notes                                                                    |
+| --------------------- | ------------------------- | ----------------------- | ---------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `validation_behavior` | controlled                | prop change after mount | `SetValidationBehavior` or equivalent machine update | switches between native and ARIA-managed validation behavior        | sync is immediate and effect-based                                       |
+| `validation_errors`   | controlled                | prop change after mount | `SetValidationErrors` / server-error sync path       | updates field error state and status messaging                      | deterministic prop-to-machine path                                       |
+| `action`              | non-reactive adapter prop | render time only        | included in root props                               | changes form submission target semantics                            | post-mount changes should be treated as unsupported unless reinitialized |
+| `role`                | non-reactive adapter prop | render time only        | included in root props                               | affects root semantics when non-native role is explicitly required  | must not break native form semantics                                     |
+| `on_submit`           | observational callback    | native submit event     | `Submit` then callback emission                      | consumer can update local state while core submit lifecycle updates | prevents native navigation when present                                  |
+| `on_reset`            | observational callback    | native reset event      | `Reset` then callback emission                       | consumer can restore local state while core reset lifecycle updates | does not cancel native reset by default                                  |
 
-| UI event      | Preconditions                                   | Machine event / callback path         | Ordering notes                                                      | Notes                                                         |
-| ------------- | ----------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `submit`      | form submitted and not blocked by machine state | normalized submit handler -> `Submit` | normalization runs before consumer notification callbacks           | may prevent default when the machine blocks native submission |
-| `reset`       | form reset triggered                            | normalized reset handler -> `Reset`   | reset dispatch occurs before descendant notification-only callbacks | registered fields restore canonical defaults                  |
-| status update | machine status message changes                  | update status-region content          | live-region update occurs after machine transition                  | repeated messages follow the documented announcement timing   |
+| UI event      | Preconditions                                   | Machine event / callback path                        | Ordering notes                                                      | Notes                                                                                     |
+| ------------- | ----------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `submit`      | form submitted and not blocked by machine state | normalized submit handler -> `Submit` -> `on_submit` | normalization runs before consumer notification callbacks           | prevents default when `on_submit` is present or when the machine blocks native submission |
+| `reset`       | form reset triggered                            | normalized reset handler -> `Reset`                  | reset dispatch occurs before descendant notification-only callbacks | registered fields restore canonical defaults                                              |
+| status update | machine status message changes                  | update status-region content                         | live-region update occurs after machine transition                  | repeated messages follow the documented announcement timing                               |
 
 ## 8. Registration and Cleanup Contract
 
@@ -102,10 +118,10 @@ Controlled/uncontrolled switching is not supported for validation state sources 
 
 ## 11. Callback Payload Contract
 
-| Callback                                  | Payload source             | Payload shape                                                | Timing                                                                             | Cancelable?                                             | Notes                                                                         |
-| ----------------------------------------- | -------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| submit callback when exposed by a wrapper | normalized adapter payload | `{ form_data, validation_behavior, is_valid }`               | after normalized submit gating, before external side-effect wrappers if documented | yes when the wrapper exposes a veto layer; otherwise no | Must reflect machine-visible validation state, not ad hoc form serialization. |
-| reset callback when exposed               | machine-derived snapshot   | `{ reset_to_defaults: bool, registered_field_count: usize }` | after normalized reset dispatch                                                    | no                                                      | Observational callback after the form begins canonical reset.                 |
+| Callback    | Payload source           | Payload shape | Timing                                                                           | Cancelable?                                          | Notes                                                                                           |
+| ----------- | ------------------------ | ------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `on_submit` | normalized adapter event | `()`          | after core `Submit` dispatch, before external side-effect wrappers if documented | yes, adapter prevents native navigation when present | Observational callback for local state updates; richer server-action wrappers can layer on top. |
+| `on_reset`  | normalized adapter event | `()`          | after core `Reset` dispatch                                                      | no                                                   | Observational callback after the form begins canonical reset.                                   |
 
 ## 12. Failure and Degradation Rules
 
@@ -234,7 +250,7 @@ let registry = create_field_registration_helper();
 
 publish_form_context(machine, registry);
 render_form_root_and_persistent_status_region(form_ref, status_ref);
-sync_validation_behavior_and_server_errors(machine, props);
+sync_validation_behavior_and_validation_errors(machine, props);
 normalize_submit_and_reset_handlers(form_ref, machine, registry);
 update_status_region_in_place(status_ref, machine.status_message());
 
@@ -248,7 +264,7 @@ on_cleanup(|| {
 
 - `StatusRegion` must remain a real structural node even when rendered visually hidden.
 - Submit and reset wiring must preserve native form semantics unless the core machine explicitly blocks the action.
-- Server-side error synchronization must follow a deterministic prop-to-machine path.
+- Validation error synchronization must follow a deterministic prop-to-machine path.
 - Validation handling must distinguish native browser validation from ARIA-managed validation modes.
 - SSR output must preserve the structural nodes needed for hydration-safe status and error messaging.
 - Status announcements must preserve the documented timing sequence so repeated messages still announce reliably.

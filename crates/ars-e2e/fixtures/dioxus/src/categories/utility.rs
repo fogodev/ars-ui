@@ -7,13 +7,16 @@
 
 use ars_dioxus::{
     I18nRegistries, MessageFn, MessagesRegistry,
-    prelude::{Orientation, Translate, t},
+    prelude::{Orientation, Translate, ValidationError, t},
     utility::{
         button::{self, Button, ButtonAsChild},
         client_only::ClientOnly,
         dismissable,
-        error_boundary::{Boundary, CapturedError},
-        heading::{self, Heading, HeadingLevelProvider, Section},
+        error_boundary::{CapturedError, ErrorBoundary},
+        field::{self, Field},
+        fieldset::{self, Fieldset},
+        form::{self, Form},
+        heading::{self, Heading, HeadingLevelProvider},
         highlight::Highlight,
         landmark::{self, Landmark},
         separator::{Separator, SeparatorAsChild},
@@ -149,6 +152,54 @@ pub(crate) enum UtilityText {
 
     #[translate(en_US = "Sidebar region", pt_BR = "Região da barra lateral")]
     LandmarkRegion,
+
+    #[translate(
+        en_US = "Field and form primitives",
+        pt_BR = "Primitivos de campo e formulário"
+    )]
+    FieldFormHeading,
+
+    #[translate(en_US = "Account details", pt_BR = "Detalhes da conta")]
+    AccountDetails,
+
+    #[translate(
+        en_US = "Grouped controls inherit the fieldset contract.",
+        pt_BR = "Controles agrupados herdam o contrato do fieldset."
+    )]
+    FieldsetDescription,
+
+    #[translate(en_US = "Email", pt_BR = "E-mail")]
+    EmailLabel,
+
+    #[translate(
+        en_US = "Use a reachable address.",
+        pt_BR = "Use um endereço acessível."
+    )]
+    EmailDescription,
+
+    #[translate(en_US = "Email is required.", pt_BR = "E-mail é obrigatório.")]
+    EmailRequired,
+
+    #[translate(
+        en_US = "Include an @ in the email address.",
+        pt_BR = "Inclua um @ no endereço de e-mail."
+    )]
+    EmailMissingAt,
+
+    #[translate(
+        en_US = "Enter a domain after @.",
+        pt_BR = "Informe um domínio depois de @."
+    )]
+    EmailIncompleteDomain,
+
+    #[translate(
+        en_US = "Account details are incomplete.",
+        pt_BR = "Os detalhes da conta estão incompletos."
+    )]
+    AccountIncomplete,
+
+    #[translate(en_US = "Ready", pt_BR = "Pronto")]
+    Ready,
 }
 
 /// Registers the utility category's localized message bundles with the
@@ -182,7 +233,8 @@ fn ZIndexProbe(id: &'static str) -> Element {
 
 /// Utility-category showcase panel.
 #[component]
-pub(crate) fn UtilityPanel() -> Element {
+pub(crate) fn UtilityPanel(locale_key: String) -> Element {
+    let _ = locale_key;
     let dismiss_status = use_signal_sync(|| UtilityText::DismissInitial);
     let dismiss_status_for_dismiss = dismiss_status;
 
@@ -193,6 +245,9 @@ pub(crate) fn UtilityPanel() -> Element {
             reason: format!("{reason:?}"),
         });
     });
+    let required_error = t(UtilityText::EmailRequired);
+    let missing_at_error = t(UtilityText::EmailMissingAt);
+    let incomplete_domain_error = t(UtilityText::EmailIncompleteDomain);
 
     rsx! {
         div { class: "gallery-grid",
@@ -364,15 +419,9 @@ pub(crate) fn UtilityPanel() -> Element {
                     {t(UtilityText::HeadingThree)}
                 }
                 HeadingLevelProvider { level: heading::Level::Three,
-                    Heading {
-                        id: "dioxus-fixture-heading-provided",
-                        {t(UtilityText::HeadingProvider)}
-                    }
-                    Section {
-                        Heading {
-                            id: "dioxus-fixture-heading-section",
-                            {t(UtilityText::HeadingSection)}
-                        }
+                    Heading { id: "dioxus-fixture-heading-provided", {t(UtilityText::HeadingProvider)} }
+                    heading::Section {
+                        Heading { id: "dioxus-fixture-heading-section", {t(UtilityText::HeadingSection)} }
                     }
                 }
             }
@@ -383,25 +432,33 @@ pub(crate) fn UtilityPanel() -> Element {
                 Landmark {
                     id: "dioxus-fixture-landmark-banner",
                     role: landmark::Role::Banner,
-                    messages: landmark::Messages { label: MessageFn::static_str("Page banner") },
+                    messages: landmark::Messages {
+                        label: MessageFn::static_str("Page banner"),
+                    },
                     {t(UtilityText::LandmarkBanner)}
                 }
                 Landmark {
                     id: "dioxus-fixture-landmark-navigation",
                     role: landmark::Role::Navigation,
-                    messages: landmark::Messages { label: MessageFn::static_str("Primary navigation") },
+                    messages: landmark::Messages {
+                        label: MessageFn::static_str("Primary navigation"),
+                    },
                     {t(UtilityText::LandmarkNavigation)}
                 }
                 Landmark {
                     id: "dioxus-fixture-landmark-search",
                     role: landmark::Role::Search,
-                    messages: landmark::Messages { label: MessageFn::static_str("Site search") },
+                    messages: landmark::Messages {
+                        label: MessageFn::static_str("Site search"),
+                    },
                     {t(UtilityText::LandmarkSearch)}
                 }
                 Landmark {
                     id: "dioxus-fixture-landmark-region",
                     role: landmark::Role::Region,
-                    messages: landmark::Messages { label: MessageFn::static_str("Sidebar region") },
+                    messages: landmark::Messages {
+                        label: MessageFn::static_str("Sidebar region"),
+                    },
                     {t(UtilityText::LandmarkRegion)}
                 }
             }
@@ -413,6 +470,82 @@ pub(crate) fn UtilityPanel() -> Element {
                     Highlight {
                         query: vec!["highlighted".to_string()],
                         text: "Hello highlighted world!",
+                    }
+                }
+            }
+            section { class: "showcase-panel wide", "aria-labelledby": "field-form",
+                h2 { id: "field-form", {t(UtilityText::FieldFormHeading)} }
+                Form {
+                    id: "dioxus-fixture-account-form",
+                    action: "/account",
+                    validation_errors: std::collections::BTreeMap::from([
+                        (
+                            "email-required".to_string(),
+                            vec![ValidationError::server(required_error.clone())],
+                        ),
+                    ]),
+                    status_message: t(UtilityText::Ready),
+                    class: "fixture-form",
+                    Fieldset {
+                        id: "dioxus-fixture-account-fieldset",
+                        disabled: true,
+                        invalid: true,
+                        fieldset::Legend { {t(UtilityText::AccountDetails)} }
+                        fieldset::Description { {t(UtilityText::FieldsetDescription)} }
+                        fieldset::Content {
+                            Field {
+                                id: "dioxus-fixture-email-required-field",
+                                name: "email-required",
+                                required: true,
+                                field::Label { {t(UtilityText::EmailLabel)} }
+                                field::Description { {t(UtilityText::EmailDescription)} }
+                                field::Input { r#type: field::InputType::Email, name: "email-required" }
+                                field::ErrorMessage { {t(UtilityText::EmailRequired)} }
+                            }
+                            Field {
+                                id: "dioxus-fixture-email-missing-at-field",
+                                name: "email-missing-at",
+                                errors: vec![ValidationError::custom("email-missing-at", missing_at_error.clone())],
+                                field::Label { {t(UtilityText::EmailLabel)} }
+                                field::Description { {t(UtilityText::EmailDescription)} }
+                                field::Input {
+                                    r#type: field::InputType::Email,
+                                    name: "email-missing-at",
+                                    value: "admin",
+                                }
+                                field::ErrorMessage { {t(UtilityText::EmailMissingAt)} }
+                            }
+                            Field {
+                                id: "dioxus-fixture-email-incomplete-domain-field",
+                                name: "email-incomplete-domain",
+                                errors: vec![
+                                    ValidationError::custom(
+                                        "email-incomplete-domain",
+                                        incomplete_domain_error.clone(),
+                                    ),
+                                ],
+                                field::Label { {t(UtilityText::EmailLabel)} }
+                                field::Description { {t(UtilityText::EmailDescription)} }
+                                field::Input {
+                                    r#type: field::InputType::Email,
+                                    name: "email-incomplete-domain",
+                                    value: "admin@",
+                                }
+                                field::ErrorMessage { {t(UtilityText::EmailIncompleteDomain)} }
+                            }
+                        }
+                        fieldset::ErrorMessage { {t(UtilityText::AccountIncomplete)} }
+                    }
+                    Field {
+                        id: "dioxus-fixture-email-valid-field",
+                        name: "email-valid",
+                        field::Label { {t(UtilityText::EmailLabel)} }
+                        field::Description { {t(UtilityText::EmailDescription)} }
+                        field::Input {
+                            r#type: field::InputType::Email,
+                            name: "email-valid",
+                            value: "admin@email.com",
+                        }
                     }
                 }
             }
@@ -431,10 +564,10 @@ pub(crate) fn UtilityPanel() -> Element {
             }
             section { class: "showcase-panel wide", "aria-labelledby": "errors",
                 h2 { id: "errors", "Error boundary" }
-                Boundary {
+                ErrorBoundary {
                     p { class: "healthy-boundary", "Healthy child rendered" }
                 }
-                Boundary { FixtureErrorChild {} }
+                ErrorBoundary { FixtureErrorChild {} }
             }
         }
     }

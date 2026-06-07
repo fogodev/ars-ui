@@ -43,12 +43,12 @@ pub struct MarqueeProps {
     pub locale: Option<Locale>,
     #[props(optional)]
     pub messages: Option<marquee::Messages>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub on_pause_change: Option<EventHandler<bool>>,
-    #[props(optional)]
+    #[props(optional, into)]
     pub on_loop_complete: Option<EventHandler<usize>>,
-    #[props(optional)]
-    pub on_complete: Option<EventHandler<()>>,
+    #[props(optional, into)]
+    pub on_complete: Option<EventHandler>,
     pub children: Element,
 }
 

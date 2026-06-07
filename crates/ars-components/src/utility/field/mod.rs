@@ -14,6 +14,113 @@ use ars_core::{
 };
 use ars_forms::validation::Error;
 
+/// Native HTML input type for [`Field`](Machine) input parts.
+///
+/// The enum is non-exhaustive because the HTML input type vocabulary may grow.
+/// Unknown future types can still be passed through lower-level adapter attrs
+/// until this enum is expanded.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum InputType {
+    /// `type="button"`.
+    Button,
+
+    /// `type="checkbox"`.
+    Checkbox,
+
+    /// `type="color"`.
+    Color,
+
+    /// `type="date"`.
+    Date,
+
+    /// `type="datetime-local"`.
+    DateTimeLocal,
+
+    /// `type="email"`.
+    Email,
+
+    /// `type="file"`.
+    File,
+
+    /// `type="hidden"`.
+    Hidden,
+
+    /// `type="image"`.
+    Image,
+
+    /// `type="month"`.
+    Month,
+
+    /// `type="number"`.
+    Number,
+
+    /// `type="password"`.
+    Password,
+
+    /// `type="radio"`.
+    Radio,
+
+    /// `type="range"`.
+    Range,
+
+    /// `type="reset"`.
+    Reset,
+
+    /// `type="search"`.
+    Search,
+
+    /// `type="submit"`.
+    Submit,
+
+    /// `type="tel"`.
+    Tel,
+
+    /// `type="text"`.
+    #[default]
+    Text,
+
+    /// `type="time"`.
+    Time,
+
+    /// `type="url"`.
+    Url,
+
+    /// `type="week"`.
+    Week,
+}
+
+impl InputType {
+    /// Returns the HTML token for this input type.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Button => "button",
+            Self::Checkbox => "checkbox",
+            Self::Color => "color",
+            Self::Date => "date",
+            Self::DateTimeLocal => "datetime-local",
+            Self::Email => "email",
+            Self::File => "file",
+            Self::Hidden => "hidden",
+            Self::Image => "image",
+            Self::Month => "month",
+            Self::Number => "number",
+            Self::Password => "password",
+            Self::Radio => "radio",
+            Self::Range => "range",
+            Self::Reset => "reset",
+            Self::Search => "search",
+            Self::Submit => "submit",
+            Self::Tel => "tel",
+            Self::Text => "text",
+            Self::Time => "time",
+            Self::Url => "url",
+            Self::Week => "week",
+        }
+    }
+}
+
 /// Single state for the field component machine.
 ///
 /// `Field` is effectively stateless. All meaningful changes are stored in
@@ -107,6 +214,9 @@ pub struct Props {
     /// Whether the field is invalid before error-driven state is applied.
     pub invalid: bool,
 
+    /// Initial or controlled field-level validation errors.
+    pub errors: Vec<Error>,
+
     /// The configured text direction for RTL-aware rendering.
     pub dir: Option<Direction>,
 }
@@ -158,6 +268,14 @@ impl Props {
         self
     }
 
+    /// Replaces [`errors`](Self::errors) with controlled field-level
+    /// validation errors.
+    #[must_use]
+    pub fn errors(mut self, errors: Vec<Error>) -> Self {
+        self.errors = errors;
+        self
+    }
+
     /// Sets [`dir`](Self::dir) — the configured text direction for
     /// RTL-aware rendering. Wraps the supplied value in [`Some`].
     #[must_use]
@@ -191,10 +309,10 @@ impl ars_core::Machine for Machine {
                 required: props.required,
                 disabled: props.disabled,
                 readonly: props.readonly,
-                invalid: props.invalid,
+                invalid: props.invalid || !props.errors.is_empty(),
                 validating: false,
                 dir: props.dir,
-                errors: Vec::new(),
+                errors: props.errors.clone(),
                 has_description: false,
                 ids: ComponentIds::from_id(&props.id),
             },
@@ -227,6 +345,14 @@ impl ars_core::Machine for Machine {
 
         if old.dir != new.dir {
             events.push(Event::SetDir(new.dir));
+        }
+
+        if old.errors != new.errors {
+            if new.errors.is_empty() {
+                events.push(Event::ClearErrors);
+            } else {
+                events.push(Event::SetErrors(new.errors.clone()));
+            }
         }
 
         events
@@ -373,6 +499,10 @@ impl<'a> Api<'a> {
             .set(HtmlAttr::Id, self.ctx.ids.id())
             .set(scope_attr, scope_val)
             .set(part_attr, part_val);
+
+        if self.ctx.invalid {
+            attrs.set_bool(HtmlAttr::Data("ars-invalid"), true);
+        }
 
         if let Some(dir) = self.ctx.dir {
             attrs.set(HtmlAttr::Dir, dir.as_html_attr());
@@ -579,6 +709,7 @@ mod tests {
             disabled: false,
             readonly: false,
             invalid: false,
+            errors: Vec::new(),
             dir: None,
         };
 
@@ -588,12 +719,13 @@ mod tests {
             disabled: true,
             readonly: true,
             invalid: true,
+            errors: vec![custom_error()],
             dir: Some(Direction::Rtl),
         };
 
         let events = <Machine as ars_core::Machine>::on_props_changed(&old, &new);
 
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 6);
         assert!(matches!(events[0], Event::SetDisabled(true)));
         assert!(matches!(events[1], Event::SetInvalid(true)));
         assert!(matches!(events[2], Event::SetReadonly(true)));
@@ -645,6 +777,7 @@ mod tests {
         let attrs = api.input_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Required)), Some("true"));
+        assert!(!attrs.contains(&HtmlAttr::Required));
     }
 
     #[test]
@@ -685,6 +818,7 @@ mod tests {
         let attrs = api.input_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Disabled)), Some("true"));
+        assert!(!attrs.contains(&HtmlAttr::Disabled));
     }
 
     #[test]
@@ -698,6 +832,7 @@ mod tests {
         let attrs = api.input_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ReadOnly)), Some("true"));
+        assert!(!attrs.contains(&HtmlAttr::ReadOnly));
     }
 
     #[test]

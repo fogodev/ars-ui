@@ -69,7 +69,9 @@ pub(super) async fn run_error_boundary_flow(driver: &WebDriver, url: &str) -> Re
 
     run_axe(driver).await?;
 
-    let alert = driver.find(By::Css("[role='alert']")).await?;
+    let alert = driver
+        .find(By::Css("[data-ars-scope='error-boundary'][role='alert']"))
+        .await?;
 
     assert_attr(&alert, "data-ars-scope", "error-boundary").await?;
     assert_attr(&alert, "data-ars-part", "root").await?;

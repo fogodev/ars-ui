@@ -18,7 +18,7 @@ use {ars_core::StrongSend, std::sync::Arc};
 
 use crate::{
     ephemeral::EphemeralRef,
-    provider::{resolve_locale, use_intl_backend, use_messages},
+    provider::{use_intl_backend, use_messages_and_locale},
     use_id,
 };
 
@@ -132,7 +132,7 @@ where
     /// immutable borrow on the `StoredValue`, preventing `send` (which calls
     /// `update_value`) from re-entering. Sending events from API snapshots would
     /// cause a re-entrant borrow panic.
-    pub fn with_api_snapshot<T>(&self, f: impl Fn(&M::Api<'_>) -> T) -> T {
+    pub fn with_api_snapshot<T>(&self, f: impl FnOnce(&M::Api<'_>) -> T) -> T {
         self.service.with_value(|svc| {
             let api = svc.connect(&|_e| {
                 #[cfg(debug_assertions)]
@@ -332,23 +332,23 @@ where
                 service.update_value(|svc| {
                     let send_result = svc.set_props(new_props.clone());
 
-                    if send_result.state_changed {
-                        state_write.set(svc.state().clone());
-                    }
-
-                    if send_result.context_changed {
-                        context_version_write.update(|version| *version += 1);
-                    }
-
+                    let state = send_result.state_changed.then(|| svc.state().clone());
                     let ctx = svc.context().clone();
-
                     let props = svc.props().clone();
 
-                    extracted = Some((send_result, ctx, props));
+                    extracted = Some((send_result, state, ctx, props));
                 });
 
-                let (send_result, ctx, props) =
+                let (send_result, state, ctx, props) =
                     extracted.expect("service update should extract send result");
+
+                if let Some(state) = state {
+                    state_write.set(state);
+                }
+
+                if send_result.context_changed {
+                    context_version_write.update(|version| *version += 1);
+                }
 
                 #[cfg(feature = "ssr")]
                 handle_effects::<M>(&send_result, &ctx, &props, send_ref, effect_cleanups);
@@ -428,11 +428,9 @@ where
         props
     };
 
-    let locale = resolve_locale(None);
-
     let intl_backend = use_intl_backend();
 
-    let messages = use_messages::<M::Messages>(None, Some(&locale));
+    let (messages, locale) = use_messages_and_locale::<M::Messages>(None, None).get_untracked();
 
     let env = Env::new(locale, intl_backend)
         .with_render_mode(current_render_mode(hydrated_state.is_some()));
@@ -476,22 +474,23 @@ where
         service.update_value(|s| {
             let send_result = s.send(event);
 
-            if send_result.state_changed {
-                state_write.set(s.state().clone());
-            }
-
-            if send_result.context_changed {
-                context_version_write.update(|version| *version += 1);
-            }
-
+            let state = send_result.state_changed.then(|| s.state().clone());
             let ctx = s.context().clone();
-
             let props = s.props().clone();
 
-            extracted = Some((send_result, ctx, props));
+            extracted = Some((send_result, state, ctx, props));
         });
 
-        let (send_result, ctx, props) = extracted.expect("service update should extract result");
+        let (send_result, state, ctx, props) =
+            extracted.expect("service update should extract result");
+
+        if let Some(state) = state {
+            state_write.set(state);
+        }
+
+        if send_result.context_changed {
+            context_version_write.update(|version| *version += 1);
+        }
 
         #[cfg(feature = "ssr")]
         handle_effects::<M>(&send_result, &ctx, &props, send_ref, effect_cleanups);

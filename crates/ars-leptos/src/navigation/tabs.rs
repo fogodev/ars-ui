@@ -51,7 +51,7 @@ use crate::{
     attrs::attr_map_to_leptos_inline_attrs,
     event_mapping::leptos_key_to_keyboard_key,
     id::use_id,
-    provider::{current_ars_context, use_locale, use_modality_context, use_platform_effects},
+    provider::{current_ars_context, t, use_locale, use_modality_context, use_platform_effects},
     use_machine::use_machine_with_reactive_props,
 };
 
@@ -70,7 +70,7 @@ pub enum TabLabel {
     Static(Oco<'static, str>),
 
     /// Dynamic label text resolved from provider state or other runtime inputs.
-    Dynamic(Arc<dyn Fn() -> String + Send + Sync>),
+    Dynamic(TextProp),
 }
 
 impl TabLabel {
@@ -86,12 +86,13 @@ impl TabLabel {
     where
         T: Translate + Send + Sync + 'static,
     {
-        let locale = use_locale();
-        let intl_backend = crate::provider::use_intl_backend();
+        Self::Dynamic(TextProp::from(t(message)))
+    }
 
-        Self::Dynamic(Arc::new(move || {
-            message.translate(&locale.get(), &*intl_backend)
-        }))
+    /// Builds a dynamic label from a Leptos string signal.
+    #[must_use]
+    pub fn dynamic(text: impl Into<TextProp>) -> Self {
+        Self::Dynamic(text.into())
     }
 
     /// Resolves the label text for the current provider locale.
@@ -99,14 +100,25 @@ impl TabLabel {
     pub fn resolve(&self) -> String {
         match self {
             Self::Static(text) => text.to_string(),
-            Self::Dynamic(text) => text(),
+            Self::Dynamic(text) => text.get().into_owned(),
+        }
+    }
+
+    /// Resolves the label text for diagnostics without evaluating dynamic text.
+    #[must_use]
+    pub fn debug_label(&self) -> String {
+        match self {
+            Self::Static(text) => text.to_string(),
+            Self::Dynamic(_) => String::from("<dynamic>"),
         }
     }
 }
 
 impl Debug for TabLabel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("TabLabel").field(&self.resolve()).finish()
+        f.debug_tuple("TabLabel")
+            .field(&self.debug_label())
+            .finish()
     }
 }
 
@@ -254,7 +266,7 @@ impl<K: TabKey> Debug for Tab<K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Tab")
             .field("key", &self.key.into_key())
-            .field("label_text", &self.label_text.resolve())
+            .field("label_text", &self.label_text.debug_label())
             .field("disabled", &self.disabled)
             .field("closable", &self.closable)
             .field("link", &self.link)
@@ -471,7 +483,7 @@ pub fn Tabs<K: TabKey>(
     /// list, triggers, panels) carry their own `data-ars-part` attrs for
     /// finer-grained styling.
     #[prop(optional, into)]
-    class: Option<Oco<'static, str>>,
+    class: Option<TextProp>,
 
     /// Optional adapter-user content rendered inside Root after panels.
     #[prop(optional)]
@@ -518,8 +530,7 @@ pub fn Tabs<K: TabKey>(
 
     let ever_selected = setup_lazy_mount_tracking(machine);
 
-    let class = class.map(Oco::into_owned);
-    let root_attrs = tabs_root_attrs(machine, class.as_deref());
+    let root_attrs = tabs_root_attrs(machine, class);
     let list_attrs = tabs_list_attrs(machine, tabs_field);
 
     #[cfg(not(feature = "ssr"))]
@@ -922,7 +933,7 @@ fn setup_lazy_mount_tracking(
 )]
 fn tabs_root_attrs(
     machine: crate::use_machine::UseMachineReturn<tabs::Machine>,
-    consumer_class: Option<&str>,
+    consumer_class: Option<TextProp>,
 ) -> Vec<crate::LeptosAttribute> {
     let mut attrs = machine.with_api_snapshot(|api| api.root_attrs());
 
@@ -947,7 +958,7 @@ fn tabs_root_attrs(
             AttrValue::reactive(move || orientation.get()),
         );
 
-    crate::merge_consumer_class_into(&mut attrs, consumer_class);
+    crate::merge_consumer_class_prop_into(&mut attrs, consumer_class);
 
     attr_map_to_leptos_inline_attrs(attrs)
 }

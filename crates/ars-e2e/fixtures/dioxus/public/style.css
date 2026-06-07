@@ -89,6 +89,49 @@ a[data-ars-scope="button"] {
     font-weight: 650;
 }
 
+.locale-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.fixture-form,
+.fixture-form [data-ars-scope="fieldset"][data-ars-part="content"] {
+    display: grid;
+    gap: 14px;
+}
+
+.fixture-form [data-ars-scope="field"][data-ars-part="root"] {
+    display: grid;
+    max-width: 420px;
+    gap: 6px;
+}
+
+.fixture-form [data-ars-scope="field"][data-ars-part="input"] {
+    min-height: 38px;
+    padding: 8px 10px;
+    border: 1px solid #94a3b8;
+    border-radius: 6px;
+    color: #0f172a;
+    font: inherit;
+}
+
+.fixture-form
+    [data-ars-scope="field"][data-ars-part="input"][aria-invalid="true"] {
+    border-color: #dc2626;
+    box-shadow: 0 0 0 1px #dc2626;
+}
+
+.fixture-form [data-ars-scope="field"][data-ars-part="error-message"],
+.fixture-form [data-ars-scope="fieldset"][data-ars-part="error-message"] {
+    color: #b91c1c;
+    font-weight: 650;
+}
+
+.fixture-form [data-ars-scope="form"][data-ars-part="status-region"] {
+    color: #047857;
+    font-weight: 650;
+}
+
 [data-ars-size="icon"] {
     inline-size: 44px;
     block-size: 44px;

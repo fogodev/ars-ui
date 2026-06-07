@@ -4,12 +4,9 @@
 //! to the native Leptos attribute representation spread onto elements.
 
 use ars_core::{AttrMap, AttrValue, CssProperty, StyleStrategy, styles_to_nonce_css};
+use leptos::prelude::*;
 #[cfg(not(feature = "ssr"))]
-use leptos::{
-    prelude::{Get, GetValue, SetValue, UpdateValue},
-    wasm_bindgen::JsCast,
-    web_sys,
-};
+use leptos::{wasm_bindgen::JsCast, web_sys};
 
 use crate::provider::{current_ars_context, warn_missing_provider};
 
@@ -113,42 +110,76 @@ pub fn attr_map_to_leptos_inline_attrs(map: AttrMap) -> Vec<LeptosAttribute> {
     attr_map_to_leptos(map, &StyleStrategy::Inline, None).attrs
 }
 
-/// Pre-merges a consumer-supplied `class` token string with whatever class
-/// the component already wrote into `map`.
+/// Pre-merges a reactive consumer class prop with any component class.
 ///
-/// Used by adapter components that expose an explicit `class` prop to let
-/// Tailwind / CSS-utility consumers add their own tokens onto the rendered
-/// root. The merge happens at the [`AttrMap`] layer so the final
-/// conversion emits a *single* `class="…"` attribute — Leptos's
-/// `attr:class="…"` pass-through emits a second `class=` attribute when an
-/// internal class is already present, and HTML5 duplicate-attribute rules
-/// then cause one of the two to be silently dropped by the browser.
-///
-/// Behavior:
-///
-/// - If both the component and the consumer supplied non-empty classes,
-///   the merged value is `"{component} {consumer}"`.
-/// - If only one side is non-empty, that side is kept.
-/// - Empty / whitespace-only consumer strings are ignored.
-pub fn merge_consumer_class_into(map: &mut AttrMap, consumer_class: Option<&str>) {
-    let Some(consumer) = consumer_class.map(str::trim).filter(|s| !s.is_empty()) else {
+/// This keeps component-owned classes in the same final `class` attribute while
+/// letting consumers pass Leptos signals, memos, translated strings, or static
+/// strings through [`TextProp`].
+pub fn merge_consumer_class_prop_into(map: &mut AttrMap, consumer_class: Option<TextProp>) {
+    let Some(consumer_class) = consumer_class else {
         return;
     };
 
-    let merged = map
-        .get(&ars_core::HtmlAttr::Class)
-        .filter(|existing| !existing.trim().is_empty())
-        .map_or_else(
-            || consumer.to_owned(),
-            |existing| format!("{existing} {consumer}"),
-        );
+    let component_class = map.take(&ars_core::HtmlAttr::Class);
 
-    map.set(ars_core::HtmlAttr::Class, merged);
+    map.set(
+        ars_core::HtmlAttr::Class,
+        AttrValue::reactive_optional(move || {
+            let consumer = consumer_class.get();
+            let consumer = consumer.trim();
+
+            let mut reactive_class = String::new();
+
+            let component = component_class
+                .as_ref()
+                .and_then(|class| match class {
+                    AttrValue::String(class) => Some(class.trim()),
+
+                    AttrValue::Reactive(class) => {
+                        reactive_class = class();
+                        Some(reactive_class.trim())
+                    }
+
+                    AttrValue::ReactiveOptional(maybe_class) => maybe_class().map(|s| {
+                        reactive_class = s;
+                        reactive_class.trim()
+                    }),
+
+                    AttrValue::Bool(_) | AttrValue::ReactiveBool(_) | AttrValue::None => None,
+                })
+                .unwrap_or_default();
+
+            match (component.is_empty(), consumer.is_empty()) {
+                (true, true) => None,
+                (true, false) => Some(consumer.to_owned()),
+                (false, true) => Some(component.to_owned()),
+                (false, false) => Some(format!("{component} {consumer}")),
+            }
+        }),
+    );
+}
+
+/// Converts a static or reactive consumer inline style prop to a Leptos attr.
+///
+/// Raw `style` is an escape hatch, but when a component exposes it the value
+/// should remain reactive in Leptos just like other user-facing string props.
+#[must_use]
+pub fn consumer_style_prop_to_leptos_attr(
+    consumer_style: Option<TextProp>,
+) -> Option<LeptosAttribute> {
+    let consumer_style = consumer_style?;
+
+    let closure = move || {
+        let style = consumer_style.get();
+        let style = style.trim();
+
+        (!style.is_empty()).then(|| style.to_owned())
+    };
+
+    Some(leptos::attr::custom::custom_attribute(String::from("style"), closure).into_any_attr())
 }
 
 fn attr_value_to_leptos_attr(name: String, value: AttrValue) -> Option<LeptosAttribute> {
-    use leptos::tachys::html::attribute::any_attribute::IntoAnyAttribute as _;
-
     match value {
         AttrValue::String(text) => {
             Some(leptos::attr::custom::custom_attribute(name, text).into_any_attr())
@@ -157,13 +188,11 @@ fn attr_value_to_leptos_attr(name: String, value: AttrValue) -> Option<LeptosAtt
         AttrValue::Bool(true) => Some(string_attr(name, String::new())),
 
         AttrValue::Reactive(f) => {
-            // tachys's `AttributeValue for F where F: ReactiveFunction`
-            // wraps the closure in a `RenderEffect`, so the rendered
-            // attribute updates whenever the signals read inside the
-            // closure change.
-            let closure = move || f();
+            Some(leptos::attr::custom::custom_attribute(name, f).into_any_attr())
+        }
 
-            Some(leptos::attr::custom::custom_attribute(name, closure).into_any_attr())
+        AttrValue::ReactiveOptional(f) => {
+            Some(leptos::attr::custom::custom_attribute(name, f).into_any_attr())
         }
 
         AttrValue::ReactiveBool(f) => {
@@ -190,8 +219,6 @@ fn attr_value_to_leptos_attr(name: String, value: AttrValue) -> Option<LeptosAtt
 
 /// Builds one literal custom Leptos attribute.
 pub(crate) fn string_attr(name: String, value: String) -> LeptosAttribute {
-    use leptos::tachys::html::attribute::any_attribute::IntoAnyAttribute as _;
-
     leptos::attr::custom::custom_attribute(name, value).into_any_attr()
 }
 
@@ -258,10 +285,8 @@ pub fn apply_styles_cssom(el: &web_sys::HtmlElement, styles: &[(CssProperty, Str
 /// syncs are also removed from the DOM element. Cleanup clears every property
 /// owned by the handle. Use [`use_cssom_styles`] when the style list is reactive.
 #[cfg(not(feature = "ssr"))]
-pub fn use_cssom_styles_from_attrs<E>(
-    target: leptos::prelude::NodeRef<E>,
-    result: &LeptosAttrResult,
-) where
+pub fn use_cssom_styles_from_attrs<E>(target: NodeRef<E>, result: &LeptosAttrResult)
+where
     E: leptos::tachys::html::element::ElementType,
     E::Output: JsCast + Clone + 'static,
 {
@@ -277,16 +302,16 @@ pub fn use_cssom_styles_from_attrs<E>(
 /// removed, and styles are cleared from the previous target when the node ref
 /// points at a different element.
 #[cfg(not(feature = "ssr"))]
-pub fn use_cssom_styles<E, F>(target: leptos::prelude::NodeRef<E>, styles: F)
+pub fn use_cssom_styles<E, F>(target: NodeRef<E>, styles: F)
 where
     E: leptos::tachys::html::element::ElementType,
     E::Output: JsCast + Clone + 'static,
     F: Fn() -> Vec<(CssProperty, String)> + 'static,
 {
-    let handle = leptos::prelude::StoredValue::new_local(CssomStyleHandle::new());
-    let applied_element = leptos::prelude::StoredValue::new_local(None);
+    let handle = StoredValue::new_local(CssomStyleHandle::new());
+    let applied_element = StoredValue::new_local(None);
 
-    leptos::prelude::Effect::new(move |_| {
+    Effect::new(move |_| {
         let styles = styles();
 
         let element = target.get().map(JsCast::unchecked_into);
@@ -306,7 +331,7 @@ where
         applied_element.set_value(Some(element));
     });
 
-    leptos::prelude::on_cleanup(move || {
+    on_cleanup(move || {
         if let Some(element) = applied_element.get_value() {
             handle.update_value(|handle| handle.clear(&element));
         }
@@ -589,7 +614,8 @@ mod wasm_tests {
     use leptos::prelude::NodeRefAttribute;
     use leptos::{
         either::Either,
-        prelude::{AddAnyAttr, Get, GlobalAttributes, Owner, Set},
+        mount::mount_to,
+        prelude::{AddAnyAttr, Get, GlobalAttributes, NodeRef, Owner, Set, signal},
     };
     use wasm_bindgen::JsCast;
     use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -643,7 +669,7 @@ mod wasm_tests {
             let inline_attrs = inline.attrs;
             let nonce_attrs = nonce.attrs;
 
-            let mount_handle = leptos::mount::mount_to(parent.clone(), move || {
+            let mount_handle = mount_to(parent.clone(), move || {
                 leptos::view! {
                     <div id="inline-target" {..inline_attrs}></div>
                     <div id="nonce-target" {..nonce_attrs}></div>
@@ -713,8 +739,8 @@ mod wasm_tests {
                 .dyn_into::<web_sys::HtmlElement>()
                 .expect("created div should be an HtmlElement");
 
-            let (label, set_label) = leptos::prelude::signal(String::from("first"));
-            let (disabled, set_disabled) = leptos::prelude::signal(false);
+            let (label, set_label) = signal(String::from("first"));
+            let (disabled, set_disabled) = signal(false);
 
             let mut map = AttrMap::new();
 
@@ -729,7 +755,7 @@ mod wasm_tests {
 
             let attrs = attr_map_to_leptos(map, &StyleStrategy::Inline, None).attrs;
 
-            let mount_handle = leptos::mount::mount_to(parent.clone(), move || {
+            let mount_handle = mount_to(parent.clone(), move || {
                 leptos::view! { <button id="reactive-attrs" {..attrs}></button> }
             });
 
@@ -923,8 +949,8 @@ mod wasm_tests {
 
             let result = attr_map_to_leptos(map, &StyleStrategy::Cssom, None);
 
-            let mount_handle = leptos::mount::mount_to(parent.clone(), move || {
-                let target = leptos::prelude::NodeRef::<leptos::html::Div>::new();
+            let mount_handle = mount_to(parent.clone(), move || {
+                let target = NodeRef::<leptos::html::Div>::new();
 
                 use_cssom_styles_from_attrs(target, &result);
 
@@ -984,10 +1010,10 @@ mod wasm_tests {
                 .dyn_into::<web_sys::HtmlElement>()
                 .expect("created div should be an HtmlElement");
 
-            let (show_second, set_second) = leptos::prelude::signal(false);
+            let (show_second, set_second) = signal(false);
 
-            let mount_handle = leptos::mount::mount_to(parent.clone(), move || {
-                let target = leptos::prelude::NodeRef::<leptos::html::Div>::new();
+            let mount_handle = mount_to(parent.clone(), move || {
+                let target = NodeRef::<leptos::html::Div>::new();
 
                 use_cssom_styles(target, || vec![(CssProperty::Width, String::from("120px"))]);
 
@@ -1062,8 +1088,8 @@ mod wasm_tests {
                 .dyn_into::<web_sys::HtmlElement>()
                 .expect("created div should be an HtmlElement");
 
-            leptos::mount::mount_to(parent, move || {
-                let target = leptos::prelude::NodeRef::<leptos::html::Div>::new();
+            mount_to(parent, move || {
+                let target = NodeRef::<leptos::html::Div>::new();
 
                 use_cssom_styles(target, || vec![(CssProperty::Width, String::from("120px"))]);
 

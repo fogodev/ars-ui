@@ -1,20 +1,4 @@
-use ars_dioxus::{
-    MessageFn,
-    prelude::{Orientation, Translate, t},
-    utility::{
-        button::{self, Button, ButtonAsChild},
-        client_only::ClientOnly,
-        dismissable,
-        error_boundary::{Boundary, CapturedError},
-        heading::{self, Heading, HeadingLevelProvider, Section},
-        highlight::Highlight,
-        landmark::{self, Landmark},
-        separator::{Separator, SeparatorAsChild},
-        visually_hidden::{VisuallyHidden, VisuallyHiddenAsChild},
-        z_index_allocator::{Context as ZIndexContext, ZIndexAllocatorProvider},
-    },
-};
-use dioxus::prelude::*;
+use ars_dioxus::prelude::*;
 
 #[derive(Clone, Debug, Translate, PartialEq)]
 #[translate(fallback = "en-US")]
@@ -90,6 +74,48 @@ pub(crate) enum UtilityText {
 
     #[translate(en_US = "Reset", pt_BR = "Redefinir")]
     Reset,
+
+    #[translate(en_US = "Submit", pt_BR = "Enviar")]
+    Submit,
+
+    #[translate(en_US = "Field and form", pt_BR = "Campo e formulário")]
+    FieldForm,
+
+    #[translate(
+        en_US = "React Aria-style form fields with labels, helper text, and validation.",
+        pt_BR = "Campos de formulário no estilo React Aria com rótulos, texto de ajuda e validação."
+    )]
+    FieldFormDescription,
+
+    #[translate(en_US = "Account details", pt_BR = "Detalhes da conta")]
+    AccountDetails,
+
+    #[translate(
+        en_US = "Required fields are announced from their labels and descriptions.",
+        pt_BR = "Campos obrigatórios são anunciados a partir de seus rótulos e descrições."
+    )]
+    RequiredFieldsDescription,
+
+    #[translate(en_US = "Name", pt_BR = "Nome")]
+    NameLabel,
+
+    #[translate(en_US = "Enter your full name", pt_BR = "Digite seu nome completo")]
+    NamePlaceholder,
+
+    #[translate(en_US = "Email", pt_BR = "E-mail")]
+    EmailLabel,
+
+    #[translate(
+        en_US = "Use a reachable address.",
+        pt_BR = "Use um endereço acessível."
+    )]
+    EmailDescription,
+
+    #[translate(en_US = "Enter your email", pt_BR = "Digite seu e-mail")]
+    EmailPlaceholder,
+
+    #[translate(en_US = "Ready to submit", pt_BR = "Pronto para enviar")]
+    ReadyToSubmit,
 
     #[translate(en_US = "Visually hidden", pt_BR = "Visualmente oculto")]
     VisuallyHidden,
@@ -361,7 +387,7 @@ pub(crate) enum UtilityText {
 
 #[component]
 fn ExampleErrorChild() -> Element {
-    Err(CapturedError::from_display(t(UtilityText::ExampleChildError)).into())
+    Err(error_boundary::CapturedError::from_display(t(UtilityText::ExampleChildError)).into())
 }
 
 #[component]
@@ -390,6 +416,7 @@ pub(crate) fn UtilityPanel() -> Element {
 
     let dismiss_props = dismissable::Props::new().on_dismiss(move |reason| {
         let mut dismiss_status = dismiss_status;
+
         dismiss_status.set(UtilityText::DismissReason {
             reason: format!("{reason:?}"),
         });
@@ -516,6 +543,57 @@ pub(crate) fn UtilityPanel() -> Element {
                     }
                 }
             }
+            section { class: "showcase-panel", "aria-labelledby": "field-form",
+                div { class: "panel-heading",
+                    h2 { id: "field-form", {t(UtilityText::FieldForm)} }
+                    p { class: "panel-note", {t(UtilityText::FieldFormDescription)} }
+                }
+                Form {
+                    id: "dioxus-css-field-form-demo",
+                    action: "/account",
+                    class: "field-form-demo",
+                    on_submit: move |()| {},
+                    Fieldset { id: "dioxus-css-fieldset-demo",
+                        fieldset::Legend { {t(UtilityText::AccountDetails)} }
+                        fieldset::Description { {t(UtilityText::RequiredFieldsDescription)} }
+                        fieldset::Content {
+                            Field {
+                                id: "dioxus-css-name-field",
+                                required: true,
+                                class: "field-form-field",
+                                field::Label { {t(UtilityText::NameLabel)} }
+                                field::Input {
+                                    class: "field-form-input",
+                                    name: "name",
+                                    placeholder: t(UtilityText::NamePlaceholder),
+                                }
+                            }
+                            Field {
+                                id: "dioxus-css-email-field",
+                                name: "email",
+                                required: true,
+                                class: "field-form-field",
+                                field::Label { {t(UtilityText::EmailLabel)} }
+                                field::Description { {t(UtilityText::EmailDescription)} }
+                                field::Input {
+                                    class: "field-form-input",
+                                    r#type: field::InputType::Email,
+                                    name: "email",
+                                    placeholder: t(UtilityText::EmailPlaceholder),
+                                }
+                            }
+                        }
+                    }
+                    div { class: "button-row",
+                        Button { r#type: button::Type::Submit, {t(UtilityText::Submit)} }
+                        Button {
+                            r#type: button::Type::Reset,
+                            variant: button::Variant::Secondary,
+                            {t(UtilityText::Reset)}
+                        }
+                    }
+                }
+            }
             section { class: "showcase-panel", "aria-labelledby": "visually-hidden",
                 div { class: "panel-heading",
                     h2 { id: "visually-hidden", {t(UtilityText::VisuallyHidden)} }
@@ -607,10 +685,10 @@ pub(crate) fn UtilityPanel() -> Element {
                     p { class: "panel-note", {t(UtilityText::ErrorBoundaryNote)} }
                 }
                 div { class: "error-grid",
-                    Boundary {
+                    ErrorBoundary {
                         p { class: "healthy-boundary", {t(UtilityText::HealthyChild)} }
                     }
-                    Boundary { ExampleErrorChild {} }
+                    ErrorBoundary { ExampleErrorChild {} }
                 }
             }
             section {
@@ -663,7 +741,7 @@ pub(crate) fn UtilityPanel() -> Element {
                         style: "font-size: 1.875rem; font-weight: 700; line-height: 1.25; margin: 0.4rem 0;",
                         {t(UtilityText::HeadingProvider)}
                     }
-                    Section {
+                    heading::Section {
                         Heading {
                             id: "dioxus-css-heading-section",
                             style: "font-size: 1.5rem; font-weight: 700; line-height: 1.3; margin: 0.4rem 0;",

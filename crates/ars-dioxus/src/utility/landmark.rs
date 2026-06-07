@@ -10,7 +10,7 @@ use ars_core::{AttrValue, Env, HtmlAttr, Locale};
 use dioxus::prelude::*;
 
 use crate::{
-    as_child::merge_dioxus_attrs, attr_map_to_dioxus_inline_attrs, resolve_locale, use_messages,
+    as_child::merge_dioxus_attrs, attr_map_to_dioxus_inline_attrs, use_messages_and_locale,
 };
 
 /// Props for the Dioxus [`Landmark`] component.
@@ -74,10 +74,8 @@ pub fn Landmark(props: LandmarkProps) -> Element {
         core_props = core_props.labelledby_id(labelledby);
     }
 
-    let resolved_locale = resolve_locale(props.locale.as_ref());
-
-    let resolved_messages =
-        use_messages::<Messages>(props.messages.as_ref(), Some(&resolved_locale));
+    let (resolved_messages, resolved_locale) =
+        use_messages_and_locale::<Messages>(props.messages, props.locale);
 
     let env = Env {
         locale: resolved_locale,

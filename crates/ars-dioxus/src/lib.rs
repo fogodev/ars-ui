@@ -47,7 +47,7 @@ pub use attrs::{
 pub use attrs::{
     DioxusAttrResult, attr_map_to_dioxus, attr_map_to_dioxus_inline_attrs, use_style_strategy,
 };
-pub use callbacks::{emit, emit_map};
+pub use callbacks::{call, emit, emit_map};
 pub use dioxus_stores;
 pub use ephemeral::EphemeralRef;
 pub use event_mapping::dioxus_key_to_keyboard_key;
@@ -77,8 +77,8 @@ pub use platform::{
 };
 pub use provider::{
     ArsContext, ArsProvider, ArsProviderProps, Translatable, resolve_locale, t, use_direction,
-    use_intl_backend, use_locale, use_messages, use_modality_context, use_number_formatter,
-    use_platform_effects, warn_missing_provider,
+    use_intl_backend, use_locale, use_messages_and_locale, use_modality_context,
+    use_number_formatter, use_platform_effects, warn_missing_provider,
 };
 #[cfg(feature = "web")]
 pub use safe_listener::{

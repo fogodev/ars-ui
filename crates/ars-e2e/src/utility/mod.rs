@@ -24,6 +24,9 @@ pub mod dismissable;
 /// Browser E2E harness for ErrorBoundary.
 pub mod error_boundary;
 
+/// Browser E2E harness for Field, Fieldset, and Form.
+pub mod field_form;
+
 /// Browser E2E harness for Heading.
 pub mod heading;
 
@@ -90,6 +93,7 @@ pub async fn run(options: Options) -> Result<(), Error> {
         client_only::run_client_only_flow(&session.driver, &session.url, adapter).await?;
         z_index_allocator::run_z_index_allocator_flow(&session.driver, &session.url, adapter)
             .await?;
+        field_form::run_field_form_flow(&session.driver, &session.url, adapter).await?;
         dismissable::run_dismissable_flow(&session.driver, &session.url).await?;
         error_boundary::run_error_boundary_flow(&session.driver, &session.url).await
     }

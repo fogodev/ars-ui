@@ -23,7 +23,7 @@ pub struct GridListProps {
     pub id: Option<String>,
     pub items: StaticCollection<grid_list::ItemDef>,
     pub columns: usize,
-    #[props(optional)]
+    #[props(optional, into)]
     pub selected_keys: Option<Signal<selection::Set>>,
     #[props(optional)]
     pub selection_mode: Option<selection::Mode>,
@@ -31,7 +31,7 @@ pub struct GridListProps {
     pub selection_behavior: Option<selection::Behavior>,
     #[props(default = false)]
     pub disabled: bool,
-    #[props(optional)]
+    #[props(optional, into)]
     pub disabled_keys: Option<BTreeSet<Key>>,
     #[props(default = false)]
     pub composite: bool,
@@ -39,9 +39,9 @@ pub struct GridListProps {
     pub loading: bool,
     #[props(default = false)]
     pub dnd_enabled: bool,
-    #[props(optional)]
-    pub on_load_more: Option<EventHandler<()>>,
-    #[props(optional)]
+    #[props(optional, into)]
+    pub on_load_more: Option<EventHandler>,
+    #[props(optional, into)]
     pub on_action: Option<EventHandler<Key>>,
     pub render_item: GridListRenderItem,
     pub empty_state: Element,

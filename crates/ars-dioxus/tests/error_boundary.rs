@@ -1,4 +1,4 @@
-//! Unit tests for `error_boundary::Boundary` (issue #197).
+//! Unit tests for `error_boundary::ErrorBoundary` (issue #197).
 //!
 //! Exercises `spec/components/utility/error-boundary.md` and the
 //! Dioxus-specific contract at `spec/dioxus-components/utility/error-boundary.md`:
@@ -23,7 +23,7 @@ use ars_core::{
 };
 use ars_dioxus::{
     ArsContext, NullPlatform,
-    utility::error_boundary::{self, Boundary, default_fallback},
+    utility::error_boundary::{self, ErrorBoundary, default_fallback},
 };
 use ars_i18n::{Direction, Locale, StubIntlBackend};
 use dioxus::{CapturedError, dioxus_core::NoOpMutations, prelude::*};
@@ -60,7 +60,7 @@ fn ThrowingChild() -> Element {
 fn renders_children_when_no_error() {
     fn app() -> Element {
         rsx! {
-            Boundary {
+            ErrorBoundary {
                 p { "child-ok" }
             }
         }
@@ -79,7 +79,7 @@ fn renders_children_when_no_error() {
 fn renders_canonical_fallback_attrs_when_child_errors() {
     fn app() -> Element {
         rsx! {
-            Boundary { ThrowingChild {} }
+            ErrorBoundary { ThrowingChild {} }
         }
     }
 
@@ -119,7 +119,7 @@ fn renders_canonical_fallback_attrs_when_child_errors() {
 fn fallback_includes_default_message_and_error_text() {
     fn app() -> Element {
         rsx! {
-            Boundary { ThrowingChild {} }
+            ErrorBoundary { ThrowingChild {} }
         }
     }
 
@@ -144,7 +144,7 @@ fn fallback_includes_default_message_and_error_text() {
 fn fallback_wraps_errors_in_unordered_list() {
     fn app() -> Element {
         rsx! {
-            Boundary { ThrowingChild {} }
+            ErrorBoundary { ThrowingChild {} }
         }
     }
 
@@ -163,7 +163,7 @@ fn boundary_does_not_propagate_error_past_wrapper() {
     fn app() -> Element {
         rsx! {
             div { "data-outside": "1",
-                Boundary { ThrowingChild {} }
+                ErrorBoundary { ThrowingChild {} }
                 p { "after-boundary" }
             }
         }
@@ -196,7 +196,7 @@ fn on_error_telemetry_fires_with_captured_error() {
         });
 
         rsx! {
-            Boundary { on_error: EventHandler::new(move |err: CapturedError| on_error.call(err)),
+            ErrorBoundary { on_error: EventHandler::new(move |err: CapturedError| on_error.call(err)),
                 ThrowingChild {}
             }
         }
@@ -224,7 +224,7 @@ fn custom_fallback_replaces_default_markup() {
         });
 
         rsx! {
-            Boundary { fallback, ThrowingChild {} }
+            ErrorBoundary { fallback, ThrowingChild {} }
         }
     }
 
@@ -246,7 +246,7 @@ fn default_fallback_helper_emits_canonical_markup() {
     // `dioxus_core::ErrorBoundary` when they do not want the wrapper.
     fn app() -> Element {
         rsx! {
-            ErrorBoundary { handle_error: default_fallback, ThrowingChild {} }
+            dioxus::prelude::ErrorBoundary { handle_error: default_fallback, ThrowingChild {} }
         }
     }
 
@@ -264,7 +264,7 @@ fn custom_messages_override_default_heading() {
         };
 
         rsx! {
-            Boundary { messages, ThrowingChild {} }
+            ErrorBoundary { messages, ThrowingChild {} }
         }
     }
 
@@ -285,12 +285,12 @@ fn explicit_locale_prop_is_passed_to_messages_override() {
     fn app() -> Element {
         let messages = error_boundary::Messages {
             message: MessageFn::new(|locale: &Locale| {
-                format!("Boundary heading for {}", locale.to_bcp47())
+                format!("ErrorBoundary heading for {}", locale.to_bcp47())
             }),
         };
 
         rsx! {
-            Boundary {
+            ErrorBoundary {
                 messages,
                 locale: Locale::parse("pt-BR").expect("locale should parse"),
                 ThrowingChild {}
@@ -301,7 +301,7 @@ fn explicit_locale_prop_is_passed_to_messages_override() {
     let html = render_app(app);
 
     assert!(
-        html.contains("Boundary heading for pt-BR"),
+        html.contains("ErrorBoundary heading for pt-BR"),
         "explicit locale prop was not passed to the messages override: {html}"
     );
 }
@@ -352,7 +352,7 @@ fn fallback_attrs_are_invariant_under_rtl_locale() {
         use_context_provider(|| ctx);
 
         rsx! {
-            Boundary { ThrowingChild {} }
+            ErrorBoundary { ThrowingChild {} }
         }
     }
 
@@ -381,7 +381,7 @@ fn fallback_attrs_are_invariant_under_rtl_locale() {
         use_context_provider(|| ctx);
 
         rsx! {
-            Boundary { ThrowingChild {} }
+            ErrorBoundary { ThrowingChild {} }
         }
     }
 
@@ -473,7 +473,7 @@ fn public_types_have_non_empty_debug_impls() {
 fn fallback_render_is_deterministic_across_two_virtualdom_instances() {
     fn app() -> Element {
         rsx! {
-            Boundary { ThrowingChild {} }
+            ErrorBoundary { ThrowingChild {} }
         }
     }
 
@@ -513,7 +513,7 @@ fn fallback_render_is_deterministic_across_two_virtualdom_instances() {
 fn fallback_satisfies_wai_aria_alert_region_contract() {
     fn app() -> Element {
         rsx! {
-            Boundary { ThrowingChild {} }
+            ErrorBoundary { ThrowingChild {} }
         }
     }
 
@@ -623,7 +623,7 @@ fn custom_fallback_clear_errors_restores_children_when_retry_succeeds() {
         });
 
         rsx! {
-            Boundary { fallback, ThrowsOnce {} }
+            ErrorBoundary { fallback, ThrowsOnce {} }
         }
     }
 
@@ -644,7 +644,7 @@ fn custom_fallback_clear_errors_restores_children_when_retry_succeeds() {
 }
 
 /// Verifies that flipping the surrounding `ArsContext.locale` signal
-/// causes `Boundary` to re-resolve `Messages` from the registry on the
+/// causes `ErrorBoundary` to re-resolve `Messages` from the registry on the
 /// next render.
 ///
 /// We can't observe live signal-driven re-rendering in `dioxus-ssr`
@@ -699,7 +699,7 @@ fn locale_change_in_provider_re_resolves_registered_messages() {
         use_context_provider(|| build_ctx(Locale::parse("en-US").expect("locale")));
 
         rsx! {
-            Boundary { ThrowingChild {} }
+            ErrorBoundary { ThrowingChild {} }
         }
     }
 
@@ -707,7 +707,7 @@ fn locale_change_in_provider_re_resolves_registered_messages() {
         use_context_provider(|| build_ctx(Locale::parse("es-MX").expect("locale")));
 
         rsx! {
-            Boundary { ThrowingChild {} }
+            ErrorBoundary { ThrowingChild {} }
         }
     }
 
@@ -783,7 +783,7 @@ fn explicit_messages_prop_wins_over_provider_registry() {
         };
 
         rsx! {
-            Boundary { messages: direct, ThrowingChild {} }
+            ErrorBoundary { messages: direct, ThrowingChild {} }
         }
     }
 
@@ -811,7 +811,7 @@ fn explicit_messages_prop_wins_over_provider_registry() {
 /// 3. `Messages::default()` fallback
 ///
 /// This test exercises path 2 — registering a Spanish bundle in the
-/// provider context and confirming `Boundary` renders the localized
+/// provider context and confirming `ErrorBoundary` renders the localized
 /// heading without the consumer passing `messages` directly.
 #[test]
 fn provider_registry_messages_drive_heading_when_no_prop_override() {
@@ -847,7 +847,7 @@ fn provider_registry_messages_drive_heading_when_no_prop_override() {
         use_context_provider(|| ctx);
 
         rsx! {
-            Boundary { ThrowingChild {} }
+            ErrorBoundary { ThrowingChild {} }
         }
     }
 
@@ -898,7 +898,7 @@ fn explicit_locale_prop_selects_provider_registry_bundle() {
         use_context_provider(|| ctx);
 
         rsx! {
-            Boundary { locale: Locale::parse("es-MX").expect("locale should parse"), ThrowingChild {} }
+            ErrorBoundary { locale: Locale::parse("es-MX").expect("locale should parse"), ThrowingChild {} }
         }
     }
 
@@ -977,7 +977,7 @@ fn error_message_text_is_html_escaped_in_fallback_list() {
 
     fn app() -> Element {
         rsx! {
-            Boundary { ScriptyChild {} }
+            ErrorBoundary { ScriptyChild {} }
         }
     }
 
@@ -1013,7 +1013,7 @@ fn non_ascii_error_text_is_preserved_through_render() {
 
     fn app() -> Element {
         rsx! {
-            Boundary { JapaneseErrorChild {} }
+            ErrorBoundary { JapaneseErrorChild {} }
         }
     }
 
@@ -1038,7 +1038,7 @@ fn non_ascii_error_text_is_preserved_through_render() {
 fn error_boundary_html_snapshot_happy_path() {
     fn app() -> Element {
         rsx! {
-            Boundary {
+            ErrorBoundary {
                 p { "child-ok" }
             }
         }
@@ -1053,15 +1053,15 @@ fn error_boundary_html_snapshot_happy_path() {
 fn error_boundary_html_snapshot_error_path() {
     fn app() -> Element {
         rsx! {
-            Boundary { ThrowingChild {} }
+            ErrorBoundary { ThrowingChild {} }
         }
     }
 
     insta::assert_snapshot!("dioxus_error_boundary_error_path", render_app(app));
 }
 
-/// Nested-Boundary contract: when an inner `Boundary` catches an error,
-/// the outer `Boundary` stays idle (no fallback markup, children render
+/// Nested-ErrorBoundary contract: when an inner `ErrorBoundary` catches an error,
+/// the outer `ErrorBoundary` stays idle (no fallback markup, children render
 /// normally). This guards against an aria-live double-announcement that
 /// would arise if both boundaries fired their fallbacks for the same
 /// caught error.
@@ -1069,9 +1069,9 @@ fn error_boundary_html_snapshot_error_path() {
 fn inner_boundary_catches_outer_stays_idle() {
     fn app() -> Element {
         rsx! {
-            Boundary {
+            ErrorBoundary {
                 p { "outer-sibling" }
-                Boundary { ThrowingChild {} }
+                ErrorBoundary { ThrowingChild {} }
             }
         }
     }
@@ -1080,7 +1080,7 @@ fn inner_boundary_catches_outer_stays_idle() {
 
     assert!(
         html.contains("outer-sibling"),
-        "outer Boundary's non-erroring sibling should render: {html}"
+        "outer ErrorBoundary's non-erroring sibling should render: {html}"
     );
 
     // Exactly one fallback: only the inner boundary triggered.
@@ -1088,7 +1088,7 @@ fn inner_boundary_catches_outer_stays_idle() {
 
     assert_eq!(
         fallback_opens, 1,
-        "inner Boundary should swallow the error; outer should stay idle. \
+        "inner ErrorBoundary should swallow the error; outer should stay idle. \
          Saw {fallback_opens} fallback container(s) in: {html}"
     );
 

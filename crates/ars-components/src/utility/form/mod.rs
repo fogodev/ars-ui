@@ -16,6 +16,7 @@ use ars_core::{
     AriaAttr, AttrMap, ComponentIds, ComponentPart, ConnectApi, Env, HtmlAttr, TransitionPlan,
     sanitize_url,
 };
+use ars_forms::validation::Error;
 
 /// Controls how validation errors are reported to the user.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -62,14 +63,14 @@ pub enum Event {
     /// Triggered when the form is reset.
     ///
     /// Reset returns the machine to the idle state and re-synchronizes
-    /// declarative server errors from [`Props::validation_errors`].
+    /// declarative validation errors from [`Props::validation_errors`].
     Reset,
 
-    /// Replaces server-side validation errors keyed by field name.
-    SetServerErrors(BTreeMap<String, Vec<String>>),
+    /// Replaces validation errors keyed by field name.
+    SetValidationErrors(BTreeMap<String, Vec<Error>>),
 
-    /// Clears all server-side validation errors.
-    ClearServerErrors,
+    /// Clears all validation errors.
+    ClearValidationErrors,
 
     /// Synchronizes validation behavior from props.
     SetValidationBehavior(ValidationBehavior),
@@ -87,8 +88,8 @@ pub struct Context {
     /// Whether the form is currently submitting.
     pub is_submitting: bool,
 
-    /// Server-side validation errors keyed by field name.
-    pub server_errors: BTreeMap<String, Vec<String>>,
+    /// Validation errors keyed by field name.
+    pub validation_errors: BTreeMap<String, Vec<Error>>,
 
     /// Status message shown in the live region.
     pub status_message: Option<String>,
@@ -112,11 +113,14 @@ pub struct Props {
     /// How validation errors are reported.
     pub validation_behavior: ValidationBehavior,
 
-    /// Declarative server-side validation errors keyed by field name.
+    /// Declarative validation errors keyed by field name.
     ///
-    /// Reset rehydrates [`Context::server_errors`] from this prop so controlled
+    /// Reset rehydrates [`Context::validation_errors`] from this prop so controlled
     /// error state remains deterministic across local resets.
-    pub validation_errors: BTreeMap<String, Vec<String>>,
+    pub validation_errors: BTreeMap<String, Vec<Error>>,
+
+    /// Controlled status message shown in the status live region.
+    pub status_message: Option<String>,
 
     /// The URL to submit the form to.
     pub action: Option<String>,
@@ -154,11 +158,28 @@ impl Props {
     }
 
     /// Replaces [`validation_errors`](Self::validation_errors) with the
-    /// supplied map of declarative server-side validation errors keyed
+    /// supplied map of declarative validation errors keyed
     /// by field name.
     #[must_use]
-    pub fn validation_errors(mut self, errors: BTreeMap<String, Vec<String>>) -> Self {
+    pub fn validation_errors(mut self, errors: BTreeMap<String, Vec<Error>>) -> Self {
         self.validation_errors = errors;
+        self
+    }
+
+    /// Sets [`status_message`](Self::status_message) — the controlled
+    /// status text shown in the form status live region. Wraps the
+    /// supplied value in [`Some`].
+    #[must_use]
+    pub fn status_message(mut self, status_message: impl Into<String>) -> Self {
+        self.status_message = Some(status_message.into());
+        self
+    }
+
+    /// Replaces [`status_message`](Self::status_message) with an
+    /// optional controlled status value.
+    #[must_use]
+    pub fn maybe_status_message(mut self, status_message: Option<String>) -> Self {
+        self.status_message = status_message;
         self
     }
 
@@ -205,8 +226,8 @@ impl ars_core::Machine for Machine {
             Context {
                 validation_behavior: props.validation_behavior,
                 is_submitting: false,
-                server_errors: props.validation_errors.clone(),
-                status_message: None,
+                validation_errors: props.validation_errors.clone(),
+                status_message: props.status_message.clone(),
                 last_submit_succeeded: None,
                 ids: ComponentIds::from_id(&props.id),
             },
@@ -227,10 +248,14 @@ impl ars_core::Machine for Machine {
 
         if old.validation_errors != new.validation_errors {
             if new.validation_errors.is_empty() {
-                events.push(Event::ClearServerErrors);
+                events.push(Event::ClearValidationErrors);
             } else {
-                events.push(Event::SetServerErrors(new.validation_errors.clone()));
+                events.push(Event::SetValidationErrors(new.validation_errors.clone()));
             }
+        }
+
+        if old.status_message != new.status_message {
+            events.push(Event::SetStatusMessage(new.status_message.clone()));
         }
 
         events
@@ -243,20 +268,24 @@ impl ars_core::Machine for Machine {
         props: &Self::Props,
     ) -> Option<TransitionPlan<Self>> {
         match (state, event) {
-            (State::Idle, Event::Submit) => Some(TransitionPlan::to(State::Submitting).apply(
-                |ctx: &mut Context| {
-                    ctx.is_submitting = true;
-                    ctx.status_message = None;
-                },
-            )),
+            (State::Idle, Event::Submit) => {
+                let status_message = props.status_message.clone();
+                Some(
+                    TransitionPlan::to(State::Submitting).apply(move |ctx: &mut Context| {
+                        ctx.is_submitting = true;
+                        ctx.status_message = status_message;
+                    }),
+                )
+            }
 
             (State::Submitting, Event::SubmitComplete { success }) => {
                 let success = *success;
+                let status_message = props.status_message.clone();
                 Some(
                     TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
                         ctx.is_submitting = false;
                         ctx.last_submit_succeeded = Some(success);
-                        ctx.status_message = None;
+                        ctx.status_message = status_message;
                     }),
                 )
             }
@@ -264,27 +293,28 @@ impl ars_core::Machine for Machine {
             (_, Event::Reset) => {
                 let behavior = props.validation_behavior;
                 let validation_errors = props.validation_errors.clone();
+                let status_message = props.status_message.clone();
                 Some(
                     TransitionPlan::to(State::Idle).apply(move |ctx: &mut Context| {
                         ctx.is_submitting = false;
                         ctx.last_submit_succeeded = None;
-                        ctx.server_errors = validation_errors;
-                        ctx.status_message = None;
+                        ctx.validation_errors = validation_errors;
+                        ctx.status_message = status_message;
                         ctx.validation_behavior = behavior;
                     }),
                 )
             }
 
-            (_, Event::SetServerErrors(errors)) => {
+            (_, Event::SetValidationErrors(errors)) => {
                 let errors = errors.clone();
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
-                    ctx.server_errors = errors;
+                    ctx.validation_errors = errors;
                 }))
             }
 
-            (_, Event::ClearServerErrors) => {
+            (_, Event::ClearValidationErrors) => {
                 Some(TransitionPlan::context_only(|ctx: &mut Context| {
-                    ctx.server_errors.clear();
+                    ctx.validation_errors.clear();
                 }))
             }
 
@@ -429,6 +459,10 @@ mod tests {
         }
     }
 
+    fn server_error(message: &str) -> Error {
+        Error::server(message)
+    }
+
     fn snapshot_attrs(attrs: &AttrMap) -> String {
         format!("{attrs:#?}")
     }
@@ -443,7 +477,7 @@ mod tests {
             &Context {
                 validation_behavior: ValidationBehavior::Aria,
                 is_submitting: false,
-                server_errors: BTreeMap::new(),
+                validation_errors: BTreeMap::new(),
                 status_message: None,
                 last_submit_succeeded: None,
                 ids: ComponentIds::from_id("checkout"),
@@ -510,7 +544,7 @@ mod tests {
                 validation_behavior: ValidationBehavior::Native,
                 validation_errors: BTreeMap::from([(
                     "email".to_string(),
-                    vec!["Taken".to_string()],
+                    vec![server_error("Taken")],
                 )]),
                 ..test_props()
             },
@@ -527,8 +561,8 @@ mod tests {
         assert_eq!(service.state(), &State::Idle);
         assert!(!service.context().is_submitting);
         assert_eq!(
-            service.context().server_errors,
-            BTreeMap::from([("email".to_string(), vec!["Taken".to_string()])])
+            service.context().validation_errors,
+            BTreeMap::from([("email".to_string(), vec![server_error("Taken")])])
         );
         assert!(service.context().status_message.is_none());
         assert_eq!(service.context().last_submit_succeeded, None);
@@ -539,12 +573,12 @@ mod tests {
     }
 
     #[test]
-    fn form_reset_clears_uncontrolled_server_errors() {
+    fn form_reset_clears_uncontrolled_validation_errors() {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
-        drop(service.send(Event::SetServerErrors(BTreeMap::from([(
+        drop(service.send(Event::SetValidationErrors(BTreeMap::from([(
             "email".to_string(),
-            vec!["Taken".to_string()],
+            vec![server_error("Taken")],
         )]))));
         drop(service.send(Event::SetStatusMessage(Some("Working".to_string()))));
 
@@ -552,38 +586,38 @@ mod tests {
 
         assert!(result.state_changed);
         assert_eq!(service.state(), &State::Idle);
-        assert!(service.context().server_errors.is_empty());
+        assert!(service.context().validation_errors.is_empty());
         assert!(service.context().status_message.is_none());
         assert_eq!(service.context().last_submit_succeeded, None);
     }
 
     #[test]
-    fn form_set_server_errors() {
+    fn form_set_validation_errors() {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
-        let errors = BTreeMap::from([("email".to_string(), vec!["Taken".to_string()])]);
+        let errors = BTreeMap::from([("email".to_string(), vec![server_error("Taken")])]);
 
-        let result = service.send(Event::SetServerErrors(errors.clone()));
+        let result = service.send(Event::SetValidationErrors(errors.clone()));
 
         assert!(!result.state_changed);
         assert!(result.context_changed);
-        assert_eq!(service.context().server_errors, errors);
+        assert_eq!(service.context().validation_errors, errors);
     }
 
     #[test]
-    fn form_clear_server_errors() {
+    fn form_clear_validation_errors() {
         let mut service = Service::<Machine>::new(test_props(), &Env::default(), &());
 
-        drop(service.send(Event::SetServerErrors(BTreeMap::from([(
+        drop(service.send(Event::SetValidationErrors(BTreeMap::from([(
             "email".to_string(),
-            vec!["Taken".to_string()],
+            vec![server_error("Taken")],
         )]))));
 
-        let result = service.send(Event::ClearServerErrors);
+        let result = service.send(Event::ClearValidationErrors);
 
         assert!(!result.state_changed);
         assert!(result.context_changed);
-        assert!(service.context().server_errors.is_empty());
+        assert!(service.context().validation_errors.is_empty());
     }
 
     #[test]
@@ -653,7 +687,7 @@ mod tests {
 
         let new = Props {
             validation_behavior: ValidationBehavior::Native,
-            validation_errors: BTreeMap::from([("email".to_string(), vec!["Taken".to_string()])]),
+            validation_errors: BTreeMap::from([("email".to_string(), vec![server_error("Taken")])]),
             ..test_props()
         };
 
@@ -664,7 +698,7 @@ mod tests {
             events[0],
             Event::SetValidationBehavior(ValidationBehavior::Native)
         );
-        assert_eq!(events[1], Event::SetServerErrors(new.validation_errors));
+        assert_eq!(events[1], Event::SetValidationErrors(new.validation_errors));
     }
 
     #[test]
@@ -875,9 +909,9 @@ mod tests {
     }
 
     #[test]
-    fn form_on_props_changed_clears_server_errors_when_new_map_is_empty() {
+    fn form_on_props_changed_clears_validation_errors_when_new_map_is_empty() {
         let old = Props {
-            validation_errors: BTreeMap::from([("email".to_string(), vec!["Taken".to_string()])]),
+            validation_errors: BTreeMap::from([("email".to_string(), vec![server_error("Taken")])]),
             ..test_props()
         };
 
@@ -885,7 +919,7 @@ mod tests {
 
         let events = Machine::on_props_changed(&old, &new);
 
-        assert_eq!(events, vec![Event::ClearServerErrors]);
+        assert_eq!(events, vec![Event::ClearValidationErrors]);
     }
 
     // ── Builder tests ──────────────────────────────────────────────
@@ -898,7 +932,8 @@ mod tests {
     #[test]
     fn props_builder_chain_applies_each_setter() {
         let mut errors = BTreeMap::new();
-        errors.insert("email".into(), vec!["taken".into()]);
+
+        errors.insert("email".into(), vec![server_error("taken")]);
 
         let props = Props::new()
             .id("form-1")

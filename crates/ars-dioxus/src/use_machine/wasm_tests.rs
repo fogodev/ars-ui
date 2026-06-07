@@ -139,6 +139,7 @@ fn derive_and_reactive_props_sync_on_wasm() {
             id: String::from("toggle"),
             checked: false,
             label: "a",
+            title: "first",
         });
 
         let mut phase = use_signal(|| 0u8);
@@ -151,6 +152,7 @@ fn derive_and_reactive_props_sync_on_wasm() {
             derived(),
             *machine.state.peek(),
             *machine.context_version.peek(),
+            *machine.props_version.peek(),
         ));
 
         if phase() == 0 {
@@ -160,6 +162,7 @@ fn derive_and_reactive_props_sync_on_wasm() {
                 id: String::from("toggle"),
                 checked: true,
                 label: "a",
+                title: "first",
             });
         } else if phase() == 1 {
             phase.set(2);
@@ -168,6 +171,16 @@ fn derive_and_reactive_props_sync_on_wasm() {
                 id: String::from("toggle"),
                 checked: true,
                 label: "b",
+                title: "first",
+            });
+        } else if phase() == 2 {
+            phase.set(3);
+
+            props.set(PropProps {
+                id: String::from("toggle"),
+                checked: true,
+                label: "b",
+                title: "second",
             });
         }
 
@@ -183,13 +196,16 @@ fn derive_and_reactive_props_sync_on_wasm() {
     dom.render_immediate(&mut NoOpMutations);
     dom.mark_dirty(ScopeId::APP);
     dom.render_immediate(&mut NoOpMutations);
+    dom.mark_dirty(ScopeId::APP);
+    dom.render_immediate(&mut NoOpMutations);
 
     assert_eq!(
         snapshots.borrow().as_slice(),
         &[
-            ((false, 0), PropState::Off, 0),
-            ((true, 0), PropState::On, 0),
-            ((true, 1), PropState::On, 1),
+            ((false, 0, "first"), PropState::Off, 0, 0),
+            ((true, 0, "first"), PropState::On, 0, 1),
+            ((true, 1, "first"), PropState::On, 1, 2),
+            ((true, 1, "second"), PropState::On, 1, 3),
         ]
     );
 }

@@ -25,6 +25,8 @@ pub struct FieldsetProps {
     pub invalid: bool,
     #[props(default = false)]
     pub readonly: bool,
+    #[props(default)]
+    pub errors: Vec<ars_forms::validation::Error>,
     #[props(optional)]
     pub dir: Option<Direction>,
     pub children: Element,
@@ -58,7 +60,7 @@ pub struct ErrorMessageProps {
 pub fn ErrorMessage(props: ErrorMessageProps) -> Element
 ```
 
-The root `Fieldset` component surfaces the full core prop set: `id`, `disabled`, `invalid`, `readonly`, and `dir`.
+The root `Fieldset` component surfaces the full core prop set: `id`, `disabled`, `invalid`, `readonly`, `errors`, and `dir`.
 
 ## 3. Mapping to Core Component Contract
 
@@ -94,15 +96,16 @@ The root `Fieldset` component surfaces the full core prop set: `id`, `disabled`,
 
 ## 7. Prop Sync and Event Mapping
 
-Controlled/uncontrolled switching is not applicable. Fieldset state is driven by explicit props and the presence of description or error subparts.
+Controlled/uncontrolled switching is not applicable. Fieldset state is driven by explicit props, controlled error data, and the presence of description subparts.
 
 | Adapter prop         | Mode                        | Sync trigger                 | Machine event / update path                    | Visible effect                                        | Notes                                                                    |
 | -------------------- | --------------------------- | ---------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ |
 | `disabled`           | controlled                  | prop change after mount      | `SetDisabled` or equivalent fieldset sync path | disables descendant field context and root semantics  | inherited by descendant fields unless locally overridden per core policy |
 | `readonly`           | controlled                  | prop change after mount      | `SetReadonly` or equivalent                    | updates inherited readonly context                    | context-derived effect                                                   |
 | `invalid`            | controlled                  | prop change after mount      | `SetInvalid` or equivalent                     | updates inherited invalid context and error semantics | context-derived effect                                                   |
+| `errors`             | controlled                  | prop change after mount      | `SetErrors` / `ClearErrors`                    | updates group-level describedby and alert visibility  | server/custom messages enter the fieldset through this vector            |
 | description presence | uncontrolled internal state | `Description` mount/unmount  | `SetHasDescription(true/false)` or equivalent  | updates group-level describedby                       | registration-driven                                                      |
-| error presence       | uncontrolled internal state | `ErrorMessage` mount/unmount | `SetHasErrorMessage(true/false)` or equivalent | updates group-level describedby and alert semantics   | registration-driven                                                      |
+| error state          | controlled by `errors`      | root error synchronization   | `SetErrors` / `ClearErrors`                    | updates group-level describedby and alert semantics   | error message presence alone does not create an error relationship       |
 
 | UI event                | Preconditions             | Machine event / callback path          | Ordering notes                                                        | Notes                                                    |
 | ----------------------- | ------------------------- | -------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
@@ -110,14 +113,15 @@ Controlled/uncontrolled switching is not applicable. Fieldset state is driven by
 
 ## 8. Registration and Cleanup Contract
 
-- Description and error subparts register on mount and unregister on cleanup.
+- Description subparts register on mount and unregister on cleanup.
+- Error message visibility and alert reachability are driven by the controlled `errors` vector, not by `ErrorMessage` mount alone.
 - Descendant fields consume inherited context for as long as the fieldset is mounted.
 - Cleanup must remove inherited-state availability before descendant orphan updates can occur.
 
 | Registered entity          | Registration trigger | Identity key                          | Cleanup trigger      | Cleanup action                                  | Notes                                                 |
 | -------------------------- | -------------------- | ------------------------------------- | -------------------- | ----------------------------------------------- | ----------------------------------------------------- |
 | `Description` part         | subcomponent mount   | fieldset instance plus description ID | subcomponent cleanup | clear description registration from the machine | prevents stale group describedby references           |
-| `ErrorMessage` part        | subcomponent mount   | fieldset instance plus error ID       | subcomponent cleanup | clear error registration from the machine       | removes stale alert relationships                     |
+| `ErrorMessage` part        | render when consumer wants an error container | derived error ID       | subcomponent cleanup | no machine event; empty error vectors keep the part hidden | alert relationship appears only when core fieldset errors exist |
 | inherited fieldset context | root mount           | fieldset instance                     | root cleanup         | drop context provider / subscription linkage    | descendant fields must not read stale inherited state |
 
 ## 9. Ref and Node Contract

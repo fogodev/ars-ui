@@ -14,6 +14,20 @@ the browser.
 - [ ] Advanced counterpart examples mapped to supported demo sections.
 - [ ] Intentional visual/content differences documented.
 - [ ] `playwright-cli` artifact paths recorded for reference and local pages.
+- [ ] Every supported reference outcome appears in the final parity matrix with
+      local widget evidence or a documented reason widgets are not the proof
+      surface.
+- [ ] Reference API shape was reviewed as outcome evidence only; local widget
+      proof uses idiomatic ars-ui APIs instead of copying React/TypeScript API
+      structure.
+- [ ] No supported outcome depends on raw native controls, sibling error UI, or
+      duplicated component policy in the widget demo.
+- [ ] The widget behaves like a consumer application: it owns sample data,
+      controlled values, callback sinks, consumer-owned copy, routing, layout,
+      and styling only.
+- [ ] The widget does not implement component-owned validation, ARIA
+      relationships, keyboard/focus behavior, selection, drag/drop, loading,
+      layout, popup state, or localized-message policy.
 
 ## Visible States
 
@@ -41,3 +55,6 @@ the browser.
 - [ ] Popups/overlays anchor to their trigger.
 - [ ] Scrollable areas show affordances.
 - [ ] Browser console is clean after page load and representative interactions.
+- [ ] Locale switch checked when the widget shell supports locales; labels,
+      descriptions, placeholders, validation messages, status text, button text,
+      and announcements update for component-owned text.
