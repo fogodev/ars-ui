@@ -114,12 +114,14 @@ where
                         && !skip_validation && !form_is_valid(form_ref)
                     {
                         let (messages, locale) = form_messages.get_untracked();
-                        let error_count = invalid_control_count(form_ref).max(1);
                         let mut errors = validation_errors.get_untracked();
-                        merge_validation_errors(
-                            &mut errors,
-                            invalid_control_errors(form_ref, &messages, &locale),
-                        );
+                        let native_errors = invalid_control_errors(form_ref, &messages, &locale);
+                        let error_count = native_errors
+                            .values()
+                            .map(Vec::len)
+                            .sum::<usize>()
+                            .max(1);
+                        merge_validation_errors(&mut errors, native_errors);
                         machine.send.run(form::Event::SetValidationErrors(errors));
                         machine
                             .send
@@ -247,26 +249,6 @@ fn form_is_valid(form_ref: NodeRef<html::Form>) -> bool {
     {
         let _ = form_ref;
         true
-    }
-}
-
-#[expect(
-    clippy::missing_const_for_fn,
-    reason = "The wasm implementation reads live form controls through querySelectorAll."
-)]
-fn invalid_control_count(form_ref: NodeRef<html::Form>) -> usize {
-    #[cfg(target_arch = "wasm32")]
-    {
-        form_ref
-            .get()
-            .and_then(|form| form.query_selector_all(":invalid").ok())
-            .map_or(0, |nodes| nodes.length() as usize)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = form_ref;
-        0
     }
 }
 

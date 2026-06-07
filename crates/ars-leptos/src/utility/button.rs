@@ -418,13 +418,13 @@ fn leptos_root_attrs(
 
         strip_dynamic_root_attrs(&mut attrs);
 
-        if filter_native {
-            filter_native_button_attrs(&mut attrs);
-        }
-
         attrs.set(HtmlAttr::Id, id);
 
         add_dynamic_root_attrs(&mut attrs, machine);
+
+        if filter_native {
+            filter_native_button_attrs(&mut attrs);
+        }
 
         let mut leptos_attrs = attr_map_to_leptos_inline_attrs(attrs);
 

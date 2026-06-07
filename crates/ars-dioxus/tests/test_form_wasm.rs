@@ -384,6 +384,54 @@ async fn form_default_aria_blocks_invalid_required_submit_callback() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn form_default_aria_counts_only_invalid_named_controls_in_groups() {
+    fn app() -> Element {
+        rsx! {
+            Form { id: "wasm-invalid-group-form",
+                fieldset {
+                    input { name: "email", required: true }
+                }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let form = parent
+        .query_selector("#wasm-invalid-group-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    let submit = cancelable_event("submit");
+
+    form.dispatch_event(&submit)
+        .expect("submit event should dispatch");
+
+    flush().await;
+
+    assert_eq!(
+        form.query_selector("[data-ars-part='status-region']")
+            .expect("query should succeed")
+            .expect("status region should exist")
+            .text_content()
+            .as_deref(),
+        Some("1 error found. Please correct the highlighted field."),
+        "group containers matching :invalid must not inflate the announced field count"
+    );
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
 async fn form_global_onsubmit_does_not_replace_adapter_handler() {
     FORM_EVENTS.with(|events| events.borrow_mut().clear());
 

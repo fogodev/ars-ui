@@ -197,10 +197,10 @@ pub fn Input(props: InputProps) -> Element {
         props.placeholder,
     );
 
-    let attrs = merge_dioxus_attrs(
+    let attrs = strip_input_event_attrs(merge_dioxus_attrs(
         props.attrs,
         attr_map_to_dioxus_inline_attrs(component_attrs),
-    );
+    ));
 
     if let Some(value) = props.value {
         rsx! {
@@ -218,6 +218,11 @@ pub fn Input(props: InputProps) -> Element {
             }
         }
     }
+}
+
+fn strip_input_event_attrs(mut attrs: Vec<Attribute>) -> Vec<Attribute> {
+    attrs.retain(|attr| !matches!(attr.name, "oninput"));
+    attrs
 }
 
 /// Props for the Dioxus [`Description`] component.

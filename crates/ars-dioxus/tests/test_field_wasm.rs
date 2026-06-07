@@ -6,7 +6,7 @@ use std::cell::RefCell;
 
 use ars_dioxus::utility::field::{Description, ErrorMessage, Field, Input, InputType, Label};
 use ars_forms::validation::Error;
-use dioxus::prelude::*;
+use dioxus::{dioxus_core::AttributeValue, prelude::*};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
@@ -164,6 +164,68 @@ async fn field_browser_renders_relationship_attrs_and_input_callback() {
         assert_eq!(
             values.borrow().as_slice(),
             &[String::from("ericson@example.com")]
+        );
+    });
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn field_raw_oninput_attr_does_not_replace_adapter_input_callback() {
+    INPUT_VALUES.with(|values| values.borrow_mut().clear());
+
+    fn app() -> Element {
+        rsx! {
+            Field { id: "wasm-global-input-field",
+                Label { "Email" }
+                Input {
+                    name: "email",
+                    attrs: vec![
+                        Attribute::new(
+                            "oninput",
+                            AttributeValue::listener(move |_event: Event<FormData>| {
+                                INPUT_VALUES
+                                    .with(|values| {
+                                        values.borrow_mut().push(String::from("raw-input"));
+                                    });
+                            }),
+                            None,
+                            false,
+                        ),
+                    ],
+                    on_value_input: move |value: String| {
+                        INPUT_VALUES.with(|values| values.borrow_mut().push(value));
+                    },
+                }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let input = parent
+        .query_selector("#wasm-global-input-field-input")
+        .expect("query should succeed")
+        .expect("field input should exist");
+
+    dispatch_input(&input, "admin@email.com");
+
+    flush().await;
+
+    INPUT_VALUES.with(|values| {
+        assert_eq!(
+            values.borrow().as_slice(),
+            &[String::from("admin@email.com")],
+            "raw global oninput must not replace the adapter on_value_input handler"
         );
     });
 

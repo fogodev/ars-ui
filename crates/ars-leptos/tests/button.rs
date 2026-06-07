@@ -120,7 +120,7 @@ fn button_renders_disabled_and_form_override_attrs() {
     .to_html();
 
     for fragment in [
-        r#"disabled"#,
+        r#" disabled"#,
         r#"aria-disabled="true""#,
         r#"data-ars-disabled"#,
         r#"type="submit""#,
@@ -237,7 +237,7 @@ fn button_as_child_forwards_root_attrs_without_wrapper() {
 #[test]
 fn button_as_child_filters_native_button_attrs() {
     let html = view! {
-        <ButtonAsChild id="docs-link">
+        <ButtonAsChild id="docs-link" disabled=true>
             <a href="/docs">"Docs"</a>
         </ButtonAsChild>
     }
@@ -253,6 +253,7 @@ fn button_as_child_filters_native_button_attrs() {
         r#"formenctype="application/x-www-form-urlencoded""#,
         r#"formtarget="_self""#,
         r#"formnovalidate"#,
+        " disabled",
     ] {
         assert!(
             !html.contains(fragment),

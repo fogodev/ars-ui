@@ -388,6 +388,55 @@ async fn form_default_aria_blocks_invalid_required_submit_callback() {
 }
 
 #[wasm_bindgen_test(async)]
+async fn form_default_aria_counts_only_invalid_named_controls_in_groups() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent) = owner.with(|| {
+        let parent = container();
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <Form id="wasm-invalid-group-form">
+                    <fieldset>
+                        <input name="email" required />
+                    </fieldset>
+                </Form>
+            }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+
+    let form = parent
+        .query_selector("#wasm-invalid-group-form")
+        .expect("query should succeed")
+        .expect("form should exist");
+
+    let submit = cancelable_event("submit");
+
+    form.dispatch_event(&submit)
+        .expect("submit event should dispatch");
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        form.query_selector("[data-ars-part='status-region']")
+            .expect("query should succeed")
+            .expect("status region should exist")
+            .text_content()
+            .as_deref(),
+        Some("1 error found. Please correct the highlighted field."),
+        "group containers matching :invalid must not inflate the announced field count"
+    );
+
+    drop(mount_handle);
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
 async fn formnovalidate_submitter_skips_aria_constraint_validation() {
     let owner = Owner::new();
 

@@ -128,16 +128,14 @@ pub fn Form(props: FormProps) -> Element {
                 {
                     let current_form_ref = form_ref();
                     let mut errors = controlled_validation_errors.clone();
-                    merge_validation_errors(
-                        &mut errors,
-                        invalid_control_errors(
-                            &event,
-                            current_form_ref.clone(),
-                            &form_messages,
-                            &form_locale,
-                        ),
+                    let native_errors = invalid_control_errors(
+                        &event,
+                        current_form_ref,
+                        &form_messages,
+                        &form_locale,
                     );
-                    let error_count = invalid_control_count(&event, current_form_ref).max(1);
+                    let error_count = native_errors.values().map(Vec::len).sum::<usize>().max(1);
+                    merge_validation_errors(&mut errors, native_errors);
                     machine.send.call(form::Event::SetValidationErrors(errors));
                     machine
                         .send
@@ -210,22 +208,6 @@ fn merge_validation_errors(
         .for_each(|(name, mut field_errors)| {
             errors.entry(name).or_default().append(&mut field_errors);
         });
-}
-
-fn invalid_control_count(event: &Event<FormData>, form_ref: Option<Rc<MountedData>>) -> usize {
-    #[cfg(all(feature = "web", target_arch = "wasm32"))]
-    {
-        form_element(event, form_ref)
-            .and_then(|form| form.query_selector_all(":invalid").ok())
-            .map_or(0, |nodes| nodes.length() as usize)
-    }
-
-    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
-    {
-        let _ = event;
-        drop(form_ref);
-        0
-    }
 }
 
 fn form_is_valid(event: &Event<FormData>, form_ref: Option<Rc<MountedData>>) -> bool {
