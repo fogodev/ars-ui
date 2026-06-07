@@ -1,0 +1,43 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "6c823358603e",
+  "session_id": "019e93b2-e997-7881-b092-7b1fb63bf491",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-07T00:31:20.29197Z",
+  "branch": "codex/issue-332-423-field-form-adapters",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-leptos/src/utility/field.rs",
+    "crates/ars-dioxus/src/utility/field.rs",
+    "spec/leptos-components/utility/field.md",
+    "spec/dioxus-components/utility/field.md",
+    "crates/ars-components/src/utility/field/mod.rs",
+    "crates/ars-dioxus/src/utility/field.rs",
+    "crates/ars-leptos/src/utility/field.rs",
+    "spec/leptos-components/utility/field.md",
+    "spec/dioxus-components/utility/field.md",
+    "crates/ars-components/src/utility/field/mod.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "e01c00c2b1fe",
+  "token_usage": {
+    "input_tokens": 17739703,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 435371392,
+    "output_tokens": 886080,
+    "api_call_count": 2971
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-07T00:31:16.056815Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 13,
+    "human_modified": 24,
+    "human_removed": 0,
+    "total_committed": 13,
+    "total_lines_changed": 54,
+    "agent_percentage": 0,
+    "metric_version": 2
+  }
+}
