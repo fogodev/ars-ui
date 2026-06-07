@@ -377,7 +377,7 @@ async fn form_default_aria_blocks_invalid_required_submit_callback() {
             .expect("status region should exist")
             .text_content()
             .as_deref(),
-        Some("Please correct the highlighted fields.")
+        Some("1 error found. Please correct the highlighted field.")
     );
 
     parent.remove();
@@ -446,7 +446,7 @@ async fn form_global_onsubmit_does_not_replace_adapter_handler() {
             .expect("status region should exist")
             .text_content()
             .as_deref(),
-        Some("Please correct the highlighted fields.")
+        Some("1 error found. Please correct the highlighted field.")
     );
 
     parent.remove();
@@ -485,17 +485,6 @@ async fn formnovalidate_submitter_skips_aria_constraint_validation() {
         .expect("query should succeed")
         .expect("form should exist");
 
-    let default_prevented = std::rc::Rc::new(std::cell::Cell::new(false));
-    let observed_default_prevented = std::rc::Rc::clone(&default_prevented);
-    let submit_observer = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(
-        move |event: web_sys::Event| {
-            observed_default_prevented.set(event.default_prevented());
-        },
-    );
-
-    form.add_event_listener_with_callback("submit", submit_observer.as_ref().unchecked_ref())
-        .expect("submit observer should attach");
-
     let button = parent
         .query_selector("button[formnovalidate]")
         .expect("query should succeed")
@@ -503,7 +492,16 @@ async fn formnovalidate_submitter_skips_aria_constraint_validation() {
         .dyn_into::<web_sys::HtmlElement>()
         .expect("formnovalidate button should be an HtmlElement");
 
-    button.click();
+    let submit = cancelable_event("submit");
+    js_sys::Reflect::set(
+        submit.as_ref(),
+        &wasm_bindgen::JsValue::from_str("submitter"),
+        button.as_ref(),
+    )
+    .expect("submitter property should be attached");
+
+    form.dispatch_event(&submit)
+        .expect("submit event should dispatch");
 
     flush().await;
 
@@ -515,7 +513,7 @@ async fn formnovalidate_submitter_skips_aria_constraint_validation() {
         );
     });
     assert!(
-        default_prevented.get(),
+        submit.default_prevented(),
         "ARIA form should still prevent native navigation"
     );
     assert_eq!(
@@ -526,8 +524,6 @@ async fn formnovalidate_submitter_skips_aria_constraint_validation() {
             .as_deref(),
         Some("")
     );
-
-    drop(submit_observer);
 
     parent.remove();
 }

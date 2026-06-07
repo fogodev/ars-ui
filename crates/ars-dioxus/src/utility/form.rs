@@ -93,6 +93,8 @@ pub fn Form(props: FormProps) -> Element {
 
     let validation_behavior = core_props.validation_behavior;
     let controlled_validation_errors = core_props.validation_errors.clone();
+    let should_prevent_native_submit =
+        validation_behavior == ValidationBehavior::Aria || props.on_submit.is_some();
 
     let machine = use_machine::<form::Machine>(core_props);
     let (form_messages, form_locale) =
@@ -115,7 +117,8 @@ pub fn Form(props: FormProps) -> Element {
             onsubmit: move |event| {
                 let skip_validation = submitter_skips_validation(&event);
 
-                if validation_behavior == ValidationBehavior::Aria || props.on_submit.is_some() {
+                if should_prevent_native_submit {
+                    prevent_native_default(&event);
                     event.prevent_default();
                 }
 
@@ -178,6 +181,24 @@ pub fn Form(props: FormProps) -> Element {
 fn strip_form_event_attrs(mut attrs: Vec<Attribute>) -> Vec<Attribute> {
     attrs.retain(|attr| !matches!(attr.name, "onsubmit" | "onreset" | "onmounted"));
     attrs
+}
+
+#[expect(
+    clippy::missing_const_for_fn,
+    reason = "the wasm web path downcasts event data and calls Event::prevent_default"
+)]
+fn prevent_native_default(event: &Event<FormData>) {
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    {
+        if let Some(event) = event.data().downcast::<web_sys::Event>() {
+            event.prevent_default();
+        }
+    }
+
+    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+    {
+        let _ = event;
+    }
 }
 
 fn merge_validation_errors(

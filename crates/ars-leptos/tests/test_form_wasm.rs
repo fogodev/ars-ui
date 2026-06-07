@@ -379,7 +379,7 @@ async fn form_default_aria_blocks_invalid_required_submit_callback() {
             .expect("status region should exist")
             .text_content()
             .as_deref(),
-        Some("Please correct the highlighted fields.")
+        Some("1 error found. Please correct the highlighted field.")
     );
 
     drop(mount_handle);

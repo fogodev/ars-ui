@@ -800,7 +800,10 @@ pub fn generate_wasm_lcov(options: &WasmCoverageOptions) -> Result<String, Error
 
     let mut profdata_command = process::Command::new(&tools.llvm_profdata);
 
-    profdata_command.arg("merge").arg("-sparse");
+    profdata_command
+        .arg("merge")
+        .arg("-sparse")
+        .arg("--failure-mode=all");
 
     for file in &profraw_files {
         profdata_command.arg(file);
