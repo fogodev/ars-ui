@@ -291,4 +291,12 @@ fn apply_input_attrs(
     if attrs.contains(&HtmlAttr::Aria(AriaAttr::Disabled)) {
         attrs.set_bool(HtmlAttr::Disabled, true);
     }
+
+    if attrs.contains(&HtmlAttr::Aria(AriaAttr::Required)) {
+        attrs.set_bool(HtmlAttr::Required, true);
+    }
+
+    if attrs.contains(&HtmlAttr::Aria(AriaAttr::ReadOnly)) {
+        attrs.set_bool(HtmlAttr::ReadOnly, true);
+    }
 }

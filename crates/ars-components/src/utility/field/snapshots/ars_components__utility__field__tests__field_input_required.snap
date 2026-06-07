@@ -42,12 +42,6 @@ AttrMap {
                 "email-input",
             ),
         ),
-        (
-            Required,
-            Bool(
-                true,
-            ),
-        ),
     ],
     styles: [],
 }

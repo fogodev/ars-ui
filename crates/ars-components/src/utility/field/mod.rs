@@ -559,9 +559,7 @@ impl<'a> Api<'a> {
         }
 
         if self.ctx.required {
-            attrs
-                .set(HtmlAttr::Aria(AriaAttr::Required), "true")
-                .set_bool(HtmlAttr::Required, true);
+            attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true");
         }
 
         if self.ctx.invalid {
@@ -580,9 +578,7 @@ impl<'a> Api<'a> {
         }
 
         if self.ctx.readonly {
-            attrs
-                .set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true")
-                .set_bool(HtmlAttr::ReadOnly, true);
+            attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true");
         }
 
         if self.ctx.validating {
@@ -781,6 +777,7 @@ mod tests {
         let attrs = api.input_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Required)), Some("true"));
+        assert!(!attrs.contains(&HtmlAttr::Required));
     }
 
     #[test]
@@ -835,6 +832,7 @@ mod tests {
         let attrs = api.input_attrs();
 
         assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::ReadOnly)), Some("true"));
+        assert!(!attrs.contains(&HtmlAttr::ReadOnly));
     }
 
     #[test]

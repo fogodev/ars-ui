@@ -307,10 +307,8 @@ fn add_dynamic_input_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn
     let aria_invalid = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Invalid));
     let error_message = input_attr_string_memo(machine, HtmlAttr::Aria(AriaAttr::ErrorMessage));
     let aria_required = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Required));
-    let native_required = input_attr_bool_memo(machine, HtmlAttr::Required);
     let aria_disabled = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::Disabled));
     let aria_readonly = input_attr_bool_memo(machine, HtmlAttr::Aria(AriaAttr::ReadOnly));
-    let native_readonly = input_attr_bool_memo(machine, HtmlAttr::ReadOnly);
 
     attrs
         .set(
@@ -331,7 +329,7 @@ fn add_dynamic_input_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn
         )
         .set(
             HtmlAttr::Required,
-            AttrValue::reactive_bool(move || native_required.get()),
+            AttrValue::reactive_bool(move || aria_required.get()),
         )
         .set(
             HtmlAttr::Aria(AriaAttr::Disabled),
@@ -347,7 +345,7 @@ fn add_dynamic_input_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn
         )
         .set(
             HtmlAttr::ReadOnly,
-            AttrValue::reactive_bool(move || native_readonly.get()),
+            AttrValue::reactive_bool(move || aria_readonly.get()),
         );
 }
 

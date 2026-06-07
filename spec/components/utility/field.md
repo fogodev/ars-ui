@@ -163,11 +163,12 @@ the shared enum rather than duplicating string constants in examples.
 
 `error_message_attrs()` sets `role="alert"` and hides the node when there are no errors.
 
-### 3.2 Disabled Contract
+### 3.2 Native Constraint Contract
 
-Field emits `aria-disabled`, not a native `disabled` attribute. This is intentional: Field is a
-structural wrapper, not the concrete input element. The consuming input component or adapter decides
-whether the underlying control should also receive native `disabled`.
+Field emits ARIA state for generic input-like controls, not native HTML constraint attributes.
+This is intentional: Field is a structural wrapper, not the concrete input element. The consuming
+input component or adapter decides whether the underlying control should also receive native
+`required`, `disabled`, or `readonly`.
 
 ## 4. Integration
 
