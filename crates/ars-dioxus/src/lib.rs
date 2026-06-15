@@ -47,7 +47,7 @@ pub use attrs::{
 };
 pub use attrs::{
     DioxusAttrResult, attr_map_to_dioxus, attr_map_to_dioxus_inline_attrs, merge_dioxus_attrs,
-    use_style_strategy,
+    root_class_attrs, use_style_strategy,
 };
 pub use callbacks::{call, emit, emit_map};
 pub use dioxus_stores;

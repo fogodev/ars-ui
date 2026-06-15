@@ -96,7 +96,7 @@ pub use crate::utility::highlight::{self, Highlight};
 // `spec/dioxus-components/utility/ars-provider.md`.
 pub use crate::{ArsProvider, ArsProviderProps};
 // -- User-facing helpers --
-pub use crate::{Translatable, t, use_number_formatter, use_t};
+pub use crate::{Translatable, root_class_attrs, t, use_number_formatter, use_t};
 pub use crate::{
     input::{self, checkbox},
     navigation::{

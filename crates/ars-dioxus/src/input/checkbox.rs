@@ -8,7 +8,11 @@ use ars_components::input::checkbox::Machine;
 pub use ars_components::input::checkbox::{Event, Messages, Part, Props, State};
 use ars_forms::validation::Error;
 use ars_interactions::KeyboardEventData;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+use dioxus::events::MountedData;
 use dioxus::prelude::*;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+use web_sys::wasm_bindgen::JsCast as _;
 
 use crate::{
     attr_map_to_dioxus_inline_attrs, event_mapping::dioxus_key_to_keyboard_key, merge_dioxus_attrs,
@@ -25,6 +29,10 @@ struct CheckboxContext {
 fn checkbox_context() -> CheckboxContext {
     try_use_context::<CheckboxContext>()
         .expect("Checkbox subcomponents must be rendered inside <checkbox::Root/>")
+}
+
+const fn api_is_interactive(api: &ars_components::input::checkbox::Api<'_>) -> bool {
+    api.is_interactive()
 }
 
 /// Props for the Dioxus [`Root`] compound checkbox part.
@@ -116,13 +124,19 @@ pub fn Root(props: RootProps) -> Element {
 
     let last_pointer = use_signal(|| false);
 
-    machine
-        .send
-        .call(Event::SetHasDescription(props.has_description));
+    let mut seeded_presence = use_signal(|| false);
 
-    machine
-        .send
-        .call(Event::SetHasErrorMessage(props.has_error_message));
+    if !*seeded_presence.peek() {
+        machine
+            .send
+            .call(Event::SetHasDescription(props.has_description));
+
+        machine
+            .send
+            .call(Event::SetHasErrorMessage(props.has_error_message));
+
+        seeded_presence.set(true);
+    }
 
     use_context_provider(|| CheckboxContext {
         machine,
@@ -193,16 +207,15 @@ pub fn Control(props: ControlProps) -> Element {
         mut last_pointer,
     } = checkbox_context();
 
-    let attrs = machine.part_attrs(props.attrs, |api| api.control_attrs());
+    let attrs =
+        strip_control_event_attrs(machine.part_attrs(props.attrs, |api| api.control_attrs()));
 
     rsx! {
         div {
             onclick: move |_| {
                 let next = machine.with_api_snapshot(|api| api.next_toggle_state());
-                let interactive = machine.with_api_snapshot(|api| api.is_interactive());
-
+                let interactive = machine.with_api_snapshot(api_is_interactive);
                 machine.send.call(Event::Toggle);
-
                 if interactive && let Some(callback) = on_checked_change {
                     callback.call(next);
                 }
@@ -227,7 +240,7 @@ pub fn Control(props: ControlProps) -> Element {
                     ev.prevent_default();
 
                     let next = machine.with_api_snapshot(|api| api.next_toggle_state());
-                    let interactive = machine.with_api_snapshot(|api| api.is_interactive());
+                    let interactive = machine.with_api_snapshot(api_is_interactive);
 
                     machine.send.call(Event::Toggle);
 
@@ -293,10 +306,6 @@ pub struct HiddenInputProps {
 
 /// Dioxus compound checkbox hidden input.
 #[expect(
-    unused_qualifications,
-    reason = "rsx! macro expansion currently reports event-handler closures as unnecessary qualifications."
-)]
-#[expect(
     clippy::redundant_closure_for_method_calls,
     reason = "Api method references are not general enough for UseMachineReturn snapshot callbacks."
 )]
@@ -308,15 +317,54 @@ pub fn HiddenInput(props: HiddenInputProps) -> Element {
         ..
     } = checkbox_context();
 
-    let attrs = machine.part_attrs(props.attrs, |api| api.hidden_input_attrs());
+    let attrs = strip_hidden_input_event_attrs(
+        machine.part_attrs(props.attrs, |api| api.hidden_input_attrs()),
+    );
+
+    render_hidden_input(attrs, machine, on_checked_change)
+}
+
+fn strip_control_event_attrs(mut attrs: Vec<Attribute>) -> Vec<Attribute> {
+    attrs.retain(|attr| {
+        !matches!(
+            attr.name,
+            "onclick" | "onkeydown" | "onpointerdown" | "onfocus" | "onblur"
+        )
+    });
+    attrs
+}
+
+fn strip_hidden_input_event_attrs(mut attrs: Vec<Attribute>) -> Vec<Attribute> {
+    attrs.retain(|attr| !matches!(attr.name, "onchange" | "onmounted"));
+    attrs
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler closures as unnecessary qualifications."
+)]
+fn render_hidden_input(
+    attrs: Vec<Attribute>,
+    machine: crate::UseMachineReturn<Machine>,
+    on_checked_change: Option<EventHandler<State>>,
+) -> Element {
+    let mut form_reset_target = use_signal(|| None::<web_sys::EventTarget>);
+
+    crate::use_safe_event_listener(form_reset_target, "reset", move |_| {
+        machine.send.call(Event::Reset);
+    });
 
     rsx! {
         input {
+            onmounted: move |event| {
+                set_form_reset_target(&mut form_reset_target, event.data());
+            },
             onchange: move |ev| {
                 let checked = ev.checked();
 
                 let next = State::from_checked_bool(checked);
-                let interactive = machine.with_api_snapshot(|api| api.is_interactive());
+                let interactive = machine.with_api_snapshot(api_is_interactive);
 
                 machine.send.call(if checked { Event::Check } else { Event::Uncheck });
 
@@ -327,6 +375,48 @@ pub fn HiddenInput(props: HiddenInputProps) -> Element {
             ..attrs,
         }
     }
+}
+
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+#[expect(
+    unused_qualifications,
+    reason = "rsx! macro expansion currently reports event-handler closures as unnecessary qualifications."
+)]
+fn render_hidden_input(
+    attrs: Vec<Attribute>,
+    machine: crate::UseMachineReturn<Machine>,
+    on_checked_change: Option<EventHandler<State>>,
+) -> Element {
+    rsx! {
+        input {
+            onchange: move |ev| {
+                let checked = ev.checked();
+
+                let next = State::from_checked_bool(checked);
+                let interactive = machine.with_api_snapshot(api_is_interactive);
+
+                machine.send.call(if checked { Event::Check } else { Event::Uncheck });
+
+                if interactive && let Some(callback) = on_checked_change {
+                    callback.call(next);
+                }
+            },
+            ..attrs,
+        }
+    }
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn set_form_reset_target(
+    form_reset_target: &mut Signal<Option<web_sys::EventTarget>>,
+    mounted: std::rc::Rc<MountedData>,
+) {
+    let target = mounted
+        .downcast::<web_sys::HtmlInputElement>()
+        .and_then(|input| input.form())
+        .map(|form| form.unchecked_into::<web_sys::EventTarget>());
+
+    form_reset_target.set(target);
 }
 
 /// Props for the Dioxus [`Description`] compound checkbox part.

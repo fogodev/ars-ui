@@ -293,6 +293,24 @@ pub fn merge_dioxus_attrs(
     merged
 }
 
+/// Returns root global attributes with a component-owned class merged in.
+///
+/// This is the Dioxus counterpart to Leptos `root_class`: styled source
+/// templates can keep consumer customization on `GlobalAttributes` while
+/// preserving required component styling classes.
+#[must_use]
+pub fn root_class_attrs(attrs: Vec<Attribute>, class: &'static str) -> Vec<Attribute> {
+    merge_dioxus_attrs(
+        attrs,
+        vec![Attribute::new(
+            "class",
+            AttributeValue::Text(class.to_string()),
+            None,
+            false,
+        )],
+    )
+}
+
 fn merge_or_replace_attr(attrs: &mut Vec<Attribute>, component_attr: Attribute) {
     let Some(index) = attrs.iter().position(|attr| {
         attr.name == component_attr.name && attr.namespace == component_attr.namespace

@@ -9,7 +9,14 @@ pub use ars_components::input::checkbox::{Event, Messages, Part, Props, State};
 use ars_core::{AriaAttr, AttrMap, AttrValue, HtmlAttr};
 use ars_forms::validation::Error;
 use ars_interactions::KeyboardEventData;
-use leptos::{children::TypedChildren, context::Provider, prelude::*};
+#[cfg(target_arch = "wasm32")]
+use leptos::reactive::owner::LocalStorage;
+use leptos::{children::TypedChildren, context::Provider, html, prelude::*};
+#[cfg(target_arch = "wasm32")]
+use leptos::{
+    wasm_bindgen::{JsCast as _, closure::Closure},
+    web_sys,
+};
 
 use crate::{
     apply_part_attrs, attr_map_to_leptos_inline_attrs, event_mapping::leptos_key_to_keyboard_key,
@@ -128,11 +135,17 @@ where
         props
     }));
 
-    machine.send.run(Event::SetHasDescription(has_description));
+    let seeded_presence = StoredValue::new(false);
 
-    machine
-        .send
-        .run(Event::SetHasErrorMessage(has_error_message));
+    if !seeded_presence.get_value() {
+        machine.send.run(Event::SetHasDescription(has_description));
+
+        machine
+            .send
+            .run(Event::SetHasErrorMessage(has_error_message));
+
+        seeded_presence.set_value(true);
+    }
 
     let attrs = machine.with_api_snapshot(|api| {
         let mut attrs = api.root_attrs();
@@ -164,10 +177,6 @@ where
 }
 
 /// Leptos compound checkbox label.
-#[expect(
-    clippy::redundant_closure_for_method_calls,
-    reason = "Api method references are not general enough for part attr callbacks."
-)]
 #[component]
 pub fn Label<T: 'static>(
     /// Consumer class tokens appended to the label.
@@ -184,9 +193,15 @@ pub fn Label<T: 'static>(
 where
     View<T>: IntoView,
 {
-    let attrs = checkbox_context()
-        .machine
-        .part_attrs(|api| api.label_attrs(), class, style);
+    let machine = checkbox_context().machine;
+
+    let attrs = machine.with_api_snapshot(|api| {
+        let mut attrs = api.label_attrs();
+
+        add_dynamic_label_attrs(&mut attrs, machine);
+
+        apply_part_attrs(attrs, class, style)
+    });
 
     view! { <label {..attrs}>{children.into_inner()()}</label> }
 }
@@ -317,6 +332,7 @@ pub fn HiddenInput(
         on_checked_change,
         ..
     } = checkbox_context();
+    let input_ref = NodeRef::<html::Input>::new();
 
     let attrs = machine.with_api_snapshot(|api| {
         let mut attrs = api.hidden_input_attrs();
@@ -326,9 +342,12 @@ pub fn HiddenInput(
         apply_part_attrs(attrs, class, style)
     });
 
+    use_form_reset_listener(input_ref, machine);
+
     view! {
         <input
             {..attrs}
+            node_ref=input_ref
             on:change=move |ev| {
                 let checked = event_target_checked(&ev);
                 let next = State::from_checked_bool(checked);
@@ -419,7 +438,7 @@ fn build_base_props(
 ) -> Props {
     let mut props = Props::new().id(id).default_checked(default_checked);
 
-    if let Some(name) = name {
+    if let Some(name) = name.filter(|name| !name.is_empty()) {
         props = props.name(name);
     }
 
@@ -427,11 +446,24 @@ fn build_base_props(
         props = props.value(value);
     }
 
-    if let Some(form) = form {
+    if let Some(form) = form.filter(|form| !form.is_empty()) {
         props = props.form(form);
     }
 
     props
+}
+
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "Api method references are not general enough for reactive attr snapshot callbacks."
+)]
+fn add_dynamic_label_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<Machine>) {
+    let html_for = machine.attr_optional_string_memo(|api| api.label_attrs(), HtmlAttr::For);
+
+    attrs.set(
+        HtmlAttr::For,
+        AttrValue::reactive_optional(move || html_for.get()),
+    );
 }
 
 #[expect(
@@ -554,4 +586,68 @@ fn add_dynamic_hidden_input_attrs(attrs: &mut AttrMap, machine: crate::UseMachin
             HtmlAttr::Required,
             AttrValue::reactive_bool(move || required.get()),
         );
+}
+
+#[cfg(target_arch = "wasm32")]
+struct FormResetListener {
+    target: web_sys::EventTarget,
+    closure: Closure<dyn FnMut(web_sys::Event)>,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn use_form_reset_listener(
+    input_ref: NodeRef<html::Input>,
+    machine: crate::UseMachineReturn<Machine>,
+) {
+    let listener = StoredValue::new_local(None::<FormResetListener>);
+
+    Effect::new(move |_| {
+        remove_form_reset_listener(listener);
+
+        let Some(input) = input_ref.get() else {
+            return;
+        };
+
+        let Some(form) = input.form() else {
+            return;
+        };
+
+        let target: web_sys::EventTarget = form.unchecked_into();
+        let closure = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+            machine.send.run(Event::Reset);
+        }) as Box<dyn FnMut(web_sys::Event)>);
+
+        target
+            .add_event_listener_with_callback("reset", closure.as_ref().unchecked_ref())
+            .expect("addEventListener");
+
+        listener.set_value(Some(FormResetListener { target, closure }));
+    });
+
+    on_cleanup(move || remove_form_reset_listener(listener));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const fn use_form_reset_listener(
+    _input_ref: NodeRef<html::Input>,
+    _machine: crate::UseMachineReturn<Machine>,
+) {
+}
+
+#[cfg(target_arch = "wasm32")]
+fn remove_form_reset_listener(listener: StoredValue<Option<FormResetListener>, LocalStorage>) {
+    let previous = {
+        let mut previous = None;
+
+        listener.update_value(|value| previous = value.take());
+
+        previous
+    };
+
+    if let Some(previous) = previous {
+        previous
+            .target
+            .remove_event_listener_with_callback("reset", previous.closure.as_ref().unchecked_ref())
+            .ok();
+    }
 }

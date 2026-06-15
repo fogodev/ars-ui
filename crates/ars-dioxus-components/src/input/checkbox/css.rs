@@ -76,6 +76,8 @@ pub struct CheckboxProps {
 /// Dioxus Checkbox component styled with stable CSS classes.
 #[component]
 pub fn Checkbox(props: CheckboxProps) -> Element {
+    let attrs = root_class_attrs(props.attrs, "ars-checkbox");
+
     rsx! {
         checkbox::Root {
             id: props.id,
@@ -92,8 +94,7 @@ pub fn Checkbox(props: CheckboxProps) -> Element {
             has_description: props.description.is_some(),
             has_error_message: props.error_message.is_some(),
             on_checked_change: props.on_checked_change,
-            attrs: props.attrs,
-            class: "ars-checkbox",
+            attrs,
             checkbox::Label { class: "ars-checkbox__label", {props.children} }
             checkbox::Control { class: "ars-checkbox__control",
                 checkbox::Indicator { class: "ars-checkbox__indicator" }

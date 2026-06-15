@@ -35,8 +35,7 @@ fn css_checkbox_renders_anatomy_and_styles() {
     let html = render_app(app);
 
     for fragment in [
-        r#"class="consumer""#,
-        r#"class="ars-checkbox""#,
+        r#"class="consumer ars-checkbox""#,
         r#"class="ars-checkbox__label""#,
         r#"class="ars-checkbox__control""#,
         r#"class="ars-checkbox__indicator""#,

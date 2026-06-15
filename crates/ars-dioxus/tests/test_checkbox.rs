@@ -1,5 +1,7 @@
 //! Adapter-parity smoke tests for the Dioxus Checkbox adapter.
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use ars_dioxus::input::checkbox;
 use dioxus::prelude::*;
 

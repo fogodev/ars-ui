@@ -193,11 +193,13 @@ pub fn check_adapter_parity(options: &AdapterParityOptions) -> Result<String, Er
     let implemented =
         implemented_adapter_components(&options.leptos_src_dir, &options.dioxus_src_dir)?;
 
-    let documented = documented_adapter_components()?;
-
     let components = manifest_components
         .intersection(&implemented)
-        .filter(|component| documented.contains(*component))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let documented = documented_adapter_components()?;
+    let delivery_components = components
+        .intersection(&documented)
         .cloned()
         .collect::<BTreeSet<_>>();
 
@@ -205,17 +207,28 @@ pub fn check_adapter_parity(options: &AdapterParityOptions) -> Result<String, Er
 
     let dioxus_counts = adapter_test_counts(&options.dioxus_test_dir, &components)?;
 
-    let presence = adapter_component_presence(options, &components)?;
+    let presence = adapter_component_presence(options, &delivery_components)?;
 
-    let (mut output, mut failures) = adapter_parity_report(
+    let (mut output, parity_failures) = adapter_parity_report(
         &components,
         &leptos_counts,
         &dioxus_counts,
         options.tolerance,
         &presence,
     );
+    let mut failures = parity_failures
+        .into_iter()
+        .filter(|failure| {
+            failure
+                .split_once(':')
+                .is_some_and(|(component, _)| delivery_components.contains(component))
+        })
+        .collect::<Vec<_>>();
 
-    failures.extend(adapter_semantic_boundary_failures(options, &components)?);
+    failures.extend(adapter_semantic_boundary_failures(
+        options,
+        &delivery_components,
+    )?);
 
     if failures.is_empty() {
         Ok(output)

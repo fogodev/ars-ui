@@ -87,6 +87,7 @@ features = [
   "HtmlCollection",
   "HtmlElement",
   "HtmlFormElement",
+  "HtmlInputElement",
   "KeyboardEvent",
   "KeyboardEventInit",
   "MouseEvent",
