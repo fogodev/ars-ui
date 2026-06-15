@@ -1,0 +1,74 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d46937ac75aa",
+  "session_id": "019e92f8-84a9-7fc0-bf0e-061072d47c47",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-15T23:38:49.743445Z",
+  "branch": "codex/issue-320-431-checkbox-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "d932f1bc2bc5",
+  "checkpoint_transcript_start": 14492,
+  "transcript_lines_at_start": 14492,
+  "token_usage": {
+    "input_tokens": 242378,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 9544960,
+    "output_tokens": 13218,
+    "api_call_count": 50
+  },
+  "session_metrics": {
+    "turn_count": 21
+  },
+  "summary": {
+    "intent": "Fix a CI coverage failure on PR #727 (branch codex/issue-320-431-checkbox-adapters) in the fogodev/ars-ui repo by addressing a CRAP (Change Risk Anti-Patterns) regression in the native validation error functions of the Leptos and Dioxus form adapters.",
+    "outcome": "Successfully refactored `native_validation_error` in both `crates/ars-leptos/src/utility/form.rs` and `crates/ars-dioxus/src/utility/form.rs` by splitting the complex function into smaller branch helpers, resolved a naming collision by renaming `parsed_attr` to `build_parsed_attr`, and committed the fix as `refactor(form): split native validation mapping`. CI was retriggered and the fix was pushed to the remote branch.",
+    "learnings": {
+      "repo": [
+        "The Coverage CI lane takes approximately 26 minutes to complete, which is notably slow compared to other lanes.",
+        "The Coverage job failure is gated on CRAP (Change Risk Anti-Patterns) metrics, not just Codecov patch percentage — a separate regression threshold check runs as part of the coverage job.",
+        "There is an adapter-boundary lint (`cargo xtask lint adapter-parity`) that catches duplicate helper function names across Leptos and Dioxus adapters — helpers named `parsed_attr` in both adapters triggered it.",
+        "The repo uses `build_*` prefix as a naming convention for shared adapter helpers to avoid the cross-adapter duplication lint.",
+        "Codex review is triggered by posting `@codex review` as a PR comment, and its review state is tracked via GitHub reactions (👀) and review threads.",
+        "The project uses `cargo xfmt`, `cargo xclippy`, `cargo xtask lint adapter-parity`, and `cargo xcrap` as local validation commands.",
+        "wasm targets require `--target wasm32-unknown-unknown` with nightly toolchain; Leptos uses `--features csr` and Dioxus uses `--features web` for wasm builds.",
+        "CI checks include formatting, snapshots, clippy, adapter parity, DOM/I18n browser tests, integration, core gates, unit, feature flags (Dioxus/Leptos/subsystems), release verification, and coverage lanes."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-leptos/src/utility/form.rs",
+          "line": 260,
+          "end_line": 485,
+          "finding": "The `native_validation_error` function was complex enough to trigger CRAP regression; it was split into smaller branch helper functions to reduce per-function complexity without behavioral change."
+        },
+        {
+          "path": "crates/ars-dioxus/src/utility/form.rs",
+          "line": 240,
+          "end_line": 490,
+          "finding": "Same `native_validation_error` CRAP issue as Leptos adapter; same split-into-helpers fix was applied in parallel."
+        }
+      ],
+      "workflow": [
+        "When the Codecov PR comment hasn't updated yet, the raw GitHub Actions job log (`gh api repos/.../actions/jobs/{id}/logs`) is more reliable for diagnosing coverage failures than waiting for the comment to refresh.",
+        "Direct job API checks (`gh api repos/.../actions/jobs/{id}`) can confirm whether a job is genuinely still running versus a stale rollup.",
+        "Polling CI state every 120 seconds with combined `gh pr checks`, reactions, and GraphQL review-thread queries is an effective babysitting pattern for slow CI pipelines.",
+        "When CRAP gates fail, reducing cyclomatic complexity by splitting functions is preferable to adjusting baselines, as it improves actual code quality.",
+        "After formatting touches files, adapter parity lint should be re-run since formatting can affect file state used by the lint."
+      ]
+    },
+    "friction": [
+      "The Coverage CI lane is slow (~26 minutes), requiring many polling iterations before getting a result.",
+      "The Codecov PR comment lags behind the actual job completion, making it unreliable as a status indicator — required falling back to raw job logs.",
+      "Running combined test filters in a single `cargo test -p xtask` command with two filters failed due to invalid Cargo syntax, requiring them to be run as separate commands.",
+      "The helper split introduced an unintended naming collision (`parsed_attr` in both adapters) that triggered the adapter-boundary lint, requiring an additional rename step before committing.",
+      "The CRAP check cannot be run locally reliably because the `lcov.info` file was stale, so remote CI was the only authoritative CRAP result."
+    ],
+    "open_items": [
+      "Verify that the CRAP fix (function split) actually passes the remote CRAP gate once the new Coverage CI run completes — this was deferred to CI since local lcov was stale.",
+      "Codex review was still in 👀 state at the end of the session — its final review verdict on the refactored form adapters is pending.",
+      "The full CI run for the new push had not completed at the end of the session — all lanes need to go green before PR #727 can be merged."
+    ]
+  }
+}
