@@ -3,7 +3,7 @@
   "checkpoint_id": "5d379c5e7a4f",
   "strategy": "manual-commit",
   "branch": "codex/issue-320-431-checkbox-adapters",
-  "checkpoints_count": 7,
+  "checkpoints_count": 1,
   "files_touched": [
     "crates/ars-components/src/input/checkbox/mod.rs",
     "crates/ars-components/src/input/checkbox/snapshots/ars_components__input__checkbox__tests__checkbox_hidden_input_checked.snap",
@@ -42,18 +42,12 @@
     "crates/ars-leptos/tests/checkbox.rs",
     "crates/ars-leptos/tests/checkbox_wasm.rs",
     "crates/ars-leptos/tests/test_checkbox.rs",
-    "docs/implementation/sketches/issues-320-431-checkbox-counterpart-sketch.md",
     "examples/widgets-dioxus-css/src/categories/input.rs",
     "examples/widgets-dioxus-tailwind/src/categories/input.rs",
     "examples/widgets-dioxus/src/categories/input.rs",
     "examples/widgets-leptos-css/src/categories/input.rs",
     "examples/widgets-leptos-tailwind/src/categories/input.rs",
-    "examples/widgets-leptos/src/categories/input.rs",
-    "spec/components/input/checkbox.md",
-    "spec/dioxus-components/input/checkbox.md",
-    "spec/leptos-components/input/checkbox.md",
-    "xtask/src/e2e.rs",
-    "xtask/src/main.rs"
+    "examples/widgets-leptos/src/categories/input.rs"
   ],
   "sessions": [
     {
@@ -64,10 +58,10 @@
     }
   ],
   "token_usage": {
-    "input_tokens": 14518528,
+    "input_tokens": 14707369,
     "cache_creation_tokens": 0,
-    "cache_read_tokens": 240611456,
-    "output_tokens": 627745,
-    "api_call_count": 1643
+    "cache_read_tokens": 242011008,
+    "output_tokens": 630434,
+    "api_call_count": 1653
   }
 }
