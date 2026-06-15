@@ -86,7 +86,7 @@ pub use crate::ArsProvider;
 // re-export covers both the framework-agnostic types (`Props`, `Messages`,
 // `DismissReason`, …) and the Leptos-side wrappers (`Handle`, `Region`,
 // `RegionProps`, `use_dismissable`).
-pub use crate::as_child;
+pub use crate::as_child::{self, AsChildSlot};
 // The `error_boundary` adapter module exposes the `ArsErrorBoundary`
 // wrapper component spec'd at
 // `spec/foundation/08-adapter-leptos.md` §17. End users reach it as
@@ -94,9 +94,13 @@ pub use crate::as_child;
 #[cfg(feature = "icu4x")]
 pub use crate::utility::highlight::{self, Highlight};
 // -- User-facing helpers --
-pub use crate::{Translatable, t, use_number_formatter};
+pub use crate::{Translatable, root_class, t, use_id, use_number_formatter};
 pub use crate::{
-    navigation::{self, tabs},
+    input::{self, checkbox},
+    navigation::{
+        self,
+        tabs::{self, Tabs},
+    },
     utility::{
         self,
         button::{self, Button, ButtonAsChild},

@@ -12,7 +12,7 @@ use std::{
 
 #[cfg(any(feature = "ssr", all(feature = "web", target_arch = "wasm32")))]
 use ars_core::HydrationSnapshot;
-use ars_core::{CleanupFn, EffectName, Env, HasId, Machine, RenderMode, Service};
+use ars_core::{AttrMap, CleanupFn, EffectName, Env, HasId, Machine, RenderMode, Service};
 use dioxus::prelude::*;
 
 use crate::{
@@ -203,6 +203,21 @@ where
 
             f(&api)
         })
+    }
+
+    /// Builds Dioxus attributes for a machine-backed compound part.
+    ///
+    /// The framework-agnostic `part_attrs` closure owns semantic attributes.
+    /// This method merges consumer global attributes with the component-owned
+    /// part attrs and returns a vector ready for spreading with `..attrs`.
+    pub fn part_attrs<F>(&self, consumer_attrs: Vec<Attribute>, part_attrs: F) -> Vec<Attribute>
+    where
+        F: for<'a, 'b> Fn(&'a M::Api<'b>) -> AttrMap + 'static,
+    {
+        crate::merge_dioxus_attrs(
+            consumer_attrs,
+            self.derive(move |api| crate::attr_map_to_dioxus_inline_attrs(part_attrs(api)))(),
+        )
     }
 
     /// Provides imperative, non-reactive API access wrapped in an [`EphemeralRef`].

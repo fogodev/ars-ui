@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use ars_leptos::I18nRegistries;
 
+pub mod input;
 pub mod navigation;
 pub mod utility;
 
@@ -31,6 +32,7 @@ pub mod utility;
 pub fn i18n_registries() -> Arc<I18nRegistries> {
     let mut registries = I18nRegistries::new();
 
+    input::register_messages(&mut registries);
     navigation::register_messages(&mut registries);
     utility::register_messages(&mut registries);
 

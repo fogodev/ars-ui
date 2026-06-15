@@ -1,5 +1,6 @@
 //! ars-ui workspace task runner — library.
 
+pub mod adapter;
 pub mod ci;
 pub mod coverage;
 pub mod crap;

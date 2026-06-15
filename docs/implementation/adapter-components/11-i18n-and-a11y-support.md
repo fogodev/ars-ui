@@ -40,6 +40,17 @@ announcements, and semantic labels that back custom rendered views. The `t`
 helper itself returns `Memo<String>` so rendered text and `TextProp` props can
 subscribe without component-owned mirror state.
 
+Dioxus adapters and widgets should use hookless `t(MessageKey)` for ordinary
+inline translated text. The helper uses the current `ArsProvider` context
+without registering a hook, so it may appear directly inside conditional
+`rsx!` branches, iterator closures, and other render expressions. When called
+during render, its reads of provider locale and signal-backed message values are
+still reactive, so locale changes update the rendered string on the next render.
+Use `use_t(MessageKey)` only when the component needs a reusable
+`Memo<String>`, for example to avoid recomputing an expensive parameterized
+translation or to pass a memo into an API that stores reactive text. Because
+`use_t` is a hook, it must be called unconditionally at component top level.
+
 Leptos consumer styling props must use `TextProp` when exposed by adapter
 components: `class` always, and raw `style` when the component intentionally
 exposes inline styles as an escape hatch. That keeps styling reactive without

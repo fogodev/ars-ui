@@ -7,8 +7,8 @@ use std::cell::RefCell;
 use ars_components::utility::as_child::AsChildMerge;
 use ars_core::{AriaAttr, AttrMap, CssProperty, HtmlAttr, StyleStrategy};
 use ars_dioxus::{
-    as_child::{AsChildRenderProps, AsChildSlot, AsChildSlotProps, merge_dioxus_attrs},
-    attr_map_to_dioxus, attr_map_to_dioxus_inline_attrs,
+    as_child::{AsChildRenderProps, AsChildSlot, AsChildSlotProps},
+    attr_map_to_dioxus, attr_map_to_dioxus_inline_attrs, merge_dioxus_attrs,
 };
 use dioxus::{dioxus_core::AttributeValue, prelude::*};
 

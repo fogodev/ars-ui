@@ -29,6 +29,12 @@ AttrMap {
             ),
         ),
         (
+            Class,
+            String(
+                "ars-sr-input",
+            ),
+        ),
+        (
             Id,
             String(
                 "terms-hidden-input",

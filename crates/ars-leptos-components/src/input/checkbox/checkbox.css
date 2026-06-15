@@ -1,0 +1,137 @@
+/* Root: lays out the checkbox control, label, description, and error text.
+   The BEM class is used by the styled template; the data attributes keep the
+   same styling available when users compose primitives directly. */
+.ars-checkbox,
+[data-ars-scope="checkbox"][data-ars-part="root"] {
+    display: grid;
+    grid-template-columns: 1.125rem minmax(0, 1fr);
+    align-items: center;
+    column-gap: 0.625rem;
+    row-gap: 0.25rem;
+    margin: 0.55rem 0;
+}
+
+/* Label: places the visible label text beside the control and keeps the cursor
+   aligned with the clickable label behavior. */
+.ars-checkbox__label,
+[data-ars-scope="checkbox"][data-ars-part="label"] {
+    grid-column: 2;
+    cursor: pointer;
+}
+
+/* Control: draws the visible checkbox box. State-specific selectors below
+   change only colors so the control dimensions stay stable. */
+.ars-checkbox__control,
+[data-ars-scope="checkbox"][data-ars-part="control"] {
+    grid-column: 1;
+    grid-row: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 1.125rem;
+    height: 1.125rem;
+    border: 2px solid #64748b;
+    border-radius: 0.25rem;
+    background: #fff;
+    color: #fff;
+}
+
+/* Checked and indeterminate states: fill the control with the selected color.
+   The actual checkmark or dash is drawn by the indicator pseudo-element. */
+.ars-checkbox[data-ars-state="checked"] .ars-checkbox__control,
+.ars-checkbox[data-ars-state="indeterminate"] .ars-checkbox__control,
+[data-ars-scope="checkbox"][data-ars-part="root"][data-ars-state="checked"]
+    [data-ars-part="control"],
+[data-ars-scope="checkbox"][data-ars-part="root"][data-ars-state="indeterminate"]
+    [data-ars-part="control"] {
+    border-color: #2563eb;
+    background: #2563eb;
+}
+
+/* Invalid unchecked state: uses the error color on the control border while
+   keeping the interior white, matching form-control error affordances. */
+.ars-checkbox[data-ars-invalid] .ars-checkbox__control,
+[data-ars-scope="checkbox"][data-ars-part="root"][data-ars-invalid]
+    [data-ars-part="control"] {
+    border-color: #dc2626;
+    background: #fff;
+    color: #dc2626;
+}
+
+/* Invalid selected states: keep the selected fill but switch it to the error
+   color so checked and indeterminate invalid states remain visibly invalid. */
+.ars-checkbox[data-ars-invalid][data-ars-state="checked"]
+    .ars-checkbox__control,
+.ars-checkbox[data-ars-invalid][data-ars-state="indeterminate"]
+    .ars-checkbox__control,
+[data-ars-scope="checkbox"][data-ars-part="root"][data-ars-invalid][data-ars-state="checked"]
+    [data-ars-part="control"],
+[data-ars-scope="checkbox"][data-ars-part="root"][data-ars-invalid][data-ars-state="indeterminate"]
+    [data-ars-part="control"] {
+    border-color: #dc2626;
+    background: #dc2626;
+    color: #fff;
+}
+
+/* Indicator base: reserves the pseudo-element used for the checkmark or
+   indeterminate dash without drawing anything for the unchecked state. */
+.ars-checkbox__indicator::after,
+[data-ars-scope="checkbox"][data-ars-part="indicator"]::after {
+    content: "";
+    display: block;
+}
+
+/* Checked indicator: draws the checkmark using borders so it inherits the
+   current control text color. */
+.ars-checkbox[data-ars-state="checked"] .ars-checkbox__indicator::after,
+[data-ars-scope="checkbox"][data-ars-part="root"][data-ars-state="checked"]
+    [data-ars-part="indicator"]::after {
+    width: 0.35rem;
+    height: 0.65rem;
+    border: solid currentColor;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg) translate(-1px, -1px);
+}
+
+/* Indeterminate indicator: draws the horizontal dash used for mixed state. */
+.ars-checkbox[data-ars-state="indeterminate"] .ars-checkbox__indicator::after,
+[data-ars-scope="checkbox"][data-ars-part="root"][data-ars-state="indeterminate"]
+    [data-ars-part="indicator"]::after {
+    width: 0.65rem;
+    height: 2px;
+    border-radius: 999px;
+    background: currentColor;
+}
+
+/* Disabled root: dims the whole checkbox, including label and helper text, to
+   communicate that the control is unavailable. */
+.ars-checkbox[data-ars-disabled],
+[data-ars-scope="checkbox"][data-ars-part="root"][data-ars-disabled] {
+    opacity: 0.5;
+}
+
+/* Disabled control: further softens the box so disabled controls remain
+   visually distinct even near normal text. */
+.ars-checkbox[data-ars-disabled] .ars-checkbox__control,
+[data-ars-scope="checkbox"][data-ars-part="root"][data-ars-disabled]
+    [data-ars-part="control"] {
+    opacity: 0.5;
+}
+
+/* Description and error message: align helper text under the label column and
+   use a smaller text size than the primary label. */
+.ars-checkbox__description,
+.ars-checkbox__error-message,
+[data-ars-scope="checkbox"][data-ars-part="description"],
+[data-ars-scope="checkbox"][data-ars-part="error-message"] {
+    grid-column: 2;
+    font-size: 0.9rem;
+}
+
+/* Error message: uses the error text color for validation feedback rendered by
+   the error-message part. */
+.ars-checkbox__error-message,
+[data-ars-scope="checkbox"][data-ars-part="error-message"] {
+    color: #b91c1c;
+}

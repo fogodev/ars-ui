@@ -8,8 +8,9 @@ publish = false
 
 [features]
 default = ["web"]
-web     = ["ars-dioxus/web", "dioxus/web"]
+web     = ["ars-dioxus/web", "ars-dioxus-components/web", "dioxus/web"]
 
 [dependencies]
-ars-dioxus = { path = "../../../ars-dioxus" }
-dioxus     = { version = "0.7", default-features = false, features = ["launch"] }
+ars-dioxus            = { path = "../../../ars-dioxus" }
+ars-dioxus-components = { path = "../../../ars-dioxus-components" }
+dioxus                = { version = "0.7", default-features = false, features = ["launch"] }

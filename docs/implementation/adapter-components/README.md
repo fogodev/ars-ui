@@ -19,17 +19,23 @@ file below:
 5. [02-adapter-api-and-wiring.md](02-adapter-api-and-wiring.md)
 6. [03-framework-rules.md](03-framework-rules.md)
 7. [04-adapter-tests.md](04-adapter-tests.md)
-8. [05-e2e-fixtures-and-harnesses.md](05-e2e-fixtures-and-harnesses.md)
-9. [06-widgets-examples.md](06-widgets-examples.md)
-10. [09-browser-parity-harness.md](09-browser-parity-harness.md)
-11. [12-parity-audit-loop.md](12-parity-audit-loop.md)
-12. [08-validation-and-pr-closeout.md](08-validation-and-pr-closeout.md)
+8. [13-composition-integration.md](13-composition-integration.md)
+9. [05-e2e-fixtures-and-harnesses.md](05-e2e-fixtures-and-harnesses.md)
+10. [06-widgets-examples.md](06-widgets-examples.md)
+11. [09-browser-parity-harness.md](09-browser-parity-harness.md)
+12. [12-parity-audit-loop.md](12-parity-audit-loop.md)
+13. [08-validation-and-pr-closeout.md](08-validation-and-pr-closeout.md)
 
 Then keep the checklists open while implementing:
 
 - [checklists/component-delivery.md](checklists/component-delivery.md)
 - [checklists/e2e-feature-matrix.md](checklists/e2e-feature-matrix.md)
 - [checklists/widgets-visual-review.md](checklists/widgets-visual-review.md)
+
+Component-specific usage notes live beside this workflow when an adapter
+component has composition behavior worth preserving. For Checkbox, read
+[checkbox-usage.md](checkbox-usage.md) before changing standalone, `Form`, or
+`Fieldset` behavior.
 
 The checklist files are reminders, not substitutes for the workflow files.
 
@@ -38,14 +44,20 @@ The checklist files are reminders, not substitutes for the workflow files.
 An adapter component task is complete only when the same PR includes:
 
 - adapter crate code, module wiring, feature wiring, and symmetric prelude
-  exports;
+  exports for unstyled primitives;
+- styled component source-template crate code and tests when the task delivers
+  ready-made visual components;
 - adapter SSR/unit tests and focused wasm browser tests for adapter/browser
   wiring that SSR cannot prove;
+- composition integration tests for every foundation context the component
+  consumes, with `Form` and `Fieldset` mandatory for form controls;
 - E2E fixtures and harness coverage for both adapters, covering complete
   user-visible workflows and outcome parity;
 - matrix entries, axe coverage across visible states, and computed visual
   assertions;
 - widgets examples in all six widgets crates;
+- documentation that distinguishes adapter primitives, checked-in styled
+  source templates, and future `ars-ui` copied source distribution;
 - proof that widgets and fixtures behave as consumer applications: they may
   provide sample data and apply callbacks, but they must not duplicate
   component-owned validation, accessibility, selection, keyboard, focus,

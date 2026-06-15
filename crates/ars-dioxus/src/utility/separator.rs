@@ -9,10 +9,7 @@ use ars_core::HtmlAttr;
 pub use ars_i18n::Orientation;
 use dioxus::prelude::*;
 
-use crate::{
-    as_child::{AsChildRenderProps, merge_dioxus_attrs},
-    attr_map_to_dioxus_inline_attrs,
-};
+use crate::{as_child::AsChildRenderProps, attr_map_to_dioxus_inline_attrs, merge_dioxus_attrs};
 
 fn root_attrs(id: Option<&str>, orientation: Orientation, decorative: bool) -> Vec<Attribute> {
     let mut props = Props::new().orientation(orientation).decorative(decorative);

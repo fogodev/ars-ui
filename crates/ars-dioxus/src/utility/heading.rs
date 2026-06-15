@@ -12,7 +12,7 @@ pub use ars_components::utility::heading::{
 use ars_core::{AttrValue, HtmlAttr};
 use dioxus::prelude::*;
 
-use crate::{as_child::merge_dioxus_attrs, attr_map_to_dioxus_inline_attrs};
+use crate::{attr_map_to_dioxus_inline_attrs, merge_dioxus_attrs};
 
 fn inherited_context() -> HeadingContext {
     if let Some(ctx) = try_use_context::<Signal<HeadingContext>>() {

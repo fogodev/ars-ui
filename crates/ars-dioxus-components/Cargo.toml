@@ -1,0 +1,32 @@
+[package]
+name                   = "ars-dioxus-components"
+version                = "0.1.0"
+edition.workspace      = true
+license.workspace      = true
+description.workspace  = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[features]
+default = ["icu4x"]
+ssr     = ["ars-dioxus/ssr", "dioxus/server"]
+web     = ["ars-dioxus/web", "dioxus/web"]
+desktop = ["ars-dioxus/desktop", "dioxus/desktop"]
+mobile  = ["ars-dioxus/mobile", "dioxus/mobile"]
+icu4x   = ["ars-dioxus/icu4x"]
+
+[dependencies]
+ars-dioxus = { path = "../ars-dioxus", default-features = false }
+ars-forms  = { path = "../ars-forms" }
+
+[dependencies.dioxus]
+version          = "0.7"
+default-features = false
+features         = ["macro", "signals", "hooks", "html"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+dioxus-ssr = "0.7"
+insta      = { version = "1", features = ["yaml"] }
+
+[lints]
+workspace = true

@@ -12,6 +12,7 @@ use ars_core::{
     AriaAttr, AttrMap, Bindable, Callback, ComponentIds, ComponentPart, ConnectApi, Env, HtmlAttr,
     PendingEffect, TransitionPlan, no_cleanup,
 };
+use ars_forms::validation::Error;
 use ars_interactions::keyboard::{KeyboardEventData, KeyboardKey};
 
 /// The checked state of the component.
@@ -25,6 +26,27 @@ pub enum State {
 
     /// The component is indeterminate.
     Indeterminate,
+}
+
+impl State {
+    /// Returns the state represented by a native checkbox `checked` boolean.
+    #[must_use]
+    pub const fn from_checked_bool(checked: bool) -> Self {
+        if checked {
+            Self::Checked
+        } else {
+            Self::Unchecked
+        }
+    }
+
+    /// Returns the state requested by user toggle intent.
+    #[must_use]
+    pub const fn next_on_toggle(self) -> Self {
+        match self {
+            Self::Unchecked | Self::Indeterminate => Self::Checked,
+            Self::Checked => Self::Unchecked,
+        }
+    }
 }
 
 /// Events for the Checkbox component.
@@ -51,6 +73,9 @@ pub enum Event {
     /// Track whether a description part is rendered.
     SetHasDescription(bool),
 
+    /// Track whether an error message part is rendered.
+    SetHasErrorMessage(bool),
+
     /// Focus received.
     Focus {
         /// True if the focus was initiated by a keyboard.
@@ -76,6 +101,9 @@ pub struct Context {
     /// Whether the component is invalid.
     pub invalid: bool,
 
+    /// Validation errors associated with the checkbox.
+    pub errors: Vec<Error>,
+
     /// Whether the component is readonly.
     pub readonly: bool,
 
@@ -96,6 +124,9 @@ pub struct Context {
 
     /// Whether a description part is rendered and should be referenced by ARIA.
     pub has_description: bool,
+
+    /// Whether an error message part is rendered and should be referenced by ARIA.
+    pub has_error_message: bool,
 
     /// Stable IDs for checkbox anatomy parts.
     pub ids: ComponentIds,
@@ -125,6 +156,9 @@ pub struct Props {
     /// Whether the component is invalid.
     pub invalid: bool,
 
+    /// Validation errors associated with the checkbox.
+    pub errors: Vec<Error>,
+
     /// Whether the component is readonly.
     pub readonly: bool,
 
@@ -150,6 +184,7 @@ impl Default for Props {
             disabled: false,
             required: false,
             invalid: false,
+            errors: Vec::new(),
             readonly: false,
             name: None,
             form: None,
@@ -212,6 +247,14 @@ impl Props {
     #[must_use]
     pub const fn invalid(mut self, value: bool) -> Self {
         self.invalid = value;
+        self
+    }
+
+    /// Sets [`errors`](Self::errors), switching the checkbox to invalid when
+    /// at least one error is present.
+    #[must_use]
+    pub fn errors(mut self, errors: Vec<Error>) -> Self {
+        self.errors = errors;
         self
     }
 
@@ -317,7 +360,8 @@ impl ars_core::Machine for Machine {
                 },
                 disabled: props.disabled,
                 required: props.required,
-                invalid: props.invalid,
+                invalid: props.invalid || !props.errors.is_empty(),
+                errors: props.errors.clone(),
                 readonly: props.readonly,
                 focused: false,
                 focus_visible: false,
@@ -325,6 +369,7 @@ impl ars_core::Machine for Machine {
                 form: props.form.clone(),
                 value: props.value.clone(),
                 has_description: false,
+                has_error_message: false,
                 ids: ComponentIds::from_id(&props.id),
             },
         )
@@ -368,7 +413,8 @@ impl ars_core::Machine for Machine {
             (_, Event::SetProps) => {
                 let disabled = props.disabled;
                 let required = props.required;
-                let invalid = props.invalid;
+                let invalid = props.invalid || !props.errors.is_empty();
+                let errors = props.errors.clone();
                 let readonly = props.readonly;
                 let name = props.name.clone();
                 let form = props.form.clone();
@@ -378,6 +424,7 @@ impl ars_core::Machine for Machine {
                     ctx.disabled = disabled;
                     ctx.required = required;
                     ctx.invalid = invalid;
+                    ctx.errors = errors;
                     ctx.readonly = readonly;
                     ctx.name = name;
                     ctx.form = form;
@@ -389,6 +436,13 @@ impl ars_core::Machine for Machine {
                 let has_description = *has_description;
                 Some(TransitionPlan::context_only(move |ctx: &mut Context| {
                     ctx.has_description = has_description;
+                }))
+            }
+
+            (_, Event::SetHasErrorMessage(has_error_message)) => {
+                let has_error_message = *has_error_message;
+                Some(TransitionPlan::context_only(move |ctx: &mut Context| {
+                    ctx.has_error_message = has_error_message;
                 }))
             }
 
@@ -432,6 +486,7 @@ impl ars_core::Machine for Machine {
         if old.disabled != new.disabled
             || old.required != new.required
             || old.invalid != new.invalid
+            || old.errors != new.errors
             || old.readonly != new.readonly
             || old.name != new.name
             || old.form != new.form
@@ -520,6 +575,24 @@ impl ConnectApi for Api<'_> {
 }
 
 impl Api<'_> {
+    /// Returns the current checked state.
+    #[must_use]
+    pub fn checked(&self) -> State {
+        *self.ctx.checked.get()
+    }
+
+    /// Returns whether user intent can currently mutate the checked state.
+    #[must_use]
+    pub const fn is_interactive(&self) -> bool {
+        !self.ctx.disabled && !self.ctx.readonly
+    }
+
+    /// Returns the checked state requested by user toggle intent.
+    #[must_use]
+    pub fn next_toggle_state(&self) -> State {
+        self.checked().next_on_toggle()
+    }
+
     /// Returns attributes for the root container.
     #[must_use]
     pub fn root_attrs(&self) -> AttrMap {
@@ -599,10 +672,13 @@ impl Api<'_> {
 
         if self.ctx.invalid {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
-            attrs.set(
-                HtmlAttr::Aria(AriaAttr::ErrorMessage),
-                self.ctx.ids.part("error-message"),
-            );
+
+            if self.ctx.has_error_message {
+                attrs.set(
+                    HtmlAttr::Aria(AriaAttr::ErrorMessage),
+                    self.ctx.ids.part("error-message"),
+                );
+            }
         }
 
         if self.ctx.disabled {
@@ -619,7 +695,7 @@ impl Api<'_> {
             described_by.push(self.ctx.ids.part("description"));
         }
 
-        if self.ctx.invalid {
+        if self.ctx.invalid && self.ctx.has_error_message {
             described_by.push(self.ctx.ids.part("error-message"));
         }
 
@@ -656,6 +732,7 @@ impl Api<'_> {
         attrs
             .set(scope_attr, scope_val)
             .set(part_attr, part_val)
+            .set(HtmlAttr::Class, "ars-sr-input")
             .set(HtmlAttr::Id, self.ctx.ids.part("hidden-input"))
             .set(HtmlAttr::Type, "checkbox")
             .set(HtmlAttr::TabIndex, "-1")
@@ -821,6 +898,7 @@ mod tests {
     use std::sync::Mutex;
 
     use ars_core::{AriaAttr, ConnectApi, Env, HtmlAttr, Service, StrongSend, callback};
+    use ars_forms::validation::Error;
     use insta::assert_snapshot;
 
     use super::*;
@@ -1313,6 +1391,55 @@ mod tests {
     }
 
     #[test]
+    fn checkbox_errors_make_control_invalid_without_dangling_error_reference() {
+        let service = Service::<Machine>::new(
+            Props {
+                errors: vec![Error::server("Accept terms before continuing.")],
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        let attrs = service.connect(&|_| {}).control_attrs();
+
+        assert!(service.context().invalid);
+        assert_eq!(attrs.get(&HtmlAttr::Aria(AriaAttr::Invalid)), Some("true"));
+        assert!(!attrs.contains(&HtmlAttr::Aria(AriaAttr::ErrorMessage)));
+        assert!(
+            !attrs
+                .get(&HtmlAttr::Aria(AriaAttr::DescribedBy))
+                .is_some_and(|value| value.contains("error-message"))
+        );
+    }
+
+    #[test]
+    fn checkbox_error_message_presence_controls_error_relationships() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                errors: vec![Error::server("Accept terms before continuing.")],
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        drop(service.send(Event::SetHasDescription(true)));
+        drop(service.send(Event::SetHasErrorMessage(true)));
+
+        let attrs = service.connect(&|_| {}).control_attrs();
+
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::DescribedBy)),
+            Some("terms-description terms-error-message")
+        );
+        assert_eq!(
+            attrs.get(&HtmlAttr::Aria(AriaAttr::ErrorMessage)),
+            Some("terms-error-message")
+        );
+    }
+
+    #[test]
     fn checkbox_on_props_changed_emits_expected_sync_events() {
         let old = test_props();
         let new = Props {
@@ -1420,6 +1547,15 @@ mod tests {
         assert_eq!(service.context().name.as_deref(), Some("terms"));
         assert_eq!(service.context().form.as_deref(), Some("settings"));
         assert_eq!(service.context().value, "accepted");
+        assert!(
+            !service
+                .connect(&|_| {})
+                .control_attrs()
+                .contains(&HtmlAttr::Aria(AriaAttr::ErrorMessage))
+        );
+
+        drop(service.send(Event::SetHasErrorMessage(true)));
+
         assert_eq!(
             service
                 .connect(&|_| {})
@@ -1467,6 +1603,60 @@ mod tests {
                 .get(&HtmlAttr::Aria(AriaAttr::Checked)),
             Some("mixed")
         );
+    }
+
+    #[test]
+    fn checkbox_api_checked_returns_current_state() {
+        let mut service = Service::<Machine>::new(
+            Props {
+                default_checked: State::Indeterminate,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        assert_eq!(service.connect(&|_| {}).checked(), State::Indeterminate);
+
+        drop(service.send(Event::Check));
+
+        assert_eq!(service.connect(&|_| {}).checked(), State::Checked);
+    }
+
+    #[test]
+    fn checkbox_state_helpers_map_native_and_toggle_states() {
+        assert_eq!(State::from_checked_bool(false), State::Unchecked);
+        assert_eq!(State::from_checked_bool(true), State::Checked);
+        assert_eq!(State::Unchecked.next_on_toggle(), State::Checked);
+        assert_eq!(State::Indeterminate.next_on_toggle(), State::Checked);
+        assert_eq!(State::Checked.next_on_toggle(), State::Unchecked);
+    }
+
+    #[test]
+    fn checkbox_api_reports_interactive_and_next_toggle_state() {
+        let service = Service::<Machine>::new(
+            Props {
+                default_checked: State::Indeterminate,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+        let api = service.connect(&|_| {});
+
+        assert!(api.is_interactive());
+        assert_eq!(api.next_toggle_state(), State::Checked);
+
+        let service = Service::<Machine>::new(
+            Props {
+                disabled: true,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        assert!(!service.connect(&|_| {}).is_interactive());
     }
 
     #[test]
@@ -1822,7 +2012,7 @@ mod tests {
 
     #[test]
     fn checkbox_control_disabled_readonly_invalid_snapshot() {
-        let service = Service::<Machine>::new(
+        let mut service = Service::<Machine>::new(
             Props {
                 disabled: true,
                 readonly: true,
@@ -1832,6 +2022,8 @@ mod tests {
             &Env::default(),
             &Messages,
         );
+
+        drop(service.send(Event::SetHasErrorMessage(true)));
 
         assert_snapshot!(
             "checkbox_control_disabled_readonly_invalid",
@@ -1853,7 +2045,7 @@ mod tests {
 
     #[test]
     fn checkbox_control_error_only_snapshot() {
-        let service = Service::<Machine>::new(
+        let mut service = Service::<Machine>::new(
             Props {
                 invalid: true,
                 ..test_props()
@@ -1861,6 +2053,8 @@ mod tests {
             &Env::default(),
             &Messages,
         );
+
+        drop(service.send(Event::SetHasErrorMessage(true)));
 
         assert_snapshot!(
             "checkbox_control_error_only",
@@ -1880,6 +2074,7 @@ mod tests {
         );
 
         drop(service.send(Event::SetHasDescription(true)));
+        drop(service.send(Event::SetHasErrorMessage(true)));
 
         assert_snapshot!(
             "checkbox_control_description_and_error",

@@ -594,11 +594,7 @@ fn run_adapter() -> Result<(), Error> {
 }
 
 fn run_adapter_parity() -> Result<(), Error> {
-    match lint::check_adapter_parity(&lint::AdapterParityOptions {
-        leptos_test_dir: PathBuf::from("crates/ars-leptos/tests"),
-        dioxus_test_dir: PathBuf::from("crates/ars-dioxus/tests"),
-        tolerance: 2,
-    }) {
+    match lint::check_adapter_parity(&lint::AdapterParityOptions::workspace_defaults()) {
         Ok(output) => {
             eprint!("{output}");
             Ok(())

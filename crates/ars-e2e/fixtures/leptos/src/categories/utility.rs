@@ -17,7 +17,7 @@ use ars_leptos::{
         error_boundary::ErrorBoundary,
         field::{self, Field},
         fieldset::{self, Fieldset},
-        form::{self, Form},
+        form::Form,
         heading::{self, Heading, HeadingLevelProvider, Section},
         highlight::Highlight,
         landmark::{self, Landmark},
@@ -301,6 +301,8 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
     let missing_at_value = Signal::stored(String::from("admin"));
     let incomplete_domain_value = Signal::stored(String::from("admin@"));
     let valid_email_value = Signal::stored(String::from("admin@email.com"));
+    let ready_status = t(UtilityText::Ready);
+    let status_message = Signal::derive(move || Some(ready_status.get()));
 
     view! {
         <div class="gallery-grid">
@@ -482,7 +484,7 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                     id="leptos-fixture-account-form"
                     action="/account"
                     validation_errors=form_errors
-                    status_message=move || Some(t(UtilityText::Ready))
+                    status_message
                     class="fixture-form"
                 >
                     <Fieldset id="leptos-fixture-account-fieldset" disabled=true invalid=true>
@@ -500,7 +502,10 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                                 <field::Description>
                                     {t(UtilityText::EmailDescription)}
                                 </field::Description>
-                                <field::Input r#type=field::InputType::Email name="email-required" />
+                                <field::Input
+                                    r#type=field::InputType::Email
+                                    name="email-required"
+                                />
                                 <field::ErrorMessage>
                                     {t(UtilityText::EmailRequired)}
                                 </field::ErrorMessage>
@@ -548,9 +553,7 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                     </Fieldset>
                     <Field id="leptos-fixture-email-valid-field" name="email-valid">
                         <field::Label>{t(UtilityText::EmailLabel)}</field::Label>
-                        <field::Description>
-                            {t(UtilityText::EmailDescription)}
-                        </field::Description>
+                        <field::Description>{t(UtilityText::EmailDescription)}</field::Description>
                         <field::Input
                             r#type=field::InputType::Email
                             name="email-valid"

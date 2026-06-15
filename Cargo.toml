@@ -1,29 +1,31 @@
 [workspace]
 members = [
-    "crates/ars-a11y",
-    "crates/ars-components",
-    "crates/ars-collections",
-    "crates/ars-core",
-    "crates/ars-derive",
-    "crates/ars-dioxus",
-    "crates/ars-dom",
-    "crates/ars-e2e",
-    "crates/ars-forms",
-    "crates/ars-i18n",
-    "crates/ars-interactions",
-    "crates/ars-leptos",
-    "crates/ars-test-harness",
-    "crates/ars-test-harness-dioxus",
-    "crates/ars-test-harness-leptos",
-    "xtask"
+  "crates/ars-a11y",
+  "crates/ars-components",
+  "crates/ars-collections",
+  "crates/ars-core",
+  "crates/ars-derive",
+  "crates/ars-dioxus",
+  "crates/ars-dioxus-components",
+  "crates/ars-dom",
+  "crates/ars-e2e",
+  "crates/ars-forms",
+  "crates/ars-i18n",
+  "crates/ars-interactions",
+  "crates/ars-leptos",
+  "crates/ars-leptos-components",
+  "crates/ars-test-harness",
+  "crates/ars-test-harness-dioxus",
+  "crates/ars-test-harness-leptos",
+  "xtask"
 ]
 exclude = [
-    "examples/widgets-leptos",
-    "examples/widgets-dioxus",
-    "examples/widgets-leptos-css",
-    "examples/widgets-dioxus-css",
-    "examples/widgets-leptos-tailwind",
-    "examples/widgets-dioxus-tailwind",
+  "examples/widgets-leptos",
+  "examples/widgets-dioxus",
+  "examples/widgets-leptos-css",
+  "examples/widgets-dioxus-css",
+  "examples/widgets-leptos-tailwind",
+  "examples/widgets-dioxus-tailwind"
 ]
 resolver = "3"
 

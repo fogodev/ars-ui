@@ -53,10 +53,10 @@ use wasm_bindgen::{JsCast, closure::Closure};
 type IndicatorAutoUpdateCleanup = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
 
 use crate::{
-    as_child::merge_dioxus_attrs,
     attrs::attr_map_to_dioxus_inline_attrs,
     event_mapping::dioxus_key_to_keyboard_key,
     id::use_stable_id,
+    merge_dioxus_attrs,
     platform::{DioxusPlatform, use_platform},
     provider::{use_messages_and_locale, use_modality_context, use_platform_effects},
     use_machine::use_machine_with_reactive_props,

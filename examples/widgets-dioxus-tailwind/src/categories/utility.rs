@@ -114,9 +114,6 @@ pub(crate) enum UtilityText {
     #[translate(en_US = "Enter your email", pt_BR = "Digite seu e-mail")]
     EmailPlaceholder,
 
-    #[translate(en_US = "Ready to submit", pt_BR = "Pronto para enviar")]
-    ReadyToSubmit,
-
     #[translate(en_US = "Visually hidden", pt_BR = "Visualmente oculto")]
     VisuallyHidden,
 

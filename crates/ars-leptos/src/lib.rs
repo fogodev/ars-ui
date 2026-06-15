@@ -27,6 +27,7 @@ mod ephemeral;
 mod event_mapping;
 mod hydration;
 mod id;
+pub mod input;
 pub mod navigation;
 mod nonce;
 pub mod prelude;
@@ -45,8 +46,9 @@ pub use attrs::{
     CssomStyleHandle, apply_styles_cssom, use_cssom_styles, use_cssom_styles_from_attrs,
 };
 pub use attrs::{
-    LeptosAttrResult, LeptosAttribute, attr_map_to_leptos, attr_map_to_leptos_inline_attrs,
-    consumer_style_prop_to_leptos_attr, merge_consumer_class_prop_into, use_style_strategy,
+    LeptosAttrResult, LeptosAttribute, apply_part_attrs, attr_map_to_leptos,
+    attr_map_to_leptos_inline_attrs, consumer_style_prop_to_leptos_attr,
+    merge_consumer_class_prop_into, root_class, use_style_strategy,
 };
 pub use callbacks::{call, emit, emit_map};
 pub use controlled::use_controlled_prop;

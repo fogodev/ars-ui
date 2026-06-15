@@ -31,6 +31,25 @@ pub enum State {
     /// The component is indeterminate.
     Indeterminate,
 }
+
+impl State {
+    /// State represented by a native checkbox `checked` boolean.
+    pub const fn from_checked_bool(checked: bool) -> Self {
+        if checked {
+            Self::Checked
+        } else {
+            Self::Unchecked
+        }
+    }
+
+    /// State requested by user toggle intent.
+    pub const fn next_on_toggle(self) -> Self {
+        match self {
+            Self::Unchecked | Self::Indeterminate => Self::Checked,
+            Self::Checked => Self::Unchecked,
+        }
+    }
+}
 ```
 
 ### 1.2 Events
@@ -53,6 +72,8 @@ pub enum Event {
     SetProps,
     /// Track whether a Description part is rendered.
     SetHasDescription(bool),
+    /// Track whether an ErrorMessage part is rendered.
+    SetHasErrorMessage(bool),
     /// Focus received.
     Focus {
         /// True if the focus was initiated by a keyboard.
@@ -77,6 +98,8 @@ pub struct Context {
     pub required: bool,
     /// Whether the component is invalid.
     pub invalid: bool,
+    /// Validation errors associated with the checkbox.
+    pub errors: Vec<Error>,
     /// Whether the component is readonly.
     pub readonly: bool,
     /// Whether the component is focused.
@@ -91,6 +114,8 @@ pub struct Context {
     pub value: String,
     /// Whether a Description part is rendered (gates aria-describedby).
     pub has_description: bool,
+    /// Whether an ErrorMessage part is rendered (gates aria-errormessage).
+    pub has_error_message: bool,
     /// Component IDs for part identification.
     pub ids: ComponentIds,
 }
@@ -113,6 +138,8 @@ pub struct Props {
     pub required: bool,
     /// Whether the component is invalid.
     pub invalid: bool,
+    /// Validation errors associated with the checkbox.
+    pub errors: Vec<Error>,
     /// Whether the component is readonly.
     pub readonly: bool,
     /// The name attribute for form submission.
@@ -134,6 +161,7 @@ impl Default for Props {
             disabled: false,
             required: false,
             invalid: false,
+            errors: Vec::new(),
             readonly: false,
             name: None,
             form: None,
@@ -195,7 +223,8 @@ impl ars_core::Machine for Machine {
             },
             disabled: props.disabled,
             required: props.required,
-            invalid: props.invalid,
+            invalid: props.invalid || !props.errors.is_empty(),
+            errors: props.errors.clone(),
             readonly: props.readonly,
             focused: false,
             focus_visible: false,
@@ -203,6 +232,7 @@ impl ars_core::Machine for Machine {
             form: props.form.clone(),
             value: props.value.clone(),
             has_description: false,
+            has_error_message: false,
             ids: ComponentIds::from_id(&props.id),
         };
         (state, ctx)
@@ -249,7 +279,8 @@ impl ars_core::Machine for Machine {
             (_, Event::SetProps) => {
                 let disabled = props.disabled;
                 let required = props.required;
-                let invalid = props.invalid;
+                let invalid = props.invalid || !props.errors.is_empty();
+                let errors = props.errors.clone();
                 let readonly = props.readonly;
                 let name = props.name.clone();
                 let form = props.form.clone();
@@ -258,6 +289,7 @@ impl ars_core::Machine for Machine {
                     ctx.disabled = disabled;
                     ctx.required = required;
                     ctx.invalid = invalid;
+                    ctx.errors = errors;
                     ctx.readonly = readonly;
                     ctx.name = name;
                     ctx.form = form;
@@ -268,6 +300,12 @@ impl ars_core::Machine for Machine {
                 let has_description = *has_description;
                 Some(TransitionPlan::context_only(move |ctx| {
                     ctx.has_description = has_description;
+                }))
+            }
+            (_, Event::SetHasErrorMessage(has_error_message)) => {
+                let has_error_message = *has_error_message;
+                Some(TransitionPlan::context_only(move |ctx| {
+                    ctx.has_error_message = has_error_message;
                 }))
             }
 
@@ -322,6 +360,7 @@ impl ars_core::Machine for Machine {
         if old.disabled != new.disabled
             || old.required != new.required
             || old.invalid != new.invalid
+            || old.errors != new.errors
             || old.readonly != new.readonly
             || old.name != new.name
             || old.form != new.form
@@ -431,6 +470,21 @@ pub struct Api<'a> {
 }
 
 impl<'a> Api<'a> {
+    /// Current checked state.
+    pub fn checked(&self) -> State {
+        *self.ctx.checked.get()
+    }
+
+    /// Whether user intent can currently mutate checked state.
+    pub const fn is_interactive(&self) -> bool {
+        !self.ctx.disabled && !self.ctx.readonly
+    }
+
+    /// Checked state requested by user toggle intent.
+    pub fn next_toggle_state(&self) -> State {
+        self.checked().next_on_toggle()
+    }
+
     /// Attributes for the root container.
     pub fn root_attrs(&self) -> AttrMap {
         let mut attrs = AttrMap::new();
@@ -479,21 +533,23 @@ impl<'a> Api<'a> {
         if self.ctx.required { attrs.set(HtmlAttr::Aria(AriaAttr::Required), "true"); }
         if self.ctx.invalid {
             attrs.set(HtmlAttr::Aria(AriaAttr::Invalid), "true");
-            attrs.set(HtmlAttr::Aria(AriaAttr::ErrorMessage), self.ctx.ids.part("error-message"));
+            if self.ctx.has_error_message {
+                attrs.set(HtmlAttr::Aria(AriaAttr::ErrorMessage), self.ctx.ids.part("error-message"));
+            }
         }
         if self.ctx.disabled { attrs.set(HtmlAttr::Aria(AriaAttr::Disabled), "true"); }
         if self.ctx.readonly { attrs.set(HtmlAttr::Aria(AriaAttr::ReadOnly), "true"); }
         attrs.set(HtmlAttr::Aria(AriaAttr::LabelledBy), self.ctx.ids.part("label"));
-        // Conditional aria-describedby: only when a Description part is rendered
+        // Conditional aria-describedby: only when described parts are rendered.
+        let mut describedby_parts = Vec::new();
         if self.ctx.has_description {
-            let mut describedby_parts = Vec::new();
             describedby_parts.push(self.ctx.ids.part("description"));
-            if self.ctx.invalid {
-                describedby_parts.push(self.ctx.ids.part("error-message"));
-            }
+        }
+        if self.ctx.invalid && self.ctx.has_error_message {
+            describedby_parts.push(self.ctx.ids.part("error-message"));
+        }
+        if !describedby_parts.is_empty() {
             attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), describedby_parts.join(" "));
-        } else if self.ctx.invalid {
-            attrs.set(HtmlAttr::Aria(AriaAttr::DescribedBy), self.ctx.ids.part("error-message"));
         }
         attrs.set(HtmlAttr::TabIndex, "0");
         attrs
@@ -626,17 +682,17 @@ Checkbox
 
 ### 3.1 ARIA Roles, States, and Properties
 
-| Property            | Value                                         |
-| ------------------- | --------------------------------------------- |
-| Role                | `checkbox` on Control                         |
-| `aria-checked`      | `"true"` / `"false"` / `"mixed"`              |
-| `aria-required`     | Present when `required=true`                  |
-| `aria-invalid`      | Present when `invalid=true`                   |
-| `aria-errormessage` | Points to ErrorMessage id when `invalid=true` |
-| `aria-disabled`     | Present when `disabled=true`                  |
-| `aria-readonly`     | Present when `readonly=true`                  |
-| `aria-labelledby`   | Points to Label id                            |
-| `aria-describedby`  | Points to Description + ErrorMessage ids      |
+| Property            | Value                                                                       |
+| ------------------- | --------------------------------------------------------------------------- |
+| Role                | `checkbox` on Control                                                       |
+| `aria-checked`      | `"true"` / `"false"` / `"mixed"`                                            |
+| `aria-required`     | Present when `required=true`                                                |
+| `aria-invalid`      | Present when `invalid=true`                                                 |
+| `aria-errormessage` | Points to ErrorMessage id when invalid and an ErrorMessage part is rendered |
+| `aria-disabled`     | Present when `disabled=true`                                                |
+| `aria-readonly`     | Present when `readonly=true`                                                |
+| `aria-labelledby`   | Points to Label id                                                          |
+| `aria-describedby`  | Points to rendered Description + ErrorMessage ids                           |
 
 ### 3.2 Keyboard Interaction
 
@@ -678,8 +734,8 @@ parent confirms it by passing `checked: Some(State::Checked)`.
 
 - **Hidden input**: A hidden `<input type="checkbox">` is rendered via `HiddenInput` part. It carries `id`, `name`, `form`, and `value` from context, and the `checked` attribute when state is `Checked`. The indeterminate state does not set `checked` — only `Checked` does. The native input is disabled only when the component is disabled; readonly values remain enabled so they can be submitted with native forms.
 - **Label activation**: `Label` points `for` at `HiddenInput` so native label activation targets a labelable form control. When readonly, `Label` omits `for` because checkboxes have no native readonly behavior and label activation would otherwise mutate the hidden input. Adapters must wire hidden input changes to `Api::on_hidden_input_change(checked)`.
-- **Validation states**: `aria-invalid="true"` is set on the Control part when `invalid=true`. The `ErrorMessage` part is linked via `aria-describedby`.
-- **Error message association**: `aria-describedby` on Control points to `Description` (when present) and `ErrorMessage` (when invalid). See `control_attrs()` for the wiring logic.
+- **Validation states**: `aria-invalid="true"` is set on the Control part when `invalid=true` or validation errors are present.
+- **Error message association**: `aria-describedby` on Control points to `Description` and `ErrorMessage` only when those parts are rendered. `aria-errormessage` is emitted only when the checkbox is invalid and an ErrorMessage part is rendered. See `control_attrs()` for the wiring logic.
 - **Required**: `aria-required="true"` on Control; `required` attribute on the hidden input.
 - **Reset behavior**: On form reset, the adapter sends `Event::Reset`. Reset is not blocked by `disabled` or `readonly`. Uncontrolled checkboxes restore `checked` to `default_checked` without emitting `on_checked_change`; controlled checkboxes request `default_checked` through `on_checked_change(default_checked)` and wait for the parent to confirm with `checked: Some(default_checked)`.
 - **Disabled/readonly propagation**: When inside a `Field` or `Fieldset`, the adapter merges `disabled`/`readonly` from `FieldCtx` per `07-forms.md` §12.6.
@@ -698,6 +754,7 @@ parent confirms it by passing `checked: Some(State::Checked)`.
 | Read-only        | `readonly: bool`         | `readOnly`               | --                       | `isReadOnly`      | Ark+RA parity; Radix lacks |
 | Required         | `required: bool`         | `required`               | `required`               | `isRequired`      | Full parity                |
 | Invalid          | `invalid: bool`          | `invalid`                | --                       | `isInvalid`       | Ark+RA parity; Radix lacks |
+| Errors           | `errors: Vec<Error>`     | field-level validation   | --                       | validation result | Idiomatic form integration |
 | Form name        | `name: Option<String>`   | `name`                   | `name`                   | `name`            | Full parity                |
 | Form value       | `value: String`          | `value` (default `"on"`) | `value` (default `"on"`) | `value`           | Full parity                |
 | Form ID          | `form: Option<String>`   | `form`                   | --                       | `form`            | Ark+RA parity              |

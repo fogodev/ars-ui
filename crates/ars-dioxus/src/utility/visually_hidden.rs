@@ -16,10 +16,7 @@ use dioxus::{
     prelude::*,
 };
 
-use crate::{
-    as_child::{AsChildRenderProps, merge_dioxus_attrs},
-    attr_map_to_dioxus_inline_attrs,
-};
+use crate::{as_child::AsChildRenderProps, attr_map_to_dioxus_inline_attrs, merge_dioxus_attrs};
 
 static TEMPLATE_CACHE: LazyLock<Mutex<HashMap<TemplateKey, Template>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));

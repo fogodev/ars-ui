@@ -7,5 +7,6 @@ publish = false
 [workspace]
 
 [dependencies]
-ars-leptos = { path = "../../../ars-leptos", features = ["csr"] }
-leptos     = { version = "0.8", default-features = false, features = ["csr"] }
+ars-leptos            = { path = "../../../ars-leptos", features = ["csr"] }
+ars-leptos-components = { path = "../../../ars-leptos-components", features = ["csr"] }
+leptos                = { version = "0.8", default-features = false, features = ["csr"] }

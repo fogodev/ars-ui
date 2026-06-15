@@ -3,7 +3,7 @@
 //! This module bridges the framework-agnostic connect output used across `ars-ui`
 //! to the native Leptos attribute representation spread onto elements.
 
-use ars_core::{AttrMap, AttrValue, CssProperty, StyleStrategy, styles_to_nonce_css};
+use ars_core::{AttrMap, AttrValue, CssProperty, HtmlAttr, StyleStrategy, styles_to_nonce_css};
 use leptos::prelude::*;
 #[cfg(not(feature = "ssr"))]
 use leptos::{wasm_bindgen::JsCast, web_sys};
@@ -120,10 +120,10 @@ pub fn merge_consumer_class_prop_into(map: &mut AttrMap, consumer_class: Option<
         return;
     };
 
-    let component_class = map.take(&ars_core::HtmlAttr::Class);
+    let component_class = map.take(&HtmlAttr::Class);
 
     map.set(
-        ars_core::HtmlAttr::Class,
+        HtmlAttr::Class,
         AttrValue::reactive_optional(move || {
             let consumer = consumer_class.get();
             let consumer = consumer.trim();
@@ -159,6 +159,29 @@ pub fn merge_consumer_class_prop_into(map: &mut AttrMap, consumer_class: Option<
     );
 }
 
+/// Builds a reactive root `class` prop from a required component class and
+/// optional consumer class tokens.
+///
+/// This is intended for styled wrapper crates that compose unstyled adapter
+/// primitives. The component class is always preserved; consumer classes are
+/// appended only when the reactive [`TextProp`] resolves to non-empty text.
+#[must_use]
+pub fn root_class(base: &'static str, class: Option<TextProp>) -> TextProp {
+    TextProp::from(move || {
+        class.as_ref().map_or_else(
+            || Oco::Borrowed(base),
+            |class| {
+                let class = class.get();
+                if class.trim().is_empty() {
+                    Oco::Borrowed(base)
+                } else {
+                    Oco::Owned(format!("{base} {class}"))
+                }
+            },
+        )
+    })
+}
+
 /// Converts a static or reactive consumer inline style prop to a Leptos attr.
 ///
 /// Raw `style` is an escape hatch, but when a component exposes it the value
@@ -177,6 +200,29 @@ pub fn consumer_style_prop_to_leptos_attr(
     };
 
     Some(leptos::attr::custom::custom_attribute(String::from("style"), closure).into_any_attr())
+}
+
+/// Applies Leptos consumer part styling to an [`AttrMap`] and converts it to
+/// spreadable Leptos attributes.
+///
+/// This is the shared final step for Leptos compound parts after they have
+/// added any adapter-specific dynamic attrs, event-related attrs, or refs to
+/// the agnostic part attrs.
+#[must_use]
+pub fn apply_part_attrs(
+    mut attrs: AttrMap,
+    class: Option<TextProp>,
+    style: Option<TextProp>,
+) -> Vec<LeptosAttribute> {
+    merge_consumer_class_prop_into(&mut attrs, class);
+
+    let mut attrs = attr_map_to_leptos_inline_attrs(attrs);
+
+    if let Some(style) = consumer_style_prop_to_leptos_attr(style) {
+        attrs.push(style);
+    }
+
+    attrs
 }
 
 fn attr_value_to_leptos_attr(name: String, value: AttrValue) -> Option<LeptosAttribute> {
@@ -200,6 +246,7 @@ fn attr_value_to_leptos_attr(name: String, value: AttrValue) -> Option<LeptosAtt
             // boolean states use the literal `"true"` token instead of an empty
             // string because assistive technology consumes the attribute value.
             let is_aria = name.starts_with("aria-");
+
             let closure = move || {
                 f().then(|| {
                     if is_aria {
@@ -538,6 +585,29 @@ mod tests {
 
         assert_eq!(result.attrs.len(), 1);
         assert_eq!(calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn root_class_preserves_base_when_consumer_class_is_absent_or_empty() {
+        let owner = Owner::new();
+        owner.with(|| {
+            assert_eq!(root_class("ars-checkbox", None).get(), "ars-checkbox");
+            assert_eq!(
+                root_class("ars-checkbox", Some(TextProp::from("  "))).get(),
+                "ars-checkbox"
+            );
+        });
+    }
+
+    #[test]
+    fn root_class_appends_consumer_class_tokens() {
+        let owner = Owner::new();
+        owner.with(|| {
+            assert_eq!(
+                root_class("ars-checkbox", Some(TextProp::from("consumer"))).get(),
+                "ars-checkbox consumer"
+            );
+        });
     }
 
     #[test]

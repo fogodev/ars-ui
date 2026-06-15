@@ -15,7 +15,7 @@ use ars_dioxus::{
         error_boundary::{CapturedError, ErrorBoundary},
         field::{self, Field},
         fieldset::{self, Fieldset},
-        form::{self, Form},
+        form::Form,
         heading::{self, Heading, HeadingLevelProvider},
         highlight::Highlight,
         landmark::{self, Landmark},

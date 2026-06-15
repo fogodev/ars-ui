@@ -9,9 +9,7 @@ pub use ars_components::utility::landmark::{Api, Messages, Part, Props, Role};
 use ars_core::{AttrValue, Env, HtmlAttr, Locale};
 use dioxus::prelude::*;
 
-use crate::{
-    as_child::merge_dioxus_attrs, attr_map_to_dioxus_inline_attrs, use_messages_and_locale,
-};
+use crate::{attr_map_to_dioxus_inline_attrs, merge_dioxus_attrs, use_messages_and_locale};
 
 /// Props for the Dioxus [`Landmark`] component.
 #[derive(Props, Clone, PartialEq, Debug)]

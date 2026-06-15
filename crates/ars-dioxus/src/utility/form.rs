@@ -10,7 +10,7 @@ use dioxus::{events::MountedData, prelude::*};
 use web_sys::wasm_bindgen::{JsCast as _, JsValue};
 
 use crate::{
-    as_child::merge_dioxus_attrs, attr_map_to_dioxus_inline_attrs, callbacks, use_machine,
+    attr_map_to_dioxus_inline_attrs, callbacks, merge_dioxus_attrs, use_machine,
     use_messages_and_locale, use_stable_id,
 };
 

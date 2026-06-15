@@ -12,6 +12,9 @@ use crate::{
     text::WidgetsText,
 };
 
+const ARS_BASE_STYLE: &str = include_str!("../public/ars-base.css");
+const ARS_INTERACTIONS_STYLE: &str = include_str!("../public/ars-interactions.css");
+
 fn main() {
     dioxus::launch(App);
 }
@@ -22,6 +25,8 @@ fn App() -> Element {
 
     rsx! {
         ArsProvider { locale, i18n_registries: messages::i18n_registries(),
+            style { "{ARS_BASE_STYLE}" }
+            style { "{ARS_INTERACTIONS_STYLE}" }
             main { class: "widgets-page",
                 p { class: "page-kicker", {t(WidgetsText::CssStyling)} }
                 h1 { {t(WidgetsText::DioxusTitle)} }
