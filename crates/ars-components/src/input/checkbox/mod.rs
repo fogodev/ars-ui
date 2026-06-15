@@ -587,6 +587,12 @@ impl Api<'_> {
         self.props.default_checked
     }
 
+    /// Returns whether checked state is controlled by component props.
+    #[must_use]
+    pub const fn is_checked_controlled(&self) -> bool {
+        self.ctx.checked.is_controlled()
+    }
+
     /// Returns whether user intent can currently mutate the checked state.
     #[must_use]
     pub const fn is_interactive(&self) -> bool {
@@ -1904,6 +1910,22 @@ mod tests {
         let api = service.connect(&|_| {});
 
         assert_eq!(api.default_checked(), State::Indeterminate);
+    }
+
+    #[test]
+    fn api_reports_whether_checked_state_is_controlled() {
+        let uncontrolled = Service::<Machine>::new(test_props(), &Env::default(), &Messages);
+        assert!(!uncontrolled.connect(&|_| {}).is_checked_controlled());
+
+        let controlled = Service::<Machine>::new(
+            Props {
+                checked: Some(State::Checked),
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+        assert!(controlled.connect(&|_| {}).is_checked_controlled());
     }
 
     #[test]

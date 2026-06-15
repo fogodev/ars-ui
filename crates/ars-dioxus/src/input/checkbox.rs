@@ -10,7 +10,10 @@ use ars_forms::validation::Error;
 use ars_interactions::KeyboardEventData;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use dioxus::events::MountedData;
-use dioxus::prelude::*;
+use dioxus::{
+    dioxus_core::{DynamicNode, TemplateNode},
+    prelude::*,
+};
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use web_sys::wasm_bindgen::JsCast as _;
 
@@ -34,6 +37,45 @@ fn checkbox_context() -> CheckboxContext {
 
 const fn api_is_interactive(api: &ars_components::input::checkbox::Api<'_>) -> bool {
     api.is_interactive()
+}
+
+fn element_contains_component(element: &Element, component_path_suffix: &str) -> bool {
+    element
+        .as_ref()
+        .is_ok_and(|node| vnode_contains_component(node, component_path_suffix))
+}
+
+fn vnode_contains_component(node: &VNode, component_path_suffix: &str) -> bool {
+    node.template
+        .roots
+        .iter()
+        .any(|root| template_node_contains_component(root, node, component_path_suffix))
+}
+
+fn template_node_contains_component(
+    template_node: &TemplateNode,
+    node: &VNode,
+    component_path_suffix: &str,
+) -> bool {
+    match template_node {
+        TemplateNode::Element { children, .. } => children
+            .iter()
+            .any(|child| template_node_contains_component(child, node, component_path_suffix)),
+        TemplateNode::Dynamic { id } => {
+            dynamic_node_contains_component(&node.dynamic_nodes[*id], component_path_suffix)
+        }
+        TemplateNode::Text { .. } => false,
+    }
+}
+
+fn dynamic_node_contains_component(node: &DynamicNode, component_path_suffix: &str) -> bool {
+    match node {
+        DynamicNode::Component(component) => component.name.ends_with(component_path_suffix),
+        DynamicNode::Fragment(nodes) => nodes
+            .iter()
+            .any(|node| vnode_contains_component(node, component_path_suffix)),
+        DynamicNode::Text(_) | DynamicNode::Placeholder(_) => false,
+    }
 }
 
 /// Props for the Dioxus [`Root`] compound checkbox part.
@@ -127,14 +169,17 @@ pub fn Root(props: RootProps) -> Element {
 
     let mut seeded_presence = use_signal(|| false);
 
+    let has_description = props.has_description
+        || element_contains_component(&props.children, "input::checkbox::Description");
+    let has_error_message = props.has_error_message
+        || element_contains_component(&props.children, "input::checkbox::ErrorMessage");
+
     if !*seeded_presence.peek() {
-        machine
-            .send
-            .call(Event::SetHasDescription(props.has_description));
+        machine.send.call(Event::SetHasDescription(has_description));
 
         machine
             .send
-            .call(Event::SetHasErrorMessage(props.has_error_message));
+            .call(Event::SetHasErrorMessage(has_error_message));
 
         seeded_presence.set(true);
     }
@@ -353,9 +398,12 @@ fn render_hidden_input(
     let mut form_reset_target = use_signal(|| None::<web_sys::EventTarget>);
 
     crate::use_safe_event_listener(form_reset_target, "reset", move |_| {
-        let next = machine.with_api_snapshot(|api| api.default_checked());
+        let reset_request = machine
+            .with_api_snapshot(|api| api.is_checked_controlled().then(|| api.default_checked()));
+
         machine.send.call(Event::Reset);
-        if let Some(callback) = on_checked_change {
+
+        if let (Some(callback), Some(next)) = (on_checked_change, reset_request) {
             callback.call(next);
         }
     });

@@ -82,6 +82,7 @@ pub fn InputPanel() -> impl IntoView {
                     name="notifications"
                     value="email"
                     checked=form_value.into()
+                    default_checked=State::Checked
                     on_checked_change=Callback::new(move |next| set_form_value.set(next))
                 >
                     "Form value"

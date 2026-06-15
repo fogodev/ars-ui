@@ -216,14 +216,7 @@ pub fn check_adapter_parity(options: &AdapterParityOptions) -> Result<String, Er
         options.tolerance,
         &presence,
     );
-    let mut failures = parity_failures
-        .into_iter()
-        .filter(|failure| {
-            failure
-                .split_once(':')
-                .is_some_and(|(component, _)| delivery_components.contains(component))
-        })
-        .collect::<Vec<_>>();
+    let mut failures = parity_failures;
 
     failures.extend(adapter_semantic_boundary_failures(
         options,

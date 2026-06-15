@@ -617,9 +617,13 @@ fn use_form_reset_listener(
 
         let target: web_sys::EventTarget = form.unchecked_into();
         let closure = Closure::wrap(Box::new(move |_event: web_sys::Event| {
-            let next = machine.with_api_snapshot(|api| api.default_checked());
+            let reset_request = machine.with_api_snapshot(|api| {
+                api.is_checked_controlled().then(|| api.default_checked())
+            });
+
             machine.send.run(Event::Reset);
-            if let Some(callback) = on_checked_change {
+
+            if let (Some(callback), Some(next)) = (on_checked_change, reset_request) {
                 callback.run(next);
             }
         }) as Box<dyn FnMut(web_sys::Event)>);

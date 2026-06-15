@@ -181,6 +181,31 @@ fn checkbox_renders_disabled_readonly_invalid_description_and_user_attrs() {
 }
 
 #[test]
+fn checkbox_compound_parts_link_description_and_error_without_manual_presence_flags() {
+    let html = render(|| {
+        view! {
+            <checkbox::Root id="legal" invalid=true>
+                <checkbox::Label>"Legal terms"</checkbox::Label>
+                <checkbox::Control>
+                    <checkbox::Indicator />
+                </checkbox::Control>
+                <checkbox::HiddenInput />
+                <checkbox::Description>"Needed for account access"</checkbox::Description>
+                <checkbox::ErrorMessage>"You must accept"</checkbox::ErrorMessage>
+            </checkbox::Root>
+        }
+        .to_html()
+    });
+
+    for fragment in [
+        r#"aria-errormessage="legal-error-message""#,
+        r#"aria-describedby="legal-description legal-error-message""#,
+    ] {
+        assert!(html.contains(fragment), "missing {fragment}: {html}");
+    }
+}
+
+#[test]
 fn checkbox_inherits_fieldset_state() {
     let html = render(|| {
         view! {

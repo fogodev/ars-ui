@@ -71,6 +71,7 @@ pub fn InputPanel() -> Element {
                     name: "notifications",
                     value: "email",
                     checked: form_value(),
+                    default_checked: State::Checked,
                     on_checked_change: move |next| form_value.set(next),
                     "Form value"
                 }
