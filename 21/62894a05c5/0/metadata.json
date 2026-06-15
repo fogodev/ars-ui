@@ -1,0 +1,75 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "2162894a05c5",
+  "session_id": "019e92f8-84a9-7fc0-bf0e-061072d47c47",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-15T21:41:30.060833Z",
+  "branch": "codex/issue-320-431-checkbox-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "d932f1bc2bc5",
+  "checkpoint_transcript_start": 13101,
+  "transcript_lines_at_start": 13101,
+  "token_usage": {
+    "input_tokens": 561612,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 16651264,
+    "output_tokens": 27145,
+    "api_call_count": 105
+  },
+  "session_metrics": {
+    "turn_count": 21
+  },
+  "summary": {
+    "intent": "Address a batch of Codex review findings on PR #727 in the fogodev/ars-ui repo, covering checkbox reset callback gating, E2E controlled reset defaults, compound-part SSR ARIA links for Dioxus, and adapter parity lint scope.",
+    "outcome": "All four Codex review threads were fixed, committed as a single commit, and pushed. The PR passed all CI lanes (Coverage, Release Verification, and all feature flag checks) and Codex was retriggered for another review pass.",
+    "learnings": {
+      "repo": [
+        "Dioxus component child names in VNode DynamicNode are fully qualified (e.g., `ars_dioxus::input::checkbox::Description`), not short names — suffix matching is required when scanning child component names.",
+        "The xtask `adapter-parity` lint was previously scoped to documented delivery/workflow components only; the correct behavior is to apply raw Leptos-vs-Dioxus test parity failures to every implemented component.",
+        "Leptos serializes ARIA relationships correctly through its reactive attr path on first SSR pass; Dioxus does not without an explicit pre-render child scan at the Root boundary.",
+        "The `is_controlled()` distinction for checkbox state belongs in the agnostic `ars-components` core API, not re-derived in each adapter.",
+        "Dioxus wasm browser tests use a similar harness to Leptos but were missing for Button, causing a parity gap surfaced by the restored lint."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-dioxus/src/input/checkbox.rs",
+          "finding": "Root component now scans children VNode DynamicNode component names for `::Description` and `::ErrorMessage` suffixes to seed machine presence before Control serializes, fixing first-pass SSR ARIA links."
+        },
+        {
+          "path": "crates/ars-components/src/input/checkbox/mod.rs",
+          "finding": "New `is_controlled()` / `api_reports_whether_checked_state_is_controlled` API added so adapters can gate native reset callbacks without re-deriving core controlled-state semantics."
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "finding": "Adapter parity lint restored to report failures for all components; delivery/presence checks remain scoped to documented workflow components only."
+        },
+        {
+          "path": "crates/ars-dioxus/tests/button_wasm.rs",
+          "finding": "New file added to close Button's Dioxus wasm browser-test parity gap with Leptos, required to make the restored adapter-parity lint pass cleanly."
+        }
+      ],
+      "workflow": [
+        "CI polling used 2-minute sleep loops with batched `gh pr checks`, reactions, and GraphQL review-thread queries; this is the established pattern for the repo's Codex review cycle.",
+        "Codex review threads are resolved via GitHub GraphQL `resolveReviewThread` mutation using thread IDs, and replies are posted via `gh api` REST before resolution.",
+        "Adding focused regression tests before changing implementation behavior confirmed the failure shape (Leptos already passing, Dioxus failing) and prevented over-engineering.",
+        "Temporary `eprintln!` instrumentation was used to discover fully-qualified Dioxus component names at runtime, then removed before committing.",
+        "Commit hooks in this repo are slow/silent but complete cleanly — the pattern is to wait rather than interrupt."
+      ]
+    },
+    "friction": [
+      "Dioxus does not re-export `TemplateNode`/`DynamicNode` through its prelude, requiring direct `dioxus_core` imports for VNode scanning.",
+      "Commit hook ran silently for an extended period on multiple commits, requiring repeated polling to confirm completion.",
+      "`cargo test` only accepts one test filter argument — attempting to pass two filters in one invocation silently ran only one of them.",
+      "Restoring full adapter parity lint immediately exposed a pre-existing Button Dioxus wasm coverage gap, requiring additional work before the lint could pass.",
+      "Dioxus child component names are fully qualified at the VNode level, which was not documented and required runtime instrumentation to discover."
+    ],
+    "open_items": [
+      "Dioxus SSR ARIA link fix relies on scanning VNode child component name suffixes — this is a structural workaround and should be revisited if Dioxus exposes a proper pre-render hook or sibling-context mechanism in a future version.",
+      "The Button Dioxus wasm tests added are minimal parity coverage; deeper browser-interaction tests (click, keyboard, focus) may still be missing.",
+      "Codex review pass was retriggered at the end of the transcript but the final verdict (approved/new threads) was not yet known."
+    ]
+  }
+}
