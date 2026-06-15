@@ -215,4 +215,30 @@ mod tests {
 
         drop(fs::remove_dir_all(root));
     }
+
+    #[test]
+    fn sketch_validation_reports_missing_columns_and_incomplete_cells() {
+        let root = temp_dir("incomplete");
+        let path = root.join("sketch.md");
+
+        write(
+            &path,
+            r#"
+## Reference Sources
+## Final Outcome Matrix
+| Reference outcome | Final status | API/contract stance |
+| --- | --- | --- |
+| Basic | TODO |  |
+## Follow-up Section
+"#,
+        );
+
+        let output = execute(&path).expect("validation should run");
+
+        assert!(output.contains("missing required section `## Reference Evidence`"));
+        assert!(output.contains("final outcome matrix missing `Reference proof` column"));
+        assert!(output.contains("final outcome matrix row 1 has too few columns"));
+
+        drop(fs::remove_dir_all(root));
+    }
 }

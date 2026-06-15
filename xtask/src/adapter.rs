@@ -226,7 +226,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::{ScaffoldOptions, scaffold};
+    use super::{Error, ScaffoldOptions, scaffold};
 
     fn temp_dir(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -272,6 +272,77 @@ mod tests {
             assert!(test.contains("renders inside Form"));
             assert!(test.contains("renders inside Fieldset"));
             assert!(test.contains("validation errors by name"));
+        }
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn scaffold_can_create_docs_only_usage_without_form_placeholders() {
+        let root = temp_dir("docs-only");
+
+        let output = scaffold(&ScaffoldOptions {
+            component: "color-picker".to_string(),
+            category: "specialized".to_string(),
+            leptos: false,
+            dioxus: false,
+            form_control: false,
+            root: root.clone(),
+        })
+        .expect("docs-only scaffold should succeed");
+
+        assert!(output.contains("color_picker-counterpart-sketch.md"));
+        assert!(output.contains("color_picker-usage.md"));
+        assert!(
+            !root
+                .join("crates/ars-leptos/src/specialized/color_picker.rs")
+                .exists()
+        );
+        assert!(
+            !root
+                .join("crates/ars-dioxus/src/specialized/color_picker.rs")
+                .exists()
+        );
+
+        let usage = read(
+            &root
+                .join("docs/implementation/adapter-components")
+                .join("color_picker-usage.md"),
+        );
+        assert!(usage.contains("# color_picker Usage Notes"));
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn scaffold_refuses_to_overwrite_existing_files() {
+        let root = temp_dir("existing-file");
+        let existing = root
+            .join("docs/implementation/sketches")
+            .join("checkbox-counterpart-sketch.md");
+
+        fs::create_dir_all(existing.parent().expect("existing file has parent"))
+            .expect("create existing file parent");
+        fs::write(&existing, "existing").expect("write existing file");
+
+        let error = scaffold(&ScaffoldOptions {
+            component: "checkbox".to_string(),
+            category: "input".to_string(),
+            leptos: false,
+            dioxus: false,
+            form_control: false,
+            root: root.clone(),
+        })
+        .expect_err("scaffold should refuse to overwrite");
+
+        let message = error.to_string();
+
+        match error {
+            Error::Exists(path) => {
+                assert_eq!(path, existing);
+                assert!(message.contains("refusing to overwrite"));
+            }
+            Error::Io(error) => panic!("unexpected IO error: {error}"),
         }
 
         drop(fs::remove_dir_all(root));
