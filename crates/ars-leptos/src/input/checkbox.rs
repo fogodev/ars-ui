@@ -284,7 +284,10 @@ where
                 last_pointer.set_value(false);
                 machine.send.run(Event::Focus { is_keyboard });
             }
-            on:blur=move |_| machine.send.run(Event::Blur)
+            on:blur=move |_| {
+                last_pointer.set_value(false);
+                machine.send.run(Event::Blur);
+            }
         >
             {children.into_inner()()}
         </div>
@@ -618,7 +621,8 @@ fn use_form_reset_listener(
         let target: web_sys::EventTarget = form.unchecked_into();
         let closure = Closure::wrap(Box::new(move |_event: web_sys::Event| {
             let reset_request = machine.with_api_snapshot(|api| {
-                api.is_checked_controlled().then(|| api.default_checked())
+                (api.is_checked_controlled() && api.checked() != api.default_checked())
+                    .then(|| api.default_checked())
             });
 
             machine.send.run(Event::Reset);

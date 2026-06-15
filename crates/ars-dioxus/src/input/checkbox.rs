@@ -307,7 +307,10 @@ pub fn Control(props: ControlProps) -> Element {
                         is_keyboard,
                     });
             },
-            onblur: move |_| machine.send.call(Event::Blur),
+            onblur: move |_| {
+                last_pointer.set(false);
+                machine.send.call(Event::Blur);
+            },
             ..attrs,
             {props.children}
         }
@@ -398,8 +401,10 @@ fn render_hidden_input(
     let mut form_reset_target = use_signal(|| None::<web_sys::EventTarget>);
 
     crate::use_safe_event_listener(form_reset_target, "reset", move |_| {
-        let reset_request = machine
-            .with_api_snapshot(|api| api.is_checked_controlled().then(|| api.default_checked()));
+        let reset_request = machine.with_api_snapshot(|api| {
+            (api.is_checked_controlled() && api.checked() != api.default_checked())
+                .then(|| api.default_checked())
+        });
 
         machine.send.call(Event::Reset);
 

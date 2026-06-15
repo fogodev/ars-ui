@@ -838,7 +838,47 @@ fn component_requires_composition(src_dir: &Path, component: &str) -> Result<boo
 fn read_component_source(src_dir: &Path, component: &str) -> Result<Option<String>, Error> {
     let path = component_module_path(src_dir, component);
 
-    read_optional(&path)
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    if path.file_name().and_then(|name| name.to_str()) != Some("mod.rs") {
+        return read_optional(&path);
+    }
+
+    let Some(component_dir) = path.parent() else {
+        return read_optional(&path);
+    };
+
+    let mut content = String::new();
+
+    for path in rust_files_under(component_dir)? {
+        content.push_str(&fs::read_to_string(path)?);
+        content.push('\n');
+    }
+
+    Ok(Some(content))
+}
+
+fn rust_files_under(dir: &Path) -> Result<Vec<PathBuf>, Error> {
+    let mut files = Vec::new();
+    collect_rust_files(dir, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn collect_rust_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), Error> {
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+
+        if path.is_dir() {
+            collect_rust_files(&path, files)?;
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            files.push(path);
+        }
+    }
+
+    Ok(())
 }
 
 fn component_module_path(src_dir: &Path, component: &str) -> PathBuf {
@@ -920,6 +960,10 @@ fn widget_category_file_contains_component(dir: &Path, category: &str, component
         return false;
     };
 
+    file_content_mentions_component(&content, component)
+}
+
+fn file_content_mentions_component(content: &str, component: &str) -> bool {
     let kebab_component = component.replace('_', "-");
     let pascal_component = component
         .split('_')
@@ -940,15 +984,22 @@ fn widget_category_file_contains_component(dir: &Path, category: &str, component
 
 fn e2e_fixture_exists(dir: &Path, component: &str) -> bool {
     widget_category_for(component).is_some_and(|category| {
-        dir.join("src/categories")
-            .join(format!("{category}.rs"))
-            .exists()
+        e2e_flat_fixture_contains_component(dir, category, component)
             || dir
                 .join("src/categories")
                 .join(category)
                 .join(format!("{component}.rs"))
                 .exists()
     })
+}
+
+fn e2e_flat_fixture_contains_component(dir: &Path, category: &str, component: &str) -> bool {
+    let path = dir.join("src/categories").join(format!("{category}.rs"));
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+
+    file_content_mentions_component(&content, component)
 }
 
 fn e2e_harness_exists(dir: &Path, component: &str) -> bool {
@@ -1866,6 +1917,47 @@ mod tests {
             "input",
             "text_field"
         ));
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn component_source_scan_includes_directory_child_modules() {
+        let root = temp_dir("component-source-dir");
+        let src = root.join("crates/ars-dioxus/src");
+
+        write(&src.join("input/checkbox/mod.rs"), "mod control;\n");
+        write(
+            &src.join("input/checkbox/control.rs"),
+            "on_checked_change\n",
+        );
+
+        assert!(
+            component_requires_wasm(&src, "checkbox").expect("scan component source"),
+            "child module event handlers must require wasm coverage"
+        );
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn e2e_flat_fixture_must_mention_component() {
+        let root = temp_dir("e2e-flat-fixture-component");
+        let fixtures = root.join("crates/ars-e2e/fixtures/leptos");
+
+        write(
+            &fixtures.join("src/categories/input.rs"),
+            "pub fn input_panel() { TextField {} }\n",
+        );
+
+        assert!(!e2e_fixture_exists(&fixtures, "checkbox"));
+
+        write(
+            &fixtures.join("src/categories/input.rs"),
+            "pub fn input_panel() { Checkbox {} }\n",
+        );
+
+        assert!(e2e_fixture_exists(&fixtures, "checkbox"));
 
         drop(fs::remove_dir_all(root));
     }

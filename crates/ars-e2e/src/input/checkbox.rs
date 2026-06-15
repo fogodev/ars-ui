@@ -198,42 +198,120 @@ async fn assert_blocked_states(driver: &WebDriver, prefix: &str) -> Result<(), E
 }
 
 async fn assert_computed_visual_states(driver: &WebDriver, prefix: &str) -> Result<(), Error> {
+    let unchecked = computed_control_style(driver, prefix, "unchecked").await?;
+
     for suffix in ["checked", "indeterminate", "disabled", "invalid"] {
-        let root = element_by_id(driver, &format!("{prefix}-{suffix}")).await?;
-        let control = control(&root).await?;
-        let style = driver
-            .execute(
-                r#"
-                const style = getComputedStyle(arguments[0]);
-                return {
-                    borderColor: style.borderColor,
-                    backgroundColor: style.backgroundColor,
-                    opacity: style.opacity,
-                    color: style.color,
-                    width: style.width,
-                    height: style.height
-                };
-                "#,
-                vec![control.to_json()?],
-            )
-            .await?;
+        let style = computed_control_style(driver, prefix, suffix).await?;
 
-        let style = style.json();
+        if style.width <= 0.0 || style.height <= 0.0 {
+            return Err(Error::Assertion(format!(
+                "{suffix} checkbox control must have positive dimensions, got {}x{}",
+                style.width, style.height
+            )));
+        }
 
-        for key in ["width", "height"] {
-            if style
-                .get(key)
-                .and_then(Value::as_str)
-                .is_none_or(str::is_empty)
-            {
-                return Err(Error::Assertion(format!(
-                    "{suffix} checkbox control must expose computed {key}"
-                )));
+        match suffix {
+            "checked" | "indeterminate" => {
+                if style.background_color == unchecked.background_color
+                    && style.border_color == unchecked.border_color
+                {
+                    return Err(Error::Assertion(format!(
+                        "{suffix} checkbox control must visually differ from unchecked"
+                    )));
+                }
             }
+            "disabled" if style.opacity >= unchecked.opacity => {
+                return Err(Error::Assertion(
+                    "disabled checkbox control opacity must be lower than unchecked".into(),
+                ));
+            }
+            "invalid" if style.border_color == unchecked.border_color => {
+                return Err(Error::Assertion(
+                    "invalid checkbox control border color must differ from unchecked".into(),
+                ));
+            }
+            _ => {}
         }
     }
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct ComputedControlStyle {
+    border_color: String,
+    background_color: String,
+    opacity: f64,
+    width: f64,
+    height: f64,
+}
+
+async fn computed_control_style(
+    driver: &WebDriver,
+    prefix: &str,
+    suffix: &str,
+) -> Result<ComputedControlStyle, Error> {
+    let root = element_by_id(driver, &format!("{prefix}-{suffix}")).await?;
+    let control = control(&root).await?;
+    let style = driver
+        .execute(
+            r#"
+            const style = getComputedStyle(arguments[0]);
+            return {
+                borderColor: style.borderColor,
+                backgroundColor: style.backgroundColor,
+                opacity: style.opacity,
+                width: style.width,
+                height: style.height
+            };
+            "#,
+            vec![control.to_json()?],
+        )
+        .await?;
+
+    let style = style.json();
+
+    Ok(ComputedControlStyle {
+        border_color: string_field(style, "borderColor", suffix)?,
+        background_color: string_field(style, "backgroundColor", suffix)?,
+        opacity: number_string_field(style, "opacity", suffix)?,
+        width: px_field(style, "width", suffix)?,
+        height: px_field(style, "height", suffix)?,
+    })
+}
+
+fn string_field(style: &Value, key: &str, suffix: &str) -> Result<String, Error> {
+    style
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| Error::Assertion(format!("{suffix} checkbox missing computed {key}")))
+}
+
+fn number_string_field(style: &Value, key: &str, suffix: &str) -> Result<f64, Error> {
+    string_field(style, key, suffix)?
+        .parse::<f64>()
+        .map_err(|error| {
+            Error::Assertion(format!(
+                "{suffix} checkbox computed {key} must be numeric: {error}"
+            ))
+        })
+}
+
+fn px_field(style: &Value, key: &str, suffix: &str) -> Result<f64, Error> {
+    let raw = string_field(style, key, suffix)?;
+    let Some(value) = raw.strip_suffix("px") else {
+        return Err(Error::Assertion(format!(
+            "{suffix} checkbox computed {key} must use px, got {raw}"
+        )));
+    };
+
+    value.parse::<f64>().map_err(|error| {
+        Error::Assertion(format!(
+            "{suffix} checkbox computed {key} must be numeric px: {error}"
+        ))
+    })
 }
 
 async fn assert_form_value_and_reset(driver: &WebDriver, prefix: &str) -> Result<(), Error> {
