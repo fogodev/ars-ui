@@ -26,6 +26,7 @@ struct CheckboxContext {
     last_pointer: Signal<bool>,
 }
 
+// adapter-context-glue: framework context lookup for compound checkbox parts.
 fn checkbox_context() -> CheckboxContext {
     try_use_context::<CheckboxContext>()
         .expect("Checkbox subcomponents must be rendered inside <checkbox::Root/>")
@@ -352,7 +353,11 @@ fn render_hidden_input(
     let mut form_reset_target = use_signal(|| None::<web_sys::EventTarget>);
 
     crate::use_safe_event_listener(form_reset_target, "reset", move |_| {
+        let next = machine.with_api_snapshot(|api| api.default_checked());
         machine.send.call(Event::Reset);
+        if let Some(callback) = on_checked_change {
+            callback.call(next);
+        }
     });
 
     rsx! {

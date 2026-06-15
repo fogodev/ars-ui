@@ -917,12 +917,32 @@ fn all_widget_category_files_exist(options: &AdapterParityOptions, component: &s
             &options.dioxus_tailwind_widgets_dir,
         ]
         .iter()
-        .all(|dir| {
-            dir.join("src/categories")
-                .join(format!("{category}.rs"))
-                .exists()
-        })
+        .all(|dir| widget_category_file_contains_component(dir, category, component))
     })
+}
+
+fn widget_category_file_contains_component(dir: &Path, category: &str, component: &str) -> bool {
+    let path = dir.join("src/categories").join(format!("{category}.rs"));
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+
+    let kebab_component = component.replace('_', "-");
+    let pascal_component = component
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<String>();
+
+    content.contains(component)
+        || content.contains(&kebab_component)
+        || content.contains(&pascal_component)
 }
 
 fn e2e_fixture_exists(dir: &Path, component: &str) -> bool {
@@ -1831,6 +1851,28 @@ mod tests {
                 .any(|failure| failure.contains("E2E harness")),
             "{failures:?}"
         );
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn widget_category_file_must_mention_component() {
+        let root = temp_dir("widget-category-component");
+        let widgets = root.join("examples/widgets-leptos");
+
+        write(
+            &widgets.join("src/categories/input.rs"),
+            "pub fn input_panel() { Checkbox {} }\n",
+        );
+
+        assert!(widget_category_file_contains_component(
+            &widgets, "input", "checkbox"
+        ));
+        assert!(!widget_category_file_contains_component(
+            &widgets,
+            "input",
+            "text_field"
+        ));
 
         drop(fs::remove_dir_all(root));
     }

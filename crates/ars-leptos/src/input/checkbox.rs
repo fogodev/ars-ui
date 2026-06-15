@@ -30,6 +30,7 @@ struct CheckboxContext {
     last_pointer: StoredValue<bool>,
 }
 
+// adapter-context-glue: framework context lookup for compound checkbox parts.
 fn checkbox_context() -> CheckboxContext {
     use_context::<CheckboxContext>()
         .expect("Checkbox subcomponents must be rendered inside <checkbox::Root/>")
@@ -342,12 +343,13 @@ pub fn HiddenInput(
         apply_part_attrs(attrs, class, style)
     });
 
-    use_form_reset_listener(input_ref, machine);
+    use_form_reset_listener(input_ref, machine, on_checked_change);
 
     view! {
         <input
             {..attrs}
             node_ref=input_ref
+            prop:checked=move || machine.with_api_snapshot(|api| api.checked() == State::Checked)
             on:change=move |ev| {
                 let checked = event_target_checked(&ev);
                 let next = State::from_checked_bool(checked);
@@ -598,6 +600,7 @@ struct FormResetListener {
 fn use_form_reset_listener(
     input_ref: NodeRef<html::Input>,
     machine: crate::UseMachineReturn<Machine>,
+    on_checked_change: Option<Callback<State>>,
 ) {
     let listener = StoredValue::new_local(None::<FormResetListener>);
 
@@ -614,7 +617,11 @@ fn use_form_reset_listener(
 
         let target: web_sys::EventTarget = form.unchecked_into();
         let closure = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+            let next = machine.with_api_snapshot(|api| api.default_checked());
             machine.send.run(Event::Reset);
+            if let Some(callback) = on_checked_change {
+                callback.run(next);
+            }
         }) as Box<dyn FnMut(web_sys::Event)>);
 
         target
@@ -631,6 +638,7 @@ fn use_form_reset_listener(
 const fn use_form_reset_listener(
     _input_ref: NodeRef<html::Input>,
     _machine: crate::UseMachineReturn<Machine>,
+    _on_checked_change: Option<Callback<State>>,
 ) {
 }
 

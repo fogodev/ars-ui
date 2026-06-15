@@ -80,6 +80,13 @@ impl Example {
     const fn is_dioxus(self) -> bool {
         matches!(self, Self::Dioxus | Self::DioxusCss | Self::DioxusTailwind)
     }
+
+    const fn is_styled(self) -> bool {
+        matches!(
+            self,
+            Self::LeptosCss | Self::DioxusCss | Self::LeptosTailwind | Self::DioxusTailwind
+        )
+    }
 }
 
 impl Display for Example {
@@ -117,7 +124,7 @@ pub struct Options {
 pub async fn run(options: Options) -> Result<(), Error> {
     let session = start_widget_session(&options).await?;
 
-    let run = run_checkbox_smoke(&session.driver, &session.url).await;
+    let run = run_checkbox_smoke(&session.driver, &session.url, options.example).await;
     let quit = session.quit().await;
 
     run?;
@@ -255,7 +262,7 @@ pub fn widget_server_command(example: Example, port: u16) -> Result<Command, Str
     Ok(command)
 }
 
-async fn run_checkbox_smoke(driver: &WebDriver, url: &str) -> Result<(), Error> {
+async fn run_checkbox_smoke(driver: &WebDriver, url: &str, example: Example) -> Result<(), Error> {
     open_input_panel(driver, url).await?;
     assert_clean_console(driver).await?;
 
@@ -274,7 +281,9 @@ async fn run_checkbox_smoke(driver: &WebDriver, url: &str) -> Result<(), Error> 
     let unchecked_control = checkbox_control(&unchecked).await?;
 
     assert_attr(&unchecked_control, "aria-checked", "false").await?;
-    assert_checkbox_visual_deltas(driver).await?;
+    if example.is_styled() {
+        assert_checkbox_visual_deltas(driver).await?;
+    }
 
     dispatch_pointer_sequence(driver, &unchecked_control).await?;
 

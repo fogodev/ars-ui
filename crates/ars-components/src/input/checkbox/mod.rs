@@ -581,6 +581,12 @@ impl Api<'_> {
         *self.ctx.checked.get()
     }
 
+    /// Returns the checked state restored by form reset.
+    #[must_use]
+    pub const fn default_checked(&self) -> State {
+        self.props.default_checked
+    }
+
     /// Returns whether user intent can currently mutate the checked state.
     #[must_use]
     pub const fn is_interactive(&self) -> bool {
@@ -1882,6 +1888,22 @@ mod tests {
         assert_eq!(props.form, None);
         assert_eq!(props.value, "yes");
         assert!(props.on_checked_change.is_none());
+    }
+
+    #[test]
+    fn api_exposes_default_checked_for_adapter_reset_callbacks() {
+        let service = Service::<Machine>::new(
+            Props {
+                default_checked: State::Indeterminate,
+                ..test_props()
+            },
+            &Env::default(),
+            &Messages,
+        );
+
+        let api = service.connect(&|_| {});
+
+        assert_eq!(api.default_checked(), State::Indeterminate);
     }
 
     #[test]
