@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "cdf0fb2a9412",
+  "strategy": "manual-commit",
+  "branch": "codex/issue-320-431-checkbox-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-dioxus-components/src/input/checkbox/css.rs",
+    "crates/ars-dioxus-components/src/input/checkbox/tailwind.rs",
+    "crates/ars-dioxus-components/tests/checkbox.rs",
+    "crates/ars-dioxus/Cargo.toml",
+    "crates/ars-dioxus/src/attrs.rs",
+    "crates/ars-dioxus/src/input/checkbox.rs",
+    "crates/ars-dioxus/src/lib.rs",
+    "crates/ars-dioxus/src/prelude.rs",
+    "crates/ars-dioxus/tests/test_checkbox.rs",
+    "crates/ars-leptos/src/input/checkbox.rs",
+    "xtask/src/lint.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/cd/f0fb2a9412/0/metadata.json",
+      "transcript": "/cd/f0fb2a9412/0/full.jsonl",
+      "content_hash": "/cd/f0fb2a9412/0/content_hash.txt",
+      "prompt": "/cd/f0fb2a9412/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1149199,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 20199040,
+    "output_tokens": 29964,
+    "api_call_count": 125
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "cdf0fb2a9412",
+  "session_id": "019e92f8-84a9-7fc0-bf0e-061072d47c47",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-15T20:18:50.510667Z",
+  "branch": "codex/issue-320-431-checkbox-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-leptos/src/input/checkbox.rs",
+    "crates/ars-dioxus/src/input/checkbox.rs",
+    "crates/ars-dioxus/Cargo.toml",
+    "crates/ars-dioxus/src/attrs.rs",
+    "crates/ars-dioxus/src/lib.rs",
+    "crates/ars-dioxus/src/prelude.rs",
+    "crates/ars-dioxus-components/src/input/checkbox/css.rs",
+    "crates/ars-dioxus-components/src/input/checkbox/tailwind.rs",
+    "xtask/src/lint.rs",
+    "crates/ars-dioxus/tests/test_checkbox.rs",
+    "crates/ars-dioxus-components/tests/checkbox.rs",
+    "crates/ars-leptos/src/input/checkbox.rs",
+    "crates/ars-dioxus/src/input/checkbox.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "d932f1bc2bc5",
+  "checkpoint_transcript_start": 11790,
+  "transcript_lines_at_start": 11790,
+  "token_usage": {
+    "input_tokens": 1149199,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 20199040,
+    "output_tokens": 29964,
+    "api_call_count": 125
+  },
+  "session_metrics": {
+    "turn_count": 21
+  },
+  "summary": {
+    "intent": "Implement Checkbox primitive adapters and styled components for Leptos and Dioxus (issues #320 and #431), create PR #727, then address CI failures and Codex review findings.",
+    "outcome": "PR #727 was created and pushed. A follow-up fix commit addressed the CI wasm compile failure (dioxus_ssr unavailable under web feature), nine Codex review findings, and clippy/formatting issues. Local focused gates all pass; CI rerun and Codex re-review still pending.",
+    "learnings": {
+      "repo": [
+        "dx fmt can silently rewrite RSX syntax in Dioxus examples in ways that break Rust compilation; every amend/push requires re-checking the three widgets-dioxus*/src/categories/input.rs files.",
+        "cargo xci --profile fast is the 10-step CI gate (fmt → clippy → ~9,221 unit tests → integration → adapters → spec snippets → mutex → snapshot count → native coverage).",
+        "cargo xtask lint adapter-parity checks parity between implemented and documented workflow components; failure scope must be explicitly limited to documented-workflow components or it surfaces unrelated older debt (Button, Tabs, Dismissable).",
+        "Codex review is triggered by commenting '@codex review' on the PR; 👀 reaction confirms it is running, 👍 reaction indicates approval.",
+        "snapshot-reviewed label must be added before CI runs, or Snapshot Change Check fails on timing regardless of label presence.",
+        "The waiting-for-codex-review skill (.agents/skills/waiting-for-codex-review/SKILL.md) is a required workflow: poll for threads, fix each one, reply with fixing commit SHA, resolve the thread, then re-trigger '@codex review'.",
+        "wasm coverage builds run with --features web, not --features ssr; dioxus_ssr is unavailable in that build target so tests using it must be cfg-gated or use --no-run as a local compile check."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-dioxus/tests/test_checkbox.rs",
+          "line": 1,
+          "end_line": 120,
+          "finding": "Test used dioxus_ssr for SSR smoke testing, which is not available under the wasm 'web' feature; must be cfg-gated with #[cfg(not(target_arch = 'wasm32'))] or removed from the wasm test target."
+        },
+        {
+          "path": "crates/ars-leptos/src/input/checkbox.rs",
+          "line": 620,
+          "end_line": 650,
+          "finding": "StoredValue<Option<FormResetListener>> cannot be cloned; cleanup must use update_value(|v| v.take()) instead of get_value() to move the listener out, matching the existing safe_listener pattern."
+        },
+        {
+          "path": "crates/ars-dioxus/src/input/checkbox.rs",
+          "line": 200,
+          "end_line": 225,
+          "finding": "Clippy prefers method references over closures, but dx fmt rewrites method references back to closures and can produce malformed duplicate lines; the safe pattern is a small named const helper function instead."
+        },
+        {
+          "path": "crates/ars-dioxus/src/attrs.rs",
+          "line": 120,
+          "end_line": 240,
+          "finding": "root_class_attrs helper added to merge consumer-provided and adapter root classes before forwarding; exported through ars-dioxus prelude so styled templates only need use ars_dioxus::prelude::*."
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "line": 520,
+          "end_line": 1010,
+          "finding": "adapter_parity lint must distinguish documented_adapter_components (hard failure) from implemented_adapter_components (report-only) to avoid this PR failing on pre-existing Button/Tabs/Dismissable parity gaps."
+        }
+      ],
+      "workflow": [
+        "Use cargo +nightly test --target wasm32-unknown-unknown --no-run as a wasm compile gate when the sandbox cannot spawn a browser runner.",
+        "When a coverage CI job fails with 'lcov.info missing', the root cause is a compile error earlier in that job, not a threshold failure; filter the log with rg for 'error:' rather than reading 14k lines.",
+        "ps is sandboxed and unavailable for inspecting hook process trees; if a pre-commit hook hangs, wait rather than inspecting.",
+        "After each apply_patch or edit, re-read the exact line range with nl -ba before the next patch to avoid context-shift failures from interleaved parallel reads.",
+        "cargo xclippy warnings in changed code should be treated as blocking before push, even if not surfaced by xci fast; this repo enforces a clean clippy gate."
+      ]
+    },
+    "friction": [
+      "dx fmt silently corrupts Dioxus RSX examples after git amend, requiring a re-verify loop on every push.",
+      "Pre-commit hook ran for >2 minutes with no stdout output; ps is sandboxed so process state was unverifiable.",
+      "First gh pr create failed with a network restriction; required a second invocation.",
+      "apply_patch tool repeatedly missed context due to parallel read output interleaving, requiring many small sequential patches instead of one.",
+      "Snapshot Change Check CI failed due to label arriving after the workflow started, not a real snapshot issue.",
+      "Codecov coverage CI failure was buried in 14k log lines; required piping through rg to find the actual compile error.",
+      "Clippy method-reference suggestions and dx fmt are mutually incompatible; formatter reverts what clippy requires, causing a loop until a named helper function was introduced.",
+      "StoredValue clone error only surfaced at wasm compile time, not in native tests, adding a late-stage fix cycle."
+    ],
+    "open_items": [
+      "Codex review threads on PR #727 still need per-thread replies with the fix commit SHA and explicit resolution before re-triggering '@codex review'.",
+      "Snapshot Change Check CI job needs a manual rerun now that the snapshot-reviewed label is in place.",
+      "Existing adapter parity debt for Button, Tabs, Dismissable, and Form components is intentionally deferred and only reported, not failing, in this PR.",
+      "Codecov lcov.info upload should be verified as working once CI reruns with the wasm compile fix in place."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-15T20:17:53.518919Z",
+    "agent_lines": 0,
+    "agent_removed": 6681,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 0,
+    "total_lines_changed": 6681,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
