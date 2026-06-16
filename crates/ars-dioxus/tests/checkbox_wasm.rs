@@ -14,7 +14,7 @@ use ars_dioxus::{
         form::Form,
     },
 };
-use dioxus::prelude::*;
+use dioxus::{dioxus_core::AttributeValue, prelude::*};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
@@ -191,6 +191,74 @@ async fn checkbox_click_and_space_toggle_state() {
     assert_eq!(
         control.get_attribute("aria-checked").as_deref(),
         Some("false")
+    );
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn checkbox_control_composes_consumer_click_handler() {
+    fn app() -> Element {
+        let mut consumer_clicked = use_signal(|| false);
+
+        rsx! {
+            checkbox::Root { id: "dioxus-checkbox-consumer-control",
+                checkbox::Label { "Consumer handler" }
+                checkbox::Control {
+                    attrs: vec![
+                        Attribute::new(
+                            "onclick",
+                            AttributeValue::listener(move |_event: Event<MouseData>| {
+                                consumer_clicked.set(true);
+                            }),
+                            None,
+                            false,
+                        ),
+                    ],
+                    checkbox::Indicator {}
+                }
+                checkbox::HiddenInput {}
+            }
+            p { id: "dioxus-checkbox-consumer-clicked", "{consumer_clicked}" }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone().into()),
+    );
+
+    flush().await;
+
+    let root = parent
+        .query_selector("#dioxus-checkbox-consumer-control")
+        .expect("query should succeed")
+        .expect("root should exist");
+
+    let control = control(&root);
+
+    control.click();
+
+    flush().await;
+
+    assert_eq!(
+        control.get_attribute("aria-checked").as_deref(),
+        Some("true"),
+        "built-in checkbox toggle should still run"
+    );
+    assert_eq!(
+        parent
+            .query_selector("#dioxus-checkbox-consumer-clicked")
+            .expect("query should succeed")
+            .expect("status should exist")
+            .text_content()
+            .as_deref(),
+        Some("true"),
+        "consumer onclick should run"
     );
 
     parent.remove();

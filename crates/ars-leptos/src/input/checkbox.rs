@@ -337,6 +337,7 @@ pub fn HiddenInput(
         ..
     } = checkbox_context();
     let input_ref = NodeRef::<html::Input>::new();
+    let checked = machine.derive(|api| api.checked() == State::Checked);
 
     let attrs = machine.with_api_snapshot(|api| {
         let mut attrs = api.hidden_input_attrs();
@@ -352,7 +353,7 @@ pub fn HiddenInput(
         <input
             {..attrs}
             node_ref=input_ref
-            prop:checked=move || machine.with_api_snapshot(|api| api.checked() == State::Checked)
+            prop:checked=move || checked.get()
             on:change=move |ev| {
                 let checked = event_target_checked(&ev);
                 let next = State::from_checked_bool(checked);
@@ -361,6 +362,11 @@ pub fn HiddenInput(
                     machine.send.run(Event::Check);
                 } else {
                     machine.send.run(Event::Uncheck);
+                }
+                if let Some(input) = input_ref.get() {
+                    let committed = machine
+                        .with_api_snapshot(|api| api.checked() == State::Checked);
+                    input.set_checked(committed);
                 }
                 if interactive && let Some(callback) = on_checked_change {
                     callback.run(next);

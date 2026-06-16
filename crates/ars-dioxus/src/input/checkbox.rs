@@ -11,7 +11,7 @@ use ars_interactions::KeyboardEventData;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use dioxus::events::MountedData;
 use dioxus::{
-    dioxus_core::{DynamicNode, TemplateNode},
+    dioxus_core::{AttributeValue, DynamicNode, ListenerCallback, TemplateNode},
     prelude::*,
 };
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -253,18 +253,23 @@ pub fn Control(props: ControlProps) -> Element {
         mut last_pointer,
     } = checkbox_context();
 
-    let attrs =
-        strip_control_event_attrs(machine.part_attrs(props.attrs, |api| api.control_attrs()));
+    let mut attrs = machine.part_attrs(props.attrs, |api| api.control_attrs());
+    let onclick_listeners = take_event_listeners(&mut attrs, "onclick");
+    let onkeydown_listeners = take_event_listeners(&mut attrs, "onkeydown");
+    let onpointerdown_listeners = take_event_listeners(&mut attrs, "onpointerdown");
+    let onfocus_listeners = take_event_listeners(&mut attrs, "onfocus");
+    let onblur_listeners = take_event_listeners(&mut attrs, "onblur");
 
     rsx! {
         div {
-            onclick: move |_| {
+            onclick: move |ev| {
                 let next = machine.with_api_snapshot(|api| api.next_toggle_state());
                 let interactive = machine.with_api_snapshot(api_is_interactive);
                 machine.send.call(Event::Toggle);
                 if interactive && let Some(callback) = on_checked_change {
                     callback.call(next);
                 }
+                call_event_listeners(&onclick_listeners, &ev);
             },
             onkeydown: move |ev| {
                 let (key, character) = dioxus_key_to_keyboard_key(&ev.key());
@@ -294,9 +299,14 @@ pub fn Control(props: ControlProps) -> Element {
                         callback.call(next);
                     }
                 }
+
+                call_event_listeners(&onkeydown_listeners, &ev);
             },
-            onpointerdown: move |_| last_pointer.set(true),
-            onfocus: move |_| {
+            onpointerdown: move |ev| {
+                last_pointer.set(true);
+                call_event_listeners(&onpointerdown_listeners, &ev);
+            },
+            onfocus: move |ev| {
                 let is_keyboard = !last_pointer();
 
                 last_pointer.set(false);
@@ -306,10 +316,12 @@ pub fn Control(props: ControlProps) -> Element {
                     .call(Event::Focus {
                         is_keyboard,
                     });
+                call_event_listeners(&onfocus_listeners, &ev);
             },
-            onblur: move |_| {
+            onblur: move |ev| {
                 last_pointer.set(false);
                 machine.send.call(Event::Blur);
+                call_event_listeners(&onblur_listeners, &ev);
             },
             ..attrs,
             {props.children}
@@ -373,19 +385,36 @@ pub fn HiddenInput(props: HiddenInputProps) -> Element {
     render_hidden_input(attrs, machine, on_checked_change)
 }
 
-fn strip_control_event_attrs(mut attrs: Vec<Attribute>) -> Vec<Attribute> {
-    attrs.retain(|attr| {
-        !matches!(
-            attr.name,
-            "onclick" | "onkeydown" | "onpointerdown" | "onfocus" | "onblur"
-        )
-    });
-    attrs
-}
-
 fn strip_hidden_input_event_attrs(mut attrs: Vec<Attribute>) -> Vec<Attribute> {
     attrs.retain(|attr| !matches!(attr.name, "onchange" | "onmounted"));
     attrs
+}
+
+fn take_event_listeners(attrs: &mut Vec<Attribute>, name: &str) -> Vec<ListenerCallback> {
+    let mut listeners = Vec::new();
+
+    attrs.retain(|attr| {
+        if attr.name == name
+            && let AttributeValue::Listener(listener) = &attr.value
+        {
+            listeners.push(listener.clone());
+
+            false
+        } else {
+            true
+        }
+    });
+
+    listeners
+}
+
+fn call_event_listeners<T: 'static>(
+    listeners: &[ListenerCallback],
+    event: &dioxus::prelude::Event<T>,
+) {
+    for listener in listeners {
+        listener.call(event.clone().into_any());
+    }
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]

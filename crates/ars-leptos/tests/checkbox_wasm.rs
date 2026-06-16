@@ -189,6 +189,13 @@ fn keydown_space(element: &web_sys::HtmlElement) {
         .expect("keyboard event should dispatch");
 }
 
+fn form_data_value(form: &web_sys::HtmlFormElement, name: &str) -> Option<String> {
+    web_sys::FormData::new_with_form(form)
+        .expect("form data should construct")
+        .get(name)
+        .as_string()
+}
+
 #[wasm_bindgen_test(async)]
 async fn checkbox_click_and_space_toggle_state() {
     let owner = Owner::new();
@@ -238,6 +245,85 @@ async fn checkbox_click_and_space_toggle_state() {
     drop(mount_handle);
 
     root.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn checkbox_controlled_hidden_input_tracks_committed_state_after_label_click() {
+    let owner = Owner::new();
+
+    let (mount_handle, parent) = owner.with(|| {
+        let parent = container();
+
+        let checked = Signal::derive(|| State::Unchecked);
+
+        let mount_handle = mount_to(parent.clone(), move || {
+            view! {
+                <form id="leptos-checkbox-controlled-form">
+                    <TestCheckbox
+                        id="leptos-checkbox-controlled-hidden"
+                        name="terms"
+                        value="accepted"
+                        checked=checked
+                        on_checked_change=move |_| {}
+                    >
+                        "Terms"
+                    </TestCheckbox>
+                </form>
+            }
+        });
+
+        (mount_handle, parent)
+    });
+
+    leptos::task::tick().await;
+
+    let root = parent
+        .query_selector("#leptos-checkbox-controlled-hidden")
+        .expect("query should succeed")
+        .expect("root should exist");
+    let label = parent
+        .query_selector("[data-ars-part='label']")
+        .expect("query should succeed")
+        .expect("label should exist")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("label should be an HtmlElement");
+    let input = parent
+        .query_selector("input[type='checkbox']")
+        .expect("query should succeed")
+        .expect("hidden input should exist")
+        .dyn_into::<web_sys::HtmlInputElement>()
+        .expect("hidden input should be an HtmlInputElement");
+    let form = parent
+        .query_selector("#leptos-checkbox-controlled-form")
+        .expect("query should succeed")
+        .expect("form should exist")
+        .dyn_into::<web_sys::HtmlFormElement>()
+        .expect("form should be an HtmlFormElement");
+
+    assert_eq!(
+        control(&root).get_attribute("aria-checked").as_deref(),
+        Some("false")
+    );
+    assert!(!input.checked());
+    assert_eq!(form_data_value(&form, "terms"), None);
+
+    label.click();
+
+    leptos::task::tick().await;
+
+    assert_eq!(
+        control(&root).get_attribute("aria-checked").as_deref(),
+        Some("false")
+    );
+    assert!(
+        !input.checked(),
+        "controlled checkbox hidden input must reflect committed state"
+    );
+    assert_eq!(form_data_value(&form, "terms"), None);
+
+    drop(mount_handle);
+
+    parent.remove();
 }
 
 #[wasm_bindgen_test(async)]
