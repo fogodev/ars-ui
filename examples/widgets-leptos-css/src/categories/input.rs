@@ -208,6 +208,7 @@ pub(crate) fn InputPanel() -> impl IntoView {
                         id="checkbox-form-checked"
                         name="terms"
                         checked=form_required
+                        default_checked=State::Checked
                         invalid=required_invalid
                         error_message=move || {
                             view! { <Show when=required_invalid>{t(InputText::SubmitError)}</Show> }

@@ -195,6 +195,7 @@ pub(crate) fn InputPanel() -> Element {
                         id: "checkbox-form-checked",
                         name: "terms",
                         checked: form_required(),
+                        default_checked: State::Checked,
                         invalid: required_invalid,
                         error_message: required_invalid.then(|| rsx! {
                             {t(InputText::SubmitError)}

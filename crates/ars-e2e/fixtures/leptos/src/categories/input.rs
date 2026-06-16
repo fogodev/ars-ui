@@ -1,7 +1,7 @@
 //! Input category fixture panel.
 
 use ars_leptos::{I18nRegistries, utility::form::Form};
-use ars_leptos_components::input::checkbox::css::{Checkbox, State};
+use ars_leptos_components::input::checkbox::css::{Checkbox, STYLES as CHECKBOX_STYLES, State};
 use leptos::prelude::*;
 
 /// Registers input-category localized messages.
@@ -16,6 +16,7 @@ pub fn InputPanel() -> impl IntoView {
 
     view! {
         <section id="leptos-input-panel" data-fixture-category="input">
+            <style>{CHECKBOX_STYLES}</style>
             <h2>"Checkbox"</h2>
             <Checkbox id="leptos-fixture-checkbox-unchecked" name="unchecked">
                 "Unchecked"

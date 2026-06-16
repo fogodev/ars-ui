@@ -1,6 +1,6 @@
 //! Tests for the examples xtask catalog.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, path::Path};
 
 use xtask::examples::{EXAMPLE_NAMES, Framework, catalog, resolve};
 
@@ -48,4 +48,27 @@ fn examples_reject_unknown_names() {
     assert!(error.contains("unknown example"));
     assert!(error.contains("widgets-leptos"));
     assert!(error.contains("widgets-dioxus-tailwind"));
+}
+
+#[test]
+fn dioxus_widget_public_assets_exist_for_inline_includes() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("xtask manifest dir has workspace parent");
+
+    for example in [
+        "examples/widgets-dioxus",
+        "examples/widgets-dioxus-css",
+        "examples/widgets-dioxus-tailwind",
+    ] {
+        for asset in ["ars-base.css", "ars-interactions.css"] {
+            let path = workspace_root.join(example).join("public").join(asset);
+
+            assert!(
+                path.exists(),
+                "{} must exist because the Dioxus widget entrypoint includes it",
+                path.display()
+            );
+        }
+    }
 }

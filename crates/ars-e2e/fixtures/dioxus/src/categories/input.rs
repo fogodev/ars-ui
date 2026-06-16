@@ -1,7 +1,7 @@
 //! Input category fixture panel.
 
 use ars_dioxus::{I18nRegistries, utility::form::Form};
-use ars_dioxus_components::input::checkbox::css::{Checkbox, State};
+use ars_dioxus_components::input::checkbox::css::{Checkbox, STYLES as CHECKBOX_STYLES, State};
 use dioxus::prelude::*;
 
 /// Registers input-category localized messages.
@@ -16,6 +16,7 @@ pub fn InputPanel() -> Element {
 
     rsx! {
         section { id: "dioxus-input-panel", "data-fixture-category": "input",
+            style { "{CHECKBOX_STYLES}" }
             h2 { "Checkbox" }
             Checkbox { id: "dioxus-fixture-checkbox-unchecked", name: "unchecked", "Unchecked" }
             Checkbox {

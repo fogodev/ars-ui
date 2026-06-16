@@ -74,12 +74,15 @@ pub fn execute(path: &Path) -> Result<String, Error> {
             }
         }
 
+        let mut row_count = 0;
+
         for (idx, row) in matrix
             .lines()
             .filter(|line| line.trim_start().starts_with('|'))
             .skip(2)
             .enumerate()
         {
+            row_count += 1;
             let cells = row
                 .trim()
                 .trim_matches('|')
@@ -104,6 +107,10 @@ pub fn execute(path: &Path) -> Result<String, Error> {
                     ));
                 }
             }
+        }
+
+        if row_count == 0 {
+            failures.push("missing final outcome matrix rows".to_string());
         }
     }
 
@@ -212,6 +219,33 @@ mod tests {
         let output = execute(&path).expect("validation should run");
 
         assert!(output.contains("All sketch checks passed."));
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn sketch_validation_rejects_header_only_matrix() {
+        let root = temp_dir("header-only");
+        let path = root.join("sketch.md");
+
+        write(
+            &path,
+            r#"
+## Reference Sources
+## Reference Evidence
+## Observed Reference Outcomes
+## I18n Mapping
+## Accessibility Mapping
+## Ars Contract Mapping
+## Final Outcome Matrix
+| Reference outcome | Final status | API/contract stance | Reference proof | Local proof | Adapter tests | E2E/browser proof | I18n proof | A11y proof |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+"#,
+        );
+
+        let output = execute(&path).expect("validation should run");
+
+        assert!(output.contains("missing final outcome matrix rows"));
 
         drop(fs::remove_dir_all(root));
     }

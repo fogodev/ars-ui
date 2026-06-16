@@ -189,6 +189,7 @@ pub fn check_adapter_parity(options: &AdapterParityOptions) -> Result<String, Er
         .keys()
         .map(|name| name.replace('-', "_"))
         .collect::<BTreeSet<_>>();
+    let component_categories = manifest_component_categories(&root.manifest);
 
     let implemented =
         implemented_adapter_components(&options.leptos_src_dir, &options.dioxus_src_dir)?;
@@ -198,8 +199,13 @@ pub fn check_adapter_parity(options: &AdapterParityOptions) -> Result<String, Er
         .cloned()
         .collect::<BTreeSet<_>>();
     let documented = documented_adapter_components()?;
-    let delivery_components = components
-        .intersection(&documented)
+    let sketched = counterpart_sketch_components(&manifest_components)?;
+    let workflow_scope = documented
+        .union(&sketched)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let workflow_components = components
+        .intersection(&workflow_scope)
         .cloned()
         .collect::<BTreeSet<_>>();
 
@@ -207,7 +213,12 @@ pub fn check_adapter_parity(options: &AdapterParityOptions) -> Result<String, Er
 
     let dioxus_counts = adapter_test_counts(&options.dioxus_test_dir, &components)?;
 
-    let presence = adapter_component_presence(options, &delivery_components)?;
+    let presence = adapter_component_presence(
+        options,
+        &workflow_components,
+        &documented,
+        &component_categories,
+    )?;
 
     let (mut output, parity_failures) = adapter_parity_report(
         &components,
@@ -220,7 +231,7 @@ pub fn check_adapter_parity(options: &AdapterParityOptions) -> Result<String, Er
 
     failures.extend(adapter_semantic_boundary_failures(
         options,
-        &delivery_components,
+        &workflow_components,
     )?);
 
     if failures.is_empty() {
@@ -483,7 +494,7 @@ fn adapter_test_counts(
         return Ok(BTreeMap::new());
     }
 
-    let test_attr = Regex::new(r"#\[\s*(?:wasm_bindgen_)?test\s*(?:\([^)]*\))?\s*\]")?;
+    let test_attr = adapter_test_attr_regex()?;
 
     let files = collect_files(dir, is_adapter_test_file)?;
 
@@ -504,8 +515,19 @@ fn adapter_test_counts(
     Ok(counts)
 }
 
+fn adapter_file_has_tests(content: &str) -> bool {
+    adapter_test_attr_regex().is_ok_and(|test_attr| test_attr.find(content).is_some())
+}
+
+fn adapter_test_attr_regex() -> Result<Regex, Error> {
+    Ok(Regex::new(
+        r"#\[\s*(?:wasm_bindgen_)?test\s*(?:\([^)]*\))?\s*\]",
+    )?)
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct AdapterComponentPresence {
+    usage_docs: bool,
     leptos_ssr_test: bool,
     dioxus_ssr_test: bool,
     leptos_wasm_test: bool,
@@ -525,6 +547,7 @@ impl AdapterComponentPresence {
         let mut failures = Vec::new();
 
         for (label, present) in [
+            ("usage documentation", self.usage_docs),
             ("Leptos SSR/unit test", self.leptos_ssr_test),
             ("Dioxus SSR/unit test", self.dioxus_ssr_test),
             ("all six widget examples", self.all_widgets),
@@ -574,6 +597,8 @@ impl AdapterComponentPresence {
 fn adapter_component_presence(
     options: &AdapterParityOptions,
     components: &BTreeSet<String>,
+    documented: &BTreeSet<String>,
+    component_categories: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, AdapterComponentPresence>, Error> {
     let mut result = BTreeMap::new();
 
@@ -591,24 +616,51 @@ fn adapter_component_presence(
 
         let leptos_ssr_content = read_optional(&leptos_ssr)?;
         let dioxus_ssr_content = read_optional(&dioxus_ssr)?;
+        let leptos_wasm_content = read_optional(&leptos_wasm)?;
+        let dioxus_wasm_content = read_optional(&dioxus_wasm)?;
 
         result.insert(
             component.clone(),
             AdapterComponentPresence {
-                leptos_ssr_test: leptos_ssr_content.is_some(),
-                dioxus_ssr_test: dioxus_ssr_content.is_some(),
-                leptos_wasm_test: leptos_wasm.exists(),
-                dioxus_wasm_test: dioxus_wasm.exists(),
+                usage_docs: documented.contains(component),
+                leptos_ssr_test: leptos_ssr_content
+                    .as_deref()
+                    .is_some_and(adapter_file_has_tests),
+                dioxus_ssr_test: dioxus_ssr_content
+                    .as_deref()
+                    .is_some_and(adapter_file_has_tests),
+                leptos_wasm_test: leptos_wasm_content
+                    .as_deref()
+                    .is_some_and(adapter_file_has_tests),
+                dioxus_wasm_test: dioxus_wasm_content
+                    .as_deref()
+                    .is_some_and(adapter_file_has_tests),
                 leptos_composition_test: leptos_ssr_content
                     .as_deref()
                     .is_some_and(has_composition_test),
                 dioxus_composition_test: dioxus_ssr_content
                     .as_deref()
                     .is_some_and(has_composition_test),
-                all_widgets: all_widget_category_files_exist(options, component),
-                leptos_e2e_fixture: e2e_fixture_exists(&options.leptos_e2e_fixture_dir, component),
-                dioxus_e2e_fixture: e2e_fixture_exists(&options.dioxus_e2e_fixture_dir, component),
-                e2e_harness: e2e_harness_exists(&options.e2e_src_dir, component),
+                all_widgets: all_widget_category_files_exist(
+                    options,
+                    component_categories,
+                    component,
+                ),
+                leptos_e2e_fixture: e2e_fixture_exists(
+                    &options.leptos_e2e_fixture_dir,
+                    component_categories,
+                    component,
+                ),
+                dioxus_e2e_fixture: e2e_fixture_exists(
+                    &options.dioxus_e2e_fixture_dir,
+                    component_categories,
+                    component,
+                ),
+                e2e_harness: e2e_harness_exists(
+                    &options.e2e_src_dir,
+                    component_categories,
+                    component,
+                ),
                 requires_composition,
                 requires_wasm,
             },
@@ -679,7 +731,9 @@ struct AdapterPrivateHelper {
 }
 
 fn adapter_private_helpers(content: &str) -> Result<BTreeMap<String, AdapterPrivateHelper>, Error> {
-    let helper = Regex::new(r"(?m)^(?P<indent>\s*)fn\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(")?;
+    let helper = Regex::new(
+        r"(?m)^(?P<indent>\s*)(?:(?:pub\([^)]*\)|async|const|unsafe)\s+)*fn\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(",
+    )?;
     let mut helpers = BTreeMap::new();
 
     for captures in helper.captures_iter(content) {
@@ -939,8 +993,20 @@ fn implemented_adapter_components(
     Ok(components)
 }
 
-fn all_widget_category_files_exist(options: &AdapterParityOptions, component: &str) -> bool {
-    widget_category_for(component).is_some_and(|category| {
+fn manifest_component_categories(manifest: &manifest::Manifest) -> BTreeMap<String, String> {
+    manifest
+        .components
+        .iter()
+        .map(|(name, component)| (name.replace('-', "_"), component.category.replace('-', "_")))
+        .collect()
+}
+
+fn all_widget_category_files_exist(
+    options: &AdapterParityOptions,
+    component_categories: &BTreeMap<String, String>,
+    component: &str,
+) -> bool {
+    component_category_for(component_categories, component).is_some_and(|category| {
         [
             &options.leptos_widgets_dir,
             &options.dioxus_widgets_dir,
@@ -950,7 +1016,7 @@ fn all_widget_category_files_exist(options: &AdapterParityOptions, component: &s
             &options.dioxus_tailwind_widgets_dir,
         ]
         .iter()
-        .all(|dir| widget_category_file_contains_component(dir, category, component))
+        .all(|dir| widget_category_file_contains_component(dir, &category, component))
     })
 }
 
@@ -982,12 +1048,16 @@ fn file_content_mentions_component(content: &str, component: &str) -> bool {
         || content.contains(&pascal_component)
 }
 
-fn e2e_fixture_exists(dir: &Path, component: &str) -> bool {
-    widget_category_for(component).is_some_and(|category| {
-        e2e_flat_fixture_contains_component(dir, category, component)
+fn e2e_fixture_exists(
+    dir: &Path,
+    component_categories: &BTreeMap<String, String>,
+    component: &str,
+) -> bool {
+    component_category_for(component_categories, component).is_some_and(|category| {
+        e2e_flat_fixture_contains_component(dir, &category, component)
             || dir
                 .join("src/categories")
-                .join(category)
+                .join(&category)
                 .join(format!("{component}.rs"))
                 .exists()
     })
@@ -1002,18 +1072,20 @@ fn e2e_flat_fixture_contains_component(dir: &Path, category: &str, component: &s
     file_content_mentions_component(&content, component)
 }
 
-fn e2e_harness_exists(dir: &Path, component: &str) -> bool {
-    widget_category_for(component)
+fn e2e_harness_exists(
+    dir: &Path,
+    component_categories: &BTreeMap<String, String>,
+    component: &str,
+) -> bool {
+    component_category_for(component_categories, component)
         .is_some_and(|category| dir.join(category).join(format!("{component}.rs")).exists())
 }
 
-fn widget_category_for(component: &str) -> Option<&'static str> {
-    match component {
-        "checkbox" => Some("input"),
-        "button" | "field" | "fieldset" | "form" => Some("utility"),
-        "tabs" => Some("navigation"),
-        _ => None,
-    }
+fn component_category_for(
+    component_categories: &BTreeMap<String, String>,
+    component: &str,
+) -> Option<String> {
+    component_categories.get(component).cloned()
 }
 
 const fn component_category_dirs() -> &'static [&'static str] {
@@ -1047,6 +1119,47 @@ fn documented_adapter_components() -> Result<BTreeSet<String>, Error> {
             && let Some(component) = name.strip_suffix("-usage.md")
         {
             components.insert(component.replace('-', "_"));
+        }
+    }
+
+    Ok(components)
+}
+
+fn counterpart_sketch_components(
+    known_components: &BTreeSet<String>,
+) -> Result<BTreeSet<String>, Error> {
+    let dir = Path::new("docs/implementation/sketches");
+
+    if !dir.exists() {
+        return Ok(BTreeSet::new());
+    }
+
+    let mut components = BTreeSet::new();
+
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_none_or(|name| !name.ends_with("-counterpart-sketch.md"))
+        {
+            continue;
+        }
+
+        let content = fs::read_to_string(path)?;
+
+        for line in content.lines() {
+            let Some(component) = line.trim().strip_prefix("- Component:") else {
+                continue;
+            };
+
+            let normalized = component.trim().to_lowercase().replace('-', "_");
+
+            if known_components.contains(&normalized) {
+                components.insert(normalized);
+            }
         }
     }
 
@@ -1868,9 +1981,19 @@ mod tests {
         );
 
         let components = BTreeSet::from(["checkbox".to_owned()]);
-        let presence = adapter_component_presence(&options, &components).expect("presence");
+        let documented = BTreeSet::new();
+        let component_categories = BTreeMap::from([("checkbox".to_owned(), "input".to_owned())]);
+        let presence =
+            adapter_component_presence(&options, &components, &documented, &component_categories)
+                .expect("presence");
         let failures = presence["checkbox"].failures("checkbox");
 
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("usage documentation")),
+            "{failures:?}"
+        );
         assert!(
             failures
                 .iter()
@@ -1900,6 +2023,70 @@ mod tests {
     }
 
     #[test]
+    fn adapter_presence_requires_real_test_attributes() {
+        let root = temp_dir("adapter-presence-real-tests");
+
+        let options = AdapterParityOptions {
+            leptos_test_dir: root.join("crates/ars-leptos/tests"),
+            dioxus_test_dir: root.join("crates/ars-dioxus/tests"),
+            leptos_src_dir: root.join("crates/ars-leptos/src"),
+            dioxus_src_dir: root.join("crates/ars-dioxus/src"),
+            leptos_widgets_dir: root.join("examples/widgets-leptos"),
+            dioxus_widgets_dir: root.join("examples/widgets-dioxus"),
+            leptos_css_widgets_dir: root.join("examples/widgets-leptos-css"),
+            dioxus_css_widgets_dir: root.join("examples/widgets-dioxus-css"),
+            leptos_tailwind_widgets_dir: root.join("examples/widgets-leptos-tailwind"),
+            dioxus_tailwind_widgets_dir: root.join("examples/widgets-dioxus-tailwind"),
+            leptos_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/leptos"),
+            dioxus_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/dioxus"),
+            e2e_src_dir: root.join("crates/ars-e2e/src"),
+            tolerance: 2,
+        };
+
+        write(&options.leptos_src_dir.join("input/checkbox.rs"), "");
+        write(&options.dioxus_src_dir.join("input/checkbox.rs"), "");
+        write(
+            &options.leptos_test_dir.join("checkbox.rs"),
+            "// placeholder\n",
+        );
+        write(
+            &options.dioxus_test_dir.join("checkbox.rs"),
+            "// placeholder\n",
+        );
+        write(
+            &options.leptos_test_dir.join("checkbox_wasm.rs"),
+            "// placeholder\n",
+        );
+        write(
+            &options.dioxus_test_dir.join("checkbox_wasm.rs"),
+            "// placeholder\n",
+        );
+
+        let components = BTreeSet::from(["checkbox".to_owned()]);
+        let documented = BTreeSet::from(["checkbox".to_owned()]);
+        let component_categories = BTreeMap::from([("checkbox".to_owned(), "input".to_owned())]);
+        let presence =
+            adapter_component_presence(&options, &components, &documented, &component_categories)
+                .expect("presence");
+        let failures = presence["checkbox"].failures("checkbox");
+
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("Leptos SSR/unit test")),
+            "{failures:?}"
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("Dioxus SSR/unit test")),
+            "{failures:?}"
+        );
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
     fn widget_category_file_must_mention_component() {
         let root = temp_dir("widget-category-component");
         let widgets = root.join("examples/widgets-leptos");
@@ -1915,6 +2102,26 @@ mod tests {
         assert!(!widget_category_file_contains_component(
             &widgets,
             "input",
+            "text_field"
+        ));
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn e2e_fixture_uses_manifest_derived_category() {
+        let root = temp_dir("e2e-manifest-category");
+        let fixtures = root.join("crates/ars-e2e/fixtures/leptos");
+        let component_categories = BTreeMap::from([("text_field".to_owned(), "input".to_owned())]);
+
+        write(
+            &fixtures.join("src/categories/input.rs"),
+            "pub fn input_panel() { TextField {} }\n",
+        );
+
+        assert!(e2e_fixture_exists(
+            &fixtures,
+            &component_categories,
             "text_field"
         ));
 
@@ -1941,6 +2148,50 @@ mod tests {
     }
 
     #[test]
+    fn adapter_semantic_boundary_flags_qualified_private_helpers() {
+        let root = temp_dir("adapter-semantic-qualified");
+
+        let options = AdapterParityOptions {
+            leptos_test_dir: root.join("crates/ars-leptos/tests"),
+            dioxus_test_dir: root.join("crates/ars-dioxus/tests"),
+            leptos_src_dir: root.join("crates/ars-leptos/src"),
+            dioxus_src_dir: root.join("crates/ars-dioxus/src"),
+            leptos_widgets_dir: root.join("examples/widgets-leptos"),
+            dioxus_widgets_dir: root.join("examples/widgets-dioxus"),
+            leptos_css_widgets_dir: root.join("examples/widgets-leptos-css"),
+            dioxus_css_widgets_dir: root.join("examples/widgets-dioxus-css"),
+            leptos_tailwind_widgets_dir: root.join("examples/widgets-leptos-tailwind"),
+            dioxus_tailwind_widgets_dir: root.join("examples/widgets-dioxus-tailwind"),
+            leptos_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/leptos"),
+            dioxus_e2e_fixture_dir: root.join("crates/ars-e2e/fixtures/dioxus"),
+            e2e_src_dir: root.join("crates/ars-e2e/src"),
+            tolerance: 2,
+        };
+
+        write(
+            &options.leptos_src_dir.join("input/checkbox.rs"),
+            "pub(crate) const fn requested_toggle_state() -> bool { true }\n",
+        );
+        write(
+            &options.dioxus_src_dir.join("input/checkbox.rs"),
+            "async fn requested_toggle_state() -> bool { true }\n",
+        );
+
+        let components = BTreeSet::from(["checkbox".to_owned()]);
+        let failures =
+            adapter_semantic_boundary_failures(&options, &components).expect("semantic failures");
+
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("duplicated adapter helper")),
+            "{failures:?}"
+        );
+
+        drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
     fn e2e_flat_fixture_must_mention_component() {
         let root = temp_dir("e2e-flat-fixture-component");
         let fixtures = root.join("crates/ars-e2e/fixtures/leptos");
@@ -1950,14 +2201,24 @@ mod tests {
             "pub fn input_panel() { TextField {} }\n",
         );
 
-        assert!(!e2e_fixture_exists(&fixtures, "checkbox"));
+        let component_categories = BTreeMap::from([("checkbox".to_owned(), "input".to_owned())]);
+
+        assert!(!e2e_fixture_exists(
+            &fixtures,
+            &component_categories,
+            "checkbox"
+        ));
 
         write(
             &fixtures.join("src/categories/input.rs"),
             "pub fn input_panel() { Checkbox {} }\n",
         );
 
-        assert!(e2e_fixture_exists(&fixtures, "checkbox"));
+        assert!(e2e_fixture_exists(
+            &fixtures,
+            &component_categories,
+            "checkbox"
+        ));
 
         drop(fs::remove_dir_all(root));
     }

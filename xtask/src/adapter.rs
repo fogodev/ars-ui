@@ -116,7 +116,8 @@ fn create_adapter_files(
             .join(crate_name)
             .join("src")
             .join(category)
-            .join(format!("{component}.rs")),
+            .join(component)
+            .join("mod.rs"),
         &format!("//! {component} adapter scaffold.\n"),
         created,
     )?;
@@ -262,6 +263,20 @@ mod tests {
         assert!(output.contains("checkbox-counterpart-sketch.md"));
 
         for crate_name in ["ars-leptos", "ars-dioxus"] {
+            assert!(
+                root.join("crates")
+                    .join(crate_name)
+                    .join("src/input/checkbox/mod.rs")
+                    .exists()
+            );
+            assert!(
+                !root
+                    .join("crates")
+                    .join(crate_name)
+                    .join("src/input/checkbox.rs")
+                    .exists()
+            );
+
             let test = read(
                 &root
                     .join("crates")
