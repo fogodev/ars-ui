@@ -9,7 +9,10 @@
 use ars_components::input::checkbox::State;
 use ars_dioxus::{
     input::checkbox,
-    utility::{button::Button, form},
+    utility::{
+        button::{self, Button},
+        form,
+    },
 };
 use dioxus::{dioxus_core::AttributeValue, prelude::*};
 use wasm_bindgen::JsCast;

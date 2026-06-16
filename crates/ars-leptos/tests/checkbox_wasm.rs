@@ -5,7 +5,10 @@
 use ars_components::input::checkbox::State;
 use ars_leptos::{
     input::checkbox,
-    utility::{button::Button, fieldset, form},
+    utility::{
+        button::{self, Button},
+        fieldset, form,
+    },
 };
 use leptos::{
     children::{TypedChildren, ViewFn},
