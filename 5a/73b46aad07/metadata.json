@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "5a73b46aad07",
+  "strategy": "manual-commit",
+  "branch": "codex/field-form-adapter-retrofit-audit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-dioxus/src/utility/field.rs",
+    "crates/ars-dioxus/src/utility/fieldset.rs",
+    "crates/ars-dioxus/tests/field.rs",
+    "crates/ars-dioxus/tests/fieldset.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/5a/73b46aad07/0/metadata.json",
+      "transcript": "/5a/73b46aad07/0/full.jsonl",
+      "content_hash": "/5a/73b46aad07/0/content_hash.txt",
+      "prompt": "/5a/73b46aad07/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 297533,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 7520512,
+    "output_tokens": 6717,
+    "api_call_count": 42
+  }
+}
