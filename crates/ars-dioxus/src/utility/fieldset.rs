@@ -22,12 +22,12 @@ pub(crate) struct InheritedFieldsetContext {
 
 fn fieldset_context() -> FieldsetContext {
     try_use_context::<FieldsetContext>()
-        .expect("Fieldset subcomponents must be rendered inside <Fieldset/>")
+        .expect("Fieldset subcomponents must be rendered inside <fieldset::Root/>")
 }
 
-/// Props for the Dioxus [`Fieldset`] component.
+/// Props for the Dioxus [`Root`] component.
 #[derive(Props, Clone, PartialEq, Debug)]
-pub struct FieldsetProps {
+pub struct RootProps {
     /// Optional component instance ID.
     #[props(optional, into)]
     pub id: Option<String>,
@@ -66,7 +66,7 @@ pub struct FieldsetProps {
     reason = "fieldset::Api method items are not lifetime-general enough for derive()."
 )]
 #[component]
-pub fn Fieldset(props: FieldsetProps) -> Element {
+pub fn Root(props: RootProps) -> Element {
     let generated_id = use_stable_id("fieldset");
     let id = props.id.unwrap_or(generated_id);
 
@@ -105,16 +105,24 @@ pub fn Fieldset(props: FieldsetProps) -> Element {
 /// Props for the Dioxus [`Legend`] component.
 #[derive(Props, Clone, PartialEq, Debug)]
 pub struct LegendProps {
+    /// Global HTML attributes forwarded onto the rendered legend.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+
     /// Legend content.
     pub children: Element,
 }
 
 /// Dioxus Fieldset legend part.
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "fieldset::Api method items are not lifetime-general enough for UseMachineReturn part_attrs()."
+)]
 #[component]
 pub fn Legend(props: LegendProps) -> Element {
     let attrs = fieldset_context()
         .machine
-        .derive(|api| attr_map_to_dioxus_inline_attrs(api.legend_attrs()))();
+        .part_attrs(props.attrs, |api| api.legend_attrs());
 
     rsx! {
         legend { ..attrs,{props.children} }
@@ -124,11 +132,19 @@ pub fn Legend(props: LegendProps) -> Element {
 /// Props for the Dioxus [`Description`] component.
 #[derive(Props, Clone, PartialEq, Debug)]
 pub struct DescriptionProps {
+    /// Global HTML attributes forwarded onto the rendered description.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+
     /// Description content.
     pub children: Element,
 }
 
 /// Dioxus Fieldset description part.
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "fieldset::Api method items are not lifetime-general enough for UseMachineReturn part_attrs()."
+)]
 #[component]
 pub fn Description(props: DescriptionProps) -> Element {
     let machine = fieldset_context().machine;
@@ -143,7 +159,7 @@ pub fn Description(props: DescriptionProps) -> Element {
         machine.send.call(fieldset::Event::SetHasDescription(false));
     });
 
-    let attrs = machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.description_attrs()))();
+    let attrs = machine.part_attrs(props.attrs, |api| api.description_attrs());
 
     rsx! {
         div { ..attrs,{props.children} }
@@ -153,16 +169,24 @@ pub fn Description(props: DescriptionProps) -> Element {
 /// Props for the Dioxus [`ErrorMessage`] component.
 #[derive(Props, Clone, PartialEq, Debug)]
 pub struct ErrorMessageProps {
+    /// Global HTML attributes forwarded onto the rendered error message.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+
     /// Error message content.
     pub children: Element,
 }
 
 /// Dioxus Fieldset error message part.
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "fieldset::Api method items are not lifetime-general enough for UseMachineReturn part_attrs()."
+)]
 #[component]
 pub fn ErrorMessage(props: ErrorMessageProps) -> Element {
     let attrs = fieldset_context()
         .machine
-        .derive(|api| attr_map_to_dioxus_inline_attrs(api.error_message_attrs()))();
+        .part_attrs(props.attrs, |api| api.error_message_attrs());
 
     rsx! {
         div { ..attrs,{props.children} }
@@ -172,16 +196,24 @@ pub fn ErrorMessage(props: ErrorMessageProps) -> Element {
 /// Props for the Dioxus [`Content`] component.
 #[derive(Props, Clone, PartialEq, Debug)]
 pub struct ContentProps {
+    /// Global HTML attributes forwarded onto the rendered content wrapper.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+
     /// Descendant form controls.
     pub children: Element,
 }
 
 /// Dioxus Fieldset content part.
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "fieldset::Api method items are not lifetime-general enough for UseMachineReturn part_attrs()."
+)]
 #[component]
 pub fn Content(props: ContentProps) -> Element {
     let attrs = fieldset_context()
         .machine
-        .derive(|api| attr_map_to_dioxus_inline_attrs(api.content_attrs()))();
+        .part_attrs(props.attrs, |api| api.content_attrs());
 
     rsx! {
         div { ..attrs,{props.children} }

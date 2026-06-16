@@ -96,13 +96,31 @@ also use `#[props(extends = GlobalAttributes)]` and merge those attrs with the
 agnostic part attrs. Tailwind examples should style those public parts directly
 or with Tailwind arbitrary variants over `data-ars-*`; do not inject raw Rust
 string CSS for ordinary part styling.
+Name low-level primitive roots `Root` inside the component module, matching the
+Checkbox standard (`checkbox::Root`, `field::Root`, `fieldset::Root`,
+`form::Root`). Reserve semantic component names for future higher-level wrappers
+or styled source templates.
+Unstyled primitives still need styling hooks: evaluate every core `Part` enum
+variant and every adapter-rendered structural node, including hidden inputs,
+status regions, live regions, portals, anchors, and measurement wrappers. Expose
+a public stylable part when consumers may need to style or position that node;
+otherwise document why the node is intentionally private.
+
+For required structural nodes, expose a public part when styling is expected but
+keep an adapter fallback when the part is omitted. Suppress the fallback when
+the explicit part is present, and keep required text, ids, ARIA, roles, and
+relationships owned by the machine or adapter rather than by arbitrary consumer
+children. In Dioxus, do not rely on a child component side effect to suppress a
+parent fallback during the same SSR render; use an explicit prop-level choice or
+inspect the child `Element`/`VNode` tree before rendering the fallback.
 
 For machine-backed Dioxus compound parts that only need agnostic part attrs plus
 consumer global attrs, use `UseMachineReturn::part_attrs` instead of writing a
 component-local part attr merger. Keep local merge code only when a part adds
 adapter-specific dynamic attrs, event handlers, refs, or renderer-only behavior.
 
-Adapter crates (`ars-dioxus`) expose unstyled primitives only. Put checked-in
+Adapter crates (`ars-dioxus`) expose unstyled primitives only; unstyled does
+not mean unstylable. Put checked-in
 closed-anatomy styled Dioxus source templates in `ars-dioxus-components`, with
 CSS and Tailwind variants when both distribution styles are needed. Styled
 templates should compose adapter primitives and may expose semantic props plus
@@ -187,6 +205,15 @@ dx serve --web       # WASM browser
 dx serve --desktop   # native desktop (webview)
 dx serve --ios       # iOS simulator
 ```
+
+For ars-ui adapter behavior that depends on browser-owned semantics, classify
+the target before coding. `web` can use typed DOM APIs such as `web_sys`.
+`desktop`/WebView targets may have a DOM, but Rust usually reaches it through
+`dioxus_document::eval` or another bridge, not through typed `web_sys`.
+`server`/SSR has no live DOM. Keep public behavior stable where possible, but
+document and test which target bucket owns exact native browser behavior such
+as constraint validation, focus APIs, selection ranges, layout measurement,
+clipboard, drag data, or file inputs.
 
 ## Common Pitfalls
 

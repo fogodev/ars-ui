@@ -495,22 +495,22 @@ pub(crate) fn UtilityPanel() -> Element {
             }
             section { "aria-labelledby": "field-form",
                 h3 { id: "field-form", {t(UtilityText::FieldForm)} }
-                Form {
+                form::Root {
                     id: "dioxus-field-form-demo",
                     action: "/account",
                     on_submit: move |()| {},
-                    Fieldset { id: "dioxus-fieldset-demo",
+                    fieldset::Root { id: "dioxus-fieldset-demo",
                         fieldset::Legend { {t(UtilityText::AccountDetails)} }
                         fieldset::Description { {t(UtilityText::RequiredFieldsDescription)} }
                         fieldset::Content {
-                            Field { id: "dioxus-name-field", required: true,
+                            field::Root { id: "dioxus-name-field", required: true,
                                 field::Label { {t(UtilityText::NameLabel)} }
                                 field::Input {
                                     name: "name",
                                     placeholder: t(UtilityText::NamePlaceholder),
                                 }
                             }
-                            Field {
+                            field::Root {
                                 id: "dioxus-email-field",
                                 name: "email",
                                 required: true,

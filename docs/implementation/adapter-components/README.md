@@ -24,7 +24,8 @@ file below:
 10. [06-widgets-examples.md](06-widgets-examples.md)
 11. [09-browser-parity-harness.md](09-browser-parity-harness.md)
 12. [12-parity-audit-loop.md](12-parity-audit-loop.md)
-13. [08-validation-and-pr-closeout.md](08-validation-and-pr-closeout.md)
+13. [14-retrofit-audits.md](14-retrofit-audits.md)
+14. [08-validation-and-pr-closeout.md](08-validation-and-pr-closeout.md)
 
 Then keep the checklists open while implementing:
 
@@ -75,6 +76,9 @@ An adapter component task is complete only when the same PR includes:
 - a completed parity audit loop with at least three passes over reference
   outcomes, consumer reality, and i18n/a11y/test proof, leaving no unverified
   or workaround-backed supported outcomes;
+- retrofit-audit evidence when updating an older adapter component, including
+  the current gold-standard comparison, stale-symbol scan, and refreshed final
+  matrix;
 - spec synchronization for any drift surfaced during implementation;
 - focused validation, `post-implementation-audit`, user review before commit,
   `cargo xci-fast`, and the Codex review loop after push.

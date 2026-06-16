@@ -2,7 +2,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use ars_dioxus::utility::field::{Description, ErrorMessage, Field, Input, InputType, Label};
+use ars_dioxus::utility::field;
 use ars_forms::validation::Error;
 use dioxus::prelude::*;
 
@@ -18,22 +18,22 @@ fn render_app(app: fn() -> Element) -> String {
 fn field_renders_root_label_input_and_messages() {
     fn app() -> Element {
         rsx! {
-            Field {
+            field::Root {
                 id: "email-field",
                 required: true,
                 disabled: true,
                 readonly: true,
                 errors: vec![Error::server("Email is required.")],
                 class: "account-field",
-                Label { "Email" }
-                Description { "Use your work email address." }
-                Input {
-                    r#type: InputType::Email,
+                field::Label { "Email" }
+                field::Description { "Use your work email address." }
+                field::Input {
+                    r#type: field::InputType::Email,
                     name: "email",
                     placeholder: "name@example.com",
                     class: "account-input",
                 }
-                ErrorMessage { "Email is required." }
+                field::ErrorMessage { "Email is required." }
             }
         }
     }
@@ -70,6 +70,41 @@ fn field_renders_root_label_input_and_messages() {
         r#"id="email-field-error-message""#,
         r#"role="alert""#,
         r#"data-ars-part="error-message""#,
+    ] {
+        assert!(html.contains(fragment), "missing {fragment}: {html}");
+    }
+}
+
+#[test]
+fn field_parts_accept_consumer_class_and_style() {
+    fn app() -> Element {
+        rsx! {
+            field::Root { id: "styled-field", errors: vec![Error::server("Required.")],
+                field::Label { class: "label-class", style: "color: blue;", "Email" }
+                field::Description { class: "description-class", style: "font-size: 12px;",
+                    "Use your work email address."
+                }
+                field::Input {
+                    name: "email",
+                    class: "input-class",
+                    style: "display: block;",
+                }
+                field::ErrorMessage { class: "error-class", style: "color: red;", "Required." }
+            }
+        }
+    }
+
+    let html = render_app(app);
+
+    for fragment in [
+        r#"class="label-class""#,
+        r#"style="color: blue;""#,
+        r#"class="input-class""#,
+        r#"style="display: block;""#,
+        r#"class="description-class""#,
+        r#"style="font-size: 12px;""#,
+        r#"class="error-class""#,
+        r#"style="color: red;""#,
     ] {
         assert!(html.contains(fragment), "missing {fragment}: {html}");
     }

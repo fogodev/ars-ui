@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use ars_dioxus::utility::field::{Description, ErrorMessage, Field, Input, InputType, Label};
+use ars_dioxus::utility::field;
 use ars_forms::validation::Error;
 use dioxus::{dioxus_core::AttributeValue, prelude::*};
 use wasm_bindgen::JsCast;
@@ -95,22 +95,22 @@ async fn field_browser_renders_relationship_attrs_and_input_callback() {
 
     fn app() -> Element {
         rsx! {
-            Field {
+            field::Root {
                 id: "wasm-email-field",
                 required: true,
                 invalid: true,
                 errors: vec![Error::server("Email is required.")],
-                Label { "Email" }
-                Input {
-                    r#type: InputType::Email,
+                field::Label { "Email" }
+                field::Input {
+                    r#type: field::InputType::Email,
                     name: "email",
                     placeholder: "Enter your email",
                     on_value_input: move |value: String| {
                         INPUT_VALUES.with(|values| values.borrow_mut().push(value));
                     },
                 }
-                Description { "Use a reachable email." }
-                ErrorMessage { "Email is required." }
+                field::Description { "Use a reachable email." }
+                field::ErrorMessage { "Email is required." }
             }
         }
     }
@@ -176,9 +176,9 @@ async fn field_raw_oninput_attr_does_not_replace_adapter_input_callback() {
 
     fn app() -> Element {
         rsx! {
-            Field { id: "wasm-global-input-field",
-                Label { "Email" }
-                Input {
+            field::Root { id: "wasm-global-input-field",
+                field::Label { "Email" }
+                field::Input {
                     name: "email",
                     attrs: vec![
                         Attribute::new(
@@ -248,20 +248,20 @@ async fn field_reactive_errors_update_invalid_relationship() {
         let invalid = !errors.is_empty();
 
         rsx! {
-            Field {
+            field::Root {
                 id: "wasm-reactive-email-field",
                 required: true,
                 invalid,
                 errors,
-                Label { "Email" }
-                Description { "Use a reachable email." }
-                Input {
-                    r#type: InputType::Email,
+                field::Label { "Email" }
+                field::Description { "Use a reachable email." }
+                field::Input {
+                    r#type: field::InputType::Email,
                     name: "email",
                     value: email(),
                     on_value_input: move |value: String| email.set(value),
                 }
-                ErrorMessage { "Email is required." }
+                field::ErrorMessage { "Email is required." }
                 button {
                     r#type: "button",
                     onclick: move |_| email.set(String::from("admin@email.com")),
@@ -341,10 +341,10 @@ async fn field_controlled_value_reapplies_rejected_input() {
         let mut email = use_signal(|| String::from("fixed@example.com"));
 
         rsx! {
-            Field { id: "wasm-controlled-email-field",
-                Label { "Email" }
-                Input {
-                    r#type: InputType::Email,
+            field::Root { id: "wasm-controlled-email-field",
+                field::Label { "Email" }
+                field::Input {
+                    r#type: field::InputType::Email,
                     name: "email",
                     value: email(),
                     on_value_input: move |_| email.set(String::from("fixed@example.com")),
@@ -396,18 +396,18 @@ async fn field_input_attrs_follow_parent_prop_rerenders() {
         let mut localized = use_signal(|| false);
         let (input_type, name, placeholder) = if localized() {
             (
-                InputType::Search,
+                field::InputType::Search,
                 "consulta",
                 "Pesquisar por endereco de email",
             )
         } else {
-            (InputType::Email, "email", "Enter your email")
+            (field::InputType::Email, "email", "Enter your email")
         };
 
         rsx! {
-            Field { id: "wasm-localized-email-field",
-                Label { "Email" }
-                Input { r#type: input_type, name, placeholder }
+            field::Root { id: "wasm-localized-email-field",
+                field::Label { "Email" }
+                field::Input { r#type: input_type, name, placeholder }
                 button { r#type: "button", onclick: move |_| localized.set(true), "Localize" }
             }
         }

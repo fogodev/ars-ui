@@ -1,6 +1,6 @@
 //! Input category fixture panel.
 
-use ars_dioxus::{I18nRegistries, utility::form::Form};
+use ars_dioxus::{I18nRegistries, utility::form};
 use ars_dioxus_components::input::checkbox::css::{Checkbox, STYLES as CHECKBOX_STYLES, State};
 use dioxus::prelude::*;
 
@@ -52,7 +52,7 @@ pub fn InputPanel() -> Element {
                 on_checked_change: move |next| controlled.set(next),
                 "Controlled"
             }
-            Form {
+            form::Root {
                 id: "dioxus-fixture-checkbox-form",
                 on_submit: move |_| {
                     let status = if form_value() == State::Checked {

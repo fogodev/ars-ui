@@ -5,7 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use ars_forms::validation::Error;
-use ars_leptos::utility::field::{Description, ErrorMessage, Field, Input, InputType, Label};
+use ars_leptos::utility::field;
 use leptos::{mount::mount_to, prelude::*};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -58,12 +58,12 @@ async fn field_browser_mounts_input_with_label_relationship() {
 
         let mount_handle = mount_to(parent.clone(), || {
             view! {
-                <Field id="wasm-email-field" required=true invalid=true>
-                    <Label>"Email"</Label>
-                    <Input r#type=InputType::Email name="email" />
-                    <Description>"Use a reachable email."</Description>
-                    <ErrorMessage>"Email is required."</ErrorMessage>
-                </Field>
+                <field::Root id="wasm-email-field" required=true invalid=true>
+                    <field::Label>"Email"</field::Label>
+                    <field::Input r#type=field::InputType::Email name="email" />
+                    <field::Description>"Use a reachable email."</field::Description>
+                    <field::ErrorMessage>"Email is required."</field::ErrorMessage>
+                </field::Root>
             }
         });
 
@@ -106,10 +106,10 @@ async fn field_input_emits_value_input_callback() {
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
-                <Field id="wasm-email-field-callback">
-                    <Label>"Email"</Label>
-                    <Input
-                        r#type=InputType::Email
+                <field::Root id="wasm-email-field-callback">
+                    <field::Label>"Email"</field::Label>
+                    <field::Input
+                        r#type=field::InputType::Email
                         name="email"
                         on_value_input=Callback::new(move |value| {
                             callback_values
@@ -118,7 +118,7 @@ async fn field_input_emits_value_input_callback() {
                                 .push(value);
                         })
                     />
-                </Field>
+                </field::Root>
             }
         });
 
@@ -168,17 +168,22 @@ async fn field_reactive_errors_update_invalid_relationship() {
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
-                <Field id="wasm-reactive-email-field" required=true invalid=invalid errors=errors>
-                    <Label>"Email"</Label>
-                    <Description>"Use a reachable email."</Description>
-                    <Input
-                        r#type=InputType::Email
+                <field::Root
+                    id="wasm-reactive-email-field"
+                    required=true
+                    invalid=invalid
+                    errors=errors
+                >
+                    <field::Label>"Email"</field::Label>
+                    <field::Description>"Use a reachable email."</field::Description>
+                    <field::Input
+                        r#type=field::InputType::Email
                         name="email"
                         value=email
                         on_value_input=Callback::new(move |value| email.set(value))
                     />
-                    <ErrorMessage>"Email is required."</ErrorMessage>
-                </Field>
+                    <field::ErrorMessage>"Email is required."</field::ErrorMessage>
+                </field::Root>
             }
         });
 
@@ -260,10 +265,10 @@ async fn field_controlled_value_updates_live_input_property() {
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
-                <Field id="wasm-controlled-email-field">
-                    <Label>"Email"</Label>
-                    <Input r#type=InputType::Email name="email" value=email />
-                </Field>
+                <field::Root id="wasm-controlled-email-field">
+                    <field::Label>"Email"</field::Label>
+                    <field::Input r#type=field::InputType::Email name="email" value=email />
+                </field::Root>
             }
         });
 

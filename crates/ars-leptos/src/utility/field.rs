@@ -6,7 +6,10 @@ use ars_core::{AriaAttr, AttrMap, AttrValue, Direction, HtmlAttr};
 use ars_forms::validation::Error;
 use leptos::{children::TypedChildren, context::Provider, either::Either, prelude::*};
 
-use crate::{attr_map_to_leptos_inline_attrs, callbacks, use_id, use_machine_with_reactive_props};
+use crate::{
+    apply_part_attrs, attr_map_to_leptos_inline_attrs, callbacks, use_id,
+    use_machine_with_reactive_props,
+};
 
 #[derive(Clone, Copy)]
 struct FieldContext {
@@ -14,7 +17,8 @@ struct FieldContext {
 }
 
 fn field_context() -> FieldContext {
-    use_context::<FieldContext>().expect("Field subcomponents must be rendered inside <Field/>")
+    use_context::<FieldContext>()
+        .expect("Field subcomponents must be rendered inside <field::Root/>")
 }
 
 /// Leptos Field root component.
@@ -23,7 +27,7 @@ fn field_context() -> FieldContext {
     clippy::needless_pass_by_value,
     reason = "Leptos component props are owned builder inputs; borrowing the Oco class prop avoids allocating with Oco::into_owned just to satisfy Clippy."
 )]
-pub fn Field<T: 'static>(
+pub fn Root<T: 'static>(
     /// Optional component instance ID.
     #[prop(optional, into)]
     id: Option<Oco<'static, str>>,
@@ -90,6 +94,7 @@ where
         let mut attrs = api.root_attrs();
 
         crate::merge_consumer_class_prop_into(&mut attrs, class.clone());
+
         add_dynamic_root_attrs(&mut attrs, machine);
 
         attr_map_to_leptos_inline_attrs(attrs)
@@ -139,6 +144,14 @@ fn field_props_signal(
 /// Leptos Field label part.
 #[component]
 pub fn Label<T>(
+    /// Consumer class tokens appended to the label.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the label.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+
     /// Label content.
     children: TypedChildren<T>,
 ) -> impl IntoView
@@ -147,7 +160,7 @@ where
 {
     let attrs = field_context()
         .machine
-        .with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.label_attrs()));
+        .with_api_snapshot(|api| apply_part_attrs(api.label_attrs(), class, style));
 
     view! { <label {..attrs}>{children.into_inner()()}</label> }
 }
@@ -175,6 +188,10 @@ pub fn Input(
     #[prop(optional, into)]
     class: Option<TextProp>,
 
+    /// Consumer inline style text applied to the input.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+
     /// Fires with the current value when the native input event runs.
     #[prop(optional)]
     on_value_input: Option<Callback<String>>,
@@ -186,9 +203,9 @@ pub fn Input(
 
         add_dynamic_input_attrs(&mut attrs, machine);
 
-        apply_input_attrs(&mut attrs, r#type, name, placeholder, class);
+        apply_input_attrs(&mut attrs, r#type, name, placeholder);
 
-        attr_map_to_leptos_inline_attrs(attrs)
+        apply_part_attrs(attrs, class, style)
     });
 
     if let Some(value) = value {
@@ -216,6 +233,14 @@ pub fn Input(
 /// Leptos Field description part.
 #[component]
 pub fn Description<T>(
+    /// Consumer class tokens appended to the description.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the description.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+
     /// Description content.
     children: TypedChildren<T>,
 ) -> impl IntoView
@@ -229,7 +254,7 @@ where
     on_cleanup(move || machine.send.run(field::Event::SetHasDescription(false)));
 
     let attrs =
-        machine.with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.description_attrs()));
+        machine.with_api_snapshot(|api| apply_part_attrs(api.description_attrs(), class, style));
 
     view! { <div {..attrs}>{children.into_inner()()}</div> }
 }
@@ -237,6 +262,14 @@ where
 /// Leptos Field error message part.
 #[component]
 pub fn ErrorMessage<T>(
+    /// Consumer class tokens appended to the error message.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the error message.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+
     /// Error message content.
     children: TypedChildren<T>,
 ) -> impl IntoView
@@ -255,7 +288,7 @@ where
             AttrValue::reactive_bool(move || hidden.get()),
         );
 
-        attr_map_to_leptos_inline_attrs(attrs)
+        apply_part_attrs(attrs, class, style)
     });
 
     view! { <div {..attrs}>{children.into_inner()()}</div> }
@@ -336,7 +369,6 @@ fn apply_input_attrs(
     r#type: Option<Signal<InputType>>,
     name: Option<Oco<'static, str>>,
     placeholder: Option<TextProp>,
-    class: Option<TextProp>,
 ) {
     if let Some(input_type) = r#type {
         attrs.set(
@@ -355,6 +387,4 @@ fn apply_input_attrs(
             AttrValue::reactive(move || placeholder.get().into_owned()),
         );
     }
-
-    crate::merge_consumer_class_prop_into(attrs, class);
 }

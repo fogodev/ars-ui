@@ -13,9 +13,7 @@ use ars_dioxus::{
         client_only::ClientOnly,
         dismissable,
         error_boundary::{CapturedError, ErrorBoundary},
-        field::{self, Field},
-        fieldset::{self, Fieldset},
-        form::Form,
+        field, fieldset, form,
         heading::{self, Heading, HeadingLevelProvider},
         highlight::Highlight,
         landmark::{self, Landmark},
@@ -475,7 +473,7 @@ pub(crate) fn UtilityPanel(locale_key: String) -> Element {
             }
             section { class: "showcase-panel wide", "aria-labelledby": "field-form",
                 h2 { id: "field-form", {t(UtilityText::FieldFormHeading)} }
-                Form {
+                form::Root {
                     id: "dioxus-fixture-account-form",
                     action: "/account",
                     validation_errors: std::collections::BTreeMap::from([
@@ -486,14 +484,14 @@ pub(crate) fn UtilityPanel(locale_key: String) -> Element {
                     ]),
                     status_message: t(UtilityText::Ready),
                     class: "fixture-form",
-                    Fieldset {
+                    fieldset::Root {
                         id: "dioxus-fixture-account-fieldset",
                         disabled: true,
                         invalid: true,
                         fieldset::Legend { {t(UtilityText::AccountDetails)} }
                         fieldset::Description { {t(UtilityText::FieldsetDescription)} }
                         fieldset::Content {
-                            Field {
+                            field::Root {
                                 id: "dioxus-fixture-email-required-field",
                                 name: "email-required",
                                 required: true,
@@ -502,7 +500,7 @@ pub(crate) fn UtilityPanel(locale_key: String) -> Element {
                                 field::Input { r#type: field::InputType::Email, name: "email-required" }
                                 field::ErrorMessage { {t(UtilityText::EmailRequired)} }
                             }
-                            Field {
+                            field::Root {
                                 id: "dioxus-fixture-email-missing-at-field",
                                 name: "email-missing-at",
                                 errors: vec![ValidationError::custom("email-missing-at", missing_at_error.clone())],
@@ -515,7 +513,7 @@ pub(crate) fn UtilityPanel(locale_key: String) -> Element {
                                 }
                                 field::ErrorMessage { {t(UtilityText::EmailMissingAt)} }
                             }
-                            Field {
+                            field::Root {
                                 id: "dioxus-fixture-email-incomplete-domain-field",
                                 name: "email-incomplete-domain",
                                 errors: vec![
@@ -536,7 +534,7 @@ pub(crate) fn UtilityPanel(locale_key: String) -> Element {
                         }
                         fieldset::ErrorMessage { {t(UtilityText::AccountIncomplete)} }
                     }
-                    Field {
+                    field::Root {
                         id: "dioxus-fixture-email-valid-field",
                         name: "email-valid",
                         field::Label { {t(UtilityText::EmailLabel)} }

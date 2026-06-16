@@ -332,7 +332,7 @@ pub(crate) fn InputPanel() -> impl IntoView {
                         }}
                     </p>
                 </div>
-                <Form
+                <form::Root
                     class="showcase-card"
                     id="checkbox-demo-form"
                     on_submit=move |()| {
@@ -390,7 +390,7 @@ pub(crate) fn InputPanel() -> impl IntoView {
                         </Button>
                     </div>
                     <p>{form_status_text}</p>
-                </Form>
+                </form::Root>
             </div>
         </section>
     }

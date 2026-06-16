@@ -4,10 +4,7 @@
 
 use std::{cell::RefCell, collections::BTreeMap};
 
-use ars_dioxus::utility::{
-    field::{ErrorMessage, Field, Input, Label},
-    form::Form,
-};
+use ars_dioxus::utility::{field, form};
 use ars_forms::validation::Error;
 use dioxus::{dioxus_core::AttributeValue, prelude::*};
 use wasm_bindgen::JsCast;
@@ -87,7 +84,7 @@ async fn form_browser_renders_status_region_and_dispatches_callbacks() {
 
     fn app() -> Element {
         rsx! {
-            Form {
+            form::Root {
                 id: "wasm-account-form",
                 action: "/account",
                 on_submit: move |()| {
@@ -166,7 +163,7 @@ async fn form_browser_renders_status_region_and_dispatches_callbacks() {
 async fn form_default_aria_submit_prevents_native_navigation_without_callback() {
     fn app() -> Element {
         rsx! {
-            Form { id: "wasm-default-aria-form", action: "/account",
+            form::Root { id: "wasm-default-aria-form", action: "/account",
                 input { name: "email" }
             }
         }
@@ -213,11 +210,11 @@ async fn form_validation_errors_update_existing_descendant_field() {
         let mut errors = use_signal(BTreeMap::<String, Vec<Error>>::new);
 
         rsx! {
-            Form { id: "wasm-validation-form", validation_errors: errors(),
-                Field { id: "wasm-validation-email", name: "email",
-                    Label { "Email" }
-                    Input { name: "email" }
-                    ErrorMessage { "Email is required." }
+            form::Root { id: "wasm-validation-form", validation_errors: errors(),
+                field::Root { id: "wasm-validation-email", name: "email",
+                    field::Label { "Email" }
+                    field::Input { name: "email" }
+                    field::ErrorMessage { "Email is required." }
                 }
                 button {
                     r#type: "button",
@@ -282,7 +279,7 @@ async fn form_root_action_and_role_follow_prop_rerenders() {
         let role = if alternate() { "search" } else { "form" };
 
         rsx! {
-            Form { id: "wasm-rerender-form", action, role,
+            form::Root { id: "wasm-rerender-form", action, role,
                 input { name: "email" }
                 button { r#type: "button", onclick: move |_| alternate.set(true), "Change" }
             }
@@ -331,7 +328,7 @@ async fn form_default_aria_blocks_invalid_required_submit_callback() {
 
     fn app() -> Element {
         rsx! {
-            Form {
+            form::Root {
                 id: "wasm-invalid-required-form",
                 on_submit: move |()| {
                     FORM_EVENTS.with(|events| events.borrow_mut().push("submit"));
@@ -387,7 +384,7 @@ async fn form_default_aria_blocks_invalid_required_submit_callback() {
 async fn form_default_aria_counts_only_invalid_named_controls_in_groups() {
     fn app() -> Element {
         rsx! {
-            Form { id: "wasm-invalid-group-form",
+            form::Root { id: "wasm-invalid-group-form",
                 fieldset {
                     input { name: "email", required: true }
                 }
@@ -437,7 +434,7 @@ async fn form_global_onsubmit_does_not_replace_adapter_handler() {
 
     fn app() -> Element {
         rsx! {
-            Form {
+            form::Root {
                 id: "wasm-global-submit-form",
                 attrs: vec![
                     Attribute::new(
@@ -506,7 +503,7 @@ async fn formnovalidate_submitter_skips_aria_constraint_validation() {
 
     fn app() -> Element {
         rsx! {
-            Form {
+            form::Root {
                 id: "wasm-formnovalidate-form",
                 on_submit: move |()| {
                     FORM_EVENTS.with(|events| events.borrow_mut().push("submit"));
@@ -580,14 +577,14 @@ async fn formnovalidate_submitter_skips_aria_constraint_validation() {
 async fn form_invalid_required_submit_updates_named_field_errors() {
     fn app() -> Element {
         rsx! {
-            Form { id: "wasm-invalid-field-form",
-                Field {
+            form::Root { id: "wasm-invalid-field-form",
+                field::Root {
                     id: "wasm-invalid-email-field",
                     name: "email",
                     required: true,
-                    Label { "Email" }
-                    Input { name: "email" }
-                    ErrorMessage { "Email is required." }
+                    field::Label { "Email" }
+                    field::Input { name: "email" }
+                    field::ErrorMessage { "Email is required." }
                 }
             }
         }
@@ -669,18 +666,18 @@ async fn form_invalid_required_submit_updates_named_field_errors() {
 async fn form_valid_submit_preserves_controlled_validation_errors() {
     fn app() -> Element {
         rsx! {
-            Form {
+            form::Root {
                 id: "wasm-controlled-error-form",
                 validation_errors: BTreeMap::from([
                     ("email".to_string(), vec![Error::server("Server still rejects this email.")]),
                 ]),
-                Field {
+                field::Root {
                     id: "wasm-controlled-error-email-field",
                     name: "email",
                     required: true,
-                    Label { "Email" }
-                    Input { name: "email", value: "admin@email.com" }
-                    ErrorMessage { "Server still rejects this email." }
+                    field::Label { "Email" }
+                    field::Input { name: "email", value: "admin@email.com" }
+                    field::ErrorMessage { "Server still rejects this email." }
                 }
             }
         }

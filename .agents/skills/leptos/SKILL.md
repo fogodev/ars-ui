@@ -112,6 +112,21 @@ part should expose reactive `class: Option<TextProp>` and
 surface. Merge those attrs with the agnostic part attrs. Tailwind examples
 should style public parts directly or with Tailwind arbitrary variants over
 `data-ars-*`; do not inject raw Rust string CSS for ordinary part styling.
+Name low-level primitive roots `Root` inside the component module, matching the
+Checkbox standard (`checkbox::Root`, `field::Root`, `fieldset::Root`,
+`form::Root`). Reserve semantic component names for future higher-level wrappers
+or styled source templates.
+Unstyled primitives still need styling hooks: evaluate every core `Part` enum
+variant and every adapter-rendered structural node, including hidden inputs,
+status regions, live regions, portals, anchors, and measurement wrappers. Expose
+a public stylable part when consumers may need to style or position that node;
+otherwise document why the node is intentionally private.
+
+For required structural nodes, expose a public part when styling is expected but
+keep an adapter fallback when the part is omitted. Suppress the fallback when
+the explicit part is present, and keep required text, ids, ARIA, roles, and
+relationships owned by the machine or adapter rather than by arbitrary consumer
+children.
 
 For machine-backed Leptos compound parts that only need agnostic part attrs plus
 consumer `class` / `style` props, use `UseMachineReturn::part_attrs` instead of
@@ -130,7 +145,8 @@ For dynamic Leptos attrs derived from machine part `AttrMap`s, use
 `root_attr_*_memo`, `input_attr_*_memo`, or `attr_*_memo` copies unless the
 derivation does more than read one `AttrMap` key.
 
-Adapter crates (`ars-leptos`) expose unstyled primitives only. Put checked-in
+Adapter crates (`ars-leptos`) expose unstyled primitives only; unstyled does
+not mean unstylable. Put checked-in
 closed-anatomy styled Leptos source templates in `ars-leptos-components`, with
 CSS and Tailwind variants when both distribution styles are needed. Styled
 templates should compose adapter primitives and may expose semantic props plus
@@ -171,3 +187,11 @@ Leptos widget examples should import adapter/framework APIs through
 `use ars_leptos::prelude::*;` as much as possible. Avoid direct `leptos::*` or
 deep `ars_leptos::*` imports in examples when the item is intentionally
 available from the adapter prelude.
+
+For ars-ui adapter behavior that depends on browser-owned semantics, classify
+the target before coding. Browser builds can use typed DOM APIs such as
+`web_sys`; SSR has no live DOM; any non-DOM fallback must be documented in the
+spec or sketch. Keep public behavior stable where possible, but document and
+test which target bucket owns exact native browser behavior such as constraint
+validation, focus APIs, selection ranges, layout measurement, clipboard, drag
+data, or file inputs.

@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use ars_components::utility::form;
 pub use ars_components::utility::form::{Part, Props, ValidationBehavior};
 use ars_core::{AriaAttr, AttrMap, AttrValue, HtmlAttr};
-use ars_forms::validation::Error;
+use ars_forms::validation::{Error, merge_error_map};
+#[cfg(target_arch = "wasm32")]
+use ars_forms::validation::{NativeInputType, NativeValidity};
 use leptos::{children::TypedChildren, context::Provider, html, prelude::*};
 #[cfg(target_arch = "wasm32")]
 use leptos::{
@@ -14,18 +16,23 @@ use leptos::{
 };
 
 use crate::{
-    attr_map_to_leptos_inline_attrs, callbacks, use_id, use_machine_with_reactive_props,
-    use_messages_and_locale,
+    apply_part_attrs, attr_map_to_leptos_inline_attrs, callbacks, use_id,
+    use_machine_with_reactive_props, use_messages_and_locale,
 };
 
 #[derive(Clone, Copy)]
 pub(crate) struct FormContext {
     pub(crate) machine: crate::UseMachineReturn<form::Machine>,
+    status_region_count: RwSignal<usize>,
+}
+
+fn form_context() -> FormContext {
+    use_context::<FormContext>().expect("Form subcomponents must be rendered inside <form::Root/>")
 }
 
 /// Leptos Form root component.
 #[component]
-pub fn Form<T: 'static>(
+pub fn Root<T: 'static>(
     /// Optional component instance ID.
     #[prop(optional, into)]
     id: Option<Oco<'static, str>>,
@@ -53,6 +60,10 @@ pub fn Form<T: 'static>(
     /// Consumer class tokens appended to the form.
     #[prop(optional, into)]
     class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the form.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
 
     /// Fires when the form submit event runs.
     #[prop(optional, into)]
@@ -87,6 +98,7 @@ where
         validation_errors,
         status_message,
     ));
+
     let form_messages = use_messages_and_locale::<ars_forms::form::Messages>(None, None);
 
     let attrs = machine.with_api_snapshot(|api| {
@@ -95,11 +107,22 @@ where
         crate::merge_consumer_class_prop_into(&mut attrs, class);
         add_dynamic_root_attrs(&mut attrs, machine);
 
-        attr_map_to_leptos_inline_attrs(attrs)
+        let mut attrs = attr_map_to_leptos_inline_attrs(attrs);
+
+        if let Some(style) = crate::consumer_style_prop_to_leptos_attr(style) {
+            attrs.push(style);
+        }
+
+        attrs
     });
 
+    let status_region_count = RwSignal::new(0_usize);
+
     view! {
-        <Provider value=FormContext { machine }>
+        <Provider value=FormContext {
+            machine,
+            status_region_count,
+        }>
             <form
                 {..attrs}
                 node_ref=form_ref
@@ -121,7 +144,7 @@ where
                             .map(Vec::len)
                             .sum::<usize>()
                             .max(1);
-                        merge_validation_errors(&mut errors, native_errors);
+                        merge_error_map(&mut errors, native_errors);
                         machine.send.run(form::Event::SetValidationErrors(errors));
                         machine
                             .send
@@ -153,7 +176,10 @@ where
                 }
             >
                 {children.into_inner()()}
-                {status_region(machine, None)}
+                {move || {
+                    (status_region_count.get() == 0)
+                        .then(|| status_region_view(machine, None, None))
+                }}
             </form>
         </Provider>
     }
@@ -172,17 +198,6 @@ fn form_props_signal(
             .validation_errors(validation_errors.get())
             .maybe_status_message(status_message.get())
     })
-}
-
-fn merge_validation_errors(
-    errors: &mut BTreeMap<String, Vec<Error>>,
-    additional_errors: BTreeMap<String, Vec<Error>>,
-) {
-    additional_errors
-        .into_iter()
-        .for_each(|(name, mut field_errors)| {
-            errors.entry(name).or_default().append(&mut field_errors);
-        });
 }
 
 fn add_dynamic_root_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<form::Machine>) {
@@ -209,16 +224,48 @@ fn add_dynamic_root_attrs(attrs: &mut AttrMap, machine: crate::UseMachineReturn<
         );
 }
 
-fn status_region(
+/// Leptos Form status live-region part.
+///
+/// Rendering this part inside [`Root`] styles or repositions the form-owned
+/// live region while preserving the core status-region attributes and message
+/// source. If omitted, [`Root`] renders an unstyled fallback status region.
+#[component]
+pub fn StatusRegion(
+    /// Consumer class tokens appended to the status region.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the status region.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+) -> impl IntoView {
+    let FormContext {
+        machine,
+        status_region_count,
+    } = form_context();
+
+    status_region_count.update(|status_region_count| *status_region_count += 1);
+
+    on_cleanup(move || {
+        status_region_count.update(|status_region_count| {
+            *status_region_count = status_region_count.saturating_sub(1);
+        });
+    });
+
+    status_region_view(machine, class, style)
+}
+
+fn status_region_view(
     machine: crate::UseMachineReturn<form::Machine>,
-    children: Option<AnyView>,
+    class: Option<TextProp>,
+    style: Option<TextProp>,
 ) -> impl IntoView {
     let status_message = machine.derive(|api| api.status_message().map(str::to_owned));
 
     let attrs =
-        machine.with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.status_region_attrs()));
+        machine.with_api_snapshot(|api| apply_part_attrs(api.status_region_attrs(), class, style));
 
-    view! { <div {..attrs}>{children} {status_message}</div> }
+    view! { <div {..attrs}>{status_message}</div> }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -232,6 +279,7 @@ fn submitter_skips_validation(event: &web_sys::SubmitEvent) -> bool {
 #[cfg(not(target_arch = "wasm32"))]
 const fn submitter_skips_validation<T>(event: &T) -> bool {
     let _ = event;
+
     false
 }
 
@@ -248,6 +296,7 @@ fn form_is_valid(form_ref: NodeRef<html::Form>) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let _ = form_ref;
+
         true
     }
 }
@@ -299,6 +348,7 @@ fn invalid_control_errors(
         let _ = form_ref;
         let _ = messages;
         let _ = locale;
+
         BTreeMap::new()
     }
 }
@@ -309,114 +359,55 @@ fn native_validation_error(
     messages: &ars_forms::form::Messages,
     locale: &ars_i18n::Locale,
 ) -> Error {
-    if validity_flag(element, "valueMissing") {
-        return Error::required(messages, locale);
-    }
+    native_validity(element).to_error(messages, locale)
+}
 
-    for error in [
-        build_type_mismatch_error(element, messages, locale),
-        build_pattern_mismatch_error(element, messages, locale),
-        build_length_error(element, messages, locale),
-        build_range_error(element, messages, locale),
-        build_step_error(element, messages, locale),
-    ] {
-        if let Some(error) = error {
-            return error;
-        }
+// adapter-rendering-glue: extracts browser DOM validity facts for the shared forms helper.
+#[cfg(target_arch = "wasm32")]
+fn native_validity(element: &web_sys::Element) -> NativeValidity {
+    NativeValidity {
+        value_missing: validity_flag(element, "valueMissing"),
+        type_mismatch: type_mismatch_input_type(element),
+        pattern_mismatch: validity_flag(element, "patternMismatch")
+            .then(|| element.get_attribute("pattern"))
+            .flatten(),
+        too_short: flagged_parsed_attr(element, "tooShort", "minlength"),
+        too_long: flagged_parsed_attr(element, "tooLong", "maxlength"),
+        range_underflow: flagged_parsed_attr(element, "rangeUnderflow", "min"),
+        range_overflow: flagged_parsed_attr(element, "rangeOverflow", "max"),
+        step_mismatch: flagged_parsed_attr(element, "stepMismatch", "step"),
     }
-
-    Error::custom("native", (messages.pattern_error)(locale))
 }
 
 #[cfg(target_arch = "wasm32")]
-fn build_type_mismatch_error(
-    element: &web_sys::Element,
-    messages: &ars_forms::form::Messages,
-    locale: &ars_i18n::Locale,
-) -> Option<Error> {
-    if !validity_flag(element, "typeMismatch") {
-        return None;
+fn type_mismatch_input_type(element: &web_sys::Element) -> Option<NativeInputType> {
+    if validity_flag(element, "typeMismatch") {
+        Some(match element.get_attribute("type").as_deref() {
+            Some("email") => NativeInputType::Email,
+            Some("url") => NativeInputType::Url,
+            _ => NativeInputType::Other,
+        })
+    } else {
+        None
     }
-
-    Some(match element.get_attribute("type").as_deref() {
-        Some("email") => Error::email(messages, locale),
-        Some("url") => Error::url(messages, locale),
-        _ => Error::custom("native", (messages.pattern_error)(locale)),
-    })
 }
 
 #[cfg(target_arch = "wasm32")]
-fn build_pattern_mismatch_error(
+fn flagged_parsed_attr<T: std::str::FromStr>(
     element: &web_sys::Element,
-    messages: &ars_forms::form::Messages,
-    locale: &ars_i18n::Locale,
-) -> Option<Error> {
-    validity_flag(element, "patternMismatch")
-        .then(|| element.get_attribute("pattern"))
+    flag: &str,
+    attr: &str,
+) -> Option<T> {
+    validity_flag(element, flag)
+        .then(|| parsed_attr(element, attr))
         .flatten()
-        .map(|pattern| Error::pattern(pattern, messages, locale))
 }
 
 #[cfg(target_arch = "wasm32")]
-fn build_length_error(
-    element: &web_sys::Element,
-    messages: &ars_forms::form::Messages,
-    locale: &ars_i18n::Locale,
-) -> Option<Error> {
-    if validity_flag(element, "tooShort")
-        && let Some(min_length) = build_parsed_attr::<usize>(element, "minlength")
-    {
-        return Some(Error::min_length(min_length, messages, locale));
-    }
-
-    if validity_flag(element, "tooLong")
-        && let Some(max_length) = build_parsed_attr::<usize>(element, "maxlength")
-    {
-        return Some(Error::max_length(max_length, messages, locale));
-    }
-
-    None
-}
-
-#[cfg(target_arch = "wasm32")]
-fn build_range_error(
-    element: &web_sys::Element,
-    messages: &ars_forms::form::Messages,
-    locale: &ars_i18n::Locale,
-) -> Option<Error> {
-    if validity_flag(element, "rangeUnderflow")
-        && let Some(min) = build_parsed_attr::<f64>(element, "min")
-    {
-        return Some(Error::min(min, messages, locale));
-    }
-
-    if validity_flag(element, "rangeOverflow")
-        && let Some(max) = build_parsed_attr::<f64>(element, "max")
-    {
-        return Some(Error::max(max, messages, locale));
-    }
-
-    None
-}
-
-#[cfg(target_arch = "wasm32")]
-fn build_step_error(
-    element: &web_sys::Element,
-    messages: &ars_forms::form::Messages,
-    locale: &ars_i18n::Locale,
-) -> Option<Error> {
-    if !validity_flag(element, "stepMismatch") {
-        return None;
-    }
-
-    build_parsed_attr::<f64>(element, "step").map(|step| Error::step(step, messages, locale))
-}
-
-#[cfg(target_arch = "wasm32")]
-fn build_parsed_attr<T: std::str::FromStr>(element: &web_sys::Element, attr: &str) -> Option<T> {
+fn parsed_attr<T: std::str::FromStr>(element: &web_sys::Element, attr: &str) -> Option<T> {
     element
         .get_attribute(attr)
-        .and_then(|value| value.parse::<T>().ok())
+        .and_then(|value| value.parse().ok())
 }
 
 #[cfg(target_arch = "wasm32")]

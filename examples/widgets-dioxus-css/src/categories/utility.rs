@@ -545,16 +545,16 @@ pub(crate) fn UtilityPanel() -> Element {
                     h2 { id: "field-form", {t(UtilityText::FieldForm)} }
                     p { class: "panel-note", {t(UtilityText::FieldFormDescription)} }
                 }
-                Form {
+                form::Root {
                     id: "dioxus-css-field-form-demo",
                     action: "/account",
                     class: "field-form-demo",
                     on_submit: move |()| {},
-                    Fieldset { id: "dioxus-css-fieldset-demo",
+                    fieldset::Root { id: "dioxus-css-fieldset-demo",
                         fieldset::Legend { {t(UtilityText::AccountDetails)} }
                         fieldset::Description { {t(UtilityText::RequiredFieldsDescription)} }
                         fieldset::Content {
-                            Field {
+                            field::Root {
                                 id: "dioxus-css-name-field",
                                 required: true,
                                 class: "field-form-field",
@@ -565,7 +565,7 @@ pub(crate) fn UtilityPanel() -> Element {
                                     placeholder: t(UtilityText::NamePlaceholder),
                                 }
                             }
-                            Field {
+                            field::Root {
                                 id: "dioxus-css-email-field",
                                 name: "email",
                                 required: true,

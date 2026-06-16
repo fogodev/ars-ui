@@ -5,6 +5,7 @@ mod builder;
 mod built_in;
 mod debounced;
 mod error;
+mod native;
 mod result;
 mod validator;
 
@@ -17,5 +18,6 @@ pub use built_in::{
 };
 pub use debounced::{DebouncedAsyncValidator, TimerHandle};
 pub use error::{Error, ErrorCode, Errors};
+pub use native::{NativeInputType, NativeValidity, merge_error_map};
 pub use result::{Result, ResultExt};
 pub use validator::{BoxedValidator, Context, OwnedContext, Validator, boxed_validator};

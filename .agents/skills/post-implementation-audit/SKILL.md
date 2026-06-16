@@ -104,6 +104,10 @@ This is a non-exhaustive checklist. Each round, walk through it explicitly:
 
 - **Adapter specs** at `spec/leptos-components/<category>/<component>.md` and `spec/dioxus-components/<category>/<component>.md` — do they describe the new core surface accurately? Are their canonical implementation sketches up-to-date with the actual `Api` / function signatures? Do they reference the right helper methods (e.g., `Api::root_attrs()`) instead of hardcoded data attribute strings?
 - **Adapter parity workflow** at `docs/implementation/adapter-component-delivery.md` and linked files — for adapter component work, did the task produce and update a reference-exploration sketch, outcome matrix, browser evidence, widgets evidence, i18n/a11y mapping, and parity audit loop?
+- **Retrofit audit workflow** — if the task updates an older adapter component
+  to current conventions, did it create a fresh audit issue, compare against
+  the current gold-standard component, refresh old browser/E2E evidence, and
+  run stale-symbol scans for any public primitive rename?
 - **Adapter feature wiring** in `crates/ars-leptos/Cargo.toml` and `crates/ars-dioxus/Cargo.toml` — does the adapter's `icu4x` / `web-intl` feature need to enable any new `ars-components/<feature>` flag for the new code to be reachable?
 - **Adapter `prelude.rs`** — does the new public API need to flow through? (Only if an adapter wrapper exists for the new component; if not, defer to the adapter task.)
 - **Dioxus Rules of Hooks** — if any changed file is under `crates/ars-dioxus/src`, verify hooks run in a stable top-level order. Do not hide hooks in `unwrap_or_else`, `map_or_else`, conditionals, loops, iterator adapters, nested closures, or early-return branches. Run the fallback-hook probe against the changed Dioxus files, not the whole crate:
@@ -118,6 +122,13 @@ This is a non-exhaustive checklist. Each round, walk through it explicitly:
     let generated_id = use_stable_id("field");
     let id = props.id.unwrap_or(generated_id);
     ```
+
+- **Target capability classification** — if the changed adapter code uses a
+  browser-owned API or semantic such as constraint validation, focus,
+  selection ranges, layout measurement, clipboard, drag data, or file inputs,
+  verify the spec/sketch records which behavior is `TypedWebDom`,
+  `WebViewBridge`, `ServerOrSsr`, or `NoDomNative`. Do not accept prose that
+  claims universal native behavior when a target only has a fallback.
 
 - **Dioxus global attributes** — if a changed Dioxus component has
   `#[props(extends = GlobalAttributes)]`, verify it does not also expose
@@ -178,6 +189,11 @@ This is a non-exhaustive checklist. Each round, walk through it explicitly:
   rendering/framework glue with a concrete reason. Adapter-local extension
   traits over agnostic `Api`, `Props`, `State`, or `Event` are drift; add the
   method to the agnostic API instead.
+- **E2E blocker classification** — if an E2E command failed, verify the result
+  is classified as `ComponentAssertionFailed`, `HarnessSetupFailed`, or
+  `EvidenceMissing`. Only reached component assertions count as component
+  behavior evidence. Harness/setup failures leave the affected outcome rows
+  unverified until fixed or explicitly handed off as partial.
 - **New crate dependencies** — was the user notified per CLAUDE.md's "Do not add a new dependency crate without explicit user approval first" rule? Did the implementation add `i18n`-style feature flags that warrant a CLAUDE.md note?
 - **`.cargo/mutants.toml`** — are any new equivalent mutations documented with justifications? (Phase 3 will validate this; surface it here if a mutation that _should_ be equivalent isn't documented yet.)
 
@@ -347,6 +363,18 @@ Complete at least three passes:
    fixtures, and demos. Any raw native control, sibling error UI, hardcoded
    component text, or duplicated component policy used to prove a supported row
    is `WidgetOnlyWorkaround` and must be fixed before handoff.
+   For adapter primitives, audit every core `Part` enum variant and every
+   adapter-rendered structural node. If consumers may need to style or position
+   that node, it should be a public stylable part. If it remains private, the
+   adapter spec must record why and name the supported styling alternative.
+   Low-level primitive roots should follow the Checkbox standard and be named
+   `Root` inside the component module; treat semantic root names such as
+   `Field`, `Fieldset`, or `Form` in adapter primitive modules as API drift
+   unless the spec explicitly documents a higher-level wrapper.
+   Required structural nodes with public parts must keep an adapter fallback
+   when omitted and must prove that explicit parts suppress the fallback so only
+   one semantic node exists. Treat missing part exposure, missing fallback
+   suppression, or undocumented private structural nodes as adapter API gaps.
    For Leptos adapters, user-facing semantic text props that can update with
    locale or application state should flow as `TextProp`; the public `t(...)`
    helper returns `Memo<String>` and should be accepted directly through

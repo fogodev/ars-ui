@@ -103,6 +103,14 @@ need agnostic part attrs plus consumer global attrs. Keep local merge code only
 when the part adds adapter-specific dynamic attrs, event handlers, refs, or
 renderer-only behavior.
 
+When a parent Dioxus component auto-renders a required fallback part, do not
+depend on a child component side effect to suppress that fallback on the same
+render. On SSR, the parent output can be built before the child registration
+updates are visible, producing duplicate structural nodes. Prefer an explicit
+prop-level choice or inspect the child `Element`/`VNode` tree before rendering
+the fallback. Keep the scan narrow to the specific public part and cover the
+single-node guarantee in SSR tests.
+
 Tailwind examples should consume those public parts or use Tailwind arbitrary
 variants over `data-ars-*` state/anatomy. Raw `<style>` blocks or Rust string
 CSS in Tailwind widget crates are acceptable only for a documented Tailwind
@@ -168,6 +176,24 @@ branch is unavoidable:
 - keep the branch minimal;
 - preserve the same public contract across supported targets;
 - cover the target behavior with tests.
+
+For browser-owned behavior, record the platform capability explicitly before
+choosing a fallback. Use these buckets in specs and sketches:
+
+- `TypedWebDom`: the adapter can use typed browser APIs, such as `web_sys`;
+- `WebViewBridge`: the runtime has a browser engine but Rust must cross an
+  eval or bridge boundary to reach the DOM;
+- `ServerOrSsr`: no live DOM is available during render;
+- `NoDomNative`: the target has no browser DOM semantics.
+
+Native browser behavior such as constraint validation, focus restoration,
+selection ranges, layout measurement, clipboard, drag data, and file inputs
+must not be described as universally supported unless every target has an
+equivalent capability. When the supported behavior differs by target, keep the
+adapter API stable, document which bucket owns the exact native behavior, and
+test each implemented bucket. Do not reimplement browser algorithms in adapter
+Rust just to avoid a target gate unless the spec deliberately chooses that
+portable algorithm.
 
 ## Popup-Anchored Items
 

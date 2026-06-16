@@ -2,7 +2,7 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
-use ars_dioxus::utility::fieldset::{Content, Description, ErrorMessage, Fieldset, Legend};
+use ars_dioxus::utility::fieldset;
 use ars_forms::validation::Error;
 use dioxus::prelude::*;
 
@@ -18,17 +18,17 @@ fn render_app(app: fn() -> Element) -> String {
 fn fieldset_renders_group_anatomy() {
     fn app() -> Element {
         rsx! {
-            Fieldset {
+            fieldset::Root {
                 id: "billing",
                 disabled: true,
                 errors: vec![Error::server("Billing information is incomplete.")],
                 class: "billing-group",
-                Legend { "Billing" }
-                Description { "Fields marked required must be completed." }
-                Content {
+                fieldset::Legend { "Billing" }
+                fieldset::Description { "Fields marked required must be completed." }
+                fieldset::Content {
                     input { name: "postal-code" }
                 }
-                ErrorMessage { "Billing information is incomplete." }
+                fieldset::ErrorMessage { "Billing information is incomplete." }
             }
         }
     }
@@ -62,4 +62,39 @@ fn fieldset_renders_group_anatomy() {
         !html.contains(r#"id="billing-error-message" hidden"#),
         "fieldset error message must be reachable when errors are present: {html}"
     );
+}
+
+#[test]
+fn fieldset_parts_accept_consumer_class_and_style() {
+    fn app() -> Element {
+        rsx! {
+            fieldset::Root {
+                id: "styled-billing",
+                errors: vec![Error::server("Required.")],
+                fieldset::Legend { class: "legend-class", style: "color: blue;", "Billing" }
+                fieldset::Description { class: "description-class", style: "font-size: 12px;",
+                    "Fields marked required must be completed."
+                }
+                fieldset::Content { class: "content-class", style: "display: grid;",
+                    input { name: "postal-code" }
+                }
+                fieldset::ErrorMessage { class: "error-class", style: "color: red;", "Required." }
+            }
+        }
+    }
+
+    let html = render_app(app);
+
+    for fragment in [
+        r#"class="legend-class""#,
+        r#"style="color: blue;""#,
+        r#"class="description-class""#,
+        r#"style="font-size: 12px;""#,
+        r#"class="content-class""#,
+        r#"style="display: grid;""#,
+        r#"class="error-class""#,
+        r#"style="color: red;""#,
+    ] {
+        assert!(html.contains(fragment), "missing {fragment}: {html}");
+    }
 }

@@ -16,7 +16,7 @@ This spec maps the core [`Field`](../../components/utility/field.md) contract an
 
 ```rust,no_check
 #[derive(Props, Clone, PartialEq)]
-pub struct FieldProps {
+pub struct RootProps {
     #[props(optional)]
     pub id: Option<String>,
     #[props(default = false)]
@@ -33,14 +33,18 @@ pub struct FieldProps {
     pub errors: Vec<ars_forms::validation::Error>,
     #[props(optional)]
     pub dir: Option<Direction>,
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
     pub children: Element,
 }
 
 #[component]
-pub fn Field(props: FieldProps) -> Element
+pub fn Root(props: RootProps) -> Element
 
 #[derive(Props, Clone, PartialEq)]
 pub struct LabelProps {
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
     pub children: Element,
 }
 
@@ -59,6 +63,8 @@ pub struct InputProps {
     pub value: Option<String>,
     #[props(optional)]
     pub on_value_input: Option<EventHandler<String>>,
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
 }
 
 #[component]
@@ -66,6 +72,8 @@ pub fn Input(props: InputProps) -> Element
 
 #[derive(Props, Clone, PartialEq)]
 pub struct DescriptionProps {
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
     pub children: Element,
 }
 
@@ -74,6 +82,8 @@ pub fn Description(props: DescriptionProps) -> Element
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ErrorMessageProps {
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
     pub children: Element,
 }
 
@@ -81,13 +91,13 @@ pub struct ErrorMessageProps {
 pub fn ErrorMessage(props: ErrorMessageProps) -> Element
 ```
 
-The root `Field` component surfaces the full core prop set: `id`, `required`,
+The root `Root` part surfaces the full core prop set: `id`, `required`,
 `disabled`, `readonly`, `invalid`, `errors`, and `dir`, plus the adapter-level
 `name` lookup key for form-scoped validation errors. `errors` is a controlled
 field-error message vector that drives the core `SetErrors` / `ClearErrors`
 relationship so `ErrorMessage` visibility, `aria-describedby`, and
 `aria-errormessage` are not inferred from a sibling alert alone. When `Field`
-is rendered inside `Form`, `name` selects matching `Form.validation_errors`
+is rendered inside `form::Root`, `name` selects matching `form::Root`.validation_errors`
 entries and merges those consumer/server-provided messages into the field error
 vector without generating adapter-owned English text.
 
@@ -99,6 +109,9 @@ node. `Input.r#type` accepts the shared `InputType` enum rather than raw HTML
 strings so examples and applications use the same typed vocabulary as the core
 field spec. Consumers that need raw framework event data can still provide a
 custom input-like child that consumes `api.input_attrs()`.
+All visible compound parts extend Dioxus `GlobalAttributes`; core machine attrs
+win for IDs and ARIA relationships while consumer `class`/`style` merge
+additively.
 
 ## 3. Mapping to Core Component Contract
 
@@ -110,7 +123,7 @@ custom input-like child that consumes `api.input_attrs()`.
 
 | Core part / structure | Required?                   | Adapter rendering target                                                                      | Ownership                                   | Attr source                                        | Notes                                                                                                                                   |
 | --------------------- | --------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `Root`                | required                    | wrapper `<div>` from `Field`                                                                  | adapter-owned compound root                 | `api.root_attrs()`                                 | Hosts all field subparts.                                                                                                               |
+| `Root`                | required                    | wrapper `<div>` from `field::Root`                                                            | adapter-owned compound root                 | `api.root_attrs()`                                 | Hosts all field subparts.                                                                                                               |
 | `Label`               | conditional                 | `<label>` from `field::Label`                                                                 | compound subcomponent                       | `api.label_attrs()`                                | Optional if the consumer omits a label.                                                                                                 |
 | `Input`               | required structurally       | native `<input>` from `field::Input` or a consumer input-like child that consumes field attrs | adapter-owned helper or consumer-owned node | `api.input_attrs()` consumed by the actual control | The adapter ships a native `Input` helper for the common TextField shape; richer controls may still consume the same attr set directly. |
 | `Description`         | conditional                 | `<span>` or similar from `field::Description`                                                 | compound subcomponent                       | `api.description_attrs()`                          | Mount state affects `aria-describedby`.                                                                                                 |
@@ -119,13 +132,13 @@ custom input-like child that consumes `api.input_attrs()`.
 
 ## 5. Attr Merge and Ownership Rules
 
-| Target node                    | Core attrs                                              | Adapter-owned attrs                                               | Consumer attrs                                                     | Merge order                                                                                                                                                                                           | Ownership notes                                                                  |
-| ------------------------------ | ------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `Root`                         | `api.root_attrs()`                                      | wrapper-only `data-ars-part` helpers if needed                    | consumer attrs on `Field` root                                     | core state, ID, and relationship attrs win; `class`/`style` merge additively                                                                                                                          | root remains adapter-owned                                                       |
-| `Label`                        | `api.label_attrs()`                                     | optional required-indicator wrapper attrs                         | consumer label attrs or label slot content                         | core `for`, `id`, and labeling attrs win; visual classes merge                                                                                                                                        | compound subcomponent owns the actual `<label>`                                  |
+| Target node                    | Core attrs                                              | Adapter-owned attrs                                                                       | Consumer attrs                                                     | Merge order                                                                                                                                                                                                                                            | Ownership notes                                                                  |
+| ------------------------------ | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `Root`                         | `api.root_attrs()`                                      | wrapper-only `data-ars-part` helpers if needed                                            | consumer attrs on `Root` part                                      | core state, ID, and relationship attrs win; `class`/`style` merge additively                                                                                                                                                                           | root remains adapter-owned                                                       |
+| `Label`                        | `api.label_attrs()`                                     | optional required-indicator wrapper attrs                                                 | consumer label attrs or label slot content                         | core `for`, `id`, and labeling attrs win; visual classes merge                                                                                                                                                                                         | compound subcomponent owns the actual `<label>`                                  |
 | actual input-like control      | `api.input_attrs()`                                     | native `required`, `disabled`, and `readonly` when rendered by the adapter `Input` helper | consumer input attrs from the concrete control component           | core `id`, `aria-*`, and describedby attrs win; adapter-owned native constraint attrs win for the native `Input` helper; consumer `class`/`style` merge; consumer handlers compose after machine-normalized handlers unless guard logic must run first | the input DOM node is consumer-owned but must consume the core attr set directly |
-| `Description` / `ErrorMessage` | `api.description_attrs()` / `api.error_message_attrs()` | registration markers if needed                                    | consumer text/content attrs on the subcomponent root               | core `id`, `role`, and announcement attrs win                                                                                                                                                         | compound subcomponents own their nodes                                           |
-| `RequiredIndicator`            | none from core beyond field state                       | structural wrapper attrs such as `aria-hidden="true"`             | consumer decoration only if the adapter exposes the indicator slot | adapter-owned attrs win because the indicator must remain decorative by default                                                                                                                       | usually rendered inside `Label`                                                  |
+| `Description` / `ErrorMessage` | `api.description_attrs()` / `api.error_message_attrs()` | registration markers if needed                                                            | consumer text/content attrs on the subcomponent root               | core `id`, `role`, and announcement attrs win                                                                                                                                                                                                          | compound subcomponents own their nodes                                           |
+| `RequiredIndicator`            | none from core beyond field state                       | structural wrapper attrs such as `aria-hidden="true"`                                     | consumer decoration only if the adapter exposes the indicator slot | adapter-owned attrs win because the indicator must remain decorative by default                                                                                                                                                                        | usually rendered inside `Label`                                                  |
 
 - Child input-like controls must merge their own attrs onto the same DOM node that receives `api.input_attrs()`.
 - Parent field context may contribute disabled, readonly, invalid, and naming defaults, but an explicit local field prop must follow the precedence policy documented by the core spec.
@@ -133,7 +146,7 @@ custom input-like child that consumes `api.input_attrs()`.
 
 ## 6. Composition / Context Contract
 
-`Field` provides a typed machine context with `use_context_provider`. Required subparts use `try_use_context::<Context>().expect(...)`. Optional parent field state such as inherited disabled/invalid values is read via `try_use_context::<FieldCtx>()`.
+`field::Root` provides a typed machine context with `use_context_provider`. Required subparts use `try_use_context::<Context>().expect(...)`. Optional parent field state such as inherited disabled/invalid values is read via `try_use_context::<FieldCtx>()`.
 
 ## 7. Prop Sync and Event Mapping
 
@@ -144,7 +157,7 @@ Controlled/uncontrolled switching is not applicable to the compound shell itself
 | `disabled`             | controlled                  | root prop change after mount       | `SetDisabled` or equivalent prop-to-machine sync       | disables the input attr set and descendant affordances                | local prop participates in merge with parent context                      |
 | `readonly`             | controlled                  | root prop change after mount       | `SetReadonly` or equivalent prop-to-machine sync       | updates input attrs and read-only affordances                         | merge with inherited readonly follows explicit precedence                 |
 | `invalid`              | controlled                  | root prop change after mount       | `SetInvalid` or equivalent prop-to-machine sync        | updates error attrs and validation styling                            | merged with parent invalid state                                          |
-| `name`                 | controlled lookup key       | render or form context recompute   | merges matching `Form.validation_errors[name]`         | localized/server field errors reach the field error relationship      | separate from `Input.name`, which remains the native HTML field name      |
+| `name`                 | controlled lookup key       | render or form context recompute   | merges matching `form::Root`.validation_errors[name]`  | localized/server field errors reach the field error relationship      | separate from `Input.name`, which remains the native HTML field name      |
 | `errors`               | controlled                  | root prop change after mount       | `SetErrors` / `ClearErrors`                            | updates invalid state, error attrs, and `ErrorMessage` visibility     | server/custom messages enter the field through this vector                |
 | `Input.on_value_input` | observational callback      | native input event                 | value emitted through adapter callback                 | consumer state can update while field relationships stay core-owned   | callback payload is `String`, not a raw framework event                   |
 | `required`             | non-reactive adapter prop   | render time only                   | included in machine props                              | toggles required semantics and required indicator rendering           | changes after mount should be treated as unsupported unless reinitialized |
@@ -154,7 +167,7 @@ Controlled/uncontrolled switching is not applicable to the compound shell itself
 
 | UI event                     | Preconditions                          | Machine event / callback path                 | Ordering notes                                                                              | Notes                                                        |
 | ---------------------------- | -------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| compound subpart render      | inside a valid `Field` context         | attr derivation only                          | context lookup must happen before attrs are derived                                         | missing context is a contract failure for required subparts  |
+| compound subpart render      | inside a valid `field::Root` context   | attr derivation only                          | context lookup must happen before attrs are derived                                         | missing context is a contract failure for required subparts  |
 | input-like descendant events | child control consumes `input_attrs()` | handled by the concrete child control adapter | child control normalizes events first, then field relationships update through shared attrs | `Field` does not steal ownership of the input event pipeline |
 | native `Input` value input   | adapter `Input` helper rendered        | `on_value_input(String)`                      | input attrs are already on the actual control before the callback runs                      | ergonomic common path for interactive validation demos       |
 
@@ -168,7 +181,7 @@ Controlled/uncontrolled switching is not applicable to the compound shell itself
 | ------------------------------------ | --------------------------------------------- | ---------------------------------------------- | -------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------ |
 | `Description` part                   | `Description` subcomponent mount              | component instance plus derived description ID | subcomponent cleanup | dispatch `SetHasDescription(false)` and drop any stored ID contribution | must not leave stale describedby tokens                      |
 | `ErrorMessage` part                  | render when consumer wants an error container | derived error ID                               | subcomponent cleanup | no machine event; empty error vectors keep the part hidden              | alert relationship appears only when core field errors exist |
-| inherited field context subscription | root `Field` mount                            | field instance                                 | root cleanup         | drop inherited-state subscription                                       | parent updates must not outlive the child field              |
+| inherited field context subscription | root `field::Root` mount                      | field instance                                 | root cleanup         | drop inherited-state subscription                                       | parent updates must not outlive the child field              |
 
 ## 9. Ref and Node Contract
 
@@ -279,7 +292,7 @@ pub struct FieldSketchProps {
 }
 
 #[component]
-pub fn Field(props: FieldSketchProps) -> Element {
+pub fn Root(props: FieldSketchProps) -> Element {
     let machine =
         use_machine::<field::Machine>(field::Props::default());
     let root_attrs = machine.derive(|api| api.root_attrs());
@@ -300,7 +313,7 @@ pub struct LabelSketchProps {
 
 #[component]
 pub fn Label(props: LabelSketchProps) -> Element {
-    let machine = try_use_context::<Context>().expect("field::Label requires Field");
+    let machine = try_use_context::<Context>().expect("field::Label requires field::Root");
     let attrs = machine.derive(|api| api.label_attrs());
     rsx! { label { ..attrs.read().clone(), {props.children} } }
 }

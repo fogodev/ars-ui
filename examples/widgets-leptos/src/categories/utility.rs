@@ -512,25 +512,25 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
             </section>
             <section aria-labelledby="field-form">
                 <h3 id="field-form">{t(UtilityText::FieldForm)}</h3>
-                <Form
+                <form::Root
                     id="leptos-field-form-demo"
                     action="/account"
                     on_submit=Callback::new(|()| ())
                 >
-                    <Fieldset id="leptos-fieldset-demo">
+                    <fieldset::Root id="leptos-fieldset-demo">
                         <fieldset::Legend>{t(UtilityText::AccountDetails)}</fieldset::Legend>
                         <fieldset::Description>
                             {t(UtilityText::RequiredFieldsDescription)}
                         </fieldset::Description>
                         <fieldset::Content>
-                            <Field id="leptos-name-field" required=true>
+                            <field::Root id="leptos-name-field" required=true>
                                 <field::Label>{t(UtilityText::NameLabel)}</field::Label>
                                 <field::Input
                                     name="name"
                                     placeholder=t(UtilityText::NamePlaceholder)
                                 />
-                            </Field>
-                            <Field id="leptos-email-field" name="email" required=true>
+                            </field::Root>
+                            <field::Root id="leptos-email-field" name="email" required=true>
                                 <field::Label>{t(UtilityText::EmailLabel)}</field::Label>
                                 <field::Description>
                                     {t(UtilityText::EmailDescription)}
@@ -540,16 +540,16 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                                     name="email"
                                     placeholder=t(UtilityText::EmailPlaceholder)
                                 />
-                            </Field>
+                            </field::Root>
                         </fieldset::Content>
-                    </Fieldset>
+                    </fieldset::Root>
                     <div class="button-row">
                         <Button r#type=button::Type::Submit>{t(UtilityText::Submit)}</Button>
                         <Button r#type=button::Type::Reset variant=button::Variant::Secondary>
                             {t(UtilityText::Reset)}
                         </Button>
                     </div>
-                </Form>
+                </form::Root>
             </section>
             <section aria-labelledby="visually-hidden">
                 <h3 id="visually-hidden">{t(UtilityText::VisuallyHidden)}</h3>

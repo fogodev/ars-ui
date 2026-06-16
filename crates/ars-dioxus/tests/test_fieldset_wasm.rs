@@ -2,10 +2,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use ars_dioxus::utility::{
-    field::{Field, Input, Label},
-    fieldset::{Content, Description, ErrorMessage, Fieldset, Legend},
-};
+use ars_dioxus::utility::{field, fieldset};
+use ars_forms::validation::Error;
 use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -68,13 +66,13 @@ fn assert_bool_attr(element: &web_sys::Element, name: &str) {
 async fn fieldset_browser_renders_group_anatomy_attrs() {
     fn app() -> Element {
         rsx! {
-            Fieldset { id: "wasm-billing", disabled: true,
-                Legend { "Billing" }
-                Description { "Billing details." }
-                Content {
+            fieldset::Root { id: "wasm-billing", disabled: true,
+                fieldset::Legend { "Billing" }
+                fieldset::Description { "Billing details." }
+                fieldset::Content {
                     input { name: "postal-code" }
                 }
-                ErrorMessage { "Billing is incomplete." }
+                fieldset::ErrorMessage { "Billing is incomplete." }
             }
         }
     }
@@ -151,16 +149,16 @@ async fn fieldset_browser_renders_group_anatomy_attrs() {
 async fn fieldset_state_reaches_descendant_field_input_attrs() {
     fn app() -> Element {
         rsx! {
-            Fieldset {
+            fieldset::Root {
                 id: "wasm-disabled-group",
                 disabled: true,
                 invalid: true,
                 readonly: true,
-                Legend { "Account" }
-                Content {
-                    Field { id: "wasm-grouped-email",
-                        Label { "Email" }
-                        Input { name: "email" }
+                fieldset::Legend { "Account" }
+                fieldset::Content {
+                    field::Root { id: "wasm-grouped-email",
+                        field::Label { "Email" }
+                        field::Input { name: "email" }
                     }
                 }
             }
@@ -183,6 +181,135 @@ async fn fieldset_state_reaches_descendant_field_input_attrs() {
         .expect("query should succeed")
         .expect("grouped field input should exist");
 
+    assert_bool_attr(&input, "disabled");
+    assert_eq!(
+        input.get_attribute("aria-disabled").as_deref(),
+        Some("true")
+    );
+    assert_bool_attr(&input, "readonly");
+    assert_eq!(
+        input.get_attribute("aria-readonly").as_deref(),
+        Some("true")
+    );
+    assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+async fn fieldset_errors_reach_descendant_field_invalid_attrs() {
+    fn app() -> Element {
+        rsx! {
+            fieldset::Root {
+                id: "wasm-error-group",
+                errors: vec![Error::server("Account details are incomplete.")],
+                fieldset::Legend { "Account" }
+                fieldset::Content {
+                    field::Root { id: "wasm-error-grouped-email",
+                        field::Label { "Email" }
+                        field::Input { name: "email" }
+                    }
+                }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let input = parent
+        .query_selector("#wasm-error-grouped-email-input")
+        .expect("query should succeed")
+        .expect("grouped field input should exist");
+
+    assert_eq!(input.get_attribute("aria-invalid").as_deref(), Some("true"));
+
+    parent.remove();
+}
+
+#[wasm_bindgen_test(async)]
+#[expect(
+    unused_qualifications,
+    reason = "Dioxus rsx! reports the event handler closure as an unused qualification on wasm."
+)]
+async fn fieldset_state_updates_reach_descendant_fields_without_remount() {
+    fn app() -> Element {
+        let mut disabled = use_signal(|| false);
+        let mut invalid = use_signal(|| false);
+        let mut readonly = use_signal(|| false);
+
+        rsx! {
+            fieldset::Root {
+                id: "wasm-reactive-group",
+                disabled: disabled(),
+                invalid: invalid(),
+                readonly: readonly(),
+                fieldset::Legend { "Account" }
+                fieldset::Content {
+                    field::Root { id: "wasm-reactive-grouped-email",
+                        field::Label { "Email" }
+                        field::Input { name: "email" }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    onclick: move |_| {
+                        disabled.set(true);
+                        invalid.set(true);
+                        readonly.set(true);
+                    },
+                    "Apply state"
+                }
+            }
+        }
+    }
+
+    let parent = container();
+
+    let dom = VirtualDom::new(app);
+
+    dioxus_web::launch::launch_virtual_dom(
+        dom,
+        dioxus_web::Config::new().rootelement(parent.clone()),
+    );
+
+    flush().await;
+
+    let fieldset = parent
+        .query_selector("#wasm-reactive-group")
+        .expect("query should succeed")
+        .expect("fieldset should exist");
+
+    let input = parent
+        .query_selector("#wasm-reactive-grouped-email-input")
+        .expect("query should succeed")
+        .expect("grouped field input should exist");
+
+    assert_eq!(fieldset.get_attribute("disabled"), None);
+    assert_eq!(input.get_attribute("disabled"), None);
+    assert_eq!(input.get_attribute("aria-invalid"), None);
+    assert_eq!(input.get_attribute("readonly"), None);
+
+    let button = parent
+        .query_selector("button[type='button']")
+        .expect("query should succeed")
+        .expect("state button should exist")
+        .dyn_into::<web_sys::HtmlElement>()
+        .expect("state button should be an HtmlElement");
+
+    button.click();
+
+    flush().await;
+
+    assert_bool_attr(&fieldset, "disabled");
     assert_bool_attr(&input, "disabled");
     assert_eq!(
         input.get_attribute("aria-disabled").as_deref(),

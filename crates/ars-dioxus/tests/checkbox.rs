@@ -4,10 +4,9 @@
 
 use std::collections::BTreeMap;
 
-use ars_components::input::checkbox as core_checkbox;
 use ars_dioxus::{
     input::checkbox,
-    utility::{fieldset::Fieldset, form::Form},
+    utility::{fieldset, form},
 };
 use ars_forms::validation::Error;
 use dioxus::prelude::*;
@@ -66,7 +65,7 @@ fn checkbox_renders_checked_indeterminate_and_form_states() {
         rsx! {
             checkbox::Root {
                 id: "newsletter",
-                checked: core_checkbox::State::Checked,
+                checked: checkbox::State::Checked,
                 name: "newsletter",
                 value: "weekly",
                 form: "preferences",
@@ -98,7 +97,7 @@ fn checkbox_renders_checked_indeterminate_and_form_states() {
 
     fn mixed_app() -> Element {
         rsx! {
-            checkbox::Root { id: "partial", checked: core_checkbox::State::Indeterminate,
+            checkbox::Root { id: "partial", checked: checkbox::State::Indeterminate,
                 checkbox::Label { "Some selected" }
                 checkbox::Control { checkbox::Indicator {} }
                 checkbox::HiddenInput {}
@@ -198,7 +197,7 @@ fn checkbox_compound_parts_link_description_and_error_without_manual_presence_fl
 fn checkbox_inherits_fieldset_state() {
     fn app() -> Element {
         rsx! {
-            Fieldset {
+            fieldset::Root {
                 id: "settings",
                 disabled: true,
                 readonly: true,
@@ -231,7 +230,7 @@ fn checkbox_inherits_fieldset_state() {
 fn checkbox_inherits_matching_form_validation_errors_by_name() {
     fn app() -> Element {
         rsx! {
-            Form {
+            form::Root {
                 id: "preferences",
                 validation_errors: BTreeMap::from([
                     ("terms".to_string(), vec![Error::server("Accept terms before continuing.")]),

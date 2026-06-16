@@ -15,9 +15,7 @@ use ars_leptos::{
         client_only::ClientOnly,
         dismissable,
         error_boundary::ErrorBoundary,
-        field::{self, Field},
-        fieldset::{self, Fieldset},
-        form::Form,
+        field, fieldset, form,
         heading::{self, Heading, HeadingLevelProvider, Section},
         highlight::Highlight,
         landmark::{self, Landmark},
@@ -480,20 +478,20 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
             </section>
             <section class="showcase-panel wide" aria-labelledby="field-form">
                 <h2 id="field-form">{t(UtilityText::FieldFormHeading)}</h2>
-                <Form
+                <form::Root
                     id="leptos-fixture-account-form"
                     action="/account"
                     validation_errors=form_errors
                     status_message
                     class="fixture-form"
                 >
-                    <Fieldset id="leptos-fixture-account-fieldset" disabled=true invalid=true>
+                    <fieldset::Root id="leptos-fixture-account-fieldset" disabled=true invalid=true>
                         <fieldset::Legend>{t(UtilityText::AccountDetails)}</fieldset::Legend>
                         <fieldset::Description>
                             {t(UtilityText::FieldsetDescription)}
                         </fieldset::Description>
                         <fieldset::Content>
-                            <Field
+                            <field::Root
                                 id="leptos-fixture-email-required-field"
                                 name="email-required"
                                 required=true
@@ -509,8 +507,8 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                                 <field::ErrorMessage>
                                     {t(UtilityText::EmailRequired)}
                                 </field::ErrorMessage>
-                            </Field>
-                            <Field
+                            </field::Root>
+                            <field::Root
                                 id="leptos-fixture-email-missing-at-field"
                                 name="email-missing-at"
                                 errors=missing_at_errors
@@ -527,8 +525,8 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                                 <field::ErrorMessage>
                                     {t(UtilityText::EmailMissingAt)}
                                 </field::ErrorMessage>
-                            </Field>
-                            <Field
+                            </field::Root>
+                            <field::Root
                                 id="leptos-fixture-email-incomplete-domain-field"
                                 name="email-incomplete-domain"
                                 errors=incomplete_domain_errors
@@ -545,13 +543,13 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                                 <field::ErrorMessage>
                                     {t(UtilityText::EmailIncompleteDomain)}
                                 </field::ErrorMessage>
-                            </Field>
+                            </field::Root>
                         </fieldset::Content>
                         <fieldset::ErrorMessage>
                             {t(UtilityText::AccountIncomplete)}
                         </fieldset::ErrorMessage>
-                    </Fieldset>
-                    <Field id="leptos-fixture-email-valid-field" name="email-valid">
+                    </fieldset::Root>
+                    <field::Root id="leptos-fixture-email-valid-field" name="email-valid">
                         <field::Label>{t(UtilityText::EmailLabel)}</field::Label>
                         <field::Description>{t(UtilityText::EmailDescription)}</field::Description>
                         <field::Input
@@ -559,8 +557,8 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                             name="email-valid"
                             value=valid_email_value
                         />
-                    </Field>
-                </Form>
+                    </field::Root>
+                </form::Root>
             </section>
             <section class="showcase-panel wide" aria-labelledby="dismissable">
                 <h2 id="dismissable">"Dismissable primitive"</h2>

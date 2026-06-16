@@ -16,7 +16,7 @@ This spec maps the core [`Fieldset`](../../components/utility/fieldset.md) contr
 
 ```rust,no_check
 #[derive(Props, Clone, PartialEq)]
-pub struct FieldsetProps {
+pub struct RootProps {
     #[props(optional)]
     pub id: Option<String>,
     #[props(default = false)]
@@ -29,14 +29,18 @@ pub struct FieldsetProps {
     pub errors: Vec<ars_forms::validation::Error>,
     #[props(optional)]
     pub dir: Option<Direction>,
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
     pub children: Element,
 }
 
 #[component]
-pub fn Fieldset(props: FieldsetProps) -> Element
+pub fn Root(props: RootProps) -> Element
 
 #[derive(Props, Clone, PartialEq)]
 pub struct LegendProps {
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
     pub children: Element,
 }
 
@@ -45,6 +49,8 @@ pub fn Legend(props: LegendProps) -> Element
 
 #[derive(Props, Clone, PartialEq)]
 pub struct DescriptionProps {
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
     pub children: Element,
 }
 
@@ -53,14 +59,29 @@ pub fn Description(props: DescriptionProps) -> Element
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ErrorMessageProps {
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
     pub children: Element,
 }
 
 #[component]
 pub fn ErrorMessage(props: ErrorMessageProps) -> Element
+
+#[derive(Props, Clone, PartialEq)]
+pub struct ContentProps {
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+    pub children: Element,
+}
+
+#[component]
+pub fn Content(props: ContentProps) -> Element
 ```
 
-The root `Fieldset` component surfaces the full core prop set: `id`, `disabled`, `invalid`, `readonly`, `errors`, and `dir`.
+The root `Root` part surfaces the full core prop set: `id`, `disabled`, `invalid`, `readonly`, `errors`, and `dir`.
+Root and visible compound parts extend Dioxus `GlobalAttributes`; core machine
+attrs win for fieldset semantics while consumer `class`/`style` merge
+additively.
 
 ## 3. Mapping to Core Component Contract
 
@@ -82,7 +103,7 @@ The root `Fieldset` component surfaces the full core prop set: `id`, `disabled`,
 
 | Target node                          | Core attrs                                    | Adapter-owned attrs                     | Consumer attrs                    | Merge order                                                                                                                         | Ownership notes                            |
 | ------------------------------------ | --------------------------------------------- | --------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `Root`                               | `api.root_attrs()` for `<fieldset>` semantics | wrapper-only structural attrs if needed | consumer attrs on `Fieldset` root | core disabled, describedby, and group semantics win; `class`/`style` merge additively                                               | adapter-owned root                         |
+| `Root`                               | `api.root_attrs()` for `<fieldset>` semantics | wrapper-only structural attrs if needed | consumer attrs on the `Root` part | core disabled, describedby, and group semantics win; `class`/`style` merge additively                                               | adapter-owned root                         |
 | `Legend`                             | `api.legend_attrs()`                          | none beyond structural part markers     | consumer legend attrs/content     | core naming attrs win                                                                                                               | compound subcomponent owns the legend node |
 | `Description` / `ErrorMessage`       | core description/error attrs                  | registration markers if needed          | consumer text/content attrs       | core IDs, roles, and description wiring win                                                                                         | compound subcomponents own these nodes     |
 | descendant field inheritance surface | inherited context values, not DOM attrs       | adapter-provided field context          | explicit descendant `Field` props | descendant field props merge on the child field side; inherited values are defaults unless the core contract says they are forceful | no dedicated DOM node                      |
@@ -92,24 +113,24 @@ The root `Fieldset` component surfaces the full core prop set: `id`, `disabled`,
 
 ## 6. Composition / Context Contract
 
-`Fieldset` provides both machine context and inherited `FieldCtx` to descendant field-like controls. Required subparts use `try_use_context::<Context>().expect(...)`, and descendant fields consume inherited disabled, invalid, and readonly state through the published field context rather than ad hoc DOM inspection.
+`fieldset::Root` provides both machine context and inherited `FieldCtx` to descendant field-like controls. Required subparts use `try_use_context::<Context>().expect(...)`, and descendant fields consume inherited disabled, invalid, and readonly state through the published field context rather than ad hoc DOM inspection.
 
 ## 7. Prop Sync and Event Mapping
 
 Controlled/uncontrolled switching is not applicable. Fieldset state is driven by explicit props, controlled error data, and the presence of description subparts.
 
-| Adapter prop         | Mode                        | Sync trigger                 | Machine event / update path                    | Visible effect                                        | Notes                                                                    |
-| -------------------- | --------------------------- | ---------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ |
-| `disabled`           | controlled                  | prop change after mount      | `SetDisabled` or equivalent fieldset sync path | disables descendant field context and root semantics  | inherited by descendant fields unless locally overridden per core policy |
-| `readonly`           | controlled                  | prop change after mount      | `SetReadonly` or equivalent                    | updates inherited readonly context                    | context-derived effect                                                   |
-| `invalid`            | controlled                  | prop change after mount      | `SetInvalid` or equivalent                     | updates inherited invalid context and error semantics | context-derived effect                                                   |
-| `errors`             | controlled                  | prop change after mount      | `SetErrors` / `ClearErrors`                    | updates group-level describedby and alert visibility  | server/custom messages enter the fieldset through this vector            |
-| description presence | uncontrolled internal state | `Description` mount/unmount  | `SetHasDescription(true/false)` or equivalent  | updates group-level describedby                       | registration-driven                                                      |
-| error state          | controlled by `errors`      | root error synchronization   | `SetErrors` / `ClearErrors`                    | updates group-level describedby and alert semantics   | error message presence alone does not create an error relationship       |
+| Adapter prop         | Mode                        | Sync trigger                | Machine event / update path                    | Visible effect                                        | Notes                                                                    |
+| -------------------- | --------------------------- | --------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ |
+| `disabled`           | controlled                  | prop change after mount     | `SetDisabled` or equivalent fieldset sync path | disables descendant field context and root semantics  | inherited by descendant fields unless locally overridden per core policy |
+| `readonly`           | controlled                  | prop change after mount     | `SetReadonly` or equivalent                    | updates inherited readonly context                    | context-derived effect                                                   |
+| `invalid`            | controlled                  | prop change after mount     | `SetInvalid` or equivalent                     | updates inherited invalid context and error semantics | context-derived effect                                                   |
+| `errors`             | controlled                  | prop change after mount     | `SetErrors` / `ClearErrors`                    | updates group-level describedby and alert visibility  | server/custom messages enter the fieldset through this vector            |
+| description presence | uncontrolled internal state | `Description` mount/unmount | `SetHasDescription(true/false)` or equivalent  | updates group-level describedby                       | registration-driven                                                      |
+| error state          | controlled by `errors`      | root error synchronization  | `SetErrors` / `ClearErrors`                    | updates group-level describedby and alert semantics   | error message presence alone does not create an error relationship       |
 
-| UI event                | Preconditions             | Machine event / callback path          | Ordering notes                                                        | Notes                                                    |
-| ----------------------- | ------------------------- | -------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
-| descendant field render | inside `Fieldset` context | inherited state read via context merge | descendant field merges inherited state before deriving its own attrs | fieldset itself does not normalize descendant DOM events |
+| UI event                | Preconditions                   | Machine event / callback path          | Ordering notes                                                        | Notes                                                    |
+| ----------------------- | ------------------------------- | -------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
+| descendant field render | inside `fieldset::Root` context | inherited state read via context merge | descendant field merges inherited state before deriving its own attrs | fieldset itself does not normalize descendant DOM events |
 
 ## 8. Registration and Cleanup Contract
 
@@ -118,11 +139,11 @@ Controlled/uncontrolled switching is not applicable. Fieldset state is driven by
 - Descendant fields consume inherited context for as long as the fieldset is mounted.
 - Cleanup must remove inherited-state availability before descendant orphan updates can occur.
 
-| Registered entity          | Registration trigger | Identity key                          | Cleanup trigger      | Cleanup action                                  | Notes                                                 |
-| -------------------------- | -------------------- | ------------------------------------- | -------------------- | ----------------------------------------------- | ----------------------------------------------------- |
-| `Description` part         | subcomponent mount   | fieldset instance plus description ID | subcomponent cleanup | clear description registration from the machine | prevents stale group describedby references           |
-| `ErrorMessage` part        | render when consumer wants an error container | derived error ID       | subcomponent cleanup | no machine event; empty error vectors keep the part hidden | alert relationship appears only when core fieldset errors exist |
-| inherited fieldset context | root mount           | fieldset instance                     | root cleanup         | drop context provider / subscription linkage    | descendant fields must not read stale inherited state |
+| Registered entity          | Registration trigger                          | Identity key                          | Cleanup trigger      | Cleanup action                                             | Notes                                                           |
+| -------------------------- | --------------------------------------------- | ------------------------------------- | -------------------- | ---------------------------------------------------------- | --------------------------------------------------------------- |
+| `Description` part         | subcomponent mount                            | fieldset instance plus description ID | subcomponent cleanup | clear description registration from the machine            | prevents stale group describedby references                     |
+| `ErrorMessage` part        | render when consumer wants an error container | derived error ID                      | subcomponent cleanup | no machine event; empty error vectors keep the part hidden | alert relationship appears only when core fieldset errors exist |
+| inherited fieldset context | root mount                                    | fieldset instance                     | root cleanup         | drop context provider / subscription linkage               | descendant fields must not read stale inherited state           |
 
 ## 9. Ref and Node Contract
 
@@ -216,7 +237,7 @@ Controlled/uncontrolled switching is not applicable. Fieldset state is driven by
 
 ## 23. Framework-Specific Behavior
 
-Dioxus represents `Legend`, `Description`, and `ErrorMessage` as compound subcomponents. Descendant `Field` components merge inherited state with their own props. If a non-native fallback such as `<div role="group">` is ever used instead of `<fieldset>`, the adapter must set `aria-labelledby` to the rendered legend ID and continue publishing `FieldCtx` via `use_context_provider(...)`.
+Dioxus represents `Legend`, `Description`, and `ErrorMessage` as compound subcomponents. Descendant `field::Root` components merge inherited state with their own props. If a non-native fallback such as `<div role="group">` is ever used instead of `<fieldset>`, the adapter must set `aria-labelledby` to the rendered legend ID and continue publishing `FieldCtx` via `use_context_provider(...)`.
 
 ## 24. Canonical Implementation Sketch
 
@@ -229,7 +250,7 @@ pub struct FieldsetSketchProps {
 }
 
 #[component]
-pub fn Fieldset(props: FieldsetSketchProps) -> Element {
+pub fn Root(props: FieldsetSketchProps) -> Element {
     let machine = use_machine::<fieldset::Machine>(
         fieldset::Props::default(),
     );
