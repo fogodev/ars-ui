@@ -372,6 +372,16 @@ pub struct WasmCoverageOptions {
     pub extra_test_args: Vec<String>,
 }
 
+/// Options for generating native workspace LCOV.
+#[derive(Debug, Clone)]
+pub struct NativeCoverageOptions {
+    /// Output lcov path to write.
+    pub output: PathBuf,
+
+    /// Optional `cargo-nextest` partition selector, such as `hash:1/8`.
+    pub partition: Option<String>,
+}
+
 /// Default wasm/browser coverage target used by CI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WasmCoverageTarget {
@@ -665,6 +675,44 @@ pub fn merge_files(files: &[PathBuf], output: &Path) -> Result<String, Error> {
         "Merged {} lcov files into {}",
         files.len(),
         output.display()
+    ))
+}
+
+/// Generate native workspace coverage through `cargo-llvm-cov` and
+/// `cargo-nextest`.
+///
+/// When `partition` is set, only that nextest partition is executed, producing
+/// a partial LCOV file that must later be merged with the other partitions.
+///
+/// # Errors
+///
+/// Returns [`Error`] if required tools are missing, tests fail, or the lcov
+/// file cannot be generated.
+pub fn generate_native_lcov(options: &NativeCoverageOptions) -> Result<String, Error> {
+    preflight_nightly()?;
+    preflight_cargo_subcommand(
+        "llvm-cov",
+        "cargo-llvm-cov",
+        "cargo install cargo-llvm-cov --locked",
+    )?;
+    preflight_cargo_subcommand(
+        "nextest",
+        "cargo-nextest",
+        "cargo install cargo-nextest --locked",
+    )?;
+
+    let parent = options
+        .output
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+
+    fs::create_dir_all(parent).map_err(Error::Io)?;
+
+    run_command(process::Command::new("cargo").args(native_coverage_args(options)))?;
+
+    Ok(format!(
+        "Generated native lcov at {}",
+        options.output.display()
     ))
 }
 
@@ -1472,6 +1520,56 @@ version = "0.2.118"
     }
 
     #[test]
+    fn native_coverage_args_build_unpartitioned_workspace_command() {
+        let args = native_coverage_args(&NativeCoverageOptions {
+            output: PathBuf::from("target/coverage/native.lcov"),
+            partition: None,
+        });
+
+        let args = args
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            args,
+            [
+                "+nightly",
+                "llvm-cov",
+                "nextest",
+                "--branch",
+                "--workspace",
+                "--lcov",
+                "--output-path",
+                "target/coverage/native.lcov",
+                "--no-fail-fast",
+            ]
+        );
+    }
+
+    #[test]
+    fn native_coverage_args_includes_nextest_partition() {
+        let args = native_coverage_args(&NativeCoverageOptions {
+            output: PathBuf::from("target/coverage/native-1.lcov"),
+            partition: Some("hash:1/8".into()),
+        });
+
+        let args = args
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--partition", "hash:1/8"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--output-path", "target/coverage/native-1.lcov"])
+        );
+    }
+
+    #[test]
     fn native_thresholds_exclude_wasm_targets_and_derive() {
         let native: Vec<String> = native_thresholds()
             .into_iter()
@@ -1627,6 +1725,28 @@ fn wasm_no_run_args(options: &WasmCoverageOptions) -> Vec<OsString> {
     args
 }
 
+fn native_coverage_args(options: &NativeCoverageOptions) -> Vec<OsString> {
+    let mut args = vec![
+        OsString::from("+nightly"),
+        OsString::from("llvm-cov"),
+        OsString::from("nextest"),
+        OsString::from("--branch"),
+        OsString::from("--workspace"),
+    ];
+
+    if let Some(partition) = &options.partition {
+        args.push(OsString::from("--partition"));
+        args.push(OsString::from(partition));
+    }
+
+    args.push(OsString::from("--lcov"));
+    args.push(OsString::from("--output-path"));
+    args.push(options.output.as_os_str().to_owned());
+    args.push(OsString::from("--no-fail-fast"));
+
+    args
+}
+
 fn llvm_profile_file(profraw_dir: impl AsRef<Path>) -> PathBuf {
     let profraw_dir = profraw_dir.as_ref();
 
@@ -1686,6 +1806,28 @@ fn run_command(command: &mut process::Command) -> Result<(), Error> {
         Err(Error::CommandFailed {
             command: display,
             code: status.code(),
+        })
+    }
+}
+
+fn preflight_cargo_subcommand(
+    subcommand: &str,
+    tool: &str,
+    install_hint: &str,
+) -> Result<(), Error> {
+    let status = process::Command::new("cargo")
+        .args([subcommand, "--version"])
+        .stdout(process::Stdio::null())
+        .stderr(process::Stdio::null())
+        .status()
+        .map_err(Error::Io)?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Error::MissingTool {
+            tool: tool.into(),
+            install_hint: install_hint.into(),
         })
     }
 }

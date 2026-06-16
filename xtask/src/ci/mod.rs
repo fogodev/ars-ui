@@ -716,12 +716,6 @@ fn is_expected_mutual_exclusion_failure(stderr: &str) -> bool {
 }
 
 fn run_coverage() -> Result<(), Error> {
-    preflight_llvm_cov()?;
-
-    preflight_nextest()?;
-
-    coverage::preflight_nightly().map_err(Error::Coverage)?;
-
     let coverage_dir = Path::new("target").join("coverage");
 
     fs::create_dir_all(&coverage_dir).map_err(Error::Io)?;
@@ -730,21 +724,11 @@ fn run_coverage() -> Result<(), Error> {
 
     let merged_lcov = PathBuf::from("lcov.info");
 
-    // Generate native lcov via cargo-llvm-cov + cargo-nextest.
-    cargo(
-        Step::Coverage,
-        &[
-            "+nightly",
-            "llvm-cov",
-            "nextest",
-            "--branch",
-            "--workspace",
-            "--lcov",
-            "--output-path",
-            native_lcov.to_str().expect("valid utf-8 path"),
-            "--no-fail-fast",
-        ],
-    )?;
+    coverage::generate_native_lcov(&coverage::NativeCoverageOptions {
+        output: native_lcov.clone(),
+        partition: None,
+    })
+    .map_err(Error::Coverage)?;
 
     let mut reports = vec![native_lcov];
 
