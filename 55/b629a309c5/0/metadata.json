@@ -1,0 +1,107 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "55b629a309c5",
+  "session_id": "019e92f8-84a9-7fc0-bf0e-061072d47c47",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-16T01:28:45.603117Z",
+  "branch": "codex/issue-320-431-checkbox-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "22e064adfda4",
+  "checkpoint_transcript_start": 16137,
+  "transcript_lines_at_start": 16137,
+  "token_usage": {
+    "input_tokens": 892298,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 18235136,
+    "output_tokens": 33362,
+    "api_call_count": 124
+  },
+  "session_metrics": {
+    "turn_count": 21
+  },
+  "summary": {
+    "intent": "Fix CI failures on PR #727 (branch codex/issue-320-431-checkbox-adapters) for the ars-ui repo, then address two new P2 Codex review findings about checkbox adapter correctness in both Leptos and Dioxus.",
+    "outcome": "Both Codex review findings were fixed with regression tests: Leptos hidden input now reactively tracks committed state instead of using a one-shot snapshot, and Dioxus control now composes consumer event listeners instead of dropping them. All focused browser regression tests passed, formatting and Clippy were clean, and the fix commit was pushed.",
+    "learnings": {
+      "repo": [
+        "The repo uses `cargo xfmt` and `cargo xclippy` as the lint/format gates before committing.",
+        "Codex review is triggered via `@codex review` PR comment; it signals status via GitHub emoji reactions (eyes = reviewing, thumbs-up = approved) and inline review threads.",
+        "The CI pipeline has a sequential gate structure: Formatting → Snapshot → Clippy → full matrix fan-out (Coverage, Unit Tests, Adapter Tests, Error Variant Coverage, Release Verification, feature-flag jobs per framework).",
+        "Error Variant Coverage was a flaky lane on the previous commit but passed cleanly on the fresh push.",
+        "The Codex bot login used for filtering GraphQL results is `chatgpt-codex-connector` (without `[bot]` suffix) for comments, but `chatgpt-codex-connector[bot]` for review thread author matching — inconsistency caused missed detections.",
+        "Browser WASM tests require a special runner with elevated sandbox permissions; the default sandbox blocks spawning the local browser test server.",
+        "The repo uses a checkpoint push hook that runs on `git push`, adding latency to the push step.",
+        "Dioxus 0.7.9 stores raw event listeners as `AttributeValue::Listener`; spread attributes override component-owned handlers rather than composing with them."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-leptos/src/input/checkbox.rs",
+          "line": 300,
+          "end_line": 385,
+          "finding": "Hidden input `prop:checked` was bound to a one-shot snapshot value rather than a reactive derived signal, causing the form-serialized value to become stale after controlled state changes."
+        },
+        {
+          "path": "crates/ars-dioxus/src/input/checkbox.rs",
+          "line": 220,
+          "end_line": 330,
+          "finding": "Control component stripped consumer event attributes (onclick etc.) from the spread entirely instead of extracting and composing them after the built-in handler, causing consumer handlers to never fire."
+        },
+        {
+          "path": "crates/ars-dioxus/src/input/checkbox.rs",
+          "line": 410,
+          "end_line": 520,
+          "finding": "Dioxus event composition requires extracting `AttributeValue::Listener` callbacks from the attrs vec, removing them from the spread, and explicitly calling them with the same event after the component handler runs."
+        },
+        {
+          "path": "crates/ars-leptos/tests/checkbox_wasm.rs",
+          "line": 280,
+          "end_line": 520,
+          "finding": "Regression test added: `checkbox_controlled_hidden_input_tracks_committed_state_after_label_click` verifies form serialization reflects committed state after a controlled rejection."
+        },
+        {
+          "path": "crates/ars-dioxus/tests/checkbox_wasm.rs",
+          "line": 280,
+          "end_line": 520,
+          "finding": "Regression test added: `checkbox_control_composes_consumer_click_handler` verifies consumer click handler fires alongside the built-in toggle; uses raw `Attribute::new(..., AttributeValue::listener(...))` form, not `onclick:` sugar."
+        }
+      ],
+      "workflow": [
+        "When Codex reactions disappear without a thumbs-up and no final comment on the new commit hash appears, the review silently dropped — retriggering `@codex review` is necessary.",
+        "Polling `gh pr checks 727 --watch=false` plus `gh api repos/.../issues/727/reactions` in parallel is an effective CI+Codex monitoring pattern.",
+        "`gh run view <run-id> --json status,conclusion,jobs` gives more granular job-level state than `gh pr checks` when the check summary appears stale.",
+        "Dioxus GlobalAttributes `extends` does not support `onclick:` event sugar at component call sites; raw `attrs: vec![Attribute::new(...)]` is required for event passthrough in tests and consumer usage.",
+        "Write regression tests that reproduce the exact failure before patching the implementation — both Codex findings were verified red before the fix was applied.",
+        "Commit message should credit Codex with `Co-authored-by: Codex <codex@openai.com>` when fixes address Codex review findings."
+      ]
+    },
+    "friction": [
+      "The commit hook ran silently for over two minutes with no output, requiring process inspection attempts that were blocked by the sandbox.",
+      "The sandbox blocked spawning the WASM browser test server, causing the first focused test run to fail with a runner error rather than a test failure.",
+      "Codex reactions disappeared without a final thumbs-up comment on the new commit, requiring a second `@codex review` trigger.",
+      "GraphQL query had a syntax error (extra closing brace) on the first attempt to fetch both review threads and PR comments in one query.",
+      "The Codex bot login used in GraphQL filters is inconsistent: `chatgpt-codex-connector[bot]` for review threads vs `chatgpt-codex-connector` for PR comments, causing silent mismatches in jq filters.",
+      "Dioxus `onclick:` sugar not accepted at component call sites — had to rewrite the regression test to use raw `AttributeValue::listener` after a compile error.",
+      "First Dioxus event-composition patch used the checkbox machine `Event` type name instead of the Dioxus event type, causing a name collision compile error requiring a qualification fix.",
+      "CI Coverage and Release Verification jobs are very long-running, requiring many polling cycles before final pass/fail signal."
+    ],
+    "open_items": [
+      "Codex review for commit `b3664060` was retriggered but the transcript ends before confirming a final thumbs-up — Codex review completion is not yet confirmed.",
+      "CI Coverage lane result is not shown as passing in the transcript — the run was still in progress when the transcript ends.",
+      "Inline replies to the two new Codex P2 threads and resolving them via the API is mentioned as a next step but not executed in the transcript.",
+      "The Dioxus event-composition approach (extracting `AttributeValue::Listener` from attrs, calling manually) is a workaround for Dioxus not natively composing spread listeners — worth filing upstream or abstracting into a shared helper.",
+      "WASM browser test runner permissions are fragile in the sandbox; a persistent escalated runner configuration would eliminate the recurring friction."
+    ]
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}

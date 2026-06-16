@@ -1,0 +1,9 @@
+They're still appearing as broken here in my vscode, got me worried
+
+---
+
+CI is broken and you haven't run [waiting-for-codex-review](.agents/skills/waiting-for-codex-review/)
+
+---
+
+Did you reply and resolved the threads?
