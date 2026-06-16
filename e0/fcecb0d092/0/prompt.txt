@@ -1,0 +1,17 @@
+They're still appearing as broken here in my vscode, got me worried
+
+---
+
+CI is broken and you haven't run [waiting-for-codex-review](.agents/skills/waiting-for-codex-review/)
+
+---
+
+Did you reply and resolved the threads?
+
+---
+
+We have more reviews, and why the coverage is complaining? Can we handle it?
+
+---
+
+The new component crates are being included in the coverage? Because I don't think that they should
