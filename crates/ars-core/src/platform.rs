@@ -637,6 +637,7 @@ mod tests {
     #[test]
     fn null_now_returns_zero() {
         assert_eq!(NullPlatformEffects.now(), Duration::ZERO);
+        assert_eq!(NullPlatformEffects.now().as_nanos(), 0);
     }
 
     #[test]
@@ -743,6 +744,7 @@ mod tests {
 
         assert!(!MissingProviderEffects.is_mac_platform());
         assert_eq!(MissingProviderEffects.now(), Duration::ZERO);
+        assert_eq!(MissingProviderEffects.now().as_nanos(), 0);
         assert!(MissingProviderEffects.get_bounding_rect("id").is_none());
     }
 

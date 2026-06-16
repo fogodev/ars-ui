@@ -1880,6 +1880,33 @@ mod tests {
     }
 
     #[test]
+    fn constrain_to_ratio_pulls_origin_inside_when_minimum_exceeds_room() {
+        let mut crop = CropArea {
+            x: 0.98,
+            y: 0.98,
+            width: 0.01,
+            height: 0.01,
+            rotation: 0.0,
+        };
+
+        constrain_to_ratio(&mut crop, 1.0);
+
+        assert_eq!(crop.width, MIN_CROP_SIZE);
+        assert_eq!(crop.height, MIN_CROP_SIZE);
+        assert!((crop.x - (1.0 - MIN_CROP_SIZE)).abs() < 1e-9);
+        assert!((crop.y - (1.0 - MIN_CROP_SIZE)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn normalize_rotation_wraps_and_rejects_non_finite_values() {
+        assert_eq!(normalize_rotation(270.0), -90.0);
+        assert_eq!(normalize_rotation(-270.0), 90.0);
+        assert_eq!(normalize_rotation(540.0), -180.0);
+        assert_eq!(normalize_rotation(f64::NAN), 0.0);
+        assert_eq!(normalize_rotation(f64::INFINITY), 0.0);
+    }
+
+    #[test]
     fn crop_handle_token_and_all_cover_eight_positions() {
         let tokens: Vec<&str> = CropHandle::all().iter().map(|h| h.token()).collect();
 
@@ -2212,6 +2239,121 @@ mod tests {
     }
 
     #[test]
+    fn resize_each_handle_uses_delta_from_drag_origin() {
+        let cases = [
+            (
+                CropHandle::TopLeft,
+                0.0,
+                0.0,
+                CropArea {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 0.9,
+                    height: 0.9,
+                    rotation: 0.0,
+                },
+            ),
+            (
+                CropHandle::TopRight,
+                1.0,
+                0.0,
+                CropArea {
+                    x: 0.1,
+                    y: 0.0,
+                    width: 0.9,
+                    height: 0.9,
+                    rotation: 0.0,
+                },
+            ),
+            (
+                CropHandle::BottomLeft,
+                0.0,
+                1.0,
+                CropArea {
+                    x: 0.0,
+                    y: 0.1,
+                    width: 0.9,
+                    height: 0.9,
+                    rotation: 0.0,
+                },
+            ),
+            (
+                CropHandle::BottomRight,
+                1.0,
+                1.0,
+                CropArea {
+                    x: 0.1,
+                    y: 0.1,
+                    width: 0.9,
+                    height: 0.9,
+                    rotation: 0.0,
+                },
+            ),
+            (
+                CropHandle::Top,
+                0.5,
+                0.0,
+                CropArea {
+                    x: 0.1,
+                    y: 0.0,
+                    width: 0.8,
+                    height: 0.9,
+                    rotation: 0.0,
+                },
+            ),
+            (
+                CropHandle::Bottom,
+                0.5,
+                1.0,
+                CropArea {
+                    x: 0.1,
+                    y: 0.1,
+                    width: 0.8,
+                    height: 0.9,
+                    rotation: 0.0,
+                },
+            ),
+            (
+                CropHandle::Left,
+                0.0,
+                0.5,
+                CropArea {
+                    x: 0.0,
+                    y: 0.1,
+                    width: 0.9,
+                    height: 0.8,
+                    rotation: 0.0,
+                },
+            ),
+            (
+                CropHandle::Right,
+                1.0,
+                0.5,
+                CropArea {
+                    x: 0.1,
+                    y: 0.1,
+                    width: 0.9,
+                    height: 0.8,
+                    rotation: 0.0,
+                },
+            ),
+        ];
+
+        for (handle, x, y, expected) in cases {
+            let mut service = fresh_service(test_props());
+
+            drop(service.send(Event::ResizeStart {
+                handle,
+                x: 0.9,
+                y: 0.9,
+            }));
+            drop(service.send(Event::ResizeMove { x, y }));
+
+            assert_eq!(*service.context().crop.get(), expected, "{handle:?}");
+        }
+    }
+
+    #[test]
     fn set_aspect_ratio_reclamps_when_height_overflows_bottom() {
         // Default crop (y=0.1, width=0.8) under Portrait3x4 would compute
         // height = 0.8 / 0.75 = 1.067, overflowing the bottom and hitting the
@@ -2528,6 +2670,14 @@ mod tests {
     #[test]
     fn api_state_accessors_reflect_state() {
         assert!(
+            !Fixture {
+                state: State::Idle,
+                ..Default::default()
+            }
+            .api()
+            .is_resizing()
+        );
+        assert!(
             Fixture {
                 state: State::Dragging,
                 ..Default::default()
@@ -2644,16 +2794,10 @@ mod tests {
         let events = log.lock().unwrap();
 
         assert_eq!(events.len(), 6);
-        assert!(matches!(events[0], Event::SetZoom(_)));
-        let Event::SetRotation(rotation) = events[2] else {
-            panic!("expected positive SetRotation, got {:?}", events[2]);
-        };
-        assert!(rotation > 0.0);
-
-        let Event::SetRotation(rotation) = events[3] else {
-            panic!("expected negative SetRotation, got {:?}", events[3]);
-        };
-        assert!(rotation < 0.0);
+        assert_eq!(events[0], Event::SetZoom(1.1));
+        assert_eq!(events[1], Event::SetZoom(0.9));
+        assert_eq!(events[2], Event::SetRotation(90.0));
+        assert_eq!(events[3], Event::SetRotation(-90.0));
         assert_eq!(events[4], Event::FlipHorizontal);
         assert_eq!(events[5], Event::FlipVertical);
     }
@@ -3099,6 +3243,28 @@ mod tests {
             (crop.width - crop.height).abs() < 1e-9,
             "controlled crop not square after aspect change: {crop:?}"
         );
+    }
+
+    #[test]
+    fn sync_props_disabling_cancels_active_resize_snapshot() {
+        let mut service = fresh_service(test_props());
+
+        drop(service.send(Event::ResizeStart {
+            handle: CropHandle::Right,
+            x: 0.9,
+            y: 0.5,
+        }));
+
+        assert!(matches!(service.state(), State::Resizing { .. }));
+        assert!(service.context().drag_origin.is_some());
+        assert!(service.context().drag_start_crop.is_some());
+
+        drop(service.set_props(test_props().disabled(true)));
+
+        assert_eq!(service.state(), &State::Idle);
+        assert!(service.context().drag_origin.is_none());
+        assert!(service.context().drag_start_crop.is_none());
+        assert!(service.context().disabled);
     }
 
     #[test]

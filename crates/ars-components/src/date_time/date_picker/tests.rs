@@ -486,6 +486,39 @@ fn default_format_for_german_is_day_month_year_with_dot() {
 }
 
 #[test]
+fn default_format_uses_locale_order_and_visible_separator_edges() {
+    let korean = service_with(
+        Props {
+            default_value: Some(date(2024, 3, 15)),
+            ..props()
+        },
+        Locale::parse("ko-KR").expect("locale parses"),
+    );
+
+    assert_eq!(korean.context().input_text, "2024.03.15");
+
+    let british = service_with(
+        Props {
+            default_value: Some(date(2024, 3, 15)),
+            ..props()
+        },
+        en_gb(),
+    );
+
+    assert_eq!(british.context().input_text, "15/03/2024");
+
+    let japanese = service_with(
+        Props {
+            default_value: Some(date(2024, 3, 15)),
+            ..props()
+        },
+        ja_jp(),
+    );
+
+    assert_eq!(japanese.context().input_text, "2024/03/15");
+}
+
+#[test]
 fn typing_updates_calendar_props_value() {
     let mut svc = service();
 
@@ -1295,6 +1328,37 @@ fn api_and_messages_debug_eq_impls() {
     assert_eq!(messages.clone(), messages);
     // Manual `Debug`.
     assert!(format!("{messages:?}").contains("Messages"));
+
+    assert_ne!(
+        Messages {
+            trigger_label: MessageFn::static_str("Open"),
+            ..messages.clone()
+        },
+        messages
+    );
+    assert_ne!(
+        Messages {
+            clear_label: MessageFn::static_str("Clear"),
+            ..messages.clone()
+        },
+        messages
+    );
+    assert_ne!(
+        Messages {
+            content_label: MessageFn::static_str("Content"),
+            ..messages.clone()
+        },
+        messages
+    );
+    assert_ne!(
+        Messages {
+            selected_date_label: MessageFn::new(|date: &str, _locale: &Locale| {
+                format!("Picked {date}")
+            }),
+            ..messages.clone()
+        },
+        messages
+    );
 }
 
 // ────────────────────────────────────────────────────────────────────

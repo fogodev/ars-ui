@@ -3477,6 +3477,11 @@ mod tests {
 
         assert_eq!(original, cloned);
 
+        let original_optional = AttrValue::reactive_optional(|| Some(String::from("x")));
+        let cloned_optional = original_optional.clone();
+
+        assert_eq!(original_optional, cloned_optional);
+
         let original_bool = AttrValue::reactive_bool(|| true);
         let cloned_bool = original_bool.clone();
 
@@ -3493,6 +3498,11 @@ mod tests {
         let b = AttrValue::reactive(|| String::from("x"));
 
         assert_ne!(a, b);
+
+        let optional_a = AttrValue::reactive_optional(|| Some(String::from("x")));
+        let optional_b = AttrValue::reactive_optional(|| Some(String::from("x")));
+
+        assert_ne!(optional_a, optional_b);
     }
 
     /// `Debug` for reactive variants must redact the inner closure to
