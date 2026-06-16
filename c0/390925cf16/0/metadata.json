@@ -1,0 +1,93 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "c0390925cf16",
+  "session_id": "019ed138-1195-7a62-9d4a-6e30750f920d",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-16T21:23:30.35577Z",
+  "branch": "codex/field-form-adapter-retrofit-audit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-dioxus/tests/form.rs",
+    "crates/ars-dioxus/src/utility/form.rs",
+    "spec/dioxus-components/utility/form.md",
+    "spec/leptos-components/utility/fieldset.md",
+    "spec/dioxus-components/utility/fieldset.md"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "f89fe20eeb11",
+  "checkpoint_transcript_start": 2477,
+  "transcript_lines_at_start": 2477,
+  "token_usage": {
+    "input_tokens": 79873,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 12125568,
+    "output_tokens": 10749,
+    "api_call_count": 66
+  },
+  "session_metrics": {
+    "turn_count": 13
+  },
+  "summary": {
+    "intent": "Address two Codex review findings on PR #731 in the fogodev/ars-ui repo: fix Dioxus form status-region detection failing for wrapped components, and correct stale spec parity text in fieldset docs.",
+    "outcome": "Both Codex findings were addressed: a new `has_status_region` (or equivalent) prop was added to the Dioxus form component for explicit wrapper opt-in, a regression test was added and verified green, fieldset spec parity sentences were corrected, and the fix was committed and pushed to PR #731.",
+    "learnings": {
+      "repo": [
+        "Dioxus SSR VNode scanning cannot traverse arbitrary wrapper components, so detecting child StatusRegion by VNode name fails for wrapped cases — explicit root-level props are the correct escape hatch.",
+        "The repo uses `cargo xclippy`, `cargo xfmt`, and `cargo xtask spec validate` as the standard pre-push lint/format/spec validation pipeline.",
+        "CI matrix includes Leptos and Dioxus wasm coverage lanes that are among the slowest jobs; the aggregate Coverage check only passes after both complete.",
+        "The repo uses Codex as an automated PR reviewer via `@codex review` comments on GitHub issues."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-dioxus/src/utility/form.rs",
+          "line": 210,
+          "end_line": 285,
+          "finding": "StatusRegion child detection was VNode-name-based, which cannot see through wrapper components. Fixed by adding an explicit prop to signal status-region ownership."
+        },
+        {
+          "path": "crates/ars-dioxus/tests/form.rs",
+          "line": 1,
+          "end_line": 260,
+          "finding": "Regression test added for the wrapped-component status-region case; test was confirmed red before the fix and green after."
+        },
+        {
+          "path": "spec/leptos-components/utility/fieldset.md",
+          "finding": "Parity sentence was missing 'Content' — stale copy that diverged from actual component behavior."
+        },
+        {
+          "path": "spec/dioxus-components/utility/fieldset.md",
+          "finding": "Same stale parity sentence as Leptos fieldset spec; both were fixed together."
+        }
+      ],
+      "workflow": [
+        "Polling CI and Codex state by watching PR check runs and review thread counts via GitHub GraphQL API is an effective async monitoring pattern.",
+        "Triggering a fresh Codex review after a fix commit is done via `@codex review` comment on the PR issue, not a dedicated API endpoint.",
+        "Running the focused test (`cargo test -p ars-dioxus --test form`) in a red state before patching the implementation confirms the test genuinely covers the gap.",
+        "Committing Codex-suggested fixes with `Co-authored-by: Codex <codex@openai.com>` is the expected attribution convention in this repo."
+      ]
+    },
+    "friction": [
+      "Extended polling loop (~15+ minutes) waiting for CI matrix jobs (especially Leptos/Dioxus wasm coverage) and Codex review to complete.",
+      "GitHub check runs did not immediately attach to the new commit after push, requiring an additional wait cycle.",
+      "`cargo xclippy` ran through split i18n feature checks after the main workspace pass, adding unexpected latency before the commit could proceed."
+    ],
+    "open_items": [
+      "Unit Tests and Release Verification CI jobs were still pending when Codex's verdict arrived; their final status was not confirmed in the transcript.",
+      "The VNode-name-based StatusRegion detection for the direct (non-wrapped) case was left in place alongside the new explicit prop — the two detection paths may warrant consolidation later.",
+      "The Dioxus form spec was updated for the wrapper behavior but the broader wrapper escape-hatch pattern may not be documented at the architecture/guide level yet."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-16T21:23:07.613835Z",
+    "agent_lines": 59,
+    "agent_removed": 4,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 59,
+    "total_lines_changed": 63,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
