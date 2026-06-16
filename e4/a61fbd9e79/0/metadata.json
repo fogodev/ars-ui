@@ -1,0 +1,92 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "e4a61fbd9e79",
+  "session_id": "019ed138-1195-7a62-9d4a-6e30750f920d",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-16T22:14:27.997852Z",
+  "branch": "codex/field-form-adapter-retrofit-audit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-dioxus/tests/form.rs",
+    "crates/ars-dioxus/src/utility/form.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "f89fe20eeb11",
+  "checkpoint_transcript_start": 2877,
+  "transcript_lines_at_start": 2877,
+  "token_usage": {
+    "input_tokens": 222163,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 7564288,
+    "output_tokens": 12531,
+    "api_call_count": 84
+  },
+  "session_metrics": {
+    "turn_count": 13
+  },
+  "summary": {
+    "intent": "Address Codex review feedback on PR #731 (field-form-adapter-retrofit-audit) by fixing two inline review comments, resolving those threads, and then iterating on a third Codex finding about an overly broad StatusRegion detector in the Dioxus form adapter.",
+    "outcome": "All three Codex review issues were fixed and committed (commits 7f75fd2bd and the 'Narrow Dioxus form status region detection' commit), CI passed fully after a transient unit test failure was cleared via job rerun, and the PR was left in a clean, all-green state awaiting final Codex approval.",
+    "learnings": {
+      "repo": [
+        "Unit tests are run via `cargo xtest unit` which maps to a nextest workspace split defined in xtask/src/test.rs",
+        "CI workflow uses a multi-stage matrix; Release Verification depends only on clippy (not unit tests), so it can run independently",
+        "Codex review is triggered by posting `@codex review` as an issue comment on the PR",
+        "The Dioxus form adapter's StatusRegion child detector was matching any component named `StatusRegion`, not just the form part's own StatusRegion — needed narrowing to the fully-qualified form part path",
+        "The `has_status_region` signal on form::Root was added to expose status region presence to wrapper components, with an SSR regression test for the wrapped component case"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-dioxus/src/utility/form.rs",
+          "finding": "Direct-child StatusRegion detector was too broad — matched any child component named `StatusRegion` rather than specifically the form adapter's StatusRegion part, causing false suppression of the fallback live region"
+        },
+        {
+          "path": "crates/ars-dioxus/tests/form.rs",
+          "finding": "Regression test added: `form_status_region_detector_ignores_unrelated_status_region_components` verifies that an unrelated child component named StatusRegion does not suppress the fallback live region"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "finding": "Release Verification job depends only on clippy, not on unit tests — confirmed by grep on `release:` needs section"
+        },
+        {
+          "path": "xtask/src/test.rs",
+          "finding": "Unit test stage dispatches via `Stage::Unit` through cargo nextest; the exact reproducer command is `cargo xtest unit`"
+        }
+      ],
+      "workflow": [
+        "`gh run view --log` withholds logs while the overall workflow run is still in progress, even if the specific job has failed — use `gh api repos/{owner}/{repo}/actions/jobs/{job_id}/logs` as a fallback",
+        "GitHub job log blobs (via actions/jobs API) may return 404 for several minutes after a job fails; polling with sleep is necessary",
+        "`gh run rerun --failed` reruns only the failed jobs in a workflow, not the entire matrix",
+        "GraphQL `resolveReviewThread` mutation requires the thread node ID (PRRT_... format), not the comment database ID",
+        "When a CI failure does not reproduce locally with the exact same command, treat it as a transient runner issue and use `gh run rerun --failed` rather than making code changes",
+        "Codex review threads can be resolved via GitHub GraphQL `resolveReviewThread` mutation; inline replies use `gh api .../pulls/{n}/comments` with `in_reply_to` parameter"
+      ]
+    },
+    "friction": [
+      "GitHub `gh run view --log` refuses to return logs while the parent workflow is still in_progress, forcing use of the lower-level jobs API",
+      "Job log blobs via `gh api .../actions/jobs/{id}/logs` returned 404 for an extended period after the job failed, requiring multiple retries with sleeps",
+      "GraphQL query had syntax errors (extra closing brace) that required several iterations to correct",
+      "GraphQL status query hit the network sandbox repeatedly, requiring escalation approvals",
+      "Codex has not yet posted a final approval reaction/comment after the last review trigger, leaving merge state unclear at session end",
+      "Release Verification remained in a long-running pending state due to release-profile compilation, causing confusion about whether it was stuck or progressing"
+    ],
+    "open_items": [
+      "Awaiting Codex final approval reaction or review comment after the `@codex review` trigger posted at the end of the session",
+      "PR #731 is not yet merged — all CI is green but review decision status was not confirmed as approved at session end",
+      "No log was ever retrieved for the original transient unit failure (job 81769492448) — root cause remains unknown and unconfirmed as truly transient"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-16T22:13:58.584083Z",
+    "agent_lines": 43,
+    "agent_removed": 1,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 43,
+    "total_lines_changed": 44,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
