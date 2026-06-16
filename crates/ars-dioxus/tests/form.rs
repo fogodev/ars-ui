@@ -104,6 +104,46 @@ fn form_status_region_part_accepts_consumer_class_and_style() {
 }
 
 #[test]
+fn form_status_region_wrapper_can_disable_fallback_region() {
+    #[component]
+    fn WrappedStatusRegion() -> Element {
+        rsx! {
+            form::StatusRegion { class: "wrapped-status" }
+        }
+    }
+
+    #[rustfmt::skip]
+    fn app() -> Element {
+        rsx! {
+            form::Root {
+                id: "account-form",
+                status_message: "Ready",
+                has_status_region: true,
+                input { name: "email" }
+                WrappedStatusRegion {}
+            }
+        }
+    }
+
+    let html = render_app(app);
+
+    for fragment in [
+        r#"role="status""#,
+        r#"data-ars-part="status-region""#,
+        r#"class="wrapped-status""#,
+        "Ready",
+    ] {
+        assert!(html.contains(fragment), "missing {fragment}: {html}");
+    }
+
+    assert_eq!(
+        html.matches(r#"data-ars-part="status-region""#).count(),
+        1,
+        "wrapped StatusRegion must replace the fallback status region when declared: {html}"
+    );
+}
+
+#[test]
 fn form_validation_errors_drive_matching_field_by_name() {
     #[rustfmt::skip]
     fn app() -> Element {

@@ -86,7 +86,7 @@ additively.
 ## 3. Mapping to Core Component Contract
 
 - Props parity: full parity with the core fieldset props.
-- Part parity: `Root`, `Legend`, `Description`, and `ErrorMessage` are all explicit mapped structures.
+- Part parity: `Root`, `Legend`, `Content`, `Description`, and `ErrorMessage` are all explicit mapped structures.
 - Context parity: descendant field-like controls inherit group state through field context.
 
 ## 4. Part Mapping

@@ -25,6 +25,8 @@ pub struct RootProps {
     pub validation_errors: BTreeMap<String, Vec<ars_forms::validation::Error>>,
     #[props(optional, into)]
     pub status_message: Option<String>,
+    #[props(default = false)]
+    pub has_status_region: bool,
     #[props(optional)]
     pub action: Option<String>,
     #[props(optional)]
@@ -59,7 +61,11 @@ callbacks. `on_submit` dispatches the core `Submit` event before emitting
 live region. Consumers may render the public `StatusRegion` compound part
 inside `form::Root` to style or position the live region independently. When omitted,
 `form::Root` renders an unstyled fallback status region so the accessibility contract
-is preserved.
+is preserved. Direct `StatusRegion` children are detected automatically; when
+the status region is returned from a wrapper component, consumers set
+`has_status_region=true` so `Root` can suppress the fallback without relying on
+component-output introspection that Dioxus does not expose during the parent
+render.
 The root form extends Dioxus `GlobalAttributes`; core validation, busy, action,
 role, and live-region semantics win, while consumer `class`/`style` merge
 additively.

@@ -61,6 +61,14 @@ pub struct RootProps {
     #[props(optional, into)]
     pub status_message: Option<String>,
 
+    /// Whether children render [`StatusRegion`] through an intermediate component.
+    ///
+    /// Direct `StatusRegion` children are detected automatically. Set this when
+    /// a wrapper component returns `StatusRegion`, because Dioxus does not expose
+    /// wrapped component output to the parent before render.
+    #[props(default = false)]
+    pub has_status_region: bool,
+
     /// Fires when the form submit event runs.
     #[props(optional, into)]
     pub on_submit: Option<EventHandler>,
@@ -128,7 +136,8 @@ pub fn Root(props: RootProps) -> Element {
     let status_attrs =
         machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.status_region_attrs()))();
 
-    let has_explicit_status_region = element_contains_status_region(&props.children);
+    let has_explicit_status_region =
+        props.has_status_region || element_contains_status_region(&props.children);
 
     rsx! {
         form {
