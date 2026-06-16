@@ -97,6 +97,96 @@ pub(crate) enum InputText {
     FormReset,
 }
 
+const PLAIN_CHECKBOX_STYLES: &str = r#"
+.plain-checkbox {
+    display: grid;
+    grid-template-columns: 1.125rem minmax(0, 1fr);
+    align-items: center;
+    gap: 0.35rem 0.65rem;
+    margin-block: 0.55rem;
+}
+
+.plain-checkbox-label {
+    grid-column: 2;
+}
+
+.plain-checkbox-control {
+    grid-column: 1;
+    grid-row: 1;
+    inline-size: 1.125rem;
+    block-size: 1.125rem;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #64748b;
+    border-radius: 0.25rem;
+    color: #ffffff;
+    background: #ffffff;
+}
+
+.plain-checkbox[data-ars-state="checked"] .plain-checkbox-control,
+.plain-checkbox[data-ars-state="indeterminate"] .plain-checkbox-control {
+    border-color: #2563eb;
+    background: #2563eb;
+}
+
+.plain-checkbox[data-ars-invalid] .plain-checkbox-control {
+    border-color: #dc2626;
+}
+
+.plain-checkbox[data-ars-invalid][data-ars-state="checked"] .plain-checkbox-control,
+.plain-checkbox[data-ars-invalid][data-ars-state="indeterminate"] .plain-checkbox-control {
+    background: #dc2626;
+}
+
+.plain-checkbox[data-ars-disabled] {
+    color: #94a3b8;
+    opacity: 0.75;
+}
+
+.plain-checkbox[data-ars-disabled] .plain-checkbox-control {
+    border-color: #cbd5e1;
+    background: #f8fafc;
+}
+
+.plain-checkbox[data-ars-focus-visible] .plain-checkbox-control {
+    outline: 3px solid #93c5fd;
+    outline-offset: 2px;
+}
+
+.plain-checkbox-indicator::after {
+    content: "";
+    display: none;
+}
+
+.plain-checkbox[data-ars-state="checked"] .plain-checkbox-indicator::after {
+    display: block;
+    inline-size: 0.35rem;
+    block-size: 0.65rem;
+    border: solid currentColor;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.plain-checkbox[data-ars-state="indeterminate"] .plain-checkbox-indicator::after {
+    display: block;
+    inline-size: 0.65rem;
+    block-size: 0.15rem;
+    border-radius: 999px;
+    background: currentColor;
+}
+
+.plain-checkbox-description,
+.plain-checkbox-error {
+    grid-column: 2;
+}
+
+.plain-checkbox-error {
+    color: #dc2626;
+}
+"#;
+
 #[component]
 fn Checkbox<T>(
     #[prop(optional, into)] id: Option<Oco<'static, str>>,
@@ -122,6 +212,7 @@ where
 
     view! {
         <checkbox::Root
+            class="plain-checkbox"
             id=id.unwrap_or_else(|| use_id("checkbox").into())
             checked
             default_checked
@@ -135,18 +226,26 @@ where
             has_error_message=error_message.is_some()
             on_checked_change=on_checked_change
         >
-            <checkbox::Label>{label()}</checkbox::Label>
-            <checkbox::Control>
-                <checkbox::Indicator />
+            <checkbox::Label class="plain-checkbox-label">{label()}</checkbox::Label>
+            <checkbox::Control class="plain-checkbox-control">
+                <checkbox::Indicator class="plain-checkbox-indicator" />
             </checkbox::Control>
             <checkbox::HiddenInput />
             {description
                 .map(|description| {
-                    view! { <checkbox::Description>{description.run()}</checkbox::Description> }
+                    view! {
+                        <checkbox::Description class="plain-checkbox-description">
+                            {description.run()}
+                        </checkbox::Description>
+                    }
                 })}
             {error_message
                 .map(|error_message| {
-                    view! { <checkbox::ErrorMessage>{error_message.run()}</checkbox::ErrorMessage> }
+                    view! {
+                        <checkbox::ErrorMessage class="plain-checkbox-error">
+                            {error_message.run()}
+                        </checkbox::ErrorMessage>
+                    }
                 })}
         </checkbox::Root>
     }
@@ -166,6 +265,7 @@ pub(crate) fn InputPanel() -> impl IntoView {
 
     view! {
         <section class="showcase-panel wide">
+            <style>{PLAIN_CHECKBOX_STYLES}</style>
             <h2>{t(InputText::Checkbox)}</h2>
             <div class="showcase-grid">
                 <div class="showcase-card">

@@ -6,6 +6,8 @@
 
 use ars_components::input::checkbox::Machine;
 pub use ars_components::input::checkbox::{Event, Messages, Part, Props, State};
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+use ars_core::HtmlAttr;
 use ars_forms::validation::Error;
 use ars_interactions::KeyboardEventData;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
@@ -454,6 +456,7 @@ fn render_hidden_input(
                 let interactive = machine.with_api_snapshot(api_is_interactive);
 
                 machine.send.call(if checked { Event::Check } else { Event::Uncheck });
+                sync_hidden_input_checked(machine);
 
                 if interactive && let Some(callback) = on_checked_change {
                     callback.call(next);
@@ -504,6 +507,25 @@ fn set_form_reset_target(
         .map(|form| form.unchecked_into::<web_sys::EventTarget>());
 
     form_reset_target.set(target);
+}
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn sync_hidden_input_checked(machine: crate::UseMachineReturn<Machine>) {
+    let (input_id, committed) = machine.with_api_snapshot(|api| {
+        (
+            api.hidden_input_attrs()
+                .get(&HtmlAttr::Id)
+                .map(str::to_owned),
+            api.checked() == State::Checked,
+        )
+    });
+
+    if let Some(input) = input_id
+        .and_then(|id| web_sys::window()?.document()?.get_element_by_id(&id))
+        .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        input.set_checked(committed);
+    }
 }
 
 /// Props for the Dioxus [`Description`] compound checkbox part.

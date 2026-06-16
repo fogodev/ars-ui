@@ -179,6 +179,14 @@ a[data-ars-scope="button"] {
     border: 0;
 }
 
+.ars-sr-input {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+}
+
 .separator-demo-row {
     display: flex;
     align-items: stretch;

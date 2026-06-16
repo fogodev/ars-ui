@@ -97,6 +97,96 @@ pub(crate) enum InputText {
     FormReset,
 }
 
+const PLAIN_CHECKBOX_STYLES: &str = r#"
+.plain-checkbox {
+    display: grid;
+    grid-template-columns: 1.125rem minmax(0, 1fr);
+    align-items: center;
+    gap: 0.35rem 0.65rem;
+    margin-block: 0.55rem;
+}
+
+.plain-checkbox-label {
+    grid-column: 2;
+}
+
+.plain-checkbox-control {
+    grid-column: 1;
+    grid-row: 1;
+    inline-size: 1.125rem;
+    block-size: 1.125rem;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #64748b;
+    border-radius: 0.25rem;
+    color: #ffffff;
+    background: #ffffff;
+}
+
+.plain-checkbox[data-ars-state="checked"] .plain-checkbox-control,
+.plain-checkbox[data-ars-state="indeterminate"] .plain-checkbox-control {
+    border-color: #2563eb;
+    background: #2563eb;
+}
+
+.plain-checkbox[data-ars-invalid] .plain-checkbox-control {
+    border-color: #dc2626;
+}
+
+.plain-checkbox[data-ars-invalid][data-ars-state="checked"] .plain-checkbox-control,
+.plain-checkbox[data-ars-invalid][data-ars-state="indeterminate"] .plain-checkbox-control {
+    background: #dc2626;
+}
+
+.plain-checkbox[data-ars-disabled] {
+    color: #94a3b8;
+    opacity: 0.75;
+}
+
+.plain-checkbox[data-ars-disabled] .plain-checkbox-control {
+    border-color: #cbd5e1;
+    background: #f8fafc;
+}
+
+.plain-checkbox[data-ars-focus-visible] .plain-checkbox-control {
+    outline: 3px solid #93c5fd;
+    outline-offset: 2px;
+}
+
+.plain-checkbox-indicator::after {
+    content: "";
+    display: none;
+}
+
+.plain-checkbox[data-ars-state="checked"] .plain-checkbox-indicator::after {
+    display: block;
+    inline-size: 0.35rem;
+    block-size: 0.65rem;
+    border: solid currentColor;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.plain-checkbox[data-ars-state="indeterminate"] .plain-checkbox-indicator::after {
+    display: block;
+    inline-size: 0.65rem;
+    block-size: 0.15rem;
+    border-radius: 999px;
+    background: currentColor;
+}
+
+.plain-checkbox-description,
+.plain-checkbox-error {
+    grid-column: 2;
+}
+
+.plain-checkbox-error {
+    color: #dc2626;
+}
+"#;
+
 #[derive(Props, Clone, PartialEq)]
 struct CheckboxProps {
     #[props(optional, into)]
@@ -130,6 +220,7 @@ struct CheckboxProps {
 fn Checkbox(props: CheckboxProps) -> Element {
     rsx! {
         checkbox::Root {
+            class: "plain-checkbox",
             id: props.id,
             checked: props.checked,
             default_checked: props.default_checked,
@@ -142,16 +233,18 @@ fn Checkbox(props: CheckboxProps) -> Element {
             has_description: props.description.is_some(),
             has_error_message: props.error_message.is_some(),
             on_checked_change: props.on_checked_change,
-            checkbox::Label { {props.children} }
-            checkbox::Control { checkbox::Indicator {} }
+            checkbox::Label { class: "plain-checkbox-label", {props.children} }
+            checkbox::Control { class: "plain-checkbox-control",
+                checkbox::Indicator { class: "plain-checkbox-indicator" }
+            }
             checkbox::HiddenInput {}
 
             if let Some(description) = props.description {
-                checkbox::Description { {description} }
+                checkbox::Description { class: "plain-checkbox-description", {description} }
             }
 
             if let Some(error_message) = props.error_message {
-                checkbox::ErrorMessage { {error_message} }
+                checkbox::ErrorMessage { class: "plain-checkbox-error", {error_message} }
             }
         }
     }
@@ -170,6 +263,7 @@ pub(crate) fn InputPanel() -> Element {
 
     rsx! {
         section { class: "showcase-panel wide",
+            style { "{PLAIN_CHECKBOX_STYLES}" }
             h2 { {t(InputText::Checkbox)} }
             div { class: "showcase-grid",
                 div { class: "showcase-card",
