@@ -332,10 +332,21 @@ jobs:
   coverage:
     name: Coverage
     needs: [coverage-native, coverage-wasm]
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      - name: Require coverage shards
+        run: |
+          if [ "${{ needs.coverage-native.result }}" != "success" ]; then
+            echo "coverage-native result was ${{ needs.coverage-native.result }}"
+            exit 1
+          fi
+          if [ "${{ needs.coverage-wasm.result }}" != "success" ]; then
+            echo "coverage-wasm result was ${{ needs.coverage-wasm.result }}"
+            exit 1
+          fi
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Pinned to match crap::CARGO_CRAP_VERSION; bump both together.
@@ -348,7 +359,19 @@ jobs:
           path: target/coverage/downloads
           merge-multiple: true
       - name: Merge coverage
-        run: cargo xtask coverage merge --output lcov.info --file target/coverage/downloads/*.lcov
+        run: |
+          files=(target/coverage/downloads/*.lcov)
+          if [ "${files[0]}" = "target/coverage/downloads/*.lcov" ]; then
+            echo "No coverage LCOV artifacts were downloaded"
+            exit 1
+          fi
+
+          args=()
+          for file in "${files[@]}"; do
+            args+=(--file "$file")
+          done
+
+          cargo xtask coverage merge --output lcov.info "${args[@]}"
       - name: Coverage thresholds
         run: cargo xtask coverage check-all --file lcov.info
       # Reuses the merged lcov.info from the coverage step (no recompile).
