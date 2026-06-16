@@ -109,3 +109,27 @@ fn field_parts_accept_consumer_class_and_style() {
         assert!(html.contains(fragment), "missing {fragment}: {html}");
     }
 }
+
+#[test]
+fn field_input_references_description_when_rendered_before_description() {
+    fn app() -> Element {
+        rsx! {
+            field::Root { id: "email-field",
+                field::Label { "Email" }
+                field::Input { name: "email" }
+                field::Description { "Use your work email address." }
+            }
+        }
+    }
+
+    let html = render_app(app);
+
+    for fragment in [
+        r#"id="email-field-input""#,
+        r#"aria-describedby="email-field-description""#,
+        r#"id="email-field-description""#,
+        "Use your work email address.",
+    ] {
+        assert!(html.contains(fragment), "missing {fragment}: {html}");
+    }
+}

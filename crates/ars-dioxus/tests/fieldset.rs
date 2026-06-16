@@ -39,7 +39,7 @@ fn fieldset_renders_group_anatomy() {
         r#"<fieldset"#,
         r#"id="billing""#,
         r#"disabled"#,
-        r#"aria-describedby="billing-error-message""#,
+        r#"aria-describedby="billing-description billing-error-message""#,
         r#"data-ars-scope="fieldset""#,
         r#"data-ars-part="root""#,
         r#"class="billing-group""#,

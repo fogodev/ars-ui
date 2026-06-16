@@ -4,7 +4,7 @@ use ars_components::utility::fieldset;
 pub use ars_components::utility::fieldset::{Part, Props};
 use ars_core::{Direction, HtmlAttr};
 use ars_forms::validation::Error;
-use dioxus::prelude::*;
+use dioxus::{dioxus_core::DynamicNode, prelude::*};
 
 use crate::{attr_map_to_dioxus_inline_attrs, merge_dioxus_attrs, use_machine, use_stable_id};
 
@@ -83,6 +83,10 @@ pub fn Root(props: RootProps) -> Element {
 
     let machine = use_machine::<fieldset::Machine>(core_props);
 
+    if element_contains_description(&props.children) {
+        machine.send.call(fieldset::Event::SetHasDescription(true));
+    }
+
     let inherited_disabled = machine.derive(|api| api.root_attrs().contains(&HtmlAttr::Disabled));
     let inherited_invalid = machine.derive(|api| api.is_invalid());
     let inherited_readonly = machine.derive(|api| api.is_readonly());
@@ -99,6 +103,29 @@ pub fn Root(props: RootProps) -> Element {
 
     rsx! {
         fieldset { ..attrs,{props.children} }
+    }
+}
+
+fn element_contains_description(element: &Element) -> bool {
+    element.as_ref().is_ok_and(vnode_contains_description)
+}
+
+fn vnode_contains_description(vnode: &VNode) -> bool {
+    vnode
+        .dynamic_nodes
+        .iter()
+        .any(dynamic_node_contains_description)
+}
+
+fn dynamic_node_contains_description(node: &DynamicNode) -> bool {
+    match node {
+        DynamicNode::Component(component) => {
+            component.name == "ars_dioxus::utility::fieldset::Description"
+        }
+
+        DynamicNode::Fragment(nodes) => nodes.iter().any(vnode_contains_description),
+
+        DynamicNode::Text(_) | DynamicNode::Placeholder(_) => false,
     }
 }
 

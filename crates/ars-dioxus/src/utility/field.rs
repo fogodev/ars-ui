@@ -4,7 +4,7 @@ use ars_components::utility::field;
 pub use ars_components::utility::field::{InputType, Part, Props};
 use ars_core::{AriaAttr, AttrMap, Direction, HtmlAttr};
 use ars_forms::validation::Error;
-use dioxus::prelude::*;
+use dioxus::{dioxus_core::DynamicNode, prelude::*};
 
 use crate::{
     attr_map_to_dioxus_inline_attrs, callbacks, merge_dioxus_attrs, use_machine, use_stable_id,
@@ -90,6 +90,10 @@ pub fn Root(props: RootProps) -> Element {
     }
 
     let machine = use_machine::<field::Machine>(core_props);
+
+    if element_contains_description(&props.children) {
+        machine.send.call(field::Event::SetHasDescription(true));
+    }
 
     use_context_provider(|| FieldContext { machine });
 
@@ -204,6 +208,29 @@ pub fn Input(props: InputProps) -> Element {
 fn strip_input_event_attrs(mut attrs: Vec<Attribute>) -> Vec<Attribute> {
     attrs.retain(|attr| !matches!(attr.name, "oninput"));
     attrs
+}
+
+fn element_contains_description(element: &Element) -> bool {
+    element.as_ref().is_ok_and(vnode_contains_description)
+}
+
+fn vnode_contains_description(vnode: &VNode) -> bool {
+    vnode
+        .dynamic_nodes
+        .iter()
+        .any(dynamic_node_contains_description)
+}
+
+fn dynamic_node_contains_description(node: &DynamicNode) -> bool {
+    match node {
+        DynamicNode::Component(component) => {
+            component.name == "ars_dioxus::utility::field::Description"
+        }
+
+        DynamicNode::Fragment(nodes) => nodes.iter().any(vnode_contains_description),
+
+        DynamicNode::Text(_) | DynamicNode::Placeholder(_) => false,
+    }
 }
 
 /// Props for the Dioxus [`Description`] component.
