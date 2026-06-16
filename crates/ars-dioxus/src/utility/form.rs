@@ -262,7 +262,9 @@ fn vnode_contains_status_region(vnode: &VNode) -> bool {
 
 fn dynamic_node_contains_status_region(node: &DynamicNode) -> bool {
     match node {
-        DynamicNode::Component(component) => component.name.ends_with("::StatusRegion"),
+        DynamicNode::Component(component) => {
+            component.name == "ars_dioxus::utility::form::StatusRegion"
+        }
         DynamicNode::Fragment(nodes) => nodes.iter().any(vnode_contains_status_region),
         DynamicNode::Text(_) | DynamicNode::Placeholder(_) => false,
     }
