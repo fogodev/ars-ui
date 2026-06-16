@@ -1,0 +1,141 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3c9cdf6bdb52",
+  "session_id": "019ed080-0566-7b73-8bb1-92fccffd5890",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-16T14:03:29.136906Z",
+  "branch": "codex/nightly-mutants-cleanup",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-collections/src/typeahead.rs",
+    "crates/ars-components/src/date_time/date_picker/tests.rs",
+    "crates/ars-components/src/layout/splitter/mod.rs",
+    "crates/ars-components/src/layout/toolbar/mod.rs",
+    "crates/ars-components/src/specialized/file_upload/tests.rs",
+    "crates/ars-components/src/specialized/image_cropper/mod.rs",
+    "crates/ars-components/src/specialized/qr_code/mod.rs",
+    "crates/ars-core/src/color.rs",
+    "crates/ars-core/src/connect.rs",
+    "crates/ars-core/src/platform.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "2cacc36d5d02",
+  "token_usage": {
+    "input_tokens": 1293874,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 15998848,
+    "output_tokens": 41983,
+    "api_call_count": 131
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Fix month-long Nightly CI breakage caused by surviving mutation testing (missed mutants) across ars-core, ars-collections, and ars-components, without running mutation testing locally. Address all currently applicable found mutants and push a PR, with a follow-up planned for the next Nightly run.",
+    "outcome": "Added focused test coverage across 10 source files targeting 261 missed mutants from the June 16 Nightly artifacts. All local gates passed (focused tests, xfmt, xclippy, xci --profile fast). Branch committed and pushed; PR created targeting main. No production behavior changes and no mutants.toml excludes were required.",
+    "learnings": {
+      "repo": [
+        "Nightly mutation artifacts are retained for only 14 days, not a full month — historical May reports beyond that window require job log ##[warning] scraping as the only durable breadcrumb",
+        "Mutation matrix runs in named shards (core-shard-1, core-shard-2, collections-shard-3, components-shard-N); component shards are frequently cancelled at the 6-hour job cap",
+        "Required repo gates in order: cargo xfmt, cargo xclippy, cargo xci --profile fast (covers fmt, clippy, unit/nextest 8711 tests, ars-i18n stages, adapter, spec-conformance, coverage-native)",
+        "Commits require Co-authored-by: Codex <codex@openai.com> trailer and must be followed by the waiting-for-codex-review loop",
+        "No .cargo/mutants.toml exists — adding equivalent-mutant excludes would introduce a new policy surface and was avoided in favor of direct behavior tests",
+        "file_upload tests live in a sibling tests.rs file rather than an inline #[cfg(test)] module",
+        "scroll_area scroll_progress missed mutants were already addressed by code on HEAD that was one commit ahead of the failing Nightly SHA"
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/layout/splitter/mod.rs",
+          "line": 1368,
+          "end_line": 1465,
+          "finding": "Freed size from panel collapse is distributed to the right-side panel first, then left — tests that assumed left-first distribution were wrong and had to be corrected"
+        },
+        {
+          "path": "crates/ars-components/src/specialized/image_cropper/mod.rs",
+          "line": 620,
+          "end_line": 1710,
+          "finding": "Existing image_cropper tests only asserted event shape and broad invariants, not exact arithmetic deltas — this left resize-handle geometry, rotation normalization, and shortcut key values all unconstrained by tests"
+        },
+        {
+          "path": "crates/ars-components/src/date_time/date_picker/tests.rs",
+          "line": 1324,
+          "end_line": 1360,
+          "finding": "New locale-format tests produced unused_qualifications warnings that required cleanup before clippy gate passed"
+        },
+        {
+          "path": "crates/ars-core/src/color.rs",
+          "line": 900,
+          "end_line": 1325,
+          "finding": "Color boundary math, HSB/HSL/RGB conversions, WCAG thresholds, perceptual naming bucket edges, channel replacement, and format alpha branching were all unconstrained — mutations in these areas survived because tests only checked broad invariants"
+        },
+        {
+          "path": "crates/ars-collections/src/typeahead.rs",
+          "line": 820,
+          "end_line": 980,
+          "finding": "Typeahead timeout boundary, locale wrapper delegation, disabled filtering, and wrap/non-wrap index arithmetic had test gaps that allowed surviving mutants"
+        }
+      ],
+      "workflow": [
+        "Downloading all mutation artifacts at once with --pattern 'mutants-*' is unreliable and slow; download specific shard names individually into separate directories to avoid filename collisions",
+        "Multiple gh run download calls targeting the same directory collide when archives share root-level filenames (e.g., missed.txt) — always use per-artifact directories",
+        "cargo test -p <crate> <filter1> <filter2> with multiple space-separated filters does not work as expected; run one filter per invocation",
+        "Broad month-wide artifact sweeps and log scrapes were impractically slow; latest retained missed set is sufficient as the actionable target, with older expired data checked only for shard pass/fail status",
+        "Job log ##[warning] lines are the durable missed-mutant record after artifact expiry — gh run view <id> --log-failed | rg '##\\[warning\\]' is the fallback",
+        "Test-first approach (adding assertions that pin exact behavior mutants change) was uniformly more appropriate than adding mutants.toml excludes for this codebase"
+      ]
+    },
+    "friction": [
+      "gh run download --pattern 'mutants-*' timed out on the full shard set; required switching to targeted per-artifact downloads",
+      "Multiple artifacts sharing the same root-level filename (missed.txt) caused silent file collisions when downloaded to the same directory",
+      "Month-wide log scrape across all failed runs and broad all_missed.tsv generation both ran too long to complete and had to be cancelled",
+      "Sandbox network restrictions initially blocked gh run list, requiring a retry after network access was granted",
+      "cargo xclippy required fetching wasm-bindgen-test-macro over the network, blocking on first attempt",
+      "Initial splitter collapse test asserted left-side distribution priority when the implementation actually distributes to the right side first",
+      "cargo xci --profile fast required many long polling waits across compilation, nextest (8711 tests), i18n stages, adapter, and coverage-native phases"
+    ],
+    "open_items": [
+      "Follow-up PR planned for after the next Nightly run to address any remaining or newly surfaced missed mutants",
+      "ars-components shards were cancelled at the 6-hour CI cap — their missed mutant reports were partial; some component mutants may still survive in the next Nightly run",
+      "Expired May artifacts could not be fully verified; only current shard pass/fail status was used to determine applicability of older mutants",
+      "No equivalent-mutant excludes were added — if any of the retained 261 mutants are genuinely unobservable, they will reappear in the next Nightly and require a mutants.toml exclude entry with documented rationale"
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-16T14:02:25.368697Z",
+    "agent_lines": 750,
+    "agent_removed": 10,
+    "human_added": 46,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 796,
+    "total_lines_changed": 806,
+    "agent_percentage": 94.29280397022333,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 23,
+      "user_lines_removed": 0,
+      "agent_lines_added": 773,
+      "agent_lines_removed": 10,
+      "user_added_per_file": {
+        "crates/ars-collections/src/typeahead.rs": 4,
+        "crates/ars-components/src/date_time/date_picker/tests.rs": 3,
+        "crates/ars-components/src/layout/splitter/mod.rs": 1,
+        "crates/ars-components/src/layout/toolbar/mod.rs": 6,
+        "crates/ars-components/src/specialized/file_upload/tests.rs": 3,
+        "crates/ars-components/src/specialized/image_cropper/mod.rs": 2,
+        "crates/ars-core/src/color.rs": 4
+      }
+    }
+  ]
+}

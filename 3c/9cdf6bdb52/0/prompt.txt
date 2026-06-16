@@ -1,0 +1,51 @@
+I wanna handle the existing Nightly CI breakage for the last month, it's been breaking everyday in the Mutants part. I want you to only address the found mutants, don't re-run the mutation testing locally as it will take forever. The idea is to address all the found mutants in this last month, handle all of those that are still applicable given our code changes and push a PR. Tomorrow after the next Nightly run we can do a follow-up PR handling more found mutants if any. Make sure to not run mutation test locally
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Nightly Mutation Breakage Fix Plan
+
+## Summary
+
+Fix the currently actionable missed mutants from the Nightly mutation-testing failures without running mutation testing locally. Use GitHub’s retained artifacts and failed-job warning logs as the source of truth, then add focused regression tests or documented equivalent-mutant excludes only for still-applicable current code.
+
+Known current target from the June 16 Nightly artifacts: 261 missed mutants across `ars-core`, `ars-collections`, and `ars-components`. Earlier expired artifacts show older `Key::into_key` misses that are no longer applicable because the relevant shard now passes.
+
+## Key Changes
+
+- Create a normal feature branch from current `HEAD`, since the checkout is detached and one commit newer than today’s Nightly SHA.
+- Preserve `/tmp/ars-ui-mutants-latest-missed.tsv` as the working checklist during implementation, grouped by source file:
+  - `crates/ars-core/src/color.rs`, `connect.rs`, `platform.rs`
+  - `crates/ars-collections/src/typeahead.rs`
+  - `crates/ars-components/src/date_time/{calendar,date_picker}/mod.rs`
+  - `crates/ars-components/src/layout/{scroll_area,splitter,toolbar}/mod.rs`
+  - `crates/ars-components/src/selection/{context_menu,listbox,menu,menu_bar}/mod.rs`
+  - `crates/ars-components/src/specialized/{file_upload,image_cropper,qr_code,signature_pad}/mod.rs`
+- Add focused tests near existing component/unit/proptest/spec-conformance tests that prove the exact behavior each surviving mutant changes:
+  - color boundary math, HSB/HSL/RGB conversion, WCAG thresholds, perceptual naming bucket edges, channel replacement, and format alpha branch behavior;
+  - typeahead timeout boundary, focus-start behavior, disabled filtering, wrap/non-wrap indexing, and locale-wrapper delegation;
+  - component state-machine transitions and connect API getters for calendar, date picker, splitter, toolbar, listbox/menu/menu-bar, file upload, image cropper, QR code, and signature pad.
+- For mutants proven equivalent after reading the code and existing tests, add narrowly-scoped `.cargo/mutants.toml` `exclude_re` entries with line-number-agnostic regexes and comments explaining why the mutation is behaviorally unobservable.
+- Do not change production behavior unless a test reveals an actual bug. This PR is mutation-signal cleanup, not feature work.
+
+## Verification
+
+- Do not run local mutation testing: no `cargo mutants`, no `cargo xmutants`, no `cargo xtask mutants`.
+- Run focused tests only:
+  - `cargo test -p ars-core color`
+  - `cargo test -p ars-core connect platform`
+  - `cargo test -p ars-collections typeahead`
+  - `cargo test -p ars-components --lib -- date_time::calendar date_time::date_picker layout::scroll_area layout::splitter layout::toolbar selection::context_menu selection::listbox selection::menu selection::menu_bar specialized::file_upload specialized::image_cropper specialized::qr_code specialized::signature_pad`
+  - `cargo test -p ars-components --test spec_conformance -- date_time::calendar date_time::date_picker layout::scroll_area layout::splitter layout::toolbar selection::context_menu selection::listbox selection::menu selection::menu_bar specialized::file_upload specialized::image_cropper specialized::qr_code specialized::signature_pad`
+  - `cargo test -p ars-components --test proptest_state_machines -- --ignored proptest` only if the added coverage lands in the existing ignored proptest suites.
+- Run required repo gates before commit/push:
+  - `cargo xfmt`
+  - `cargo xclippy`
+  - `cargo xci --profile fast`
+- After user approval, commit, push, open a PR targeting `main`, then invoke the required `waiting-for-codex-review` loop. The PR body should state explicitly that local mutation testing was intentionally not run per request and that the next Nightly run is the validation source for remaining mutants.
+
+## Assumptions
+
+- “Found mutants” includes the latest uploaded partial component-shard `missed.txt` reports, even where the component shard later cancelled at the six-hour cap.
+- Expired May artifacts are used only as historical evidence; if their mutants are no longer present in the latest retained missed set and the current shard passes, they are treated as no longer applicable.
+- No GitHub issue auto-close keyword is required unless an issue is identified during implementation.

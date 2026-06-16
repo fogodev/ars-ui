@@ -1,0 +1,34 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "3c9cdf6bdb52",
+  "strategy": "manual-commit",
+  "branch": "codex/nightly-mutants-cleanup",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "crates/ars-collections/src/typeahead.rs",
+    "crates/ars-components/src/date_time/date_picker/tests.rs",
+    "crates/ars-components/src/layout/splitter/mod.rs",
+    "crates/ars-components/src/layout/toolbar/mod.rs",
+    "crates/ars-components/src/specialized/file_upload/tests.rs",
+    "crates/ars-components/src/specialized/image_cropper/mod.rs",
+    "crates/ars-components/src/specialized/qr_code/mod.rs",
+    "crates/ars-core/src/color.rs",
+    "crates/ars-core/src/connect.rs",
+    "crates/ars-core/src/platform.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/3c/9cdf6bdb52/0/metadata.json",
+      "transcript": "/3c/9cdf6bdb52/0/full.jsonl",
+      "content_hash": "/3c/9cdf6bdb52/0/content_hash.txt",
+      "prompt": "/3c/9cdf6bdb52/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1293874,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 15998848,
+    "output_tokens": 41983,
+    "api_call_count": 131
+  }
+}
