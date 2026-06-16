@@ -100,6 +100,40 @@ fn form_status_region_part_accepts_consumer_class_and_style() {
 }
 
 #[test]
+fn form_status_region_detector_ignores_unrelated_status_region_components() {
+    #[component]
+    fn StatusRegion(children: Children) -> impl IntoView {
+        view! { <div class="other-status-region">{children()}</div> }
+    }
+
+    let html = render(|| {
+        view! {
+            <form::Root id="account-form" status_message="Ready">
+                <input name="email" />
+                <StatusRegion>"Other status"</StatusRegion>
+            </form::Root>
+        }
+        .to_html()
+    });
+
+    for fragment in [
+        r#"class="other-status-region""#,
+        "Other status",
+        r#"role="status""#,
+        r#"data-ars-part="status-region""#,
+        "Ready",
+    ] {
+        assert!(html.contains(fragment), "missing {fragment}: {html}");
+    }
+
+    assert_eq!(
+        html.matches(r#"data-ars-part="status-region""#).count(),
+        1,
+        "unrelated StatusRegion component must not suppress the form fallback: {html}"
+    );
+}
+
+#[test]
 fn form_validation_errors_drive_matching_field_by_name() {
     let html = render(|| {
         view! {
