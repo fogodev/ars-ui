@@ -7,7 +7,10 @@ use std::cell::RefCell;
 use ars_components::utility::as_child::AsChildMerge;
 use ars_core::{AriaAttr, AttrMap, CssProperty, HtmlAttr, StyleStrategy};
 use ars_dioxus::{
-    as_child::{AsChildRenderProps, AsChildSlot, AsChildSlotProps},
+    as_child::{
+        AsChildRenderProps, AsChildSlot, AsChildSlotProps,
+        merge_dioxus_attrs as merge_dioxus_attrs_from_as_child,
+    },
     attr_map_to_dioxus, attr_map_to_dioxus_inline_attrs, merge_dioxus_attrs,
 };
 use dioxus::{dioxus_core::AttributeValue, prelude::*};
@@ -59,6 +62,16 @@ fn native_dioxus_attr(name: &'static str, value: &'static str) -> Attribute {
 
 fn native_dioxus_attr_value(name: &'static str, value: AttributeValue) -> Attribute {
     Attribute::new(name, value, None, false)
+}
+
+#[test]
+fn as_child_module_preserves_merge_dioxus_attrs_export() {
+    let attrs = merge_dioxus_attrs_from_as_child(
+        vec![native_dioxus_attr("class", "child")],
+        vec![native_dioxus_attr("class", "component")],
+    );
+
+    assert!(attrs.contains(&native_dioxus_attr("class", "child component")));
 }
 
 #[test]

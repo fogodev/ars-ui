@@ -10,7 +10,7 @@ use std::fmt::{self, Debug};
 
 use dioxus::prelude::*;
 
-use crate::merge_dioxus_attrs;
+pub use crate::merge_dioxus_attrs;
 
 /// Props passed to the Dioxus `as_child` render callback.
 #[derive(Clone, Debug, PartialEq)]

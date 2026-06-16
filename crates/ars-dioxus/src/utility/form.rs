@@ -17,6 +17,7 @@ use crate::{
 #[derive(Clone, Copy)]
 pub(crate) struct FormContext {
     pub(crate) machine: crate::UseMachineReturn<form::Machine>,
+    pub(crate) reset_generation: Signal<u64>,
 }
 
 /// Props for the Dioxus [`Form`] component.
@@ -72,6 +73,7 @@ pub fn Form(props: FormProps) -> Element {
     let generated_id = use_stable_id("form");
     let id = props.id.unwrap_or(generated_id);
     let mut form_ref = use_signal(|| None::<Rc<MountedData>>);
+    let mut reset_generation = use_signal(|| 0_u64);
 
     let mut core_props = Props::new().id(&id);
 
@@ -100,7 +102,10 @@ pub fn Form(props: FormProps) -> Element {
     let (form_messages, form_locale) =
         use_messages_and_locale::<ars_forms::form::Messages>(None, None);
 
-    use_context_provider(|| FormContext { machine });
+    use_context_provider(|| FormContext {
+        machine,
+        reset_generation,
+    });
 
     let component_attrs = machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.root_attrs()))();
     let attrs = strip_form_event_attrs(merge_dioxus_attrs(props.attrs, component_attrs));
@@ -167,6 +172,7 @@ pub fn Form(props: FormProps) -> Element {
             },
             onreset: move |_event| {
                 machine.send.call(form::Event::Reset);
+                reset_generation.set(reset_generation().wrapping_add(1));
                 callbacks::call(props.on_reset.as_ref());
             },
             ..attrs,

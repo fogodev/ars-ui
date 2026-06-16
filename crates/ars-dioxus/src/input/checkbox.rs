@@ -189,6 +189,9 @@ pub fn Root(props: RootProps) -> Element {
         seeded_presence.set(true);
     }
 
+    #[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+    use_form_reset_sync(machine, props.on_checked_change);
+
     use_context_provider(|| CheckboxContext {
         machine,
         on_checked_change: props.on_checked_change,
@@ -201,6 +204,42 @@ pub fn Root(props: RootProps) -> Element {
     rsx! {
         div { ..attrs,{props.children} }
     }
+}
+
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+fn use_form_reset_sync(
+    machine: crate::UseMachineReturn<Machine>,
+    on_checked_change: Option<EventHandler<State>>,
+) {
+    let form_context = try_use_context::<crate::utility::form::FormContext>();
+    let mut observed_generation =
+        use_signal(|| form_context.map_or(0, |context| (context.reset_generation)()));
+
+    use_effect(move || {
+        let Some(form_context) = form_context else {
+            return;
+        };
+
+        let reset_generation = (form_context.reset_generation)();
+
+        if reset_generation == *observed_generation.peek() {
+            return;
+        }
+
+        observed_generation.set(reset_generation);
+
+        let reset_request = machine.with_api_snapshot(|api| {
+            (api.is_checked_controlled() && api.checked() != api.default_checked())
+                .then(|| api.default_checked())
+        });
+
+        machine.send.call(Event::Reset);
+        sync_hidden_input_checked(machine);
+
+        if let (Some(callback), Some(next)) = (on_checked_change, reset_request) {
+            callback.call(next);
+        }
+    });
 }
 
 /// Props for the Dioxus [`Label`] compound checkbox part.
