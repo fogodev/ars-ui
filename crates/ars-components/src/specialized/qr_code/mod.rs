@@ -624,6 +624,16 @@ mod tests {
     }
 
     #[test]
+    fn matrix_accessor_returns_injected_matrix() {
+        let props = Props::default();
+        let connected = api(&props, Some(sample_matrix()));
+        let matrix = connected.matrix().expect("injected matrix");
+
+        assert_eq!(matrix.size, 3);
+        assert!(matrix.get(1, 1));
+    }
+
+    #[test]
     fn qr_matrix_new_computes_size_and_get() {
         let matrix = sample_matrix();
 

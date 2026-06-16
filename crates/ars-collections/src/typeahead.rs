@@ -517,6 +517,31 @@ mod tests {
         assert_eq!(state.search, "ap");
     }
 
+    #[test]
+    fn timeout_boundary_resets_at_exact_timeout() {
+        let c = fruit_collection();
+
+        let state = State {
+            search: String::from("a"),
+            last_key_time: Duration::from_millis(100),
+            search_start_key: Some(Key::int(1)),
+        };
+
+        let (state, found) = state.process_char(
+            'b',
+            Duration::from_millis(600),
+            Some(&Key::int(1)),
+            &c,
+            &no_disabled(),
+            DisabledBehavior::Skip,
+        );
+
+        assert_eq!(state.search, "b");
+        assert_eq!(state.last_key_time, Duration::from_millis(600));
+        assert_eq!(state.search_start_key, Some(Key::int(1)));
+        assert_eq!(found, Some(Key::int(2)));
+    }
+
     // ------------------------------------------------------------------ //
     // Prefix matching                                                     //
     // ------------------------------------------------------------------ //
@@ -743,6 +768,53 @@ mod tests {
         assert_eq!(found, Some(Key::int(4)));
     }
 
+    #[test]
+    fn locale_wrapper_delegates_to_process_char_in_non_i18n_builds() {
+        let c = fruit_collection();
+
+        let state = State::default();
+
+        let (direct_state, direct_found) = state.process_char(
+            'b',
+            Duration::from_millis(100),
+            Some(&Key::int(1)),
+            &c,
+            &no_disabled(),
+            DisabledBehavior::Skip,
+        );
+
+        let (wrapped_state, wrapped_found) = state.process_char_with_locale(
+            'b',
+            Duration::from_millis(100),
+            Some(&Key::int(1)),
+            &c,
+            &(),
+            &no_disabled(),
+            DisabledBehavior::Skip,
+        );
+
+        assert_eq!(wrapped_state, direct_state);
+        assert_eq!(wrapped_found, direct_found);
+    }
+
+    #[test]
+    fn single_char_scan_wraps_from_last_item_without_dividing_index() {
+        let c = fruit_collection();
+
+        let state = State::default();
+
+        let (_, found) = state.process_char(
+            'd',
+            Duration::from_millis(100),
+            Some(&Key::int(5)),
+            &c,
+            &no_disabled(),
+            DisabledBehavior::Skip,
+        );
+
+        assert_eq!(found, Some(Key::int(5)));
+    }
+
     // ------------------------------------------------------------------ //
     // Match cycling (repeated same character)                             //
     // ------------------------------------------------------------------ //
@@ -845,6 +917,30 @@ mod tests {
         );
 
         assert_eq!(found, Some(Key::int(3))); // Blueberry, not Banana
+    }
+
+    #[test]
+    fn skip_disabled_requires_focusable_and_not_disabled() {
+        let c = CollectionBuilder::new()
+            .section(Key::str("section"), "Berries")
+            .item(Key::int(1), "Banana", "banana")
+            .item(Key::int(2), "Blueberry", "blueberry")
+            .separator()
+            .item(Key::int(3), "Blackberry", "blackberry")
+            .build();
+
+        let disabled = BTreeSet::from([Key::int(1), Key::int(2)]);
+
+        let (_, found) = State::default().process_char(
+            'b',
+            Duration::from_millis(100),
+            None,
+            &c,
+            &disabled,
+            DisabledBehavior::Skip,
+        );
+
+        assert_eq!(found, Some(Key::int(3)));
     }
 
     #[test]

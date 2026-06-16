@@ -440,6 +440,33 @@ fn file_upload_upload_error_marks_failed() {
 }
 
 #[test]
+fn file_upload_upload_error_keeps_uploading_state_when_other_file_uploads() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").default_files(vec![
+            item("file-1", "a.png", Status::Pending),
+            item("file-2", "b.png", Status::Pending),
+        ]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::StartUpload));
+
+    assert_eq!(service.state(), &State::Uploading);
+
+    drop(service.send(Event::UploadError {
+        file_id: "file-1".into(),
+        error: "network".into(),
+    }));
+
+    let files = service.context().files.get();
+
+    assert!(matches!(files[0].status, Status::Failed(_)));
+    assert_eq!(files[1].status, Status::Uploading);
+    assert_eq!(service.state(), &State::Uploading);
+}
+
+#[test]
 fn file_upload_accept_extension_pattern_matches_by_filename() {
     let mut service = Service::<Machine>::new(
         Props::new().id("upload").accept(vec![".png".into()]),
@@ -686,6 +713,27 @@ fn file_upload_min_file_size_rejects_small_files() {
 }
 
 #[test]
+fn file_upload_size_limits_accept_exact_boundaries() {
+    let mut service = Service::<Machine>::new(
+        Props::new()
+            .id("upload")
+            .multiple(true)
+            .max_file_size(100)
+            .min_file_size(10),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::FilesSelected(vec![
+        raw_file("min.png", 10, "image/png"),
+        raw_file("max.png", 100, "image/png"),
+    ])));
+
+    assert_eq!(service.context().files.get().len(), 2);
+    assert!(service.context().rejected_files.is_empty());
+}
+
+#[test]
 fn file_upload_max_files_rejects_excess() {
     let mut service = Service::<Machine>::new(
         Props::new()
@@ -726,6 +774,28 @@ fn file_upload_remove_file_filters_queue() {
 
     assert_eq!(service.context().files.get().len(), 1);
     assert_eq!(service.context().files.get()[0].id, "file-2");
+}
+
+#[test]
+fn file_upload_remove_keeps_uploading_state_when_other_file_uploads() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").default_files(vec![
+            item("file-1", "a.png", Status::Pending),
+            item("file-2", "b.png", Status::Pending),
+        ]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::StartUpload));
+    drop(service.send(Event::RemoveFile {
+        file_id: "file-1".into(),
+    }));
+
+    assert_eq!(service.context().files.get().len(), 1);
+    assert_eq!(service.context().files.get()[0].id, "file-2");
+    assert_eq!(service.context().files.get()[0].status, Status::Uploading);
+    assert_eq!(service.state(), &State::Uploading);
 }
 
 #[test]
@@ -2367,6 +2437,41 @@ fn file_upload_retry_targets_specific_failed_file_after_a_mismatch() {
             .status,
         Status::Pending
     );
+}
+
+#[test]
+fn file_upload_retry_does_not_touch_nonmatching_failed_files() {
+    let mut service = Service::<Machine>::new(
+        Props::new().id("upload").default_files(vec![
+            Item {
+                status: Status::Failed("first".into()),
+                error: Some("first".into()),
+                progress: 0.75,
+                ..item("file-1", "a.png", Status::Failed("first".into()))
+            },
+            Item {
+                status: Status::Failed("second".into()),
+                error: Some("second".into()),
+                progress: 0.5,
+                ..item("file-2", "b.png", Status::Failed("second".into()))
+            },
+        ]),
+        &Env::default(),
+        &Messages::default(),
+    );
+
+    drop(service.send(Event::RetryFile {
+        file_id: "file-2".into(),
+    }));
+
+    let files = service.context().files.get();
+
+    assert_eq!(files[0].status, Status::Failed("first".into()));
+    assert_eq!(files[0].error, Some("first".into()));
+    assert_eq!(files[0].progress, 0.75);
+    assert_eq!(files[1].status, Status::Pending);
+    assert_eq!(files[1].error, None);
+    assert_eq!(files[1].progress, 0.0);
 }
 
 #[test]

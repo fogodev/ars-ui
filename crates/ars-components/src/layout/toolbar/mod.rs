@@ -770,6 +770,30 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_navigation_ignores_cross_axis_arrow_keys() {
+        let captured = alloc::rc::Rc::new(core::cell::RefCell::new(Vec::new()));
+        let send = {
+            let captured = alloc::rc::Rc::clone(&captured);
+            move |event| captured.borrow_mut().push(event)
+        };
+
+        service(Props::new())
+            .connect(&send)
+            .on_root_keydown(&keyboard(KeyboardKey::ArrowDown));
+        service(Props::new())
+            .connect(&send)
+            .on_root_keydown(&keyboard(KeyboardKey::ArrowUp));
+        service(Props::new().orientation(Orientation::Vertical))
+            .connect(&send)
+            .on_root_keydown(&keyboard(KeyboardKey::ArrowRight));
+        service(Props::new().orientation(Orientation::Vertical))
+            .connect(&send)
+            .on_root_keydown(&keyboard(KeyboardKey::ArrowLeft));
+
+        assert!(captured.borrow().is_empty());
+    }
+
+    #[test]
     fn home_end_focus_first_and_last_enabled_items() {
         let mut service = service(Props::new());
 
@@ -836,6 +860,17 @@ mod tests {
     }
 
     #[test]
+    fn focus_item_ignores_disabled_index_without_clearing_current_focus() {
+        let mut service = service(Props::new());
+
+        assert_eq!(service.context().focused_index, Some(0));
+
+        drop(service.send(Event::FocusItem(2)));
+
+        assert_eq!(service.context().focused_index, Some(0));
+    }
+
+    #[test]
     fn set_items_normalizes_disabled_items_and_prunes_invalid_focus() {
         let mut service = service(Props::new());
 
@@ -860,6 +895,20 @@ mod tests {
         }));
 
         assert_eq!(*service.context(), before);
+    }
+
+    #[test]
+    fn set_items_keeps_disabled_index_strictly_below_count() {
+        let mut service =
+            Service::<Machine>::new(Props::new().id("toolbar"), &Env::default(), &Messages);
+
+        drop(service.send(Event::SetItems {
+            count: 3,
+            disabled_items: vec![2, 3],
+        }));
+
+        assert_eq!(service.context().disabled_items, vec![2]);
+        assert_eq!(service.context().focused_index, Some(0));
     }
 
     #[test]
@@ -947,6 +996,40 @@ mod tests {
         assert_eq!(service.context().orientation, Orientation::Vertical);
         assert_eq!(service.context().dir, Direction::Rtl);
         assert!(!service.context().disabled);
+    }
+
+    #[test]
+    fn each_output_prop_change_syncs_independently() {
+        let mut orientation = service(Props::new().id("toolbar"));
+
+        drop(
+            orientation.set_props(
+                Props::new()
+                    .id("toolbar")
+                    .orientation(Orientation::Vertical),
+            ),
+        );
+
+        assert_eq!(orientation.context().orientation, Orientation::Vertical);
+        assert_eq!(orientation.context().dir, Direction::Ltr);
+        assert!(!orientation.context().disabled);
+
+        let mut dir = service(Props::new().id("toolbar"));
+
+        drop(dir.set_props(Props::new().id("toolbar").dir(Direction::Rtl)));
+
+        assert_eq!(dir.context().orientation, Orientation::Horizontal);
+        assert_eq!(dir.context().dir, Direction::Rtl);
+        assert!(!dir.context().disabled);
+
+        let mut disabled = service(Props::new().id("toolbar"));
+
+        drop(disabled.set_props(Props::new().id("toolbar").disabled(true)));
+
+        assert_eq!(disabled.context().orientation, Orientation::Horizontal);
+        assert_eq!(disabled.context().dir, Direction::Ltr);
+        assert!(disabled.context().disabled);
+        assert_eq!(disabled.context().focused_index, None);
     }
 
     #[test]

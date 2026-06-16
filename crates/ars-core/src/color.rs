@@ -956,6 +956,51 @@ mod tests {
     }
 
     #[test]
+    fn min_max_helpers_preserve_rhs_on_equal_signed_zero() {
+        assert_eq!(fmin(-0.0, 0.0).to_bits(), 0.0f64.to_bits());
+        assert_eq!(fmax(0.0, -0.0).to_bits(), (-0.0f64).to_bits());
+    }
+
+    #[test]
+    fn hex_alpha_is_emitted_only_when_requested_and_translucent() {
+        let translucent = ColorValue::new(210.0, 1.0, 0.5, 0.5);
+        let opaque = ColorValue::new(210.0, 1.0, 0.5, 1.0);
+
+        assert_eq!(translucent.to_hex(false).len(), 7);
+        assert_eq!(translucent.to_hex(true).len(), 9);
+        assert_eq!(opaque.to_hex(true).len(), 7);
+        assert_eq!(
+            format_color_string(&translucent, ColorFormat::Hex),
+            translucent.to_hex(true)
+        );
+    }
+
+    #[test]
+    fn rgb_to_hsl_selects_correct_hue_branch_and_saturation_formula() {
+        let magenta = ColorValue::from_rgb(255, 0, 128);
+        let pale_green = ColorValue::from_rgb(204, 255, 204);
+        let dark_blue = ColorValue::from_rgb(0, 20, 80);
+
+        rgb_close(magenta.to_rgb(), (255, 0, 128), 1);
+
+        assert!((magenta.hue - 329.882_352_941_176_46).abs() < 1e-9);
+        assert!(magenta.saturation > 0.99);
+        assert!((magenta.lightness - 0.5).abs() < 1e-9);
+
+        rgb_close(pale_green.to_rgb(), (204, 255, 204), 1);
+
+        assert!((pale_green.hue - 120.0).abs() < 1e-9);
+        assert!((pale_green.saturation - 1.0).abs() < 1e-9);
+        assert!(pale_green.lightness > 0.89);
+
+        rgb_close(dark_blue.to_rgb(), (0, 20, 80), 1);
+
+        assert!((dark_blue.hue - 225.0).abs() < 1e-9);
+        assert!(dark_blue.saturation > 0.99);
+        assert!(dark_blue.lightness < 0.16);
+    }
+
+    #[test]
     fn hex_parse_and_format() {
         let color = ColorValue::from_hex("#3366ff").unwrap();
 
@@ -1175,6 +1220,22 @@ mod tests {
     }
 
     #[test]
+    fn hsb_conversion_preserves_boundary_brightness_and_saturation() {
+        let white = ColorValue::from_hsb(42.0, 0.0, 1.0);
+        let black = ColorValue::from_hsb(42.0, 1.0, 0.0);
+        let vivid_mid = ColorValue::from_hsb(210.0, 0.75, 0.8);
+
+        assert_eq!(white.to_rgb(), (255, 255, 255));
+        assert_eq!(black.to_rgb(), (0, 0, 0));
+
+        let (hue, saturation, brightness) = vivid_mid.to_hsb();
+
+        assert!((hue - 210.0).abs() < 1e-9);
+        assert!((saturation - 0.75).abs() < 1e-9);
+        assert!((brightness - 0.8).abs() < 1e-9);
+    }
+
+    #[test]
     fn channel_value_reads_every_channel() {
         let color = ColorValue::new(120.0, 0.4, 0.6, 0.8);
 
@@ -1210,6 +1271,25 @@ mod tests {
     }
 
     #[test]
+    fn with_channel_brightness_preserves_hue_saturation_and_alpha() {
+        let mut base = ColorValue::from_hsb(210.0, 0.6, 0.4);
+
+        base.alpha = 0.35;
+
+        let updated = with_channel(&base, ColorChannel::Brightness, 0.9);
+        let (hue, saturation, brightness) = updated.to_hsb();
+
+        assert!((hue - 210.0).abs() < 1e-9);
+        assert!((saturation - 0.6).abs() < 1e-9);
+        assert!((brightness - 0.9).abs() < 1e-9);
+        assert!((updated.alpha - 0.35).abs() < 1e-9);
+
+        let black = with_channel(&base, ColorChannel::Brightness, 0.0);
+
+        assert_eq!(black.to_rgb(), (0, 0, 0));
+    }
+
+    #[test]
     fn perceptual_naming_covers_lightness_and_chroma_modifiers() {
         // A dark vivid color picks up a lightness modifier and "vibrant".
         let dark_blue = ColorValue::from_rgb(0, 0, 90).color_name_en();
@@ -1224,6 +1304,28 @@ mod tests {
             pastel.contains("light") || pastel.contains("pale"),
             "got {pastel:?}"
         );
+    }
+
+    #[test]
+    fn perceptual_naming_distinguishes_achromatic_and_chroma_modifiers() {
+        assert_eq!(
+            ColorValue::from_rgb(0, 0, 0).color_name_parts().hue,
+            "black"
+        );
+        assert_eq!(
+            ColorValue::from_rgb(255, 255, 255).color_name_parts().hue,
+            "white"
+        );
+
+        let pale = ColorValue::from_rgb(255, 220, 210).color_name_parts();
+
+        assert_eq!(pale.chroma, "pale");
+        assert_ne!(pale.hue, "gray");
+
+        let vibrant = ColorValue::from_rgb(255, 0, 128).color_name_parts();
+
+        assert_eq!(vibrant.chroma, "vibrant");
+        assert_ne!(vibrant.hue, "gray");
     }
 
     #[test]
@@ -1247,6 +1349,23 @@ mod tests {
     }
 
     #[test]
+    fn hue_name_boundaries_use_next_bucket_at_exact_cutover() {
+        assert_eq!(hue_name(35.0), "red-orange");
+        assert_eq!(hue_name(55.0), "orange");
+        assert_eq!(hue_name(75.0), "yellow-orange");
+        assert_eq!(hue_name(90.0), "yellow");
+        assert_eq!(hue_name(110.0), "yellow-green");
+        assert_eq!(hue_name(135.0), "green");
+        assert_eq!(hue_name(165.0), "cyan-green");
+        assert_eq!(hue_name(185.0), "cyan");
+        assert_eq!(hue_name(205.0), "cyan-blue");
+        assert_eq!(hue_name(240.0), "blue");
+        assert_eq!(hue_name(280.0), "purple");
+        assert_eq!(hue_name(320.0), "magenta");
+        assert_eq!(hue_name(350.0), "red");
+    }
+
+    #[test]
     fn wcag_large_text_thresholds() {
         // ~3.4:1 passes AA-large (3:1) but fails AA-normal (4.5:1).
         let fg = ColorValue::from_rgb(140, 140, 140);
@@ -1260,6 +1379,26 @@ mod tests {
 
         assert!(black.passes_wcag_aaa(&bg, true));
         assert!(black.passes_wcag_aaa(&bg, false));
+    }
+
+    #[test]
+    fn wcag_aaa_has_real_failing_cases_and_symmetric_ratio() {
+        let black = ColorValue::from_rgb(0, 0, 0);
+        let white = ColorValue::from_rgb(255, 255, 255);
+        let mid_gray = ColorValue::from_rgb(110, 110, 110);
+        let light_gray = ColorValue::from_rgb(180, 180, 180);
+
+        assert!((black.contrast_ratio(&white) - white.contrast_ratio(&black)).abs() < 1e-12);
+        assert!(mid_gray.passes_wcag_aa(&white, false));
+        assert!(!mid_gray.passes_wcag_aaa(&white, false));
+        assert!(!light_gray.passes_wcag_aaa(&white, true));
+    }
+
+    #[test]
+    fn srgb_linearization_uses_low_and_high_channel_branches() {
+        assert!((srgb_to_linear(10) - (10.0 / 255.0) / 12.92).abs() < 1e-12);
+        assert!((srgb_to_linear(12) - 0.003_676_507_324_047_436).abs() < 1e-15);
+        assert!((srgb_to_linear(255) - 1.0).abs() < 1e-12);
     }
 
     #[test]
@@ -1320,6 +1459,22 @@ mod tests {
             (255, 0, 0),
             "200% saturation clamps to full red"
         );
+    }
+
+    #[test]
+    fn parser_scales_percent_hsl_and_hsb_channels() {
+        let hsl = parse_color_string("hsl(210, 40%, 60%)").expect("hsl parses");
+
+        assert!((hsl.hue - 210.0).abs() < 1e-9);
+        assert!((hsl.saturation - 0.4).abs() < 1e-9);
+        assert!((hsl.lightness - 0.6).abs() < 1e-9);
+
+        let hsb = parse_color_string("hsb(210, 75%, 80%)").expect("hsb parses");
+        let (hue, saturation, brightness) = hsb.to_hsb();
+
+        assert!((hue - 210.0).abs() < 1e-9);
+        assert!((saturation - 0.75).abs() < 1e-9);
+        assert!((brightness - 0.8).abs() < 1e-9);
     }
 
     #[test]

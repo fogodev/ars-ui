@@ -1759,6 +1759,75 @@ mod tests {
     }
 
     #[test]
+    fn rebalance_to_total_reduces_from_end_without_crossing_minimums() {
+        let panels = [
+            Panel {
+                min_size: 15.0,
+                ..panel("left", 40.0)
+            },
+            Panel {
+                min_size: 20.0,
+                ..panel("middle", 35.0)
+            },
+            Panel {
+                min_size: 25.0,
+                ..panel("right", 45.0)
+            },
+        ];
+
+        let sizes = rebalance_to_total(vec![40.0, 35.0, 45.0], &panels, 90.0);
+
+        assert_eq!(sizes, vec![40.0, 25.0, 25.0]);
+    }
+
+    #[test]
+    fn rebalance_to_total_increases_from_end_without_crossing_maximums() {
+        let panels = [
+            Panel {
+                max_size: Some(50.0),
+                ..panel("left", 30.0)
+            },
+            Panel {
+                max_size: Some(42.0),
+                ..panel("middle", 30.0)
+            },
+            Panel {
+                max_size: Some(45.0),
+                ..panel("right", 30.0)
+            },
+        ];
+
+        let sizes = rebalance_to_total(vec![30.0, 30.0, 30.0], &panels, 125.0);
+
+        assert_eq!(sizes, vec![38.0, 42.0, 45.0]);
+    }
+
+    #[test]
+    fn collapse_panel_distributes_freed_size_to_available_recipients() {
+        let mut middle = collapsible_panel("middle", 40.0);
+
+        middle.collapsed_size = 5.0;
+
+        let panels = [
+            Panel {
+                max_size: Some(55.0),
+                ..panel("left", 30.0)
+            },
+            middle,
+            Panel {
+                max_size: Some(50.0),
+                ..panel("right", 30.0)
+            },
+        ];
+
+        let mut sizes = vec![30.0, 40.0, 30.0];
+
+        collapse_panel(&mut sizes, 1, &panels);
+
+        assert_eq!(sizes, vec![45.0, 5.0, 50.0]);
+    }
+
+    #[test]
     fn compute_resize_zero_delta_does_not_snap_collapsible_panel() {
         let mut left = collapsible_panel("left", 0.25);
 
@@ -2277,6 +2346,32 @@ mod tests {
         }));
 
         assert_eq!(service.context().sizes.get(), &vec![90.0, 10.0]);
+    }
+
+    #[test]
+    fn end_key_uses_remaining_capacity_not_sum_of_current_size() {
+        let mut left = panel("left", 30.0);
+
+        left.max_size = Some(70.0);
+
+        let mut right = panel("right", 70.0);
+
+        right.min_size = 20.0;
+        right.max_size = None;
+
+        let mut service = service(
+            Props::new()
+                .id("split")
+                .panels(vec![left, right])
+                .default_sizes(vec![30.0, 70.0]),
+        );
+
+        drop(service.send(Event::KeyDown {
+            handle_index: 0,
+            event: key(KeyboardKey::End),
+        }));
+
+        assert_eq!(service.context().sizes.get(), &vec![70.0, 30.0]);
     }
 
     #[test]
