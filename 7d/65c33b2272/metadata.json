@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "7d65c33b2272",
+  "strategy": "manual-commit",
+  "branch": "codex/sharded-coverage-ci",
+  "checkpoints_count": 0,
+  "files_touched": [
+    ".github/workflows/ci.yml"
+  ],
+  "sessions": [
+    {
+      "metadata": "/7d/65c33b2272/0/metadata.json",
+      "transcript": "/7d/65c33b2272/0/full.jsonl",
+      "content_hash": "/7d/65c33b2272/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 122331,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 3593856,
+    "output_tokens": 9434,
+    "api_call_count": 47
+  }
+}
