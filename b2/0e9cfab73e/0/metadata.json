@@ -1,0 +1,86 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "b20e9cfab73e",
+  "session_id": "019ed138-1195-7a62-9d4a-6e30750f920d",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-16T20:58:41.167839Z",
+  "branch": "codex/field-form-adapter-retrofit-audit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-leptos/tests/checkbox_wasm.rs",
+    "crates/ars-dioxus/tests/checkbox_wasm.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "f89fe20eeb11",
+  "checkpoint_transcript_start": 2009,
+  "transcript_lines_at_start": 2009,
+  "token_usage": {
+    "input_tokens": 150438,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 12613760,
+    "output_tokens": 12877,
+    "api_call_count": 79
+  },
+  "session_metrics": {
+    "turn_count": 13
+  },
+  "summary": {
+    "intent": "Retrofit Field, Fieldset, and Form adapters to the Checkbox-era low-level primitive shape with Root naming and stylable compound parts, then get the PR through CI and Codex review.",
+    "outcome": "PR #731 was opened against fogodev/ars-ui closing issue #730. Local `cargo xci-fast` passed all 10 stages, but remote CI revealed a stale `button::Type` import in checkbox wasm tests that the local fast profile missed. The import was patched and pushed; Codex review was still in progress (👀) at session end.",
+    "learnings": {
+      "repo": [
+        "`cargo xci-fast` runs 10 stages (fmt, clippy, unit, i18n splits, integration, adapter, spec snippets, error coverage, lint/coverage checks, coverage-native) but does NOT compile the full wasm test suite — wasm coverage jobs run separately in remote CI and can expose regressions missed locally.",
+        "The repo uses a `@codex review` trigger via GitHub comment to invoke an async Codex review loop; the skill lives at `.agents/skills/waiting-for-codex-review/SKILL.md`.",
+        "Shared validation helpers (native validity classification, form-error merging) belong in `ars-forms`; adapter-level duplication should be moved there.",
+        "Adapter parity lint is enforced via `cargo xtask lint adapter-parity`; Dioxus hook probe and spec validation (`cargo xtask spec validate`) are also required gates.",
+        "Remote CI has separate jobs for `Coverage`, `Coverage Wasm (ars-dioxus)`, and `Coverage Wasm (ars-leptos)` that compile the full wasm test suite, unlike the local fast profile."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-leptos/tests/checkbox_wasm.rs",
+          "line": 1,
+          "end_line": 80,
+          "finding": "Had stale `button::Type` qualified references after prelude/root export cleanup; needed `button` module import restored alongside the direct `Button` import."
+        },
+        {
+          "path": "crates/ars-dioxus/tests/checkbox_wasm.rs",
+          "line": 1,
+          "end_line": 80,
+          "finding": "Same stale `button::Type` import issue as the Leptos counterpart — parallel fix required in both adapters."
+        }
+      ],
+      "workflow": [
+        "When `gh pr create` and `gh pr comment` hit sandbox GraphQL errors, the REST issues comment endpoint (`gh api repos/:owner/:repo/issues/:n/comments`) succeeds where the GraphQL path fails.",
+        "Codex review state is observable via two parallel checks: PR reactions (👀 = in progress, rocket/+1 = approved) and a GraphQL query for unresolved review threads authored by a login matching `codex`.",
+        "A 2-minute polling interval is appropriate for Codex review; even large PRs rarely exceed 8-10 polling rounds.",
+        "Wasm tests should be run with `--tests` (all test targets) rather than named test files when verifying a fix that touches shared imports across multiple wasm test files.",
+        "The CI fix helper script is at `~/.codex/plugins/cache/openai-curated-remote/github/0.1.2/skills/gh-fix-ci/scripts/inspect_pr_checks.py` and requires `python3`, not `python`."
+      ]
+    },
+    "friction": [
+      "`gh pr create` and `gh pr comment` both failed with GitHub API connection errors in the sandboxed session, requiring fallback to `gh api` REST endpoints.",
+      "`cargo xci-fast` does not cover wasm compilation, creating a gap where a stale import survived local CI but broke remote wasm coverage jobs.",
+      "Codex review ran for 14+ polling intervals (28+ minutes) without producing threads or approval, making it impossible to confirm a clean review within the session.",
+      "The `python` binary is not available in the environment; `python3` must be used explicitly for xtask helper scripts."
+    ],
+    "open_items": [
+      "Codex review of PR #731 was still in progress (👀) at session end — verdict and any requested changes are pending.",
+      "E2E/browser parity for Field and Form adapters is only partial: focused E2E utility runs were blocked by harness startup and category-tab discovery issues before reaching Field/Form assertions.",
+      "Typed native browser validity (web/wasm DOM-owned) vs. non-DOM/native targets using controlled validation errors is an intentional design stance that may warrant a future WebView bridge design.",
+      "Remote CI wasm coverage jobs were failing at session end due to the `button::Type` import; the fix commit was pushed but remote CI re-run results were not yet confirmed."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-16T20:58:12.315444Z",
+    "agent_lines": 8,
+    "agent_removed": 2,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 8,
+    "total_lines_changed": 10,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
