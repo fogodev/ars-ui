@@ -204,6 +204,17 @@ enum Command {
 
 #[derive(Subcommand)]
 enum CoverageCommand {
+    /// Generate native workspace lcov, optionally for a nextest partition.
+    Native {
+        /// Path to write the generated lcov file.
+        #[arg(long)]
+        file: PathBuf,
+
+        /// Optional cargo-nextest partition, for example `hash:1/8`.
+        #[arg(long)]
+        partition: Option<String>,
+    },
+
     /// Generate experimental wasm lcov for a single package.
     Wasm {
         /// Crate name (e.g., "ars-dom").
@@ -754,6 +765,13 @@ fn main() {
         // ── Coverage ──────────────────────────────────────────────────
         Command::Coverage { cmd } => {
             let result = match cmd {
+                CoverageCommand::Native { file, partition } => {
+                    coverage::generate_native_lcov(&coverage::NativeCoverageOptions {
+                        output: file,
+                        partition,
+                    })
+                }
+
                 CoverageCommand::Wasm {
                     package,
                     file,

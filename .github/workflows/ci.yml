@@ -208,11 +208,55 @@ jobs:
       - name: Error Variant Coverage
         run: cargo xtask ci error-variant-coverage
 
-  coverage:
-    name: Coverage
+  coverage-native:
+    name: Coverage Native (${{ matrix.partition }}/8)
     needs: [clippy]
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: ./.github/actions/install-dioxus-desktop-deps
+      - name: Native coverage shard
+        run: cargo xtask coverage native --file target/coverage/native-${{ matrix.partition }}.lcov --partition hash:${{ matrix.partition }}/8
+      - name: Upload native lcov
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-native-${{ matrix.partition }}
+          path: target/coverage/native-${{ matrix.partition }}.lcov
+          if-no-files-found: warn
+
+  coverage-wasm:
+    name: Coverage Wasm (${{ matrix.package }})
+    needs: [clippy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: ars-dom
+            args: --feature web
+          - package: ars-i18n
+            args: --no-default-features --feature web-intl
+          - package: ars-leptos
+            args: --feature csr
+          - package: ars-dioxus
+            args: --feature web
+          - package: ars-test-harness-leptos
+            args: ""
+          - package: ars-test-harness-dioxus
+            args: --no-default-features --feature ars-i18n/web-intl
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -223,12 +267,6 @@ jobs:
           targets: wasm32-unknown-unknown
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      # Pinned to match crap::CARGO_CRAP_VERSION; bump both together.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-crap@0.2.2
       - name: Reclaim runner disk space
         run: |
           df -h
@@ -281,8 +319,61 @@ jobs:
       - name: Configure wasm coverage clang
         run: echo "WASM_COVERAGE_CLANG=/usr/bin/clang-22" >> "$GITHUB_ENV"
       - uses: ./.github/actions/install-dioxus-desktop-deps
-      - name: Coverage
-        run: cargo xtask ci coverage
+      - name: Wasm coverage shard
+        run: cargo xtask coverage wasm --package ${{ matrix.package }} --file target/coverage/${{ matrix.package }}-wasm.lcov ${{ matrix.args }}
+      - name: Upload wasm lcov
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-wasm-${{ matrix.package }}
+          path: target/coverage/${{ matrix.package }}-wasm.lcov
+          if-no-files-found: warn
+
+  coverage:
+    name: Coverage
+    needs: [coverage-native, coverage-wasm]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require coverage shards
+        run: |
+          if [ "${{ needs.coverage-native.result }}" != "success" ]; then
+            echo "coverage-native result was ${{ needs.coverage-native.result }}"
+            exit 1
+          fi
+          if [ "${{ needs.coverage-wasm.result }}" != "success" ]; then
+            echo "coverage-wasm result was ${{ needs.coverage-wasm.result }}"
+            exit 1
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Pinned to match crap::CARGO_CRAP_VERSION; bump both together.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-crap@0.2.2
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: coverage-[nw]*
+          path: target/coverage/downloads
+          merge-multiple: true
+      - name: Merge coverage
+        run: |
+          files=(target/coverage/downloads/*.lcov)
+          if [ "${files[0]}" = "target/coverage/downloads/*.lcov" ]; then
+            echo "No coverage LCOV artifacts were downloaded"
+            exit 1
+          fi
+
+          args=()
+          for file in "${files[@]}"; do
+            args+=(--file "$file")
+          done
+
+          cargo xtask coverage merge --output lcov.info "${args[@]}"
+      - name: Coverage thresholds
+        run: cargo xtask coverage check-all --file lcov.info
       # Reuses the merged lcov.info from the coverage step (no recompile).
       # Regression-mode gate: fails the job only when a tracked (>= CRAP 30)
       # shipped-library function regresses vs the committed baseline. Output is
@@ -297,6 +388,7 @@ jobs:
           path: |
             lcov.info
             target/coverage/*.lcov
+            target/coverage/downloads/*.lcov
             target/wasm-coverage/**/profraw/*.profraw
           if-no-files-found: ignore
       - name: Snapshot Count
