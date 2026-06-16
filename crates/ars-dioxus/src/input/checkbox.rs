@@ -6,7 +6,10 @@
 
 use ars_components::input::checkbox::Machine;
 pub use ars_components::input::checkbox::{Event, Messages, Part, Props, State};
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[cfg(any(
+    all(feature = "web", target_arch = "wasm32"),
+    all(feature = "desktop", not(target_arch = "wasm32"))
+))]
 use ars_core::HtmlAttr;
 use ars_forms::validation::Error;
 use ars_interactions::KeyboardEventData;
@@ -486,6 +489,7 @@ fn render_hidden_input(
                 let interactive = machine.with_api_snapshot(api_is_interactive);
 
                 machine.send.call(if checked { Event::Check } else { Event::Uncheck });
+                sync_hidden_input_checked(machine);
 
                 if interactive && let Some(callback) = on_checked_change {
                     callback.call(next);
@@ -525,6 +529,62 @@ fn sync_hidden_input_checked(machine: crate::UseMachineReturn<Machine>) {
         .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
     {
         input.set_checked(committed);
+    }
+}
+
+#[cfg(not(all(feature = "web", target_arch = "wasm32")))]
+fn sync_hidden_input_checked(machine: crate::UseMachineReturn<Machine>) {
+    #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+    {
+        let (input_id, committed) = machine.with_api_snapshot(|api| {
+            (
+                api.hidden_input_attrs()
+                    .get(&HtmlAttr::Id)
+                    .map(str::to_owned),
+                api.checked() == State::Checked,
+            )
+        });
+
+        if let Some(input_id) = input_id {
+            let _ = document::eval(&hidden_input_checked_sync_script(&input_id, committed));
+        }
+    }
+
+    #[cfg(not(all(feature = "desktop", not(target_arch = "wasm32"))))]
+    {
+        let _ = machine;
+    }
+}
+
+#[cfg(all(
+    not(all(feature = "web", target_arch = "wasm32")),
+    any(test, all(feature = "desktop", not(target_arch = "wasm32")))
+))]
+fn hidden_input_checked_sync_script(input_id: &str, committed: bool) -> String {
+    format!(
+        r#"(() => {{
+    const input = typeof document === "undefined" ? null : document.getElementById({input_id:?});
+    if (input && "checked" in input) {{
+        input.checked = {committed};
+    }}
+}})();"#
+    )
+}
+
+#[cfg(all(test, not(all(feature = "web", target_arch = "wasm32"))))]
+mod tests {
+    #[test]
+    fn desktop_hidden_input_sync_script_sets_committed_checked_property() {
+        let script = super::hidden_input_checked_sync_script("terms\"hidden", true);
+
+        assert!(
+            script.contains("document.getElementById(\"terms\\\"hidden\")"),
+            "script must find the native input by escaped id: {script}"
+        );
+        assert!(
+            script.contains("input.checked = true;"),
+            "script must restore the committed checked property: {script}"
+        );
     }
 }
 
