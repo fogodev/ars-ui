@@ -1,0 +1,120 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "df2b79e87faa",
+  "session_id": "019ed0de-4809-7d81-a570-c9c88fbddb60",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-16T15:14:52.543354Z",
+  "branch": "codex/sharded-coverage-ci",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "spec/testing/14-ci.md",
+    "xtask/src/ci/mod.rs",
+    "xtask/src/coverage.rs",
+    "xtask/src/main.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "a49c82d9f028",
+  "token_usage": {
+    "input_tokens": 459633,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 11795712,
+    "output_tokens": 29053,
+    "api_call_count": 87
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "summary": {
+    "intent": "Break the monolithic Coverage CI job into parallel shards — 8 native nextest partition jobs plus 6 per-package wasm jobs — merging all LCOV artifacts in a final gate job to reduce wall-clock CI time.",
+    "outcome": "Implemented the full sharding pipeline: new `cargo xtask coverage native` CLI with optional `--partition hash:K/N`, three-job GitHub Actions topology (coverage-native matrix, coverage-wasm matrix, Coverage merge/check/CRAP/Codecov), updated spec docs, and committed to branch `codex/sharded-coverage-ci` after passing the pre-push gate.",
+    "learnings": {
+      "repo": [
+        "The repo already had `cargo xtask coverage merge` that unions LCOV hits without double-counting, making artifact-based sharding straightforward.",
+        "`xtask::coverage::default_wasm_coverage_targets()` owns the canonical list of 6 wasm packages — the workflow matrix should derive from this rather than hardcoding.",
+        "The final CI job must stay named exactly `Coverage` to avoid branch-protection rule churn.",
+        "CRAP analysis and Codecov upload must live in the post-merge job because they consume the fully merged lcov.info, not partial shards.",
+        "`cargo xci --profile fast` is the required pre-push gate; it includes native coverage with thresholds and is the last stage, making it the slow part of the fast profile.",
+        "`cargo xfmt` invokes `dx fmt` broadly across Dioxus files, not just Rust — formatter diffs should be inspected after running it.",
+        "Workspace-wide nextest partitioning is safer than package-group splits for native coverage because proc-macro and cross-crate coverage (e.g. `ars-derive`) is only produced when other crates' tests run."
+      ],
+      "code": [
+        {
+          "path": "xtask/src/coverage.rs",
+          "line": 1056,
+          "end_line": 1160,
+          "finding": "Existing wasm coverage helpers showed the pattern (options struct → arg builder fn → caller) used to model the new NativeCoverageOptions + native_coverage_args."
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "line": 211,
+          "end_line": 320,
+          "finding": "Original monolithic coverage job: native workspace run, six sequential wasm packages, threshold check, CRAP, upload — all in one job. Replaced by three jobs."
+        },
+        {
+          "path": "xtask/src/ci/mod.rs",
+          "line": 700,
+          "end_line": 835,
+          "finding": "The serial `cargo xtask ci coverage` path was refactored to call the new native coverage helper without a partition, keeping local parity with the sharded CI behavior."
+        },
+        {
+          "path": "spec/testing/14-ci.md",
+          "line": 387,
+          "end_line": 595,
+          "finding": "CI spec had stale job names, a phantom `test-harness` job example, and a dependency graph that didn't reflect the sharded topology — all updated during the post-implementation audit."
+        }
+      ],
+      "workflow": [
+        "Test filters for `cargo test -p xtask --lib` require the exact test function name, not the module path prefix — `coverage::native_coverage_args` matched zero tests, but `native_coverage_args` worked.",
+        "Red-green TDD against pure argument construction functions lets you validate CI command shape without paying for instrumented workspace runs.",
+        "Synthetic LCOV files (two lines, two source records) are sufficient to smoke-test `coverage merge` and `coverage check-all` CLI paths outside unit tests.",
+        "A post-implementation audit pass (spec/workflow drift, stale references, dependency graph) caught real inconsistencies in `14-ci.md` that would have misled future contributors."
+      ]
+    },
+    "friction": [
+      "`cargo xci --profile fast` ran for an extended period requiring many polling cycles — trybuild tests and `ars-core` compile-contract tests were the slow tail.",
+      "Skill path aliases in the agent prompt pointed to non-existent filesystem locations, requiring a fallback to `~/.claude/skills/` copies before work could begin.",
+      "The initial test filter `cargo test -p xtask --lib coverage::native_coverage_args` silently matched zero tests instead of erroring, masking whether red tests were actually red."
+    ],
+    "open_items": [
+      "Tune the native partition count (currently 8) based on actual CI run times after the first PR run — one shard may dominate and warrant re-balancing.",
+      "Full sharded coverage workload was not run locally; correctness of the 14-artifact merge and per-threshold checks will only be confirmed by the CI run on the PR.",
+      "The wasm matrix still hardcodes the 6 package names in the YAML rather than deriving them from `default_wasm_coverage_targets()` — a future improvement would auto-generate the matrix."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-16T15:14:08.09547Z",
+    "agent_lines": 333,
+    "agent_removed": 155,
+    "human_added": 0,
+    "human_modified": 2,
+    "human_removed": 0,
+    "total_committed": 334,
+    "total_lines_changed": 490,
+    "agent_percentage": 99.59183673469387,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 1,
+      "user_lines_removed": 1,
+      "agent_lines_added": 335,
+      "agent_lines_removed": 156,
+      "user_added_per_file": {
+        "spec/testing/14-ci.md": 1
+      },
+      "user_removed_per_file": {
+        "spec/testing/14-ci.md": 1
+      }
+    }
+  ]
+}
