@@ -1,0 +1,76 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "ecaec7a8cdce",
+  "session_id": "019ed138-1195-7a62-9d4a-6e30750f920d",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-16T22:24:21.150186Z",
+  "branch": "codex/field-form-adapter-retrofit-audit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-leptos/tests/form.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "f89fe20eeb11",
+  "checkpoint_transcript_start": 3367,
+  "transcript_lines_at_start": 3367,
+  "token_usage": {
+    "input_tokens": 20062,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 2889216,
+    "output_tokens": 3038,
+    "api_call_count": 20
+  },
+  "session_metrics": {
+    "turn_count": 13
+  },
+  "summary": {
+    "intent": "Fix a Codex review thread on PR #731 in fogodev/ars-ui by correcting the Dioxus form status-region detector to match only the qualified type path, and add SSR regression tests to cover the fix.",
+    "outcome": "The Dioxus fix was committed and pushed, but CI caught a missing Leptos parity test; the Leptos counterpart was added, all local tests passed, and the final commit was pushed with adapter parity green.",
+    "learnings": {
+      "repo": [
+        "The repo uses a custom `cargo xtask lint adapter-parity` gate that enforces test count parity between ars-dioxus and ars-leptos form SSR tests — adding a test to one adapter without the other fails CI.",
+        "Dioxus form status-region detection uses component-name scanning and must match the fully-qualified path `ars_dioxus::utility::form::StatusRegion` to avoid false positives on unrelated components with the same name.",
+        "Leptos tracks `form::StatusRegion` via context injection rather than component-name scanning, so its detection logic differs from the Dioxus adapter."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-leptos/tests/form.rs",
+          "finding": "Added a regression test for unrelated direct-child component named StatusRegion to keep the Leptos fallback live region present and satisfy adapter parity."
+        },
+        {
+          "path": "crates/ars-leptos/src/utility/form.rs",
+          "finding": "StatusRegion tracking uses context rather than name-based scanning; lines containing 'StatusRegion', 'has_status', and 'status_region' were audited via rg to confirm this."
+        }
+      ],
+      "workflow": [
+        "Codex review is triggered by posting `@codex review` as an issue comment; pickup is confirmed by an 'eyes' reaction from `chatgpt-codex-connector`.",
+        "GraphQL mutations to resolve review threads require a `threadId` variable; a brace typo in a combined query silently failed and required splitting into simpler queries.",
+        "Polling CI with `gh pr checks 731 --watch=false` in sleep loops (60s, then 180s increments) is the pattern used to watch matrix jobs gate on clippy before the rest fan out.",
+        "`cargo xfmt` + `git diff --check` + `cargo xclippy` is the local pre-commit hygiene sequence used before every push."
+      ]
+    },
+    "friction": [
+      "A brace typo in a combined GraphQL query caused a silent failure, requiring the query to be split into simpler separate calls.",
+      "CI adapter-parity gate caught a missing Leptos test that was not caught by local pre-commit checks, requiring an extra commit/push cycle.",
+      "Clippy is a serial gate in the CI matrix, forcing long sleep-poll loops (180s) before the rest of the matrix fans out.",
+      "`gh api` POST for review thread replies requires knowing the `in_reply_to` comment database ID upfront, which must be retrieved separately."
+    ],
+    "open_items": [
+      "Codex final review result was not confirmed in the transcript — the fresh `@codex review` request was pending when the session ended.",
+      "The full CI matrix result after the Leptos parity commit was not verified; only local passes were confirmed."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-16T22:24:01.482579Z",
+    "agent_lines": 34,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 34,
+    "total_lines_changed": 34,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}

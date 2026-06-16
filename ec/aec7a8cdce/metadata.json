@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "ecaec7a8cdce",
+  "strategy": "manual-commit",
+  "branch": "codex/field-form-adapter-retrofit-audit",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "crates/ars-leptos/tests/form.rs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ec/aec7a8cdce/0/metadata.json",
+      "transcript": "/ec/aec7a8cdce/0/full.jsonl",
+      "content_hash": "/ec/aec7a8cdce/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 20062,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 2889216,
+    "output_tokens": 3038,
+    "api_call_count": 20
+  }
+}
