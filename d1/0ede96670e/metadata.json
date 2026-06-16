@@ -1,0 +1,23 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d10ede96670e",
+  "strategy": "manual-commit",
+  "branch": "codex/issue-320-431-checkbox-adapters",
+  "checkpoints_count": 0,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/d1/0ede96670e/0/metadata.json",
+      "transcript": "/d1/0ede96670e/0/full.jsonl",
+      "content_hash": "/d1/0ede96670e/0/content_hash.txt",
+      "prompt": "/d1/0ede96670e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 928077,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 18544128,
+    "output_tokens": 22628,
+    "api_call_count": 114
+  }
+}

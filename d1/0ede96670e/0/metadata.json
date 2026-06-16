@@ -1,0 +1,83 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "d10ede96670e",
+  "session_id": "019e92f8-84a9-7fc0-bf0e-061072d47c47",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-16T00:56:06.795842Z",
+  "branch": "codex/issue-320-431-checkbox-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "d932f1bc2bc5",
+  "checkpoint_transcript_start": 15427,
+  "transcript_lines_at_start": 15427,
+  "token_usage": {
+    "input_tokens": 928077,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 18544128,
+    "output_tokens": 22628,
+    "api_call_count": 114
+  },
+  "session_metrics": {
+    "turn_count": 21
+  },
+  "summary": {
+    "intent": "Address nine Codex review threads on PR #727 (fogodev/ars-ui), push fixes, and then resolve a CI Coverage/CRAP regression that appeared in the subsequent CI run.",
+    "outcome": "All nine Codex threads were replied to and resolved with commit b696c490. A follow-up commit fixed two CRAP complexity regressions (InputType::as_str in ars-components and apply_attr_value in ars-dom) that were blocking the Coverage CI gate. A transient network failure in Error Variant Coverage remained unresolved at session end.",
+    "learnings": {
+      "repo": [
+        "The repo uses a `cargo crap` gate with a `.crap-baseline.json` file and `--fail-regression` flag; CRAP score increases in changed or path-shifted functions block CI.",
+        "CI LCOV artifacts use `/home/runner/work/ars-ui/ars-ui/` paths; local replay requires `SF:` path normalization to the local checkout root.",
+        "The `cargo xclippy` and `cargo xfmt` commands are the required pre-push lint/format gates for this repo.",
+        "Adapter scaffolding should create `src/<category>/<component>/mod.rs` (directory-backed layout), not flat files.",
+        "Widget, fixture, and E2E harness category lookup must come from `spec/manifest.toml` metadata, not a hard-coded component map.",
+        "Leptos and Dioxus input E2E fixtures must inject CSS Checkbox STYLES before rendering styled fixtures.",
+        "Dioxus widget public CSS include targets are tracked as public symlinks to crate companion styles, verified by an xtask regression test.",
+        "All six widget form demos must set controlled terms checkbox `default_checked` to `Checked` so reset restores expected checked state.",
+        "Adapter presence checks require parsed `#[test]`/`#[wasm_bindgen_test]` attributes; empty or comment-only files are rejected.",
+        "Sketch validation must track final matrix data-row count and reject header-only placeholder matrices.",
+        "Workflow delivery checks in adapter-parity must scope from usage docs or counterpart sketches so missing usage docs cause failures instead of silent drops.",
+        "The duplicate-helper regex must match `const`, `async`, `unsafe`, and `pub(crate)`-style private helper functions."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-components/src/utility/field/mod.rs",
+          "line": 60,
+          "end_line": 125,
+          "finding": "InputType::as_str was a wide 23-arm match with partial coverage, causing CRAP regression. Fixed by switching to a static indexed token table with a test covering every HTML token. Explicit discriminants were added to prevent future variant ordering shifts."
+        },
+        {
+          "path": "crates/ars-dom/src/announcer.rs",
+          "line": 312,
+          "end_line": 385,
+          "finding": "apply_attr_value mixed AttrValue conversion with DOM mutation in one function, inflating cyclomatic complexity past the CRAP gate. Refactored to separate value conversion from set/remove dispatch. This code is behind a wasm/web cfg and must be checked with --target wasm32-unknown-unknown."
+        }
+      ],
+      "workflow": [
+        "GitHub blocks `gh run rerun --failed` while the workflow is still in progress; must wait for all jobs to complete before rerunning failed jobs.",
+        "Saving CI job logs locally with `gh api .../logs > /tmp/file.log` and stripping ANSI color with `perl -pe 's/\\e\\[[0-9;]*m//g'` is necessary to reliably parse cargo-crap table output.",
+        "The cargo-crap CLI's table format prints thousands of unchanged/removed rows; filtering for `┆ +N` delta columns is needed to isolate actual regressions.",
+        "Transient CI failures (e.g., curl HTTP2 framing errors during crate registry downloads) must be distinguished from real code failures before deciding to rerun vs. fix.",
+        "When CI LCOV paths don't match the local checkout, use `sed` to normalize `SF:` lines before running local coverage tools.",
+        "Codex review is triggered by posting `@codex review` as a PR comment via `gh pr comment`; stale 👀 reactions can indicate a stalled review that may need re-triggering.",
+        "Resolving GitHub review threads requires both posting a reply comment (`gh api -X POST .../comments` with `in_reply_to`) and calling the `resolveReviewThread` GraphQL mutation separately."
+      ]
+    },
+    "friction": [
+      "GitHub's `gh run rerun --failed` command refuses to run while the workflow is still active, requiring repeated polling loops before the rerun could be attempted.",
+      "The cargo-crap terminal output is extremely noisy (thousands of unchanged/removed rows) and embeds ANSI color codes, making it difficult to identify actual regressions from raw log output.",
+      "CI LCOV artifacts reference runner-absolute paths, breaking local cargo-crap replay without a manual sed normalization step.",
+      "The Coverage CI job took an unusually long time (multiple polling cycles), and its failure was buried in a large log requiring manual line-range extraction.",
+      "A GraphQL query typo in one polling iteration (`reviewThreads` closing brace misplaced) caused a failed query that had to be corrected in the next cycle.",
+      "The pre-commit hook ran silently for an extended period with no output, making it unclear whether it was progressing or hung.",
+      "The transient `Error Variant Coverage` network failure (curl HTTP2 framing error on pin-project-lite) could not be rerun during the session due to the active workflow restriction."
+    ],
+    "open_items": [
+      "The transient `Error Variant Coverage` CI job failure (curl HTTP2 framing error fetching pin-project-lite) was never rerun; it needs a manual `gh run rerun --failed` once CI settles.",
+      "The `ars-dom::apply_attr_value` CRAP delta shown in local replay against CI LCOV may still appear in CI if baseline path alignment differs; should be verified in the next CI run.",
+      "Codex had 👀 for an extended period with no new threads posted; if the next CI run triggers another Codex review cycle, watch for stale review state requiring a fresh `@codex review` trigger.",
+      "The `.crap-baseline.json` was not updated in this session; if the refactored functions now have lower CRAP scores, the baseline should be updated to lock in the improvement."
+    ]
+  }
+}
