@@ -1,0 +1,111 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "649ef581106f",
+  "session_id": "019e92f8-84a9-7fc0-bf0e-061072d47c47",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-16T00:07:31.171557Z",
+  "branch": "codex/issue-320-431-checkbox-adapters",
+  "checkpoints_count": 0,
+  "files_touched": [],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "d932f1bc2bc5",
+  "checkpoint_transcript_start": 14805,
+  "transcript_lines_at_start": 14805,
+  "token_usage": {
+    "input_tokens": 419748,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 10370048,
+    "output_tokens": 29689,
+    "api_call_count": 81
+  },
+  "session_metrics": {
+    "turn_count": 21
+  },
+  "summary": {
+    "intent": "Address nine unresolved Codex review findings on PR #727 (codex/issue-320-431-checkbox-adapters) covering adapter lint hardening, sketch validation, scaffold layout, E2E fixture CSS loading, Dioxus widget public assets, and reset defaults in widget demos.",
+    "outcome": "All nine Codex findings were addressed and committed as 'fix(workflow): address Codex adapter hardening findings'. All focused regression tests and lint gates passed before the commit.",
+    "learnings": {
+      "repo": [
+        "The Dioxus widget example public/ directories (widgets-dioxus, widgets-dioxus-css, widgets-dioxus-tailwind) contain symlinks pointing to the crate companion stylesheets (crates/ars-core/ars-base.css, crates/ars-interactions/ars-interactions.css) — writing to public/*.css files follows the symlink and damages the crate source.",
+        "Adapter parity lint was silently skipping components without usage docs instead of failing — the fix scopes delivery-hardening checks to workflow-enrolled components (those with usage docs or a single-component counterpart sketch).",
+        "Category lookup in the lint was hard-coded; it was replaced with manifest-derived data from spec/manifest.toml.",
+        "The helper/semantic-boundary regex was incorrectly matching public component functions (e.g., HiddenInput); it was narrowed to only match pub(...) scoped (private/internal) helpers.",
+        "Sketch validation was accepting header-only matrices as valid; the validator now rejects them.",
+        "Scaffold output was generating flat files; it now creates src/<category>/<component>/mod.rs (directory-backed module shape).",
+        "E2E fixtures for both Leptos and Dioxus were rendering the styled Checkbox without injecting its CSS, causing unstyled rendering in fixture tests.",
+        "The controlled required checkbox in all six widget examples (widgets-leptos, widgets-leptos-css, widgets-leptos-tailwind, widgets-dioxus, widgets-dioxus-css, widgets-dioxus-tailwind) was missing an explicit checked default matching the reset handler."
+      ],
+      "code": [
+        {
+          "path": "xtask/src/lint.rs",
+          "line": 188,
+          "end_line": 220,
+          "finding": "Parity lint was filtering by docs presence before validating delivery — fixed to make missing docs a hard failure for workflow-scoped components"
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "line": 460,
+          "end_line": 540,
+          "finding": "Presence checks were file-existence based; replaced with content-backed checks requiring actual test attributes"
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "line": 1760,
+          "end_line": 1845,
+          "finding": "Helper detection regex was too broad, matching public component fns; narrowed to pub(...) visibility forms"
+        },
+        {
+          "path": "xtask/src/spec/sketch.rs",
+          "line": 1,
+          "end_line": 170,
+          "finding": "Sketch validator accepted header-only matrices as valid; now rejects them"
+        },
+        {
+          "path": "xtask/src/adapter.rs",
+          "line": 80,
+          "end_line": 150,
+          "finding": "Scaffold was generating flat src files; changed to create src/<category>/<component>/mod.rs"
+        },
+        {
+          "path": "xtask/tests/examples.rs",
+          "line": 1,
+          "end_line": 220,
+          "finding": "New regression test added: dioxus_widget_public_assets_exist_for_inline_includes, resolving paths from CARGO_MANIFEST_DIR/.. to reach workspace root"
+        },
+        {
+          "path": "crates/ars-e2e/fixtures/leptos/src/categories/input.rs",
+          "line": 1,
+          "end_line": 90,
+          "finding": "Style injection for Checkbox CSS was missing from Leptos E2E fixture"
+        },
+        {
+          "path": "crates/ars-e2e/fixtures/dioxus/src/categories/input.rs",
+          "line": 1,
+          "end_line": 90,
+          "finding": "Style injection for Checkbox CSS was missing from Dioxus E2E fixture"
+        }
+      ],
+      "workflow": [
+        "When git restore is sandboxed (metadata outside writable root), restoring files requires overwriting content via python3 or apply_patch rather than git commands.",
+        "Codex review threads are fetched via GitHub GraphQL API filtering on isResolved==false and author matching 'codex'.",
+        "The waiting-for-codex-review skill governs the loop: push fix → post '@codex review' comment → poll CI + Codex reaction/thread count.",
+        "Running cargo xfmt after each patch batch is necessary because rustfmt reformats surrounding code, invalidating the next patch's context lines.",
+        "Integration tests in xtask/tests/ run with xtask/ as their cwd assumption; paths to workspace-level files must use CARGO_MANIFEST_DIR/.."
+      ]
+    },
+    "friction": [
+      "git restore was blocked by sandbox (git metadata lives outside the writable root), requiring multiple workarounds (apply_patch, python3 content overwrite) to restore accidentally modified crate CSS files.",
+      "apply_patch reported success creating Dioxus public/*.css files but they were silently not created — the writes went through symlinks back to crate source files, requiring filesystem investigation before the root cause was found.",
+      "Cargo xfmt reformatted surrounding code after each patch, causing subsequent patch context to not match — required re-reading sections and re-applying patches multiple times.",
+      "The adapter parity lint initially surfaced legacy pre-workflow adapters as failures after the stricter checks were added, requiring a scoping mechanism to limit new gates to workflow-enrolled components only.",
+      "The xtask integration test path resolution was wrong on first attempt (used xtask-relative paths instead of workspace-relative paths via CARGO_MANIFEST_DIR/..)."
+    ],
+    "open_items": [
+      "Legacy adapters (those predating the workflow) are still counted for parity but not gated on the new delivery-hardening checks — they should eventually be enrolled in the workflow and have docs/tests added.",
+      "The public/ symlink strategy for Dioxus widget examples is implicit and fragile — the new regression test catches missing targets, but the symlink approach itself (vs. real files or a build step) may warrant documentation or reconsideration.",
+      "The existing third-party future-incompatibility clippy note was left unresolved (noted as pre-existing).",
+      "Codex review threads were not yet replied to or resolved in this transcript — the commit was staged but the reply/resolve loop was not shown as complete."
+    ]
+  }
+}
