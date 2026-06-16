@@ -8,7 +8,7 @@ use ars_components::input::checkbox as core_checkbox;
 use ars_forms::validation::Error;
 use ars_leptos::{
     input::checkbox,
-    utility::{fieldset::Fieldset, form::Form},
+    utility::{fieldset, form},
 };
 use leptos::{prelude::*, reactive::owner::Owner};
 
@@ -209,7 +209,7 @@ fn checkbox_compound_parts_link_description_and_error_without_manual_presence_fl
 fn checkbox_inherits_fieldset_state() {
     let html = render(|| {
         view! {
-            <Fieldset id="settings" disabled=true readonly=true invalid=true>
+            <fieldset::Root id="settings" disabled=true readonly=true invalid=true>
                 <checkbox::Root id="legal">
                     <checkbox::Label>"Legal terms"</checkbox::Label>
                     <checkbox::Control>
@@ -217,7 +217,7 @@ fn checkbox_inherits_fieldset_state() {
                     </checkbox::Control>
                     <checkbox::HiddenInput />
                 </checkbox::Root>
-            </Fieldset>
+            </fieldset::Root>
         }
         .to_html()
     });
@@ -239,7 +239,7 @@ fn checkbox_inherits_fieldset_state() {
 fn checkbox_inherits_matching_form_validation_errors_by_name() {
     let html = render(|| {
         view! {
-            <Form
+            <form::Root
                 id="preferences"
                 validation_errors=BTreeMap::from([
                     ("terms".to_string(), vec![Error::server("Accept terms before continuing.")]),
@@ -262,7 +262,7 @@ fn checkbox_inherits_matching_form_validation_errors_by_name() {
                     </checkbox::Control>
                     <checkbox::HiddenInput />
                 </checkbox::Root>
-            </Form>
+            </form::Root>
         }
         .to_html()
     });

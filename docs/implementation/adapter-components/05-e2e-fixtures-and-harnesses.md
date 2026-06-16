@@ -196,6 +196,23 @@ the standalone E2E harness.
 When a PR adds the first E2E-covered component in a category, it must add the
 category command before listing it as validation.
 
+## Blocked E2E Evidence
+
+Classify E2E failures before using them as evidence:
+
+- `ComponentAssertionFailed`: the harness reached the component scenario and a
+  component assertion failed;
+- `HarnessSetupFailed`: the server, WebDriver, routing, category tab, fixture
+  discovery, or browser startup failed before the component scenario ran;
+- `EvidenceMissing`: the intended E2E row was not exercised.
+
+Only `ComponentAssertionFailed` is component behavior evidence. A
+`HarnessSetupFailed` result is still a delivery blocker for an
+outcome-complete claim, but it must not be described as a component regression
+without a reached component assertion. Fix the harness/setup issue, or mark the
+affected matrix rows `Unverified` and hand off as `partial` if the user accepts
+the remaining evidence gap.
+
 ## Exceptions
 
 Smoke-only coverage is acceptable only when:

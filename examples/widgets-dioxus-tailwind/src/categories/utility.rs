@@ -577,16 +577,16 @@ pub(crate) fn UtilityPanel() -> Element {
                     }
                     p { class: "text-sm text-slate-500", {t(UtilityText::FieldFormDescription)} }
                 }
-                Form {
+                form::Root {
                     id: "dioxus-tw-field-form-demo",
                     action: "/account",
                     on_submit: move |()| {},
                     class: "grid max-w-md gap-4 [&_fieldset]:grid [&_fieldset]:m-0 [&_fieldset]:gap-4 [&_fieldset]:rounded-lg [&_fieldset]:border [&_fieldset]:border-slate-300 [&_fieldset]:p-4 [&_legend]:px-1.5 [&_legend]:font-bold **:data-[ars-part=content]:grid **:data-[ars-part=content]:gap-3 **:data-[ars-part=description]:text-sm **:data-[ars-part=description]:text-slate-500 **:data-[ars-part=status-region]:text-sm **:data-[ars-part=status-region]:font-semibold **:data-[ars-part=status-region]:text-emerald-700",
-                    Fieldset { id: "dioxus-tw-fieldset-demo",
+                    fieldset::Root { id: "dioxus-tw-fieldset-demo",
                         fieldset::Legend { {t(UtilityText::AccountDetails)} }
                         fieldset::Description { {t(UtilityText::RequiredFieldsDescription)} }
                         fieldset::Content {
-                            Field {
+                            field::Root {
                                 id: "dioxus-tw-name-field",
                                 required: true,
                                 class: "grid gap-2",
@@ -597,7 +597,7 @@ pub(crate) fn UtilityPanel() -> Element {
                                     placeholder: t(UtilityText::NamePlaceholder),
                                 }
                             }
-                            Field {
+                            field::Root {
                                 id: "dioxus-tw-email-field",
                                 name: "email",
                                 required: true,

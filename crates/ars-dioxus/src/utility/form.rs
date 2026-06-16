@@ -4,8 +4,10 @@ use std::{collections::BTreeMap, rc::Rc};
 
 use ars_components::utility::form;
 pub use ars_components::utility::form::{Part, Props, ValidationBehavior};
-use ars_forms::validation::Error;
-use dioxus::{events::MountedData, prelude::*};
+use ars_forms::validation::{Error, merge_error_map};
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+use ars_forms::validation::{NativeInputType, NativeValidity};
+use dioxus::{dioxus_core::DynamicNode, events::MountedData, prelude::*};
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 use web_sys::wasm_bindgen::{JsCast as _, JsValue};
 
@@ -17,12 +19,24 @@ use crate::{
 #[derive(Clone, Copy)]
 pub(crate) struct FormContext {
     pub(crate) machine: crate::UseMachineReturn<form::Machine>,
+    #[cfg_attr(
+        target_arch = "wasm32",
+        expect(
+            dead_code,
+            reason = "Input adapters read this reset generation when form-participating controls are compiled; utility-only wasm test targets can compile Form without those consumers."
+        )
+    )]
     pub(crate) reset_generation: Signal<u64>,
 }
 
-/// Props for the Dioxus [`Form`] component.
+fn form_context() -> FormContext {
+    try_use_context::<FormContext>()
+        .expect("Form subcomponents must be rendered inside <form::Root/>")
+}
+
+/// Props for the Dioxus [`Root`] component.
 #[derive(Props, Clone, PartialEq, Debug)]
-pub struct FormProps {
+pub struct RootProps {
     /// Optional component instance ID.
     #[props(optional, into)]
     pub id: Option<String>,
@@ -47,6 +61,14 @@ pub struct FormProps {
     #[props(optional, into)]
     pub status_message: Option<String>,
 
+    /// Whether children render [`StatusRegion`] through an intermediate component.
+    ///
+    /// Direct `StatusRegion` children are detected automatically. Set this when
+    /// a wrapper component returns `StatusRegion`, because Dioxus does not expose
+    /// wrapped component output to the parent before render.
+    #[props(default = false)]
+    pub has_status_region: bool,
+
     /// Fires when the form submit event runs.
     #[props(optional, into)]
     pub on_submit: Option<EventHandler>,
@@ -69,7 +91,7 @@ pub struct FormProps {
     reason = "Dioxus rsx event attributes are reported as unnecessary qualifications"
 )]
 #[component]
-pub fn Form(props: FormProps) -> Element {
+pub fn Root(props: RootProps) -> Element {
     let generated_id = use_stable_id("form");
     let id = props.id.unwrap_or(generated_id);
     let mut form_ref = use_signal(|| None::<Rc<MountedData>>);
@@ -114,6 +136,9 @@ pub fn Form(props: FormProps) -> Element {
     let status_attrs =
         machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.status_region_attrs()))();
 
+    let has_explicit_status_region =
+        props.has_status_region || element_contains_status_region(&props.children);
+
     rsx! {
         form {
             onmounted: move |event| {
@@ -132,6 +157,7 @@ pub fn Form(props: FormProps) -> Element {
                     && !form_is_valid(&event, form_ref())
                 {
                     let current_form_ref = form_ref();
+
                     let mut errors = controlled_validation_errors.clone();
                     let native_errors = invalid_control_errors(
                         &event,
@@ -140,7 +166,9 @@ pub fn Form(props: FormProps) -> Element {
                         &form_locale,
                     );
                     let error_count = native_errors.values().map(Vec::len).sum::<usize>().max(1);
-                    merge_validation_errors(&mut errors, native_errors);
+
+                    merge_error_map(&mut errors, native_errors);
+
                     machine.send.call(form::Event::SetValidationErrors(errors));
                     machine
                         .send
@@ -151,8 +179,10 @@ pub fn Form(props: FormProps) -> Element {
                                 ),
                             ),
                         );
+
                     return;
                 }
+
                 if validation_behavior == ValidationBehavior::Aria {
                     machine
                         .send
@@ -162,8 +192,11 @@ pub fn Form(props: FormProps) -> Element {
                             ),
                         );
                 }
+
                 machine.send.call(form::Event::Submit);
+
                 callbacks::call(props.on_submit.as_ref());
+
                 machine
                     .send
                     .call(form::Event::SubmitComplete {
@@ -177,13 +210,69 @@ pub fn Form(props: FormProps) -> Element {
             },
             ..attrs,
             {props.children}
-            div { ..status_attrs,{status_message} }
+
+            if !has_explicit_status_region {
+                div { ..status_attrs,{status_message} }
+            }
         }
+    }
+}
+
+/// Props for the Dioxus [`StatusRegion`] component.
+#[derive(Props, Clone, PartialEq, Debug)]
+pub struct StatusRegionProps {
+    /// Global HTML attributes forwarded onto the rendered status region.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+}
+
+/// Dioxus Form status live-region part.
+///
+/// Rendering this part inside [`Root`] styles or repositions the form-owned
+/// live region while preserving the core status-region attributes and message
+/// source. If omitted, [`Root`] renders an unstyled fallback status region.
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "form::Api method items are not lifetime-general enough for UseMachineReturn part_attrs()."
+)]
+#[component]
+pub fn StatusRegion(props: StatusRegionProps) -> Element {
+    let machine = form_context().machine;
+
+    let attrs = machine.part_attrs(props.attrs, |api| api.status_region_attrs());
+
+    let status_message =
+        machine.derive(|api| api.status_message().map(str::to_owned).unwrap_or_default())();
+
+    rsx! {
+        div { ..attrs,{status_message} }
+    }
+}
+
+fn element_contains_status_region(element: &Element) -> bool {
+    element.as_ref().is_ok_and(vnode_contains_status_region)
+}
+
+fn vnode_contains_status_region(vnode: &VNode) -> bool {
+    vnode
+        .dynamic_nodes
+        .iter()
+        .any(dynamic_node_contains_status_region)
+}
+
+fn dynamic_node_contains_status_region(node: &DynamicNode) -> bool {
+    match node {
+        DynamicNode::Component(component) => {
+            component.name == "ars_dioxus::utility::form::StatusRegion"
+        }
+        DynamicNode::Fragment(nodes) => nodes.iter().any(vnode_contains_status_region),
+        DynamicNode::Text(_) | DynamicNode::Placeholder(_) => false,
     }
 }
 
 fn strip_form_event_attrs(mut attrs: Vec<Attribute>) -> Vec<Attribute> {
     attrs.retain(|attr| !matches!(attr.name, "onsubmit" | "onreset" | "onmounted"));
+
     attrs
 }
 
@@ -203,17 +292,6 @@ fn prevent_native_default(event: &Event<FormData>) {
     {
         let _ = event;
     }
-}
-
-fn merge_validation_errors(
-    errors: &mut BTreeMap<String, Vec<Error>>,
-    additional_errors: BTreeMap<String, Vec<Error>>,
-) {
-    additional_errors
-        .into_iter()
-        .for_each(|(name, mut field_errors)| {
-            errors.entry(name).or_default().append(&mut field_errors);
-        });
 }
 
 fn form_is_valid(event: &Event<FormData>, form_ref: Option<Rc<MountedData>>) -> bool {
@@ -285,114 +363,55 @@ fn native_validation_error(
     messages: &ars_forms::form::Messages,
     locale: &ars_i18n::Locale,
 ) -> Error {
-    if validity_flag(element, "valueMissing") {
-        return Error::required(messages, locale);
-    }
+    native_validity(element).to_error(messages, locale)
+}
 
-    for error in [
-        build_type_mismatch_error(element, messages, locale),
-        build_pattern_mismatch_error(element, messages, locale),
-        build_length_error(element, messages, locale),
-        build_range_error(element, messages, locale),
-        build_step_error(element, messages, locale),
-    ] {
-        if let Some(error) = error {
-            return error;
-        }
+// adapter-rendering-glue: extracts browser DOM validity facts for the shared forms helper.
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+fn native_validity(element: &web_sys::Element) -> NativeValidity {
+    NativeValidity {
+        value_missing: validity_flag(element, "valueMissing"),
+        type_mismatch: type_mismatch_input_type(element),
+        pattern_mismatch: validity_flag(element, "patternMismatch")
+            .then(|| element.get_attribute("pattern"))
+            .flatten(),
+        too_short: flagged_parsed_attr(element, "tooShort", "minlength"),
+        too_long: flagged_parsed_attr(element, "tooLong", "maxlength"),
+        range_underflow: flagged_parsed_attr(element, "rangeUnderflow", "min"),
+        range_overflow: flagged_parsed_attr(element, "rangeOverflow", "max"),
+        step_mismatch: flagged_parsed_attr(element, "stepMismatch", "step"),
     }
-
-    Error::custom("native", (messages.pattern_error)(locale))
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn build_type_mismatch_error(
-    element: &web_sys::Element,
-    messages: &ars_forms::form::Messages,
-    locale: &ars_i18n::Locale,
-) -> Option<Error> {
-    if !validity_flag(element, "typeMismatch") {
-        return None;
+fn type_mismatch_input_type(element: &web_sys::Element) -> Option<NativeInputType> {
+    if validity_flag(element, "typeMismatch") {
+        Some(match element.get_attribute("type").as_deref() {
+            Some("email") => NativeInputType::Email,
+            Some("url") => NativeInputType::Url,
+            _ => NativeInputType::Other,
+        })
+    } else {
+        None
     }
-
-    Some(match element.get_attribute("type").as_deref() {
-        Some("email") => Error::email(messages, locale),
-        Some("url") => Error::url(messages, locale),
-        _ => Error::custom("native", (messages.pattern_error)(locale)),
-    })
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn build_pattern_mismatch_error(
+fn flagged_parsed_attr<T: std::str::FromStr>(
     element: &web_sys::Element,
-    messages: &ars_forms::form::Messages,
-    locale: &ars_i18n::Locale,
-) -> Option<Error> {
-    validity_flag(element, "patternMismatch")
-        .then(|| element.get_attribute("pattern"))
+    flag: &str,
+    attr: &str,
+) -> Option<T> {
+    validity_flag(element, flag)
+        .then(|| parsed_attr(element, attr))
         .flatten()
-        .map(|pattern| Error::pattern(pattern, messages, locale))
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn build_length_error(
-    element: &web_sys::Element,
-    messages: &ars_forms::form::Messages,
-    locale: &ars_i18n::Locale,
-) -> Option<Error> {
-    if validity_flag(element, "tooShort")
-        && let Some(min_length) = build_parsed_attr::<usize>(element, "minlength")
-    {
-        return Some(Error::min_length(min_length, messages, locale));
-    }
-
-    if validity_flag(element, "tooLong")
-        && let Some(max_length) = build_parsed_attr::<usize>(element, "maxlength")
-    {
-        return Some(Error::max_length(max_length, messages, locale));
-    }
-
-    None
-}
-
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn build_range_error(
-    element: &web_sys::Element,
-    messages: &ars_forms::form::Messages,
-    locale: &ars_i18n::Locale,
-) -> Option<Error> {
-    if validity_flag(element, "rangeUnderflow")
-        && let Some(min) = build_parsed_attr::<f64>(element, "min")
-    {
-        return Some(Error::min(min, messages, locale));
-    }
-
-    if validity_flag(element, "rangeOverflow")
-        && let Some(max) = build_parsed_attr::<f64>(element, "max")
-    {
-        return Some(Error::max(max, messages, locale));
-    }
-
-    None
-}
-
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn build_step_error(
-    element: &web_sys::Element,
-    messages: &ars_forms::form::Messages,
-    locale: &ars_i18n::Locale,
-) -> Option<Error> {
-    if !validity_flag(element, "stepMismatch") {
-        return None;
-    }
-
-    build_parsed_attr::<f64>(element, "step").map(|step| Error::step(step, messages, locale))
-}
-
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
-fn build_parsed_attr<T: std::str::FromStr>(element: &web_sys::Element, attr: &str) -> Option<T> {
+fn parsed_attr<T: std::str::FromStr>(element: &web_sys::Element, attr: &str) -> Option<T> {
     element
         .get_attribute(attr)
-        .and_then(|value| value.parse::<T>().ok())
+        .and_then(|value| value.parse().ok())
 }
 
 #[cfg(all(feature = "web", target_arch = "wasm32"))]

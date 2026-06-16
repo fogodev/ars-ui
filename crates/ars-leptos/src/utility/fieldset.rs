@@ -6,7 +6,9 @@ use ars_core::Direction;
 use ars_forms::validation::Error;
 use leptos::{children::TypedChildren, context::Provider, prelude::*};
 
-use crate::{attr_map_to_leptos_inline_attrs, use_id, use_machine_with_reactive_props};
+use crate::{
+    apply_part_attrs, attr_map_to_leptos_inline_attrs, use_id, use_machine_with_reactive_props,
+};
 
 #[derive(Clone, Copy)]
 struct FieldsetContext {
@@ -22,12 +24,12 @@ pub(crate) struct InheritedFieldsetContext {
 
 fn fieldset_context() -> FieldsetContext {
     use_context::<FieldsetContext>()
-        .expect("Fieldset subcomponents must be rendered inside <Fieldset/>")
+        .expect("Fieldset subcomponents must be rendered inside <fieldset::Root/>")
 }
 
 /// Leptos Fieldset root component.
 #[component]
-pub fn Fieldset<T: 'static>(
+pub fn Root<T: 'static>(
     /// Optional component instance ID.
     #[prop(optional, into)]
     id: Option<Oco<'static, str>>,
@@ -118,6 +120,14 @@ fn fieldset_props_signal(
 /// Leptos Fieldset legend part.
 #[component]
 pub fn Legend<T>(
+    /// Consumer class tokens appended to the legend.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the legend.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+
     /// Legend content.
     children: TypedChildren<T>,
 ) -> impl IntoView
@@ -126,7 +136,7 @@ where
 {
     let attrs = fieldset_context()
         .machine
-        .with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.legend_attrs()));
+        .with_api_snapshot(|api| apply_part_attrs(api.legend_attrs(), class, style));
 
     view! { <legend {..attrs}>{children.into_inner()()}</legend> }
 }
@@ -134,6 +144,14 @@ where
 /// Leptos Fieldset description part.
 #[component]
 pub fn Description<T>(
+    /// Consumer class tokens appended to the description.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the description.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+
     /// Description content.
     children: TypedChildren<T>,
 ) -> impl IntoView
@@ -150,7 +168,7 @@ where
 
     let attrs = fieldset_context()
         .machine
-        .with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.description_attrs()));
+        .with_api_snapshot(|api| apply_part_attrs(api.description_attrs(), class, style));
 
     view! { <div {..attrs}>{children.into_inner()()}</div> }
 }
@@ -180,6 +198,14 @@ fn add_dynamic_root_attrs(
 /// Leptos Fieldset error message part.
 #[component]
 pub fn ErrorMessage<T>(
+    /// Consumer class tokens appended to the error message.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the error message.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+
     /// Error message content.
     children: TypedChildren<T>,
 ) -> impl IntoView
@@ -200,7 +226,7 @@ where
             ars_core::AttrValue::reactive_bool(move || hidden.get()),
         );
 
-        attr_map_to_leptos_inline_attrs(attrs)
+        apply_part_attrs(attrs, class, style)
     });
 
     view! { <div {..attrs}>{children.into_inner()()}</div> }
@@ -209,6 +235,14 @@ where
 /// Leptos Fieldset content part.
 #[component]
 pub fn Content<T>(
+    /// Consumer class tokens appended to the content wrapper.
+    #[prop(optional, into)]
+    class: Option<TextProp>,
+
+    /// Consumer inline style text applied to the content wrapper.
+    #[prop(optional, into)]
+    style: Option<TextProp>,
+
     /// Descendant form controls.
     children: TypedChildren<T>,
 ) -> impl IntoView
@@ -217,7 +251,7 @@ where
 {
     let attrs = fieldset_context()
         .machine
-        .with_api_snapshot(|api| attr_map_to_leptos_inline_attrs(api.content_attrs()));
+        .with_api_snapshot(|api| apply_part_attrs(api.content_attrs(), class, style));
 
     view! { <div {..attrs}>{children.into_inner()()}</div> }
 }

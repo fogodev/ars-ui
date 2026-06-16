@@ -16,16 +16,24 @@ This spec maps the core [`Form`](../../components/utility/form.md) and canonical
 
 ```rust,no_check
 #[component]
-pub fn Form(
+pub fn Root(
     #[prop(optional)] id: Option<String>,
     #[prop(optional)] validation_behavior: Option<form::ValidationBehavior>,
     #[prop(optional, into)] validation_errors: Signal<BTreeMap<String, Vec<ars_forms::validation::Error>>>,
     #[prop(optional, into)] status_message: Signal<Option<String>>,
     #[prop(optional)] action: Option<String>,
     #[prop(optional)] role: Option<String>,
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
     #[prop(optional, into)] on_submit: Option<Callback<()>>,
     #[prop(optional, into)] on_reset: Option<Callback<()>>,
     children: Children,
+) -> impl IntoView
+
+#[component]
+pub fn StatusRegion(
+    #[prop(optional, into)] class: Option<TextProp>,
+    #[prop(optional, into)] style: Option<TextProp>,
 ) -> impl IntoView
 ```
 
@@ -36,10 +44,13 @@ callbacks. `on_submit` dispatches the core `Submit` event before emitting
 `validation_errors` is a reactive `Signal<BTreeMap<String, Vec<ars_forms::validation::Error>>>`
 input so server/custom validation errors can appear and clear after mount
 without rebuilding the form subtree. `status_message` is a reactive
-`Signal<Option<String>>` used to seed or control the adapter-owned status live
-region. The status region is structural and always rendered by `Form`; it is
-not exposed as a separate public child component because doing so would create
-duplicate live-region nodes and duplicate announcements.
+`Signal<Option<String>>` used to seed or control the form status live region.
+Consumers may render the public `StatusRegion` compound part inside `form::Root` to
+style or position the live region independently. When omitted, `form::Root` renders
+an unstyled fallback status region so the accessibility contract is preserved.
+The root form exposes additive `class` and `style` props for consumer styling;
+core validation, busy, action, role, and live-region semantics remain owned by
+the form machine.
 
 ## 3. Mapping to Core Component Contract
 
@@ -49,27 +60,27 @@ duplicate live-region nodes and duplicate announcements.
 
 ## 4. Part Mapping
 
-| Core part / structure | Required? | Adapter rendering target        | Ownership      | Attr source                 | Notes                                                                 |
-| --------------------- | --------- | ------------------------------- | -------------- | --------------------------- | --------------------------------------------------------------------- |
-| `Root`                | required  | native `<form>`                 | adapter-owned  | `api.root_attrs()`          | Must preserve `novalidate`, `aria-busy`, `action`, and optional role. |
-| `StatusRegion`        | required  | hidden `<div>` inside `Root`    | adapter-owned  | `api.status_region_attrs()` | Structural live region for submission or validation announcements.    |
-| form children         | required  | consumer children inside `Root` | consumer-owned | none                        | Descendants usually consume `Context`.                                |
+| Core part / structure | Required? | Adapter rendering target                                            | Ownership      | Attr source                 | Notes                                                                 |
+| --------------------- | --------- | ------------------------------------------------------------------- | -------------- | --------------------------- | --------------------------------------------------------------------- |
+| `Root`                | required  | native `<form>`                                                     | adapter-owned  | `api.root_attrs()`          | Must preserve `novalidate`, `aria-busy`, `action`, and optional role. |
+| `StatusRegion`        | required  | public `StatusRegion` part or fallback hidden `<div>` inside `Root` | adapter-owned  | `api.status_region_attrs()` | Structural live region for submission or validation announcements.    |
+| form children         | required  | consumer children inside `Root`                                     | consumer-owned | none                        | Descendants usually consume `Context`.                                |
 
 ## 5. Attr Merge and Ownership Rules
 
-| Target node    | Core attrs                                                            | Adapter-owned attrs                                                     | Consumer attrs                                                          | Merge order                                                                                                                                                                              | Ownership notes                   |
-| -------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `Root`         | `api.root_attrs()` including validation, busy, action, and role attrs | adapter submit/reset handlers and structural `data-*` helpers if needed | consumer attrs on the form root                                         | core submission, validation, and accessibility attrs win when conflict would break the contract; `class`/`style` merge additively; handlers compose around normalized submit/reset logic | adapter-owned native `<form>`     |
-| `StatusRegion` | `api.status_region_attrs()`                                           | status wrapper visibility helpers if needed                             | none                                                                    | core live-region attrs win; consumer content cannot replace the region node                                                                                                              | always adapter-owned              |
-| form children  | none directly                                                         | none                                                                    | consumer field/tree content                                             | consumer children live inside the form root and consume context as needed                                                                                                                | descendants remain consumer-owned |
+| Target node    | Core attrs                                                            | Adapter-owned attrs                                                     | Consumer attrs                           | Merge order                                                                                                                                                                              | Ownership notes                   |
+| -------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `Root`         | `api.root_attrs()` including validation, busy, action, and role attrs | adapter submit/reset handlers and structural `data-*` helpers if needed | consumer attrs on the form root          | core submission, validation, and accessibility attrs win when conflict would break the contract; `class`/`style` merge additively; handlers compose around normalized submit/reset logic | adapter-owned native `<form>`     |
+| `StatusRegion` | `api.status_region_attrs()`                                           | status wrapper visibility helpers if needed                             | consumer attrs on the status-region part | core live-region attrs win; `class`/`style` merge additively; consumer content cannot replace the status message source                                                                  | adapter-owned live-region node    |
+| form children  | none directly                                                         | none                                                                    | consumer field/tree content              | consumer children live inside the form root and consume context as needed                                                                                                                | descendants remain consumer-owned |
 
 - Consumer overrides must not remove `novalidate`, busy semantics, or required live-region attrs when the core contract requires them.
-- Form root event handlers are composed around normalized submit/reset handling; consumer handlers may observe normalized state but must not re-enable blocked submission.
-- `StatusRegion` is an adapter-owned structural node, not a public child component; user-facing status text flows through `status_message`.
+- Root form event handlers are composed around normalized submit/reset handling; consumer handlers may observe normalized state but must not re-enable blocked submission.
+- `StatusRegion` is a public stylable compound part, but user-facing status text flows through `status_message`; consumer children must not replace the live-region message source.
 
 ## 6. Composition / Context Contract
 
-`Form` provides form context to descendant field, fieldset, and submission-aware utilities. Required descendants use `use_context::<Context>().expect(...)`; optional ones use `use_context::<Context>()`.
+`form::Root` provides form context to descendant field, fieldset, and submission-aware utilities. Required descendants use `use_context::<Context>().expect(...)`; optional ones use `use_context::<Context>()`.
 
 ## 7. Prop Sync and Event Mapping
 
@@ -143,7 +154,7 @@ Controlled/uncontrolled switching is not supported for validation state sources 
 - SSR must render both `Root` and `StatusRegion`.
 - Submit/reset listeners and validation execution are client-only.
 - The status-region node must remain structurally identical across hydration so machine-driven updates land on the expected node.
-- Form-node and status-region refs are server-safe absent and required after mount.
+- Root form node and status-region refs are server-safe absent and required after mount.
 
 ## 15. Performance Constraints
 
@@ -156,7 +167,7 @@ Controlled/uncontrolled switching is not supported for validation state sources 
 
 | Dependency    | Required?   | Dependency type         | Why it must exist first                                                                                | Notes                                                         |
 | ------------- | ----------- | ----------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
-| `field`       | required    | context contract        | Form-level registration and reset logic depends on canonical field identity and registration behavior. | Required for descendant field coordination.                   |
+| `field`       | required    | context contract        | Root-level registration and reset logic depends on canonical field identity and registration behavior. | Required for descendant field coordination.                   |
 | `fieldset`    | recommended | context contract        | Grouped field inheritance and registration should align with form-level coordination.                  | Important for complex form trees.                             |
 | `live-region` | recommended | behavioral prerequisite | The status region uses the same announcement timing principles as live-region utilities.               | Status messaging should not invent a parallel announce model. |
 
@@ -210,7 +221,7 @@ Leptos can keep the status message in a memo so only the hidden live region upda
 use leptos::prelude::*;
 
 #[component]
-pub fn Form(children: Children) -> impl IntoView {
+pub fn Root(children: Children) -> impl IntoView {
     let machine = use_machine::<form::Machine>(form::Props::default());
     let root_attrs = machine.derive(|api| api.root_attrs());
     let status_attrs = machine.derive(|api| api.status_region_attrs());

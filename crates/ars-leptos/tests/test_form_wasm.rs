@@ -8,10 +8,7 @@ use std::{
 };
 
 use ars_forms::validation::Error;
-use ars_leptos::utility::{
-    field::{ErrorMessage, Field, Input, Label},
-    form::Form,
-};
+use ars_leptos::utility::{field, form};
 use leptos::{mount::mount_to, prelude::*};
 use wasm_bindgen::{JsCast, closure::Closure};
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -57,9 +54,9 @@ async fn form_browser_mounts_status_region() {
 
         let mount_handle = mount_to(parent.clone(), || {
             view! {
-                <Form id="wasm-account-form" action="/account">
+                <form::Root id="wasm-account-form" action="/account">
                     <input name="email" />
-                </Form>
+                </form::Root>
             }
         });
 
@@ -109,7 +106,7 @@ async fn form_submit_and_reset_callbacks_fire_and_block_native_submit() {
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
-                <Form
+                <form::Root
                     id="wasm-account-form-callback"
                     on_submit=Callback::new(move |()| {
                         submit_log
@@ -125,7 +122,7 @@ async fn form_submit_and_reset_callbacks_fire_and_block_native_submit() {
                     })
                 >
                     <input name="email" />
-                </Form>
+                </form::Root>
             }
         });
 
@@ -192,7 +189,7 @@ async fn form_submit_button_click_fires_submit_callback_without_navigation() {
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
-                <Form
+                <form::Root
                     id="wasm-account-form-click-submit"
                     action="/account"
                     on_submit=Callback::new(move |()| {
@@ -204,7 +201,7 @@ async fn form_submit_button_click_fires_submit_callback_without_navigation() {
                 >
                     <input name="email" value="admin@email.com" />
                     <button type="submit">"Submit"</button>
-                </Form>
+                </form::Root>
             }
         });
 
@@ -267,18 +264,17 @@ async fn form_validation_behavior_updates_without_remount() {
 
     let (_mount_handle, parent, set_behavior) = owner.with(|| {
         let parent = container();
-        let (behavior, set_behavior) =
-            signal(ars_leptos::utility::form::ValidationBehavior::Native);
+        let (behavior, set_behavior) = signal(form::ValidationBehavior::Native);
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
-                <Form
+                <form::Root
                     id="wasm-validation-behavior-form"
                     action="/account"
                     validation_behavior=behavior
                 >
                     <input name="email" />
-                </Form>
+                </form::Root>
             }
         });
 
@@ -298,7 +294,7 @@ async fn form_validation_behavior_updates_without_remount() {
         "native validation behavior should not render novalidate"
     );
 
-    set_behavior.set(ars_leptos::utility::form::ValidationBehavior::Aria);
+    set_behavior.set(form::ValidationBehavior::Aria);
 
     leptos::task::tick().await;
 
@@ -335,7 +331,7 @@ async fn form_default_aria_blocks_invalid_required_submit_callback() {
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
-                <Form
+                <form::Root
                     id="wasm-invalid-required-form"
                     on_submit=Callback::new(move |()| {
                         submit_log
@@ -345,7 +341,7 @@ async fn form_default_aria_blocks_invalid_required_submit_callback() {
                     })
                 >
                     <input name="email" required />
-                </Form>
+                </form::Root>
             }
         });
 
@@ -396,11 +392,11 @@ async fn form_default_aria_counts_only_invalid_named_controls_in_groups() {
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
-                <Form id="wasm-invalid-group-form">
+                <form::Root id="wasm-invalid-group-form">
                     <fieldset>
                         <input name="email" required />
                     </fieldset>
-                </Form>
+                </form::Root>
             }
         });
 
@@ -448,7 +444,7 @@ async fn formnovalidate_submitter_skips_aria_constraint_validation() {
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
-                <Form
+                <form::Root
                     id="wasm-formnovalidate-form"
                     on_submit=Callback::new(move |()| {
                         submit_log
@@ -461,7 +457,7 @@ async fn formnovalidate_submitter_skips_aria_constraint_validation() {
                     <button type="submit" formnovalidate=true>
                         "Submit without validation"
                     </button>
-                </Form>
+                </form::Root>
             }
         });
 
@@ -536,13 +532,13 @@ async fn form_invalid_required_submit_updates_named_field_errors() {
 
         let mount_handle = mount_to(parent.clone(), || {
             view! {
-                <Form id="wasm-invalid-field-form">
-                    <Field id="wasm-invalid-email-field" name="email" required=true>
-                        <Label>"Email"</Label>
-                        <Input name="email" />
-                        <ErrorMessage>"Email is required."</ErrorMessage>
-                    </Field>
-                </Form>
+                <form::Root id="wasm-invalid-field-form">
+                    <field::Root id="wasm-invalid-email-field" name="email" required=true>
+                        <field::Label>"Email"</field::Label>
+                        <field::Input name="email" />
+                        <field::ErrorMessage>"Email is required."</field::ErrorMessage>
+                    </field::Root>
+                </form::Root>
             }
         });
 
@@ -621,7 +617,7 @@ async fn form_valid_submit_preserves_controlled_validation_errors() {
 
         let mount_handle = mount_to(parent.clone(), || {
             view! {
-                <Form
+                <form::Root
                     id="wasm-controlled-error-form"
                     validation_errors=BTreeMap::from([
                         (
@@ -630,12 +626,14 @@ async fn form_valid_submit_preserves_controlled_validation_errors() {
                         ),
                     ])
                 >
-                    <Field id="wasm-controlled-error-email-field" name="email" required=true>
-                        <Label>"Email"</Label>
-                        <Input name="email" value="admin@email.com" />
-                        <ErrorMessage>"Server still rejects this email."</ErrorMessage>
-                    </Field>
-                </Form>
+                    <field::Root id="wasm-controlled-error-email-field" name="email" required=true>
+                        <field::Label>"Email"</field::Label>
+                        <field::Input name="email" value="admin@email.com" />
+                        <field::ErrorMessage>
+                            "Server still rejects this email."
+                        </field::ErrorMessage>
+                    </field::Root>
+                </form::Root>
             }
         });
 

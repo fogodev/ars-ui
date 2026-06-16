@@ -46,7 +46,17 @@ pub use ars_collections::selection::{
 Do not put machine internals, slot output internals, adapter hooks, or
 component-author-only helpers in the end-user prelude.
 
+Low-level adapter primitive roots are named `Root` inside the component module,
+matching the Checkbox standard. Prefer `field::Root`, `fieldset::Root`,
+`form::Root`, and `checkbox::Root` over semantic root names such as `Field`,
+`Fieldset`, or `Form`. The module name identifies the component family; `Root`
+identifies the part. Reserve semantic names for future higher-level wrappers or
+styled source templates that orchestrate a closed anatomy.
+
 Ready-made styled components do not belong in `ars-leptos` or `ars-dioxus`.
+Unstyled does not mean unstylable: adapter primitives should expose the public
+parts and attribute hooks consumers need to style the component without
+reimplementing component-owned semantics.
 The checked-in styled crates (`ars-leptos-components` and
 `ars-dioxus-components`) are the reference/source-template layer used by
 widgets, examples, tests, and the future source-distribution workflow. They may
@@ -115,22 +125,60 @@ Avoid swallowing consumer classes or replacing them with fixed demo styling.
 
 ### Multi-Part Components
 
-For components with visible internal anatomy, do not add a long series of
-`*_class` / `*_style` props for every part. That API scales poorly, makes the
-root component harder to read, and forces every framework to carry repetitive
-styling escape hatches.
+For components with internal anatomy or adapter-rendered structural nodes, do
+not add a long series of `*_class` / `*_style` props for every part. That API
+scales poorly, makes the root component harder to read, and forces every
+framework to carry repetitive styling escape hatches.
 
 Prefer a compound-part API when consumers need to style internal anatomy:
 
 - keep adapter crates focused on unstyled primitives;
 - put checked-in closed-anatomy styled source templates in `ars-*-components`;
-- expose public part components for the rendered anatomy, such as `Root`,
-  `Control`, `Indicator`, `Description`, and `ErrorMessage`;
+- expose public part components for the rendered anatomy, with the low-level
+  root named `Root` and other parts such as
+  `Control`, `Indicator`, `Description`, `ErrorMessage`, and status or live
+  region parts;
 - make each part consume the same agnostic machine/context as the convenience
   component;
 - render roles, ARIA, ids, and `data-ars-*` attrs from the agnostic API, not
   from the example;
 - let consumers pass normal framework attributes to each part.
+
+For every core `Part` enum variant and every adapter-rendered structural node,
+make an explicit public styling decision:
+
+- expose a public stylable part when consumers may reasonably need to style,
+  position, hide, or target that node;
+- keep it private only when exposing it would break semantics or duplicate
+  required browser behavior;
+- record private exceptions in the adapter spec with the reason and the
+  supported styling alternative, such as stable `data-ars-*` selectors.
+
+Hidden or infrastructure-oriented nodes are not automatically exempt. Status
+regions, live regions, hidden inputs, portals, anchors, overlay layers, and
+measurement wrappers still need the same decision. Some of them should remain
+private, but the decision must be documented instead of assumed.
+
+### Required Structural Parts And Fallbacks
+
+Some structural nodes are required for accessibility or native behavior even
+when a consumer does not render the corresponding compound part. Use this
+pattern:
+
+- expose a public part for styling or placement;
+- render an unstyled adapter fallback when the public part is omitted;
+- suppress the fallback when the explicit part is present, so only one semantic
+  node exists;
+- keep required roles, ARIA, ids, relationships, event behavior, and generated
+  text owned by the machine or adapter;
+- do not let consumer children replace required live-region, hidden-input, or
+  relationship content unless the component spec explicitly makes that content
+  consumer-owned.
+
+For example, a form status live region can be a public `StatusRegion` part for
+styling and placement, while `Form` still auto-renders an unstyled fallback when
+the part is omitted. The status message source remains `status_message` and the
+core form machine, not arbitrary consumer children.
 
 For Dioxus part components, use
 `#[props(extends = GlobalAttributes)] attrs: Vec<Attribute>` for each stylable

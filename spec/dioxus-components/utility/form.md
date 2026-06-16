@@ -16,7 +16,7 @@ This spec maps the core [`Form`](../../components/utility/form.md) and canonical
 
 ```rust,no_check
 #[derive(Props, Clone, PartialEq)]
-pub struct FormProps {
+pub struct RootProps {
     #[props(optional, into)]
     pub id: Option<String>,
     #[props(optional)]
@@ -25,6 +25,8 @@ pub struct FormProps {
     pub validation_errors: BTreeMap<String, Vec<ars_forms::validation::Error>>,
     #[props(optional, into)]
     pub status_message: Option<String>,
+    #[props(default = false)]
+    pub has_status_region: bool,
     #[props(optional)]
     pub action: Option<String>,
     #[props(optional)]
@@ -33,11 +35,22 @@ pub struct FormProps {
     pub on_submit: Option<EventHandler>,
     #[props(optional, into)]
     pub on_reset: Option<EventHandler>,
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
     pub children: Element,
 }
 
 #[component]
-pub fn Form(props: FormProps) -> Element
+pub fn Root(props: RootProps) -> Element
+
+#[derive(Props, Clone, PartialEq)]
+pub struct StatusRegionProps {
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+}
+
+#[component]
+pub fn StatusRegion(props: StatusRegionProps) -> Element
 ```
 
 The adapter surfaces the full core prop set plus observational submit/reset
@@ -45,9 +58,17 @@ callbacks. `on_submit` dispatches the core `Submit` event before emitting
 `EventHandler` and prevents native navigation when the handler is present.
 `on_reset` dispatches the core `Reset` event before emitting
 `EventHandler`. `status_message` seeds or controls the adapter-owned status
-live region. The status region is structural and always rendered by `Form`; it
-is not exposed as a separate public child component because doing so would
-create duplicate live-region nodes and duplicate announcements.
+live region. Consumers may render the public `StatusRegion` compound part
+inside `form::Root` to style or position the live region independently. When omitted,
+`form::Root` renders an unstyled fallback status region so the accessibility contract
+is preserved. Direct `StatusRegion` children are detected automatically; when
+the status region is returned from a wrapper component, consumers set
+`has_status_region=true` so `Root` can suppress the fallback without relying on
+component-output introspection that Dioxus does not expose during the parent
+render.
+The root form extends Dioxus `GlobalAttributes`; core validation, busy, action,
+role, and live-region semantics win, while consumer `class`/`style` merge
+additively.
 
 ## 3. Mapping to Core Component Contract
 
@@ -57,27 +78,27 @@ create duplicate live-region nodes and duplicate announcements.
 
 ## 4. Part Mapping
 
-| Core part / structure | Required? | Adapter rendering target        | Ownership      | Attr source                 | Notes                                                                 |
-| --------------------- | --------- | ------------------------------- | -------------- | --------------------------- | --------------------------------------------------------------------- |
-| `Root`                | required  | native `<form>`                 | adapter-owned  | `api.root_attrs()`          | Must preserve `novalidate`, `aria-busy`, `action`, and optional role. |
-| `StatusRegion`        | required  | hidden `<div>` inside `Root`    | adapter-owned  | `api.status_region_attrs()` | Structural live region for submission or validation announcements.    |
-| form children         | required  | consumer children inside `Root` | consumer-owned | none                        | Descendants usually consume `Context`.                                |
+| Core part / structure | Required? | Adapter rendering target                                            | Ownership      | Attr source                 | Notes                                                                 |
+| --------------------- | --------- | ------------------------------------------------------------------- | -------------- | --------------------------- | --------------------------------------------------------------------- |
+| `Root`                | required  | native `<form>`                                                     | adapter-owned  | `api.root_attrs()`          | Must preserve `novalidate`, `aria-busy`, `action`, and optional role. |
+| `StatusRegion`        | required  | public `StatusRegion` part or fallback hidden `<div>` inside `Root` | adapter-owned  | `api.status_region_attrs()` | Structural live region for submission or validation announcements.    |
+| form children         | required  | consumer children inside `Root`                                     | consumer-owned | none                        | Descendants usually consume `Context`.                                |
 
 ## 5. Attr Merge and Ownership Rules
 
-| Target node    | Core attrs                                                            | Adapter-owned attrs                                                     | Consumer attrs                                                          | Merge order                                                                                                                                                                              | Ownership notes                   |
-| -------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `Root`         | `api.root_attrs()` including validation, busy, action, and role attrs | adapter submit/reset handlers and structural `data-*` helpers if needed | consumer attrs on the form root                                         | core submission, validation, and accessibility attrs win when conflict would break the contract; `class`/`style` merge additively; handlers compose around normalized submit/reset logic | adapter-owned native `<form>`     |
-| `StatusRegion` | `api.status_region_attrs()`                                           | status wrapper visibility helpers if needed                             | none                                                                    | core live-region attrs win; consumer content cannot replace the region node                                                                                                              | always adapter-owned              |
-| form children  | none directly                                                         | none                                                                    | consumer field/tree content                                             | consumer children live inside the form root and consume context as needed                                                                                                                | descendants remain consumer-owned |
+| Target node    | Core attrs                                                            | Adapter-owned attrs                                                     | Consumer attrs                           | Merge order                                                                                                                                                                              | Ownership notes                   |
+| -------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `Root`         | `api.root_attrs()` including validation, busy, action, and role attrs | adapter submit/reset handlers and structural `data-*` helpers if needed | consumer attrs on the form root          | core submission, validation, and accessibility attrs win when conflict would break the contract; `class`/`style` merge additively; handlers compose around normalized submit/reset logic | adapter-owned native `<form>`     |
+| `StatusRegion` | `api.status_region_attrs()`                                           | status wrapper visibility helpers if needed                             | consumer attrs on the status-region part | core live-region attrs win; consumer global attrs merge additively; consumer content cannot replace the status message source                                                            | adapter-owned live-region node    |
+| form children  | none directly                                                         | none                                                                    | consumer field/tree content              | consumer children live inside the form root and consume context as needed                                                                                                                | descendants remain consumer-owned |
 
 - Consumer overrides must not remove `novalidate`, busy semantics, or required live-region attrs when the core contract requires them.
-- Form root event handlers are composed around normalized submit/reset handling; consumer handlers may observe normalized state but must not re-enable blocked submission.
-- `StatusRegion` is an adapter-owned structural node, not a public child component; user-facing status text flows through `status_message`.
+- Root form event handlers are composed around normalized submit/reset handling; consumer handlers may observe normalized state but must not re-enable blocked submission.
+- `StatusRegion` is a public stylable compound part, but user-facing status text flows through `status_message`; consumer children must not replace the live-region message source.
 
 ## 6. Composition / Context Contract
 
-`Form` provides form context to descendant field, fieldset, and submission-aware utilities. Required descendants use `try_use_context::<Context>().expect(...)`; optional ones use `try_use_context::<Context>()`.
+`form::Root` provides form context to descendant field, fieldset, and submission-aware utilities. Required descendants use `try_use_context::<Context>().expect(...)`; optional ones use `try_use_context::<Context>()`.
 
 ## 7. Prop Sync and Event Mapping
 
@@ -151,7 +172,7 @@ Controlled/uncontrolled switching is not supported for validation state sources 
 - SSR must render both `Root` and `StatusRegion`.
 - Submit/reset listeners and validation execution are client-only.
 - The status-region node must remain structurally identical across hydration so machine-driven updates land on the expected node.
-- Form-node and status-region refs are server-safe absent and required after mount.
+- Root form node and status-region refs are server-safe absent and required after mount.
 
 ## 15. Performance Constraints
 
@@ -164,7 +185,7 @@ Controlled/uncontrolled switching is not supported for validation state sources 
 
 | Dependency    | Required?   | Dependency type         | Why it must exist first                                                                                | Notes                                                         |
 | ------------- | ----------- | ----------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
-| `field`       | required    | context contract        | Form-level registration and reset logic depends on canonical field identity and registration behavior. | Required for descendant field coordination.                   |
+| `field`       | required    | context contract        | Root-level registration and reset logic depends on canonical field identity and registration behavior. | Required for descendant field coordination.                   |
 | `fieldset`    | recommended | context contract        | Grouped field inheritance and registration should align with form-level coordination.                  | Important for complex form trees.                             |
 | `live-region` | recommended | behavioral prerequisite | The status region uses the same announcement timing principles as live-region utilities.               | Status messaging should not invent a parallel announce model. |
 
@@ -223,7 +244,7 @@ pub struct FormSketchProps {
 }
 
 #[component]
-pub fn Form(props: FormSketchProps) -> Element {
+pub fn Root(props: FormSketchProps) -> Element {
     let machine = use_machine::<form::Machine>(form::Props::default());
     let root_attrs = machine.derive(|api| api.root_attrs());
     let status_attrs = machine.derive(|api| api.status_region_attrs());

@@ -4,7 +4,7 @@ use ars_components::utility::field;
 pub use ars_components::utility::field::{InputType, Part, Props};
 use ars_core::{AriaAttr, AttrMap, Direction, HtmlAttr};
 use ars_forms::validation::Error;
-use dioxus::prelude::*;
+use dioxus::{dioxus_core::DynamicNode, prelude::*};
 
 use crate::{
     attr_map_to_dioxus_inline_attrs, callbacks, merge_dioxus_attrs, use_machine, use_stable_id,
@@ -16,12 +16,13 @@ struct FieldContext {
 }
 
 fn field_context() -> FieldContext {
-    try_use_context::<FieldContext>().expect("Field subcomponents must be rendered inside <Field/>")
+    try_use_context::<FieldContext>()
+        .expect("Field subcomponents must be rendered inside <field::Root/>")
 }
 
-/// Props for the Dioxus [`Field`] component.
+/// Props for the Dioxus [`Root`] component.
 #[derive(Props, Clone, PartialEq, Debug)]
-pub struct FieldProps {
+pub struct RootProps {
     /// Optional component instance ID.
     #[props(optional, into)]
     pub id: Option<String>,
@@ -64,7 +65,7 @@ pub struct FieldProps {
 
 /// Dioxus Field root component.
 #[component]
-pub fn Field(props: FieldProps) -> Element {
+pub fn Root(props: RootProps) -> Element {
     let generated_id = use_stable_id("field");
     let id = props.id.unwrap_or(generated_id);
 
@@ -90,6 +91,10 @@ pub fn Field(props: FieldProps) -> Element {
 
     let machine = use_machine::<field::Machine>(core_props);
 
+    if element_contains_description(&props.children) {
+        machine.send.call(field::Event::SetHasDescription(true));
+    }
+
     use_context_provider(|| FieldContext { machine });
 
     let component_attrs = machine.derive(|api| attr_map_to_dioxus_inline_attrs(api.root_attrs()));
@@ -103,16 +108,24 @@ pub fn Field(props: FieldProps) -> Element {
 /// Props for the Dioxus [`Label`] component.
 #[derive(Props, Clone, PartialEq, Debug)]
 pub struct LabelProps {
+    /// Global HTML attributes forwarded onto the rendered label.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+
     /// Label content.
     pub children: Element,
 }
 
 /// Dioxus Field label part.
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "field::Api method items are not lifetime-general enough for UseMachineReturn part_attrs()."
+)]
 #[component]
 pub fn Label(props: LabelProps) -> Element {
     let attrs = field_context()
         .machine
-        .derive(|api| attr_map_to_dioxus_inline_attrs(api.label_attrs()))();
+        .part_attrs(props.attrs, |api| api.label_attrs());
 
     rsx! {
         label { ..attrs,{props.children} }
@@ -197,14 +210,45 @@ fn strip_input_event_attrs(mut attrs: Vec<Attribute>) -> Vec<Attribute> {
     attrs
 }
 
+fn element_contains_description(element: &Element) -> bool {
+    element.as_ref().is_ok_and(vnode_contains_description)
+}
+
+fn vnode_contains_description(vnode: &VNode) -> bool {
+    vnode
+        .dynamic_nodes
+        .iter()
+        .any(dynamic_node_contains_description)
+}
+
+fn dynamic_node_contains_description(node: &DynamicNode) -> bool {
+    match node {
+        DynamicNode::Component(component) => {
+            component.name == "ars_dioxus::utility::field::Description"
+        }
+
+        DynamicNode::Fragment(nodes) => nodes.iter().any(vnode_contains_description),
+
+        DynamicNode::Text(_) | DynamicNode::Placeholder(_) => false,
+    }
+}
+
 /// Props for the Dioxus [`Description`] component.
 #[derive(Props, Clone, PartialEq, Debug)]
 pub struct DescriptionProps {
+    /// Global HTML attributes forwarded onto the rendered description.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+
     /// Description content.
     pub children: Element,
 }
 
 /// Dioxus Field description part.
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "field::Api method items are not lifetime-general enough for UseMachineReturn part_attrs()."
+)]
 #[component]
 pub fn Description(props: DescriptionProps) -> Element {
     let machine = field_context().machine;
@@ -221,7 +265,7 @@ pub fn Description(props: DescriptionProps) -> Element {
 
     let attrs = field_context()
         .machine
-        .derive(|api| attr_map_to_dioxus_inline_attrs(api.description_attrs()))();
+        .part_attrs(props.attrs, |api| api.description_attrs());
 
     rsx! {
         div { ..attrs,{props.children} }
@@ -231,16 +275,24 @@ pub fn Description(props: DescriptionProps) -> Element {
 /// Props for the Dioxus [`ErrorMessage`] component.
 #[derive(Props, Clone, PartialEq, Debug)]
 pub struct ErrorMessageProps {
+    /// Global HTML attributes forwarded onto the rendered error message.
+    #[props(extends = GlobalAttributes)]
+    pub attrs: Vec<Attribute>,
+
     /// Error message content.
     pub children: Element,
 }
 
 /// Dioxus Field error message part.
+#[expect(
+    clippy::redundant_closure_for_method_calls,
+    reason = "field::Api method items are not lifetime-general enough for UseMachineReturn part_attrs()."
+)]
 #[component]
 pub fn ErrorMessage(props: ErrorMessageProps) -> Element {
     let attrs = field_context()
         .machine
-        .derive(|api| attr_map_to_dioxus_inline_attrs(api.error_message_attrs()))();
+        .part_attrs(props.attrs, |api| api.error_message_attrs());
 
     rsx! {
         div { ..attrs,{props.children} }

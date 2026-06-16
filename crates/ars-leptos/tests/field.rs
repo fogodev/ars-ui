@@ -3,7 +3,7 @@
 #![cfg(all(not(target_arch = "wasm32"), feature = "ssr"))]
 
 use ars_forms::validation::Error;
-use ars_leptos::utility::field::{Description, ErrorMessage, Field, Input, InputType, Label};
+use ars_leptos::utility::field;
 use leptos::{prelude::*, reactive::owner::Owner};
 
 fn render(view_fn: impl FnOnce() -> String + 'static) -> String {
@@ -19,7 +19,7 @@ fn render(view_fn: impl FnOnce() -> String + 'static) -> String {
 fn field_renders_root_label_input_and_messages() {
     let html = render(|| {
         view! {
-            <Field
+            <field::Root
                 id="email-field"
                 required=true
                 disabled=true
@@ -27,16 +27,16 @@ fn field_renders_root_label_input_and_messages() {
                 errors=vec![Error::server("Email is required.")]
                 class="account-field"
             >
-                <Label>"Email"</Label>
-                <Input
-                    r#type=InputType::Email
+                <field::Label>"Email"</field::Label>
+                <field::Input
+                    r#type=field::InputType::Email
                     name="email"
                     placeholder="name@example.com"
                     class="account-input"
                 />
-                <Description>"Use your work email address."</Description>
-                <ErrorMessage>"Email is required."</ErrorMessage>
-            </Field>
+                <field::Description>"Use your work email address."</field::Description>
+                <field::ErrorMessage>"Email is required."</field::ErrorMessage>
+            </field::Root>
         }
         .to_html()
     });
@@ -71,6 +71,40 @@ fn field_renders_root_label_input_and_messages() {
         r#"id="email-field-error-message""#,
         r#"role="alert""#,
         r#"data-ars-part="error-message""#,
+    ] {
+        assert!(html.contains(fragment), "missing {fragment}: {html}");
+    }
+}
+
+#[test]
+fn field_parts_accept_consumer_class_and_style() {
+    let html = render(|| {
+        view! {
+            <field::Root id="styled-field" errors=vec![Error::server("Required.")]>
+                <field::Label class="label-class" style="color: blue;">
+                    "Email"
+                </field::Label>
+                <field::Input name="email" class="input-class" style="display: block;" />
+                <field::Description class="description-class" style="font-size: 12px;">
+                    "Use your work email address."
+                </field::Description>
+                <field::ErrorMessage class="error-class" style="color: red;">
+                    "Required."
+                </field::ErrorMessage>
+            </field::Root>
+        }
+        .to_html()
+    });
+
+    for fragment in [
+        r#"class="label-class""#,
+        r#"style="color: blue;""#,
+        r#"class="input-class""#,
+        r#"style="display: block;""#,
+        r#"class="description-class""#,
+        r#"style="font-size: 12px;""#,
+        r#"class="error-class""#,
+        r#"style="color: red;""#,
     ] {
         assert!(html.contains(fragment), "missing {fragment}: {html}");
     }

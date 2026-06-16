@@ -20,6 +20,7 @@ The detailed workflow is split across:
 - [adapter-components/06-widgets-examples.md](adapter-components/06-widgets-examples.md)
 - [adapter-components/09-browser-parity-harness.md](adapter-components/09-browser-parity-harness.md)
 - [adapter-components/12-parity-audit-loop.md](adapter-components/12-parity-audit-loop.md)
+- [adapter-components/14-retrofit-audits.md](adapter-components/14-retrofit-audits.md)
 - [adapter-components/08-validation-and-pr-closeout.md](adapter-components/08-validation-and-pr-closeout.md)
 - [adapter-components/checklists/component-delivery.md](adapter-components/checklists/component-delivery.md)
 - [adapter-components/checklists/e2e-feature-matrix.md](adapter-components/checklists/e2e-feature-matrix.md)
@@ -58,6 +59,8 @@ Adapter delivery spans several distinct concerns:
 - a bounded parity audit loop that re-checks reference outcomes, consumer demo
   reality, and i18n/a11y/test proof until no outcome is unknown, unverified, or
   implemented only as a widget workaround;
+- retrofit-audit rules for older adapter components that predate the current
+  workflow or the latest gold-standard component shape;
 - an example-consumer audit that proves widgets and fixtures showcase the
   shipped components instead of reimplementing component logic locally;
 - validation, audit, PR, CI, and Codex review closeout.

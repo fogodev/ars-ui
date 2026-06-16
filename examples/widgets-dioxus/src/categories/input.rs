@@ -313,7 +313,7 @@ pub(crate) fn InputPanel() -> Element {
                     }
                     p { "{t(InputText::CurrentState)}: {controlled():?}" }
                 }
-                Form {
+                form::Root {
                     class: "showcase-card",
                     id: "checkbox-demo-form",
                     on_submit: move |_| {

@@ -579,27 +579,27 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                     </h2>
                     <p class="text-sm text-slate-500">{t(UtilityText::FieldFormDescription)}</p>
                 </div>
-                <Form
+                <form::Root
                     id="leptos-tw-field-form-demo"
                     action="/account"
                     on_submit=Callback::new(|()| ())
                     class="grid gap-4 max-w-md [&_fieldset]:grid [&_fieldset]:gap-4 [&_fieldset]:m-0 [&_fieldset]:p-4 [&_fieldset]:rounded-lg [&_fieldset]:border [&_fieldset]:border-slate-300 [&_legend]:px-1.5 [&_legend]:font-bold **:data-[ars-part=content]:grid **:data-[ars-part=content]:gap-3 **:data-[ars-part=description]:text-sm **:data-[ars-part=description]:text-slate-500 **:data-[ars-part=status-region]:text-sm **:data-[ars-part=status-region]:font-semibold **:data-[ars-part=status-region]:text-emerald-700"
                 >
-                    <Fieldset id="leptos-tw-fieldset-demo">
+                    <fieldset::Root id="leptos-tw-fieldset-demo">
                         <fieldset::Legend>{t(UtilityText::AccountDetails)}</fieldset::Legend>
                         <fieldset::Description>
                             {t(UtilityText::RequiredFieldsDescription)}
                         </fieldset::Description>
                         <fieldset::Content>
-                            <Field id="leptos-tw-name-field" required=true class="grid gap-2">
+                            <field::Root id="leptos-tw-name-field" required=true class="grid gap-2">
                                 <field::Label>{t(UtilityText::NameLabel)}</field::Label>
                                 <field::Input
                                     class="py-2 px-3 text-sm rounded-md border shadow-sm border-slate-300"
                                     name="name"
                                     placeholder=t(UtilityText::NamePlaceholder)
                                 />
-                            </Field>
-                            <Field
+                            </field::Root>
+                            <field::Root
                                 id="leptos-tw-email-field"
                                 name="email"
                                 required=true
@@ -615,16 +615,16 @@ pub(crate) fn UtilityPanel() -> impl IntoView {
                                     name="email"
                                     placeholder=t(UtilityText::EmailPlaceholder)
                                 />
-                            </Field>
+                            </field::Root>
                         </fieldset::Content>
-                    </Fieldset>
+                    </fieldset::Root>
                     <div class="flex flex-wrap gap-3">
                         <Button r#type=button::Type::Submit>{t(UtilityText::Submit)}</Button>
                         <Button r#type=button::Type::Reset variant=button::Variant::Secondary>
                             {t(UtilityText::Reset)}
                         </Button>
                     </div>
-                </Form>
+                </form::Root>
             </section>
             <section
                 class="p-5 rounded-lg border shadow-lg border-slate-200 bg-white/85 shadow-slate-900/10"

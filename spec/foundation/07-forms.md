@@ -3997,6 +3997,8 @@ pub struct Context {
 ```rust
 use std::collections::BTreeMap;
 
+use ars_forms::validation::Error;
+
 #[derive(Clone, Debug, PartialEq, HasId)]
 pub struct Props {
     pub id: String,
@@ -4006,7 +4008,7 @@ pub struct Props {
     /// `on_props_changed` sends `Event::SetServerErrors` to inject the errors into
     /// the machine context (and from there into `Context` for child fields).
     /// This is the declarative alternative to sending `Event::SetServerErrors` directly.
-    pub validation_errors: BTreeMap<String, Vec<String>>,
+    pub validation_errors: BTreeMap<String, Vec<Error>>,
     /// The URL to submit the form to. Sets the HTML `action` attribute on `<form>`.
     /// When `None`, the form submits to the current page URL (browser default).
     pub action: Option<String>,

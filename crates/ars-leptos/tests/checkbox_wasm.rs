@@ -6,9 +6,8 @@ use ars_components::input::checkbox::State;
 use ars_leptos::{
     input::checkbox,
     utility::{
-        button::{Button, Type as ButtonType},
-        fieldset::Fieldset,
-        form::Form,
+        button::{self, Button},
+        fieldset, form,
     },
 };
 use leptos::{
@@ -464,7 +463,7 @@ async fn checkbox_in_form_submits_resets_and_remains_interactive() {
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
-                <Form
+                <form::Root
                     id="leptos-checkbox-widget-form"
                     on_submit=move |()| {
                         if newsletter.get_untracked() == State::Checked {
@@ -498,14 +497,14 @@ async fn checkbox_in_form_submits_resets_and_remains_interactive() {
                     >
                         "Required checked value"
                     </TestCheckbox>
-                    <Button id="leptos-checkbox-widget-submit" r#type=ButtonType::Submit>
+                    <Button id="leptos-checkbox-widget-submit" r#type=button::Type::Submit>
                         "Submit"
                     </Button>
-                    <Button id="leptos-checkbox-widget-reset" r#type=ButtonType::Reset>
+                    <Button id="leptos-checkbox-widget-reset" r#type=button::Type::Reset>
                         "Reset"
                     </Button>
                     <p id="leptos-checkbox-widget-status">{move || status.get()}</p>
-                </Form>
+                </form::Root>
             }
         });
 
@@ -589,9 +588,14 @@ async fn checkbox_in_fieldset_inherits_blocking_state_in_browser() {
 
         let mount_handle = mount_to(parent.clone(), || {
             view! {
-                <Fieldset id="leptos-checkbox-fieldset" disabled=true readonly=true invalid=true>
+                <fieldset::Root
+                    id="leptos-checkbox-fieldset"
+                    disabled=true
+                    readonly=true
+                    invalid=true
+                >
                     <TestCheckbox id="leptos-checkbox-fieldset-child">"Legal terms"</TestCheckbox>
-                </Fieldset>
+                </fieldset::Root>
             }
         });
 

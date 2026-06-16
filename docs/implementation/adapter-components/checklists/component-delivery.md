@@ -19,9 +19,11 @@ workflow docs.
 - [ ] Implementation sketch created under `docs/implementation/sketches/`.
 - [ ] Sketch records reference artifact paths and explored states.
 - [ ] Sketch maps every reference outcome to ars-ui contract surfaces.
+- [ ] For retrofit audits, a fresh audit issue exists, the current gold-standard component comparison is recorded, and old evidence was refreshed.
 - [ ] Sketch records API/contract stance for every reference outcome, without treating React/TypeScript API shape as required parity.
 - [ ] Sketch maps every user-facing string to an i18n source or consumer-owned text source.
 - [ ] Sketch maps every accessible name, description, error, live region, focus path, and keyboard path.
+- [ ] Browser-owned behavior is classified by target capability: `TypedWebDom`, `WebViewBridge`, `ServerOrSsr`, or `NoDomNative`.
 - [ ] Sketch has no unresolved `ContractGap` rows before adapter-only coding.
 - [ ] Counterpart outcome matrix written from live browser review.
 - [ ] Counterpart outcome matrix records primary and fallback sources.
@@ -62,6 +64,7 @@ workflow docs.
 - [ ] `StoredValue` / `CopyValue` used for shared captured values.
 - [ ] Changed Dioxus adapter files have stable top-level hook order: no hooks inside `unwrap_or_else`, `map_or_else`, conditionals, loops, iterator adapters, nested closures, or early-return branches.
 - [ ] Dioxus fallback-hook search run against the changed Dioxus files and every hit fixed or justified: `rg 'unwrap_or_else\(\|\| use_|map_or_else\([^\n]*use_' <changed-dioxus-files>`.
+- [ ] Public primitive renames ran a stale-symbol scan across adapters, tests, widgets, E2E fixtures/harnesses, specs, sketches, and `xtask` snippets.
 
 ## Tests And Examples
 
@@ -75,6 +78,7 @@ workflow docs.
 - [ ] E2E harness has one test per feature axis.
 - [ ] E2E matrix entry covers every axis or records N/A.
 - [ ] E2E/browser proof covers full user-visible workflows, computed visual states, axe-clean reached states, and Leptos/Dioxus parity for every supported counterpart outcome.
+- [ ] Any E2E failure is classified as `ComponentAssertionFailed`, `HarnessSetupFailed`, or `EvidenceMissing`; only reached component assertions are treated as component behavior evidence.
 - [ ] Every browser/UX review complaint from the session has a matching E2E regression assertion, or an explicit N/A / intentionally-different matrix row with the reason.
 - [ ] Axe runs across visible states.
 - [ ] Keyboard and focus behavior tested for every interactive state.

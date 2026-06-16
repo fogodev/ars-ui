@@ -1,6 +1,6 @@
 //! Input category fixture panel.
 
-use ars_leptos::{I18nRegistries, utility::form::Form};
+use ars_leptos::{I18nRegistries, utility::form};
 use ars_leptos_components::input::checkbox::css::{Checkbox, STYLES as CHECKBOX_STYLES, State};
 use leptos::prelude::*;
 
@@ -63,7 +63,7 @@ pub fn InputPanel() -> impl IntoView {
             >
                 "Controlled"
             </Checkbox>
-            <Form
+            <form::Root
                 id="leptos-fixture-checkbox-form"
                 on_submit=Callback::new(move |_| {
                     let status = if form_value.get() == State::Checked {
@@ -95,7 +95,7 @@ pub fn InputPanel() -> impl IntoView {
                     "Submit"
                 </button>
                 <p id="leptos-fixture-checkbox-form-status">{move || form_status.get()}</p>
-            </Form>
+            </form::Root>
         </section>
     }
 }

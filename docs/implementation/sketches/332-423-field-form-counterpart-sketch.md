@@ -194,3 +194,40 @@ Allowed statuses: `Supported`, `RendererSpecific`, `ContractGap`,
 - Decision: Leptos and Dioxus Tailwind `Field/Form` examples should not carry custom email validation policy, per-input class switching, or derived validation message logic. Those heavier behaviors belong to the future `TextField` adapter PR.
 - Fix: both Tailwind examples now keep the `Field/Form/Fieldset` demo as a low-level relationship showcase with labels, descriptions, required inputs, submit/reset controls, and a status region. The examples no longer implement demo-local email validation or dynamic invalid styling.
 - Follow-up: future `TextField` should own the React Aria-style text input outcomes: value tracking, native constraint handling, validation message selection, invalid data attrs/styling hooks, and default error display wiring.
+
+## Retrofit Audit Addendum
+
+- Date: 2026-06-16
+- Audit issue: #730
+- Prior implementation context: #332 and #423
+- Current workflow baseline: Checkbox-era adapter delivery workflow, including compound-part `class`/`style` support, Dioxus `GlobalAttributes`, no duplicated semantic helpers in adapter files, and browser-backed parity evidence.
+
+### Fresh Findings
+
+| Area                             | Finding                                                                                                                                            | Fix                                                                                                                                                                                     |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native validity classification   | Leptos and Dioxus `Form` adapters duplicated native validity classification and form-error map merging.                                            | Moved reusable `NativeValidity`, `NativeInputType`, and `merge_error_map` semantics to `ars_forms::validation`; adapters now only extract browser DOM facts.                            |
+| Compound part styling            | `Field`, `Fieldset`, and `Form` subparts predated the Checkbox adapter surface and did not consistently expose consumer `class`/`style` / globals. | Leptos `Label`, `Input`, `Description`, `ErrorMessage`, `Legend`, `Content`, and `StatusRegion` now accept additive `class` and `style`; Dioxus subparts now extend `GlobalAttributes`. |
+| Form root styling parity         | Dioxus `Form` root accepted global `class`/`style`; Leptos `Form` root only accepted `class`.                                                      | Added Leptos `Form.style` using the shared reactive style helper.                                                                                                                       |
+| Dioxus Fieldset browser evidence | Dioxus had initial inherited-state browser coverage but lacked parity tests for fieldset error inheritance and reactive inherited-state updates.   | Added Dioxus wasm tests matching the Leptos evidence rows.                                                                                                                              |
+| Dioxus form context              | A wasm compile surfaced an unused `reset_generation` field stored in form context even though reset generation is only used inside `Form`.         | Removed the unused context field and kept the signal local to the adapter root.                                                                                                         |
+| Spec drift                       | Adapter specs and the forms foundation still described older public API/error shapes in several places.                                            | Updated adapter API snippets, attr-merge notes, and `Form.validation_errors` to structured `ars_forms::validation::Error`.                                                              |
+
+### Final Retrofit Outcome Matrix
+
+| Outcome                                                                                  | Status                 | Evidence                                                                                                                                                                                |
+| ---------------------------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Field/Form/Fieldset SSR structure and root styling parity                                | Supported              | `cargo test -p ars-leptos --features ssr --test field --test fieldset --test form`; `cargo test -p ars-dioxus --test field --test fieldset --test form`                                 |
+| Field and Fieldset compound part consumer styling/globals                                | Supported              | New SSR tests: `field_parts_accept_consumer_class_and_style`, `fieldset_parts_accept_consumer_class_and_style` in both adapters                                                         |
+| Native validity and error-map semantics kept outside renderer glue                       | Supported              | `cargo test -p ars-forms --lib native`                                                                                                                                                  |
+| Field reactive errors, input relationships, and controlled input values                  | Supported              | Leptos wasm `test_field_wasm` 4 tests; Dioxus wasm `test_field_wasm` 5 tests                                                                                                            |
+| Fieldset inherited disabled/readonly/invalid/error state                                 | Supported              | Leptos wasm `test_fieldset_wasm` 4 tests; Dioxus wasm `test_fieldset_wasm` 4 tests                                                                                                      |
+| Form validation behavior, native invalid submit, server errors, reset, and status region | Supported              | Leptos wasm `test_form_wasm` 9 tests; Dioxus wasm `test_form_wasm` 10 tests                                                                                                             |
+| Dioxus hook-order probe                                                                  | Supported              | `rg 'unwrap*or_else\(\|\| use*                                                                                                                                                          | map*or_else\([^\n]\*use*' crates/ars-dioxus/src/utility/{field,fieldset,form,field_support}.rs` returned no matches |
+| Tailwind example scope after addendum                                                    | IntentionallyDifferent | Existing 2026-06-04 addendum remains current: Field/Form/Fieldset examples stay low-level relationship showcases; richer text-input validation policy remains future `TextField` scope. |
+
+### Intentionally Different Or Out Of Scope
+
+- Custom validator registration remains higher-level form integration scope, not a low-level `Field`/`Form` adapter requirement.
+- Form-level invalid summary alert remains consumer composition around `Form`, not a required low-level `Form` part.
+- Rich `FormData` submit payloads remain higher-level API scope; the low-level adapters expose normalized lifecycle callbacks.

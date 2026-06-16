@@ -32,8 +32,22 @@ Cover:
 - callbacks and action dispatch;
 - native links, forms, and hidden inputs where supported;
 - composition with every foundation context the component consumes;
-- consumer class/global-attribute forwarding;
+- consumer class/global-attribute forwarding on the root and on every public
+  stylable part;
+- fallback structural part behavior, including the guarantee that an explicit
+  public part suppresses the adapter fallback when only one semantic node may
+  exist;
 - empty state and loading sentinel output where supported.
+
+For each public stylable part, include at least one focused SSR/unit assertion
+that consumer styling reaches the rendered node while core attrs remain intact:
+
+- Leptos parts should prove `class` and `style` merge with the agnostic part
+  attrs;
+- Dioxus parts should prove `GlobalAttributes` forwarding with at least
+  `class:` and `style:`;
+- required fallback parts should prove both the fallback path and the explicit
+  part path render exactly one required semantic node.
 
 ## Wasm Browser Coverage
 

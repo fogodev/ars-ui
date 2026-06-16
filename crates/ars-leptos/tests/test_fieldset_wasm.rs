@@ -3,10 +3,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use ars_forms::validation::Error;
-use ars_leptos::utility::{
-    field::{Field, Input, Label},
-    fieldset::{Content, Description, ErrorMessage, Fieldset, Legend},
-};
+use ars_leptos::utility::{field, fieldset};
 use leptos::{mount::mount_to, prelude::*};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
@@ -42,14 +39,14 @@ async fn fieldset_browser_mounts_group_anatomy() {
 
         let mount_handle = mount_to(parent.clone(), || {
             view! {
-                <Fieldset id="wasm-billing" disabled=true>
-                    <Legend>"Billing"</Legend>
-                    <Description>"Billing details."</Description>
-                    <Content>
+                <fieldset::Root id="wasm-billing" disabled=true>
+                    <fieldset::Legend>"Billing"</fieldset::Legend>
+                    <fieldset::Description>"Billing details."</fieldset::Description>
+                    <fieldset::Content>
                         <input name="postal-code" />
-                    </Content>
-                    <ErrorMessage>"Billing is incomplete."</ErrorMessage>
-                </Fieldset>
+                    </fieldset::Content>
+                    <fieldset::ErrorMessage>"Billing is incomplete."</fieldset::ErrorMessage>
+                </fieldset::Root>
             }
         });
 
@@ -125,15 +122,15 @@ async fn fieldset_state_reaches_descendant_field_input_attrs() {
 
         let mount_handle = mount_to(parent.clone(), || {
             view! {
-                <Fieldset id="wasm-disabled-group" disabled=true invalid=true readonly=true>
-                    <Legend>"Account"</Legend>
-                    <Content>
-                        <Field id="wasm-grouped-email">
-                            <Label>"Email"</Label>
-                            <Input name="email" />
-                        </Field>
-                    </Content>
-                </Fieldset>
+                <fieldset::Root id="wasm-disabled-group" disabled=true invalid=true readonly=true>
+                    <fieldset::Legend>"Account"</fieldset::Legend>
+                    <fieldset::Content>
+                        <field::Root id="wasm-grouped-email">
+                            <field::Label>"Email"</field::Label>
+                            <field::Input name="email" />
+                        </field::Root>
+                    </fieldset::Content>
+                </fieldset::Root>
             }
         });
 
@@ -171,18 +168,18 @@ async fn fieldset_errors_reach_descendant_field_invalid_attrs() {
 
         let mount_handle = mount_to(parent.clone(), || {
             view! {
-                <Fieldset
+                <fieldset::Root
                     id="wasm-error-group"
                     errors=vec![Error::server("Account details are incomplete.")]
                 >
-                    <Legend>"Account"</Legend>
-                    <Content>
-                        <Field id="wasm-error-grouped-email">
-                            <Label>"Email"</Label>
-                            <Input name="email" />
-                        </Field>
-                    </Content>
-                </Fieldset>
+                    <fieldset::Legend>"Account"</fieldset::Legend>
+                    <fieldset::Content>
+                        <field::Root id="wasm-error-grouped-email">
+                            <field::Label>"Email"</field::Label>
+                            <field::Input name="email" />
+                        </field::Root>
+                    </fieldset::Content>
+                </fieldset::Root>
             }
         });
 
@@ -213,20 +210,20 @@ async fn fieldset_state_updates_reach_descendant_fields_without_remount() {
 
         let mount_handle = mount_to(parent.clone(), move || {
             view! {
-                <Fieldset
+                <fieldset::Root
                     id="wasm-reactive-group"
                     disabled=disabled
                     invalid=invalid
                     readonly=readonly
                 >
-                    <Legend>"Account"</Legend>
-                    <Content>
-                        <Field id="wasm-reactive-grouped-email">
-                            <Label>"Email"</Label>
-                            <Input name="email" />
-                        </Field>
-                    </Content>
-                </Fieldset>
+                    <fieldset::Legend>"Account"</fieldset::Legend>
+                    <fieldset::Content>
+                        <field::Root id="wasm-reactive-grouped-email">
+                            <field::Label>"Email"</field::Label>
+                            <field::Input name="email" />
+                        </field::Root>
+                    </fieldset::Content>
+                </fieldset::Root>
             }
         });
 

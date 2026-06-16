@@ -10,8 +10,8 @@ use ars_components::input::checkbox::State;
 use ars_dioxus::{
     input::checkbox,
     utility::{
-        button::{Button, Type as ButtonType},
-        form::Form,
+        button::{self, Button},
+        form,
     },
 };
 use dioxus::{dioxus_core::AttributeValue, prelude::*};
@@ -489,7 +489,7 @@ async fn checkbox_inside_form_remains_interactive_after_submit() {
         let mut submitted = use_signal(|| false);
 
         rsx! {
-            Form {
+            form::Root {
                 id: "dioxus-checkbox-form",
                 on_submit: move |_| submitted.set(true),
                 TestCheckbox {
@@ -573,7 +573,7 @@ async fn checkbox_widget_form_pattern_remains_interactive_after_submit() {
         let required_invalid = submit_attempted() && required() != State::Checked;
 
         rsx! {
-            Form {
+            form::Root {
                 id: "dioxus-checkbox-widget-form",
                 on_submit: move |_| {
                     submit_attempted.set(true);
@@ -611,12 +611,12 @@ async fn checkbox_widget_form_pattern_remains_interactive_after_submit() {
                 }
                 Button {
                     id: "dioxus-checkbox-widget-submit",
-                    r#type: ButtonType::Submit,
+                    r#type: button::Type::Submit,
                     "Submit"
                 }
                 Button {
                     id: "dioxus-checkbox-widget-reset",
-                    r#type: ButtonType::Reset,
+                    r#type: button::Type::Reset,
                     "Reset"
                 }
                 p { id: "dioxus-checkbox-widget-status", "{status}" }

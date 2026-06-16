@@ -854,7 +854,10 @@ fn read_optional(path: &Path) -> Result<Option<String>, Error> {
 }
 
 fn has_composition_test(content: &str) -> bool {
-    content.contains("Fieldset") && content.contains("Form") && content.contains("validation")
+    let has_fieldset_root = content.contains("Fieldset") || content.contains("fieldset::Root");
+    let has_form_root = content.contains("Form") || content.contains("form::Root");
+
+    has_fieldset_root && has_form_root && content.contains("validation")
 }
 
 fn component_requires_wasm(src_dir: &Path, component: &str) -> Result<bool, Error> {
@@ -1940,6 +1943,16 @@ mod tests {
         assert_eq!(dioxus_counts["checkbox"], 3);
 
         drop(fs::remove_dir_all(root));
+    }
+
+    #[test]
+    fn composition_test_detection_accepts_root_part_syntax() {
+        assert!(has_composition_test(
+            "field::Root { }\nfieldset::Root { }\nform::Root { }\nvalidation"
+        ));
+        assert!(has_composition_test(
+            "<field::Root><fieldset::Root><form::Root>validation</form::Root></fieldset::Root></field::Root>"
+        ));
     }
 
     #[test]
