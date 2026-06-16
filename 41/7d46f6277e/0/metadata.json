@@ -1,0 +1,319 @@
+{
+  "cli_version": "0.6.1-nightly.202605070709.47a2e910",
+  "checkpoint_id": "417d46f6277e",
+  "session_id": "019ed138-1195-7a62-9d4a-6e30750f920d",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-16T20:26:01.702561Z",
+  "branch": "codex/field-form-adapter-retrofit-audit",
+  "checkpoints_count": 12,
+  "files_touched": [
+    ".agents/skills/dioxus/SKILL.md",
+    ".agents/skills/leptos/SKILL.md",
+    ".agents/skills/post-implementation-audit/SKILL.md",
+    "crates/ars-dioxus/src/prelude.rs",
+    "crates/ars-dioxus/src/utility/field.rs",
+    "crates/ars-dioxus/src/utility/fieldset.rs",
+    "crates/ars-dioxus/src/utility/form.rs",
+    "crates/ars-dioxus/tests/checkbox.rs",
+    "crates/ars-dioxus/tests/checkbox_wasm.rs",
+    "crates/ars-dioxus/tests/field.rs",
+    "crates/ars-dioxus/tests/fieldset.rs",
+    "crates/ars-dioxus/tests/form.rs",
+    "crates/ars-dioxus/tests/test_field_wasm.rs",
+    "crates/ars-dioxus/tests/test_fieldset_wasm.rs",
+    "crates/ars-dioxus/tests/test_form_wasm.rs",
+    "crates/ars-e2e/fixtures/dioxus/src/categories/input.rs",
+    "crates/ars-e2e/fixtures/dioxus/src/categories/utility.rs",
+    "crates/ars-e2e/fixtures/leptos/src/categories/input.rs",
+    "crates/ars-e2e/fixtures/leptos/src/categories/utility.rs",
+    "crates/ars-forms/src/validation/mod.rs",
+    "crates/ars-forms/src/validation/native.rs",
+    "crates/ars-leptos/src/prelude.rs",
+    "crates/ars-leptos/src/utility/field.rs",
+    "crates/ars-leptos/src/utility/fieldset.rs",
+    "crates/ars-leptos/src/utility/form.rs",
+    "crates/ars-leptos/tests/checkbox.rs",
+    "crates/ars-leptos/tests/checkbox_wasm.rs",
+    "crates/ars-leptos/tests/field.rs",
+    "crates/ars-leptos/tests/fieldset.rs",
+    "crates/ars-leptos/tests/form.rs",
+    "crates/ars-leptos/tests/test_field_wasm.rs",
+    "crates/ars-leptos/tests/test_fieldset_wasm.rs",
+    "crates/ars-leptos/tests/test_form_wasm.rs",
+    "docs/implementation/adapter-component-delivery.md",
+    "docs/implementation/adapter-components/02-adapter-api-and-wiring.md",
+    "docs/implementation/adapter-components/03-framework-rules.md",
+    "docs/implementation/adapter-components/04-adapter-tests.md",
+    "docs/implementation/adapter-components/05-e2e-fixtures-and-harnesses.md",
+    "docs/implementation/adapter-components/14-retrofit-audits.md",
+    "docs/implementation/adapter-components/README.md",
+    "docs/implementation/adapter-components/checklists/component-delivery.md",
+    "docs/implementation/sketches/332-423-field-form-counterpart-sketch.md",
+    "examples/widgets-dioxus-css/src/categories/input.rs",
+    "examples/widgets-dioxus-css/src/categories/utility.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/input.rs",
+    "examples/widgets-dioxus-tailwind/src/categories/utility.rs",
+    "examples/widgets-dioxus/src/categories/input.rs",
+    "examples/widgets-dioxus/src/categories/utility.rs",
+    "examples/widgets-leptos-css/src/categories/input.rs",
+    "examples/widgets-leptos-css/src/categories/utility.rs",
+    "examples/widgets-leptos-tailwind/src/categories/input.rs",
+    "examples/widgets-leptos-tailwind/src/categories/utility.rs",
+    "examples/widgets-leptos/src/categories/input.rs",
+    "examples/widgets-leptos/src/categories/utility.rs",
+    "spec/dioxus-components/utility/field.md",
+    "spec/dioxus-components/utility/fieldset.md",
+    "spec/dioxus-components/utility/form.md",
+    "spec/foundation/07-forms.md",
+    "spec/leptos-components/utility/field.md",
+    "spec/leptos-components/utility/fieldset.md",
+    "spec/leptos-components/utility/form.md",
+    "xtask/src/lint.rs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "f89fe20eeb11",
+  "token_usage": {
+    "input_tokens": 1479998,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 38151552,
+    "output_tokens": 98279,
+    "api_call_count": 269
+  },
+  "session_metrics": {
+    "turn_count": 13
+  },
+  "summary": {
+    "intent": "Audit and retrofit the existing Leptos and Dioxus Field, Fieldset, and Form adapter components against the newer 'Checkbox-era' adapter delivery workflow standards, fixing all spec drift, semantic-boundary drift, missing tests, stale examples, and parity gaps in a single PR.",
+    "outcome": "Successfully completed the full retrofit on branch `codex/field-form-adapter-retrofit-audit`: shared native validation logic extracted to `ars-forms`, all compound parts made publicly stylable (including `Form::StatusRegion`), root primitives renamed to the `Root` naming convention, docs/skills updated with new workflow guidance, and all local gates passed before committing and pushing a PR linked to new audit issue #730.",
+    "learnings": {
+      "repo": [
+        "The Checkbox component is the designated gold-standard reference for adapter implementation patterns; new and retrofitted components are measured against it.",
+        "Adapter primitives follow a module-based compound part API: module name is the component family, `Root` is the low-level root part (e.g., `field::Root`, `fieldset::Root`, `form::Root`); semantic names like `Form` are reserved for future higher-level wrappers.",
+        "Leptos adapter uses an `apply_part_attrs` helper for merging consumer `class`/`style` onto parts; Dioxus uses `props(extends = GlobalAttributes)` for the same purpose.",
+        "Shared validation semantics (native validity classification, error-map merging) belong in `ars-forms::validation`, not in adapter crates; adapters should only contain browser DOM extraction and event wiring.",
+        "`cargo xtask lint adapter-parity` validates cross-adapter API consistency; `cargo xtask spec validate` validates spec correctness; both must pass before PR.",
+        "The `xtask/src/lint.rs` composition-test heuristic uses text pattern matching to detect root component usage in composition tests and must be updated whenever public primitive names change.",
+        "The adapter delivery workflow is split across `docs/implementation/adapter-components/` (numbered files 01–13 plus new 14) with required reading order enforced by the delivery doc.",
+        "Dioxus `FormContext.reset_generation` is consumed by the Checkbox input adapter for form-reset behavior, so it cannot be removed even when it appears unused in isolated Field/Form tests."
+      ],
+      "code": [
+        {
+          "path": "crates/ars-dioxus/src/utility/form.rs",
+          "line": 1,
+          "end_line": 120,
+          "finding": "Dioxus `Form::StatusRegion` fallback suppression cannot rely on a child side-effect registration because children render after the parent on first SSR pass; instead the parent must inspect the child `Element` VNode tree (via `dioxus_core::DynamicNode`) before emitting the fallback."
+        },
+        {
+          "path": "crates/ars-forms/src/validation/native.rs",
+          "line": 1,
+          "end_line": 230,
+          "finding": "New shared module `ars_forms::validation::native` provides `NativeValidity`, `NativeInputType`, and `merge_error_map`; these replace duplicated classifier functions that previously lived independently in both adapter `form.rs` files."
+        },
+        {
+          "path": "crates/ars-dioxus/src/utility/field.rs",
+          "line": 1,
+          "end_line": 60,
+          "finding": "Dioxus `GlobalAttributes`-extending closures for attr merge cannot be replaced with direct method items when the callback has lifetime-bound generic parameters; scoped `#[expect(clippy::redundant_closure_for_method_calls)]` annotations are the correct fix."
+        },
+        {
+          "path": "xtask/src/lint.rs",
+          "line": 540,
+          "end_line": 600,
+          "finding": "The `has_composition_test` heuristic used loose text matching for `Fieldset` and `Form`; after the Root rename it required explicit patterns for `fieldset::Root` and `form::Root` to avoid false-negative adapter-parity failures."
+        },
+        {
+          "path": "crates/ars-leptos/tests/form.rs",
+          "line": 1,
+          "end_line": 35,
+          "finding": "Leptos test files that use both the core `form` spec module (for `ValidationBehavior`) and the adapter `form` module (for `form::Root`) require an alias (`use ars_components::utility::form as form_spec`) to resolve the naming collision."
+        }
+      ],
+      "workflow": [
+        "TDD discipline: write a focused failing SSR/unit test before touching implementation; confirm it fails for the expected reason before adding the fix.",
+        "Concurrent browser wasm test runs cause Chrome timeouts; run adapter browser suites sequentially rather than in parallel.",
+        "Dioxus child components cannot update parent context/state before the parent renders on first SSR; fallback suppression must use pre-render information (props, VNode inspection) not runtime side effects.",
+        "Public primitive renames require a coordinated sweep: exported function names, `Props` struct names, module re-exports in preludes, all test/example/fixture call sites, spec code snippets, and xtask lint heuristics must all be updated atomically.",
+        "E2E evidence gaps should be explicitly classified: 'component assertion failed', 'harness setup failed before reaching component', or 'evidence missing because harness is blocked'; the third category keeps parity partial, not passing.",
+        "Platform capability should be recorded in spec/sketch: TypedWebDom (wasm with web_sys), WebViewBridge (Dioxus desktop via eval), ServerOrSsr (no DOM), NoDomNative (no browser semantics)."
+      ]
+    },
+    "friction": [
+      "E2E utility harness timed out at the 'Utility tab discovery' step (15 s timeout) on both sequential and concurrent runs, blocking Field/Form browser assertion evidence entirely; root cause was not diagnosed.",
+      "Dioxus `StatusRegion` fallback suppression required two failed approaches (child side-effect registration, then context signal) before landing on VNode tree inspection, which required reading Dioxus internal `DynamicNode` API not surfaced in project skill docs.",
+      "The `cargo xclippy` redundant-closure lint conflicted with lifetime-bound generic callbacks in Dioxus part-attr wiring; method items cannot satisfy the bound, forcing `#[expect]` annotations.",
+      "The `reset_generation` dead-code warning from wasm-only builds required a narrowly scoped `#[cfg(target_arch = \"wasm32\")]` expect attribute because the field is used in native builds by the Checkbox adapter.",
+      "Perl one-liner call-site rewrite for the `Root` rename left import lines stale; a separate mechanical pass was needed to fix module aliases and remove now-nonexistent direct imports.",
+      "Browser wasm test runner failed with 'cannot spawn browser server' inside sandbox on first attempt; required a second escalated run, adding latency to an already slow wasm compile cycle."
+    ],
+    "open_items": [
+      "E2E utility harness tab-discovery timeout is unresolved; Field/Form E2E browser assertion evidence is missing from the parity matrix until the harness startup blocker is fixed.",
+      "`cargo xci-fast` was not run (requires explicit user approval before push/pre-push flow); full CI gate is pending.",
+      "Dioxus desktop/native target has no typed equivalent of `web_sys` constraint validation; a future JS eval bridge (`dioxus_document::eval`) would be needed for native-target parity with browser native validity, but was intentionally deferred.",
+      "The retrofit audit identified that old examples may still model 'consumer applications' rather than pure primitive showcases; a full example audit was not completed as part of this PR.",
+      "The `Form::StatusRegion` VNode inspection approach (reading `DynamicNode` children to detect explicit part) is an internal Dioxus API; this should be revisited if Dioxus 0.8 changes the VNode shape."
+    ]
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-16T20:24:57.574034Z",
+    "agent_lines": 1240,
+    "agent_removed": 444,
+    "human_added": 0,
+    "human_modified": 286,
+    "human_removed": 3,
+    "total_committed": 1526,
+    "total_lines_changed": 1973,
+    "agent_percentage": 85.3522554485555,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 860,
+      "agent_lines_removed": 239
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 860,
+      "agent_lines_removed": 239
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 860,
+      "agent_lines_removed": 239
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 860,
+      "agent_lines_removed": 239
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1071,
+      "agent_lines_removed": 264
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1071,
+      "agent_lines_removed": 264
+    },
+    {
+      "checkpoint_number": 8,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1175,
+      "agent_lines_removed": 272
+    },
+    {
+      "checkpoint_number": 9,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1175,
+      "agent_lines_removed": 272
+    },
+    {
+      "checkpoint_number": 10,
+      "user_lines_added": 18,
+      "user_lines_removed": 9,
+      "agent_lines_added": 1484,
+      "agent_lines_removed": 545,
+      "user_added_per_file": {
+        "crates/ars-dioxus/src/utility/form.rs": 18
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus/src/utility/form.rs": 9
+      }
+    },
+    {
+      "checkpoint_number": 11,
+      "user_lines_added": 268,
+      "user_lines_removed": 280,
+      "agent_lines_added": 1493,
+      "agent_lines_removed": 545,
+      "user_added_per_file": {
+        "crates/ars-dioxus/tests/checkbox.rs": 2,
+        "crates/ars-dioxus/tests/checkbox_wasm.rs": 3,
+        "crates/ars-dioxus/tests/field.rs": 10,
+        "crates/ars-dioxus/tests/fieldset.rs": 9,
+        "crates/ars-dioxus/tests/form.rs": 9,
+        "crates/ars-dioxus/tests/test_field_wasm.rs": 20,
+        "crates/ars-dioxus/tests/test_fieldset_wasm.rs": 17,
+        "crates/ars-dioxus/tests/test_form_wasm.rs": 10,
+        "crates/ars-leptos/src/utility/field.rs": 1,
+        "crates/ars-leptos/src/utility/form.rs": 14,
+        "crates/ars-leptos/tests/checkbox_wasm.rs": 3,
+        "crates/ars-leptos/tests/field.rs": 13,
+        "crates/ars-leptos/tests/fieldset.rs": 18,
+        "crates/ars-leptos/tests/form.rs": 8,
+        "crates/ars-leptos/tests/test_field_wasm.rs": 15,
+        "crates/ars-leptos/tests/test_fieldset_wasm.rs": 21,
+        "crates/ars-leptos/tests/test_form_wasm.rs": 9,
+        "docs/implementation/sketches/332-423-field-form-counterpart-sketch.md": 18,
+        "spec/dioxus-components/utility/field.md": 10,
+        "spec/dioxus-components/utility/fieldset.md": 15,
+        "spec/dioxus-components/utility/form.md": 9,
+        "spec/leptos-components/utility/field.md": 10,
+        "spec/leptos-components/utility/fieldset.md": 15,
+        "spec/leptos-components/utility/form.md": 9
+      },
+      "user_removed_per_file": {
+        "crates/ars-dioxus/tests/checkbox.rs": 3,
+        "crates/ars-dioxus/tests/checkbox_wasm.rs": 6,
+        "crates/ars-dioxus/tests/field.rs": 10,
+        "crates/ars-dioxus/tests/fieldset.rs": 9,
+        "crates/ars-dioxus/tests/form.rs": 13,
+        "crates/ars-dioxus/tests/test_field_wasm.rs": 20,
+        "crates/ars-dioxus/tests/test_fieldset_wasm.rs": 20,
+        "crates/ars-dioxus/tests/test_form_wasm.rs": 13,
+        "crates/ars-leptos/src/utility/form.rs": 7,
+        "crates/ars-leptos/tests/checkbox_wasm.rs": 6,
+        "crates/ars-leptos/tests/field.rs": 13,
+        "crates/ars-leptos/tests/fieldset.rs": 14,
+        "crates/ars-leptos/tests/form.rs": 11,
+        "crates/ars-leptos/tests/test_field_wasm.rs": 15,
+        "crates/ars-leptos/tests/test_fieldset_wasm.rs": 24,
+        "crates/ars-leptos/tests/test_form_wasm.rs": 10,
+        "docs/implementation/sketches/332-423-field-form-counterpart-sketch.md": 18,
+        "spec/dioxus-components/utility/field.md": 10,
+        "spec/dioxus-components/utility/fieldset.md": 15,
+        "spec/dioxus-components/utility/form.md": 9,
+        "spec/leptos-components/utility/field.md": 10,
+        "spec/leptos-components/utility/fieldset.md": 15,
+        "spec/leptos-components/utility/form.md": 9
+      }
+    },
+    {
+      "checkpoint_number": 12,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1668,
+      "agent_lines_removed": 732
+    },
+    {
+      "checkpoint_number": 13,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 1815,
+      "agent_lines_removed": 733
+    }
+  ]
+}

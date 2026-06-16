@@ -1,0 +1,95 @@
+Recently we did several improvements on how we design and implement our adapter level components, the first one following those new improvements was the Checkbox one, for both adapters. Now I wanna do an audit of the other components that were already implemented. Starting with the field, fieldset and form components.
+
+---
+
+PLEASE IMPLEMENT THIS PLAN:
+# Field/Fieldset/Form Adapter Retrofit Audit Plan
+
+## Summary
+Run a full retrofit audit of the existing Leptos and Dioxus `Field`, `Fieldset`, and `Form` adapters against the current Checkbox-era adapter delivery workflow. Treat every finding as in-scope for the same PR: spec drift, semantic-boundary drift, missing tests, stale examples, incomplete browser evidence, and parity-matrix gaps all get fixed before handoff.
+
+Create a new issue-backed task for this audit rather than reopening closed #332/#423. The PR should close that new audit issue and reference #332/#423 as prior implementation context.
+
+## Key Changes
+- Re-read, in order, `docs/implementation/adapter-component-delivery.md`, every linked `docs/implementation/adapter-components/*.md` workflow file, all three checklists, `docs/implementation/sketches/332-423-field-form-counterpart-sketch.md`, and the component/adapter specs for `field`, `fieldset`, and `form`.
+- Compare the current implementation in `crates/ars-leptos/src/utility/{field,fieldset,form,field_support}.rs` and `crates/ars-dioxus/src/utility/{field,fieldset,form,field_support}.rs` against the specs and current workflow.
+- Explicitly audit these known risk areas:
+  - duplicated native-validation/error-merging logic in both adapter `form.rs` files;
+  - Leptos vs Dioxus reactive update parity for validation errors, form validation maps, fieldset inherited state, input relationships, and reset behavior;
+  - Dioxus hook-order and global-attribute/event-strip behavior;
+  - whether Field/Form examples remain “consumer applications” and do not reimplement component-owned validation or ARIA policy;
+  - whether current E2E/widget evidence still matches the final outcome matrix after the Tailwind example scope addendum.
+- Update `docs/implementation/sketches/332-423-field-form-counterpart-sketch.md` or replace it with a dated retrofit sketch that records fresh reference/local evidence, final outcome matrix rows, and any intentionally different or out-of-scope axes.
+- Fix all drift in the right layer:
+  - renderer-specific DOM/event/ref code stays in adapters;
+  - reusable native validity classification, form-error merging, or field-support semantics move to shared/core layers if they can be tested without framework types;
+  - adapter specs and foundation docs are updated when the intended contract has changed.
+
+## Test Plan
+- Add failing tests before each fix.
+- Run focused adapter SSR/unit tests:
+  - `cargo test -p ars-leptos --test field --test fieldset --test form`
+  - `cargo test -p ars-dioxus --test field --test fieldset --test form`
+- Run focused wasm browser tests for both adapters:
+  - `crates/ars-leptos/tests/test_field_wasm.rs`
+  - `crates/ars-leptos/tests/test_fieldset_wasm.rs`
+  - `crates/ars-leptos/tests/test_form_wasm.rs`
+  - corresponding Dioxus wasm tests
+- Run E2E utility Field/Form coverage for both adapters, including axe, invalid states, valid states, reset, localized visible messages, status-region isolation, and computed visual assertions.
+- Run workflow gates:
+  - `cargo xtask lint adapter-parity`
+  - Dioxus hook probe: `rg 'unwrap_or_else\(\|\| use_|map_or_else\([^\n]*use_' crates/ars-dioxus/src/utility/{field,fieldset,form,field_support}.rs`
+  - `cargo xclippy`
+  - `cargo xfmt`
+  - after user approval and before push: `cargo xci-fast`
+- Invoke `.agents/skills/post-implementation-audit/SKILL.md` after focused tests pass, complete all three phases, then rerun relevant checks.
+
+## Assumptions
+- Audit depth is full retrofit to the current adapter workflow, not report-only.
+- No old closed issue is moved back to In Progress; a new audit issue is the execution record.
+- No new dependency crate is added. If a shared helper needs a new dependency, stop and ask first.
+- Commit/push/PR creation still require explicit user approval.
+
+---
+
+Should we have styled components for those 3 components or just the low level unstyled that we will compose later with more higher level components? Actual question, don't change any code yet
+
+---
+
+Are we following this intended contract now after the audit?
+
+---
+
+Are we exposing the lower level parts for all of them as needed, so they can be styled independently?
+
+---
+
+Yeah, let's have it stylable too, that was the intention of one of our improvements in the implementation docs / skills
+
+---
+
+Based in our conversation until now, do we see any opportunity to improve our implementation docs / skills for adapter level components?
+
+---
+
+Let's apply those improvements then
+
+---
+
+Should we follow the checkbox standard for low level components to use `Root` as the name for root part? Like `fieldset::Root` for example, it helps to denote that those components are low level parts and usually shouldn't be used without a component orchestrating them
+
+---
+
+Let's do it then, and don't forget to improve our docs/skills too
+
+---
+
+Does Dioxus provide some of kind of way to achieve the same result for native target as we had to put those web only target functions?
+
+---
+
+Do we have anything else worth to improve in our implementation docs / skills?
+
+---
+
+Go ahead then
